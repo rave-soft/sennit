@@ -79,12 +79,25 @@ type RuntimeOverrides struct {
 //
 // writeMu serialises every operation that produces a new in-memory Config:
 // the typed copy-on-write mutators (SetCompactMode, UpdatePreferredModel,
-// ...) and ReloadFromDisk. Typed mutators take Lock; autoReload takes
-// TryLock so a write triggered re-entrantly during a reload (e.g.
-// configureProviders calling RemoveConfigField) skips the nested reload
-// instead of deadlocking. This is what lets published Configs be treated
-// as immutable: a mutator clones, mutates the clone, and swaps it in under
-// writeMu rather than mutating the live Config in place.
+// ...) and the final swap step of a reload. This is what lets published
+// Configs be treated as immutable: a mutator clones, mutates the clone, and
+// swaps it in under writeMu rather than mutating the live Config in place.
+//
+// Unlike mutators, a reload does most of its work — disk reads, JSON
+// merging, provider catalog refresh, and any model-discovery HTTP calls for
+// custom providers — before it ever touches writeMu; see reloadFromDisk.
+// Holding writeMu across a slow discovery round trip would block every
+// other mutator (SetConfigField, UpdatePreferredModel, ...) for the
+// duration, which is what
+// TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu guards against.
+// writeMu is taken only for the brief final swap.
+//
+// reloadMu serialises reload *attempts* against each other (concurrent
+// autoReload calls, or an explicit ReloadFromDisk racing autoReload) —
+// a job writeMu no longer does now that a reload only holds it briefly.
+// autoReload takes reloadMu with TryLock so a reload triggered while
+// another is already in flight skips instead of running redundant disk
+// I/O and HTTP calls concurrently with it.
 type ConfigStore struct {
 	config             *Config
 	workingDir         string
@@ -104,8 +117,9 @@ type ConfigStore struct {
 	// build a fresh Config rather than mutating the live one.
 	configMu sync.RWMutex
 
-	mu      sync.Mutex   // serialises config file writes
-	writeMu sync.RWMutex // serialises in-memory config production (mutators + reload); RLock for readers
+	mu       sync.Mutex   // serialises config file writes
+	writeMu  sync.RWMutex // serialises in-memory config production (mutators + the reload swap); RLock for readers
+	reloadMu sync.Mutex   // serialises reload attempts against each other; see the ConfigStore doc comment
 
 	// refreshSF collapses concurrent in-process OAuth refreshes for the
 	// same provider into a single attempt. Combined with the per-provider
@@ -130,7 +144,7 @@ type ConfigStore struct {
 // Config returns the pure-data config struct (read-only after load).
 //
 // The pointer read is guarded by configMu so it can never tear against
-// the reload swap in reloadFromDiskLocked. Reloads build a brand-new
+// the reload swap in reloadFromDisk. Reloads build a brand-new
 // Config and swap it in rather than mutating the live one, so holding the
 // returned pointer stays safe even across a concurrent reload — the reader
 // keeps reading its (now immutable) snapshot.
@@ -1139,19 +1153,45 @@ func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
 
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
 // config atomically. It rebuilds the staleness snapshot after successful reload.
-// On failure, the store state is rolled back to its previous state.
-// Concurrent calls are serialised via writeMu.
+// Concurrent calls (including a racing autoReload) are serialised via
+// reloadMu; see reloadFromDisk for why that is a separate lock from writeMu.
 func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 	if s.workingDir == "" {
 		return fmt.Errorf("cannot reload: working directory not set")
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	return s.reloadFromDiskLocked(ctx)
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	return s.reloadFromDisk(ctx)
 }
 
-// reloadFromDiskLocked performs the actual reload. Caller must hold writeMu.
-func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
+// snapshotOverrides returns a copy of the runtime overrides deep enough to
+// read without holding writeMu afterward: the top-level struct plus its
+// slice/map fields are cloned so a concurrent mutator (which mutates
+// overrides.Models in place under writeMu, see pinPreferredModelLocked)
+// cannot race a caller ranging over the snapshot later.
+func (s *ConfigStore) snapshotOverrides() RuntimeOverrides {
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
+	return RuntimeOverrides{
+		SkipPermissionRequests: s.overrides.SkipPermissionRequests,
+		EnabledChannels:        slices.Clone(s.overrides.EnabledChannels),
+		Models:                 maps.Clone(s.overrides.Models),
+	}
+}
+
+// reloadFromDisk performs the actual reload. Caller must hold reloadMu (to
+// serialise reload attempts against each other) but must NOT hold writeMu on
+// entry: nearly all of this — disk reads, JSON merging, provider catalog
+// refresh, and any model-discovery HTTP calls for custom providers run via
+// configureProviders — happens before writeMu is ever touched, so a slow
+// discovery endpoint never blocks a concurrent mutator's Lock or autoReload's
+// TryLock. writeMu is acquired only for the final swap into store state.
+//
+// Because model resolution (resolveSelectedModels) also runs before writeMu
+// is taken, a failure there returns before any store state changes, which is
+// what makes the old rollback-on-setup-failure logic unnecessary here: there
+// is nothing to roll back yet.
+func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// Migrate deprecated disable_notifications before reloading config.
 	migrateDisableNotifications()
 
@@ -1183,25 +1223,22 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		}
 	}
 
+	// Apply the same environment-derived defaults Load applies at startup,
+	// so a reload does not silently drop them — see
+	// TestLoad_AppleTerminalDefaultSurvivesReload.
+	applyEnvironmentDefaults(cfg)
+
 	// Validate hooks after all config merging is complete so matcher
 	// regexes are recompiled on the reloaded config (mirrors Load).
 	if err := cfg.ValidateHooks(); err != nil {
 		return fmt.Errorf("invalid hook configuration on reload: %w", err)
 	}
 
-	// Save current state for potential rollback BEFORE configureProviders,
-	// which may write to disk via RemoveConfigField (e.g. removing stale
-	// OAuth providers). Capturing after would snapshot a config that has
-	// already been mutated, and the rollback would restore corrupted state.
-	oldConfig := s.Config()
-	oldLoadedPaths := s.loadedPaths
-	oldResolver := s.resolver
-	oldKnownProviders := s.knownProviders
-	oldOverrides := s.overrides
-	oldWorkspacePath := s.workspacePath
-
-	// Preserve runtime overrides
-	overrides := s.overrides
+	// Snapshot runtime overrides up front (a brief writeMu.RLock) rather
+	// than reading s.overrides directly, since the rest of this function
+	// runs without writeMu held and a concurrent mutator could otherwise
+	// race a later read of the same map.
+	overrides := s.snapshotOverrides()
 
 	// Reapply model choices made in this instance. The global config file is
 	// shared, so it may now name a model a sibling instance selected; a
@@ -1226,11 +1263,41 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		slog.Warn("Reload continuing with the previously known providers", "error", err)
 	}
 
+	// configureProviders may run model-discovery HTTP calls for custom
+	// providers (see discoverCustomProviderModels). This runs here, before
+	// writeMu is taken below — see the writeMu doc comment on ConfigStore
+	// and TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu.
 	if err := cfg.configureProviders(ctx, s, env, resolver, providers); err != nil {
 		return fmt.Errorf("failed to configure providers during reload: %w", err)
 	}
 
-	// Update store state BEFORE running model/agent setup (so they see new config)
+	var resolved resolvedModels
+	configured := cfg.IsConfigured()
+	if configured {
+		resolved, err = resolveSelectedModels(cfg, providers)
+		if err != nil {
+			return fmt.Errorf("failed to configure selected models during reload: %w", err)
+		}
+		cfg.Models[SelectedModelTypeLarge] = resolved.Large
+		cfg.Models[SelectedModelTypeSmall] = resolved.Small
+	} else {
+		slog.Warn("No providers configured after reload")
+	}
+
+	// Everything above is pure computation (plus the best-effort disk
+	// cleanup configureProviders may have performed); no store state has
+	// changed yet. Take writeMu only for the swap, so the compute-heavy
+	// (and potentially network-bound) part of a reload is never on the
+	// critical path for a concurrent mutator.
+	//
+	// Unlike the old reloadFromDiskLocked, there is no rollback path here:
+	// every fallible step above (loadFromConfigPaths, ValidateHooks,
+	// Providers, configureProviders, resolveSelectedModels) already
+	// returned before this point on failure, so the swap below cannot fail
+	// partway through in a way that would need undoing.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.setConfig(cfg)
 	s.loadedPaths = loadedPaths
 	s.resolver = resolver
@@ -1238,30 +1305,15 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	s.overrides = overrides
 	s.workspacePath = workspacePath
 
-	// Mirror startup flow: setup models and agents against NEW config.
-	var setupErr error
-	if !cfg.IsConfigured() {
-		slog.Warn("No providers configured after reload")
-	} else {
-		resolved, resolveErr := resolveSelectedModels(cfg, providers)
-		if resolveErr != nil {
-			setupErr = fmt.Errorf("failed to configure selected models during reload: %w", resolveErr)
-		} else {
-			cfg.Models[SelectedModelTypeLarge] = resolved.Large
-			cfg.Models[SelectedModelTypeSmall] = resolved.Small
-			s.SetupAgents()
-		}
-	}
-
-	// Rollback on setup failure
-	if setupErr != nil {
-		s.setConfig(oldConfig)
-		s.loadedPaths = oldLoadedPaths
-		s.resolver = oldResolver
-		s.knownProviders = oldKnownProviders
-		s.overrides = oldOverrides
-		s.workspacePath = oldWorkspacePath
-		return setupErr
+	if configured {
+		// Note: unlike Load, a fallback model correction (resolved.*Fallback)
+		// is not persisted to disk here, only applied in memory. This
+		// matches reloadFromDiskLocked's pre-existing behavior; persisting
+		// via updateLocked here would need its own failure handling (Load
+		// can simply discard the whole store on error, but a reload has
+		// already published a config other goroutines may be reading).
+		// Left as-is rather than risked as part of this refactor.
+		s.SetupAgents()
 	}
 
 	// Rebuild staleness tracking. Track every discovered config path, not
@@ -1280,9 +1332,12 @@ func (s *ConfigStore) autoReload(ctx context.Context) error {
 	if s.workingDir == "" {
 		return nil // Expected skip: working directory not set
 	}
-	// Skip if a reload is already in progress. This handles both
-	// concurrent auto-reloads after parallel writes and re-entrant
-	// calls from configureProviders during a reload.
+	// Skip if a reload is already in progress. reloadMu (not writeMu) is
+	// the right lock to probe here: writeMu is now only held for the brief
+	// final swap of a reload, so TryLock-ing it would not detect a reload
+	// whose disk/HTTP work is still in flight. This still covers both
+	// concurrent auto-reloads after parallel writes and any call made
+	// while an explicit ReloadFromDisk is running.
 	//
 	// Note: if a write completes after the in-progress reload has
 	// already read the config file, that write won't be reflected in
@@ -1290,9 +1345,9 @@ func (s *ConfigStore) autoReload(ctx context.Context) error {
 	// are rare and the next user action or file-watch tick will pick
 	// up the change. Callers that need guaranteed fresh state after a
 	// write should call ReloadFromDisk explicitly.
-	if !s.writeMu.TryLock() {
+	if !s.reloadMu.TryLock() {
 		return nil
 	}
-	defer s.writeMu.Unlock()
-	return s.reloadFromDiskLocked(ctx)
+	defer s.reloadMu.Unlock()
+	return s.reloadFromDisk(ctx)
 }

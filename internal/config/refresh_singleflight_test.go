@@ -46,7 +46,7 @@ func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 // The fixture uses "copilot" rather than a made-up provider ID because a
 // successful exchange writes only the credential fields to disk
 // (SetConfigFields) and then reloads the whole config from disk
-// (reloadFromDiskLocked). A provider outside the embedded catalog would be
+// (reloadFromDisk). A provider outside the embedded catalog would be
 // re-validated as a custom provider on that reload and dropped for lacking
 // base_url/models (see TECHDEBT.md); copilot survives because
 // configureProviders restores type/base_url/models for known providers from

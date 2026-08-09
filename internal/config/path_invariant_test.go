@@ -8,7 +8,7 @@ import (
 // TestConfigPathInvariant_MatchesReloadReadSet guards against "where we write"
 // (configPath) and "where reload reads" (lookupConfigs, plus the
 // separately-read workspace file) drifting apart. If configPath(scope) ever
-// pointed somewhere reloadFromDiskLocked does not also read, a write through
+// pointed somewhere reloadFromDisk does not also read, a write through
 // that scope would silently vanish on the next reload -- exactly the kind of
 // bug that made the refresh_singleflight_test.go fixtures non-hermetic (see
 // TECHDEBT.md): they wrote to a tmp file that reload never looked at, so the
@@ -29,7 +29,7 @@ func TestConfigPathInvariant_MatchesReloadReadSet(t *testing.T) {
 			t.Fatalf("Load(%q): %v", workingDir, err)
 		}
 
-		// reloadFromDiskLocked's read set: lookupConfigs(workingDir), plus the
+		// reloadFromDisk's read set: lookupConfigs(workingDir), plus the
 		// workspace config it reads directly via os.ReadFile (store.go, and
 		// mirrored in Load itself). Both compute the workspace path the same
 		// way: DataDirectory/braid.json.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -916,4 +918,123 @@ func TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace(t *testing.T) {
 	after, err = os.ReadFile(configPath)
 	require.NoError(t, err)
 	require.Equal(t, string(before), string(after), "a failed OAuth SetProviderAPIKey must not modify the config file")
+}
+
+// TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu is a regression test
+// for configureProviders' model-discovery step holding writeMu for the full
+// duration of the HTTP round trip. reloadFromDisk (and Load) run
+// configureProviders while holding writeMu, so a slow discovery endpoint
+// currently blocks every other config mutator (SetConfigField,
+// UpdatePreferredModel, ...) until discovery finishes or times out.
+//
+// EXPECTED TO FAIL against the current implementation: TryLock below returns
+// false because writeMu is still held by the in-flight reload's discovery
+// call. It is expected to pass once the writeMu/discovery refactor releases
+// the lock before (or drops it during) the network round trip.
+func TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu(t *testing.T) {
+	const serverDelay = 200 * time.Millisecond
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "braid.json")
+
+	// Isolate from the host's global config.
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+
+	// Start with no providers so the initial Load is fast and has nothing
+	// to discover.
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	// A slow discovery endpoint: sleeps well past our poll window before
+	// responding with a minimal, valid models list.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(serverDelay)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "slow-model", "object": "model"}]}`))
+	}))
+	defer server.Close()
+
+	// Rewrite the config to add a custom provider with no models, which
+	// auto-triggers discovery against the slow server on the next reload.
+	slowConfig := fmt.Sprintf(`{
+		"providers": {
+			"custom": {
+				"api_key": "test-key",
+				"base_url": %q
+			}
+		}
+	}`, server.URL+"/v1")
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, os.WriteFile(configPath, []byte(slowConfig), 0o600))
+
+	reloadDone := make(chan error, 1)
+	go func() {
+		reloadDone <- store.ReloadFromDisk(context.Background())
+	}()
+
+	// Give the reload goroutine time to enter the HTTP call, but stay well
+	// under serverDelay so we're observing mid-discovery state.
+	time.Sleep(50 * time.Millisecond)
+
+	tryStart := time.Now()
+	acquired := store.writeMu.TryLock()
+	tryElapsed := time.Since(tryStart)
+
+	require.Less(t, tryElapsed, 50*time.Millisecond, "TryLock itself should return immediately, not block")
+	if acquired {
+		store.writeMu.Unlock()
+	}
+	require.True(t, acquired, "writeMu should not be held for the full discovery HTTP round trip; "+
+		"other config mutators must remain usable while discovery is in flight")
+
+	// Regardless of the assertion above, confirm the reload eventually
+	// completes successfully so the test doesn't leak a goroutine.
+	store.writeMu.Lock()
+	store.writeMu.Unlock()
+	require.NoError(t, <-reloadDone)
+}
+
+// TestLoad_AppleTerminalDefaultSurvivesReload pins down whether the
+// isAppleTerminal-driven Options.TUI.Transparent default (set only in Load,
+// via load.go's isAppleTerminal() block) survives a subsequent
+// ReloadFromDisk. reloadFromDisk calls cfg.setDefaults but has no
+// equivalent isAppleTerminal block, so the default may be lost on reload.
+func TestLoad_AppleTerminalDefaultSurvivesReload(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "Apple_Terminal")
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "braid.json")
+
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+
+	// Empty config: Load tolerates !cfg.IsConfigured() and returns early,
+	// which keeps this test focused on the Apple Terminal default rather
+	// than provider setup.
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+
+	require.NotNil(t, store.config.Options.TUI.Transparent)
+	require.True(t, *store.config.Options.TUI.Transparent, "Load should enable transparent mode under Apple Terminal")
+
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	// Force a reload without going through an unrelated mutator, so any
+	// loss of the default is attributable to reloadFromDisk itself.
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"options": {"debug": true}}`), 0o600))
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+
+	cfg := store.Config()
+	require.NotNil(t, cfg.Options.TUI.Transparent, "Apple Terminal transparent default should survive reload")
+	require.True(t, cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent,
+		"Apple Terminal transparent default should still be true after reload")
 }

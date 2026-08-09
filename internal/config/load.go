@@ -82,20 +82,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
 
-	if !isInsideWorktree() {
-		const depth = 2
-		const items = 100
-		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
-		assignIfNil(&cfg.Tools.Ls.MaxDepth, depth)
-		assignIfNil(&cfg.Tools.Ls.MaxItems, items)
-		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
-		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
-	}
-
-	if isAppleTerminal() {
-		slog.Warn("Detected Apple Terminal, enabling transparent mode")
-		assignIfNil(&cfg.Options.TUI.Transparent, true)
-	}
+	applyEnvironmentDefaults(cfg)
 
 	// Load known providers, this loads the config from catwalk. A failed
 	// refresh still yields the cached or embedded catalog, so only an empty
@@ -115,15 +102,17 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	valueResolver := NewShellVariableResolver(env)
 	store.resolver = valueResolver
 
-	// Hold writeMu during initial load to prevent configureProviders
-	// from triggering auto-reload via RemoveConfigField.
-	store.writeMu.Lock()
-	defer store.writeMu.Unlock()
-
 	// Apply top-level env vars before configuring providers so variables
 	// like AWS_PROFILE are visible to the AWS SDK credential chain.
 	cfg.applyEnv(valueResolver)
 
+	// configureProviders may run model-discovery HTTP calls for custom
+	// providers (see discoverCustomProviderModels). It runs here, without
+	// writeMu held, so the store is never seen mid-lock by anything for the
+	// full duration of a slow discovery round trip. The store is not
+	// published anywhere until Load returns, so nothing can race this
+	// section regardless; writeMu is taken further down only because
+	// updateLocked/SetupAgents document it as a precondition.
 	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
@@ -140,7 +129,10 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	cfg.Models[SelectedModelTypeLarge] = resolved.Large
 	cfg.Models[SelectedModelTypeSmall] = resolved.Small
 
-	// Persist any fallback corrections while we still hold writeMu.
+	store.writeMu.Lock()
+	defer store.writeMu.Unlock()
+
+	// Persist any fallback corrections.
 	if resolved.LargeFallback {
 		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
 			return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
@@ -157,13 +149,35 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 	store.SetupAgents()
 
-	// Capture initial staleness snapshot
 	// Capture initial staleness snapshot. Track every discovered config path,
 	// not just the ones that loaded, so a config file created after startup
 	// (e.g. a braidrc added mid-session) is detected as a change.
 	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
 
 	return store, nil
+}
+
+// applyEnvironmentDefaults applies defaults that depend on the process
+// environment and git status rather than on config file contents: reduced
+// file-walk limits when not inside a git worktree, and transparent
+// background under Apple Terminal. Shared by Load and reloadFromDisk so a
+// reload does not silently drop a default that was only ever applied at
+// startup — see TestLoad_AppleTerminalDefaultSurvivesReload.
+func applyEnvironmentDefaults(cfg *Config) {
+	if !isInsideWorktree() {
+		const depth = 2
+		const items = 100
+		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
+		assignIfNil(&cfg.Tools.Ls.MaxDepth, depth)
+		assignIfNil(&cfg.Tools.Ls.MaxItems, items)
+		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
+		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
+	}
+
+	if isAppleTerminal() {
+		slog.Warn("Detected Apple Terminal, enabling transparent mode")
+		assignIfNil(&cfg.Options.TUI.Transparent, true)
+	}
 }
 
 // mustMarshalConfig marshals the config to JSON bytes, returning empty JSON on
@@ -204,8 +218,15 @@ func PushPopBraidEnv() func() {
 	return restore
 }
 
+// configureProviders is a thin wrapper around three phases that used to be
+// inlined here as one ~290-line function: mergeCatalogProviders (merge the
+// embedded catalog with user overrides, applying vendor special cases),
+// discoverCustomProviderModels (pure HTTP model discovery for custom
+// providers), and validateCustomProviders (apply discovery results and drop
+// invalid custom providers). Splitting the HTTP-performing phase out lets
+// callers (Load, reloadFromDisk) run it before taking writeMu — see those
+// call sites for why that matters.
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
-	knownProviderNames := make(map[string]bool)
 	restore := PushPopBraidEnv()
 	defer restore()
 
@@ -216,6 +237,74 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	if c.Options.DisableDefaultProviders {
 		knownProviders = nil
 	}
+
+	knownProviderNames, actions, err := c.mergeCatalogProviders(env, resolver, knownProviders)
+	if err != nil {
+		return err
+	}
+	// Disk cleanup collected while merging (e.g. dropping a stale Claude
+	// Code OAuth provider) is applied here via a direct write rather than
+	// through RemoveConfigField: RemoveConfigField's autoReload trigger
+	// would be pointless mid-load/reload (a fresh config is about to be
+	// swapped in anyway) and, prior to this refactor, was the thing that
+	// forced this whole call to run under writeMu just so the re-entrant
+	// autoReload could TryLock-and-noop instead of deadlocking.
+	applyPendingDiskActions(store, actions)
+
+	discoveryResults := discoverCustomProviderModels(ctx, c.Providers, knownProviderNames, resolver)
+
+	if err := c.validateCustomProviders(knownProviderNames, resolver, discoveryResults); err != nil {
+		return err
+	}
+
+	if c.Providers.Len() == 0 && c.Options.DisableDefaultProviders {
+		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
+	}
+
+	return nil
+}
+
+// pendingDiskAction records a best-effort config-file deletion discovered
+// while merging providers, to be applied by the caller after the merge
+// phase completes. See configureProviders for why this is not just a direct
+// store.RemoveConfigField call.
+type pendingDiskAction struct {
+	scope Scope
+	key   string
+}
+
+// applyPendingDiskActions performs the disk deletions collected during
+// provider merging. Failures are logged and otherwise ignored: this is
+// best-effort cleanup of a stale field, not something that should fail
+// config loading.
+func applyPendingDiskActions(store *ConfigStore, actions []pendingDiskAction) {
+	for _, action := range actions {
+		err := store.atomicWrite(action.scope, func(data []byte) ([]byte, error) {
+			v, sErr := sjson.Delete(string(data), action.key)
+			if sErr != nil {
+				return nil, fmt.Errorf("failed to delete config field %s: %w", action.key, sErr)
+			}
+			return []byte(v), nil
+		})
+		if err != nil {
+			slog.Warn("Failed to remove stale config field", "key", action.key, "error", err)
+		}
+	}
+}
+
+// mergeCatalogProviders merges the embedded/known provider catalog with the
+// user's overrides (base_url, api_key, models, headers), applying
+// vendor-specific special cases (Anthropic OAuth removal, Copilot OAuth
+// setup, Vertex AI/Azure/Bedrock credential requirements). It returns the
+// set of known provider IDs (so later phases can skip them) and any disk
+// cleanup the caller should apply once merging is done.
+//
+// This is pure in-memory work plus resolver calls (which may run shell
+// commands for $(...) substitutions, but never network I/O) — no HTTP,
+// unlike discoverCustomProviderModels.
+func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) (map[string]bool, []pendingDiskAction, error) {
+	knownProviderNames := make(map[string]bool)
+	var actions []pendingDiskAction
 
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
@@ -272,7 +361,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		for k, v := range headers {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
-				return fmt.Errorf("resolving provider %s header %q: %w", p.ID, k, err)
+				return nil, nil, fmt.Errorf("resolving provider %s header %q: %w", p.ID, k, err)
 			}
 			if resolved == "" {
 				delete(headers, k)
@@ -298,12 +387,13 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 
 		switch {
 		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
-			// Claude Code subscription is not supported anymore. Remove to show onboarding.
-			// RemoveConfigField persists the deletion to disk. The in-memory
-			// state is kept consistent by the Providers.Del call below; any
-			// concurrent reload that races with this write will also see the
-			// removal because it re-reads from disk.
-			store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
+			// Claude Code subscription is not supported anymore. Remove to
+			// show onboarding. The disk deletion is deferred to the caller
+			// (applyPendingDiskActions) rather than performed here; the
+			// in-memory state is kept consistent by the Providers.Del call
+			// below, and any concurrent reload that races with the deferred
+			// write will also see the removal because it re-reads from disk.
+			actions = append(actions, pendingDiskAction{scope: ScopeGlobal, key: "providers.anthropic"})
 			c.Providers.Del(string(p.ID))
 			continue
 		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
@@ -359,20 +449,33 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		c.Providers.Set(string(p.ID), prepared)
 	}
 
-	// Discover models concurrently for custom providers that need it.
-	// A provider needs discovery when discover_models is explicitly true,
-	// or when the models list is empty (auto-trigger, unless opted out).
-	type discoveryResult struct {
-		models []catwalk.Model
-		err    error
-	}
+	return knownProviderNames, actions, nil
+}
 
+// discoveryResult holds the outcome of a single custom provider's
+// model-discovery HTTP call.
+type discoveryResult struct {
+	models []catwalk.Model
+	err    error
+}
+
+// discoverCustomProviderModels runs model discovery concurrently for custom
+// providers that need it. A provider needs discovery when discover_models is
+// explicitly true, or when its models list is empty (auto-trigger, unless
+// opted out).
+//
+// This is pure computation plus HTTP calls against providers — it does not
+// touch the store, a config pointer, or any lock. Callers are expected to
+// run it without holding writeMu so a slow endpoint (bounded by the 3s
+// timeout below) never blocks unrelated config mutators.
+func discoverCustomProviderModels(ctx context.Context, providers *csync.Map[string, ProviderConfig], knownProviderNames map[string]bool, resolver VariableResolver) map[string]discoveryResult {
 	discoveryResults := make(map[string]discoveryResult)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
 	discoverCtx, discoverCancel := context.WithTimeout(ctx, 3*time.Second)
-	for id, pc := range c.Providers.Seq2() {
+	defer discoverCancel()
+	for id, pc := range providers.Seq2() {
 		if knownProviderNames[id] {
 			continue
 		}
@@ -406,9 +509,15 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		})
 	}
 	wg.Wait()
-	discoverCancel()
 
-	// Validate the custom providers.
+	return discoveryResults
+}
+
+// validateCustomProviders validates every provider outside the known
+// catalog, applies any discovery results computed for it, and drops
+// providers that end up unusable (unsupported type, disabled, no models, no
+// endpoint).
+func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, resolver VariableResolver, discoveryResults map[string]discoveryResult) error {
 	for id, providerConfig := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
 			continue
@@ -473,7 +582,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		}
 
 		// Custom-provider headers share the MCP error contract; see
-		// the known-provider loop above.
+		// mergeCatalogProviders' known-provider loop.
 		for k, v := range providerConfig.ExtraHeaders {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
@@ -487,10 +596,6 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		}
 
 		c.Providers.Set(id, providerConfig)
-	}
-
-	if c.Providers.Len() == 0 && c.Options.DisableDefaultProviders {
-		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
 	}
 
 	return nil
