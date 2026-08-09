@@ -36,8 +36,12 @@ type APIKeyInput struct {
 	com          *common.Common
 	isOnboarding bool
 
-	provider  catwalk.Provider
-	model     config.SelectedModel
+	provider catwalk.Provider
+	// model is nil when this dialog is authenticating a provider outside
+	// the model-switch flow (see NewProviders/ActionConfigureProvider) —
+	// there's no model selection to carry forward, so saveKeyAndContinue
+	// returns ActionProviderConfigured instead of ActionSelectModel.
+	model     *config.SelectedModel
 	modelType config.SelectedModelType
 
 	width int
@@ -59,7 +63,7 @@ func NewAPIKeyInput(
 	com *common.Common,
 	isOnboarding bool,
 	provider catwalk.Provider,
-	model config.SelectedModel,
+	model *config.SelectedModel,
 	modelType config.SelectedModelType,
 ) (*APIKeyInput, tea.Cmd) {
 	t := com.Styles
@@ -312,9 +316,13 @@ func (m *APIKeyInput) saveKeyAndContinue() Action {
 		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}
 
+	if m.model == nil {
+		return ActionProviderConfigured{ProviderID: string(m.provider.ID)}
+	}
+
 	return ActionSelectModel{
 		Provider:  m.provider,
-		Model:     m.model,
+		Model:     *m.model,
 		ModelType: m.modelType,
 	}
 }

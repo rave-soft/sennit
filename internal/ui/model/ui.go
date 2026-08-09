@@ -2019,6 +2019,34 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionAttachSkill:
 		m.dialog.CloseFrontDialog()
 		cmds = append(cmds, m.attachSkill(msg.ID, msg.Name))
+	// Providers configuration dialog messages.
+	case dialog.ActionConfigureProvider:
+		if cmd := m.configureProvider(msg.ProviderID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionOpenCustomProviderForm:
+		if cmd := m.openProviderFormDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionSubmitCustomProvider:
+		ws := m.com.Workspace
+		ctx := m.com.Context()
+		params := workspace.ConfigureCustomProviderParams{
+			ID:      msg.ID,
+			BaseURL: msg.BaseURL,
+			Type:    msg.Type,
+			APIKey:  msg.APIKey,
+		}
+		cmds = append(cmds, func() tea.Msg {
+			_, err := workspace.ConfigureCustomProvider(ctx, ws, config.ScopeGlobal, params)
+			return dialog.ActionCustomProviderResult{ProviderID: msg.ID, Err: err}
+		})
+	case dialog.ActionProviderConfigured:
+		// TODO(portion 2): auto-select a model for this provider and
+		// transition into chat.
+		m.dialog.CloseDialog(dialog.ProviderFormID)
+		m.dialog.CloseDialog(dialog.ProvidersID)
+
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
@@ -2149,7 +2177,7 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 	case catwalk.InferenceProviderCopilot:
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
 	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, &model, modelType)
 	}
 
 	if m.dialog.ContainsDialog(dlg.ID()) {
@@ -4021,6 +4049,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ProvidersID:
+		if cmd := m.openProvidersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4112,6 +4144,79 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(reasoningDialog)
 	return nil
+}
+
+// openProvidersDialog opens the providers configuration dialog. Reachable
+// only from the command palette in this portion — see the "configure_providers"
+// entry in dialog/commands.go; onboarding wiring is a later portion, hence
+// the hardcoded isOnboarding=false.
+func (m *UI) openProvidersDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ProvidersID) {
+		m.dialog.BringToFront(dialog.ProvidersID)
+		return nil
+	}
+
+	providersDialog, err := dialog.NewProviders(m.com, false)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(providersDialog)
+	return nil
+}
+
+// openProviderFormDialog opens the custom provider form dialog.
+func (m *UI) openProviderFormDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ProviderFormID) {
+		m.dialog.BringToFront(dialog.ProviderFormID)
+		return nil
+	}
+
+	formDialog := dialog.NewProviderForm(m.com)
+	m.dialog.OpenDialog(formDialog)
+	return nil
+}
+
+// configureProvider resolves providerID to its catalog entry and opens the
+// matching authentication dialog (OAuth for Copilot, API key input
+// otherwise), mirroring openAuthenticationDialog's dispatch. The API key
+// dialog is opened in its model-less mode (nil model) since this flow
+// isn't switching a model, just authenticating a provider.
+func (m *UI) configureProvider(providerID string) tea.Cmd {
+	providers, err := config.Providers(m.com.Config())
+	if err != nil && len(providers) == 0 {
+		return util.ReportError(err)
+	}
+
+	idx := slices.IndexFunc(providers, func(p catwalk.Provider) bool {
+		return string(p.ID) == providerID
+	})
+	if idx == -1 {
+		return util.ReportError(fmt.Errorf("unknown provider %q", providerID))
+	}
+	provider := providers[idx]
+
+	var (
+		dlg dialog.Dialog
+		cmd tea.Cmd
+	)
+	switch provider.ID {
+	case catwalk.InferenceProviderCopilot:
+		// TODO(portion 2): pass a real model/modelType once this flow
+		// decides one automatically; onboarding's model-switch flow is
+		// the only caller that has one today.
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, false, provider, config.SelectedModel{}, config.SelectedModelTypeLarge)
+	default:
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, false, provider, nil, "")
+	}
+
+	if m.dialog.ContainsDialog(dlg.ID()) {
+		m.dialog.BringToFront(dlg.ID())
+		return nil
+	}
+
+	m.dialog.OpenDialogWithGrace(dlg)
+	return cmd
 }
 
 // openNotificationsDialog opens the notification style picker dialog.
