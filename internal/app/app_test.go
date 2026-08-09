@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +21,7 @@ func TestSetupSubscriber_NormalFlow(t *testing.T) {
 
 	src := pubsub.NewBroker[string]()
 	defer src.Shutdown()
-	out := pubsub.NewBroker[tea.Msg]()
+	out := pubsub.NewBroker[any]()
 	defer out.Shutdown()
 
 	ch := out.Subscribe(ctx)
@@ -57,7 +56,7 @@ func TestSetupSubscriber_ContextCancellation(t *testing.T) {
 
 	src := pubsub.NewBroker[string]()
 	defer src.Shutdown()
-	out := pubsub.NewBroker[tea.Msg]()
+	out := pubsub.NewBroker[any]()
 	defer out.Shutdown()
 
 	var wg sync.WaitGroup
@@ -81,7 +80,7 @@ func TestSetupSubscriber_ContextCancellation(t *testing.T) {
 func TestEvents_ZeroConsumers(t *testing.T) {
 	t.Parallel()
 
-	broker := pubsub.NewBroker[tea.Msg]()
+	broker := pubsub.NewBroker[any]()
 	defer broker.Shutdown()
 
 	require.Equal(t, 0, broker.GetSubscriberCount())
@@ -89,8 +88,8 @@ func TestEvents_ZeroConsumers(t *testing.T) {
 	// Must not block.
 	done := make(chan struct{})
 	go func() {
-		broker.Publish(pubsub.UpdatedEvent, tea.Msg("msg1"))
-		broker.Publish(pubsub.UpdatedEvent, tea.Msg("msg2"))
+		broker.Publish(pubsub.UpdatedEvent, any("msg1"))
+		broker.Publish(pubsub.UpdatedEvent, any("msg2"))
 		close(done)
 	}()
 
@@ -109,20 +108,20 @@ func TestEvents_OneConsumer(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	broker := pubsub.NewBroker[tea.Msg]()
+	broker := pubsub.NewBroker[any]()
 	defer broker.Shutdown()
 
 	ch := broker.Subscribe(ctx)
 
 	const n = 10
 	for i := range n {
-		broker.Publish(pubsub.UpdatedEvent, tea.Msg(i))
+		broker.Publish(pubsub.UpdatedEvent, any(i))
 	}
 
 	for i := range n {
 		select {
 		case ev := <-ch:
-			require.Equal(t, tea.Msg(i), ev.Payload)
+			require.Equal(t, any(i), ev.Payload)
 		case <-time.After(5 * time.Second):
 			t.Fatalf("timed out waiting for event %d", i)
 		}
@@ -148,11 +147,11 @@ func testNConsumers(t *testing.T, n int) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	broker := pubsub.NewBroker[tea.Msg]()
+	broker := pubsub.NewBroker[any]()
 	defer broker.Shutdown()
 
 	// Subscribe all N consumers before publishing.
-	channels := make([]<-chan pubsub.Event[tea.Msg], n)
+	channels := make([]<-chan pubsub.Event[any], n)
 	for i := range n {
 		channels[i] = broker.Subscribe(ctx)
 	}
@@ -160,7 +159,7 @@ func testNConsumers(t *testing.T, n int) {
 
 	const numEvents = 20
 	for i := range numEvents {
-		broker.Publish(pubsub.UpdatedEvent, tea.Msg(i))
+		broker.Publish(pubsub.UpdatedEvent, any(i))
 	}
 
 	// Each consumer must receive all numEvents messages.
@@ -170,7 +169,7 @@ func testNConsumers(t *testing.T, n int) {
 			for j := range numEvents {
 				select {
 				case ev := <-ch:
-					require.Equal(t, tea.Msg(j), ev.Payload,
+					require.Equal(t, any(j), ev.Payload,
 						"consumer %d: wrong payload for event %d", i, j)
 				case <-time.After(5 * time.Second):
 					t.Errorf("consumer %d: timed out waiting for event %d", i, j)

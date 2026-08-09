@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/backend"
 	"github.com/rave-soft/braid/internal/config"
@@ -144,7 +143,7 @@ func containsSkillName(states []*skills.SkillState, name string) bool {
 // the timeout elapses. Non-skills events on the channel are silently
 // skipped — the backend fans in many event types and we only care
 // about skills here.
-func waitForSkillsEvent(t *testing.T, ch <-chan pubsub.Event[tea.Msg], marker string, timeout time.Duration) bool {
+func waitForSkillsEvent(t *testing.T, ch <-chan pubsub.Event[any], marker string, timeout time.Duration) bool {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {

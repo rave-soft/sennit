@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/proto"
@@ -16,7 +15,7 @@ import (
 // awaitConfigChanged drains events until a ConfigChanged is received
 // for the given workspace ID, or fails the test on timeout. Other
 // event types are ignored.
-func awaitConfigChanged(t *testing.T, evc <-chan pubsub.Event[tea.Msg], workspaceID string) {
+func awaitConfigChanged(t *testing.T, evc <-chan pubsub.Event[any], workspaceID string) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
 	for {
@@ -40,7 +39,7 @@ func awaitConfigChanged(t *testing.T, evc <-chan pubsub.Event[tea.Msg], workspac
 // newPublishingWorkspace creates a real workspace through the backend
 // so its embedded *app.App is wired up and SendEvent works. It returns
 // the backend, the workspace, and a fresh event subscription.
-func newPublishingWorkspace(t *testing.T) (*Backend, *Workspace, <-chan pubsub.Event[tea.Msg]) {
+func newPublishingWorkspace(t *testing.T) (*Backend, *Workspace, <-chan pubsub.Event[any]) {
 	t.Helper()
 	xdgIsolated(t)
 
@@ -187,7 +186,7 @@ func TestDisableDockerMCP_PublishesConfigChanged(t *testing.T) {
 // drainEvents reads from evc until quiet for the given window. Used
 // to flush events emitted by setup steps so the assertion can target
 // the event from the action under test.
-func drainEvents(evc <-chan pubsub.Event[tea.Msg], quiet time.Duration) {
+func drainEvents(evc <-chan pubsub.Event[any], quiet time.Duration) {
 	for {
 		select {
 		case <-evc:

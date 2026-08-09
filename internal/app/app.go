@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
@@ -58,8 +57,12 @@ type App struct {
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
-	events          *pubsub.Broker[tea.Msg]
-	tuiWG           *sync.WaitGroup
+	// events is typed any rather than bubbletea's tea.Msg: the app
+	// package is core (no UI dependency), and any is what tea.Msg
+	// aliases down to anyway. Consumers that need a tea.Msg (the TUI)
+	// convert at the boundary; see workspace.AppWorkspace.Subscribe.
+	events *pubsub.Broker[any]
+	tuiWG  *sync.WaitGroup
 
 	// global context and cleanup functions
 	globalCtx          context.Context
@@ -108,7 +111,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 		config: store,
 
-		events:             pubsub.NewBroker[tea.Msg](),
+		events:             pubsub.NewBroker[any](),
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
@@ -189,12 +192,12 @@ func (app *App) Store() *config.ConfigStore {
 
 // Events returns a per-caller subscription channel for application events.
 // Each caller receives its own channel; all callers receive every event.
-func (app *App) Events(ctx context.Context) <-chan pubsub.Event[tea.Msg] {
+func (app *App) Events(ctx context.Context) <-chan pubsub.Event[any] {
 	return app.events.Subscribe(ctx)
 }
 
 // SendEvent publishes a message to all event subscribers.
-func (app *App) SendEvent(msg tea.Msg) {
+func (app *App) SendEvent(msg any) {
 	app.events.Publish(pubsub.UpdatedEvent, msg)
 }
 
@@ -296,7 +299,7 @@ func setupSubscriber[T any](
 	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
-	broker *pubsub.Broker[tea.Msg],
+	broker *pubsub.Broker[any],
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
@@ -307,7 +310,7 @@ func setupSubscriber[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				broker.Publish(pubsub.UpdatedEvent, tea.Msg(event))
+				broker.Publish(pubsub.UpdatedEvent, any(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return
@@ -328,7 +331,7 @@ func setupSubscriberMustDeliver[T any](
 	wg *sync.WaitGroup,
 	name string,
 	subscriber func(context.Context) <-chan pubsub.Event[T],
-	broker *pubsub.Broker[tea.Msg],
+	broker *pubsub.Broker[any],
 ) {
 	wg.Go(func() {
 		subCh := subscriber(ctx)
@@ -339,7 +342,7 @@ func setupSubscriberMustDeliver[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				broker.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
+				broker.PublishMustDeliver(ctx, pubsub.UpdatedEvent, any(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return
@@ -385,11 +388,16 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	return nil
 }
 
-// Subscribe sends events to the TUI as tea.Msgs.
-func (app *App) Subscribe(program *tea.Program) {
+// Subscribe streams application events to send until ctx (app.globalCtx
+// scoped internally) is torn down. It is decoupled from bubbletea's
+// concrete *tea.Program so this core package doesn't need to import
+// it; onPanic is invoked instead of a hardcoded program.Quit() if the
+// delivery loop panics. Callers that feed a *tea.Program (see
+// workspace.AppWorkspace.Subscribe) pass program.Send and program.Quit.
+func (app *App) Subscribe(send func(any), onPanic func()) {
 	defer log.RecoverPanic("app.Subscribe", func() {
 		slog.Info("TUI subscription panic: attempting graceful shutdown")
-		program.Quit()
+		onPanic()
 	})
 
 	app.tuiWG.Add(1)
@@ -413,7 +421,7 @@ func (app *App) Subscribe(program *tea.Program) {
 				slog.Debug("TUI message channel closed")
 				return
 			}
-			program.Send(ev.Payload)
+			send(ev.Payload)
 		}
 	}
 }

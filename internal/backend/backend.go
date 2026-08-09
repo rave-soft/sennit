@@ -21,8 +21,8 @@ import (
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/skills"
-	"github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/version"
 )
 
@@ -505,10 +505,16 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			"client", args.Version,
 			"server", version.Version,
 		)
-		appWorkspace.SendEvent(util.NewWarnMsg(fmt.Sprintf(
-			"Server version %q differs from client version %q. Consider restarting the server.",
-			version.Version, args.Version,
-		)))
+		appWorkspace.SendEvent(pubsub.Event[proto.ServerNotice]{
+			Type: pubsub.UpdatedEvent,
+			Payload: proto.ServerNotice{
+				Level: proto.ServerNoticeLevelWarn,
+				Message: fmt.Sprintf(
+					"Server version %q differs from client version %q. Consider restarting the server.",
+					version.Version, args.Version,
+				),
+			},
+		})
 	}
 
 	return ws, workspaceToProto(ws), nil

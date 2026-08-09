@@ -600,7 +600,11 @@ func (w *AppWorkspace) MCPAuthURL(name string) string {
 // -- Lifecycle --
 
 func (w *AppWorkspace) Subscribe(program *tea.Program) {
-	w.app.Subscribe(program)
+	// app.App.Subscribe is decoupled from bubbletea's concrete
+	// *tea.Program (the app package is core and must not import UI
+	// frameworks); adapt it to a *tea.Program here at the workspace
+	// boundary, which is where UI-facing types are allowed to appear.
+	w.app.Subscribe(func(msg any) { program.Send(msg) }, program.Quit)
 }
 
 func (w *AppWorkspace) Shutdown() {

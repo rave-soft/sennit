@@ -3,8 +3,6 @@ package backend
 import (
 	"context"
 
-	tea "charm.land/bubbletea/v2"
-
 	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/config"
@@ -13,7 +11,7 @@ import (
 
 // SubscribeEvents returns a per-caller event channel for a workspace.
 // Each caller receives all events; multiple callers do not compete.
-func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-chan pubsub.Event[tea.Msg], error) {
+func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-chan pubsub.Event[any], error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err

@@ -53,6 +53,27 @@ type UpdateAvailable struct {
 	IsDevelopment  bool   `json:"is_development"`
 }
 
+// ServerNoticeLevel mirrors the client's status-line severity taxonomy
+// without depending on it, so backend code can flag a notice's
+// severity without importing internal/ui.
+type ServerNoticeLevel string
+
+const (
+	ServerNoticeLevelInfo  ServerNoticeLevel = "info"
+	ServerNoticeLevelWarn  ServerNoticeLevel = "warn"
+	ServerNoticeLevelError ServerNoticeLevel = "error"
+)
+
+// ServerNotice carries a human-readable notice from the server (e.g. a
+// client/server version mismatch) for display in the client's status
+// area. It is the transport-neutral payload backend code publishes
+// instead of reaching into internal/ui/util directly; the UI converts
+// it to its own util.InfoMsg on receipt.
+type ServerNotice struct {
+	Level   ServerNoticeLevel `json:"level"`
+	Message string            `json:"message"`
+}
+
 // CurrentSession is the request body for the per-client
 // current-session endpoint. An empty SessionID clears the entry.
 type CurrentSession struct {

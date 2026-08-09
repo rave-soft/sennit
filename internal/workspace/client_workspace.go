@@ -1448,6 +1448,11 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			LatestVersion:  e.Payload.LatestVersion,
 			IsDevelopment:  e.Payload.IsDevelopment,
 		}
+	case pubsub.Event[proto.ServerNotice]:
+		// Passed straight through: the wire shape already matches what
+		// local (in-process) workspaces publish, so the UI's conversion
+		// to util.InfoMsg is the same in both modes.
+		return e
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil
