@@ -228,6 +228,57 @@ func TestDiscoverModels_RoutesThroughProxy(t *testing.T) {
 	require.Contains(t, proxyRequestURI, "192.0.2.1")
 }
 
+func TestDiscoverModels_ProxyDirectIgnoresEnvProxy(t *testing.T) {
+	var proxyHit bool
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHit = true
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer proxy.Close()
+
+	var directHit bool
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directHit = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "model-a", "object": "model"}]}`))
+	}))
+	defer direct.Close()
+
+	// net/http caches the environment-derived proxy function process-wide
+	// behind a sync.Once (see transport.go's envProxyOnce/envProxyFunc), so
+	// asserting that an *empty* ProxyURL picks up a later t.Setenv'd
+	// HTTP_PROXY would be flaky: whichever test in this binary first makes
+	// a request through the default transport locks in that env snapshot
+	// for the rest of the process. We sidestep that entirely: Transport.Proxy
+	// is only ever consulted by net/http when non-nil (transport.go,
+	// connectMethodForRequest), so proxyDirect's explicitly nil'd Proxy
+	// field guarantees HTTP_PROXY is never even read here, deterministically
+	// and regardless of caching or test order.
+	t.Setenv("HTTP_PROXY", proxy.URL)
+
+	cfg := Config{
+		ID:       "test",
+		BaseURL:  direct.URL + "/v1",
+		ProxyURL: proxyDirect,
+	}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	require.True(t, directHit, "expected the request to reach the direct target server")
+	require.False(t, proxyHit, "expected the request not to reach the proxy stand-in")
+}
+
+func TestNewProxyHTTPClient_ProxyDirect(t *testing.T) {
+	t.Parallel()
+	client, err := newProxyHTTPClient(proxyDirect)
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	transport, ok := client.Transport.(*http.Transport)
+	require.True(t, ok, "expected an *http.Transport")
+	require.Nil(t, transport.Proxy, "Proxy must be nil'd out, not left unset, so env proxy vars are ignored")
+}
+
 func TestDiscoverModels_InvalidProxyURL(t *testing.T) {
 	cfg := Config{
 		ID:       "my-provider",

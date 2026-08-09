@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -49,5 +50,15 @@ func TestNewProxyHTTPClient(t *testing.T) {
 		client, err := NewProxyHTTPClient("ftp://proxy:21")
 		require.Error(t, err)
 		require.Nil(t, client)
+	})
+
+	t.Run("ProxyDirect sentinel returns a client with Proxy explicitly nil", func(t *testing.T) {
+		t.Parallel()
+		client, err := NewProxyHTTPClient(ProxyDirect)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+		transport, ok := client.Transport.(*http.Transport)
+		require.True(t, ok, "expected an *http.Transport")
+		require.Nil(t, transport.Proxy, "Proxy must be nil'd out, not left unset, so env proxy vars are ignored")
 	})
 }

@@ -18,15 +18,25 @@ import (
 // even if the caller forgets to set a context deadline.
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
-// newProxyHTTPClient builds an *http.Client whose Transport routes requests
-// through proxyURL. This intentionally duplicates config.NewProxyHTTPClient's
-// small parse-and-validate logic instead of importing internal/config: config
+// proxyDirect duplicates config.ProxyDirect's literal value. This
+// intentionally duplicates config.NewProxyHTTPClient's small
+// parse-and-validate logic instead of importing internal/config: config
 // already builds discover.Config (see load.go's discoverCustomProviderModels),
 // so importing config from here would create an import cycle, and pulling in
 // the whole config package just for this one helper isn't warranted anyway.
-// http, https, socks5, and socks5h schemes are all supported natively by
-// net/http's Transport.Proxy.
+const proxyDirect = "none"
+
+// newProxyHTTPClient builds an *http.Client whose Transport routes requests
+// through proxyURL. proxyURL == proxyDirect returns a client whose Transport
+// has Proxy explicitly nil'd out, forcing a direct connection even when
+// HTTP_PROXY/HTTPS_PROXY are set. http, https, socks5, and socks5h schemes
+// are all supported natively by net/http's Transport.Proxy.
 func newProxyHTTPClient(proxyURL string) (*http.Client, error) {
+	if proxyURL == proxyDirect {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = nil
+		return &http.Client{Timeout: 10 * time.Second, Transport: transport}, nil
+	}
 	u, err := url.Parse(proxyURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid proxy_url %q: %w", proxyURL, err)

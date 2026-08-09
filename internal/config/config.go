@@ -101,7 +101,7 @@ type ProviderConfig struct {
 	// per-provider proxy override — requests fall back to the standard
 	// HTTP_PROXY/HTTPS_PROXY/NO_PROXY environment variables via net/http's
 	// default proxy resolution.
-	ProxyURL string `json:"proxy_url,omitempty" jsonschema:"description=Proxy URL for requests to this provider (http/https/socks5),example=http://localhost:8080"`
+	ProxyURL string `json:"proxy_url,omitempty" jsonschema:"description=Proxy URL for requests to this provider (http/https/socks5); set to \"none\" to force a direct connection even if HTTP_PROXY/HTTPS_PROXY are set in the environment,example=http://localhost:8080"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
 	// The provider's API key.

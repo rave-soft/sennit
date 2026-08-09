@@ -67,4 +67,17 @@ func TestBuildProviderHTTPClient(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, client)
 	})
+
+	t.Run("ProxyDirect returns a real client with Proxy explicitly nil", func(t *testing.T) {
+		c := newProxyTestCoordinator(t, false)
+		client, err := c.buildProviderHTTPClient(config.ProxyDirect)
+		require.NoError(t, err)
+		// Distinct from the "no proxyURL, no debug" case above, which
+		// returns a nil *http.Client entirely: "none" must still produce a
+		// real client, just one whose Transport ignores env proxy vars.
+		require.NotNil(t, client)
+		transport, ok := client.Transport.(*http.Transport)
+		require.True(t, ok, "expected the direct *http.Transport")
+		require.Nil(t, transport.Proxy, "Proxy must be nil'd out, not left unset")
+	})
 }

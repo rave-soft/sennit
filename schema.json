@@ -685,7 +685,7 @@
         },
         "proxy_url": {
           "type": "string",
-          "description": "Proxy URL for requests to this provider (http/https/socks5)",
+          "description": "Proxy URL for requests to this provider (http/https/socks5); set to \"none\" to force a direct connection even if HTTP_PROXY/HTTPS_PROXY are set in the environment",
           "examples": [
             "http://localhost:8080"
           ]
