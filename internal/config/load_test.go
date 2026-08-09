@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestMain(m *testing.M) {
@@ -1181,6 +1184,151 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		_, exists := cfg.Providers.Get("custom")
 		require.False(t, exists)
 	})
+}
+
+// TestConfig_Load_DiscoveredModelsPersistAcrossReload verifies that a
+// successful custom-provider model discovery is written to the data-dir
+// config file, so a second Load of the same data dir finds a non-empty
+// models list and skips the HTTP round trip entirely.
+func TestConfig_Load_DiscoveredModelsPersistAcrossReload(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "auto-model", "object": "model"}]}`))
+	}))
+	defer server.Close()
+
+	globalDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+
+	// Seed the data-dir config (what GlobalConfigData() resolves to) with
+	// a custom provider that has no models, so discovery auto-triggers.
+	dataConfigPath := GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
+	seed := fmt.Sprintf(`{"providers": {"custom": {"api_key": "test-key", "base_url": %q}}}`, server.URL+"/v1")
+	require.NoError(t, os.WriteFile(dataConfigPath, []byte(seed), 0o644))
+
+	workingDir1 := t.TempDir()
+	store1, err := Load(workingDir1, "", false)
+	require.NoError(t, err)
+	pc, ok := store1.config.Providers.Get("custom")
+	require.True(t, ok)
+	require.Len(t, pc.Models, 1)
+	require.Equal(t, "auto-model", pc.Models[0].ID)
+	require.Equal(t, int64(1), requests.Load(), "first load should discover over HTTP")
+
+	// The discovered models must now be on disk in the data-dir config.
+	persisted, err := os.ReadFile(dataConfigPath)
+	require.NoError(t, err)
+	models := gjson.GetBytes(persisted, "providers.custom.models")
+	require.True(t, models.Exists())
+	require.NotEmpty(t, models.Array())
+
+	// A second, independent Load of the same data dir must find the
+	// models already populated and skip discovery entirely.
+	workingDir2 := t.TempDir()
+	store2, err := Load(workingDir2, "", false)
+	require.NoError(t, err)
+	pc2, ok := store2.config.Providers.Get("custom")
+	require.True(t, ok)
+	require.Len(t, pc2.Models, 1)
+	require.Equal(t, int64(1), requests.Load(), "second load must not re-discover over HTTP")
+}
+
+// TestConfig_Load_FailedDiscoveryLeavesDiskUntouched verifies that a custom
+// provider whose discovery fails (unreachable endpoint) is dropped from the
+// in-memory config as before, and that the failure never touches the
+// data-dir config file: no bogus/empty models entry appears there.
+func TestConfig_Load_FailedDiscoveryLeavesDiskUntouched(t *testing.T) {
+	globalDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+
+	dataConfigPath := GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
+	seed := `{"providers": {"custom": {"api_key": "test-key", "base_url": "http://127.0.0.1:1/v1"}}}`
+	require.NoError(t, os.WriteFile(dataConfigPath, []byte(seed), 0o644))
+	before, err := os.ReadFile(dataConfigPath)
+	require.NoError(t, err)
+
+	workingDir := t.TempDir()
+	store, err := Load(workingDir, "", false)
+	require.NoError(t, err)
+	_, exists := store.config.Providers.Get("custom")
+	require.False(t, exists, "provider with failed discovery and no models must be dropped")
+
+	after, err := os.ReadFile(dataConfigPath)
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after), "failed discovery must not write to disk")
+	require.False(t, gjson.GetBytes(after, "providers.custom.models").Exists())
+}
+
+// TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels verifies that a
+// project-level braid.json's explicit, non-empty models list merges with a
+// stale models list already persisted in the data-dir config, and that a
+// non-empty merged list is enough to skip discovery entirely (no HTTP
+// request is made, and the data-dir file is left untouched).
+func TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "discovered-model", "object": "model"}]}`))
+	}))
+	defer server.Close()
+
+	globalDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+
+	// Seed the data-dir config with a custom provider that already has a
+	// persisted (stale) models list and a base_url.
+	dataConfigPath := GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
+	dataSeed := fmt.Sprintf(`{"providers": {"custom": {"api_key": "test-key", "base_url": %q, "models": [{"id": "stale-model", "name": "stale-model"}]}}}`, server.URL+"/v1")
+	require.NoError(t, os.WriteFile(dataConfigPath, []byte(dataSeed), 0o644))
+
+	// Seed a project-level braid.json with a different, explicit models
+	// list for the same provider ID. It intentionally omits base_url so we
+	// can confirm the merge still inherits it from the data-dir file.
+	workingDir := t.TempDir()
+	projectSeed := `{"providers": {"custom": {"models": [{"id": "project-model", "name": "project-model"}]}}}`
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "braid.json"), []byte(projectSeed), 0o644))
+
+	store, err := Load(workingDir, "", false)
+	require.NoError(t, err)
+	pc, ok := store.config.Providers.Get("custom")
+	require.True(t, ok)
+
+	// jsons.Merge concatenates the array fields rather than letting the
+	// higher-priority project file fully replace it, so the merged models
+	// list carries both entries (data-dir's first, then the project's).
+	// What matters for this test is that the project's model is present
+	// and nothing from discovery leaked in.
+	require.Len(t, pc.Models, 2)
+	require.Equal(t, "stale-model", pc.Models[0].ID)
+	require.Equal(t, "project-model", pc.Models[1].ID)
+
+	// base_url is not set in the project file, so it must be inherited
+	// from the data-dir config via field-by-field merge.
+	require.Equal(t, server.URL+"/v1", pc.BaseURL)
+
+	// A non-empty merged models list must short-circuit discovery.
+	require.Equal(t, int64(0), requests.Load(), "discovery must not run when merged models is already non-empty")
+
+	// The data-dir file must not be clobbered with the project's models:
+	// persistence only ever writes discovery results, and none ran here.
+	persisted, err := os.ReadFile(dataConfigPath)
+	require.NoError(t, err)
+	models := gjson.GetBytes(persisted, "providers.custom.models")
+	require.True(t, models.Exists())
+	require.Len(t, models.Array(), 1)
+	require.Equal(t, "stale-model", models.Array()[0].Get("id").String())
 }
 
 func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {

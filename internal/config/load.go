@@ -246,20 +246,24 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	if err != nil {
 		return err
 	}
-	// Disk cleanup collected while merging (e.g. dropping a stale Claude
-	// Code OAuth provider) is applied here via a direct write rather than
-	// through RemoveConfigField: RemoveConfigField's autoReload trigger
-	// would be pointless mid-load/reload (a fresh config is about to be
-	// swapped in anyway) and, prior to this refactor, was the thing that
-	// forced this whole call to run under writeMu just so the re-entrant
-	// autoReload could TryLock-and-noop instead of deadlocking.
-	applyPendingDiskActions(store, actions)
 
 	discoveryResults := discoverCustomProviderModels(ctx, c.Providers, knownProviderNames, resolver)
 
-	if err := c.validateCustomProviders(knownProviderNames, resolver, discoveryResults); err != nil {
+	validateActions, err := c.validateCustomProviders(knownProviderNames, resolver, discoveryResults)
+	if err != nil {
 		return err
 	}
+
+	// Disk writes collected while merging (e.g. dropping a stale Claude
+	// Code OAuth provider) and while validating (e.g. persisting freshly
+	// discovered custom-provider models so the next load skips the HTTP
+	// round trip) are applied together here, via a direct write rather
+	// than through RemoveConfigField/SetConfigFields: their autoReload
+	// trigger would be pointless mid-load/reload (a fresh config is about
+	// to be swapped in anyway) and, prior to this refactor, was the thing
+	// that forced this whole call to run under writeMu just so the
+	// re-entrant autoReload could TryLock-and-noop instead of deadlocking.
+	applyPendingDiskActions(store, append(actions, validateActions...))
 
 	if c.Providers.Len() == 0 && c.Options.DisableDefaultProviders {
 		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
@@ -268,30 +272,63 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	return nil
 }
 
-// pendingDiskAction records a best-effort config-file deletion discovered
-// while merging providers, to be applied by the caller after the merge
-// phase completes. See configureProviders for why this is not just a direct
-// store.RemoveConfigField call.
+// pendingDiskAction records a best-effort config-file mutation discovered
+// while merging or validating providers, to be applied by the caller after
+// that phase completes. See configureProviders for why this is not just a
+// direct store.RemoveConfigField/SetConfigFields call.
+//
+// A nil fields means "delete key" (e.g. dropping a stale OAuth provider
+// entry); a non-nil fields means "sjson.Set each entry in fields", and key
+// is ignored in that case.
 type pendingDiskAction struct {
-	scope Scope
-	key   string
+	scope  Scope
+	key    string
+	fields map[string]any
 }
 
-// applyPendingDiskActions performs the disk deletions collected during
-// provider merging. Failures are logged and otherwise ignored: this is
-// best-effort cleanup of a stale field, not something that should fail
+// applyPendingDiskActions performs the disk mutations collected during
+// provider merging and validation. Failures are logged and otherwise
+// ignored: this is best-effort persistence, not something that should fail
 // config loading.
 func applyPendingDiskActions(store *ConfigStore, actions []pendingDiskAction) {
 	for _, action := range actions {
+		if action.fields == nil {
+			err := store.atomicWrite(action.scope, func(data []byte) ([]byte, error) {
+				v, sErr := sjson.Delete(string(data), action.key)
+				if sErr != nil {
+					return nil, fmt.Errorf("failed to delete config field %s: %w", action.key, sErr)
+				}
+				return []byte(v), nil
+			})
+			if err != nil {
+				slog.Warn("Failed to remove stale config field", "key", action.key, "error", err)
+			}
+			continue
+		}
+
+		// Sort keys for deterministic output regardless of map iteration
+		// order, same as writeConfigFields. This is a deliberate inline
+		// duplicate of that logic rather than a call to it (or to
+		// SetConfigFields): both of those trigger autoReload, which
+		// would recursively reload mid-load.
+		keys := make([]string, 0, len(action.fields))
+		for k := range action.fields {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+
 		err := store.atomicWrite(action.scope, func(data []byte) ([]byte, error) {
-			v, sErr := sjson.Delete(string(data), action.key)
-			if sErr != nil {
-				return nil, fmt.Errorf("failed to delete config field %s: %w", action.key, sErr)
+			v := string(data)
+			for _, key := range keys {
+				var sErr error
+				if v, sErr = sjson.Set(v, key, action.fields[key]); sErr != nil {
+					return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
+				}
 			}
 			return []byte(v), nil
 		})
 		if err != nil {
-			slog.Warn("Failed to remove stale config field", "key", action.key, "error", err)
+			slog.Warn("Failed to persist config fields", "keys", keys, "error", err)
 		}
 	}
 }
@@ -534,8 +571,12 @@ func discoverCustomProviderModels(ctx context.Context, providers *csync.Map[stri
 // validateCustomProviders validates every provider outside the known
 // catalog, applies any discovery results computed for it, and drops
 // providers that end up unusable (unsupported type, disabled, no models, no
-// endpoint).
-func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, resolver VariableResolver, discoveryResults map[string]discoveryResult) error {
+// endpoint). It also returns disk-persist actions for providers whose
+// models were freshly discovered, so a later load can skip the HTTP round
+// trip; see configureProviders for why these are returned rather than
+// written here.
+func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, resolver VariableResolver, discoveryResults map[string]discoveryResult) ([]pendingDiskAction, error) {
+	var actions []pendingDiskAction
 	for id, providerConfig := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
 			continue
@@ -579,6 +620,14 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 			} else if len(result.models) > 0 {
 				providerConfig.Models = result.models
 				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
+				// Persist so the next load finds a non-empty models list
+				// and skips this HTTP round trip entirely. A failed
+				// discovery (the branch above) must never reach here, so
+				// a down endpoint never touches disk.
+				actions = append(actions, pendingDiskAction{
+					scope:  ScopeGlobal,
+					fields: map[string]any{fmt.Sprintf("providers.%s.models", id): result.models},
+				})
 			}
 		}
 
@@ -604,7 +653,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		for k, v := range providerConfig.ExtraHeaders {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
-				return fmt.Errorf("resolving provider %s header %q: %w", id, k, err)
+				return nil, fmt.Errorf("resolving provider %s header %q: %w", id, k, err)
 			}
 			if resolved == "" {
 				delete(providerConfig.ExtraHeaders, k)
@@ -629,7 +678,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		c.Providers.Set(id, providerConfig)
 	}
 
-	return nil
+	return actions, nil
 }
 
 // applyEnv sets top-level env vars from the config. Keys are sorted for

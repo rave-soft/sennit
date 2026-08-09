@@ -60,6 +60,13 @@ Any OpenAI-compatible endpoint works as a provider, including a local
 }
 ```
 
+A custom provider with no `models` list has its model catalog auto-discovered
+from `/models` on first load, then persisted into the data-dir config so later
+starts skip the network round trip. Run `braid models refresh [provider-id]`
+to force a re-discovery on demand (all custom providers if no ID is given);
+explicit `models` entries in a project or global `braid.json` always take
+precedence over the persisted list.
+
 ## Building
 
 ```bash

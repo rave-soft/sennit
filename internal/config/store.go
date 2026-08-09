@@ -286,6 +286,9 @@ func (s *ConfigStore) configPath(scope Scope) (string, error) {
 		}
 		return s.workspacePath, nil
 	default:
+		if s.globalDataPath == "" {
+			return "", ErrNoGlobalConfig
+		}
 		return s.globalDataPath, nil
 	}
 }
