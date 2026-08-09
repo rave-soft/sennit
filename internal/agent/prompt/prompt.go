@@ -85,10 +85,7 @@ func (p *Prompt) Build(ctx context.Context, provider, model string, store *confi
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
 	var sb strings.Builder
-	d, err := p.promptData(ctx, provider, model, store)
-	if err != nil {
-		return "", err
-	}
+	d := p.promptData(ctx, provider, model, store)
 	if err := t.Execute(&sb, d); err != nil {
 		return "", fmt.Errorf("executing template: %w", err)
 	}
@@ -164,7 +161,7 @@ func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]Co
 	return files
 }
 
-func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
+func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) PromptDat {
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
@@ -218,11 +215,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		AvailSkillXML: availSkillXML,
 	}
 	if isGit {
-		var err error
-		data.GitStatus, err = getGitStatus(ctx, store.WorkingDir())
-		if err != nil {
-			return PromptDat{}, err
-		}
+		data.GitStatus = getGitStatus(ctx, store.WorkingDir())
 	}
 
 	for _, files := range contextFiles {
@@ -231,7 +224,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	for _, files := range globalContextFiles {
 		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
 	}
-	return data, nil
+	return data
 }
 
 func isGitRepo(dir string) bool {
@@ -239,56 +232,53 @@ func isGitRepo(dir string) bool {
 	return err == nil
 }
 
-func getGitStatus(ctx context.Context, dir string) (string, error) {
+func getGitStatus(ctx context.Context, dir string) string {
 	sh := shell.NewShell(&shell.Options{
 		WorkingDir: dir,
 	})
-	branch, err := getGitBranch(ctx, sh)
-	if err != nil {
-		return "", err
-	}
-	status, err := getGitStatusSummary(ctx, sh)
-	if err != nil {
-		return "", err
-	}
-	commits, err := getGitRecentCommits(ctx, sh)
-	if err != nil {
-		return "", err
-	}
-	return branch + status + commits, nil
+	branch := getGitBranch(ctx, sh)
+	status := getGitStatusSummary(ctx, sh)
+	commits := getGitRecentCommits(ctx, sh)
+	return branch + status + commits
 }
 
-func getGitBranch(ctx context.Context, sh *shell.Shell) (string, error) {
+// getGitBranch is best-effort: git failures are silently ignored and simply
+// omit the branch line from the prompt.
+func getGitBranch(ctx context.Context, sh *shell.Shell) string {
 	out, _, err := sh.Exec(ctx, "git branch --show-current 2>/dev/null")
 	if err != nil {
-		return "", nil
+		return ""
 	}
 	out = strings.TrimSpace(out)
 	if out == "" {
-		return "", nil
+		return ""
 	}
-	return fmt.Sprintf("Current branch: %s\n", out), nil
+	return fmt.Sprintf("Current branch: %s\n", out)
 }
 
-func getGitStatusSummary(ctx context.Context, sh *shell.Shell) (string, error) {
+// getGitStatusSummary is best-effort: git failures are silently ignored and
+// simply omit the status line from the prompt.
+func getGitStatusSummary(ctx context.Context, sh *shell.Shell) string {
 	out, _, err := sh.Exec(ctx, "git status --short 2>/dev/null | head -20")
 	if err != nil {
-		return "", nil
+		return ""
 	}
 	out = strings.TrimSpace(out)
 	if out == "" {
-		return "Status: clean\n", nil
+		return "Status: clean\n"
 	}
-	return fmt.Sprintf("Status:\n%s\n", out), nil
+	return fmt.Sprintf("Status:\n%s\n", out)
 }
 
-func getGitRecentCommits(ctx context.Context, sh *shell.Shell) (string, error) {
+// getGitRecentCommits is best-effort: git failures are silently ignored and
+// simply omit the commits line from the prompt.
+func getGitRecentCommits(ctx context.Context, sh *shell.Shell) string {
 	out, _, err := sh.Exec(ctx, "git log --oneline -n 3 2>/dev/null")
 	if err != nil || out == "" {
-		return "", nil
+		return ""
 	}
 	out = strings.TrimSpace(out)
-	return fmt.Sprintf("Recent commits:\n%s\n", out), nil
+	return fmt.Sprintf("Recent commits:\n%s\n", out)
 }
 
 func (p *Prompt) Name() string {

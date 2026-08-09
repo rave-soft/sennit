@@ -29,9 +29,10 @@ func newTestRenderer(t *testing.T, width int) *glamour.TermRenderer {
 // glamour renderer and applies the same trailing-newline trim
 // that streamingMarkdown.Render does. Use this for byte- and
 // visible-equivalence comparisons against the streaming path.
-func freshRender(t *testing.T, content string, width int) string {
+// Always renders at the standard test width of 80.
+func freshRender(t *testing.T, content string) string {
 	t.Helper()
-	r := newTestRenderer(t, width)
+	r := newTestRenderer(t, 80)
 	out, err := r.Render(content)
 	require.NoError(t, err)
 	return strings.TrimSuffix(out, "\n")
@@ -424,7 +425,7 @@ func TestStreamingMarkdown_FinalVisuallyEquivalent(t *testing.T) {
 				lastOut = sm.Render(p, width, renderer)
 			}
 
-			fresh := freshRender(t, sc.doc, width)
+			fresh := freshRender(t, sc.doc)
 			require.Equal(t, normalizeRender(fresh), normalizeRender(lastOut),
 				"final streaming output must match a fresh full render visually")
 		})
@@ -528,7 +529,7 @@ func TestStreamingMarkdown_NonPrefixContentInvalidates(t *testing.T) {
 		"stable prefix must be reset to a prefix of the new content")
 
 	// Visual equivalence to a fresh render of `other`.
-	fresh := freshRender(t, other, width)
+	fresh := freshRender(t, other)
 	require.Equal(t, normalizeRender(fresh), normalizeRender(out),
 		"render after non-prefix content change must match a fresh render")
 }
@@ -557,7 +558,7 @@ func TestStreamingMarkdown_ResetClearsCache(t *testing.T) {
 	// Next render must be a full render path. Drive one step
 	// and verify the output matches a fresh full render.
 	out := sm.Render(doc, width, r)
-	fresh := freshRender(t, doc, width)
+	fresh := freshRender(t, doc)
 	require.Equal(t, normalizeRender(fresh), normalizeRender(out))
 }
 
@@ -606,7 +607,7 @@ func TestStreamingMarkdown_NoSafeBoundaryAlwaysFullRenders(t *testing.T) {
 			continue
 		}
 		out := sm.Render(p, width, r)
-		fresh := freshRender(t, p, width)
+		fresh := freshRender(t, p)
 		require.Equalf(t, fresh, out,
 			"step %d (len=%d): streaming output must byte-equal a fresh render when boundary detection fails",
 			i, len(p))
@@ -716,7 +717,7 @@ func runProgressiveBoundaryRespectTest(t *testing.T, doc string, hazardLineOffse
 			i, len(sm.stablePrefix), hazardLineOffset, sm.stablePrefix)
 	}
 
-	fresh := freshRender(t, doc, width)
+	fresh := freshRender(t, doc)
 	require.Equal(t, nonBlankLines(fresh), nonBlankLines(lastOut),
 		"final streaming output must contain the same non-blank lines as a fresh full render")
 }

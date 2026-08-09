@@ -154,14 +154,14 @@ func formatAnswers(answers []question.Answer, questions []question.Question) (fa
 		if i < len(questions) {
 			fmt.Fprintf(&b, "Q%d: %s\n", i+1, questions[i].Text)
 		}
-		formatted, _ := formatAnswer(&answer, question.Type(""))
+		formatted := formatAnswer(&answer, question.Type(""))
 		b.WriteString(formatted.Content)
 	}
 	return fantasy.NewTextResponse(b.String()), nil
 }
 
 // formatAnswer formats a single answer for the LLM.
-func formatAnswer(answer *question.Answer, _ question.Type) (fantasy.ToolResponse, error) {
+func formatAnswer(answer *question.Answer, _ question.Type) fantasy.ToolResponse {
 	var b strings.Builder
 
 	switch {
@@ -198,5 +198,5 @@ func formatAnswer(answer *question.Answer, _ question.Type) (fantasy.ToolRespons
 		}
 	}
 
-	return fantasy.NewTextResponse(b.String()), nil
+	return fantasy.NewTextResponse(b.String())
 }

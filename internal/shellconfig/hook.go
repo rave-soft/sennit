@@ -53,7 +53,7 @@ func hookAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	slog.Info("Hook defined in shell config", "event", event)
 	h := map[string]any{}
 
-	if err := applyFlags(hookAddFlags, args, 3, h, "hook add", stderr); err != nil {
+	if err := applyFlags(hookAddFlags, args, h, "hook add", stderr); err != nil {
 		return err
 	}
 
@@ -81,7 +81,7 @@ func hookRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	event := args[2]
 
 	flags := map[string]any{}
-	if err := applyFlags(hookRemoveFlags, args, 3, flags, "hook remove", stderr); err != nil {
+	if err := applyFlags(hookRemoveFlags, args, flags, "hook remove", stderr); err != nil {
 		return err
 	}
 	name, _ := flags["name"].(string)

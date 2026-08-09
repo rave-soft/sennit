@@ -18,10 +18,11 @@ func drawTestArea(width, height int) uv.Rectangle {
 
 // renderToBuffer mirrors what Chat.Draw does at the screen layer so tests
 // can assert byte-equivalence with a fresh uv.NewStyledString render.
-func renderToBuffer(t *testing.T, c *Chat, w, h int) string {
+// Always renders at the standard test size of 80x20.
+func renderToBuffer(t *testing.T, c *Chat) string {
 	t.Helper()
-	scr := uv.NewScreenBuffer(w, h)
-	c.Draw(scr, drawTestArea(w, h))
+	scr := uv.NewScreenBuffer(80, 20)
+	c.Draw(scr, drawTestArea(80, 20))
 	return scr.Render()
 }
 
@@ -40,13 +41,12 @@ func TestChatDrawCache_HitOnIdenticalRender(t *testing.T) {
 	)
 	u.updateLayoutAndSize()
 
-	w, h := 80, 20
-	_ = renderToBuffer(t, u.chat, w, h)
+	_ = renderToBuffer(t, u.chat)
 	require.NotNil(t, u.chat.drawCache, "first draw should populate cache")
 	firstCache := u.chat.drawCache
 	firstBuf := u.chat.drawCache.buf.RenderBuffer
 
-	_ = renderToBuffer(t, u.chat, w, h)
+	_ = renderToBuffer(t, u.chat)
 	require.Same(t, firstCache, u.chat.drawCache,
 		"identical rendered string must reuse the same cache pointer")
 	require.Same(t, firstBuf, u.chat.drawCache.buf.RenderBuffer,
@@ -65,8 +65,8 @@ func TestChatDrawCache_MissOnDifferentRender(t *testing.T) {
 	)
 	u.updateLayoutAndSize()
 
-	w, h := 80, 20
-	_ = renderToBuffer(t, u.chat, w, h)
+	h := 20
+	_ = renderToBuffer(t, u.chat)
 	require.NotNil(t, u.chat.drawCache)
 	firstCache := u.chat.drawCache
 
@@ -76,14 +76,14 @@ func TestChatDrawCache_MissOnDifferentRender(t *testing.T) {
 	)
 	u.updateLayoutAndSize()
 
-	got := renderToBuffer(t, u.chat, w, h)
+	got := renderToBuffer(t, u.chat)
 	require.NotSame(t, firstCache, u.chat.drawCache,
 		"changed rendered string must replace the cache entry")
 
 	// Output must match a fresh uv.NewStyledString render of the current
 	// list output for the same area. This is the byte-equivalence guard
 	// that protects against blit drift from StyledString.Draw.
-	want := freshStyledRender(u.chat.list.Render(), w, h)
+	want := freshStyledRender(u.chat.list.Render(), 80, h)
 	require.Equal(t, want, got)
 }
 
@@ -101,8 +101,7 @@ func TestChatDrawCache_ReusedAcrossDifferentArea(t *testing.T) {
 	)
 	u.updateLayoutAndSize()
 
-	w, h := 80, 20
-	_ = renderToBuffer(t, u.chat, w, h)
+	_ = renderToBuffer(t, u.chat)
 	require.NotNil(t, u.chat.drawCache)
 	firstCache := u.chat.drawCache
 	firstBuf := u.chat.drawCache.buf.RenderBuffer
@@ -131,7 +130,6 @@ func TestChatDrawCache_BoundedSize(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	w, h := 80, 20
 
 	// Cycle through several distinct list outputs and confirm that
 	// drawCache is still a single *chatDrawCache pointing at the most
@@ -141,7 +139,7 @@ func TestChatDrawCache_BoundedSize(t *testing.T) {
 			testMessageItem{id: "x", text: "tick " + strconv.Itoa(i)},
 		)
 		u.updateLayoutAndSize()
-		_ = renderToBuffer(t, u.chat, w, h)
+		_ = renderToBuffer(t, u.chat)
 		require.NotNil(t, u.chat.drawCache)
 		require.Equal(t, u.chat.list.Render(), u.chat.drawCache.rendered,
 			"cache.rendered must always match the most recent list output")

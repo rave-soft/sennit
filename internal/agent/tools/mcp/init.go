@@ -210,7 +210,7 @@ func (r *Registry) AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore,
 
 	// The OAuth handler persists the token automatically as it is
 	// exchanged, so a successful connection has already saved it.
-	_, err := r.connectAndRegister(ctx, cfg, name, m, r.currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	err := r.connectAndRegister(ctx, cfg, name, m, r.currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return err
 	}
@@ -313,8 +313,7 @@ func (r *Registry) BeginAuth(cfg *config.ConfigStore, name string) (finish func(
 // suppression enabled on the freshly created handler.
 func (r *Registry) runAuthFlow(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig) error {
 	r.updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-	_, err := r.connectAndRegister(ctx, cfg, name, m, r.currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
-	return err
+	return r.connectAndRegister(ctx, cfg, name, m, r.currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 }
 
 // suppressLock returns the per-server mutex used to serialize
@@ -349,7 +348,7 @@ func (r *Registry) initClient(ctx context.Context, cfg *config.ConfigStore, name
 	}
 
 	r.updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-	_, err := r.connectAndRegister(ctx, cfg, name, m, gen, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
+	err := r.connectAndRegister(ctx, cfg, name, m, gen, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		// If an OAuth MCP fails because the saved token is no longer
 		// valid (e.g. refresh token expired or revoked) or no token
@@ -371,18 +370,16 @@ func (r *Registry) initClient(ctx context.Context, cfg *config.ConfigStore, name
 
 // connectAndRegister creates a session, lists tools and prompts,
 // registers them in global state, and transitions to StateConnected.
-// Returns the session so callers can perform post-processing (e.g.
-// token persistence).
 //
 // gen is the generation captured when this attempt was launched. If the
 // server was torn down since (generation bumped), the freshly built session
 // is closed and discarded instead of being registered over whatever the
 // newer attempt is doing. This is what makes a config change that lands
 // mid-connect converge on the latest config rather than a stale one.
-func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen uint64, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
+func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen uint64, resolver config.VariableResolver, channelOptIn bool) error {
 	session, err := r.createSession(ctx, cfg, name, m, resolver, channelOptIn)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// A teardown ran while we were connecting: a newer attempt owns this
@@ -391,7 +388,7 @@ func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigSto
 	if r.currentGen(name) != gen {
 		slog.Debug("Discarding stale MCP session after config change", "name", name)
 		r.closeSession(name, session)
-		return nil, context.Canceled
+		return context.Canceled
 	}
 
 	toolCount, err := r.registerSessionTools(ctx, cfg, name, session)
@@ -399,7 +396,7 @@ func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigSto
 		slog.Error("Error listing tools", "error", err)
 		r.updateState(name, StateError, err, nil, Counts{})
 		r.closeSession(name, session)
-		return nil, err
+		return err
 	}
 
 	prompts, err := getPrompts(ctx, session)
@@ -407,7 +404,7 @@ func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigSto
 		slog.Error("Error listing prompts", "error", err)
 		r.updateState(name, StateError, err, nil, Counts{})
 		r.closeSession(name, session)
-		return nil, err
+		return err
 	}
 
 	// Re-check before publishing: if a teardown landed during registration a
@@ -416,7 +413,7 @@ func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigSto
 	if r.currentGen(name) != gen {
 		slog.Debug("Discarding stale MCP session after config change", "name", name)
 		r.closeSession(name, session)
-		return nil, context.Canceled
+		return context.Canceled
 	}
 
 	r.updatePrompts(name, prompts)
@@ -427,7 +424,7 @@ func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigSto
 		Prompts: len(prompts),
 	}, withConfig(m))
 
-	return session, nil
+	return nil
 }
 
 // persistOAuthToken saves the OAuth token from a session to the global

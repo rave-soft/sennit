@@ -49,7 +49,7 @@ func makeEmptyStep() fantasy.StepResult {
 
 func TestHasRepeatedToolCalls(t *testing.T) {
 	t.Run("no steps", func(t *testing.T) {
-		result := hasRepeatedToolCalls(nil, 10, 5)
+		result := hasRepeatedToolCalls(nil)
 		if result {
 			t.Error("expected false for empty steps")
 		}
@@ -60,7 +60,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		for i := range steps {
 			steps[i] = makeToolStep("read", `{"file":"a.go"}`, "content")
 		}
-		result := hasRepeatedToolCalls(steps, 10, 5)
+		result := hasRepeatedToolCalls(steps)
 		if result {
 			t.Error("expected false when fewer steps than window size")
 		}
@@ -71,7 +71,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		for i := range steps {
 			steps[i] = makeToolStep("tool", fmt.Sprintf(`{"i":%d}`, i), fmt.Sprintf("result-%d", i))
 		}
-		result := hasRepeatedToolCalls(steps, 10, 5)
+		result := hasRepeatedToolCalls(steps)
 		if result {
 			t.Error("expected false when all signatures are different")
 		}
@@ -86,7 +86,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		for i := 5; i < 10; i++ {
 			steps[i] = makeToolStep("tool", fmt.Sprintf(`{"i":%d}`, i), fmt.Sprintf("result-%d", i))
 		}
-		result := hasRepeatedToolCalls(steps, 10, 5)
+		result := hasRepeatedToolCalls(steps)
 		if result {
 			t.Error("expected false when count equals maxRepeats (threshold is >)")
 		}
@@ -101,7 +101,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		for i := 6; i < 10; i++ {
 			steps[i] = makeToolStep("tool", fmt.Sprintf(`{"i":%d}`, i), fmt.Sprintf("result-%d", i))
 		}
-		result := hasRepeatedToolCalls(steps, 10, 5)
+		result := hasRepeatedToolCalls(steps)
 		if !result {
 			t.Error("expected true when same signature appears more than maxRepeats times")
 		}
@@ -119,7 +119,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 		for i := 8; i < 10; i++ {
 			steps[i] = makeToolStep("write", `{"file":"b.go"}`, "ok")
 		}
-		result := hasRepeatedToolCalls(steps, 10, 5)
+		result := hasRepeatedToolCalls(steps)
 		if result {
 			t.Error("expected false: only 4 repeated tool calls, empty steps should be skipped")
 		}
@@ -135,7 +135,7 @@ func TestHasRepeatedToolCalls(t *testing.T) {
 				steps[i] = makeToolStep("write", `{"file":"b.go"}`, "content-b")
 			}
 		}
-		result := hasRepeatedToolCalls(steps, 10, 5)
+		result := hasRepeatedToolCalls(steps)
 		if result {
 			t.Error("expected false: two patterns each appearing 5 times (not > 5)")
 		}

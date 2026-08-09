@@ -4115,6 +4115,8 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 }
 
 // openNotificationsDialog opens the notification style picker dialog.
+//
+//nolint:unparam // always nil today, but matches the tea.Cmd signature shared by the other open*Dialog methods
 func (m *UI) openNotificationsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.NotificationsID) {
 		m.dialog.BringToFront(dialog.NotificationsID)
@@ -4211,6 +4213,8 @@ func (m *UI) openFilesDialog() tea.Cmd {
 }
 
 // openPermissionsDialog opens the permissions dialog for a permission request.
+//
+//nolint:unparam // always nil today, but matches the tea.Cmd signature shared by the other open*Dialog methods
 func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
 	// Close any existing permissions dialog first.
 	m.dialog.CloseDialog(dialog.PermissionsID)

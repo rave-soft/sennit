@@ -50,6 +50,7 @@ func validateAgenticFetchParams(ctx context.Context, params tools.AgenticFetchPa
 //go:embed templates/agentic_fetch_prompt.md.tpl
 var agenticFetchPromptTmpl []byte
 
+//nolint:unparam // matches the (tool, error) signature of the other buildTools helpers
 func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()

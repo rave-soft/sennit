@@ -71,7 +71,7 @@ func mcpAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 		m["type"] = "stdio"
 	}
 
-	if err := applyFlags(mcpAddFlags, args, 3, m, "mcp add", stderr); err != nil {
+	if err := applyFlags(mcpAddFlags, args, m, "mcp add", stderr); err != nil {
 		return err
 	}
 

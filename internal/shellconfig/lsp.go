@@ -59,7 +59,7 @@ func lspAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	slog.Info("LSP server defined in shell config", "name", name)
 	l := childMap(b.section("lsp"), name)
 
-	if err := applyFlags(lspAddFlags, args, 3, l, "lsp add", stderr); err != nil {
+	if err := applyFlags(lspAddFlags, args, l, "lsp add", stderr); err != nil {
 		return err
 	}
 

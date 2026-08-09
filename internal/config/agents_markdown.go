@@ -168,8 +168,8 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 		ReasoningEffort: meta.ReasoningEffort,
 	}
 
-	switch {
-	case meta.Model == "":
+	switch meta.Model {
+	case "":
 		// Leave unset; empty means inherit the app's main model.
 	default:
 		// A foreign model reference. It's honoured if it resolves to a

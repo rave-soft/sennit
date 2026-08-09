@@ -605,7 +605,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		StopWhen: []fantasy.StopCondition{
 			t.stopOnContextWindow,
 			func(steps []fantasy.StepResult) bool {
-				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
+				return hasRepeatedToolCalls(steps)
 			},
 		},
 	})

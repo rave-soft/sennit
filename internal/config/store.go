@@ -677,7 +677,8 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		// would risk reusing a rotated refresh token.
 		if diskToken := s.usableDiskToken(scope, providerID, entryToken); diskToken != nil {
 			slog.Warn("Refresh lock unavailable; adopting token from disk", "provider", providerID, "error", lockErr)
-			return s.applyToken(providerConfig, diskToken, providerID)
+			s.applyToken(providerConfig, diskToken, providerID)
+			return nil
 		}
 		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, lockErr)
 	}
@@ -692,7 +693,8 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	if diskToken := s.newerDiskToken(scope, providerID, entryToken); diskToken != nil {
 		if !diskToken.IsExpired() {
 			slog.Info("Adopting token refreshed by another session", "provider", providerID)
-			return s.applyToken(providerConfig, diskToken, providerID)
+			s.applyToken(providerConfig, diskToken, providerID)
+			return nil
 		}
 		slog.Info("Exchanging with refresh token rotated by another session", "provider", providerID)
 		entryToken = diskToken
@@ -708,7 +710,8 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		if diskToken := s.newerDiskToken(scope, providerID, entryToken); diskToken != nil {
 			if !diskToken.IsExpired() {
 				slog.Info("Adopting token refreshed by another session after exchange failure", "provider", providerID)
-				return s.applyToken(providerConfig, diskToken, providerID)
+				s.applyToken(providerConfig, diskToken, providerID)
+				return nil
 			}
 			slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
 			refreshedToken, refreshErr = s.exchange(ctx, providerID, diskToken.RefreshToken)
@@ -719,9 +722,7 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	}
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
-	if err := s.applyToken(providerConfig, refreshedToken, providerID); err != nil {
-		return err
-	}
+	s.applyToken(providerConfig, refreshedToken, providerID)
 
 	fields := map[string]any{
 		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
@@ -902,14 +903,13 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 }
 
 // applyToken updates the in-memory provider config with the given token.
-func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) error {
+func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) {
 	providerConfig.OAuthToken = token
 	providerConfig.APIKey = token.AccessToken
 	if providerID == string(catwalk.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}
 	s.Config().Providers.Set(providerID, providerConfig)
-	return nil
 }
 
 // loadTokenFromDisk reads the OAuth token for the given provider from the

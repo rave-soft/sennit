@@ -14,14 +14,15 @@ const (
 )
 
 // hasRepeatedToolCalls checks whether the agent is stuck in a loop by looking
-// at recent steps. It examines the last windowSize steps and returns true if
-// any tool-call signature appears more than maxRepeats times.
-func hasRepeatedToolCalls(steps []fantasy.StepResult, windowSize, maxRepeats int) bool {
-	if len(steps) < windowSize {
+// at recent steps. It examines the last loopDetectionWindowSize steps and
+// returns true if any tool-call signature appears more than
+// loopDetectionMaxRepeats times.
+func hasRepeatedToolCalls(steps []fantasy.StepResult) bool {
+	if len(steps) < loopDetectionWindowSize {
 		return false
 	}
 
-	window := steps[len(steps)-windowSize:]
+	window := steps[len(steps)-loopDetectionWindowSize:]
 	counts := make(map[string]int)
 
 	for _, step := range window {
@@ -30,7 +31,7 @@ func hasRepeatedToolCalls(steps []fantasy.StepResult, windowSize, maxRepeats int
 			continue
 		}
 		counts[sig]++
-		if counts[sig] > maxRepeats {
+		if counts[sig] > loopDetectionMaxRepeats {
 			return true
 		}
 	}

@@ -278,10 +278,9 @@ func TestReadBuiltinFile(t *testing.T) {
 	t.Run("reads braid-config skill", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := readBuiltinFile(ViewParams{
+		resp := readBuiltinFile(ViewParams{
 			FilePath: "braid://skills/braid-config/SKILL.md",
 		}, nil)
-		require.NoError(t, err)
 		require.NotEmpty(t, resp.Content)
 		require.Contains(t, resp.Content, "Braid Configuration")
 	})
@@ -289,20 +288,18 @@ func TestReadBuiltinFile(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := readBuiltinFile(ViewParams{
+		resp := readBuiltinFile(ViewParams{
 			FilePath: "braid://skills/nonexistent/SKILL.md",
 		}, nil)
-		require.NoError(t, err)
 		require.True(t, resp.IsError)
 	})
 
 	t.Run("metadata has skill info", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := readBuiltinFile(ViewParams{
+		resp := readBuiltinFile(ViewParams{
 			FilePath: "braid://skills/braid-config/SKILL.md",
 		}, nil)
-		require.NoError(t, err)
 
 		var meta ViewResponseMetadata
 		require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
@@ -314,11 +311,10 @@ func TestReadBuiltinFile(t *testing.T) {
 	t.Run("respects offset", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := readBuiltinFile(ViewParams{
+		resp := readBuiltinFile(ViewParams{
 			FilePath: "braid://skills/braid-config/SKILL.md",
 			Offset:   5,
 		}, nil)
-		require.NoError(t, err)
 		require.NotContains(t, resp.Content, "     1|")
 	})
 }

@@ -9,6 +9,8 @@ import (
 // atomicWriteFile writes data to a file atomically by writing to a unique
 // temporary file in the same directory and renaming it into place. This
 // prevents concurrent readers from observing a partially-written file.
+//
+//nolint:unparam // perm varies: cache[T].Store passes 0o644, other callers 0o600; unparam's constant-propagation misses the call through the generic method
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	path = filepath.Clean(path)
 	dir := filepath.Dir(path)

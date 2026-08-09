@@ -105,8 +105,7 @@ func NewViewTool(
 
 			// Handle builtin skill files (braid: prefix).
 			if strings.HasPrefix(params.FilePath, skills.BuiltinPrefix) {
-				resp, err := readBuiltinFile(params, skillTracker)
-				return resp, err
+				return readBuiltinFile(params, skillTracker), nil
 			}
 
 			// Handle relative paths
@@ -430,18 +429,18 @@ func isInSkillsPath(filePath string, skillsPaths []string) bool {
 }
 
 // readBuiltinFile reads a file from the embedded builtin skills filesystem.
-func readBuiltinFile(params ViewParams, skillTracker *skills.Tracker) (fantasy.ToolResponse, error) {
+func readBuiltinFile(params ViewParams, skillTracker *skills.Tracker) fantasy.ToolResponse {
 	embeddedPath := "builtin/" + strings.TrimPrefix(params.FilePath, skills.BuiltinPrefix)
 	builtinFS := skills.BuiltinFS()
 
 	data, err := fs.ReadFile(builtinFS, embeddedPath)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("Builtin file not found: %s", params.FilePath)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Builtin file not found: %s", params.FilePath))
 	}
 
 	content := string(data)
 	if !utf8.ValidString(content) {
-		return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
+		return fantasy.NewTextErrorResponse("File content is not valid UTF-8")
 	}
 
 	limit := params.Limit
@@ -480,5 +479,5 @@ func readBuiltinFile(params ViewParams, skillTracker *skills.Tracker) (fantasy.T
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(output),
 		meta,
-	), nil
+	)
 }

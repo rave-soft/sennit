@@ -51,10 +51,10 @@ func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOp
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
-func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
+func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderConfig) *coordinator {
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)
-	cfg.Config().Providers.Set(providerID, providerCfg)
+	cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
 	return &coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,
@@ -63,11 +63,11 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 }
 
 // newMockAgent creates a mockSessionAgent with the given provider and run function.
-func newMockAgent(providerID string, maxTokens int64, runFunc func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)) *mockSessionAgent {
+func newMockAgent(providerID string, runFunc func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)) *mockSessionAgent {
 	return &mockSessionAgent{
 		model: Model{
 			CatalogCfg: catwalk.Model{
-				DefaultMaxTokens: maxTokens,
+				DefaultMaxTokens: 4096,
 			},
 			ModelCfg: config.SelectedModel{
 				Provider: providerID,
@@ -94,12 +94,12 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("happy path", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		agent := newMockAgent(providerID, func(_ context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 			assert.Equal(t, "do something", call.Prompt)
 			assert.Equal(t, int64(4096), call.MaxOutputTokens)
 			return agentResultWithText("done"), nil
@@ -120,9 +120,9 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("cost update failure preserves output", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
 			return agentResultWithText("output before cost failure"), nil
 		})
 
@@ -141,12 +141,12 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("response with text returns it", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
 			return agentResultWithText("the answer"), nil
 		})
 
@@ -165,12 +165,12 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("nil result returns error response", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
 			return nil, nil
 		})
 
@@ -189,12 +189,12 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("empty result returns error response", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
 			return &fantasy.AgentResult{}, nil
 		})
 
@@ -213,7 +213,7 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("ModelCfg.MaxTokens overrides default", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -248,12 +248,12 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("session creation failure with canceled context", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		agent := newMockAgent(providerID, 4096, nil)
+		agent := newMockAgent(providerID, nil)
 
 		// Use a canceled context to trigger CreateTaskSession failure.
 		ctx, cancel := context.WithCancel(t.Context())
@@ -272,13 +272,13 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("provider not configured", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
 		// Agent references a provider that doesn't exist in config.
-		agent := newMockAgent("unknown-provider", 4096, nil)
+		agent := newMockAgent("unknown-provider", nil)
 
 		_, err = coord.runSubAgent(t.Context(), subAgentParams{
 			Agent:          agent,
@@ -294,12 +294,12 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("agent run error returns error response", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
 			return nil, errors.New("provider request failed")
 		})
 
@@ -319,13 +319,13 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("session setup callback is invoked", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
 		var setupCalledWith string
-		agent := newMockAgent(providerID, 4096, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
+		agent := newMockAgent(providerID, func(_ context.Context, _ SessionAgentCall) (*fantasy.AgentResult, error) {
 			return agentResultWithText("ok"), nil
 		})
 
@@ -346,12 +346,12 @@ func TestRunSubAgent(t *testing.T) {
 
 	t.Run("cost propagation to parent session", func(t *testing.T) {
 		env := testEnv(t)
-		coord := newTestCoordinator(t, env, providerID, providerCfg)
+		coord := newTestCoordinator(t, env, providerCfg)
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
 
-		agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		agent := newMockAgent(providerID, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 			// Simulate the agent incurring cost by updating the child session.
 			childSession, err := env.sessions.Get(ctx, call.SessionID)
 			if err != nil {

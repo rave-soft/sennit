@@ -88,7 +88,7 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 
 	model := map[string]any{"id": id}
-	if err := applyFlags(modelAddFlags, args, 3, model, "model add", stderr); err != nil {
+	if err := applyFlags(modelAddFlags, args, model, "model add", stderr); err != nil {
 		return err
 	}
 
@@ -183,7 +183,7 @@ func modelSelect(b *ConfigBuilder, args []string, stdout, stderr io.Writer) erro
 	sel["provider"] = provider
 	sel["model"] = id
 
-	if err := applyFlags(modelSelectFlags, args, 3, sel, "model "+slot, stderr); err != nil {
+	if err := applyFlags(modelSelectFlags, args, sel, "model "+slot, stderr); err != nil {
 		return err
 	}
 

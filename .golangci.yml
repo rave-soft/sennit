@@ -22,7 +22,7 @@ linters:
     - staticcheck
     - tparallel
     # - unconvert
-    # - unparam
+    - unparam
     - whitespace
     # - wrapcheck
   disable:

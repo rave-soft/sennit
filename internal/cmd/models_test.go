@@ -19,7 +19,7 @@ import (
 // refreshCmd.RunE reads (cwd, data-dir, debug), matching what rootCmd
 // registers as persistent flags in root.go. Tests invoke RunE directly
 // rather than going through rootCmd.Execute() to keep them hermetic.
-func newRefreshTestCmd(t *testing.T, args []string) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
+func newRefreshTestCmd(t *testing.T) (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	testCmd := &cobra.Command{Use: "refresh"}
 	testCmd.Flags().StringP("cwd", "c", "", "")
@@ -29,7 +29,7 @@ func newRefreshTestCmd(t *testing.T, args []string) (*cobra.Command, *bytes.Buff
 	var stdout, stderr bytes.Buffer
 	testCmd.SetOut(&stdout)
 	testCmd.SetErr(&stderr)
-	testCmd.SetArgs(args)
+	testCmd.SetArgs(nil)
 	return testCmd, &stdout, &stderr
 }
 
@@ -72,7 +72,7 @@ func TestModelsRefreshCmd_SingleProvider(t *testing.T) {
 	seed := fmt.Sprintf(`{"providers": {"custom": {"api_key": "key", "base_url": %q, "models": [{"id": "old-model", "name": "old-model"}]}}}`, server.URL+"/v1")
 	dataConfigPath := setupHermeticConfigEnv(t, seed)
 
-	testCmd, stdout, _ := newRefreshTestCmd(t, nil)
+	testCmd, stdout, _ := newRefreshTestCmd(t)
 	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
 
 	err := refreshCmd.RunE(testCmd, []string{"custom"})
@@ -104,7 +104,7 @@ func TestModelsRefreshCmd_AllProviders(t *testing.T) {
 	}}`, serverA.URL+"/v1", serverB.URL+"/v1")
 	dataConfigPath := setupHermeticConfigEnv(t, seed)
 
-	testCmd, stdout, _ := newRefreshTestCmd(t, nil)
+	testCmd, stdout, _ := newRefreshTestCmd(t)
 	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
 
 	err := refreshCmd.RunE(testCmd, nil)
@@ -125,7 +125,7 @@ func TestModelsRefreshCmd_UnreachableEndpointLeavesDiskUntouched(t *testing.T) {
 	before, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
 
-	testCmd, _, stderr := newRefreshTestCmd(t, nil)
+	testCmd, _, stderr := newRefreshTestCmd(t)
 	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
 
 	err = refreshCmd.RunE(testCmd, []string{"custom"})
@@ -143,7 +143,7 @@ func TestModelsRefreshCmd_UnknownProviderID(t *testing.T) {
 	before, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
 
-	testCmd, _, _ := newRefreshTestCmd(t, nil)
+	testCmd, _, _ := newRefreshTestCmd(t)
 	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
 
 	err = refreshCmd.RunE(testCmd, []string{"does-not-exist"})
@@ -158,7 +158,7 @@ func TestModelsRefreshCmd_KnownCatalogProviderRejected(t *testing.T) {
 	seed := `{"providers": {}}`
 	setupHermeticConfigEnv(t, seed)
 
-	testCmd, _, _ := newRefreshTestCmd(t, nil)
+	testCmd, _, _ := newRefreshTestCmd(t)
 	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
 
 	err := refreshCmd.RunE(testCmd, []string{"openai"})

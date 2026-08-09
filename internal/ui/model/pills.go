@@ -144,6 +144,8 @@ const pillsHeightReasonableTerminalHeight = 40
 
 // autoExpandPillsIfReasonable expands the pills panel if the terminal has
 // enough vertical space to show the expanded list comfortably.
+//
+//nolint:unparam // always nil today, but keeps the tea.Cmd signature shared with the other pill handlers callers check for a non-nil cmd
 func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -179,6 +181,8 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 }
 
 // togglePillsExpanded toggles the pills panel expansion state.
+//
+//nolint:unparam // always nil today, but keeps the tea.Cmd signature shared with the other pill handlers callers check for a non-nil cmd
 func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -208,6 +212,8 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 }
 
 // switchPillSection changes focus between todo and queue sections.
+//
+//nolint:unparam // always nil today, but keeps the tea.Cmd signature shared with the other pill handlers callers check for a non-nil cmd
 func (m *UI) switchPillSection(dir int) tea.Cmd {
 	if !m.pills.expanded || !m.hasSession() {
 		return nil
