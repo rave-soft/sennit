@@ -233,6 +233,75 @@ func TestFindModelMatches(t *testing.T) {
 	}
 }
 
+func TestResolveModelString(t *testing.T) {
+	tests := []struct {
+		name             string
+		modelStr         string
+		expectedProvider string
+		expectedModelID  string
+		expectError      bool
+		errorContains    string
+		setupProviders   func() map[string]ProviderConfig
+	}{
+		{
+			name:             "provider/model happy path",
+			modelStr:         "openai/gpt-4o",
+			expectedProvider: "openai",
+			expectedModelID:  "gpt-4o",
+			setupProviders:   setupMockProvidersForResolve,
+		},
+		{
+			name:             "bare model unambiguous",
+			modelStr:         "claude-3-opus",
+			expectedProvider: "anthropic",
+			expectedModelID:  "claude-3-opus",
+			setupProviders:   setupMockProvidersForResolve,
+		},
+		{
+			name:          "bare model ambiguous across providers",
+			modelStr:      "shared-model",
+			expectError:   true,
+			errorContains: "multiple providers",
+			setupProviders: func() map[string]ProviderConfig {
+				return map[string]ProviderConfig{
+					"openai":    {ID: "openai", Models: []catwalk.Model{{ID: "shared-model"}}},
+					"anthropic": {ID: "anthropic", Models: []catwalk.Model{{ID: "shared-model"}}},
+				}
+			},
+		},
+		{
+			name:           "provider not found",
+			modelStr:       "nonexistent-provider/gpt-4o",
+			expectError:    true,
+			errorContains:  "provider",
+			setupProviders: setupMockProvidersForResolve,
+		},
+		{
+			name:           "model not found",
+			modelStr:       "nonexistent-model",
+			expectError:    true,
+			errorContains:  "not found",
+			setupProviders: setupMockProvidersForResolve,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			providers := tt.setupProviders()
+			match, err := ResolveModelString(providers, tt.modelStr)
+
+			if tt.expectError {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.errorContains)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.expectedProvider, match.Provider)
+			require.Equal(t, tt.expectedModelID, match.ModelID)
+		})
+	}
+}
+
 // TestModelFilterMatches_CaseInsensitiveProviderName pins the fix where
 // provider name comparisons must ignore case: the previous cmd/run.go
 // implementation (matchesModel) compared provider names with an exact

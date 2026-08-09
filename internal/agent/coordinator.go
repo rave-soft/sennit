@@ -312,12 +312,17 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
-	// The session agent runs on LargeModel and keeps SmallModel for titles and
-	// summaries, so honouring an agent's `model: small` means handing it the
-	// small model as its working model.
-	primary := large
-	if agent.Model == config.SelectedModelTypeSmall {
-		primary = small
+	// An empty agent.Model means "inherit the app's main model", which
+	// internally is still the large model built above. A non-empty value is
+	// a "provider/model-id" string naming a specific model of its own.
+	var primary Model
+	if agent.Model == "" {
+		primary = large
+	} else {
+		primary, err = c.buildCustomAgentModel(ctx, agent, isSubAgent)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Model is a value and ModelCfg a plain struct, so this override stays
@@ -422,7 +427,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Get the model name for the agent
 	modelID := ""
-	if modelCfg, ok := c.cfg.Config().Models[agent.Model]; ok {
+	if modelCfg, ok := c.cfg.Config().Models[config.SelectedModelType(agent.Model)]; ok {
 		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
 			modelID = model.ID
 		}
@@ -611,6 +616,62 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 			ModelCfg:   smallModelCfg,
 			FlatRate:   smallProviderCfg.FlatRate,
 		}, nil
+}
+
+// buildCustomAgentModel builds the Model for an agent whose Model field
+// names a specific model, e.g. "provider/model-id", rather than inheriting
+// the app's main model. Config-load validation already guarantees that any
+// such string reaching here resolves against the configured providers, but
+// the config can be reloaded or edited after an agent is set up, so this
+// still fails safe instead of trusting that blindly. ResolveModelString is
+// reused rather than re-deriving its ambiguity resolution (matching a bare
+// model ID against every provider, disambiguating a "provider/model" prefix
+// from a model ID that itself contains a slash, etc.).
+func (c *coordinator) buildCustomAgentModel(ctx context.Context, agent config.Agent, isSubAgent bool) (Model, error) {
+	match, err := config.ResolveModelString(c.cfg.Config().Providers.Copy(), agent.Model)
+	if err != nil {
+		return Model{}, fmt.Errorf("agent %q model %q: %w", agent.Name, agent.Model, err)
+	}
+
+	providerCfg, ok := c.cfg.Config().Providers.Get(match.Provider)
+	if !ok {
+		return Model{}, fmt.Errorf("agent %q model %q: provider %q not configured", agent.Name, agent.Model, match.Provider)
+	}
+
+	selected := config.SelectedModel{Provider: match.Provider, Model: match.ModelID}
+
+	provider, err := c.buildProvider(providerCfg, selected, isSubAgent)
+	if err != nil {
+		return Model{}, err
+	}
+
+	var catwalkModel *catwalk.Model
+	for _, m := range providerCfg.Models {
+		if m.ID == match.ModelID {
+			catwalkModel = &m
+			break
+		}
+	}
+	if catwalkModel == nil {
+		return Model{}, fmt.Errorf("agent %q model %q: model not found in provider config", agent.Name, agent.Model)
+	}
+
+	modelID := match.ModelID
+	if match.Provider == openrouter.Name && isExactoSupported(modelID) {
+		modelID += ":exacto"
+	}
+
+	languageModel, err := provider.LanguageModel(ctx, modelID)
+	if err != nil {
+		return Model{}, err
+	}
+
+	return Model{
+		Model:      languageModel,
+		CatalogCfg: *catwalkModel,
+		ModelCfg:   selected,
+		FlatRate:   providerCfg.FlatRate,
+	}, nil
 }
 
 func isExactoSupported(modelID string) bool {

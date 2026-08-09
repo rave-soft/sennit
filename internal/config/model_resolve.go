@@ -79,6 +79,34 @@ func modelFilterMatches(modelFilter, providerFilter, model, provider string) boo
 		(providerFilter == "" || strings.EqualFold(provider, providerFilter))
 }
 
+// ResolveModelString resolves a single "model" or "provider/model" string
+// against the configured providers, exactly like FindModelMatches does for
+// the large/small slots. It returns the single unambiguous match, or an
+// error naming why not (provider not found / model not found / ambiguous
+// across providers).
+func ResolveModelString(providers map[string]ProviderConfig, modelStr string) (ModelMatch, error) {
+	providerFilter, modelID := ParseModelString(providers, modelStr)
+	if providerFilter != "" {
+		if _, ok := providers[providerFilter]; !ok {
+			return ModelMatch{}, fmt.Errorf("provider %q not found in configuration", providerFilter)
+		}
+	}
+
+	var matches []ModelMatch
+	for name, provider := range providers {
+		if provider.Disable {
+			continue
+		}
+		for _, m := range provider.Models {
+			if modelFilterMatches(modelID, providerFilter, m.ID, name) {
+				matches = append(matches, ModelMatch{Provider: name, ModelID: m.ID})
+			}
+		}
+	}
+
+	return ValidateModelMatches(matches, modelID, "agent")
+}
+
 // ValidateModelMatches ensures exactly one match exists, returning a
 // descriptive error otherwise.
 func ValidateModelMatches(matches []ModelMatch, modelID, label string) (ModelMatch, error) {

@@ -1872,14 +1872,16 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				return util.ReportError(errors.New("configuration not found"))()
 			}
 
-			agentCfg, ok := cfg.Agents[config.AgentCoder]
-			if !ok {
+			if _, ok := cfg.Agents[config.AgentCoder]; !ok {
 				return util.ReportError(errors.New("agent configuration not found"))()
 			}
 
-			currentModel := cfg.Models[agentCfg.Model]
+			// The coder agent leaves Model unset (it inherits the app's main
+			// model), so the model it actually runs on always lives in the
+			// large slot.
+			currentModel := cfg.Models[config.SelectedModelTypeLarge]
 			currentModel.Think = !currentModel.Think
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
 			if err := m.com.Workspace.UpdateAgentModel(m.com.Context()); err != nil {
@@ -1945,15 +1947,17 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
-		agentCfg, ok := cfg.Agents[config.AgentCoder]
-		if !ok {
+		if _, ok := cfg.Agents[config.AgentCoder]; !ok {
 			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
 			break
 		}
 
-		currentModel := cfg.Models[agentCfg.Model]
+		// The coder agent leaves Model unset (it inherits the app's main
+		// model), so the model it actually runs on always lives in the large
+		// slot.
+		currentModel := cfg.Models[config.SelectedModelTypeLarge]
 		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, currentModel); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -3126,11 +3130,12 @@ func (m *UI) currentModelSupportsImages() bool {
 	if cfg == nil {
 		return false
 	}
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
+	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
 		return false
 	}
-	model := cfg.GetModelByType(agentCfg.Model)
+	// The coder agent leaves Model unset (it inherits the app's main model),
+	// so the model it actually runs on always lives in the large slot.
+	model := cfg.GetModelByType(config.SelectedModelTypeLarge)
 	return model != nil && model.SupportsImages
 }
 
@@ -4348,11 +4353,12 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
+	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
 		return nil
 	}
-	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[agentCfg.Model], agentCfg.Model)
+	// The coder agent leaves Model unset (it inherits the app's main model),
+	// so the model it actually runs on always lives in the large slot.
+	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[config.SelectedModelTypeLarge], config.SelectedModelTypeLarge)
 }
 
 // handleAWSSSOAuth opens the AWS SSO progress dialog (or updates the SSO URL

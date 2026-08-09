@@ -457,11 +457,13 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Add reasoning toggle for models that support it
 	cfg := c.com.Config()
-	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
-		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
-		model := cfg.GetModelByType(agentCfg.Model)
+	// The coder agent leaves Model unset (it inherits the app's main model),
+	// so the model it actually runs on always lives in the large slot.
+	if _, ok := cfg.Agents[config.AgentCoder]; ok {
+		providerCfg := cfg.GetProviderForModel(config.SelectedModelTypeLarge)
+		model := cfg.GetModelByType(config.SelectedModelTypeLarge)
 		if providerCfg != nil && model != nil && model.CanReason {
-			selectedModel := cfg.Models[agentCfg.Model]
+			selectedModel := cfg.Models[config.SelectedModelTypeLarge]
 
 			// Anthropic models: thinking toggle
 			if model.CanReason && len(model.ReasoningLevels) == 0 {
@@ -486,8 +488,9 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	}
 	if c.hasSession {
 		cfgPrime := c.com.Config()
-		agentCfg := cfgPrime.Agents[config.AgentCoder]
-		model := cfgPrime.GetModelByType(agentCfg.Model)
+		// See the reasoning-toggle block above: the coder inherits the main
+		// (large) model.
+		model := cfgPrime.GetModelByType(config.SelectedModelTypeLarge)
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
 				DialogID: FilePickerID,

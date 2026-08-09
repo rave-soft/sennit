@@ -569,7 +569,12 @@ type Agent struct {
 	// This is the id of the system prompt used by the agent
 	Disabled bool `json:"disabled,omitempty"`
 
-	Model SelectedModelType `json:"model" jsonschema:"required,description=The model type to use for this agent,enum=large,enum=small,default=large"`
+	// Model optionally pins this agent to a specific "provider/model-id",
+	// letting a sub-agent use a model other agents don't. Left empty, the
+	// agent inherits the application's main model. A value that does not
+	// resolve to a known provider/model falls back to the empty default
+	// with a warning logged.
+	Model string `json:"model,omitempty" jsonschema:"description=Specific model as 'provider/model-id'; omit to inherit the app's main model"`
 
 	// Prompt is the system prompt for this agent. User-defined agents must
 	// set it; the built-in coder and task agents leave it empty and fall back
@@ -743,6 +748,16 @@ func (c *Config) ensureTUI() *TUIOptions {
 	return c.Options.TUI
 }
 
+// providersOrEmpty snapshots the configured providers for model resolution.
+// c.Providers is nil in tests that build a Config by hand without going
+// through Load, so this returns a nil map rather than panicking.
+func (c *Config) providersOrEmpty() map[string]ProviderConfig {
+	if c.Providers == nil {
+		return nil
+	}
+	return c.Providers.Copy()
+}
+
 func (c *Config) EnabledProviders() []ProviderConfig {
 	var enabled []ProviderConfig
 	for p := range c.Providers.Seq() {
@@ -878,11 +893,12 @@ func filterSlice(data []string, mask []string, include bool) []string {
 // (config reload, workspace switch) converge on the same result.
 func (c *Config) SetupAgents() {
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	providers := c.providersOrEmpty()
 
 	// Markdown files are the primary way to define an agent; entries in the
 	// JSON config are merged on top so an explicit config edit still wins.
 	merged := make(map[string]Agent)
-	maps.Copy(merged, discoverMarkdownAgents(c.workingDir))
+	maps.Copy(merged, discoverMarkdownAgents(c.workingDir, providers))
 	for id, agent := range c.Agents {
 		merged[id] = agent
 	}
@@ -905,7 +921,6 @@ func (c *Config) SetupAgents() {
 			ID:           AgentCoder,
 			Name:         "Coder",
 			Description:  "An agent that helps with executing coding tasks.",
-			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: coderTools,
 		},
@@ -914,7 +929,6 @@ func (c *Config) SetupAgents() {
 			ID:           AgentTask,
 			Name:         "Task",
 			Description:  "An agent that helps with searching for context and finding implementation details.",
-			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default
@@ -926,9 +940,6 @@ func (c *Config) SetupAgents() {
 		agent.ID = id
 		if agent.Name == "" {
 			agent.Name = id
-		}
-		if agent.Model == "" {
-			agent.Model = SelectedModelTypeLarge
 		}
 		// A nil allowed_tools means "everything the coder may use". An empty
 		// list is a deliberate choice and stays empty.
@@ -952,6 +963,7 @@ func (c *Config) validUserAgents() (valid map[string]Agent, invalid map[string]s
 	valid = make(map[string]Agent)
 	invalid = make(map[string]string)
 	builtinTools := allToolNames()
+	providers := c.providersOrEmpty()
 
 	for id, agent := range c.Agents {
 		switch {
@@ -968,6 +980,18 @@ func (c *Config) validUserAgents() (valid map[string]Agent, invalid map[string]s
 		case strings.TrimSpace(agent.Prompt) == "":
 			invalid[id] = "prompt is required for user-defined agents"
 		default:
+			// A model string that does not resolve to a known provider/model
+			// is not worth rejecting the whole agent over; fall back to the
+			// empty default and say so, symmetric to the markdown agent
+			// loader. This is also where stray "large"/"small" values land
+			// now that those words carry no special meaning here.
+			if agent.Model != "" {
+				if _, err := ResolveModelString(providers, agent.Model); err != nil {
+					slog.Warn("Unrecognised model for agent, falling back to the app's main model",
+						"agent", id, "model", agent.Model, "error", err)
+					agent.Model = ""
+				}
+			}
 			valid[id] = agent
 		}
 	}

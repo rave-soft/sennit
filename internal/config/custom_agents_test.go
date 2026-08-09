@@ -38,12 +38,42 @@ func TestSetupAgentsRegistersUserAgent(t *testing.T) {
 	require.True(t, ok, "user agent should survive SetupAgents")
 	require.Equal(t, "reviewer", reviewer.ID)
 	require.Equal(t, "reviewer", reviewer.Name, "name should default to the id")
-	require.Equal(t, SelectedModelTypeLarge, reviewer.Model, "model should default to large")
+	require.Empty(t, reviewer.Model, "empty model means inherit the app's main model")
 	require.NotEmpty(t, reviewer.AllowedTools, "nil allowed_tools means all tools")
 
 	// The coder delegates through a tool named after the agent, so that name
 	// has to be in its allow-list or buildTools filters the tool away.
 	require.Contains(t, cfg.Agents[AgentCoder].AllowedTools, "reviewer")
+}
+
+// An unresolvable model string must not throw the agent out entirely: it
+// falls back to empty (the app's main model), symmetric to the markdown
+// agent loader.
+func TestSetupAgentsFallsBackToLargeForUnresolvableModel(t *testing.T) {
+	cfg := newAgentConfig(t, `{"agents":{"reviewer":{
+		"prompt":"You review code.",
+		"model":"nope/nope"
+	}}}`)
+	cfg.SetupAgents()
+
+	reviewer, ok := cfg.Agents["reviewer"]
+	require.True(t, ok, "an invalid model must not reject the whole agent")
+	require.Empty(t, reviewer.Model)
+}
+
+// "large"/"small" are no longer meaningful values for an agent's model: with
+// no provider named "small", this is just another unresolvable string and
+// falls back the same way "nope/nope" does above.
+func TestSetupAgentsSlotWordsAreNotSpecial(t *testing.T) {
+	cfg := newAgentConfig(t, `{"agents":{"reviewer":{
+		"prompt":"You review code.",
+		"model":"small"
+	}}}`)
+	cfg.SetupAgents()
+
+	reviewer, ok := cfg.Agents["reviewer"]
+	require.True(t, ok)
+	require.Empty(t, reviewer.Model)
 }
 
 func TestSetupAgentsRejectsInvalidDefinitions(t *testing.T) {

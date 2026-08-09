@@ -15,7 +15,7 @@ Drop a markdown file into `.braid/agents/`:
 ---
 name: reviewer
 description: Reviews Go code for correctness and idiom.
-model: large              # large | small
+model: anthropic/claude-sonnet-4   # optional; provider/model-id. Omit to use the app's main model.
 reasoning_effort: low     # low | medium | high
 tools: [view, grep, glob]
 ---
@@ -26,11 +26,25 @@ You are a Go code reviewer. Report real defects, not style opinions.
 The file name (or the `name` field) becomes the tool the main agent calls to
 delegate. The body is the system prompt.
 
+`model` is optional. When set it must be a `provider/model-id` (e.g.
+`anthropic/claude-sonnet-4`) to pin an agent to a model of its own; a bare
+model id also works if it's unambiguous across your configured providers.
+Omitting it makes the agent use the app's main model. A value that doesn't
+resolve to a configured provider/model — including the words `large` or
+`small`, which carry no special meaning here — is ignored with a warning and
+the agent falls back to the main model. `reasoning_effort` overrides the
+model's effort for this agent alone, and applies the same way regardless of
+whether `model` is set or omitted; an effort the model doesn't offer is
+ignored at call time in favor of the model's own default.
+
 Braid also reads agents from `.claude/agents/` and `.opencode/agent/`, and from
 an `agents/` directory next to the global config. Tool names from Claude Code
 (`Read`, `Grep`, `Bash`, …) are translated automatically, so existing role
 files work without being rewritten. Entries under `agents` in the JSON config
-still work and take precedence over files of the same name.
+still work and take precedence over files of the same name. Those foreign
+files' `model:` values are honored the same way — a `provider/model-id`
+string that resolves against your configured providers is used; a tool-name
+like `opus` that isn't one of your models still falls back to the main model.
 
 Fields Braid does not understand are ignored rather than rejected — including
 opencode's `permission:` blocks, which are **not** enforced. Restrict an agent

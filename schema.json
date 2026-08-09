@@ -19,12 +19,7 @@
         },
         "model": {
           "type": "string",
-          "enum": [
-            "large",
-            "small"
-          ],
-          "description": "The model type to use for this agent",
-          "default": "large"
+          "description": "Specific model as 'provider/model-id'; omit to inherit the app's main model"
         },
         "prompt": {
           "type": "string",
@@ -62,10 +57,7 @@
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "model"
-      ]
+      "type": "object"
     },
     "Attribution": {
       "properties": {

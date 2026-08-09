@@ -28,9 +28,10 @@ var agentDirs = []string{
 type markdownAgent struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
-	// Model is Braid's model slot, "large" or "small". Foreign files name a
-	// concrete provider model here ("opus", "some/provider/model"), which is
-	// meaningless to us, so anything unrecognised falls back to the default.
+	// Model is a "provider/model-id" string. Foreign files name a concrete
+	// provider model here ("opus", "some/provider/model"); it is honoured if
+	// it resolves against a configured provider, and otherwise falls back to
+	// the default (the app's main model).
 	Model string `yaml:"model"`
 	// ReasoningEffort overrides the model's effort for this agent.
 	ReasoningEffort string `yaml:"reasoning_effort"`
@@ -84,7 +85,7 @@ var claudeToolNames = map[string]string{
 // discoverMarkdownAgents reads agent definitions from every known directory.
 // A file that cannot be parsed is reported and skipped: one broken agent must
 // not stop the rest from loading.
-func discoverMarkdownAgents(workingDir string) map[string]Agent {
+func discoverMarkdownAgents(workingDir string, providers map[string]ProviderConfig) map[string]Agent {
 	found := make(map[string]Agent)
 	if workingDir == "" {
 		return found
@@ -108,7 +109,7 @@ func discoverMarkdownAgents(workingDir string) map[string]Agent {
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
-			id, agent, err := parseAgentFile(path)
+			id, agent, err := parseAgentFile(path, providers)
 			if err != nil {
 				slog.Warn("Skipping agent file", "path", path, "error", err)
 				continue
@@ -124,7 +125,7 @@ func discoverMarkdownAgents(workingDir string) map[string]Agent {
 
 // parseAgentFile turns one markdown file into an agent. An empty id means the
 // file was valid but intentionally not registered.
-func parseAgentFile(path string) (string, Agent, error) {
+func parseAgentFile(path string, providers map[string]ProviderConfig) (string, Agent, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", Agent{}, err
@@ -167,17 +168,20 @@ func parseAgentFile(path string) (string, Agent, error) {
 		ReasoningEffort: meta.ReasoningEffort,
 	}
 
-	switch strings.ToLower(meta.Model) {
-	case string(SelectedModelTypeLarge), string(SelectedModelTypeSmall):
-		agent.Model = SelectedModelType(strings.ToLower(meta.Model))
-	case "":
-		// Leave unset; SetupAgents defaults it.
+	switch {
+	case meta.Model == "":
+		// Leave unset; empty means inherit the app's main model.
 	default:
-		// A foreign model reference. Ignoring it beats failing the file, but
-		// say so: the agent silently runs on a different model than its
-		// original tool used.
-		slog.Debug("Ignoring unrecognised model in agent file",
-			"path", path, "model", meta.Model, "hint", "use \"large\" or \"small\"")
+		// A foreign model reference. It's honoured if it resolves to a
+		// configured provider/model; otherwise ignoring it beats failing the
+		// file, but say so: the agent silently runs on a different model
+		// than its original tool used.
+		if match, err := ResolveModelString(providers, meta.Model); err == nil {
+			agent.Model = match.Provider + "/" + match.ModelID
+		} else {
+			slog.Debug("Ignoring unrecognised model in agent file",
+				"path", path, "model", meta.Model, "hint", "use \"provider/model-id\"")
+		}
 	}
 
 	if meta.Tools != nil {

@@ -54,3 +54,4 @@ manpages/
 completions/braid.*sh
 .prettierignore
 .task
+.claude/worktrees/

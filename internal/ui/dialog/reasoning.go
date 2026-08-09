@@ -73,13 +73,14 @@ func NewReasoning(com *common.Common) (*Reasoning, error) {
 // of the currently active effort.
 func reasoningItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	cfg := com.Config()
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
+	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
 		return nil, 0, errors.New("agent configuration not found")
 	}
 
-	selectedModel := cfg.Models[agentCfg.Model]
-	model := cfg.GetModelByType(agentCfg.Model)
+	// The coder agent leaves Model unset (it inherits the app's main model),
+	// so the model it actually runs on always lives in the large slot.
+	selectedModel := cfg.Models[config.SelectedModelTypeLarge]
+	model := cfg.GetModelByType(config.SelectedModelTypeLarge)
 	if model == nil {
 		return nil, 0, errors.New("model configuration not found")
 	}
