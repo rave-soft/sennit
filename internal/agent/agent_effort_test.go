@@ -14,7 +14,7 @@ import (
 // levels, which is what effectiveReasoningEffort validates against.
 func reasoningModel(selected string, levels []string, modelDefault string) Model {
 	return Model{
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catwalk.Model{
 			CanReason:              true,
 			ReasoningLevels:        levels,
 			DefaultReasoningEffort: modelDefault,
@@ -45,7 +45,7 @@ func TestEffectiveReasoningEffortFallsBackToFirstLevel(t *testing.T) {
 
 func TestEffectiveReasoningEffortEmptyForNonReasoningModel(t *testing.T) {
 	m := reasoningModel("high", []string{"low", "high"}, "high")
-	m.CatwalkCfg.CanReason = false
+	m.CatalogCfg.CanReason = false
 	require.Empty(t, effectiveReasoningEffort(m))
 }
 
@@ -67,7 +67,7 @@ func TestAgentEffortOverrideDoesNotMutateShared(t *testing.T) {
 // the setups that need it most.
 func TestGetProviderOptionsSetsEffortForLocalProvider(t *testing.T) {
 	m := reasoningModel("low", []string{"low", "medium", "high"}, "high")
-	m.CatwalkCfg.ID = "local-model"
+	m.CatalogCfg.ID = "local-model"
 
 	opts := getProviderOptions(m, config.ProviderConfig{Type: "llamacpp"})
 
@@ -84,7 +84,7 @@ func TestGetProviderOptionsOmitsUnsupportedEffort(t *testing.T) {
 	// The model does not advertise "low", so nothing should be sent rather
 	// than a level the server would reject or misread.
 	m := reasoningModel("low", []string{"high"}, "")
-	m.CatwalkCfg.ID = "local-model"
+	m.CatalogCfg.ID = "local-model"
 
 	opts := getProviderOptions(m, config.ProviderConfig{Type: "llamacpp"})
 	compat := opts["openai-compat"].(*openaicompat.ProviderOptions)

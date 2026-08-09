@@ -90,8 +90,8 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	small := &finishStreamModel{text: "title"}
 
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel:  Model{Model: large, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
-		SmallModel:  Model{Model: small, CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		LargeModel:  Model{Model: large, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		SmallModel:  Model{Model: small, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 		Sessions:    env.sessions,
 		Messages:    env.messages,
 		RunComplete: broker,

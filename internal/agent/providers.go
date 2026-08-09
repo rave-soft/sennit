@@ -54,18 +54,18 @@ var opencodeMessagesModels = map[string]bool{
 // It prefers the user-selected effort when valid, otherwise the model default when
 // valid, and finally falls back to the first configured reasoning level.
 func effectiveReasoningEffort(model Model) string {
-	if !model.CatwalkCfg.CanReason {
+	if !model.CatalogCfg.CanReason {
 		return ""
 	}
 
-	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatalogCfg.ReasoningLevels, effort) {
 		return effort
 	}
-	if effort := model.CatwalkCfg.DefaultReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+	if effort := model.CatalogCfg.DefaultReasoningEffort; effort != "" && slices.Contains(model.CatalogCfg.ReasoningLevels, effort) {
 		return effort
 	}
-	if len(model.CatwalkCfg.ReasoningLevels) > 0 {
-		return model.CatwalkCfg.ReasoningLevels[0]
+	if len(model.CatalogCfg.ReasoningLevels) > 0 {
+		return model.CatalogCfg.ReasoningLevels[0]
 	}
 	return ""
 }
@@ -91,8 +91,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	}
 
-	if model.CatwalkCfg.Options.ProviderOptions != nil {
-		data, err := json.Marshal(model.CatwalkCfg.Options.ProviderOptions)
+	if model.CatalogCfg.Options.ProviderOptions != nil {
+		data, err := json.Marshal(model.CatalogCfg.Options.ProviderOptions)
 		if err == nil {
 			catwalkOpts = data
 		}
@@ -119,9 +119,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	reasoningEffort := effectiveReasoningEffort(model)
-	shouldSetEffort := model.CatwalkCfg.CanReason &&
+	shouldSetEffort := model.CatalogCfg.CanReason &&
 		reasoningEffort != "" &&
-		slices.Contains(model.CatwalkCfg.ReasoningLevels, reasoningEffort)
+		slices.Contains(model.CatalogCfg.ReasoningLevels, reasoningEffort)
 
 	switch providerCfg.Type {
 	case openai.Name, azure.Name:
@@ -129,8 +129,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
-		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
-			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+		if openai.IsResponsesModel(model.CatalogCfg.ID) {
+			if openai.IsResponsesReasoningModel(model.CatalogCfg.ID) {
 				mergedOptions["reasoning_summary"] = "auto"
 				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
 			}
@@ -157,7 +157,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			switch {
 			case !hasEffort && shouldSetEffort:
 				extraBody["reasoning_effort"] = reasoningEffort
-			case !hasThink && model.CatwalkCfg.CanReason:
+			case !hasThink && model.CatalogCfg.CanReason:
 				if model.ModelCfg.Think {
 					extraBody["thinking"] = map[string]any{"type": "enabled"}
 				} else {
@@ -209,7 +209,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
 		if !hasReasoning {
-			if strings.HasPrefix(model.CatwalkCfg.ID, "gemini-2") {
+			if strings.HasPrefix(model.CatalogCfg.ID, "gemini-2") {
 				mergedOptions["thinking_config"] = map[string]any{
 					"thinking_budget":  2000,
 					"include_thoughts": true,
@@ -238,7 +238,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				// MiniMax models use the "thinking" parameter instead of
 				// "reasoning_effort". Other models on these providers still
 				// use the standard field.
-				if !strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
+				if !strings.HasPrefix(strings.ToLower(model.CatalogCfg.ID), "minimax") {
 					mergedOptions["reasoning_effort"] = reasoningEffort
 				}
 			default:
@@ -252,7 +252,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// TODO: Allow custom providers to specify how to set this?
 		switch providerCfg.ID {
 		case string(catwalk.InferenceProviderIoNet):
-			if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason {
+			if _, ok := extraBody["reasoning"]; !ok && model.CatalogCfg.CanReason {
 				if model.ModelCfg.Think {
 					extraBody["reasoning"] = map[string]string{"effort": "medium"}
 				} else {
@@ -286,8 +286,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			// MiniMax M3 uses the "thinking" parameter to control reasoning.
 			// "reasoning_split" must be true so thinking content is returned
 			// in the "reasoning_content" field instead of inline in "content".
-			if strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
-				if model.CatwalkCfg.CanReason && (model.ModelCfg.Think || reasoningEffort != "") {
+			if strings.HasPrefix(strings.ToLower(model.CatalogCfg.ID), "minimax") {
+				if model.CatalogCfg.CanReason && (model.ModelCfg.Think || reasoningEffort != "") {
 					extraBody["thinking"] = map[string]any{"type": "adaptive"}
 					extraBody["reasoning_split"] = true
 				} else {
@@ -296,7 +296,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			}
 
 		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
-			if model.CatwalkCfg.CanReason {
+			if model.CatalogCfg.CanReason {
 				extraBody["enable_thinking"] = model.ModelCfg.Think || reasoningEffort != ""
 			}
 		}

@@ -185,7 +185,7 @@ func (w *AppWorkspace) AgentModel() AgentModel {
 	}
 	m := w.app.AgentCoordinator.Model()
 	return AgentModel{
-		CatwalkCfg: m.CatwalkCfg,
+		CatalogCfg: m.CatalogCfg,
 		ModelCfg:   m.ModelCfg,
 	}
 }

@@ -207,7 +207,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	}
 
 	model := c.currentAgent.Model()
-	maxTokens := model.CatwalkCfg.DefaultMaxTokens
+	maxTokens := model.CatalogCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
 	}
@@ -298,11 +298,11 @@ func (c *coordinator) waitForMCPInit(ctx context.Context) error {
 
 func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
 	modelOptions := getProviderOptions(model, cfg)
-	temp := cmp.Or(model.ModelCfg.Temperature, model.CatwalkCfg.Options.Temperature)
-	topP := cmp.Or(model.ModelCfg.TopP, model.CatwalkCfg.Options.TopP)
-	topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)
-	freqPenalty := cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatwalkCfg.Options.FrequencyPenalty)
-	presPenalty := cmp.Or(model.ModelCfg.PresencePenalty, model.CatwalkCfg.Options.PresencePenalty)
+	temp := cmp.Or(model.ModelCfg.Temperature, model.CatalogCfg.Options.Temperature)
+	topP := cmp.Or(model.ModelCfg.TopP, model.CatalogCfg.Options.TopP)
+	topK := cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)
+	freqPenalty := cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatalogCfg.Options.FrequencyPenalty)
+	presPenalty := cmp.Or(model.ModelCfg.PresencePenalty, model.CatalogCfg.Options.PresencePenalty)
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
@@ -602,12 +602,12 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 	return Model{
 			Model:      largeModel,
-			CatwalkCfg: *largeCatwalkModel,
+			CatalogCfg: *largeCatwalkModel,
 			ModelCfg:   largeModelCfg,
 			FlatRate:   largeProviderCfg.FlatRate,
 		}, Model{
 			Model:      smallModel,
-			CatwalkCfg: *smallCatwalkModel,
+			CatalogCfg: *smallCatwalkModel,
 			ModelCfg:   smallModelCfg,
 			FlatRate:   smallProviderCfg.FlatRate,
 		}, nil

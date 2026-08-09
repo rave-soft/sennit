@@ -132,14 +132,14 @@ func testEnv(t *testing.T) fakeEnv {
 func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
 	largeModel := Model{
 		Model: large,
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catwalk.Model{
 			ContextWindow:    200000,
 			DefaultMaxTokens: 10000,
 		},
 	}
 	smallModel := Model{
 		Model: small,
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catwalk.Model{
 			ContextWindow:    200000,
 			DefaultMaxTokens: 10000,
 		},

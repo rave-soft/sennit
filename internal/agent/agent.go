@@ -142,7 +142,7 @@ type SessionAgent interface {
 
 type Model struct {
 	Model      fantasy.LanguageModel
-	CatwalkCfg catwalk.Model
+	CatalogCfg catwalk.Model
 	ModelCfg   config.SelectedModel
 	FlatRate   bool
 }
@@ -568,7 +568,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		reporter.publish(ctx, complete)
 	}()
 
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	history, files := a.preparePrompt(msgs, largeModel.CatalogCfg.SupportsImages, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -744,7 +744,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatalogCfg.SupportsImages)
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1184,8 +1184,8 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	var success bool
 	for _, attempt := range attempts {
 		tok := int64(40)
-		if attempt.model.CatwalkCfg.CanReason {
-			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
+		if attempt.model.CatalogCfg.CanReason {
+			tok = attempt.model.CatalogCfg.DefaultMaxTokens
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
 		resp, err = agent.Stream(ctx, streamCall)
@@ -1240,7 +1240,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		}
 	}
 
-	modelConfig := model.CatwalkCfg
+	modelConfig := model.CatalogCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
@@ -1298,7 +1298,7 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		session.EstimatedUsage = estimated
 	}
 
-	modelConfig := model.CatwalkCfg
+	modelConfig := model.CatalogCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
@@ -1489,7 +1489,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 		return messages
 	}
 
-	supportsImages := largeModel.CatwalkCfg.SupportsImages
+	supportsImages := largeModel.CatalogCfg.SupportsImages
 
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
 

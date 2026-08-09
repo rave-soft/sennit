@@ -54,7 +54,7 @@ func TestSummarize_QueuedThenCanceledDoesNotRun(t *testing.T) {
 	sa := NewSessionAgent(SessionAgentOptions{
 		LargeModel: Model{
 			Model:      model,
-			CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000},
+			CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000},
 		},
 		SystemPrompt: "system",
 		Sessions:     env.sessions,

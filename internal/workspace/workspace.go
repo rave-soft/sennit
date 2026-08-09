@@ -106,7 +106,7 @@ type LSPEvent struct {
 
 // AgentModel holds the model information exposed to the UI.
 type AgentModel struct {
-	CatwalkCfg catwalk.Model
+	CatalogCfg catwalk.Model
 	ModelCfg   config.SelectedModel
 }
 

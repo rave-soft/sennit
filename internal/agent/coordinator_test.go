@@ -66,7 +66,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 func newMockAgent(providerID string, maxTokens int64, runFunc func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)) *mockSessionAgent {
 	return &mockSessionAgent{
 		model: Model{
-			CatwalkCfg: catwalk.Model{
+			CatalogCfg: catwalk.Model{
 				DefaultMaxTokens: maxTokens,
 			},
 			ModelCfg: config.SelectedModel{
@@ -220,7 +220,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		agent := &mockSessionAgent{
 			model: Model{
-				CatwalkCfg: catwalk.Model{
+				CatalogCfg: catwalk.Model{
 					DefaultMaxTokens: 4096,
 				},
 				ModelCfg: config.SelectedModel{
@@ -501,7 +501,7 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			model := Model{
-				CatwalkCfg: catwalk.Model{
+				CatalogCfg: catwalk.Model{
 					ID:              "claude-opus-4-7",
 					CanReason:       true,
 					ReasoningLevels: []string{"max"},
@@ -553,7 +553,7 @@ func TestIsUnauthorized(t *testing.T) {
 
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	model := Model{
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catwalk.Model{
 			ID:              "glm-5.2",
 			CanReason:       true,
 			ReasoningLevels: []string{"high", "max"},

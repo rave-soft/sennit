@@ -91,15 +91,15 @@ func (m *UI) modelInfo(width int) string {
 			providerName = providerConfig.Name
 
 			// Only check reasoning if model can reason
-			if model.CatwalkCfg.CanReason {
-				if len(model.CatwalkCfg.ReasoningLevels) == 0 {
+			if model.CatalogCfg.CanReason {
+				if len(model.CatalogCfg.ReasoningLevels) == 0 {
 					if model.ModelCfg.Think {
 						reasoningInfo = "Thinking On"
 					} else {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatwalkCfg.DefaultReasoningEffort)
+					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatalogCfg.DefaultReasoningEffort)
 					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}
@@ -111,13 +111,13 @@ func (m *UI) modelInfo(width int) string {
 		modelContext = &common.ModelContextInfo{
 			ContextUsed:    m.session.CompletionTokens + m.session.PromptTokens,
 			Cost:           m.session.Cost,
-			ModelContext:   model.CatwalkCfg.ContextWindow,
+			ModelContext:   model.CatalogCfg.ContextWindow,
 			EstimatedUsage: m.session.EstimatedUsage,
 		}
 	}
 	var modelName string
 	if model != nil {
-		modelName = model.CatwalkCfg.Name
+		modelName = model.CatalogCfg.Name
 	}
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width)
 }

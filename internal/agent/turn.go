@@ -154,8 +154,8 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 		return callContext, prepared, err
 	}
 	callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.largeModel.CatwalkCfg.SupportsImages)
-	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.largeModel.CatwalkCfg.Name)
+	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.largeModel.CatalogCfg.SupportsImages)
+	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.largeModel.CatalogCfg.Name)
 	t.currentAssistant = &assistantMsg
 	return callContext, prepared, err
 }
@@ -332,7 +332,7 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 // the turn once the session's token usage crosses the context-window
 // threshold, so Run's tail can kick off a summarize pass.
 func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
-	cw := int64(t.largeModel.CatwalkCfg.ContextWindow)
+	cw := int64(t.largeModel.CatalogCfg.ContextWindow)
 	// If context window is unknown (0), skip auto-summarize
 	// to avoid immediately truncating custom/local models.
 	if cw == 0 {
@@ -457,7 +457,7 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 			// message content.
 			quotaErr := &ProviderQuotaError{
 				Provider:    "copilot",
-				Model:       t.largeModel.CatwalkCfg.Name,
+				Model:       t.largeModel.CatalogCfg.Name,
 				SettingsURL: "https://github.com/settings/copilot/features",
 			}
 			t.currentAssistant.AddFinish(

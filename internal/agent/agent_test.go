@@ -906,7 +906,7 @@ func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 	// a text placeholder and not create a synthetic user message.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catwalk.Model{
 			SupportsImages: false,
 		},
 	}
@@ -950,7 +950,7 @@ func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
 	// user message with FilePart.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catwalk.Model{
 			SupportsImages: true,
 		},
 	}
@@ -1003,7 +1003,7 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 	// SupportsImages, since Anthropic handles media in tool results natively.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: string(catwalk.InferenceProviderAnthropic)},
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catwalk.Model{
 			SupportsImages: true,
 		},
 	}

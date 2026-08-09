@@ -1579,6 +1579,105 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/mcp/auth": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Authenticate an MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "MCP name request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPNameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/auth-url": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP OAuth authorization URL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "MCP server name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/mcp/docker/disable": {
             "post": {
                 "tags": [
@@ -1688,6 +1787,49 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/pending-auth": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP servers pending OAuth",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.MCPPendingAuthServer"
+                            }
                         }
                     },
                     "404": {
@@ -1962,6 +2104,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/mcp/resources": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP resources",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.MCPResource"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/mcp/states": {
             "get": {
                 "produces": [
@@ -2029,7 +2214,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_braid_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_rave-soft_braid_internal_proto.Message"
                             }
                         }
                     },
@@ -2824,7 +3009,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_braid_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_rave-soft_braid_internal_proto.Message"
                             }
                         }
                     },
@@ -2874,7 +3059,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_braid_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_rave-soft_braid_internal_proto.Message"
                             }
                         }
                     },
@@ -3064,6 +3249,59 @@ const docTemplate = `{
                 },
                 "top_p": {
                     "type": "number"
+                }
+            }
+        },
+        "config.Agent": {
+            "type": "object",
+            "properties": {
+                "allowed_mcp": {
+                    "description": "this tells us which MCPs are available for this agent\n if this is empty all mcps are available\n the string array is the list of tools from the AllowedMCP the agent has available\n if the string array is nil, all tools from the AllowedMCP are available",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "allowed_tools": {
+                    "description": "The available tools for the agent\n if this is nil, all tools are available",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "context_paths": {
+                    "description": "Overrides the context paths for this agent",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "disabled": {
+                    "description": "This is the id of the system prompt used by the agent",
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model": {
+                    "$ref": "#/definitions/config.SelectedModelType"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "prompt": {
+                    "description": "Prompt is the system prompt for this agent. User-defined agents must\nset it; the built-in coder and task agents leave it empty and fall back\nto their embedded templates.",
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "description": "ReasoningEffort overrides the selected model's effort for this agent, so\na cheap reviewer and a deep implementer can share one model. An effort\nthe model does not offer is ignored at call time in favour of the\nmodel's own default; the enum below lists the common levels, but any\nlevel the model advertises is accepted.",
+                    "type": "string"
                 }
             }
         },
@@ -3403,11 +3641,18 @@ const docTemplate = `{
         "csync.Map-string-config_ProviderConfig": {
             "type": "object"
         },
-        "github_com_charmbracelet_braid_internal_config.Config": {
+        "github_com_rave-soft_braid_internal_config.Config": {
             "type": "object",
             "properties": {
                 "$schema": {
                     "type": "string"
+                },
+                "agents": {
+                    "description": "Agents holds both the built-in agents and any the user defines. User\ndefinitions are read from this field on load; SetupAgents then merges\nthem with the built-ins and writes the result back here.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/config.Agent"
+                    }
                 },
                 "env": {
                     "description": "Env is a map of environment variables set on startup.",
@@ -3439,7 +3684,7 @@ const docTemplate = `{
                     }
                 },
                 "options": {
-                    "$ref": "#/definitions/github_com_charmbracelet_braid_internal_config.Options"
+                    "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Options"
                 },
                 "permissions": {
                     "$ref": "#/definitions/config.Permissions"
@@ -3467,7 +3712,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_charmbracelet_braid_internal_config.Options": {
+        "github_com_rave-soft_braid_internal_config.Options": {
             "type": "object",
             "properties": {
                 "attribution": {
@@ -3539,7 +3784,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_charmbracelet_braid_internal_config.Scope": {
+        "github_com_rave-soft_braid_internal_config.Scope": {
             "type": "integer",
             "enum": [
                 0,
@@ -3550,7 +3795,7 @@ const docTemplate = `{
                 "ScopeWorkspace"
             ]
         },
-        "github_com_charmbracelet_braid_internal_proto.Message": {
+        "github_com_rave-soft_braid_internal_proto.Message": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -3761,7 +4006,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_braid_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Scope"
                 }
             }
         },
@@ -3775,7 +4020,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/config.SelectedModelType"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_braid_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Scope"
                 }
             }
         },
@@ -3795,7 +4040,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_braid_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Scope"
                 }
             }
         },
@@ -3806,7 +4051,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_braid_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Scope"
                 }
             }
         },
@@ -3817,7 +4062,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_braid_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Scope"
                 }
             }
         },
@@ -3828,7 +4073,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_braid_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Scope"
                 },
                 "value": {}
             }
@@ -3921,6 +4166,15 @@ const docTemplate = `{
                 }
             }
         },
+        "proto.MCPAuthResponse": {
+            "type": "object",
+            "properties": {
+                "auth_url": {
+                    "description": "AuthURL is the OAuth authorization URL the user must visit, when\nthe flow is still in progress.",
+                    "type": "string"
+                }
+            }
+        },
         "proto.MCPClientInfo": {
             "type": "object",
             "properties": {
@@ -3974,6 +4228,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.MCPPendingAuthServer": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "url": {
                     "type": "string"
                 }
             }
@@ -4032,6 +4297,23 @@ const docTemplate = `{
                 }
             }
         },
+        "proto.MCPResource": {
+            "type": "object",
+            "properties": {
+                "mcp_name": {
+                    "type": "string"
+                },
+                "mime_type": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "uri": {
+                    "type": "string"
+                }
+            }
+        },
         "proto.MCPState": {
             "type": "integer",
             "enum": [
@@ -4052,6 +4334,10 @@ const docTemplate = `{
         "proto.MessageRole": {
             "type": "string",
             "enum": [
+                "assistant",
+                "user",
+                "system",
+                "tool",
                 "assistant",
                 "user",
                 "system",
@@ -4413,7 +4699,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "config": {
-                    "$ref": "#/definitions/github_com_charmbracelet_braid_internal_config.Config"
+                    "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Config"
                 },
                 "data_dir": {
                     "type": "string"

@@ -262,7 +262,7 @@ func (w *ClientWorkspace) AgentModel() AgentModel {
 		return AgentModel{}
 	}
 	return AgentModel{
-		CatwalkCfg: info.Model,
+		CatalogCfg: info.Model,
 		ModelCfg:   info.ModelCfg,
 	}
 }
