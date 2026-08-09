@@ -21,6 +21,14 @@ func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-ch
 }
 
 // GetLSPStates returns the state of all LSP clients.
+//
+// TODO(workspace-scoping): workspaceID is validated (GetWorkspace errors if
+// it doesn't exist) but otherwise unused — app.GetLSPStates() returns
+// process-global state (internal/app/lsp_events.go's package-level
+// lspStates/lspBroker), not the state of the LSP clients belonging to this
+// specific workspace. In a multi-workspace process this returns every
+// workspace's LSP state regardless of which one was asked for. See
+// ARCHITECTURE_REVIEW.md section 3.1.
 func (b *Backend) GetLSPStates(workspaceID string) (map[string]app.LSPClientInfo, error) {
 	_, err := b.GetWorkspace(workspaceID)
 	if err != nil {
@@ -91,6 +99,13 @@ func (b *Backend) LSPStopAll(ctx context.Context, workspaceID string) error {
 }
 
 // MCPGetStates returns the current state of all MCP clients.
+//
+// TODO(workspace-scoping): the workspaceID parameter is ignored outright
+// (named _) — mcptools.GetStates() reads defaultRegistry, the MCP package's
+// shared process-global registry, so this returns every workspace's MCP
+// client state regardless of which workspace was asked about. Fixing this
+// requires each workspace/App to own its own *mcp.Registry; see
+// ARCHITECTURE_REVIEW.md section 3.1.
 func (b *Backend) MCPGetStates(_ string) map[string]mcptools.ClientInfo {
 	return mcptools.GetStates()
 }

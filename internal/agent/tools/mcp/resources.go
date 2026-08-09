@@ -9,23 +9,26 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/csync"
 )
 
 type Resource = mcp.Resource
 
 type ResourceContents = mcp.ResourceContents
 
-var allResources = csync.NewMap[string, []*Resource]()
-
 // Resources returns all available MCP resources.
-func Resources() iter.Seq2[string, []*Resource] {
-	return allResources.Seq2()
+func Resources() iter.Seq2[string, []*Resource] { return defaultRegistry.Resources() }
+
+func (r *Registry) Resources() iter.Seq2[string, []*Resource] {
+	return r.allResources.Seq2()
 }
 
 // ListResources returns the current resources for an MCP server.
 func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([]*Resource, error) {
-	session, err := getOrRenewClient(ctx, cfg, name)
+	return defaultRegistry.ListResources(ctx, cfg, name)
+}
+
+func (r *Registry) ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([]*Resource, error) {
+	session, err := r.getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err
 	}
@@ -35,16 +38,20 @@ func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([
 		return nil, err
 	}
 
-	resourceCount := updateResources(name, resources)
-	prev, _ := states.Get(name)
+	resourceCount := r.updateResources(name, resources)
+	prev, _ := r.states.Get(name)
 	prev.Counts.Resources = resourceCount
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	r.updateState(name, StateConnected, nil, session, prev.Counts)
 	return resources, nil
 }
 
 // ReadResource reads the contents of a resource from an MCP server.
 func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string) ([]*ResourceContents, error) {
-	session, err := getOrRenewClient(ctx, cfg, name)
+	return defaultRegistry.ReadResource(ctx, cfg, name, uri)
+}
+
+func (r *Registry) ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string) ([]*ResourceContents, error) {
+	session, err := r.getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err
 	}
@@ -57,8 +64,10 @@ func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string
 
 // RefreshResources gets the updated list of resources from the MCP and updates the
 // global state.
-func RefreshResources(ctx context.Context, name string) {
-	session, ok := sessions.Get(name)
+func RefreshResources(ctx context.Context, name string) { defaultRegistry.RefreshResources(ctx, name) }
+
+func (r *Registry) RefreshResources(ctx context.Context, name string) {
+	session, ok := r.sessions.Get(name)
 	if !ok {
 		slog.Warn("Refresh resources: no session", "name", name)
 		return
@@ -66,15 +75,15 @@ func RefreshResources(ctx context.Context, name string) {
 
 	resources, err := getResources(ctx, session)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		r.updateState(name, StateError, err, nil, Counts{})
 		return
 	}
 
-	resourceCount := updateResources(name, resources)
+	resourceCount := r.updateResources(name, resources)
 
-	prev, _ := states.Get(name)
+	prev, _ := r.states.Get(name)
 	prev.Counts.Resources = resourceCount
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	r.updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
 func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {
@@ -99,11 +108,11 @@ func isMethodNotFoundError(err error) bool {
 	return errors.As(err, &rpcErr) && rpcErr != nil && rpcErr.Code == jsonrpc.CodeMethodNotFound
 }
 
-func updateResources(name string, resources []*Resource) int {
+func (r *Registry) updateResources(name string, resources []*Resource) int {
 	if len(resources) == 0 {
-		allResources.Del(name)
+		r.allResources.Del(name)
 		return 0
 	}
-	allResources.Set(name, resources)
+	r.allResources.Set(name, resources)
 	return len(resources)
 }

@@ -180,13 +180,13 @@ func channelEnabled(enabled []string, name string) bool {
 // represent ordered inbound messages (chat, alerts) rather than disposable UI
 // updates, so a stalled subscriber must not permanently lose them the way
 // lossy Publish would. Malformed payloads are dropped (fail closed).
-func publishChannelMessage(ctx context.Context, name string, raw json.RawMessage) {
+func (r *Registry) publishChannelMessage(ctx context.Context, name string, raw json.RawMessage) {
 	p, ok := parseChannelParams(raw)
 	if !ok {
 		slog.Warn("Dropping malformed channel notification", "server", name)
 		return
 	}
-	broker.PublishMustDeliver(ctx, pubsub.CreatedEvent, Event{
+	r.broker.PublishMustDeliver(ctx, pubsub.CreatedEvent, Event{
 		Type:           EventChannelMessage,
 		Name:           name,
 		ChannelMessage: renderChannel(name, p),
@@ -282,6 +282,11 @@ type channelTransport struct {
 	inner mcp.Transport
 	name  string
 	gate  *channelGate
+	// reg is the registry a message accepted by the gate is published
+	// through. Carrying it here (rather than reaching for a package-level
+	// broker) is what lets each session publish to its own registry's event
+	// stream instead of always a single shared one.
+	reg *Registry
 }
 
 // Connect implements mcp.Transport.
@@ -290,7 +295,7 @@ func (t *channelTransport) Connect(ctx context.Context) (mcp.Connection, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &channelConn{Connection: conn, name: t.name, gate: t.gate}, nil
+	return &channelConn{Connection: conn, name: t.name, gate: t.gate, reg: t.reg}, nil
 }
 
 // channelConn wraps an mcp.Connection and filters channel notifications out of
@@ -299,6 +304,7 @@ type channelConn struct {
 	mcp.Connection
 	name string
 	gate *channelGate
+	reg  *Registry
 }
 
 // Read intercepts notifications/claude/channel. Such messages are always
@@ -317,7 +323,7 @@ func (c *channelConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 			return msg, nil
 		}
 		if raw := c.gate.accept(req.Params); raw != nil {
-			publishChannelMessage(ctx, c.name, raw)
+			c.reg.publishChannelMessage(ctx, c.name, raw)
 		}
 	}
 }

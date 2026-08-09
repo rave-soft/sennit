@@ -7,21 +7,24 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/csync"
 )
 
 type Prompt = mcp.Prompt
 
-var allPrompts = csync.NewMap[string, []*Prompt]()
-
 // Prompts returns all available MCP prompts.
-func Prompts() iter.Seq2[string, []*Prompt] {
-	return allPrompts.Seq2()
+func Prompts() iter.Seq2[string, []*Prompt] { return defaultRegistry.Prompts() }
+
+func (r *Registry) Prompts() iter.Seq2[string, []*Prompt] {
+	return r.allPrompts.Seq2()
 }
 
 // GetPromptMessages retrieves the content of an MCP prompt with the given arguments.
 func GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName, promptName string, args map[string]string) ([]string, error) {
-	c, err := getOrRenewClient(ctx, cfg, clientName)
+	return defaultRegistry.GetPromptMessages(ctx, cfg, clientName, promptName, args)
+}
+
+func (r *Registry) GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName, promptName string, args map[string]string) ([]string, error) {
+	c, err := r.getOrRenewClient(ctx, cfg, clientName)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +50,10 @@ func GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName,
 
 // RefreshPrompts gets the updated list of prompts from the MCP and updates the
 // global state.
-func RefreshPrompts(ctx context.Context, name string) {
-	session, ok := sessions.Get(name)
+func RefreshPrompts(ctx context.Context, name string) { defaultRegistry.RefreshPrompts(ctx, name) }
+
+func (r *Registry) RefreshPrompts(ctx context.Context, name string) {
+	session, ok := r.sessions.Get(name)
 	if !ok {
 		slog.Warn("Refresh prompts: no session", "name", name)
 		return
@@ -56,15 +61,15 @@ func RefreshPrompts(ctx context.Context, name string) {
 
 	prompts, err := getPrompts(ctx, session)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		r.updateState(name, StateError, err, nil, Counts{})
 		return
 	}
 
-	updatePrompts(name, prompts)
+	r.updatePrompts(name, prompts)
 
-	prev, _ := states.Get(name)
+	prev, _ := r.states.Get(name)
 	prev.Counts.Prompts = len(prompts)
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	r.updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
 func getPrompts(ctx context.Context, c *ClientSession) ([]*Prompt, error) {
@@ -78,11 +83,11 @@ func getPrompts(ctx context.Context, c *ClientSession) ([]*Prompt, error) {
 	return result.Prompts, nil
 }
 
-// updatePrompts updates the global mcpPrompts and mcpClient2Prompts maps
-func updatePrompts(mcpName string, prompts []*Prompt) {
+// updatePrompts updates the registry's prompt catalog for one MCP server.
+func (r *Registry) updatePrompts(mcpName string, prompts []*Prompt) {
 	if len(prompts) == 0 {
-		allPrompts.Del(mcpName)
+		r.allPrompts.Del(mcpName)
 		return
 	}
-	allPrompts.Set(mcpName, prompts)
+	r.allPrompts.Set(mcpName, prompts)
 }

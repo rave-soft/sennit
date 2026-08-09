@@ -31,14 +31,14 @@ func (t *injectTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 // TestChannelEndToEnd exercises the whole client-side channel path against a
 // real go-sdk server over an in-memory transport: a server that declares the
 // claude/channel capability and a reply tool, a client wrapped with the channel
-// interceptor, real capability detection + gate opt-in (as createSession does),
+// interceptor, real capability detection + gate opt-in (as defaultRegistry.createSession does),
 // two-way reply-tool discovery, and a real server-pushed notification flowing
 // through the transport wrapper into an EventChannelMessage.
 func TestChannelEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	sub := broker.Subscribe(ctx)
+	sub := defaultRegistry.broker.Subscribe(ctx)
 
 	serverT, clientT := mcp.NewInMemoryTransports()
 
@@ -72,20 +72,20 @@ func TestChannelEndToEnd(t *testing.T) {
 
 	gate := newChannelGate()
 	client := mcp.NewClient(&mcp.Implementation{Name: "braid", Version: "test"}, nil)
-	session, err := client.Connect(ctx, &channelTransport{inner: clientT, name: "chan", gate: gate}, nil)
+	session, err := client.Connect(ctx, &channelTransport{inner: clientT, name: "chan", gate: gate, reg: defaultRegistry}, nil)
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
 	}
 	defer session.Close()
 
-	// Capability detection + opt-in gate flip, mirroring createSession.
+	// Capability detection + opt-in gate flip, mirroring defaultRegistry.createSession.
 	if !hasChannelCapability(session.InitializeResult()) {
 		t.Fatal("expected claude/channel capability to be detected from the handshake")
 	}
 	if channelEnabled([]string{"chan"}, "chan") && hasChannelCapability(session.InitializeResult()) {
 		buffered := gate.resolve(true)
 		for _, raw := range buffered {
-			publishChannelMessage(ctx, "chan", raw)
+			defaultRegistry.publishChannelMessage(ctx, "chan", raw)
 		}
 	} else {
 		gate.resolve(false)

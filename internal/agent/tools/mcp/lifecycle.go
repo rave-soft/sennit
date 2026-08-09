@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
-	"sync"
 
 	"github.com/rave-soft/braid/internal/config"
 )
@@ -82,63 +81,60 @@ func reconcile(current config.MCPs, running map[string]ClientInfo) map[string]re
 	return actions
 }
 
-// reinitMu guards reinitRunning and reinitDirty.
-var (
-	reinitMu      sync.Mutex
-	reinitRunning bool
-	reinitDirty   bool
-)
-
 // Reinitialize reconciles running MCP servers against the current config.
 // Servers added since the last call are started, servers removed are torn
 // down, and servers whose config changed are restarted. Unchanged servers
 // keep their existing sessions.
 //
-// MCP state is process-global, so reconciliation is single-flighted: at
+// Reconciliation is single-flighted per Registry: at
 // most one runs at a time. A config write that arrives mid-run just sets a
 // dirty flag and returns; the running reconciliation loops once more to
 // pick up the newer state. This coalesces a burst of rapid writes into at
 // most two reconciles instead of queueing a redundant no-op pass per write,
 // while still guaranteeing the final state reflects the latest config.
 func Reinitialize(ctx context.Context, cfg *config.ConfigStore) {
-	reinitMu.Lock()
-	if reinitRunning {
-		reinitDirty = true
-		reinitMu.Unlock()
+	defaultRegistry.Reinitialize(ctx, cfg)
+}
+
+func (r *Registry) Reinitialize(ctx context.Context, cfg *config.ConfigStore) {
+	r.reinitMu.Lock()
+	if r.reinitRunning {
+		r.reinitDirty = true
+		r.reinitMu.Unlock()
 		return
 	}
-	reinitRunning = true
-	reinitMu.Unlock()
+	r.reinitRunning = true
+	r.reinitMu.Unlock()
 
 	for {
-		reconcileOnce(ctx, cfg)
+		r.reconcileOnce(ctx, cfg)
 
-		reinitMu.Lock()
-		if !reinitDirty {
-			reinitRunning = false
-			reinitMu.Unlock()
+		r.reinitMu.Lock()
+		if !r.reinitDirty {
+			r.reinitRunning = false
+			r.reinitMu.Unlock()
 			return
 		}
-		reinitDirty = false
-		reinitMu.Unlock()
+		r.reinitDirty = false
+		r.reinitMu.Unlock()
 	}
 }
 
 // reconcileOnce applies one reconciliation pass against the current config.
-func reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
+func (r *Registry) reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
 	current := cfg.Config().MCP
-	actions := reconcile(current, states.Copy())
+	actions := reconcile(current, r.states.Copy())
 	for name, action := range actions {
 		switch action {
 		case reinitRemove:
 			slog.Info("Removing MCP server no longer in config", "name", name)
-			removeServer(name)
+			r.removeServer(name)
 		case reinitDisable:
 			slog.Info("Disabling MCP server", "name", name)
-			DisableSingle(cfg, name)
+			r.DisableSingle(cfg, name)
 		case reinitStart:
 			m := current[name]
-			if _, exists := states.Get(name); exists {
+			if _, exists := r.states.Get(name); exists {
 				slog.Info("Re-initializing MCP server after config change", "name", name)
 			} else {
 				slog.Info("Initializing new MCP server after config change", "name", name)
@@ -147,9 +143,9 @@ func reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
 			// attempt for this server. The StateStarting transition records
 			// m as PendingConfig so a subsequent reconcile can tell whether
 			// the attempt now in flight matches the latest config.
-			teardown(name)
-			updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-			goInitClient(ctx, cfg, name, m, nil)
+			r.teardown(name)
+			r.updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+			r.goInitClient(ctx, cfg, name, m, nil)
 		}
 	}
 }
@@ -157,10 +153,10 @@ func reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
 // removeServer fully tears down an MCP server and deletes its state
 // entry. Unlike DisableSingle (which keeps the entry as StateDisabled),
 // this is for servers that no longer exist in config at all.
-func removeServer(name string) {
-	teardown(name)
-	states.Del(name)
-	gens.Del(name)
+func (r *Registry) removeServer(name string) {
+	r.teardown(name)
+	r.states.Del(name)
+	r.gens.Del(name)
 }
 
 // mcpConfigEqual reports whether two MCPConfig values are equal, ignoring

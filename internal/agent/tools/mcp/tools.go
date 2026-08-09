@@ -12,7 +12,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/csync"
 )
 
 type Tool = mcp.Tool
@@ -25,21 +24,25 @@ type ToolResult struct {
 	MediaType string
 }
 
-var allTools = csync.NewMap[string, []*Tool]()
-
 // Tools returns all available MCP tools.
-func Tools() iter.Seq2[string, []*Tool] {
-	return allTools.Seq2()
+func Tools() iter.Seq2[string, []*Tool] { return defaultRegistry.Tools() }
+
+func (r *Registry) Tools() iter.Seq2[string, []*Tool] {
+	return r.allTools.Seq2()
 }
 
 // RunTool runs an MCP tool with the given input parameters.
 func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
+	return defaultRegistry.RunTool(ctx, cfg, name, toolName, input)
+}
+
+func (r *Registry) RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
 	}
 
-	c, err := getOrRenewClient(ctx, cfg, name)
+	c, err := r.getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return ToolResult{}, err
 	}
@@ -111,7 +114,11 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
 func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
-	session, ok := sessions.Get(name)
+	defaultRegistry.RefreshTools(ctx, cfg, name)
+}
+
+func (r *Registry) RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
+	session, ok := r.sessions.Get(name)
 	if !ok {
 		slog.Warn("Refresh tools: no session", "name", name)
 		return
@@ -119,15 +126,15 @@ func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 
 	tools, err := getTools(ctx, session)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
+		r.updateState(name, StateError, err, nil, Counts{})
 		return
 	}
 
-	toolCount := updateTools(cfg, name, tools)
+	toolCount := r.updateTools(cfg, name, tools)
 
-	prev, _ := states.Get(name)
+	prev, _ := r.states.Get(name)
 	prev.Counts.Tools = toolCount
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	r.updateState(name, StateConnected, nil, session, prev.Counts)
 }
 
 // registerSessionTools lists the tools a live session exposes and writes them
@@ -136,12 +143,12 @@ func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 // (re)connected session's tools enter the registry, so both the initial
 // connect and a lazy renew repopulate the tool list the agent sends to the LLM
 // instead of leaving it empty.
-func registerSessionTools(ctx context.Context, cfg *config.ConfigStore, name string, sess *ClientSession) (int, error) {
+func (r *Registry) registerSessionTools(ctx context.Context, cfg *config.ConfigStore, name string, sess *ClientSession) (int, error) {
 	tools, err := getTools(ctx, sess)
 	if err != nil {
 		return 0, err
 	}
-	return updateTools(cfg, name, tools), nil
+	return r.updateTools(cfg, name, tools), nil
 }
 
 func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
@@ -155,16 +162,16 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	return result.Tools, nil
 }
 
-func updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
+func (r *Registry) updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
 	mcpCfg, ok := cfg.Config().MCP[name]
 	if ok {
 		tools = filterTools(mcpCfg, tools)
 	}
 	if len(tools) == 0 {
-		allTools.Del(name)
+		r.allTools.Del(name)
 		return 0
 	}
-	allTools.Set(name, tools)
+	r.allTools.Set(name, tools)
 	return len(tools)
 }
 
