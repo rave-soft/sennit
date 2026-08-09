@@ -20,15 +20,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
-	"charm.land/fantasy/providers/google"
-	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
 	"github.com/rave-soft/braid/internal/agent/notify"
@@ -265,7 +262,7 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 		if d.RunID == "" {
 			continue
 		}
-		a.publishRunComplete(ctx, d, notify.RunComplete{
+		newCompletionReporter(a, d).publish(ctx, notify.RunComplete{
 			SessionID: d.SessionID,
 			RunID:     d.RunID,
 			Cancelled: true,
@@ -384,6 +381,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// RunComplete) would hang on an immediately-canceled accepted run.
 		call.Accepted.Close()
 		sessMu.Unlock()
+		reporter := newCompletionReporter(a, call)
 		complete := notify.RunComplete{
 			SessionID: call.SessionID,
 			RunID:     call.RunID,
@@ -391,10 +389,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		if err := a.persistCanceledTurn(ctx, call, false); err != nil {
 			complete.Error = err.Error()
-			a.publishRunComplete(ctx, call, complete)
+			reporter.publish(ctx, complete)
 			return nil, err
 		}
-		a.publishRunComplete(ctx, call, complete)
+		reporter.publish(ctx, complete)
 		return nil, nil
 	}
 
@@ -470,7 +468,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		fantasy.WithUserAgent(userAgent),
 	)
 
-	sessionLock := sync.Mutex{}
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -501,18 +498,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	// skipRunComplete is set just before the queued-recursion path so
-	// the outer Run doesn't publish a RunComplete that would race
-	// with — and be superseded by — the recursive call's own
-	// RunComplete (each queued user prompt is its own turn and
-	// publishes exactly one terminal event).
-	var skipRunComplete bool
-	// currentAssistant is declared here so the deferred RunComplete
-	// publish below can capture the pointer that PrepareStep will
-	// later (re)assign for each streaming step. The final assistant
-	// message of the turn is the value reachable through this
-	// pointer when the defer runs.
-	var currentAssistant *message.Message
+	// reporter delivers this turn's terminal RunComplete exactly once,
+	// regardless of whether it comes from the defer below (the
+	// normal/error/panic-recovery catch-all) or from the explicit
+	// publish on the queued-recursion tail path (which must win: it
+	// carries this turn's own retErr before the recursive Run
+	// clobbers the named return).
+	reporter := newCompletionReporter(a, call)
+	// t owns the streaming-callback state (currentAssistant, stepMessages,
+	// currentSession, etc.) that PrepareStep and the other
+	// fantasy.AgentStreamCall callbacks below read and write. It's
+	// declared here so the deferred RunComplete publish below can read
+	// t.currentAssistant, which PrepareStep will (re)assign once per
+	// streaming step. The final assistant message of the turn is the
+	// value reachable through that field when the defer runs.
+	t := newRunTurn(a, call, ctx, genCtx, largeModel, promptPrefix, currentSession, userMsgCreated)
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -537,13 +537,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
 		}
-		if skipRunComplete {
-			return
-		}
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if currentAssistant != nil {
-			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
+		if t.currentAssistant != nil {
+			complete.MessageID = t.currentAssistant.ID
+			complete.Text = t.currentAssistant.Content().String()
 		}
 		if retErr != nil {
 			complete.Error = retErr.Error()
@@ -557,8 +554,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// must-deliver publish applies bounded-blocking semantics to
 		// the authoritative terminal event so a momentarily-full
 		// subscriber channel can't silently drop it and hang
-		// non-interactive clients waiting on RunComplete.
-		a.publishRunComplete(ctx, call, complete)
+		// non-interactive clients waiting on RunComplete. reporter
+		// ensures this is a no-op when the tail path below already
+		// published this turn's RunComplete before recursing.
+		reporter.publish(ctx, complete)
 	}()
 
 	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
@@ -566,9 +565,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 
-	var stepMessages []fantasy.Message
-	var shouldSummarize bool
-	sanitizedToolCalls := make(map[string]bool)
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
 	if call.MaxOutputTokens > 0 {
@@ -586,256 +582,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		PresencePenalty:  call.PresencePenalty,
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			for i := range prepared.Messages {
-				prepared.Messages[i].ProviderOptions = nil
-			}
-
-			// Use latest tools (updated by SetTools when MCP tools change).
-			prepared.Tools = a.tools.Copy()
-
-			// Drain queued follow-up prompts for this step. Calls covered
-			// by a cancel recorded while they sat in the queue are dropped:
-			// a cancel that arrived after a prompt was queued must not let
-			// it run as part of this step. Coverage is per-call by accept
-			// sequence so a follow-up queued after the cancel (higher seq)
-			// is not dropped. A dropped prompt carrying a RunID still gets
-			// its terminal cancelled RunComplete so a caller waiting on it
-			// does not hang. Uncanceled prompts without a RunID are folded
-			// into this turn; uncanceled prompts with a RunID are left
-			// queued so each runs as its own turn (with its own
-			// RunComplete) via the recursive run path below.
-			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
-			a.publishCanceledQueueDrops(canceledRunIDs)
-			for _, queued := range fold {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
-				if createErr != nil {
-					return callContext, prepared, createErr
-				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
-			}
-
-			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
-
-			lastSystemRoleInx := 0
-			systemMessageUpdated := false
-			for i, msg := range prepared.Messages {
-				// Only add cache control to the last message.
-				if msg.Role == fantasy.MessageRoleSystem {
-					lastSystemRoleInx = i
-				} else if !systemMessageUpdated {
-					prepared.Messages[lastSystemRoleInx].ProviderOptions = a.getCacheControlOptions()
-					systemMessageUpdated = true
-				}
-				// Than add cache control to the last 2 messages.
-				if i > len(prepared.Messages)-3 {
-					prepared.Messages[i].ProviderOptions = a.getCacheControlOptions()
-				}
-			}
-
-			if promptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(promptPrefix)}, prepared.Messages...)
-			}
-
-			sessionLock.Lock()
-			stepMessages = cloneFantasyMessages(prepared.Messages)
-			sessionLock.Unlock()
-
-			var assistantMsg message.Message
-			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
-				Role:     message.Assistant,
-				Parts:    []message.ContentPart{},
-				Model:    largeModel.ModelCfg.Model,
-				Provider: largeModel.ModelCfg.Provider,
-			})
-			if err != nil {
-				return callContext, prepared, err
-			}
-			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
-			currentAssistant = &assistantMsg
-			return callContext, prepared, err
-		},
-		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
-			currentAssistant.AppendReasoningContent(reasoning.Text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			currentAssistant.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// handle anthropic signature
-			if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
-				if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
-					currentAssistant.AppendReasoningSignature(reasoning.Signature)
-				}
-			}
-			if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
-				if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
-					currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
-				}
-			}
-			if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
-				if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
-					currentAssistant.SetReasoningResponsesData(reasoning)
-				}
-			}
-			currentAssistant.FinishThinking()
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnTextDelta: func(id string, text string) error {
-			// Strip leading newline from initial text content. This is is
-			// particularly important in non-interactive mode where leading
-			// newlines are very visible.
-			if len(currentAssistant.Parts) == 0 {
-				text = strings.TrimPrefix(text, "\n")
-			}
-
-			currentAssistant.AppendContent(text)
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
-		OnToolInputStart: func(id string, toolName string) error {
-			toolCall := message.ToolCall{
-				ID:               id,
-				Name:             toolName,
-				ProviderExecuted: false,
-				Finished:         false,
-			}
-			currentAssistant.AddToolCall(toolCall)
-			// Use parent ctx instead of genCtx to ensure the update succeeds
-			// even if the request is canceled mid-stream
-			return a.messages.Update(ctx, *currentAssistant)
-		},
-		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
-			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
-			// Reset streamed content so the retried response doesn't
-			// concatenate with partial content from the failed attempt.
-			// On the final attempt (no more retries), any partial content
-			// stays in the message as useful context beneath the error.
-			currentAssistant.ResetStreamedContent()
-			if updateErr := a.messages.Update(genCtx, *currentAssistant); updateErr != nil {
-				slog.Error("Failed to reset message on retry", "error", updateErr)
-			}
-		},
-		OnAuthRefresh: call.OnAuthRefresh,
-		ModelProvider: func() fantasy.LanguageModel {
-			m := a.largeModel.Get()
-			slog.Info("ModelProvider called",
-				"provider", m.ModelCfg.Provider,
-				"model", m.ModelCfg.Model)
-			return m.Model
-		},
-		OnToolCall: func(tc fantasy.ToolCallContent) error {
-			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
-			if wasSanitized {
-				sanitizedToolCalls[tc.ToolCallID] = true
-			}
-			toolCall := message.ToolCall{
-				ID:               tc.ToolCallID,
-				Name:             tc.ToolName,
-				Input:            input,
-				ProviderExecuted: false,
-				Finished:         true,
-			}
-			currentAssistant.AddToolCall(toolCall)
-			// Use parent ctx instead of genCtx to ensure the update succeeds
-			// even if the request is canceled mid-stream
-			return a.messages.Update(ctx, *currentAssistant)
-		},
-		OnToolResult: func(result fantasy.ToolResultContent) error {
-			toolResult := a.convertToToolResult(result)
-			if sanitizedToolCalls[result.ToolCallID] {
-				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
-				toolResult.IsError = true
-			}
-			// Use parent ctx instead of genCtx to ensure the message is created
-			// even if the request is canceled mid-stream
-			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					toolResult,
-				},
-			})
-			return createMsgErr
-		},
-		OnStepFinish: func(stepResult fantasy.StepResult) error {
-			for _, w := range stepResult.Warnings {
-				slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
-			}
-			finishReason := message.FinishReasonUnknown
-			switch stepResult.FinishReason {
-			case fantasy.FinishReasonLength:
-				finishReason = message.FinishReasonMaxTokens
-			case fantasy.FinishReasonStop:
-				finishReason = message.FinishReasonEndTurn
-			case fantasy.FinishReasonToolCalls:
-				finishReason = message.FinishReasonToolUse
-			case fantasy.FinishReasonContentFilter:
-				// Provider safety classifier stopped the model
-				// (Anthropic stop_reason=refusal, OpenAI content_filter).
-				// The TUI owns the display copy; we only persist the
-				// reason so the UI can show a REFUSED banner.
-				finishReason = message.FinishReasonContentFilter
-				slog.Warn(
-					"Provider content filter stopped the model",
-					"session_id", call.SessionID,
-					"finish_reason", string(stepResult.FinishReason),
-				)
-			}
-			// If a tool result halted the turn (e.g. a hook halt or a
-			// permission denial), the step ends on FinishReasonToolCalls but
-			// the model will not be called again. Treat it as the end of the
-			// turn so the UI can render the assistant footer.
-			if finishReason == message.FinishReasonToolUse {
-				for _, tr := range stepResult.Content.ToolResults() {
-					if tr.StopTurn {
-						finishReason = message.FinishReasonEndTurn
-						break
-					}
-				}
-			}
-			currentAssistant.AddFinish(finishReason, "", "")
-			sessionLock.Lock()
-			defer sessionLock.Unlock()
-
-			updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
-			if getSessionErr != nil {
-				return getSessionErr
-			}
-			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
-			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
-			_, sessionErr := a.sessions.Save(ctx, updatedSession)
-			if sessionErr != nil {
-				return sessionErr
-			}
-			currentSession = updatedSession
-			return a.messages.Update(genCtx, *currentAssistant)
-		},
+		PrepareStep:      t.prepareStep,
+		OnReasoningStart: t.onReasoningStart,
+		OnReasoningDelta: t.onReasoningDelta,
+		OnReasoningEnd:   t.onReasoningEnd,
+		OnTextDelta:      t.onTextDelta,
+		OnToolInputStart: t.onToolInputStart,
+		OnRetry:          t.onRetry,
+		OnAuthRefresh:    call.OnAuthRefresh,
+		ModelProvider:    t.modelProvider,
+		OnToolCall:       t.onToolCall,
+		OnToolResult:     t.onToolResult,
+		OnStepFinish:     t.onStepFinish,
 		StopWhen: []fantasy.StopCondition{
-			func(_ []fantasy.StepResult) bool {
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
-				// If context window is unknown (0), skip auto-summarize
-				// to avoid immediately truncating custom/local models.
-				if cw == 0 {
-					return false
-				}
-				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
-				remaining := cw - tokens
-				var threshold int64
-				if cw > largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
-				}
-				if (remaining <= threshold) && !a.disableAutoSummarize {
-					shouldSummarize = true
-					return true
-				}
-				return false
-			},
+			t.stopOnContextWindow,
 			func(steps []fantasy.StepResult) bool {
 				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
 			},
@@ -845,134 +605,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
-		isCancelErr := errors.Is(err, context.Canceled)
-		slog.Info("Agent stream returned error",
-			"error", err.Error(),
-			"error_type", fmt.Sprintf("%T", err),
-			"is_cancel", isCancelErr)
-		if currentAssistant == nil {
-			// Cancel-before-assistant-creation window: the run was
-			// canceled after activeRequests.Set but before PrepareStep
-			// created the assistant message. Without this, the turn
-			// would return with no FinishReasonCanceled marker and no
-			// user-visible record. The user message was already created
-			// above, so persistCanceledTurn only writes the assistant
-			// record.
-			if isCancelErr {
-				if persistErr := a.persistCanceledTurn(ctx, call, userMsgCreated); persistErr != nil {
-					return nil, persistErr
-				}
-			}
-			return result, err
-		}
-		// Persist final state with a context detached from the run
-		// context. The run context (ctx) is derived from the
-		// workspace context, which workspace shutdown cancels before
-		// agent goroutines finish; using ctx here would drop the
-		// final assistant state. WithoutCancel keeps the values
-		// (e.g. session ID) while ignoring cancellation, and a short
-		// timeout bounds the cleanup writes.
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cleanupCancel()
-		// Ensure we finish thinking on error to close the reasoning state.
-		currentAssistant.FinishThinking()
-		toolCalls := currentAssistant.ToolCalls()
-		// INFO: we use the cleanup context here because the genCtx has been cancelled.
-		msgs, createErr := a.messages.List(cleanupCtx, currentAssistant.SessionID)
-		if createErr != nil {
-			return nil, createErr
-		}
-		for _, tc := range toolCalls {
-			if !tc.Finished {
-				tc.Finished = true
-				tc.Input = "{}"
-				currentAssistant.AddToolCall(tc)
-				updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
-				if updateErr != nil {
-					return nil, updateErr
-				}
-			}
-
-			found := false
-			for _, msg := range msgs {
-				if msg.Role == message.Tool {
-					for _, tr := range msg.ToolResults() {
-						if tr.ToolCallID == tc.ID {
-							found = true
-							break
-						}
-					}
-				}
-				if found {
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			content := "There was an error while executing the tool"
-			if isCancelErr {
-				content = "Error: user cancelled assistant tool calling"
-			}
-			toolResult := message.ToolResult{
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-				Content:    content,
-				IsError:    true,
-			}
-			_, createErr = a.messages.Create(cleanupCtx, currentAssistant.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					toolResult,
-				},
-			})
-			if createErr != nil {
-				return nil, createErr
-			}
-		}
-		var fantasyErr *fantasy.Error
-		var providerErr *fantasy.ProviderError
-		const defaultTitle = "Provider Error"
-		if isCancelErr {
-			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
-		} else if errors.As(err, &providerErr) {
-			if providerErr.Message == "The requested model is not supported." {
-				// The TUI owns the display copy: return a typed error so
-				// callers can render their own styled hyperlink instead of
-				// agent baking terminal escape codes into persisted
-				// message content.
-				quotaErr := &ProviderQuotaError{
-					Provider:    "copilot",
-					Model:       largeModel.CatwalkCfg.Name,
-					SettingsURL: "https://github.com/settings/copilot/features",
-				}
-				currentAssistant.AddFinish(
-					message.FinishReasonError,
-					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quotaErr.Model, quotaErr.SettingsURL),
-				)
-				err = quotaErr
-			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
-			}
-		} else if errors.As(err, &fantasyErr) {
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
-		} else if fantasy.IsTransportError(err) {
-			wrapped := fantasy.NewTransportError(err)
-			currentAssistant.AddFinish(message.FinishReasonError, stringext.Capitalize(wrapped.Title), wrapped.Message)
-		} else {
-			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
-		}
-		// Note: we use the cleanup context here because the genCtx has been
-		// cancelled.
-		updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
-		if updateErr != nil {
-			return nil, updateErr
-		}
-		return nil, err
+		return t.handleStreamError(err)
 	}
 
-	if shouldSummarize {
+	if t.shouldSummarize {
 		// Conditional release: only clear our own entry, mirroring the
 		// defer above. An unconditional Del here would erase a newer
 		// run's entry if one raced in and won the session in the window
@@ -982,7 +618,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
-		if len(currentAssistant.ToolCalls()) > 0 {
+		if len(t.currentAssistant.ToolCalls()) > 0 {
 			existing, ok := a.dispatch.messageQueue.Get(call.SessionID)
 			if !ok {
 				existing = []SessionAgentCall{}
@@ -1013,7 +649,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if !call.NonInteractive && a.notify != nil {
 		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			SessionID:    call.SessionID,
-			SessionTitle: currentSession.Title,
+			SessionTitle: t.currentSession.Title,
 			Type:         notify.TypeAgentFinished,
 		})
 	}
@@ -1031,11 +667,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if firstQueued == nil {
 		return result, err
 	}
-	// There are queued messages, restart the loop. Suppress the outer
-	// defer's emit: it would otherwise observe the recursive Run's retErr
-	// (named-return clobbering through the return below) against this
-	// turn's MessageID/Text and publish a mixed, racing event.
-	skipRunComplete = true
+	// There are queued messages, restart the loop. Publishing this
+	// turn's RunComplete explicitly below (when owed) fires reporter's
+	// Once first, so the outer defer's later emit — which would
+	// otherwise observe the recursive Run's retErr (named-return
+	// clobbering through the return below) against this turn's
+	// MessageID/Text — becomes a no-op instead of a mixed, racing
+	// event.
+	//
 	// Decide whether this turn still owes its own terminal RunComplete.
 	// Each submitted prompt with a RunID has its own lifecycle, so a turn
 	// that is finished and handing off to a *different* queued prompt must
@@ -1056,14 +695,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	if outerOwesRunComplete {
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if currentAssistant != nil {
-			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
+		if t.currentAssistant != nil {
+			complete.MessageID = t.currentAssistant.ID
+			complete.Text = t.currentAssistant.Content().String()
 		}
 		if ctx.Err() != nil {
 			complete.Cancelled = true
 		}
-		a.publishRunComplete(ctx, call, complete)
+		reporter.publish(ctx, complete)
+	} else {
+		// Same-RunID re-queue: the recursive turn below owns this
+		// RunID's terminal event. Spend reporter's Once now so the
+		// streaming defer — which fires after the recursive Run
+		// returns and would otherwise observe its clobbered retErr —
+		// finds nothing left to publish.
+		reporter.suppress()
 	}
 	return a.Run(ctx, *firstQueued)
 }

@@ -1,0 +1,487 @@
+package agent
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"charm.land/fantasy"
+	"charm.land/fantasy/providers/anthropic"
+	"charm.land/fantasy/providers/google"
+	"charm.land/fantasy/providers/openai"
+	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/stringext"
+)
+
+// runTurn holds the mutable state a single streaming turn's
+// fantasy.AgentStreamCall callbacks read and write. Run constructs one
+// per accepted call and wires agent.Stream's callbacks to its methods;
+// grouping the state here (instead of ~13 closures over Run's local
+// variables) makes the per-callback data flow explicit instead of implicit
+// in closure capture.
+type runTurn struct {
+	agent *sessionAgent
+	call  SessionAgentCall
+
+	// ctx is Run's outer per-call context (NOT genCtx): several callbacks
+	// deliberately use it instead of genCtx so their writes still land
+	// even if the request is canceled mid-stream.
+	ctx context.Context
+	// genCtx is the stream's cancelable context (canceled by Run's defer
+	// cancel() or by Cancel()/ctx cancellation).
+	genCtx context.Context
+
+	largeModel   Model
+	promptPrefix string
+
+	// userMsgCreated records whether Run already created the turn's user
+	// message before entering Stream, for the error path's
+	// persistCanceledTurn call.
+	userMsgCreated bool
+
+	// sessionLock guards stepMessages and currentSession, both written by
+	// PrepareStep/OnStepFinish under it.
+	sessionLock    sync.Mutex
+	stepMessages   []fantasy.Message
+	currentSession session.Session
+
+	sanitizedToolCalls map[string]bool
+	shouldSummarize    bool
+	// currentAssistant is the in-flight step's assistant message;
+	// PrepareStep (re)assigns it once per streaming step. It's the turn's
+	// final assistant message once streaming ends.
+	currentAssistant *message.Message
+}
+
+// newRunTurn returns a runTurn ready to be wired into a
+// fantasy.AgentStreamCall for the given call.
+func newRunTurn(
+	a *sessionAgent,
+	call SessionAgentCall,
+	ctx, genCtx context.Context,
+	largeModel Model,
+	promptPrefix string,
+	currentSession session.Session,
+	userMsgCreated bool,
+) *runTurn {
+	return &runTurn{
+		agent:              a,
+		call:               call,
+		ctx:                ctx,
+		genCtx:             genCtx,
+		largeModel:         largeModel,
+		promptPrefix:       promptPrefix,
+		userMsgCreated:     userMsgCreated,
+		currentSession:     currentSession,
+		sanitizedToolCalls: make(map[string]bool),
+	}
+}
+
+// prepareStep is the turn's fantasy.PrepareStepFunction. It folds queued
+// follow-up prompts into the step, applies cache-control provider options,
+// and creates the step's assistant message.
+func (t *runTurn) prepareStep(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+	prepared.Messages = options.Messages
+	for i := range prepared.Messages {
+		prepared.Messages[i].ProviderOptions = nil
+	}
+
+	// Use latest tools (updated by SetTools when MCP tools change).
+	prepared.Tools = t.agent.tools.Copy()
+
+	// Drain queued follow-up prompts for this step. Calls covered
+	// by a cancel recorded while they sat in the queue are dropped:
+	// a cancel that arrived after a prompt was queued must not let
+	// it run as part of this step. Coverage is per-call by accept
+	// sequence so a follow-up queued after the cancel (higher seq)
+	// is not dropped. A dropped prompt carrying a RunID still gets
+	// its terminal cancelled RunComplete so a caller waiting on it
+	// does not hang. Uncanceled prompts without a RunID are folded
+	// into this turn; uncanceled prompts with a RunID are left
+	// queued so each runs as its own turn (with its own
+	// RunComplete) via the recursive run path below.
+	fold, canceledRunIDs := t.agent.drainQueueForStep(t.call.SessionID)
+	t.agent.publishCanceledQueueDrops(canceledRunIDs)
+	for _, queued := range fold {
+		userMessage, createErr := t.agent.createUserMessage(callContext, queued)
+		if createErr != nil {
+			return callContext, prepared, createErr
+		}
+		prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+	}
+
+	prepared.Messages = t.agent.workaroundProviderMediaLimitations(prepared.Messages, t.largeModel)
+
+	lastSystemRoleInx := 0
+	systemMessageUpdated := false
+	for i, msg := range prepared.Messages {
+		// Only add cache control to the last message.
+		if msg.Role == fantasy.MessageRoleSystem {
+			lastSystemRoleInx = i
+		} else if !systemMessageUpdated {
+			prepared.Messages[lastSystemRoleInx].ProviderOptions = t.agent.getCacheControlOptions()
+			systemMessageUpdated = true
+		}
+		// Than add cache control to the last 2 messages.
+		if i > len(prepared.Messages)-3 {
+			prepared.Messages[i].ProviderOptions = t.agent.getCacheControlOptions()
+		}
+	}
+
+	if t.promptPrefix != "" {
+		prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(t.promptPrefix)}, prepared.Messages...)
+	}
+
+	t.sessionLock.Lock()
+	t.stepMessages = cloneFantasyMessages(prepared.Messages)
+	t.sessionLock.Unlock()
+
+	var assistantMsg message.Message
+	assistantMsg, err = t.agent.messages.Create(callContext, t.call.SessionID, message.CreateMessageParams{
+		Role:     message.Assistant,
+		Parts:    []message.ContentPart{},
+		Model:    t.largeModel.ModelCfg.Model,
+		Provider: t.largeModel.ModelCfg.Provider,
+	})
+	if err != nil {
+		return callContext, prepared, err
+	}
+	callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
+	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.largeModel.CatwalkCfg.SupportsImages)
+	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.largeModel.CatwalkCfg.Name)
+	t.currentAssistant = &assistantMsg
+	return callContext, prepared, err
+}
+
+func (t *runTurn) onReasoningStart(id string, reasoning fantasy.ReasoningContent) error {
+	t.currentAssistant.AppendReasoningContent(reasoning.Text)
+	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
+}
+
+func (t *runTurn) onReasoningDelta(id string, text string) error {
+	t.currentAssistant.AppendReasoningContent(text)
+	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
+}
+
+func (t *runTurn) onReasoningEnd(id string, reasoning fantasy.ReasoningContent) error {
+	// handle anthropic signature
+	if anthropicData, ok := reasoning.ProviderMetadata[anthropic.Name]; ok {
+		if reasoning, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok {
+			t.currentAssistant.AppendReasoningSignature(reasoning.Signature)
+		}
+	}
+	if googleData, ok := reasoning.ProviderMetadata[google.Name]; ok {
+		if reasoning, ok := googleData.(*google.ReasoningMetadata); ok {
+			t.currentAssistant.AppendThoughtSignature(reasoning.Signature, reasoning.ToolID)
+		}
+	}
+	if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
+		if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
+			t.currentAssistant.SetReasoningResponsesData(reasoning)
+		}
+	}
+	t.currentAssistant.FinishThinking()
+	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
+}
+
+func (t *runTurn) onTextDelta(id string, text string) error {
+	// Strip leading newline from initial text content. This is is
+	// particularly important in non-interactive mode where leading
+	// newlines are very visible.
+	if len(t.currentAssistant.Parts) == 0 {
+		text = strings.TrimPrefix(text, "\n")
+	}
+
+	t.currentAssistant.AppendContent(text)
+	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
+}
+
+func (t *runTurn) onToolInputStart(id string, toolName string) error {
+	toolCall := message.ToolCall{
+		ID:               id,
+		Name:             toolName,
+		ProviderExecuted: false,
+		Finished:         false,
+	}
+	t.currentAssistant.AddToolCall(toolCall)
+	// Use parent ctx instead of genCtx to ensure the update succeeds
+	// even if the request is canceled mid-stream
+	return t.agent.messages.Update(t.ctx, *t.currentAssistant)
+}
+
+func (t *runTurn) onRetry(err *fantasy.ProviderError, delay time.Duration) {
+	slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+	// Reset streamed content so the retried response doesn't
+	// concatenate with partial content from the failed attempt.
+	// On the final attempt (no more retries), any partial content
+	// stays in the message as useful context beneath the error.
+	t.currentAssistant.ResetStreamedContent()
+	if updateErr := t.agent.messages.Update(t.genCtx, *t.currentAssistant); updateErr != nil {
+		slog.Error("Failed to reset message on retry", "error", updateErr)
+	}
+}
+
+// modelProvider is the turn's fantasy.AgentStreamCall.ModelProvider. It is
+// called on each retry attempt so a refreshed model (e.g. after
+// OnAuthRefresh) is picked up.
+func (t *runTurn) modelProvider() fantasy.LanguageModel {
+	m := t.agent.largeModel.Get()
+	slog.Info("ModelProvider called",
+		"provider", m.ModelCfg.Provider,
+		"model", m.ModelCfg.Model)
+	return m.Model
+}
+
+func (t *runTurn) onToolCall(tc fantasy.ToolCallContent) error {
+	input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
+	if wasSanitized {
+		t.sanitizedToolCalls[tc.ToolCallID] = true
+	}
+	toolCall := message.ToolCall{
+		ID:               tc.ToolCallID,
+		Name:             tc.ToolName,
+		Input:            input,
+		ProviderExecuted: false,
+		Finished:         true,
+	}
+	t.currentAssistant.AddToolCall(toolCall)
+	// Use parent ctx instead of genCtx to ensure the update succeeds
+	// even if the request is canceled mid-stream
+	return t.agent.messages.Update(t.ctx, *t.currentAssistant)
+}
+
+func (t *runTurn) onToolResult(result fantasy.ToolResultContent) error {
+	toolResult := t.agent.convertToToolResult(result)
+	if t.sanitizedToolCalls[result.ToolCallID] {
+		toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
+		toolResult.IsError = true
+	}
+	// Use parent ctx instead of genCtx to ensure the message is created
+	// even if the request is canceled mid-stream
+	_, createMsgErr := t.agent.messages.Create(t.ctx, t.currentAssistant.SessionID, message.CreateMessageParams{
+		Role: message.Tool,
+		Parts: []message.ContentPart{
+			toolResult,
+		},
+	})
+	return createMsgErr
+}
+
+func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
+	for _, w := range stepResult.Warnings {
+		slog.Warn("Provider warning", "type", w.Type, "message", w.Message)
+	}
+	finishReason := message.FinishReasonUnknown
+	switch stepResult.FinishReason {
+	case fantasy.FinishReasonLength:
+		finishReason = message.FinishReasonMaxTokens
+	case fantasy.FinishReasonStop:
+		finishReason = message.FinishReasonEndTurn
+	case fantasy.FinishReasonToolCalls:
+		finishReason = message.FinishReasonToolUse
+	case fantasy.FinishReasonContentFilter:
+		// Provider safety classifier stopped the model
+		// (Anthropic stop_reason=refusal, OpenAI content_filter).
+		// The TUI owns the display copy; we only persist the
+		// reason so the UI can show a REFUSED banner.
+		finishReason = message.FinishReasonContentFilter
+		slog.Warn(
+			"Provider content filter stopped the model",
+			"session_id", t.call.SessionID,
+			"finish_reason", string(stepResult.FinishReason),
+		)
+	}
+	// If a tool result halted the turn (e.g. a hook halt or a
+	// permission denial), the step ends on FinishReasonToolCalls but
+	// the model will not be called again. Treat it as the end of the
+	// turn so the UI can render the assistant footer.
+	if finishReason == message.FinishReasonToolUse {
+		for _, tr := range stepResult.Content.ToolResults() {
+			if tr.StopTurn {
+				finishReason = message.FinishReasonEndTurn
+				break
+			}
+		}
+	}
+	t.currentAssistant.AddFinish(finishReason, "", "")
+	t.sessionLock.Lock()
+	defer t.sessionLock.Unlock()
+
+	updatedSession, getSessionErr := t.agent.sessions.Get(t.ctx, t.call.SessionID)
+	if getSessionErr != nil {
+		return getSessionErr
+	}
+	usage, estimated := fallbackStepUsage(t.stepMessages, stepResult)
+	t.agent.updateSessionUsage(t.largeModel, &updatedSession, usage, t.agent.openrouterCost(stepResult.ProviderMetadata), estimated)
+	_, sessionErr := t.agent.sessions.Save(t.ctx, updatedSession)
+	if sessionErr != nil {
+		return sessionErr
+	}
+	t.currentSession = updatedSession
+	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
+}
+
+// stopOnContextWindow is the auto-summarize StopWhen condition: it stops
+// the turn once the session's token usage crosses the context-window
+// threshold, so Run's tail can kick off a summarize pass.
+func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
+	cw := int64(t.largeModel.CatwalkCfg.ContextWindow)
+	// If context window is unknown (0), skip auto-summarize
+	// to avoid immediately truncating custom/local models.
+	if cw == 0 {
+		return false
+	}
+	tokens := t.currentSession.CompletionTokens + t.currentSession.PromptTokens
+	remaining := cw - tokens
+	var threshold int64
+	if cw > largeContextWindowThreshold {
+		threshold = largeContextWindowBuffer
+	} else {
+		threshold = int64(float64(cw) * smallContextWindowRatio)
+	}
+	if (remaining <= threshold) && !t.agent.disableAutoSummarize {
+		t.shouldSummarize = true
+		return true
+	}
+	return false
+}
+
+// handleStreamError implements Run's post-Stream error path: it finalizes
+// the assistant message (closing out any unfinished tool calls with a
+// synthetic error result), records a finish reason describing the error,
+// and persists the result with a context detached from the canceled run
+// context.
+func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
+	isCancelErr := errors.Is(err, context.Canceled)
+	slog.Info("Agent stream returned error",
+		"error", err.Error(),
+		"error_type", fmt.Sprintf("%T", err),
+		"is_cancel", isCancelErr)
+	if t.currentAssistant == nil {
+		// Cancel-before-assistant-creation window: the run was
+		// canceled after activeRequests.Set but before PrepareStep
+		// created the assistant message. Without this, the turn
+		// would return with no FinishReasonCanceled marker and no
+		// user-visible record. The user message was already created
+		// above, so persistCanceledTurn only writes the assistant
+		// record.
+		if isCancelErr {
+			if persistErr := t.agent.persistCanceledTurn(t.ctx, t.call, t.userMsgCreated); persistErr != nil {
+				return nil, persistErr
+			}
+		}
+		return nil, err
+	}
+	// Persist final state with a context detached from the run
+	// context. The run context (ctx) is derived from the
+	// workspace context, which workspace shutdown cancels before
+	// agent goroutines finish; using ctx here would drop the
+	// final assistant state. WithoutCancel keeps the values
+	// (e.g. session ID) while ignoring cancellation, and a short
+	// timeout bounds the cleanup writes.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(t.ctx), 5*time.Second)
+	defer cleanupCancel()
+	// Ensure we finish thinking on error to close the reasoning state.
+	t.currentAssistant.FinishThinking()
+	toolCalls := t.currentAssistant.ToolCalls()
+	// INFO: we use the cleanup context here because the genCtx has been cancelled.
+	msgs, createErr := t.agent.messages.List(cleanupCtx, t.currentAssistant.SessionID)
+	if createErr != nil {
+		return nil, createErr
+	}
+	for _, tc := range toolCalls {
+		if !tc.Finished {
+			tc.Finished = true
+			tc.Input = "{}"
+			t.currentAssistant.AddToolCall(tc)
+			updateErr := t.agent.messages.Update(cleanupCtx, *t.currentAssistant)
+			if updateErr != nil {
+				return nil, updateErr
+			}
+		}
+
+		found := false
+		for _, msg := range msgs {
+			if msg.Role == message.Tool {
+				for _, tr := range msg.ToolResults() {
+					if tr.ToolCallID == tc.ID {
+						found = true
+						break
+					}
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		content := "There was an error while executing the tool"
+		if isCancelErr {
+			content = "Error: user cancelled assistant tool calling"
+		}
+		toolResult := message.ToolResult{
+			ToolCallID: tc.ID,
+			Name:       tc.Name,
+			Content:    content,
+			IsError:    true,
+		}
+		_, createErr = t.agent.messages.Create(cleanupCtx, t.currentAssistant.SessionID, message.CreateMessageParams{
+			Role: message.Tool,
+			Parts: []message.ContentPart{
+				toolResult,
+			},
+		})
+		if createErr != nil {
+			return nil, createErr
+		}
+	}
+	var fantasyErr *fantasy.Error
+	var providerErr *fantasy.ProviderError
+	const defaultTitle = "Provider Error"
+	if isCancelErr {
+		t.currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+	} else if errors.As(err, &providerErr) {
+		if providerErr.Message == "The requested model is not supported." {
+			// The TUI owns the display copy: return a typed error so
+			// callers can render their own styled hyperlink instead of
+			// agent baking terminal escape codes into persisted
+			// message content.
+			quotaErr := &ProviderQuotaError{
+				Provider:    "copilot",
+				Model:       t.largeModel.CatwalkCfg.Name,
+				SettingsURL: "https://github.com/settings/copilot/features",
+			}
+			t.currentAssistant.AddFinish(
+				message.FinishReasonError,
+				"Copilot model not enabled",
+				fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quotaErr.Model, quotaErr.SettingsURL),
+			)
+			err = quotaErr
+		} else {
+			t.currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+		}
+	} else if errors.As(err, &fantasyErr) {
+		t.currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+	} else if fantasy.IsTransportError(err) {
+		wrapped := fantasy.NewTransportError(err)
+		t.currentAssistant.AddFinish(message.FinishReasonError, stringext.Capitalize(wrapped.Title), wrapped.Message)
+	} else {
+		t.currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
+	}
+	// Note: we use the cleanup context here because the genCtx has been
+	// cancelled.
+	updateErr := t.agent.messages.Update(cleanupCtx, *t.currentAssistant)
+	if updateErr != nil {
+		return nil, updateErr
+	}
+	return nil, err
+}
