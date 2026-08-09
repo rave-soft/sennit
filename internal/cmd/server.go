@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/braid/internal/hostaddr"
 	braidlog "github.com/rave-soft/braid/internal/log"
 	"github.com/rave-soft/braid/internal/server"
+	"github.com/rave-soft/braid/internal/server/supervisor"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +49,7 @@ var serverCmd = &cobra.Command{
 			return fmt.Errorf("invalid server host: %v", err)
 		}
 
-		logFile := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "braid.log")
+		logFile := filepath.Join(config.GlobalCacheDir(), "server-"+supervisor.SafeHostName(hostURL), "braid.log")
 
 		if term.IsTerminal(os.Stderr.Fd()) {
 			braidlog.Setup(logFile, debug, os.Stderr)
