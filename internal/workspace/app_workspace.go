@@ -256,7 +256,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 	}
 
 	// Wait for MCP initialization to complete before reading MCP tools.
-	if err := mcptools.WaitForInit(ctx); err != nil {
+	if err := w.app.MCP.WaitForInit(ctx); err != nil {
 		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
@@ -413,7 +413,7 @@ func (w *AppWorkspace) LSPStopAll(ctx context.Context) {
 }
 
 func (w *AppWorkspace) LSPGetStates() map[string]LSPClientInfo {
-	states := app.GetLSPStates()
+	states := w.app.GetLSPStates()
 	result := make(map[string]LSPClientInfo, len(states))
 	for k, v := range states {
 		result[k] = LSPClientInfo{
@@ -428,7 +428,7 @@ func (w *AppWorkspace) LSPGetStates() map[string]LSPClientInfo {
 }
 
 func (w *AppWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
-	state, ok := app.GetLSPState(name)
+	state, ok := w.app.GetLSPState(name)
 	if !ok || state.Client == nil {
 		return lsp.DiagnosticCounts{}
 	}
@@ -516,24 +516,43 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 
 // -- MCP operations --
 
+func (w *AppWorkspace) WaitForMCPInit(ctx context.Context) error {
+	return w.app.MCP.WaitForInit(ctx)
+}
+
 func (w *AppWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {
-	return mcptools.GetStates()
+	return w.app.MCP.GetStates()
+}
+
+func (w *AppWorkspace) MCPResources() []MCPResourceInfo {
+	var result []MCPResourceInfo
+	for mcpName, resources := range w.app.MCP.Resources() {
+		for _, r := range resources {
+			result = append(result, MCPResourceInfo{
+				MCPName:  mcpName,
+				URI:      r.URI,
+				Title:    r.Name,
+				MIMEType: r.MIMEType,
+			})
+		}
+	}
+	return result
 }
 
 func (w *AppWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
-	mcptools.RefreshPrompts(ctx, name)
+	w.app.MCP.RefreshPrompts(ctx, name)
 }
 
 func (w *AppWorkspace) MCPRefreshResources(ctx context.Context, name string) {
-	mcptools.RefreshResources(ctx, name)
+	w.app.MCP.RefreshResources(ctx, name)
 }
 
 func (w *AppWorkspace) RefreshMCPTools(ctx context.Context, name string) {
-	mcptools.RefreshTools(ctx, w.store, name)
+	w.app.MCP.RefreshTools(ctx, w.store, name)
 }
 
 func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
-	contents, err := mcptools.ReadResource(ctx, w.store, name, uri)
+	contents, err := w.app.MCP.ReadResource(ctx, w.store, name, uri)
 	if err != nil {
 		return nil, err
 	}
@@ -550,11 +569,11 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 }
 
 func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, error) {
-	return commands.LoadMCPPrompts()
+	return commands.LoadMCPPrompts(w.app.MCP)
 }
 
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
-	return commands.GetMCPPrompt(w.store, clientID, promptID, args)
+	return commands.GetMCPPrompt(w.app.MCP, w.store, clientID, promptID, args)
 }
 
 func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
@@ -563,14 +582,14 @@ func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
 		return err
 	}
 
-	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, w.store); err != nil {
-		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
+	if err := w.app.MCP.InitializeSingle(ctx, config.DockerMCPName, w.store); err != nil {
+		disableErr := w.app.MCP.DisableSingle(w.store, config.DockerMCPName)
 		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
 	if err := w.store.PersistDockerMCPConfig(mcpConfig); err != nil {
-		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
+		disableErr := w.app.MCP.DisableSingle(w.store, config.DockerMCPName)
 		w.store.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
 	}
@@ -579,22 +598,22 @@ func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
 }
 
 func (w *AppWorkspace) DisableDockerMCP() error {
-	if err := mcptools.DisableSingle(w.store, config.DockerMCPName); err != nil {
+	if err := w.app.MCP.DisableSingle(w.store, config.DockerMCPName); err != nil {
 		return fmt.Errorf("failed to disable docker MCP: %w", err)
 	}
 	return w.store.DisableDockerMCP()
 }
 
 func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
-	return mcptools.AuthenticateMCP(ctx, w.store, name)
+	return w.app.MCP.AuthenticateMCP(ctx, w.store, name)
 }
 
 func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
-	return mcptools.PendingAuthMCPs(w.store)
+	return w.app.MCP.PendingAuthMCPs(w.store)
 }
 
 func (w *AppWorkspace) MCPAuthURL(name string) string {
-	return mcptools.MCPAuthURL(name)
+	return w.app.MCP.MCPAuthURL(name)
 }
 
 // -- Lifecycle --

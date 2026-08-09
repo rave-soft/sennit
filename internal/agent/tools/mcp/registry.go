@@ -22,11 +22,13 @@ import (
 // single process could only ever run one MCP registry: a second workspace's
 // app.New silently stomped the first's sessions, and closing either
 // workspace shut down the broker for both (see ARCHITECTURE_REVIEW.md
-// section 3.1). Registry makes the state instantiable so each workspace can
-// (eventually) own its own. The package-level functions below still operate
-// against a single [defaultRegistry] for source compatibility with existing
-// callers; see init.go's refcounted Close for the stopgap that keeps that
-// shared registry from tearing down other workspaces' event streams.
+// section 3.1). Every app.App now constructs and owns its own *Registry
+// (app.App.MCP), so two workspaces in one process no longer share sessions,
+// states, auth handlers, or the event broker. The package-level functions
+// below still operate against a single [defaultRegistry] purely for source
+// compatibility with tests and any caller that constructs a Registry
+// directly rather than via app.New; production call sites all go through
+// app.App.MCP.
 type Registry struct {
 	sessions *csync.Map[string, *ClientSession]
 	states   *csync.Map[string, ClientInfo]
@@ -69,14 +71,12 @@ type Registry struct {
 	// workspace's registration does not tear down the shared event stream
 	// out from under another workspace still using this same registry.
 	//
-	// TODO(workspace-scoping): sessions, authURLs, and every other field
-	// above are still shared (keyed only by MCP server name) across every
-	// caller of the package-level wrapper functions, which all delegate to
-	// defaultRegistry. Only the broker shutdown is gated here; a second
-	// workspace configuring an MCP server with the same name as the first
-	// still clobbers its session. Fixing that requires each workspace to own
-	// its own *Registry (see ARCHITECTURE_REVIEW.md 3.1); this refcount is a
-	// minimal stopgap for the broker-shutdown half of the bug.
+	// Now that each app.App owns a dedicated *Registry, ArmInit/Close are
+	// called exactly once per Registry in production, so this refcount
+	// trivially goes 0->1->0 there. It stays in place because defaultRegistry
+	// is still a genuinely shared *Registry (see its doc), and any caller
+	// that arms it (e.g. a test exercising the package-level API directly)
+	// still needs the shutdown-gating this provides.
 	refMu          sync.Mutex
 	liveWorkspaces int
 }
@@ -209,35 +209,23 @@ func (r *Registry) Close(ctx context.Context) error {
 
 // SubscribeEvents returns a channel for MCP events.
 //
-// Channel message events (EventChannelMessage) are excluded: they carry no
-// workspace or session identity, and defaultRegistry is shared across every
-// workspace that hasn't been migrated to its own Registry. Without this
-// filter, every workspace that calls SubscribeEvents would receive every
-// other workspace's channel events — a cross-workspace injection path.
-// Channel delivery requires workspace-scoped routing, which is deferred to a
-// later PR; until then, channel events must not flow through the shared
-// event fan-out.
+// Every App-backed workspace now owns its own *Registry with its own
+// broker (see NewRegistry / app.App.MCP), so a subscriber here only ever
+// sees this registry's own servers' events — there is no cross-workspace
+// fan-out to guard against anymore. Channel message events
+// (EventChannelMessage) used to be filtered out here specifically because
+// they carried no workspace/session identity and defaultRegistry was
+// shared; that filter is gone. What still isn't wired up is delivery:
+// downstream consumers (server/events.go's SSE bridge, the TUI's mcp.Event
+// switch) don't yet do anything with EventChannelMessage, so it currently
+// just passes through unconsumed rather than injecting into a session. See
+// ARCHITECTURE_REVIEW.md section 3.1.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return defaultRegistry.SubscribeEvents(ctx)
 }
 
 func (r *Registry) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
-	raw := r.broker.Subscribe(ctx)
-	filtered := make(chan pubsub.Event[Event], 64)
-	go func() {
-		defer close(filtered)
-		for ev := range raw {
-			if ev.Payload.Type == EventChannelMessage {
-				continue
-			}
-			select {
-			case filtered <- ev:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return filtered
+	return r.broker.Subscribe(ctx)
 }
 
 // GetStates returns the current state of all MCP clients.

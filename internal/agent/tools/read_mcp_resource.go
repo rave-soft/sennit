@@ -30,7 +30,7 @@ const ReadMCPResourceToolName = "read_mcp_resource"
 //go:embed read_mcp_resource.md
 var readMCPResourceDescription string
 
-func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
+func NewReadMCPResourceTool(cfg *config.ConfigStore, reg *mcp.Registry, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ReadMCPResourceToolName,
 		readMCPResourceDescription,
@@ -66,7 +66,7 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 				return resp, nil
 			}
 
-			contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)
+			contents, err := reg.ReadResource(ctx, cfg, params.MCPName, params.URI)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

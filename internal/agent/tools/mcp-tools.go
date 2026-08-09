@@ -20,10 +20,14 @@ var whitelistDockerTools = []string{
 	"mcp_docker_code-mode",
 }
 
-// GetMCPTools gets all the currently available MCP tools.
-func GetMCPTools(permissions permission.Service, cfg *config.ConfigStore, wd string) []*Tool {
+// GetMCPTools gets all the currently available MCP tools from reg, the
+// caller's per-workspace MCP registry.
+func GetMCPTools(reg *mcp.Registry, permissions permission.Service, cfg *config.ConfigStore, wd string) []*Tool {
+	if reg == nil {
+		return nil
+	}
 	var result []*Tool
-	for mcpName, tools := range mcp.Tools() {
+	for mcpName, tools := range reg.Tools() {
 		for _, tool := range tools {
 			result = append(result, &Tool{
 				mcpName:     mcpName,
@@ -31,6 +35,7 @@ func GetMCPTools(permissions permission.Service, cfg *config.ConfigStore, wd str
 				permissions: permissions,
 				workingDir:  wd,
 				cfg:         cfg,
+				reg:         reg,
 			})
 		}
 	}
@@ -45,6 +50,7 @@ type Tool struct {
 	permissions     permission.Service
 	workingDir      string
 	providerOptions fantasy.ProviderOptions
+	reg             *mcp.Registry
 }
 
 func (m *Tool) SetProviderOptions(opts fantasy.ProviderOptions) {
@@ -122,7 +128,7 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		}
 	}
 
-	result, err := mcp.RunTool(ctx, m.cfg, m.mcpName, m.tool.Name, params.Input)
+	result, err := m.reg.RunTool(ctx, m.cfg, m.mcpName, m.tool.Name, params.Input)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}

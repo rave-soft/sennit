@@ -12,7 +12,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/ordered"
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/ui/list"
 )
@@ -140,8 +139,10 @@ func (c *Completions) KeyMap() KeyMap {
 	return c.keyMap
 }
 
-// Open opens the completions with file items from the filesystem.
-func (c *Completions) Open(depth, limit int) tea.Cmd {
+// Open opens the completions with file items from the filesystem and MCP
+// resources from loadResources, which the caller supplies bound to its
+// workspace.Workspace (this package has no backend dependency of its own).
+func (c *Completions) Open(depth, limit int, loadResources func() []ResourceCompletionValue) tea.Cmd {
 	return func() tea.Msg {
 		var msg CompletionItemsLoadedMsg
 		var wg sync.WaitGroup
@@ -149,7 +150,7 @@ func (c *Completions) Open(depth, limit int) tea.Cmd {
 			msg.Files = loadFiles(depth, limit)
 		})
 		wg.Go(func() {
-			msg.Resources = loadMCPResources()
+			msg.Resources = loadResources()
 		})
 		wg.Wait()
 		return msg
@@ -414,19 +415,4 @@ func loadFiles(depth, limit int) []FileCompletionValue {
 		})
 	}
 	return result
-}
-
-func loadMCPResources() []ResourceCompletionValue {
-	var resources []ResourceCompletionValue
-	for mcpName, mcpResources := range mcp.Resources() {
-		for _, r := range mcpResources {
-			resources = append(resources, ResourceCompletionValue{
-				MCPName:  mcpName,
-				URI:      r.URI,
-				Title:    r.Name,
-				MIMEType: r.MIMEType,
-			})
-		}
-	}
-	return resources
 }

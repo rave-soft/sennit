@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/rave-soft/braid/internal/agent"
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/oauth"
@@ -24,12 +23,11 @@ func publishConfigChanged(ws *Workspace) {
 		return
 	}
 
-	// Re-init MCP servers whose config changed. MCP state is process-global,
-	// so this only needs to happen once regardless of which workspace
-	// triggered the write. Run async so unrelated config writes (model
-	// switches, API keys) don't block on MCP reconciliation. Bound to the
-	// workspace ctx so teardown cancels any in-flight init.
-	go mcptools.Reinitialize(ws.ctx, ws.Cfg)
+	// Re-init MCP servers whose config changed, against this workspace's own
+	// registry. Run async so unrelated config writes (model switches, API
+	// keys) don't block on MCP reconciliation. Bound to the workspace ctx so
+	// teardown cancels any in-flight init.
+	go ws.MCP.Reinitialize(ws.ctx, ws.Cfg)
 
 	ws.SendEvent(pubsub.Event[proto.ConfigChanged]{
 		Type:    pubsub.UpdatedEvent,
@@ -229,14 +227,14 @@ func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error
 		return err
 	}
 
-	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, ws.Cfg); err != nil {
-		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
+	if err := ws.MCP.InitializeSingle(ctx, config.DockerMCPName, ws.Cfg); err != nil {
+		disableErr := ws.MCP.DisableSingle(ws.Cfg, config.DockerMCPName)
 		ws.Cfg.RemoveDockerMCPInMemory()
 		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
 	}
 
 	if err := ws.Cfg.PersistDockerMCPConfig(mcpConfig); err != nil {
-		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
+		disableErr := ws.MCP.DisableSingle(ws.Cfg, config.DockerMCPName)
 		ws.Cfg.RemoveDockerMCPInMemory()
 		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
 	}
@@ -253,7 +251,7 @@ func (b *Backend) DisableDockerMCP(workspaceID string) error {
 		return err
 	}
 
-	if err := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName); err != nil {
+	if err := ws.MCP.DisableSingle(ws.Cfg, config.DockerMCPName); err != nil {
 		return fmt.Errorf("failed to disable docker MCP: %w", err)
 	}
 
@@ -271,7 +269,7 @@ func (b *Backend) RefreshMCPTools(ctx context.Context, workspaceID, name string)
 	if err != nil {
 		return err
 	}
-	mcptools.RefreshTools(ctx, ws.Cfg, name)
+	ws.MCP.RefreshTools(ctx, ws.Cfg, name)
 	return nil
 }
 
@@ -281,7 +279,7 @@ func (b *Backend) ReadMCPResource(ctx context.Context, workspaceID, name, uri st
 	if err != nil {
 		return nil, err
 	}
-	contents, err := mcptools.ReadResource(ctx, ws.Cfg, name, uri)
+	contents, err := ws.MCP.ReadResource(ctx, ws.Cfg, name, uri)
 	if err != nil {
 		return nil, err
 	}
@@ -303,14 +301,15 @@ func (b *Backend) GetMCPPrompt(workspaceID, clientID, promptID string, args map[
 	if err != nil {
 		return "", err
 	}
-	return commands.GetMCPPrompt(ws.Cfg, clientID, promptID, args)
+	return commands.GetMCPPrompt(ws.MCP, ws.Cfg, clientID, promptID, args)
 }
 
 func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) {
-	if _, err := b.GetWorkspace(workspaceID); err != nil {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
 		return nil, err
 	}
-	prompts, err := commands.LoadMCPPrompts()
+	prompts, err := commands.LoadMCPPrompts(ws.MCP)
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +331,29 @@ func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) 
 			PromptID:    prompt.PromptID,
 			ClientID:    prompt.ClientID,
 			Arguments:   arguments,
+		}
+	}
+	return result, nil
+}
+
+// ListMCPResources returns the cached resource catalog (across all
+// connected MCP servers) for a workspace, e.g. for completion popups. This
+// is the registry's already-fetched list, unlike ReadMCPResource which
+// fetches live content for one resource.
+func (b *Backend) ListMCPResources(workspaceID string) ([]proto.MCPResource, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	var result []proto.MCPResource
+	for mcpName, resources := range ws.MCP.Resources() {
+		for _, r := range resources {
+			result = append(result, proto.MCPResource{
+				MCPName:  mcpName,
+				URI:      r.URI,
+				Title:    r.Name,
+				MIMEType: r.MIMEType,
+			})
 		}
 	}
 	return result, nil

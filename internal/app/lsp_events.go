@@ -36,28 +36,43 @@ type LSPClientInfo struct {
 	ConnectedAt     time.Time
 }
 
-var (
-	lspStates = csync.NewMap[string, LSPClientInfo]()
-	lspBroker = pubsub.NewBroker[LSPEvent]()
-)
-
-// SubscribeLSPEvents returns a channel for LSP events
-func SubscribeLSPEvents(ctx context.Context) <-chan pubsub.Event[LSPEvent] {
-	return lspBroker.Subscribe(ctx)
+// lspEvents holds one workspace's LSP client state and event broker. It
+// used to be a pair of package-level vars, which meant every App in a
+// process (multi-client backend mode) shared one LSP status table: a
+// second workspace's LSP clients silently overwrote the first's, and
+// GetLSPStates() had no way to answer "which workspace's LSP clients?".
+// Embedded directly in App so each workspace owns its own (see
+// ARCHITECTURE_REVIEW.md section 3.1).
+type lspEvents struct {
+	states *csync.Map[string, LSPClientInfo]
+	broker *pubsub.Broker[LSPEvent]
 }
 
-// GetLSPStates returns the current state of all LSP clients
-func GetLSPStates() map[string]LSPClientInfo {
-	return lspStates.Copy()
+func newLSPEvents() *lspEvents {
+	return &lspEvents{
+		states: csync.NewMap[string, LSPClientInfo](),
+		broker: pubsub.NewBroker[LSPEvent](),
+	}
 }
 
-// GetLSPState returns the state of a specific LSP client
-func GetLSPState(name string) (LSPClientInfo, bool) {
-	return lspStates.Get(name)
+// SubscribeLSPEvents returns a channel for this workspace's LSP events.
+func (l *lspEvents) SubscribeLSPEvents(ctx context.Context) <-chan pubsub.Event[LSPEvent] {
+	return l.broker.Subscribe(ctx)
 }
 
-// updateLSPState updates the state of an LSP client and publishes an event
-func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.Client, diagnosticCount int) {
+// GetLSPStates returns the current state of all of this workspace's LSP
+// clients.
+func (l *lspEvents) GetLSPStates() map[string]LSPClientInfo {
+	return l.states.Copy()
+}
+
+// GetLSPState returns the state of a specific LSP client.
+func (l *lspEvents) GetLSPState(name string) (LSPClientInfo, bool) {
+	return l.states.Get(name)
+}
+
+// updateLSPState updates the state of an LSP client and publishes an event.
+func (l *lspEvents) updateLSPState(name string, state lsp.ServerState, err error, client *lsp.Client, diagnosticCount int) {
 	info := LSPClientInfo{
 		Name:            name,
 		State:           state,
@@ -67,13 +82,13 @@ func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.C
 	}
 	if state == lsp.StateReady {
 		info.ConnectedAt = time.Now()
-	} else if existing, ok := lspStates.Get(name); ok {
+	} else if existing, ok := l.states.Get(name); ok {
 		info.ConnectedAt = existing.ConnectedAt
 	}
-	lspStates.Set(name, info)
+	l.states.Set(name, info)
 
 	// Publish state change event
-	lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
+	l.broker.Publish(pubsub.UpdatedEvent, LSPEvent{
 		Type:            LSPEventStateChanged,
 		Name:            name,
 		State:           state,
@@ -82,14 +97,15 @@ func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.C
 	})
 }
 
-// updateLSPDiagnostics updates the diagnostic count for an LSP client and publishes an event
-func updateLSPDiagnostics(name string, diagnosticCount int) {
-	if info, exists := lspStates.Get(name); exists {
+// updateLSPDiagnostics updates the diagnostic count for an LSP client and
+// publishes an event.
+func (l *lspEvents) updateLSPDiagnostics(name string, diagnosticCount int) {
+	if info, exists := l.states.Get(name); exists {
 		info.DiagnosticCount = diagnosticCount
-		lspStates.Set(name, info)
+		l.states.Set(name, info)
 
 		// Publish diagnostics change event
-		lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
+		l.broker.Publish(pubsub.UpdatedEvent, LSPEvent{
 			Type:            LSPEventDiagnosticsChanged,
 			Name:            name,
 			State:           info.State,

@@ -23,6 +23,7 @@ type BraidInfoParams struct{}
 
 func NewBraidInfoTool(
 	cfg *config.ConfigStore,
+	reg *mcp.Registry,
 	lspManager *lsp.Manager,
 	allSkills []*skills.Skill,
 	activeSkills []*skills.Skill,
@@ -32,20 +33,25 @@ func NewBraidInfoTool(
 		BraidInfoToolName,
 		braidInfoDescription,
 		func(ctx context.Context, _ BraidInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			return fantasy.NewTextResponse(buildBraidInfo(cfg, lspManager, allSkills, activeSkills, skillTracker)), nil
+			return fantasy.NewTextResponse(buildBraidInfo(cfg, reg, lspManager, allSkills, activeSkills, skillTracker)), nil
 		},
 	)
 }
 
-func buildBraidInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
+func buildBraidInfo(cfg *config.ConfigStore, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
 	var b strings.Builder
+
+	var mcpStates map[string]mcp.ClientInfo
+	if reg != nil {
+		mcpStates = reg.GetStates()
+	}
 
 	writeConfigFiles(&b, cfg)
 	writeConfigStaleness(&b, cfg)
 	writeModels(&b, cfg)
 	writeProviders(&b, cfg)
 	writeLSP(&b, lspManager, cfg)
-	writeMCP(&b, mcp.GetStates(), cfg)
+	writeMCP(&b, mcpStates, cfg)
 	writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
 	writeHooks(&b, cfg)
 	writePermissions(&b, cfg)

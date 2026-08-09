@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseChannelParams(t *testing.T) {
@@ -587,48 +588,52 @@ func TestChannelConnDiscardsBufferOnClosedGate(t *testing.T) {
 	}
 }
 
-// TestSubscribeEventsFiltersChannelMessages verifies that SubscribeEvents
-// strips EventChannelMessage events from the stream. The MCP defaultRegistry.broker is
-// process-global and channel events carry no workspace/session identity, so
-// forwarding them to every workspace's app event stream would be a
-// cross-workspace injection path. Channel delivery requires workspace-scoped
-// routing (deferred to a later PR); until then, SubscribeEvents must not
-// forward channel events.
-func TestSubscribeEventsFiltersChannelMessages(t *testing.T) {
+// TestSubscribeEventsDeliversChannelMessagesPerRegistry verifies two
+// things now that each workspace owns its own *Registry (ARCHITECTURE_REVIEW.md
+// 3.1, stage 3): SubscribeEvents no longer strips EventChannelMessage (there
+// is no longer a shared broker to leak across workspaces on), and two
+// independent registries stay isolated from each other regardless.
+func TestSubscribeEventsDeliversChannelMessagesPerRegistry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	filtered := SubscribeEvents(ctx)
+	regA := NewRegistry()
+	regB := NewRegistry()
+	subA := regA.SubscribeEvents(ctx)
+	subB := regB.SubscribeEvents(ctx)
 
-	// Publish a state change (should pass through) and a channel message
-	// (should be filtered out).
-	defaultRegistry.broker.Publish(pubsub.UpdatedEvent, Event{
+	regA.broker.Publish(pubsub.UpdatedEvent, Event{
 		Type: EventStateChanged,
 		Name: "srv",
 	})
-	defaultRegistry.broker.Publish(pubsub.CreatedEvent, Event{
+	regA.broker.Publish(pubsub.CreatedEvent, Event{
 		Type:           EventChannelMessage,
 		Name:           "webhook",
-		ChannelMessage: `<channel source="webhook">leak?</channel>`,
+		ChannelMessage: `<channel source="webhook">hello</channel>`,
 	})
 
-	// We should receive the state change but NOT the channel message.
-	gotState := false
+	// regA's own subscriber sees both events, including the channel message.
+	gotState, gotChannel := false, false
 	deadline := time.After(time.Second)
-	for {
+	for !gotState || !gotChannel {
 		select {
-		case ev := <-filtered:
-			if ev.Payload.Type == EventChannelMessage {
-				t.Fatal("EventChannelMessage leaked through SubscribeEvents filter")
-			}
-			if ev.Payload.Type == EventStateChanged {
+		case ev := <-subA:
+			switch ev.Payload.Type {
+			case EventStateChanged:
 				gotState = true
+			case EventChannelMessage:
+				gotChannel = true
+				require.Equal(t, `<channel source="webhook">hello</channel>`, ev.Payload.ChannelMessage)
 			}
 		case <-deadline:
-			if !gotState {
-				t.Fatal("state change event was not received")
-			}
-			return
+			t.Fatalf("did not receive both events: state=%v channel=%v", gotState, gotChannel)
 		}
+	}
+
+	// regB is a separate registry: it must not see regA's events at all.
+	select {
+	case ev := <-subB:
+		t.Fatalf("regB's subscriber must not receive regA's events, got %+v", ev.Payload)
+	case <-time.After(200 * time.Millisecond):
 	}
 }

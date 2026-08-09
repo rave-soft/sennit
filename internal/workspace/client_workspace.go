@@ -881,6 +881,32 @@ func (w *ClientWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte
 
 // -- MCP operations --
 
+// WaitForMCPInit is a no-op for the remote client: MCP initialization runs
+// server-side as part of workspace creation, and MCP state changes reach
+// this client live over the event subscription, so there is nothing local
+// to block on.
+func (w *ClientWorkspace) WaitForMCPInit(context.Context) error {
+	return nil
+}
+
+func (w *ClientWorkspace) MCPResources() []MCPResourceInfo {
+	resources, err := w.client.ListMCPResources(context.Background(), w.workspaceID())
+	if err != nil {
+		slog.Warn("Failed to list MCP resources", "error", err)
+		return nil
+	}
+	result := make([]MCPResourceInfo, len(resources))
+	for i, r := range resources {
+		result[i] = MCPResourceInfo{
+			MCPName:  r.MCPName,
+			URI:      r.URI,
+			Title:    r.Title,
+			MIMEType: r.MIMEType,
+		}
+	}
+	return result
+}
+
 func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
 	states, err := w.client.MCPGetStates(context.Background(), w.workspaceID())
 	if err != nil {

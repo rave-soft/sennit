@@ -253,7 +253,15 @@ type ProjectLifecycle interface {
 // MCPController manages MCP server connections and their tools, prompts,
 // and resources (server-side in client mode).
 type MCPController interface {
+	// WaitForMCPInit blocks until this workspace's MCP servers have
+	// finished their initial connection attempt (or ctx is done). Used by
+	// the UI to avoid reporting "no pending auth" before slow servers have
+	// had a chance to reach StateNeedsAuth.
+	WaitForMCPInit(ctx context.Context) error
 	MCPGetStates() map[string]mcptools.ClientInfo
+	// MCPResources returns the cached resource catalog across all
+	// connected MCP servers, e.g. for completion popups.
+	MCPResources() []MCPResourceInfo
 	MCPRefreshPrompts(ctx context.Context, name string)
 	MCPRefreshResources(ctx context.Context, name string)
 	RefreshMCPTools(ctx context.Context, name string)
@@ -317,4 +325,13 @@ type MCPResourceContents struct {
 	MIMEType string `json:"mime_type,omitempty"`
 	Text     string `json:"text,omitempty"`
 	Blob     []byte `json:"blob,omitempty"`
+}
+
+// MCPResourceInfo describes one resource advertised by an MCP server, as
+// returned by MCPResources' catalog listing.
+type MCPResourceInfo struct {
+	MCPName  string
+	URI      string
+	Title    string
+	MIMEType string
 }

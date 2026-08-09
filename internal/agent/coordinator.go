@@ -82,6 +82,7 @@ type coordinator struct {
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
+	mcp         *mcp.Registry
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -110,6 +111,12 @@ type CoordinatorOptions struct {
 	RunComplete pubsub.Publisher[notify.RunComplete]
 	Skills      *skills.Manager
 	Interactive bool
+	// MCP is the per-workspace MCP registry. Every consumer that used to
+	// reach for the mcp package's shared defaultRegistry now goes through
+	// this instance so two workspaces in one process don't share sessions,
+	// states, or auth handlers keyed by MCP server name. See
+	// ARCHITECTURE_REVIEW.md section 3.1.
+	MCP *mcp.Registry
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -142,6 +149,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
+		mcp:          opts.MCP,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -189,7 +197,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// not have registered their tools yet when buildTools reads the registry,
 	// so their tools silently never appear in the LLM tool palette — even
 	// though braid_info reports them as connected.
-	if err := mcp.WaitForInit(ctx); err != nil {
+	if err := c.waitForMCPInit(ctx); err != nil {
 		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
@@ -278,6 +286,16 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	return result, originalErr
 }
 
+// waitForMCPInit blocks until this coordinator's MCP registry finishes
+// initializing. A coordinator built without a registry (a handful of
+// tests construct one directly) has nothing to wait for.
+func (c *coordinator) waitForMCPInit(ctx context.Context) error {
+	if c.mcp == nil {
+		return nil
+	}
+	return c.mcp.WaitForInit(ctx)
+}
+
 func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
 	modelOptions := getProviderOptions(model, cfg)
 	temp := cmp.Or(model.ModelCfg.Temperature, model.CatwalkCfg.Options.Temperature)
@@ -323,6 +341,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		MCP:                  c.mcp,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -357,7 +376,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		// building the initial tool list. This ensures the first tool set
 		// (used if anything reads it before run() rebuilds) includes all
 		// MCP tools, not just fast-to-init ones.
-		if err := mcp.WaitForInit(initCtx); err != nil {
+		if err := c.waitForMCPInit(initCtx); err != nil {
 			return err
 		}
 		tools, err := c.buildTools(initCtx, agent, isSubAgent)
@@ -420,7 +439,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
-		tools.NewBraidInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewBraidInfoTool(c.cfg, c.mcp, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewBraidLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
@@ -459,8 +478,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	if len(c.cfg.Config().MCP) > 0 {
 		allTools = append(
 			allTools,
-			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
-			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
+			tools.NewListMCPResourcesTool(c.cfg, c.mcp, c.permissions),
+			tools.NewReadMCPResourceTool(c.cfg, c.mcp, c.permissions),
 		)
 	}
 
@@ -471,7 +490,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(c.mcp, c.permissions, c.cfg, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)

@@ -86,10 +86,14 @@ func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
 	return commands
 }
 
-// LoadMCPPrompts loads custom commands from available MCP servers.
-func LoadMCPPrompts() ([]MCPPrompt, error) {
+// LoadMCPPrompts loads custom commands from available MCP servers on reg,
+// the caller's per-workspace MCP registry.
+func LoadMCPPrompts(reg *mcp.Registry) ([]MCPPrompt, error) {
+	if reg == nil {
+		return nil, nil
+	}
 	var commands []MCPPrompt
-	for mcpName, prompts := range mcp.Prompts() {
+	for mcpName, prompts := range reg.Prompts() {
 		for _, prompt := range prompts {
 			key := mcpName + ":" + prompt.Name
 			var args []Argument
@@ -225,13 +229,13 @@ func isMarkdownFile(name string) bool {
 	return strings.HasSuffix(strings.ToLower(name), ".md")
 }
 
-func GetMCPPrompt(cfg *config.ConfigStore, clientID, promptID string, args map[string]string) (string, error) {
+func GetMCPPrompt(reg *mcp.Registry, cfg *config.ConfigStore, clientID, promptID string, args map[string]string) (string, error) {
 	// Create a context with timeout since tea.Cmd doesn't support context passing.
 	// The MCP client has its own timeout, but this provides an additional safeguard.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := mcp.GetPromptMessages(ctx, cfg, clientID, promptID, args)
+	result, err := reg.GetPromptMessages(ctx, cfg, clientID, promptID, args)
 	if err != nil {
 		return "", err
 	}

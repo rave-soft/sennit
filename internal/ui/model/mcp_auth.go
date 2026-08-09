@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
+	"github.com/rave-soft/braid/internal/ui/completions"
 	"github.com/rave-soft/braid/internal/ui/dialog"
 )
 
@@ -41,6 +41,23 @@ func (m *UI) authenticateMCP(ctx context.Context, name string) tea.Cmd {
 	}
 }
 
+// loadMCPResourceCompletions fetches the MCP resource catalog through the
+// workspace (never the mcp package directly — see internal/ui/AGENTS.md on
+// layering) for the @-completion popup.
+func (m *UI) loadMCPResourceCompletions() []completions.ResourceCompletionValue {
+	infos := m.com.Workspace.MCPResources()
+	result := make([]completions.ResourceCompletionValue, len(infos))
+	for i, info := range infos {
+		result[i] = completions.ResourceCompletionValue{
+			MCPName:  info.MCPName,
+			URI:      info.URI,
+			Title:    info.Title,
+			MIMEType: info.MIMEType,
+		}
+	}
+	return result
+}
+
 // openMCPAuthDialog opens the MCP authentication dialog if any servers
 // are pending auth. If the dialog is already open, it brings it to the
 // front instead.
@@ -65,7 +82,7 @@ func (m *UI) checkPendingMCPAuth() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := mcp.WaitForInit(ctx); err != nil {
+		if err := m.com.Workspace.WaitForMCPInit(ctx); err != nil {
 			return nil
 		}
 		return mcpStateChangedMsg{

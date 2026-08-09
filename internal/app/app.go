@@ -51,6 +51,17 @@ type App struct {
 
 	LSPManager *lsp.Manager
 
+	// lsp holds this workspace's own LSP client states and event broker;
+	// see the lspEvents doc in lsp_events.go for why it isn't shared.
+	lsp *lspEvents
+
+	// MCP is this workspace's own MCP registry: sessions, per-server
+	// state, auth handlers, and the event broker all live here rather
+	// than on mcp's process-wide defaultRegistry, so two App instances in
+	// one process (multi-client backend mode) don't clobber each other's
+	// MCP servers. See ARCHITECTURE_REVIEW.md section 3.1.
+	MCP *mcp.Registry
+
 	Skills *skills.Manager
 
 	config *config.ConfigStore
@@ -105,6 +116,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q, store.WorkingDir()),
 		LSPManager:  lsp.NewManager(store),
+		lsp:         newLSPEvents(),
+		MCP:         mcp.NewRegistry(),
 		Skills:      skillsMgr,
 
 		globalCtx: ctx,
@@ -133,8 +146,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Arm initialization synchronously before launching it so WaitForInit
 	// blocks for the in-flight init instead of racing the goroutine and
 	// returning before any MCP tools register.
-	mcp.ArmInit()
-	go mcp.Initialize(ctx, app.Permissions, store)
+	app.MCP.ArmInit()
+	go app.MCP.Initialize(ctx, app.Permissions, store)
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
@@ -151,7 +164,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
 		func(context.Context) error { return db.Release(dataDir) },
-		func(ctx context.Context) error { return mcp.Close(ctx) },
+		func(ctx context.Context) error { return app.MCP.Close(ctx) },
 	)
 
 	// TODO: remove the concept of agent config, most likely.
@@ -166,11 +179,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Set up callback for LSP state updates.
 	app.LSPManager.SetCallback(func(name string, client *lsp.Client) {
 		if client == nil {
-			updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
+			app.lsp.updateLSPState(name, lsp.StateUnstarted, nil, nil, 0)
 			return
 		}
-		client.SetDiagnosticsCallback(updateLSPDiagnostics)
-		updateLSPState(name, client.GetServerState(), nil, client, 0)
+		client.SetDiagnosticsCallback(app.lsp.updateLSPDiagnostics)
+		app.lsp.updateLSPState(name, client.GetServerState(), nil, client, 0)
 	})
 
 	// TrackConfigured must run after SetCallback so the callback is already
@@ -178,6 +191,21 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	go app.LSPManager.TrackConfigured(ctx)
 
 	return app, nil
+}
+
+// GetLSPStates returns the current state of this workspace's LSP clients.
+func (app *App) GetLSPStates() map[string]LSPClientInfo {
+	return app.lsp.GetLSPStates()
+}
+
+// GetLSPState returns the state of one of this workspace's LSP clients.
+func (app *App) GetLSPState(name string) (LSPClientInfo, bool) {
+	return app.lsp.GetLSPState(name)
+}
+
+// SubscribeLSPEvents returns a channel for this workspace's LSP events.
+func (app *App) SubscribeLSPEvents(ctx context.Context) <-chan pubsub.Event[LSPEvent] {
+	return app.lsp.SubscribeLSPEvents(ctx)
 }
 
 // Config returns the pure-data configuration.
@@ -280,8 +308,8 @@ func (app *App) setupEvents() {
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "agent-notifications", app.agentNotifications.Subscribe, app.events)
 	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "run-completions", app.runCompletions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "mcp", mcp.SubscribeEvents, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "lsp", SubscribeLSPEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "mcp", app.MCP.SubscribeEvents, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "lsp", app.lsp.SubscribeLSPEvents, app.events)
 	if app.Skills != nil {
 		setupSubscriber(ctx, app.serviceEventsWG, "skills", app.Skills.SubscribeEvents, app.events)
 	}
@@ -380,6 +408,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		RunComplete: app.runCompletions,
 		Skills:      app.Skills,
 		Interactive: interactive,
+		MCP:         app.MCP,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

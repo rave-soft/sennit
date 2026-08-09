@@ -147,6 +147,15 @@ type MCPPromptArgument struct {
 	Required    bool   `json:"required,omitempty"`
 }
 
+// MCPResource is the wire-format representation of a resource advertised
+// by an MCP server, suitable for JSON transport between server and client.
+type MCPResource struct {
+	MCPName  string `json:"mcp_name"`
+	URI      string `json:"uri"`
+	Title    string `json:"title,omitempty"`
+	MIMEType string `json:"mime_type,omitempty"`
+}
+
 type MCPPrompt struct {
 	ID          string              `json:"id"`
 	Title       string              `json:"title,omitempty"`

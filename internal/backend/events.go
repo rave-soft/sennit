@@ -20,22 +20,14 @@ func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-ch
 	return ws.Events(ctx), nil
 }
 
-// GetLSPStates returns the state of all LSP clients.
-//
-// TODO(workspace-scoping): workspaceID is validated (GetWorkspace errors if
-// it doesn't exist) but otherwise unused — app.GetLSPStates() returns
-// process-global state (internal/app/lsp_events.go's package-level
-// lspStates/lspBroker), not the state of the LSP clients belonging to this
-// specific workspace. In a multi-workspace process this returns every
-// workspace's LSP state regardless of which one was asked for. See
-// ARCHITECTURE_REVIEW.md section 3.1.
+// GetLSPStates returns the state of workspaceID's own LSP clients.
 func (b *Backend) GetLSPStates(workspaceID string) (map[string]app.LSPClientInfo, error) {
-	_, err := b.GetWorkspace(workspaceID)
+	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	return app.GetLSPStates(), nil
+	return ws.GetLSPStates(), nil
 }
 
 // GetLSPDiagnostics returns diagnostics for a specific LSP client in
@@ -98,26 +90,32 @@ func (b *Backend) LSPStopAll(ctx context.Context, workspaceID string) error {
 	return nil
 }
 
-// MCPGetStates returns the current state of all MCP clients.
-//
-// TODO(workspace-scoping): the workspaceID parameter is ignored outright
-// (named _) — mcptools.GetStates() reads defaultRegistry, the MCP package's
-// shared process-global registry, so this returns every workspace's MCP
-// client state regardless of which workspace was asked about. Fixing this
-// requires each workspace/App to own its own *mcp.Registry; see
-// ARCHITECTURE_REVIEW.md section 3.1.
-func (b *Backend) MCPGetStates(_ string) map[string]mcptools.ClientInfo {
-	return mcptools.GetStates()
+// MCPGetStates returns the current state of all MCP clients belonging to
+// workspaceID.
+func (b *Backend) MCPGetStates(workspaceID string) map[string]mcptools.ClientInfo {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil
+	}
+	return ws.MCP.GetStates()
 }
 
 // MCPRefreshPrompts refreshes prompts for a named MCP client.
-func (b *Backend) MCPRefreshPrompts(ctx context.Context, _ string, name string) {
-	mcptools.RefreshPrompts(ctx, name)
+func (b *Backend) MCPRefreshPrompts(ctx context.Context, workspaceID string, name string) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return
+	}
+	ws.MCP.RefreshPrompts(ctx, name)
 }
 
 // MCPRefreshResources refreshes resources for a named MCP client.
-func (b *Backend) MCPRefreshResources(ctx context.Context, _ string, name string) {
-	mcptools.RefreshResources(ctx, name)
+func (b *Backend) MCPRefreshResources(ctx context.Context, workspaceID string, name string) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return
+	}
+	ws.MCP.RefreshResources(ctx, name)
 }
 
 // MCPPendingAuth returns the MCP servers awaiting OAuth authentication,
@@ -128,13 +126,17 @@ func (b *Backend) MCPPendingAuth(workspaceID string) ([]mcptools.PendingAuthServ
 	if err != nil {
 		return nil, err
 	}
-	return mcptools.PendingAuthMCPs(ws.Cfg), nil
+	return ws.MCP.PendingAuthMCPs(ws.Cfg), nil
 }
 
 // MCPAuthURL returns the current OAuth authorization URL for a named
-// server, if a flow is in progress.
-func (b *Backend) MCPAuthURL(name string) string {
-	return mcptools.MCPAuthURL(name)
+// server on workspaceID, if a flow is in progress.
+func (b *Backend) MCPAuthURL(workspaceID, name string) string {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return ""
+	}
+	return ws.MCP.MCPAuthURL(name)
 }
 
 // MCPAuthenticate runs the OAuth flow for a named MCP server with the
@@ -148,7 +150,7 @@ func (b *Backend) MCPAuthenticate(ctx context.Context, workspaceID, name string)
 	if err != nil {
 		return err
 	}
-	finish, cancel, err := mcptools.BeginAuth(ws.Cfg, name)
+	finish, cancel, err := ws.MCP.BeginAuth(ws.Cfg, name)
 	if err != nil {
 		return err
 	}

@@ -169,6 +169,7 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+	mcp                  *mcp.Registry
 
 	// dispatch owns the accept/queue/cancel protocol state shared by Run
 	// and Summarize's dispatch handoffs. See dispatch.go.
@@ -187,6 +188,7 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	MCP                  *mcp.Registry
 }
 
 func NewSessionAgent(
@@ -204,6 +206,7 @@ func NewSessionAgent(
 		tools:                csync.NewSliceFrom(opts.Tools),
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		mcp:                  opts.MCP,
 		dispatch:             newDispatcher(),
 	}
 }
@@ -442,13 +445,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
 
-	for _, server := range mcp.GetStates() {
-		if server.State != mcp.StateConnected {
-			continue
-		}
-		if s := server.Client.InitializeResult().Instructions; s != "" {
-			instructions.WriteString(s)
-			instructions.WriteString("\n\n")
+	// a.mcp is nil for session agents built outside app.New (a handful of
+	// tests construct one directly); treat that as "no MCP servers" rather
+	// than panicking.
+	if a.mcp != nil {
+		for _, server := range a.mcp.GetStates() {
+			if server.State != mcp.StateConnected {
+				continue
+			}
+			if s := server.Client.InitializeResult().Instructions; s != "" {
+				instructions.WriteString(s)
+				instructions.WriteString("\n\n")
+			}
 		}
 	}
 

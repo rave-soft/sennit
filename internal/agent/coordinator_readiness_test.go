@@ -53,6 +53,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	require.NoError(t, err)
 	cfg.SetupAgents()
 
+	reg := mcp.NewRegistry()
 	coord := &coordinator{
 		cfg:         cfg,
 		sessions:    env.sessions,
@@ -60,13 +61,14 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		permissions: env.permissions,
 		history:     env.history,
 		filetracker: *env.filetracker,
+		mcp:         reg,
 	}
 
 	// Arm the MCP init gate so buildAgent's readiness goroutine blocks in
 	// WaitForInit. We never complete init, so the goroutine stays parked; the
 	// agent package's TestMain does not enforce goleak and no other test in it
 	// builds a coordinator, so the parked goroutine is harmless.
-	mcp.ArmInit()
+	reg.ArmInit()
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)

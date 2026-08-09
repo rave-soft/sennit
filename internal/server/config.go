@@ -432,6 +432,26 @@ func (c *controllerV1) handleGetWorkspaceMCPPrompts(w http.ResponseWriter, r *ht
 	jsonEncode(w, prompts)
 }
 
+// handleGetWorkspaceMCPResources returns the cached resource catalog
+// (across all connected MCP servers) for a workspace.
+//
+//	@Summary		Get MCP resources
+//	@Tags			mcp
+//	@Produce		json
+//	@Param			id	path		string			true	"Workspace ID"
+//	@Success		200	{array}		proto.MCPResource
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/mcp/resources [get]
+func (c *controllerV1) handleGetWorkspaceMCPResources(w http.ResponseWriter, r *http.Request) {
+	resources, err := c.backend.ListMCPResources(r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, resources)
+}
+
 // handlePostWorkspaceMCPGetPrompt retrieves a prompt from an MCP server.
 //
 //	@Summary		Get MCP prompt
@@ -528,12 +548,13 @@ func (c *controllerV1) handleGetWorkspaceMCPPendingAuth(w http.ResponseWriter, r
 //	@Failure		400		{object}	proto.Error
 //	@Router			/workspaces/{id}/mcp/auth-url [get]
 func (c *controllerV1) handleGetWorkspaceMCPAuthURL(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	name := r.URL.Query().Get("name")
 	if name == "" {
 		jsonError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	jsonEncode(w, proto.MCPAuthResponse{AuthURL: c.backend.MCPAuthURL(name)})
+	jsonEncode(w, proto.MCPAuthResponse{AuthURL: c.backend.MCPAuthURL(id, name)})
 }
 
 // handlePostWorkspaceMCPAuth runs the OAuth flow for a named MCP server.

@@ -23,7 +23,7 @@ func TestBraidInfo_MinimalConfig(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[providers]")
 	require.NotContains(t, output, "[lsp]")
 	require.NotContains(t, output, "[mcp]")
@@ -39,7 +39,7 @@ func TestBraidInfo_ConfigFiles(t *testing.T) {
 		"/home/user/.config/braid/braid.json",
 		"/project/.braid/braid.json",
 	)
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config_files]")
 	require.Contains(t, output, "/home/user/.config/braid/braid.json")
 	require.Contains(t, output, "/project/.braid/braid.json")
@@ -55,7 +55,7 @@ func TestBraidInfo_Models(t *testing.T) {
 		},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[model]")
 	require.Contains(t, output, "large = claude-sonnet-4-20250514 (anthropic)")
 	require.Contains(t, output, "small = claude-haiku-3-20250307 (anthropic)")
@@ -69,7 +69,7 @@ func TestBraidInfo_Providers(t *testing.T) {
 	providers.Set("anthropic", config.ProviderConfig{Models: make([]catwalk.Model, 12)})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[providers]")
 	anthropicIdx := strings.Index(output, "anthropic = enabled")
 	openaiIdx := strings.Index(output, "openai = enabled")
@@ -88,7 +88,7 @@ func TestBraidInfo_DisabledProvidersOmitted(t *testing.T) {
 	providers.Set("anthropic", config.ProviderConfig{Models: make([]catwalk.Model, 12)})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "anthropic = enabled")
 	require.NotContains(t, output, "openai")
 }
@@ -108,7 +108,7 @@ func TestBraidInfo_LSPStates(t *testing.T) {
 	mgr.Clients().Set("pyright", errorClient)
 
 	cfg := config.NewTestStore(&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
-	output := buildBraidInfo(cfg, mgr, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, mgr, nil, nil, nil)
 	require.Contains(t, output, "[lsp]")
 	require.Contains(t, output, "gopls = ready")
 	require.Contains(t, output, "pyright = error")
@@ -159,7 +159,7 @@ func TestBraidInfo_YoloMode(t *testing.T) {
 	})
 	cfg.Overrides().SkipPermissionRequests = true
 
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
 	require.Contains(t, output, "mode = yolo")
 }
@@ -172,7 +172,7 @@ func TestBraidInfo_AllowedTools(t *testing.T) {
 		Permissions: &config.Permissions{AllowedTools: []string{"edit:write", "bash"}},
 	})
 
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
 	require.Contains(t, output, "allowed_tools = bash, edit:write")
 }
@@ -185,7 +185,7 @@ func TestBraidInfo_DisabledTools(t *testing.T) {
 		Options:   &config.Options{DisabledTools: []string{"sourcegraph", "agentic_fetch"}},
 	})
 
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[tools]")
 	require.Contains(t, output, "disabled = agentic_fetch, sourcegraph")
 }
@@ -202,7 +202,7 @@ func TestBraidInfo_Options(t *testing.T) {
 		},
 	})
 
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[options]")
 	require.Contains(t, output, "auto_lsp = true")
 	require.Contains(t, output, "auto_summarize = false")
@@ -217,14 +217,14 @@ func TestBraidInfo_AutoSummarizeInversion(t *testing.T) {
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisableAutoSummarize: true},
 	})
-	outputFalse := buildBraidInfo(cfgFalse, nil, nil, nil, nil)
+	outputFalse := buildBraidInfo(cfgFalse, nil, nil, nil, nil, nil)
 	require.Contains(t, outputFalse, "auto_summarize = false")
 
 	cfgTrue := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisableAutoSummarize: false},
 	})
-	outputTrue := buildBraidInfo(cfgTrue, nil, nil, nil, nil)
+	outputTrue := buildBraidInfo(cfgTrue, nil, nil, nil, nil, nil)
 	require.Contains(t, outputTrue, "auto_summarize = true")
 }
 
@@ -238,7 +238,7 @@ func TestBraidInfo_NoSecrets(t *testing.T) {
 	})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "sk-super-secret-key-12345")
 	require.NotContains(t, output, "secret")
 	require.Contains(t, output, "openai = enabled (8 models)")
@@ -274,7 +274,7 @@ func TestBraidInfo_DeterministicOrdering(t *testing.T) {
 	zMcpIdx := strings.Index(mcpOutput, "z-mcp = connected")
 	require.Less(t, aMcpIdx, zMcpIdx)
 
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 
 	alphaIdx := strings.Index(output, "alpha = enabled")
 	middleIdx := strings.Index(output, "middle = enabled")
@@ -295,7 +295,7 @@ func TestBraidInfo_EmptySectionsOmitted(t *testing.T) {
 		Options:     &config.Options{},
 	})
 
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[tools]")
 	require.NotContains(t, output, "[permissions]")
 	require.NotContains(t, output, "[lsp]")
@@ -317,7 +317,7 @@ func TestBraidInfo_ConfigStaleness_Clean(t *testing.T) {
 	// Capture snapshot (normally done in Load)
 	store.CaptureStalenessSnapshot([]string{configPath})
 
-	output := buildBraidInfo(store, nil, nil, nil, nil)
+	output := buildBraidInfo(store, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config]")
 	require.Contains(t, output, "dirty = false")
 	require.NotContains(t, output, "changed_paths")
@@ -342,7 +342,7 @@ func TestBraidInfo_ConfigStaleness_Dirty(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": true}`), 0o600))
 
-	output := buildBraidInfo(store, nil, nil, nil, nil)
+	output := buildBraidInfo(store, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config]")
 	require.Contains(t, output, "dirty = true")
 	require.Contains(t, output, "changed_paths")
@@ -366,7 +366,7 @@ func TestBraidInfo_ConfigStaleness_MissingPath(t *testing.T) {
 	// Delete file to trigger missing state
 	require.NoError(t, os.Remove(configPath))
 
-	output := buildBraidInfo(store, nil, nil, nil, nil)
+	output := buildBraidInfo(store, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config]")
 	require.Contains(t, output, "dirty = true")
 	require.Contains(t, output, "missing_paths")
@@ -379,7 +379,7 @@ func TestBraidInfo_Skills_NoSkills(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[skills]")
 }
 
@@ -400,7 +400,7 @@ func TestBraidInfo_Skills_MixedLoadedUnloaded(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildBraidInfo(cfg, nil, allSkills, activeSkills, tracker)
+	output := buildBraidInfo(cfg, nil, nil, allSkills, activeSkills, tracker)
 	require.Contains(t, output, "[skills]")
 	require.Contains(t, output, "bash = user, loaded")
 	require.Contains(t, output, "braid-config = builtin, loaded")
@@ -426,7 +426,7 @@ func TestBraidInfo_Skills_DisabledSkills(t *testing.T) {
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisabledSkills: []string{"image-convert"}},
 	})
-	output := buildBraidInfo(cfg, nil, allSkills, activeSkills, tracker)
+	output := buildBraidInfo(cfg, nil, nil, allSkills, activeSkills, tracker)
 	require.Contains(t, output, "[skills]")
 	require.Contains(t, output, "bash = user, unloaded")
 	require.Contains(t, output, "braid-config = builtin, unloaded")
@@ -447,7 +447,7 @@ func TestBraidInfo_Skills_Ordering(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildBraidInfo(cfg, nil, allSkills, activeSkills, tracker)
+	output := buildBraidInfo(cfg, nil, nil, allSkills, activeSkills, tracker)
 
 	aIdx := strings.Index(output, "a-skill")
 	mIdx := strings.Index(output, "m-skill")
@@ -469,7 +469,7 @@ func TestBraidInfo_Skills_BuiltinOrigin(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildBraidInfo(cfg, nil, allSkills, activeSkills, tracker)
+	output := buildBraidInfo(cfg, nil, nil, allSkills, activeSkills, tracker)
 	require.Contains(t, output, "braid-config = builtin, unloaded")
 	require.Contains(t, output, "my-skill = user, unloaded")
 }
@@ -487,7 +487,7 @@ func TestBraidInfo_Hooks(t *testing.T) {
 		},
 	})
 
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[hooks]")
 	require.Contains(t, output, "PreToolUse (matcher: edit|write) = check-privates.sh")
 	require.Contains(t, output, "PreToolUse = audit.sh")
@@ -500,6 +500,6 @@ func TestBraidInfo_Hooks_NoHooks(t *testing.T) {
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 
-	output := buildBraidInfo(cfg, nil, nil, nil, nil)
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[hooks]")
 }
