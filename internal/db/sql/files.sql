@@ -22,6 +22,11 @@ FROM files
 WHERE path = ?
 ORDER BY version DESC, created_at DESC;
 
+-- name: NextFileVersion :one
+SELECT COALESCE(MAX(version), -1) + 1 AS next_version
+FROM files
+WHERE path = ?;
+
 -- name: CreateFile :one
 INSERT INTO files (
     id,

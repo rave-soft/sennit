@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/db"
@@ -56,82 +55,61 @@ func NewService(q *db.Queries, db *sql.DB) Service {
 }
 
 func (s *service) Create(ctx context.Context, sessionID, path, content string) (File, error) {
-	return s.createWithVersion(ctx, sessionID, path, content, InitialVersion)
-}
-
-// CreateVersion creates a new version of a file with auto-incremented version
-// number. If no previous versions exist for the path, it creates the initial
-// version. The provided content is stored as the new version.
-func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
-	// Get the latest version for this path
-	files, err := s.q.ListFilesByPath(ctx, path)
+	dbFile, err := s.q.CreateFile(ctx, db.CreateFileParams{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		Path:      path,
+		Content:   content,
+		Version:   InitialVersion,
+	})
 	if err != nil {
 		return File{}, err
 	}
 
-	if len(files) == 0 {
-		// No previous versions, create initial
-		return s.Create(ctx, sessionID, path, content)
-	}
-
-	// Get the latest version
-	latestFile := files[0] // Files are ordered by version DESC, created_at DESC
-	nextVersion := latestFile.Version + 1
-
-	return s.createWithVersion(ctx, sessionID, path, content, nextVersion)
+	file := s.fromDBItem(dbFile)
+	s.Publish(pubsub.CreatedEvent, file)
+	return file, nil
 }
 
-func (s *service) createWithVersion(ctx context.Context, sessionID, path, content string, version int64) (File, error) {
-	// Maximum number of retries for transaction conflicts
-	const maxRetries = 3
-	var file File
-	var err error
+// CreateVersion creates a new version of a file with auto-incremented version
+// number. If no previous versions exist for the path, it creates the initial
+// version. The provided content is stored as the new version. Version
+// numbers are global per path (shared across sessions, matching
+// ListFilesByPath and ListLatestSessionFiles semantics), so the next version
+// is computed inside the same transaction as the insert to avoid a
+// read-then-write race between concurrent callers.
+func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return File{}, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
 
-	// Retry loop for transaction conflicts
-	for attempt := range maxRetries {
-		// Start a transaction
-		tx, txErr := s.db.BeginTx(ctx, nil)
-		if txErr != nil {
-			return File{}, fmt.Errorf("failed to begin transaction: %w", txErr)
-		}
+	qtx := s.q.WithTx(tx)
 
-		// Create a new queries instance with the transaction
-		qtx := s.q.WithTx(tx)
-
-		// Try to create the file within the transaction
-		dbFile, txErr := qtx.CreateFile(ctx, db.CreateFileParams{
-			ID:        uuid.New().String(),
-			SessionID: sessionID,
-			Path:      path,
-			Content:   content,
-			Version:   version,
-		})
-		if txErr != nil {
-			// Rollback the transaction
-			tx.Rollback()
-
-			// Check if this is a uniqueness constraint violation
-			if strings.Contains(txErr.Error(), "UNIQUE constraint failed") {
-				if attempt < maxRetries-1 {
-					// If we have retries left, increment version and try again
-					version++
-					continue
-				}
-			}
-			return File{}, txErr
-		}
-
-		// Commit the transaction
-		if txErr = tx.Commit(); txErr != nil {
-			return File{}, fmt.Errorf("failed to commit transaction: %w", txErr)
-		}
-
-		file = s.fromDBItem(dbFile)
-		s.Publish(pubsub.CreatedEvent, file)
-		return file, nil
+	nextVersion, err := qtx.NextFileVersion(ctx, path)
+	if err != nil {
+		return File{}, fmt.Errorf("failed to determine next file version: %w", err)
 	}
 
-	return file, err
+	dbFile, err := qtx.CreateFile(ctx, db.CreateFileParams{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		Path:      path,
+		Content:   content,
+		Version:   nextVersion,
+	})
+	if err != nil {
+		return File{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return File{}, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	file := s.fromDBItem(dbFile)
+	s.Publish(pubsub.CreatedEvent, file)
+	return file, nil
 }
 
 func (s *service) Get(ctx context.Context, id string) (File, error) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"maps"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -80,6 +81,36 @@ func TestMap_GetOrSet(t *testing.T) {
 	require.Equal(t, 1, m.Len())
 }
 
+// TestMap_GetOrSet_Atomic verifies that concurrent GetOrSet calls racing on
+// the same missing key call fn exactly once. Prior to making GetOrSet hold
+// a single lock across the read-or-compute-and-store sequence, a Get/Set
+// pair done outside a shared lock let multiple goroutines observe the key
+// as absent and each invoke fn, discarding all but the last result.
+func TestMap_GetOrSet_Atomic(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+
+	var calls atomic.Int64
+	const goroutines = 100
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := range goroutines {
+		go func() {
+			defer wg.Done()
+			got := m.GetOrSet("key", func() int {
+				calls.Add(1)
+				return i
+			})
+			require.GreaterOrEqual(t, got, 0)
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, int64(1), calls.Load(), "fn must run exactly once for a contended key")
+}
+
 func TestMap_Get(t *testing.T) {
 	t.Parallel()
 
@@ -150,20 +181,35 @@ func TestMap_CompareAndDelete(t *testing.T) {
 	m.Set("k", original)
 
 	// Matching pointer: deletion succeeds.
-	require.True(t, m.CompareAndDelete("k", any(original)))
+	require.True(t, CompareAndDelete(m, "k", original))
 	_, ok := m.Get("k")
 	require.False(t, ok)
 
 	// Re-set with a new value, try to delete with the stale pointer.
 	second := &entry{val: 2}
 	m.Set("k", second)
-	require.False(t, m.CompareAndDelete("k", any(original)), "stale pointer must not delete")
+	require.False(t, CompareAndDelete(m, "k", original), "stale pointer must not delete")
 	got, ok := m.Get("k")
 	require.True(t, ok)
 	require.Equal(t, 2, got.val)
 
 	// Missing key: returns false.
-	require.False(t, m.CompareAndDelete("absent", any(original)))
+	require.False(t, CompareAndDelete(m, "absent", original))
+}
+
+// TestCompareAndDelete_TypedValue exercises CompareAndDelete with a
+// non-pointer comparable V, confirming the generic constraint accepts
+// ordinary comparable types (not just pointers) and compares by value.
+func TestCompareAndDelete_TypedValue(t *testing.T) {
+	t.Parallel()
+
+	m := NewMap[string, int]()
+	m.Set("k", 7)
+
+	require.False(t, CompareAndDelete(m, "k", 8), "mismatched value must not delete")
+	require.True(t, CompareAndDelete(m, "k", 7))
+	_, ok := m.Get("k")
+	require.False(t, ok)
 }
 
 func TestMap_Take(t *testing.T) {

@@ -45,8 +45,97 @@ const (
 	defaultMustDeliverTimeout = 50 * time.Millisecond
 )
 
+// subscription owns one subscriber's channel plus the lock that
+// serializes sends against close. Sends take subMu for reading, close
+// takes it for writing; the closed flag (only ever read/written under
+// subMu) lets a send that acquires the lock after close has already run
+// notice the channel is gone instead of sending on a closed channel.
+//
+// This lock is scoped to a single subscriber, not the whole broker, so a
+// slow or blocking send to one subscriber (see [Broker.PublishMustDeliver])
+// only ever delays that subscriber's own unsubscribe — it never blocks
+// [Broker.Subscribe] or any other subscriber's teardown, which only need
+// the broker's map lock.
+type subscription[T any] struct {
+	ch     chan Event[T]
+	subMu  sync.RWMutex
+	closed bool
+}
+
+// deliverResult reports what happened when a subscription attempted to
+// deliver an event.
+type deliverResult int
+
+const (
+	deliverOK       deliverResult = iota
+	deliverGone                   // subscription already closed; not a drop.
+	deliverFull                   // buffer was full; a drop.
+	deliverTimedOut               // blocking send exceeded the timeout; a drop.
+	deliverCanceled               // caller's context was canceled mid-send.
+)
+
+// send attempts a non-blocking delivery, used by the lossy [Broker.Publish].
+func (s *subscription[T]) send(event Event[T]) deliverResult {
+	s.subMu.RLock()
+	defer s.subMu.RUnlock()
+	if s.closed {
+		return deliverGone
+	}
+	select {
+	case s.ch <- event:
+		return deliverOK
+	default:
+		return deliverFull
+	}
+}
+
+// sendMustDeliver attempts a non-blocking send, then falls back to a
+// blocking send bounded by timeout. Holding subMu for the duration of the
+// blocking wait is what makes this subscriber's own close wait for the
+// send to finish rather than racing it (see close); it does not affect
+// any other subscription.
+func (s *subscription[T]) sendMustDeliver(ctx context.Context, event Event[T], timeout time.Duration) deliverResult {
+	s.subMu.RLock()
+	defer s.subMu.RUnlock()
+	if s.closed {
+		return deliverGone
+	}
+	select {
+	case s.ch <- event:
+		return deliverOK
+	default:
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case s.ch <- event:
+		return deliverOK
+	case <-timer.C:
+		return deliverTimedOut
+	case <-ctx.Done():
+		return deliverCanceled
+	}
+}
+
+// close marks the subscription closed and closes its channel, unless
+// already closed. It takes subMu for writing, so it waits for any send
+// currently in flight (bounded by that send's own timeout) and, once it
+// runs, guarantees no later send observes an open, unclosed-looking
+// channel: send() and sendMustDeliver() both check closed under the same
+// lock before touching the channel.
+func (s *subscription[T]) close() {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	close(s.ch)
+}
+
 type Broker[T any] struct {
-	subs                 map[chan Event[T]]struct{}
+	subs                 map[*subscription[T]]struct{}
 	mu                   sync.RWMutex
 	done                 chan struct{}
 	subCount             int
@@ -62,7 +151,7 @@ func NewBroker[T any]() *Broker[T] {
 
 func NewBrokerWithOptions[T any](channelBufferSize int) *Broker[T] {
 	return &Broker[T]{
-		subs:               make(map[chan Event[T]]struct{}),
+		subs:               make(map[*subscription[T]]struct{}),
 		done:               make(chan struct{}),
 		channelBufferSize:  channelBufferSize,
 		mustDeliverTimeout: defaultMustDeliverTimeout,
@@ -91,14 +180,21 @@ func (b *Broker[T]) Shutdown() {
 	}
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	for ch := range b.subs {
-		delete(b.subs, ch)
-		close(ch)
+	subs := make([]*subscription[T], 0, len(b.subs))
+	for sub := range b.subs {
+		subs = append(subs, sub)
 	}
-
+	b.subs = make(map[*subscription[T]]struct{})
 	b.subCount = 0
+	b.mu.Unlock()
+
+	// Close outside the map lock: close() may briefly wait for an
+	// in-flight send to that specific subscription to finish, and doing
+	// that under b.mu would once again let one slow subscriber stall
+	// everyone else — the exact problem this refactor removes.
+	for _, sub := range subs {
+		sub.close()
+	}
 }
 
 func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {
@@ -113,28 +209,37 @@ func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {
 	default:
 	}
 
-	sub := make(chan Event[T], b.channelBufferSize)
+	sub := &subscription[T]{ch: make(chan Event[T], b.channelBufferSize)}
 	b.subs[sub] = struct{}{}
 	b.subCount++
 
 	go func() {
-		<-ctx.Done()
-
-		b.mu.Lock()
-		defer b.mu.Unlock()
-
+		// Wake on either the caller's context or broker shutdown.
+		// Without the b.done case, a subscriber whose ctx outlives the
+		// broker (e.g. a background context) would leak this goroutine
+		// forever after Shutdown, since Shutdown closes the channel
+		// itself without signaling this goroutine.
 		select {
+		case <-ctx.Done():
 		case <-b.done:
 			return
-		default:
 		}
 
-		delete(b.subs, sub)
-		close(sub)
-		b.subCount--
+		b.mu.Lock()
+		_, ok := b.subs[sub]
+		if ok {
+			delete(b.subs, sub)
+			b.subCount--
+		}
+		b.mu.Unlock()
+
+		if ok {
+			sub.close()
+		}
+		// If !ok, Shutdown already removed and closed this subscription.
 	}()
 
-	return sub
+	return sub.ch
 }
 
 func (b *Broker[T]) GetSubscriberCount() int {
@@ -156,6 +261,19 @@ func (b *Broker[T]) MustDeliverDropCount() uint64 {
 	return b.mustDeliverDropCount.Load()
 }
 
+// snapshot returns the current subscriptions under the map lock, then
+// releases it. Delivery happens afterward, outside the lock, so a slow
+// or blocking send never holds up [Broker.Subscribe] or unsubscription.
+func (b *Broker[T]) snapshot() []*subscription[T] {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	subs := make([]*subscription[T], 0, len(b.subs))
+	for sub := range b.subs {
+		subs = append(subs, sub)
+	}
+	return subs
+}
+
 // Publish delivers an event to every active subscriber.
 //
 // Delivery is non-blocking and lossy: if a subscriber's channel is full
@@ -163,22 +281,22 @@ func (b *Broker[T]) MustDeliverDropCount() uint64 {
 // [Broker.DropCount] is incremented. Use [Broker.PublishMustDeliver]
 // for events that must not be silently dropped.
 func (b *Broker[T]) Publish(t EventType, payload T) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
 	select {
 	case <-b.done:
 		return
 	default:
 	}
 
+	subs := b.snapshot()
 	event := Event[T]{Type: t, Payload: payload}
 
-	for sub := range b.subs {
-		select {
-		case sub <- event:
-		default:
-			// Channel is full, subscriber is slow — skip this event.
+	for _, sub := range subs {
+		switch sub.send(event) {
+		case deliverOK, deliverGone:
+			// Delivered, or the subscriber already unsubscribed — a
+			// subscription that's gone simply has nothing to deliver
+			// to, same as if it weren't in the snapshot at all.
+		case deliverFull:
 			// Lossy by design; counted and logged so saturation is
 			// observable.
 			b.dropCount.Add(1)
@@ -199,37 +317,31 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 // after timeout — recovery is the subscriber's responsibility (e.g. a
 // re-fetch on the next session-visible event).
 func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload T) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
 	select {
 	case <-b.done:
 		return
 	default:
 	}
 
-	event := Event[T]{Type: t, Payload: payload}
+	b.mu.RLock()
 	timeout := b.mustDeliverTimeout
+	b.mu.RUnlock()
 
-	for sub := range b.subs {
-		// Fast path: non-blocking send.
-		select {
-		case sub <- event:
-			continue
-		default:
-		}
+	subs := b.snapshot()
+	event := Event[T]{Type: t, Payload: payload}
 
-		// Slow path: bounded blocking send.
-		timer := time.NewTimer(timeout)
-		select {
-		case sub <- event:
-			timer.Stop()
-		case <-timer.C:
+	for _, sub := range subs {
+		switch sub.sendMustDeliver(ctx, event, timeout) {
+		case deliverOK, deliverGone:
+			// Delivered, or the subscriber is already gone — either way
+			// there's nothing more to do for it.
+		case deliverTimedOut:
 			b.mustDeliverDropCount.Add(1)
 			slog.Error("PublishMustDeliver timed out delivering event",
 				"type", t, "timeout", timeout)
-		case <-ctx.Done():
-			timer.Stop()
+		case deliverCanceled:
+			// Caller gave up; matches the pre-refactor behavior of
+			// abandoning the rest of the fan-out immediately.
 			return
 		}
 	}

@@ -498,58 +498,43 @@ func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error 
 	})
 }
 
-// SetProviderAPIKey sets the API key for a provider and persists it.
-func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
-	var providerConfig ProviderConfig
-	var exists bool
-	var setKeyOrToken func()
+// isCatalogProvider reports whether providerID is present in the embedded
+// provider catalog. Only providers outside the catalog need their identity
+// fields (type/base_url/name) persisted alongside credentials: a catalog
+// provider's identity is reconstructed from the embedded list on every
+// reload (see configureProviders), and pinning its base_url in the user's
+// config file would freeze it against future catalog updates.
+func (s *ConfigStore) isCatalogProvider(providerID string) bool {
+	return s.findKnownProvider(providerID) != nil
+}
 
-	switch v := apiKey.(type) {
-	case string:
-		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
-			return fmt.Errorf("failed to save api key to config file: %w", err)
-		}
-		setKeyOrToken = func() { providerConfig.APIKey = v }
-	case *oauth.Token:
-		// Hold the refresh lock across the write so a peer's in-flight
-		// token exchange cannot land on top of a credential the user just
-		// obtained interactively — which would silently invalidate the
-		// login they only just completed.
-		if err := s.withRefreshLock(providerID, func() error {
-			return s.SetConfigFields(scope, map[string]any{
-				fmt.Sprintf("providers.%s.api_key", providerID): v.AccessToken,
-				fmt.Sprintf("providers.%s.oauth", providerID):   v,
-			})
-		}); err != nil {
-			return err
-		}
-		setKeyOrToken = func() {
-			providerConfig.APIKey = v.AccessToken
-			providerConfig.OAuthToken = v
-			switch providerID {
-			case string(catwalk.InferenceProviderCopilot):
-				providerConfig.SetupGitHubCopilot()
-			}
-		}
-	}
-
-	cfg := s.Config()
-	providerConfig, exists = cfg.Providers.Get(providerID)
-	if exists {
-		setKeyOrToken()
-		cfg.Providers.Set(providerID, providerConfig)
-		return nil
-	}
-
-	var foundProvider *catwalk.Provider
+// findKnownProvider looks up providerID in the embedded provider catalog,
+// returning nil when the provider is not catalog-known (e.g. a custom
+// OAuth provider the user configured by hand).
+func (s *ConfigStore) findKnownProvider(providerID string) *catwalk.Provider {
 	for _, p := range s.knownProviders {
 		if string(p.ID) == providerID {
-			foundProvider = &p
-			break
+			return &p
 		}
 	}
+	return nil
+}
 
-	if foundProvider != nil {
+// SetProviderAPIKey sets the API key for a provider and persists it.
+//
+// Validation and the full providerConfig are assembled entirely in memory
+// before anything is written to disk, so an unknown provider ID leaves no
+// trace on disk (previously the api_key/oauth write for the string/token
+// case happened first, and only then did the provider lookup that could
+// fail).
+func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
+	cfg := s.Config()
+	providerConfig, exists := cfg.Providers.Get(providerID)
+	if !exists {
+		foundProvider := s.findKnownProvider(providerID)
+		if foundProvider == nil {
+			return fmt.Errorf("provider with ID %s not found in known providers", providerID)
+		}
 		providerConfig = ProviderConfig{
 			ID:           providerID,
 			Name:         foundProvider.Name,
@@ -560,11 +545,60 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 			ExtraParams:  make(map[string]string),
 			Models:       foundProvider.Models,
 		}
-		setKeyOrToken()
-	} else {
-		return fmt.Errorf("provider with ID %s not found in known providers", providerID)
 	}
-	cfg.Providers.Set(providerID, providerConfig)
+
+	fields := map[string]any{}
+	var isToken bool
+
+	switch v := apiKey.(type) {
+	case string:
+		providerConfig.APIKey = v
+		fields[fmt.Sprintf("providers.%s.api_key", providerID)] = v
+	case *oauth.Token:
+		isToken = true
+		providerConfig.APIKey = v.AccessToken
+		providerConfig.OAuthToken = v
+		if providerID == string(catwalk.InferenceProviderCopilot) {
+			providerConfig.SetupGitHubCopilot()
+		}
+		fields[fmt.Sprintf("providers.%s.api_key", providerID)] = v.AccessToken
+		fields[fmt.Sprintf("providers.%s.oauth", providerID)] = v
+	default:
+		return fmt.Errorf("unsupported credential type %T for provider %s", apiKey, providerID)
+	}
+
+	// Custom providers outside the embedded catalog have nothing else to
+	// reconstruct their identity from on reload, so persist it alongside
+	// the credential. Catalog providers get it from the embedded list.
+	if !s.isCatalogProvider(providerID) {
+		fields[fmt.Sprintf("providers.%s.type", providerID)] = providerConfig.Type
+		fields[fmt.Sprintf("providers.%s.base_url", providerID)] = providerConfig.BaseURL
+		fields[fmt.Sprintf("providers.%s.name", providerID)] = providerConfig.Name
+	}
+
+	// Providers is a shared, thread-safe map (csync.Map) referenced by
+	// every Config generation, so setting it here is immediately visible
+	// without going through the clone-and-swap mutators. update() below
+	// only needs to persist fields, not restate the in-memory change.
+	persist := func() error {
+		cfg.Providers.Set(providerID, providerConfig)
+		return s.update(scope, func(*Config) map[string]any { return fields })
+	}
+
+	if isToken {
+		// Hold the refresh lock across the write so a peer's in-flight
+		// token exchange cannot land on top of a credential the user just
+		// obtained interactively — which would silently invalidate the
+		// login they only just completed.
+		if err := s.withRefreshLock(providerID, persist); err != nil {
+			return fmt.Errorf("failed to save credentials to config file: %w", err)
+		}
+		return nil
+	}
+
+	if err := persist(); err != nil {
+		return fmt.Errorf("failed to save api key to config file: %w", err)
+	}
 	return nil
 }
 
@@ -614,7 +648,9 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	// operations. The deadline exceeds the exchange timeout so that a peer
 	// mid-exchange has time to publish a token we can adopt. Lock ordering:
 	// the refresh lock is always taken before the config-write lock (via
-	// SetConfigFields), never the reverse, so no deadlock is possible.
+	// update, which takes writeMu then s.mu — the same nesting order
+	// configureProviders already uses when it calls RemoveConfigField
+	// during a reload), never the reverse, so no deadlock is possible.
 	lockCtx, cancel := context.WithTimeout(ctx, refreshLockDeadline)
 	defer cancel()
 	release, lockErr := lock.File(lockCtx, s.refreshLockPath(providerID))
@@ -670,10 +706,27 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		return err
 	}
 
-	if err := s.SetConfigFields(scope, map[string]any{
+	fields := map[string]any{
 		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
 		fmt.Sprintf("providers.%s.oauth", providerID):   refreshedToken,
-	}); err != nil {
+	}
+	// Persist identity fields for providers outside the embedded catalog —
+	// see isCatalogProvider. Without this, a custom OAuth provider's
+	// type/base_url/name live only in memory: the next reload rebuilds
+	// Config from disk (configureProviders), finds no base_url for this
+	// provider, and drops it as an invalid custom provider.
+	if !s.isCatalogProvider(providerID) {
+		fields[fmt.Sprintf("providers.%s.type", providerID)] = providerConfig.Type
+		fields[fmt.Sprintf("providers.%s.base_url", providerID)] = providerConfig.BaseURL
+		fields[fmt.Sprintf("providers.%s.name", providerID)] = providerConfig.Name
+	}
+
+	// Use update() rather than SetConfigFields: applyToken already
+	// published the refreshed token in memory (Providers is a shared
+	// csync.Map, visible without a clone-and-swap), so the full
+	// disk-reparse-and-reload that SetConfigFields triggers is unnecessary
+	// here and would discard anything else this refresh doesn't own.
+	if err := s.update(scope, func(*Config) map[string]any { return fields }); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
 	return nil
@@ -940,15 +993,11 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 		return nil, false
 	}
 
+	// SetProviderAPIKey both applies the token in memory and persists it,
+	// so a second explicit write of the same keys is unnecessary.
 	if err := s.SetProviderAPIKey(ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
-		return token, false
-	}
-
-	if err := s.SetConfigFields(ScopeGlobal, map[string]any{
-		"providers.copilot.api_key": token.AccessToken,
-		"providers.copilot.oauth":   token,
-	}); err != nil {
 		slog.Error("Unable to save GitHub Copilot token to disk", "error", err)
+		return token, false
 	}
 
 	slog.Info("GitHub Copilot successfully imported")

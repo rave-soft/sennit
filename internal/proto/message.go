@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -213,7 +214,9 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	parts, err := UnmarshalParts([]byte(aux.Parts))
+	// aux.Alias embeds m, so m.ID is already populated by the
+	// json.Unmarshal above; pass it through for warning-log context.
+	parts, err := UnmarshalParts([]byte(aux.Parts), m.ID)
 	if err != nil {
 		return err
 	}
@@ -505,6 +508,10 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 type partType string
 
 const (
+	// metaType marks the synthetic version-marker element that
+	// MarshalParts always prepends. It is never surfaced as a
+	// [ContentPart] to callers.
+	metaType         partType = "_meta"
 	reasoningType    partType = "reasoning"
 	textType         partType = "text"
 	imageURLType     partType = "image_url"
@@ -515,6 +522,31 @@ const (
 	shellCommandType partType = "shell_command"
 )
 
+// partsFormatVersion identifies the shape of the parts blob. It is
+// carried as a synthetic "_meta" wrapper element (see formatMeta)
+// rather than a schema change, so old rows without it are still
+// valid. See the identical constant and comment in
+// internal/message/message.go — this package's MarshalParts /
+// UnmarshalParts operate on the exact same SQLite column and must
+// stay format-compatible with it.
+//
+// Compatibility note: this is a one-time, unavoidable break. A binary
+// built before this version marker existed treats ANY unrecognized
+// wrapper type — including "_meta" — as fatal, so it cannot read a
+// blob written by this or a later binary. Binaries at or after this
+// change tolerate unknown wrapper types (see UnmarshalParts) and so
+// remain forward-compatible with each other from here on.
+const partsFormatVersion = 1
+
+// formatMeta is the payload of the synthetic "_meta" wrapper element.
+// It exists only to satisfy [ContentPart] for marshaling; it never
+// appears in a [Message]'s Parts slice.
+type formatMeta struct {
+	Version int `json:"version"`
+}
+
+func (formatMeta) isPart() {}
+
 type partWrapper struct {
 	Type partType    `json:"type"`
 	Data ContentPart `json:"data"`
@@ -522,9 +554,13 @@ type partWrapper struct {
 
 // MarshalParts marshals content parts to JSON.
 func MarshalParts(parts []ContentPart) ([]byte, error) {
-	wrappedParts := make([]partWrapper, len(parts))
+	wrappedParts := make([]partWrapper, 0, len(parts)+1)
+	wrappedParts = append(wrappedParts, partWrapper{
+		Type: metaType,
+		Data: formatMeta{Version: partsFormatVersion},
+	})
 
-	for i, part := range parts {
+	for _, part := range parts {
 		var typ partType
 
 		switch part.(type) {
@@ -548,16 +584,24 @@ func MarshalParts(parts []ContentPart) ([]byte, error) {
 			return nil, fmt.Errorf("unknown part type: %T", part)
 		}
 
-		wrappedParts[i] = partWrapper{
+		wrappedParts = append(wrappedParts, partWrapper{
 			Type: typ,
 			Data: part,
-		}
+		})
 	}
 	return json.Marshal(wrappedParts)
 }
 
-// UnmarshalParts unmarshals content parts from JSON.
-func UnmarshalParts(data []byte) ([]ContentPart, error) {
+// UnmarshalParts unmarshals content parts from JSON. msgID is included
+// in warning logs for unrecognized part types and may be empty.
+//
+// Unknown wrapper types are skipped rather than treated as fatal: a
+// session written by a newer binary may contain a part type this
+// binary doesn't know about, and failing the whole message would make
+// an otherwise-readable session unreadable. A malformed envelope or a
+// known type with a payload that fails to unmarshal is still a real
+// error (data corruption), so those remain fatal.
+func UnmarshalParts(data []byte, msgID string) ([]ContentPart, error) {
 	temp := []json.RawMessage{}
 
 	if err := json.Unmarshal(data, &temp); err != nil {
@@ -577,6 +621,9 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 		}
 
 		switch wrapper.Type {
+		case metaType:
+			// Version marker; nothing to branch on yet since this is
+			// the first version. Not appended to parts.
 		case reasoningType:
 			part := ReasoningContent{}
 			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
@@ -626,7 +673,8 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 			}
 			parts = append(parts, part)
 		default:
-			return nil, fmt.Errorf("unknown part type: %s", wrapper.Type)
+			slog.Warn("Skipping unrecognized message part type",
+				"type", wrapper.Type, "message_id", msgID)
 		}
 	}
 

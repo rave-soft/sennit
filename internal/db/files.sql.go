@@ -278,3 +278,16 @@ func (q *Queries) ListNewFiles(ctx context.Context) ([]File, error) {
 	}
 	return items, nil
 }
+
+const nextFileVersion = `-- name: NextFileVersion :one
+SELECT COALESCE(MAX(version), -1) + 1 AS next_version
+FROM files
+WHERE path = ?
+`
+
+func (q *Queries) NextFileVersion(ctx context.Context, path string) (int64, error) {
+	row := q.queryRow(ctx, q.nextFileVersionStmt, nextFileVersion, path)
+	var next_version int64
+	err := row.Scan(&next_version)
+	return next_version, err
+}

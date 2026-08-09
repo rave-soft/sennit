@@ -120,6 +120,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
 	}
+	if q.nextFileVersionStmt, err = db.PrepareContext(ctx, nextFileVersion); err != nil {
+		return nil, fmt.Errorf("error preparing query NextFileVersion: %w", err)
+	}
 	if q.recordFileReadStmt, err = db.PrepareContext(ctx, recordFileRead); err != nil {
 		return nil, fmt.Errorf("error preparing query RecordFileRead: %w", err)
 	}
@@ -300,6 +303,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listUserMessagesBySessionStmt: %w", cerr)
 		}
 	}
+	if q.nextFileVersionStmt != nil {
+		if cerr := q.nextFileVersionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing nextFileVersionStmt: %w", cerr)
+		}
+	}
 	if q.recordFileReadStmt != nil {
 		if cerr := q.recordFileReadStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing recordFileReadStmt: %w", cerr)
@@ -396,6 +404,7 @@ type Queries struct {
 	listSessionReadFilesStmt       *sql.Stmt
 	listSessionsStmt               *sql.Stmt
 	listUserMessagesBySessionStmt  *sql.Stmt
+	nextFileVersionStmt            *sql.Stmt
 	recordFileReadStmt             *sql.Stmt
 	renameSessionStmt              *sql.Stmt
 	updateMessageStmt              *sql.Stmt
@@ -439,6 +448,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSessionReadFilesStmt:       q.listSessionReadFilesStmt,
 		listSessionsStmt:               q.listSessionsStmt,
 		listUserMessagesBySessionStmt:  q.listUserMessagesBySessionStmt,
+		nextFileVersionStmt:            q.nextFileVersionStmt,
 		recordFileReadStmt:             q.recordFileReadStmt,
 		renameSessionStmt:              q.renameSessionStmt,
 		updateMessageStmt:              q.updateMessageStmt,

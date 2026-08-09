@@ -2,6 +2,7 @@ package filetracker
 
 import (
 	"context"
+	"os"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -18,6 +19,11 @@ type testEnv struct {
 
 func setupTest(t *testing.T) *testEnv {
 	t.Helper()
+	return setupTestWithWorkingDir(t, "/")
+}
+
+func setupTestWithWorkingDir(t *testing.T, workingDir string) *testEnv {
+	t.Helper()
 
 	conn, err := db.Connect(t.Context(), t.TempDir())
 	require.NoError(t, err)
@@ -27,7 +33,7 @@ func setupTest(t *testing.T) *testEnv {
 	return &testEnv{
 		ctx: t.Context(),
 		q:   q,
-		svc: NewService(q),
+		svc: NewService(q, workingDir),
 	}
 }
 
@@ -113,4 +119,28 @@ func TestService_RecordRead_DifferentPaths(t *testing.T) {
 
 	lastRead2 := env.svc.LastReadTime(env.ctx, sessionID, path2)
 	require.True(t, lastRead2.IsZero(), "path2 should not be recorded")
+}
+
+// TestService_UsesInjectedWorkingDir_NotProcessCwd guards against a
+// regression where paths were resolved against the process's os.Getwd()
+// instead of the workspace's working directory. In server mode the
+// process cwd need not match the workspace being served, so the service
+// must use the injected workingDir for both writes and reads.
+func TestService_UsesInjectedWorkingDir_NotProcessCwd(t *testing.T) {
+	workspaceDir := "/workspace/project"
+	env := setupTestWithWorkingDir(t, workspaceDir)
+
+	processCwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NotEqual(t, workspaceDir, processCwd, "test workspace dir must differ from process cwd")
+
+	sessionID := "test-session-workdir"
+	env.createSession(t, sessionID)
+
+	path := workspaceDir + "/pkg/file.go"
+	env.svc.RecordRead(env.ctx, sessionID, path)
+
+	files, err := env.svc.ListReadFiles(env.ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, []string{path}, files, "path should resolve against the injected workspace dir, not process cwd")
 }

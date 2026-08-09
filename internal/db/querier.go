@@ -41,6 +41,7 @@ type Querier interface {
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
+	NextFileVersion(ctx context.Context, path string) (int64, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error

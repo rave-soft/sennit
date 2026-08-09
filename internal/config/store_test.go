@@ -782,3 +782,146 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 		}
 	}
 }
+
+// TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload covers fix 2.1
+// (see ARCHITECTURE_REVIEW.md §3.4): writing an OAuth token for a provider
+// outside the embedded catalog must also persist its type/base_url/name,
+// or a later reload (which rebuilds Config from disk via
+// configureProviders) drops the provider entirely for lacking a base_url.
+func TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "braid.json")
+
+	// Isolate from the host's real global config/data so only the
+	// test-provided provider and the embedded catalog are visible.
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	resetProviderState()
+	t.Cleanup(resetProviderState)
+
+	initialConfig := `{
+		"providers": {
+			"my-custom-oauth": {
+				"type": "openai-compat",
+				"base_url": "https://example.com/v1",
+				"name": "My Custom OAuth",
+				"models": [{"id": "custom-model", "name": "Custom Model"}]
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	_, exists := store.config.Providers.Get("my-custom-oauth")
+	require.True(t, exists, "custom provider should have loaded from the initial config")
+
+	token := &oauth.Token{
+		AccessToken:  "custom-at",
+		RefreshToken: "custom-rt",
+		ExpiresIn:    3600,
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+	require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "my-custom-oauth", token))
+
+	// The identity fields must have landed on disk alongside the credential.
+	raw, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.com/v1", gjson.GetBytes(raw, "providers.my-custom-oauth.base_url").String())
+	require.Equal(t, "openai-compat", gjson.GetBytes(raw, "providers.my-custom-oauth.type").String())
+	require.Equal(t, "My Custom OAuth", gjson.GetBytes(raw, "providers.my-custom-oauth.name").String())
+	require.Equal(t, "custom-at", gjson.GetBytes(raw, "providers.my-custom-oauth.api_key").String())
+
+	// This is the bug from §3.4: without the identity fields on disk, a
+	// reload rebuilds Config from disk and drops the provider entirely.
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+
+	pc, exists := store.config.Providers.Get("my-custom-oauth")
+	require.True(t, exists, "custom OAuth provider must survive a reload")
+	require.Equal(t, "https://example.com/v1", pc.BaseURL)
+	require.Equal(t, "custom-at", pc.APIKey)
+	require.NotNil(t, pc.OAuthToken)
+	require.Equal(t, "custom-at", pc.OAuthToken.AccessToken)
+}
+
+// TestSetProviderAPIKey_CatalogProviderOmitsBaseURL covers the other half
+// of fix 2.1: a provider that IS in the embedded catalog (Copilot) must not
+// get its base_url pinned into the user's config file when a token is
+// written. Doing so would freeze that provider against future catalog
+// updates (see isCatalogProvider).
+func TestSetProviderAPIKey_CatalogProviderOmitsBaseURL(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "braid.json")
+
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	resetProviderState()
+	t.Cleanup(resetProviderState)
+
+	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+	require.NotEmpty(t, store.knownProviders, "embedded catalog should have loaded")
+
+	token := &oauth.Token{
+		AccessToken:  "copilot-at",
+		RefreshToken: "copilot-rt",
+		ExpiresIn:    3600,
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+	}
+	require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "copilot", token))
+
+	raw, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, "copilot-at", gjson.GetBytes(raw, "providers.copilot.api_key").String())
+	require.True(t, gjson.GetBytes(raw, "providers.copilot.oauth").Exists())
+	require.False(t, gjson.GetBytes(raw, "providers.copilot.base_url").Exists(),
+		"catalog provider must not get base_url pinned into the user config")
+	require.False(t, gjson.GetBytes(raw, "providers.copilot.type").Exists(),
+		"catalog provider must not get type pinned into the user config")
+}
+
+// TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace covers fix 2.9:
+// SetProviderAPIKey validates that the provider is known (or already
+// configured) before writing anything to disk, so a failed call leaves the
+// config file untouched.
+func TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "braid.json")
+
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	resetProviderState()
+	t.Cleanup(resetProviderState)
+
+	const initialConfig = `{"options": {"debug": false}}`
+	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	before, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+
+	err = store.SetProviderAPIKey(ScopeGlobal, "totally-unknown-provider", "some-api-key")
+	require.Error(t, err)
+
+	after, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after), "a failed SetProviderAPIKey must not modify the config file")
+
+	err = store.SetProviderAPIKey(ScopeGlobal, "totally-unknown-provider", &oauth.Token{AccessToken: "at"})
+	require.Error(t, err)
+
+	after, err = os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after), "a failed OAuth SetProviderAPIKey must not modify the config file")
+}

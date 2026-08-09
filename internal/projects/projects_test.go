@@ -1,7 +1,9 @@
 package projects
 
 import (
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -182,5 +184,54 @@ func TestRegisterWithExternalDataDir(t *testing.T) {
 
 	if projects[0].DataDir != "/var/data/braid/myproject" {
 		t.Errorf("Expected data_dir /var/data/braid/myproject, got %s", projects[0].DataDir)
+	}
+}
+
+// TestRegisterConcurrent registers many distinct projects from concurrent
+// goroutines and asserts every project survives. Register used to load and
+// save the list under separate mutex acquisitions, so concurrent
+// read-modify-write cycles could clobber each other's updates.
+func TestRegisterConcurrent(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
+
+	const n = 30
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			path := fmt.Sprintf("/home/user/project%d", i)
+			errs[i] = Register(path, path+"/.braid")
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("Register %d failed: %v", i, err)
+		}
+	}
+
+	list, err := List()
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(list) != n {
+		t.Fatalf("Expected %d projects, got %d", n, len(list))
+	}
+
+	seen := make(map[string]bool, n)
+	for _, p := range list {
+		seen[p.Path] = true
+	}
+	for i := range n {
+		path := fmt.Sprintf("/home/user/project%d", i)
+		if !seen[path] {
+			t.Errorf("Missing project %s", path)
+		}
 	}
 }

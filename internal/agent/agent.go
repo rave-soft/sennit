@@ -184,6 +184,19 @@ type sessionAgent struct {
 	// accepted -> (cancel-on-entry | queued | active) transition in
 	// Run against a concurrent Cancel. The lock is held only during
 	// the brief handoff (no DB or LLM I/O under the lock).
+	//
+	// Entries are never removed: sessionMu below hands out the *sync.Mutex
+	// pointer without holding dispatchMuCreate on the fast path, so a
+	// caller can be holding (or about to look up) a session's mutex at
+	// the same time a cleanup elsewhere decides the session is idle and
+	// deletes it. If a new mutex were then created for the same session,
+	// the two instances would no longer exclude each other, silently
+	// breaking the invariant this map exists to provide. Safe removal
+	// needs a refcount on top of the mutex (increment under
+	// dispatchMuCreate in sessionMu, decrement - and delete at zero - when
+	// the caller is done with it), which is a bigger change than this
+	// leak justifies: the map is bounded by the number of distinct
+	// sessions touched over the process lifetime, not by request volume.
 	dispatchMu *csync.Map[string, *sync.Mutex]
 	// acceptedRuns counts dispatched-but-not-yet-active runs per
 	// session. A counter > 0 means a dispatched prompt is in flight
@@ -648,7 +661,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// by a newer run. Without this guard, the deferred Del fires after a
 	// concurrent run registers in the completion window, silently wiping
 	// the new run's cancel and breaking cancellation.
-	defer a.activeRequests.CompareAndDelete(call.SessionID, ac)
+	defer csync.CompareAndDelete(a.activeRequests, call.SessionID, ac)
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
@@ -1179,7 +1192,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	if shouldSummarize {
-		a.activeRequests.Del(call.SessionID)
+		// Conditional release: only clear our own entry, mirroring the
+		// defer above. An unconditional Del here would erase a newer
+		// run's entry if one raced in and won the session in the window
+		// this release opens up before Summarize does its own busy check.
+		csync.CompareAndDelete(a.activeRequests, call.SessionID, ac)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
 			return nil, summarizeErr
 		}
@@ -1199,7 +1216,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
 	// tea.Msg arrives, so the cleanup must precede the notify or
 	// subscribers see stale busy state at the moment of receipt.
-	a.activeRequests.Del(call.SessionID)
+	//
+	// Conditional release, like the two cleanups above: when shouldSummarize
+	// already cleared our own entry (line ~1199), this is a no-op against
+	// whatever newer run's entry (if any) is there now. When shouldSummarize
+	// was false, ac is still our own entry here (nothing else clears it
+	// first), so this behaves exactly like the unconditional Del it
+	// replaces. Either way, our own entry can't leak: we only ever remove
+	// it, never re-register it, after this point.
+	csync.CompareAndDelete(a.activeRequests, call.SessionID, ac)
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for
@@ -1342,7 +1367,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(sessionID, ac)
-	defer a.activeRequests.CompareAndDelete(sessionID, ac)
+	defer csync.CompareAndDelete(a.activeRequests, sessionID, ac)
 	defer cancel()
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
@@ -1450,8 +1475,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}
 
 	// Release the active request before processing queued messages so that
-	// Run() does not see the session as busy.
-	a.activeRequests.Del(sessionID)
+	// Run() does not see the session as busy. Conditional release, like the
+	// defer above: only clear our own entry so a newer run that raced in
+	// and won the session is not erased.
+	csync.CompareAndDelete(a.activeRequests, sessionID, ac)
 	cancel()
 
 	// Process any messages that were queued while summarizing.
@@ -1985,13 +2012,21 @@ func (a *sessionAgent) CancelAll() {
 		a.Cancel(key) // key is sessionID
 	}
 
-	timeout := time.After(5 * time.Second)
+	// Poll IsBusy on a short tick until every canceled run's cleanup has
+	// run, bounded by the same 5s budget as before. activeRequests has no
+	// broadcast/wait primitive (csync.Map is a plain generic map used well
+	// beyond this file), so a true event-driven wait would mean adding one
+	// to a shared type for a single caller. A 10ms tick keeps this from
+	// being a coarse 200ms busy-wait while staying a minimal, local change.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	for a.IsBusy() {
 		select {
-		case <-timeout:
+		case <-ctx.Done():
 			return
-		default:
-			time.Sleep(200 * time.Millisecond)
+		case <-ticker.C:
 		}
 	}
 }

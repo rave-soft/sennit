@@ -1,7 +1,9 @@
 package projects
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,9 +11,14 @@ import (
 	"time"
 
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/lock"
 )
 
 const projectsFileName = "projects.json"
+
+// projectsLockDeadline bounds how long Register waits for the cross-process
+// flock on projects.json before giving up.
+const projectsLockDeadline = 5 * time.Second
 
 // Project represents a tracked project directory.
 type Project struct {
@@ -37,6 +44,19 @@ func Load() (*ProjectList, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
+	return loadLocked()
+}
+
+// Save writes the projects list to disk.
+func Save(list *ProjectList) error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	return saveLocked(list)
+}
+
+// loadLocked reads the projects list from disk. Callers must hold mu.
+func loadLocked() (*ProjectList, error) {
 	path := projectsFilePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -54,11 +74,10 @@ func Load() (*ProjectList, error) {
 	return &list, nil
 }
 
-// Save writes the projects list to disk.
-func Save(list *ProjectList) error {
-	mu.Lock()
-	defer mu.Unlock()
-
+// saveLocked writes the projects list to disk atomically (temp file +
+// rename), so a crash mid-write never leaves a truncated projects.json.
+// Callers must hold mu.
+func saveLocked(list *ProjectList) error {
 	path := projectsFilePath()
 
 	// Ensure directory exists
@@ -71,12 +90,32 @@ func Save(list *ProjectList) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0o600)
+	return atomicWriteFile(path, data, 0o600)
 }
 
-// Register adds or updates a project in the list.
+// Register adds or updates a project in the list. The read-modify-write
+// cycle is protected by an in-process mutex (mu) against concurrent
+// goroutines in this process, and by a cross-process flock on
+// projects.json.lock against concurrent Braid processes — otherwise two
+// processes registering at the same time can race and one update is lost.
 func Register(workingDir, dataDir string) error {
-	list, err := Load()
+	mu.Lock()
+	defer mu.Unlock()
+
+	path := projectsFilePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), projectsLockDeadline)
+	defer cancel()
+	release, err := lock.File(ctx, path+".lock")
+	if err != nil {
+		return fmt.Errorf("acquire projects lock: %w", err)
+	}
+	defer release()
+
+	list, err := loadLocked()
 	if err != nil {
 		return err
 	}
@@ -113,7 +152,39 @@ func Register(workingDir, dataDir string) error {
 		return 0
 	})
 
-	return Save(list)
+	return saveLocked(list)
+}
+
+// atomicWriteFile writes data to a file atomically by writing to a unique
+// temporary file in the same directory and renaming it into place. This
+// prevents concurrent readers (or a crash mid-write) from observing a
+// partially-written projects.json.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // List returns all tracked projects sorted by last accessed.

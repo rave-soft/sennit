@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -692,4 +693,100 @@ func TestUpdate_StructuralFlushUsesMustDeliver(t *testing.T) {
 				"structural terminal event must not be silently dropped via lossy Publish")
 		})
 	}
+}
+
+// TestUnmarshalParts_UnknownTypeSkipped verifies that an unrecognized
+// part type in the middle of the array is dropped rather than failing
+// the whole message, so a session written by a newer binary stays
+// readable on this one.
+func TestUnmarshalParts_UnknownTypeSkipped(t *testing.T) {
+	t.Parallel()
+
+	raw := `[
+		{"type":"text","data":{"text":"before"}},
+		{"type":"some_future_type","data":{"whatever":true}},
+		{"type":"text","data":{"text":"after"}}
+	]`
+
+	parts, err := unmarshalParts([]byte(raw), "msg-1")
+	require.NoError(t, err)
+	require.Equal(t, []ContentPart{
+		TextContent{Text: "before"},
+		TextContent{Text: "after"},
+	}, parts)
+}
+
+// TestUnmarshalParts_Empty verifies an empty array unmarshals cleanly.
+func TestUnmarshalParts_Empty(t *testing.T) {
+	t.Parallel()
+
+	parts, err := unmarshalParts([]byte(`[]`), "msg-1")
+	require.NoError(t, err)
+	require.Empty(t, parts)
+}
+
+// TestUnmarshalParts_OldFormatNoMeta verifies a blob written before the
+// "_meta" version marker existed (a plain array of part wrappers) is
+// still read correctly with zero data migration.
+func TestUnmarshalParts_OldFormatNoMeta(t *testing.T) {
+	t.Parallel()
+
+	raw := `[{"type":"text","data":{"text":"hello"}}]`
+
+	parts, err := unmarshalParts([]byte(raw), "msg-1")
+	require.NoError(t, err)
+	require.Equal(t, []ContentPart{TextContent{Text: "hello"}}, parts)
+}
+
+// TestMarshalUnmarshalParts_RoundTrip verifies a blob produced by the
+// new marshalParts round-trips through unmarshalParts, and that the
+// synthetic "_meta" element never surfaces as a ContentPart.
+func TestMarshalUnmarshalParts_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	original := []ContentPart{
+		TextContent{Text: "hi"},
+		ToolCall{ID: "call1", Name: "bash", Input: "{}"},
+		Finish{Reason: FinishReasonEndTurn, Time: 42},
+	}
+
+	data, err := marshalParts(original)
+	require.NoError(t, err)
+
+	// The wrapper array must carry the "_meta" marker as element 0.
+	var raw []json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	require.Len(t, raw, len(original)+1)
+	var firstWrapper struct {
+		Type string `json:"type"`
+	}
+	require.NoError(t, json.Unmarshal(raw[0], &firstWrapper))
+	require.Equal(t, "_meta", firstWrapper.Type)
+
+	parts, err := unmarshalParts(data, "msg-1")
+	require.NoError(t, err)
+	require.Equal(t, original, parts)
+}
+
+// TestUnmarshalParts_MalformedNotSwallowed verifies that real
+// corruption (broken JSON, or a known type whose payload doesn't
+// match its struct) still returns an error and is not accidentally
+// treated as an unrecognized-type skip.
+func TestUnmarshalParts_MalformedNotSwallowed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("broken JSON syntax", func(t *testing.T) {
+		t.Parallel()
+		_, err := unmarshalParts([]byte(`[{"type":"text","data":`), "msg-1")
+		require.Error(t, err)
+	})
+
+	t.Run("known type with mismatched payload", func(t *testing.T) {
+		t.Parallel()
+		// finish's Time field is int64; a string payload must fail
+		// to unmarshal rather than being silently dropped.
+		raw := `[{"type":"finish","data":{"time":"not-a-number"}}]`
+		_, err := unmarshalParts([]byte(raw), "msg-1")
+		require.Error(t, err)
+	})
 }

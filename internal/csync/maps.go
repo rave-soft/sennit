@@ -48,19 +48,27 @@ func (m *Map[K, V]) Del(key K) {
 	delete(m.inner, key)
 }
 
-// CompareAndDelete deletes the key only if the current value matches the
-// expected pointer. Returns true if the deletion occurred. This is the
-// ABA-safe cleanup primitive: it prevents a deferred cleanup from removing
-// a value that was replaced by a newer writer in the window between the
-// explicit Del and the deferred Del.
-func (m *Map[K, V]) CompareAndDelete(key K, expected any) bool {
+// CompareAndDelete deletes key from m only if its current value equals
+// expected. Returns true if the deletion occurred. This is the ABA-safe
+// cleanup primitive: it prevents a deferred cleanup from removing a value
+// that was replaced by a newer writer in the window between the explicit
+// Del and the deferred Del.
+//
+// This is a package-level function, not a method, so V can be constrained
+// to comparable: the compiler rejects Map[K, V] instantiations whose V
+// can't be compared with ==, rather than panicking at runtime the way a
+// method taking `expected any` would for a V holding an uncomparable
+// dynamic type (e.g. a slice or map). Callers typically use a pointer V
+// (e.g. agent.activeRequests, keyed by *activeCancel), which is always
+// comparable.
+func CompareAndDelete[K comparable, V comparable](m *Map[K, V], key K, expected V) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	current, ok := m.inner[key]
 	if !ok {
 		return false
 	}
-	if any(current) != expected {
+	if current != expected {
 		return false
 	}
 	delete(m.inner, key)
@@ -84,13 +92,22 @@ func (m *Map[K, V]) Len() int {
 
 // GetOrSet gets and returns the key if it exists, otherwise, it executes the
 // given function, set its return value for the given key, and returns it.
+// The whole read-or-compute-and-store sequence is atomic: fn runs under the
+// map's write lock, so concurrent GetOrSet calls for the same missing key
+// never race to call fn twice, and no writer can observe or store a value
+// for that key while fn is running.
+//
+// Contract: fn must not call any method on this same *Map (directly or
+// transitively) — doing so deadlocks, since the lock fn runs under is not
+// reentrant. Touching a different Map instance from within fn is fine.
 func (m *Map[K, V]) GetOrSet(key K, fn func() V) V {
-	got, ok := m.Get(key)
-	if ok {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if got, ok := m.inner[key]; ok {
 		return got
 	}
 	value := fn()
-	m.Set(key, value)
+	m.inner[key] = value
 	return value
 }
 
