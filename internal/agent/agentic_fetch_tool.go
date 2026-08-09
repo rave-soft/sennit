@@ -188,6 +188,16 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Tools:                fetchTools,
 			})
 
+			// The child session is NOT auto-approved: the fetch/search/glob/
+			// grep tools above don't touch permissions at all, but
+			// NewViewTool does when asked to read a path outside tmpDir.
+			// The top-level `agentic_fetch` call already required
+			// permission (above); auto-approving the child session on top
+			// of that used to let the sub-agent read arbitrary files
+			// anywhere on disk without ever prompting the user. Leaving
+			// SessionSetup unset routes those view requests through the
+			// normal per-session permission flow, same as any other
+			// agent-as-tool sub-agent (see coordinator.buildTools).
 			return c.runSubAgent(ctx, subAgentParams{
 				Agent:          agent,
 				SessionID:      validationResult.SessionID,
@@ -195,9 +205,6 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				ToolCallID:     call.ID,
 				Prompt:         fullPrompt,
 				SessionTitle:   "Fetch Analysis",
-				SessionSetup: func(sessionID string) {
-					c.permissions.AutoApproveSession(sessionID)
-				},
 			})
 		},
 	), nil
