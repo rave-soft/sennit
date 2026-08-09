@@ -137,11 +137,11 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u.autoExpandPillsIfReasonable()
 
-		if !u.pillsExpanded {
+		if !u.pills.expanded {
 			t.Fatal("expected pillsExpanded to be true")
 		}
-		if u.focusedPillSection != pillSectionTodos {
-			t.Fatalf("expected focusedPillSection to be pillSectionTodos, got %d", u.focusedPillSection)
+		if u.pills.focusedSection != pillSectionTodos {
+			t.Fatalf("expected focusedPillSection to be pillSectionTodos, got %d", u.pills.focusedSection)
 		}
 	})
 
@@ -156,7 +156,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u.autoExpandPillsIfReasonable()
 
-		if u.pillsExpanded {
+		if u.pills.expanded {
 			t.Fatal("expected pillsExpanded to be false when terminal height is below threshold")
 		}
 	})
@@ -172,7 +172,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u.autoExpandPillsIfReasonable()
 
-		if u.pillsExpanded {
+		if u.pills.expanded {
 			t.Fatal("expected pillsExpanded to be false when all todos are completed")
 		}
 	})
@@ -182,7 +182,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.height = 50
-		u.pillsExpanded = true
+		u.pills.expanded = true
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
@@ -190,7 +190,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u.autoExpandPillsIfReasonable()
 
-		if !u.pillsExpanded {
+		if !u.pills.expanded {
 			t.Fatal("expected pillsExpanded to stay true")
 		}
 	})
@@ -205,11 +205,11 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u.autoExpandPillsIfReasonable()
 
-		if !u.pillsExpanded {
+		if !u.pills.expanded {
 			t.Fatal("expected pillsExpanded to be true for prompt queue")
 		}
-		if u.focusedPillSection != pillSectionQueue {
-			t.Fatalf("expected focusedPillSection to be pillSectionQueue, got %d", u.focusedPillSection)
+		if u.pills.focusedSection != pillSectionQueue {
+			t.Fatalf("expected focusedPillSection to be pillSectionQueue, got %d", u.pills.focusedSection)
 		}
 	})
 
@@ -222,7 +222,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u.autoExpandPillsIfReasonable()
 
-		if u.pillsExpanded {
+		if u.pills.expanded {
 			t.Fatal("expected pillsExpanded to be false when there is no session")
 		}
 	})

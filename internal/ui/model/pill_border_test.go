@@ -56,16 +56,16 @@ func TestQueuePillAlwaysHasBorder(t *testing.T) {
 			u := newTestUI()
 			u.session = &session.Session{ID: "s1", Todos: tc.todos}
 			u.promptQueue = tc.queue
-			u.pillsExpanded = tc.expanded
-			u.focusedPillSection = tc.focusedSection
+			u.pills.expanded = tc.expanded
+			u.pills.focusedSection = tc.focusedSection
 			u.updateLayoutAndSize()
 			u.renderPills()
 
-			if !hasRoundedBorder(u.pillsView) {
-				t.Fatalf("expected a rounded border somewhere in pills view:\n%s", u.pillsView)
+			if !hasRoundedBorder(u.pills.view) {
+				t.Fatalf("expected a rounded border somewhere in pills view:\n%s", u.pills.view)
 			}
-			if !queuePillHasBorder(u.pillsView) {
-				t.Fatalf("expected the queue pill to have a border:\n%s", u.pillsView)
+			if !queuePillHasBorder(u.pills.view) {
+				t.Fatalf("expected the queue pill to have a border:\n%s", u.pills.view)
 			}
 		})
 	}
@@ -92,7 +92,7 @@ func TestEffectiveFocusedSectionFallsThrough(t *testing.T) {
 			u := newTestUI()
 			u.session = &session.Session{ID: "s1", Todos: tc.todos}
 			u.promptQueue = tc.queue
-			u.focusedPillSection = tc.stored
+			u.pills.focusedSection = tc.stored
 			if got := u.effectiveFocusedSection(); got != tc.expected {
 				t.Fatalf("effectiveFocusedSection() = %d, want %d", got, tc.expected)
 			}

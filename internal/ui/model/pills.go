@@ -29,6 +29,15 @@ const (
 	pillSectionQueue
 )
 
+// pillsPanelState holds the expand/focus/render state of the pills panel
+// (todo progress + queued-prompt pills below the chat).
+type pillsPanelState struct {
+	expanded       bool
+	autoExpanded   bool
+	focusedSection pillSection
+	view           string
+}
+
 // hasIncompleteTodos returns true if there are any non-completed todos.
 func hasIncompleteTodos(todos []session.Todo) bool {
 	return session.HasIncompleteTodos(todos)
@@ -149,18 +158,18 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if !hasPills {
 		return nil
 	}
-	if m.pillsExpanded {
+	if m.pills.expanded {
 		return nil
 	}
-	if m.pillsAutoExpanded {
+	if m.pills.autoExpanded {
 		return nil
 	}
-	m.pillsExpanded = true
-	m.pillsAutoExpanded = true
+	m.pills.expanded = true
+	m.pills.autoExpanded = true
 	if hasIncompleteTodos(m.session.Todos) {
-		m.focusedPillSection = pillSectionTodos
+		m.pills.focusedSection = pillSectionTodos
 	} else {
-		m.focusedPillSection = pillSectionQueue
+		m.pills.focusedSection = pillSectionQueue
 	}
 	m.updateLayoutAndSize()
 	if m.chat.Follow() {
@@ -178,12 +187,12 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !hasPills {
 		return nil
 	}
-	m.pillsExpanded = !m.pillsExpanded
-	if m.pillsExpanded {
+	m.pills.expanded = !m.pills.expanded
+	if m.pills.expanded {
 		if hasIncompleteTodos(m.session.Todos) {
-			m.focusedPillSection = pillSectionTodos
+			m.pills.focusedSection = pillSectionTodos
 		} else {
-			m.focusedPillSection = pillSectionQueue
+			m.pills.focusedSection = pillSectionQueue
 		}
 	}
 	m.updateLayoutAndSize()
@@ -200,19 +209,19 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 
 // switchPillSection changes focus between todo and queue sections.
 func (m *UI) switchPillSection(dir int) tea.Cmd {
-	if !m.pillsExpanded || !m.hasSession() {
+	if !m.pills.expanded || !m.hasSession() {
 		return nil
 	}
 	hasIncompleteTodos := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
 
-	if dir < 0 && m.focusedPillSection == pillSectionQueue && hasIncompleteTodos {
-		m.focusedPillSection = pillSectionTodos
+	if dir < 0 && m.pills.focusedSection == pillSectionQueue && hasIncompleteTodos {
+		m.pills.focusedSection = pillSectionTodos
 		m.updateLayoutAndSize()
 		return nil
 	}
-	if dir > 0 && m.focusedPillSection == pillSectionTodos && hasQueue {
-		m.focusedPillSection = pillSectionQueue
+	if dir > 0 && m.pills.focusedSection == pillSectionTodos && hasQueue {
+		m.pills.focusedSection = pillSectionQueue
 		m.updateLayoutAndSize()
 		return nil
 	}
@@ -227,7 +236,7 @@ func (m *UI) switchPillSection(dir int) tea.Cmd {
 func (m *UI) effectiveFocusedSection() pillSection {
 	hasIncomplete := hasIncompleteTodos(m.session.Todos)
 	hasQueue := m.promptQueue > 0
-	switch m.focusedPillSection {
+	switch m.pills.focusedSection {
 	case pillSectionQueue:
 		if hasQueue {
 			return pillSectionQueue
@@ -243,7 +252,7 @@ func (m *UI) effectiveFocusedSection() pillSection {
 			return pillSectionQueue
 		}
 	}
-	return m.focusedPillSection
+	return m.pills.focusedSection
 }
 
 // pillsAreaHeight calculates the total height needed for the pills area.
@@ -264,7 +273,7 @@ func (m *UI) pillsAreaHeight() int {
 	}
 
 	pillsAreaHeight := pillHeightWithBorder
-	if m.pillsExpanded {
+	if m.pills.expanded {
 		switch m.effectiveFocusedSection() {
 		case pillSectionTodos:
 			if hasIncomplete {
@@ -279,9 +288,9 @@ func (m *UI) pillsAreaHeight() int {
 	return pillsAreaHeight
 }
 
-// renderPills renders the pills panel and stores it in m.pillsView.
+// renderPills renders the pills panel and stores it in m.pills.view.
 func (m *UI) renderPills() {
-	m.pillsView = ""
+	m.pills.view = ""
 	if !m.hasSession() {
 		return
 	}
@@ -307,8 +316,8 @@ func (m *UI) renderPills() {
 
 	t := m.com.Styles
 	effective := m.effectiveFocusedSection()
-	todosFocused := m.pillsExpanded && effective == pillSectionTodos
-	queueFocused := m.pillsExpanded && effective == pillSectionQueue
+	todosFocused := m.pills.expanded && effective == pillSectionTodos
+	queueFocused := m.pills.expanded && effective == pillSectionQueue
 
 	inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 	if m.todoIsSpinning {
@@ -317,14 +326,14 @@ func (m *UI) renderPills() {
 
 	var pills []string
 	if hasIncomplete {
-		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pillsExpanded, t))
+		pills = append(pills, todoPill(m.session.Todos, inProgressIcon, m.pills.expanded, t))
 	}
 	if hasQueue {
 		pills = append(pills, queuePill(m.promptQueue, t))
 	}
 
 	var expandedList string
-	if m.pillsExpanded {
+	if m.pills.expanded {
 		if todosFocused && hasIncomplete {
 			expandedList = todoList(m.session.Todos, inProgressIcon, t, contentWidth)
 		} else if queueFocused && hasQueue {
@@ -344,7 +353,7 @@ func (m *UI) renderPills() {
 	pillsRow := lipgloss.JoinHorizontal(lipgloss.Top, pills...)
 
 	helpDesc := "open"
-	if m.pillsExpanded {
+	if m.pills.expanded {
 		helpDesc = "close"
 	}
 	helpKey := t.Pills.HelpKey.Render("ctrl+t")
@@ -357,5 +366,5 @@ func (m *UI) renderPills() {
 		pillsArea = lipgloss.JoinVertical(lipgloss.Left, pillsRow, expandedList)
 	}
 
-	m.pillsView = t.Pills.Area.MaxWidth(width).PaddingLeft(paddingLeft).Render(pillsArea)
+	m.pills.view = t.Pills.Area.MaxWidth(width).PaddingLeft(paddingLeft).Render(pillsArea)
 }

@@ -277,20 +277,9 @@ type UI struct {
 	// skills
 	skillStates []*skills.SkillState
 
-	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
-	sidebarLogo string
-
-	// Sidebar scroll state for virtual scrolling.
-	sidebarOffset           int  // current scroll offset in lines
-	sidebarScrollable       bool // true when sidebar content exceeds available height
-	sidebarScrollbarVisible bool
-	sidebarScrollbarSeq     int    // sequence number for auto-hide timer
-	sidebarMaxOffsetVal     int    // max scroll offset, computed in updateSidebarScrollState
-	sidebarContent          string // cached rendered sidebar content
-	sidebarTotalLines       int    // total lines in sidebarContent
-	sidebarContentHeight    int    // available height for sidebar content
-	sidebarContentWidth     int    // available width for sidebar content
-	sidebarDrawLogo         string // logo to render (may differ from sidebarLogo for short heights)
+	// sidebar holds virtual-scroll state and cached rendered content for the
+	// chat sidebar. See sidebar.go.
+	sidebar sidebarState
 
 	// Notification state
 	notifyBackend       notification.Backend
@@ -309,10 +298,9 @@ type UI struct {
 	// detailsOpen tracks whether the details panel is open (in compact mode)
 	detailsOpen bool
 
-	// pills state
-	pillsExpanded      bool
-	pillsAutoExpanded  bool
-	focusedPillSection pillSection
+	// pills holds the expand/focus/render state of the pills panel. See
+	// pills.go.
+	pills pillsPanelState
 	// promptQueue / promptQueueItems mirror the session's queued prompts.
 	// They are event-driven with a TTL backstop, fetched off-thread by
 	// dispatchPromptQueueRefresh (see workspace_cache.go); promptQueue is
@@ -342,7 +330,6 @@ type UI struct {
 	// like promptQueueGen it lets a stale in-flight probe result be
 	// discarded and re-fetched instead of clobbering newer state.
 	busyFetchGen uint64
-	pillsView    string
 
 	// sessionsDialogLoading / sessionsDialogGen track the off-thread
 	// ListSessions fetch dispatched by openSessionsDialog; see
@@ -723,7 +710,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
-		m.sidebarOffset = 0
+		m.sidebar.offset = 0
 		m.sessionFiles = msg.files
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
@@ -1139,10 +1126,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == uiFocusSidebar {
 				lines := int(msg.DeltaY)
 				if lines != 0 {
-					m.sidebarOffset = max(0, min(m.sidebarOffset+lines, m.sidebarMaxOffsetVal))
-					m.sidebarScrollbarSeq++
-					m.sidebarScrollbarVisible = true
-					cmds = append(cmds, sidebarScrollbarHideCmd(m.sidebarScrollbarSeq))
+					seq := m.sidebar.scrollByWheel(lines)
+					cmds = append(cmds, sidebarScrollbarHideCmd(seq))
 				}
 				break
 			}
@@ -1198,8 +1183,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case sidebarScrollbarHideMsg:
-		if msg.seq == m.sidebarScrollbarSeq && m.focus != uiFocusSidebar {
-			m.sidebarScrollbarVisible = false
+		if msg.seq == m.sidebar.scrollbarSeq && m.focus != uiFocusSidebar {
+			m.sidebar.hideScrollbar()
 		}
 	case spinner.TickMsg:
 		if m.dialog.HasDialogs() {
@@ -1633,7 +1618,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	switch {
 	case m.state != uiChat:
 		return nil
-	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.sidebarScrollable:
+	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.sidebar.scrollable:
 		m.focus = uiFocusSidebar
 		m.textarea.Blur()
 		m.chat.Blur()
@@ -1645,11 +1630,11 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		} else {
 			cmd = m.textarea.Focus()
 		}
-		m.sidebarScrollbarVisible = false
+		m.sidebar.hideScrollbar()
 		m.chat.Blur()
 	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
 		m.focus = uiFocusMain
-		m.sidebarScrollbarVisible = false
+		m.sidebar.hideScrollbar()
 		m.textarea.Blur()
 		m.chat.Focus()
 	}
@@ -2259,14 +2244,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.PillLeft):
-			if m.state == uiChat && m.hasSession() && m.pillsExpanded && m.focus != uiFocusEditor {
+			if m.state == uiChat && m.hasSession() && m.pills.expanded && m.focus != uiFocusEditor {
 				if cmd := m.switchPillSection(-1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Chat.PillRight):
-			if m.state == uiChat && m.hasSession() && m.pillsExpanded && m.focus != uiFocusEditor {
+			if m.state == uiChat && m.hasSession() && m.pills.expanded && m.focus != uiFocusEditor {
 				if cmd := m.switchPillSection(1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -2590,11 +2575,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
 				m.focus = uiFocusEditor
-				m.sidebarScrollbarVisible = false
+				m.sidebar.hideScrollbar()
 				cmds = append(cmds, m.textarea.Focus())
 				m.chat.Blur()
 			case key.Matches(msg, m.keyMap.Chat.FocusSidebar):
-				if m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebarScrollable {
+				if m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebar.scrollable {
 					m.focus = uiFocusSidebar
 					m.chat.Blur()
 				}
@@ -2685,27 +2670,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			switch {
 			case key.Matches(msg, m.keyMap.Chat.Up):
-				m.sidebarOffset = max(0, m.sidebarOffset-4)
-				m.sidebarScrollbarSeq++
+				m.sidebar.pageUp(4)
 			case key.Matches(msg, m.keyMap.Chat.Down):
-				maxOffset := m.sidebarMaxOffsetVal
-				if m.sidebarOffset < maxOffset {
-					m.sidebarOffset = min(m.sidebarOffset+4, maxOffset)
-					m.sidebarScrollbarSeq++
-				}
+				m.sidebar.pageDown(4)
 			case key.Matches(msg, m.keyMap.Chat.Home):
-				m.sidebarOffset = 0
-				m.sidebarScrollbarSeq++
+				m.sidebar.toHome()
 			case key.Matches(msg, m.keyMap.Chat.End):
-				m.sidebarOffset = m.sidebarMaxOffsetVal
-				m.sidebarScrollbarSeq++
+				m.sidebar.toEnd()
 			case key.Matches(msg, m.keyMap.Chat.FocusChat):
 				m.focus = uiFocusMain
-				m.sidebarScrollbarVisible = false
+				m.sidebar.hideScrollbar()
 				m.chat.Focus()
 			case key.Matches(msg, m.keyMap.Tab):
 				m.focus = uiFocusEditor
-				m.sidebarScrollbarVisible = false
+				m.sidebar.hideScrollbar()
 				cmds = append(cmds, m.textarea.Focus())
 				m.chat.Blur()
 			default:
@@ -2799,8 +2777,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		m.chat.Draw(scr, layout.main)
-		if layout.pills.Dy() > 0 && m.pillsView != "" {
-			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
+		if layout.pills.Dy() > 0 && m.pills.view != "" {
+			uv.NewStyledString(m.pills.view).Draw(scr, layout.pills)
 		}
 
 		if m.activeInline != nil {
@@ -3005,7 +2983,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
-			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
 			}
 		}
@@ -3145,7 +3123,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.ClearHighlight,
 				},
 			)
-			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, []key.Binding{k.Chat.PillLeft})
 			}
 		}
@@ -3846,7 +3824,7 @@ func (m *UI) renderEditorView(width int) string {
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
+	m.sidebar.logo = renderLogo(m.com.Styles, true, width)
 }
 
 // attachSkill reads a skill's content by ID and returns it as a markdown
@@ -4510,21 +4488,21 @@ func (m *UI) newSession() tea.Cmd {
 	}
 
 	m.session = nil
-	m.sidebarOffset = 0
+	m.sidebar.offset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
 	m.setState(uiLanding, uiFocusEditor)
 	m.textarea.Focus()
 	m.chat.Blur()
 	m.chat.ClearMessages()
-	m.pillsExpanded = false
-	m.pillsAutoExpanded = false
+	m.pills.expanded = false
+	m.pills.autoExpanded = false
 	m.promptQueue = 0
 	m.promptQueueItems = nil
 	m.promptQueueCheckedAt = time.Now()
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
-	m.pillsView = ""
+	m.pills.view = ""
 	m.historyReset()
 	agenttools.ResetCache()
 	return tea.Batch(

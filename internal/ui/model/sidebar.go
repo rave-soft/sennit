@@ -15,6 +15,68 @@ import (
 	"github.com/rave-soft/braid/internal/ui/logo"
 )
 
+// sidebarState holds virtual-scroll state and cached rendered content for
+// the chat sidebar.
+type sidebarState struct {
+	// logo keeps a cached version of the sidebar logo.
+	logo string
+
+	// Scroll state for virtual scrolling.
+	offset           int  // current scroll offset in lines
+	scrollable       bool // true when sidebar content exceeds available height
+	scrollbarVisible bool
+	scrollbarSeq     int    // sequence number for auto-hide timer
+	maxOffset        int    // max scroll offset, computed in updateSidebarScrollState
+	content          string // cached rendered sidebar content
+	totalLines       int    // total lines in content
+	contentHeight    int    // available height for sidebar content
+	contentWidth     int    // available width for sidebar content
+	drawLogo         string // logo to render (may differ from logo for short heights)
+}
+
+// scrollByWheel adjusts the scroll offset by delta lines from a mouse wheel
+// event, clamps it to the valid range, and shows the scrollbar. It returns
+// the new scrollbar sequence number so the caller can arm the auto-hide
+// timer.
+func (s *sidebarState) scrollByWheel(lines int) int {
+	s.offset = max(0, min(s.offset+lines, s.maxOffset))
+	s.scrollbarSeq++
+	s.scrollbarVisible = true
+	return s.scrollbarSeq
+}
+
+// pageUp scrolls the sidebar up by n lines (keyboard navigation).
+func (s *sidebarState) pageUp(n int) {
+	s.offset = max(0, s.offset-n)
+	s.scrollbarSeq++
+}
+
+// pageDown scrolls the sidebar down by n lines, clamped to maxOffset
+// (keyboard navigation).
+func (s *sidebarState) pageDown(n int) {
+	if s.offset < s.maxOffset {
+		s.offset = min(s.offset+n, s.maxOffset)
+		s.scrollbarSeq++
+	}
+}
+
+// toHome scrolls the sidebar to the top.
+func (s *sidebarState) toHome() {
+	s.offset = 0
+	s.scrollbarSeq++
+}
+
+// toEnd scrolls the sidebar to the bottom.
+func (s *sidebarState) toEnd() {
+	s.offset = s.maxOffset
+	s.scrollbarSeq++
+}
+
+// hideScrollbar hides the sidebar scrollbar.
+func (s *sidebarState) hideScrollbar() {
+	s.scrollbarVisible = false
+}
+
 // modelInfo renders the current model information including reasoning
 // settings and context usage/cost for the sidebar.
 func (m *UI) modelInfo(width int) string {
@@ -78,7 +140,7 @@ func (m *UI) updateSidebarScrollState() {
 
 	title := t.Sidebar.SessionTitle.Width(contentWidth).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), contentWidth)
-	sidebarLogo := m.sidebarLogo
+	sidebarLogo := m.sidebar.logo
 	if height < logoHeightBreakpoint {
 		sidebarLogo = lipgloss.JoinVertical(lipgloss.Left, logo.SmallRender(m.com.Styles, contentWidth, logo.Opts{}), "")
 	}
@@ -116,24 +178,24 @@ func (m *UI) updateSidebarScrollState() {
 	)
 
 	totalLines := strings.Count(content, "\n") + 1
-	m.sidebarContent = content
-	m.sidebarTotalLines = totalLines
-	m.sidebarContentWidth = contentWidth
-	m.sidebarContentHeight = contentHeight
-	m.sidebarDrawLogo = sidebarLogo
-	m.sidebarScrollable = totalLines > contentHeight
-	m.sidebarMaxOffsetVal = max(0, totalLines-contentHeight)
+	m.sidebar.content = content
+	m.sidebar.totalLines = totalLines
+	m.sidebar.contentWidth = contentWidth
+	m.sidebar.contentHeight = contentHeight
+	m.sidebar.drawLogo = sidebarLogo
+	m.sidebar.scrollable = totalLines > contentHeight
+	m.sidebar.maxOffset = max(0, totalLines-contentHeight)
 
 	// If the sidebar is focused but no longer scrollable (e.g. after a
 	// resize), return focus to the chat.
-	if m.focus == uiFocusSidebar && !m.sidebarScrollable {
+	if m.focus == uiFocusSidebar && !m.sidebar.scrollable {
 		m.focus = uiFocusMain
 		m.chat.Focus()
 	}
 
 	// Clamp sidebarOffset.
-	if m.sidebarOffset > m.sidebarMaxOffsetVal {
-		m.sidebarOffset = m.sidebarMaxOffsetVal
+	if m.sidebar.offset > m.sidebar.maxOffset {
+		m.sidebar.offset = m.sidebar.maxOffset
 	}
 }
 
@@ -145,10 +207,10 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 		return
 	}
 
-	sidebarLogo := m.sidebarDrawLogo
-	contentWidth := m.sidebarContentWidth
-	contentHeight := m.sidebarContentHeight
-	totalLines := m.sidebarTotalLines
+	sidebarLogo := m.sidebar.drawLogo
+	contentWidth := m.sidebar.contentWidth
+	contentHeight := m.sidebar.contentHeight
+	totalLines := m.sidebar.totalLines
 
 	var logoRect, contentRect image.Rectangle
 	layout.Vertical(
@@ -157,14 +219,14 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	).Split(area).Assign(&logoRect, &contentRect)
 
 	// Slice visible lines.
-	end := min(m.sidebarOffset+contentHeight, totalLines)
-	lines := strings.Split(m.sidebarContent, "\n")
-	visibleLines := lines[m.sidebarOffset:end]
+	end := min(m.sidebar.offset+contentHeight, totalLines)
+	lines := strings.Split(m.sidebar.content, "\n")
+	visibleLines := lines[m.sidebar.offset:end]
 	visibleStr := strings.Join(visibleLines, "\n")
 
 	// Determine scrollbar visibility: always visible when focused, otherwise
 	// auto-hide.
-	scrollbarVisible := totalLines > contentHeight && (m.sidebarScrollbarVisible || m.focus == uiFocusSidebar)
+	scrollbarVisible := totalLines > contentHeight && (m.sidebar.scrollbarVisible || m.focus == uiFocusSidebar)
 
 	// Draw the fixed logo.
 	uv.NewStyledString(
@@ -184,7 +246,7 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 
 	// Draw scrollbar in the reserved column.
 	if scrollbarVisible {
-		scrollbar := common.Scrollbar(m.com.Styles, contentHeight, totalLines, contentHeight, m.sidebarOffset)
+		scrollbar := common.Scrollbar(m.com.Styles, contentHeight, totalLines, contentHeight, m.sidebar.offset)
 		if scrollbar != "" {
 			scrollbarArea := image.Rectangle{
 				Min: image.Point{X: area.Max.X - 1, Y: contentRect.Min.Y},
