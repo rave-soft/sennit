@@ -55,7 +55,7 @@ func TestQueuePillAlwaysHasBorder(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			u := newTestUI()
 			u.session = &session.Session{ID: "s1", Todos: tc.todos}
-			u.promptQueue = tc.queue
+			u.wsCache.promptQueue = tc.queue
 			u.pills.expanded = tc.expanded
 			u.pills.focusedSection = tc.focusedSection
 			u.updateLayoutAndSize()
@@ -91,7 +91,7 @@ func TestEffectiveFocusedSectionFallsThrough(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			u := newTestUI()
 			u.session = &session.Session{ID: "s1", Todos: tc.todos}
-			u.promptQueue = tc.queue
+			u.wsCache.promptQueue = tc.queue
 			u.pills.focusedSection = tc.stored
 			if got := u.effectiveFocusedSection(); got != tc.expected {
 				t.Fatalf("effectiveFocusedSection() = %d, want %d", got, tc.expected)

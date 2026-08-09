@@ -15,8 +15,8 @@ import (
 // called on every frame and AgentIsReady/AgentModel are synchronous HTTP
 // round-trips in client/server mode.
 func (m *UI) selectedLargeModel() *workspace.AgentModel {
-	if m.agentReady {
-		model := m.agentModel
+	if m.wsCache.agentReady {
+		model := m.wsCache.agentModel
 		return &model
 	}
 	return nil

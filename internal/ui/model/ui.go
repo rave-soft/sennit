@@ -301,35 +301,10 @@ type UI struct {
 	// pills holds the expand/focus/render state of the pills panel. See
 	// pills.go.
 	pills pillsPanelState
-	// promptQueue / promptQueueItems mirror the session's queued prompts.
-	// They are event-driven with a TTL backstop, fetched off-thread by
-	// dispatchPromptQueueRefresh (see workspace_cache.go); promptQueue is
-	// always len(promptQueueItems).
-	promptQueue          int
-	promptQueueItems     []string
-	promptQueueCheckedAt time.Time
-	promptQueueInFlight  bool
-	// promptQueueGen is bumped by every queue state transition; an
-	// in-flight fetch captures it at dispatch and its result is discarded
-	// if the generation has moved on (see workspace_cache.go).
-	promptQueueGen uint64
-	// agentBusyCache / yoloCache memoize the workspace busy and permission
-	// probes (synchronous HTTP round-trips in client/server mode). Reads
-	// never probe; refreshes happen off-thread (see workspace_cache.go).
-	agentBusyCache    ttlCache
-	yoloCache         ttlCache
-	busyFetchInFlight bool
-	// agentReady / agentModel memoize the coordinator readiness and
-	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
-	// client/server mode, and modelInfo renders them every frame). Seeded
-	// once at construction and refreshed by the same off-thread probe as
-	// agentBusyCache.
-	agentReady bool
-	agentModel workspace.AgentModel
-	// busyFetchGen is bumped by every busy/permission state transition;
-	// like promptQueueGen it lets a stale in-flight probe result be
-	// discarded and re-fetched instead of clobbering newer state.
-	busyFetchGen uint64
+
+	// wsCache holds the memoized workspace busy/yolo/ready/model/queue
+	// state and its TTL-cache bookkeeping. See workspace_cache.go.
+	wsCache workspaceCacheState
 
 	// sessionsDialogLoading / sessionsDialogGen track the off-thread
 	// ListSessions fetch dispatched by openSessionsDialog; see
@@ -431,14 +406,14 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// fresh by write-through toggles and off-thread refreshes so Update
 	// and View never probe the workspace synchronously.
 	yolo := com.Workspace.PermissionSkipRequests()
-	ui.yoloCache.set(yolo)
+	ui.wsCache.yoloCache.set(yolo)
 
 	// Seed the memoized agent ready/model state the same way so the first
 	// frame renders the model info; the busy probe keeps it fresh
 	// afterwards.
 	if com.Workspace.AgentIsReady() {
-		ui.agentReady = true
-		ui.agentModel = com.Workspace.AgentModel()
+		ui.wsCache.agentReady = true
+		ui.wsCache.agentModel = com.Workspace.AgentModel()
 	}
 	ui.setEditorPrompt(yolo)
 	ui.randomizePlaceholders()
@@ -718,9 +693,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// session instead of a stale one.
 		m.invalidateBusyCaches()
 		m.invalidatePromptQueue()
-		m.promptQueue = 0
-		m.promptQueueItems = nil
-		m.promptQueueCheckedAt = time.Time{}
+		m.wsCache.promptQueue = 0
+		m.wsCache.promptQueueItems = nil
+		m.wsCache.promptQueueCheckedAt = time.Time{}
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2942,7 +2917,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
+			} else if m.wsCache.promptQueue > 0 {
 				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, cancelBinding)
@@ -2983,7 +2958,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
-			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.wsCache.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
 			}
 		}
@@ -3038,7 +3013,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
+			} else if m.wsCache.promptQueue > 0 {
 				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
@@ -3123,7 +3098,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.ClearHighlight,
 				},
 			)
-			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
+			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.wsCache.promptQueue > 0 {
 				binds = append(binds, []key.Binding{k.Chat.PillLeft})
 			}
 		}
@@ -3772,7 +3747,7 @@ func (m *UI) isAgentBusy() bool {
 	if m.bangCancel != nil {
 		return true
 	}
-	return m.agentBusyCache.val
+	return m.wsCache.agentBusyCache.val
 }
 
 // hasSession returns true if there is an active session with a valid ID.
@@ -3893,8 +3868,8 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	// idle value; the authoritative state arrives via agentRunSubmittedMsg.
 	// Bump the busy/queue generations so any probe started before this
 	// optimistic write is discarded rather than reverting us to idle.
-	m.agentBusyCache.set(true)
-	m.busyFetchGen++
+	m.wsCache.agentBusyCache.set(true)
+	m.wsCache.busyFetchGen++
 	m.invalidatePromptQueue()
 	cmds = append(cmds, func() tea.Msg {
 		// AgentRun is fire-and-forget: it returns once the prompt has
@@ -4033,7 +4008,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// Gate on the memoized ready state: esc is a hot key and AgentIsReady
 	// is a synchronous HTTP round-trip in client/server mode.
-	if !m.agentReady {
+	if !m.wsCache.agentReady {
 		return nil
 	}
 
@@ -4060,11 +4035,11 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// Queued prompts pending: esc clears the queue. Decide from the cached
 	// count (event-driven) instead of a synchronous workspace probe.
-	if m.promptQueue > 0 {
+	if m.wsCache.promptQueue > 0 {
 		m.com.Workspace.AgentClearQueue(m.session.ID)
-		m.promptQueue = 0
-		m.promptQueueItems = nil
-		m.promptQueueCheckedAt = time.Now()
+		m.wsCache.promptQueue = 0
+		m.wsCache.promptQueueItems = nil
+		m.wsCache.promptQueueCheckedAt = time.Now()
 		// Bump the queue generation so a fetch started before this clear
 		// cannot land and repopulate the pill we just emptied.
 		m.invalidatePromptQueue()
@@ -4162,7 +4137,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.session.ID
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
-	hasQueue := m.promptQueue > 0
+	hasQueue := m.wsCache.promptQueue > 0
 
 	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
@@ -4497,9 +4472,9 @@ func (m *UI) newSession() tea.Cmd {
 	m.chat.ClearMessages()
 	m.pills.expanded = false
 	m.pills.autoExpanded = false
-	m.promptQueue = 0
-	m.promptQueueItems = nil
-	m.promptQueueCheckedAt = time.Now()
+	m.wsCache.promptQueue = 0
+	m.wsCache.promptQueueItems = nil
+	m.wsCache.promptQueueCheckedAt = time.Now()
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
 	m.pills.view = ""

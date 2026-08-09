@@ -201,7 +201,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 		u := newTestUI()
 		u.height = 50
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{}}
-		u.promptQueue = 2
+		u.wsCache.promptQueue = 2
 
 		u.autoExpandPillsIfReasonable()
 
