@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/hostaddr"
 	braidlog "github.com/rave-soft/braid/internal/log"
 	"github.com/rave-soft/braid/internal/server"
 	"github.com/spf13/cobra"
@@ -20,7 +21,7 @@ import (
 var serverHost string
 
 func init() {
-	serverCmd.Flags().StringVarP(&serverHost, "host", "H", server.DefaultHost(), "Server host (TCP or Unix socket)")
+	serverCmd.Flags().StringVarP(&serverHost, "host", "H", hostaddr.DefaultHost(), "Server host (TCP or Unix socket)")
 	rootCmd.AddCommand(serverCmd)
 }
 
@@ -42,7 +43,7 @@ var serverCmd = &cobra.Command{
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
 
-		hostURL, err := server.ParseHostURL(serverHost)
+		hostURL, err := hostaddr.ParseHostURL(serverHost)
 		if err != nil {
 			return fmt.Errorf("invalid server host: %v", err)
 		}

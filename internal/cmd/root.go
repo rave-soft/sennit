@@ -34,6 +34,7 @@ import (
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/event"
+	"github.com/rave-soft/braid/internal/hostaddr"
 	"github.com/rave-soft/braid/internal/lock"
 	braidlog "github.com/rave-soft/braid/internal/log"
 	"github.com/rave-soft/braid/internal/projects"
@@ -54,7 +55,7 @@ func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom braid data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
-	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", server.DefaultHost(), "Connect to a specific braid server host (for advanced users)")
+	rootCmd.PersistentFlags().StringVarP(&clientHost, "host", "H", hostaddr.DefaultHost(), "Connect to a specific braid server host (for advanced users)")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
@@ -363,7 +364,7 @@ func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func()
 // connectToServer ensures the server is running, creates a client and
 // workspace, and returns a cleanup function that deletes the workspace.
 func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func(), error) {
-	hostURL, err := server.ParseHostURL(clientHost)
+	hostURL, err := hostaddr.ParseHostURL(clientHost)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("invalid host URL: %v", err)
 	}
@@ -837,7 +838,7 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	}
 
 	cmdArgs := []string{"server"}
-	if clientHost != server.DefaultHost() {
+	if clientHost != hostaddr.DefaultHost() {
 		cmdArgs = append(cmdArgs, "--host", clientHost)
 	}
 

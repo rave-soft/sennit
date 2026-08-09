@@ -32,9 +32,6 @@ import (
 	"charm.land/fantasy/providers/openai"
 	"charm.land/fantasy/providers/openrouter"
 	"charm.land/fantasy/providers/vercel"
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
@@ -1159,18 +1156,25 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		var fantasyErr *fantasy.Error
 		var providerErr *fantasy.ProviderError
 		const defaultTitle = "Provider Error"
-		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 		if isCancelErr {
 			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 		} else if errors.As(err, &providerErr) {
 			if providerErr.Message == "The requested model is not supported." {
-				url := "https://github.com/settings/copilot/features"
-				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
+				// The TUI owns the display copy: return a typed error so
+				// callers can render their own styled hyperlink instead of
+				// agent baking terminal escape codes into persisted
+				// message content.
+				quotaErr := &ProviderQuotaError{
+					Provider:    "copilot",
+					Model:       largeModel.CatwalkCfg.Name,
+					SettingsURL: "https://github.com/settings/copilot/features",
+				}
 				currentAssistant.AddFinish(
 					message.FinishReasonError,
 					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
+					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quotaErr.Model, quotaErr.SettingsURL),
 				)
+				err = quotaErr
 			} else {
 				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
 			}
@@ -1838,7 +1842,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		fallback := strings.ReplaceAll(userPrompt, "\n", " ")
 		fallback = strings.TrimSpace(fallback)
 		if len(fallback) > 50 {
-			fallback = ansi.Truncate(fallback, 50, "…")
+			fallback = truncateRunes(fallback, 50)
 		}
 		title = cmp.Or(fallback, DefaultSessionName)
 	}
@@ -1883,6 +1887,17 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		return
 	}
 	titleSaved = true
+}
+
+// truncateRunes truncates s to at most n runes, appending "…" when
+// truncation occurred. It's a dependency-free stand-in for ANSI-width-aware
+// truncation, good enough for a plain-text session-title fallback.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float64 {

@@ -32,6 +32,7 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
+	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	agenttools "github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
@@ -3884,6 +3885,16 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		// through SSE-derived events, not this return value.
 		err := m.com.Workspace.AgentRun(context.Background(), sessionID, content, attachments...)
 		if err != nil && !errors.Is(err, context.Canceled) {
+			var quotaErr *agent.ProviderQuotaError
+			if errors.As(err, &quotaErr) {
+				link := m.com.Styles.Dialog.OAuth.Link.
+					Hyperlink(quotaErr.SettingsURL, "id=copilot").
+					Render(quotaErr.SettingsURL)
+				return util.InfoMsg{
+					Type: util.InfoTypeError,
+					Msg:  fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quotaErr.Model, link),
+				}
+			}
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("%v", err),

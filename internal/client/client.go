@@ -15,8 +15,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/hostaddr"
 	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/server"
 )
 
 // DummyHost is used to satisfy the http.Client's requirement for a URL.
@@ -33,7 +33,7 @@ type Client struct {
 
 // DefaultClient creates a new [Client] connected to the default server address.
 func DefaultClient(path string) (*Client, error) {
-	host, err := server.ParseHostURL(server.DefaultHost())
+	host, err := hostaddr.ParseHostURL(hostaddr.DefaultHost())
 	if err != nil {
 		return nil, err
 	}
