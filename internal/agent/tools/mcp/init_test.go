@@ -7,9 +7,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"

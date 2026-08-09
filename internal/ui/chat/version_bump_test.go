@@ -4,12 +4,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/anim"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/ui/anim"
+	"github.com/rave-soft/braid/internal/ui/attachments"
+	"github.com/rave-soft/braid/internal/ui/list"
+	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 

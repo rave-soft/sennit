@@ -12,11 +12,11 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/filepathext"
+	"github.com/rave-soft/braid/internal/home"
+	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/braid/internal/skills"
 )
 
 // Prompt represents a template-based prompt generator.

@@ -13,14 +13,14 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/client"
+	"github.com/rave-soft/braid/internal/commands"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 

@@ -9,11 +9,11 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/backend"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/rave-soft/braid/internal/backend"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/skills"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )

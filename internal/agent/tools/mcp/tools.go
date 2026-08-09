@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/csync"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/braid/internal/version"
 )
 
 // loadTimeout bounds a single crushrc execution. Config loading runs on the

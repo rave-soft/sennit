@@ -7,7 +7,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/rave-soft/braid/internal/config"
 )
 
 // reinitAction describes how to reconcile one MCP server against the

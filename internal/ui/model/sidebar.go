@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	mcp "github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/logo"
+	mcp "github.com/rave-soft/braid/internal/agent/tools/mcp"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 )

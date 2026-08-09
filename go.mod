@@ -1,4 +1,4 @@
-module github.com/charmbracelet/crush
+module github.com/rave-soft/braid
 
 go 1.26.5
 

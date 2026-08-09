@@ -3,10 +3,10 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/fsext"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
 // RenameToolMessageItem is a message item that represents a rename tool call.

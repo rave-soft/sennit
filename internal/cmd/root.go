@@ -24,22 +24,22 @@ import (
 	fang "charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/lock"
-	crushlog "github.com/charmbracelet/crush/internal/log"
-	"github.com/charmbracelet/crush/internal/projects"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/server"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	ui "github.com/charmbracelet/crush/internal/ui/model"
-	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/client"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/braid/internal/event"
+	"github.com/rave-soft/braid/internal/lock"
+	crushlog "github.com/rave-soft/braid/internal/log"
+	"github.com/rave-soft/braid/internal/projects"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/server"
+	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/braid/internal/ui/common"
+	ui "github.com/rave-soft/braid/internal/ui/model"
+	"github.com/rave-soft/braid/internal/version"
+	"github.com/rave-soft/braid/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
@@ -142,7 +142,7 @@ crush --continue
 		if _, err := program.Run(); err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
+			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/rave-soft/braid/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		return nil
 	},

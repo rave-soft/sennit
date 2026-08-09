@@ -13,9 +13,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/server"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/server"
 	"github.com/google/uuid"
 )
 

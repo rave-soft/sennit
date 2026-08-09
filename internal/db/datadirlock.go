@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/lock"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/rave-soft/braid/internal/lock"
+	"github.com/rave-soft/braid/internal/version"
 )
 
 // ErrDataDirLocked is returned by Connect when the data directory is

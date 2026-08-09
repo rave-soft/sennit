@@ -11,11 +11,11 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/charmbracelet/crush/internal/filetracker"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/lsp"
-	lsputil "github.com/charmbracelet/crush/internal/lsp/util"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/rave-soft/braid/internal/filetracker"
+	"github.com/rave-soft/braid/internal/history"
+	"github.com/rave-soft/braid/internal/lsp"
+	lsputil "github.com/rave-soft/braid/internal/lsp/util"
+	"github.com/rave-soft/braid/internal/permission"
 )
 
 type RenameParams struct {

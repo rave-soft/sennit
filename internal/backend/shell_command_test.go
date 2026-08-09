@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )

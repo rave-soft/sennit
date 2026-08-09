@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/braid/internal/version"
 	"github.com/stretchr/testify/require"
 )
 

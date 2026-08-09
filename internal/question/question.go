@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/google/uuid"
 )
 

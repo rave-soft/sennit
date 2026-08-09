@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

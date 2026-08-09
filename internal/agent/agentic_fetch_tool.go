@@ -11,9 +11,9 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/rave-soft/braid/internal/agent/prompt"
+	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/permission"
 )
 
 //go:embed templates/agentic_fetch.md

@@ -7,12 +7,12 @@ import (
 	"os/signal"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/clipboard"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/oauth/hyper"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/rave-soft/braid/internal/clipboard"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/braid/internal/oauth/copilot"
+	"github.com/rave-soft/braid/internal/oauth/hyper"
+	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )

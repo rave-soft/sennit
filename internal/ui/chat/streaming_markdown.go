@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"charm.land/glamour/v2"
-	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/common"
 )
 
 // streamingMarkdown caches a "stable prefix" glamour render so each

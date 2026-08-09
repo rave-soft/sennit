@@ -5,12 +5,12 @@ import (
 	"errors"
 	"os"
 
-	"github.com/charmbracelet/crush/internal/agent"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/shell"
 )
 
 // SendMessage validates and accepts a prompt for the workspace's agent,

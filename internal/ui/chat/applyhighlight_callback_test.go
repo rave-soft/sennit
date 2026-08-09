@@ -3,9 +3,9 @@ package chat
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/ui/list"
+	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 

@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/pubsub"
 )
 
 // awsSSORefreshTimeout bounds how long the AWS SSO refresh command may run.

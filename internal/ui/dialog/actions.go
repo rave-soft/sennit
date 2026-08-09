@@ -9,15 +9,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/rave-soft/braid/internal/commands"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/util"
 )
 
 // ActionClose is a message to close the current dialog.

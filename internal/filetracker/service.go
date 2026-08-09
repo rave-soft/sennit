@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/db"
+	"github.com/rave-soft/braid/internal/db"
 )
 
 // Service defines the interface for tracking file reads in sessions.

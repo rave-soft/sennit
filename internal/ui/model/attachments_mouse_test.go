@@ -4,10 +4,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/question"
+	"github.com/rave-soft/braid/internal/ui/attachments"
+	"github.com/rave-soft/braid/internal/ui/dialog"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 )

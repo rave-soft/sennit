@@ -8,8 +8,8 @@ import (
 	"os/signal"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/rave-soft/braid/internal/client"
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 )

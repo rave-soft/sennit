@@ -5,14 +5,14 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/charmbracelet/crush/internal/agent"
-	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/rave-soft/braid/internal/agent"
+	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
+	"github.com/rave-soft/braid/internal/commands"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/skills"
 )
 
 // publishConfigChanged publishes a ConfigChanged event on the workspace's

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )

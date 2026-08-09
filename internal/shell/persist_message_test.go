@@ -3,9 +3,9 @@ package shell
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )

@@ -10,16 +10,16 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/lsp"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/ui/attachments"
+	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/dialog"
+	"github.com/rave-soft/braid/internal/workspace"
 )
 
 // countingWorkspace is a workspace.Workspace stub that counts every probe

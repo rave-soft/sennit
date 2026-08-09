@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

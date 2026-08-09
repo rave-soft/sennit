@@ -43,7 +43,7 @@ tasks:
   build:
     desc: Run build
     vars:
-      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
+      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/rave-soft/braid/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
       - "go build -v {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
     sources:
@@ -53,13 +53,13 @@ tasks:
       - internal/agent/**/*.md.tpl
       - internal/agent/hyper/provider.json
     generates:
-      - crush{{exeExt}}
+      - braid{{exeExt}}
 
   run:
     desc: Run build
     cmds:
       - task: build
-      - "./crush{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
+      - "./braid{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
 
   run:catwalk:
     desc: Run build with local Catwalk
@@ -67,7 +67,7 @@ tasks:
       CATWALK_URL: http://localhost:8080
     cmds:
       - task: build
-      - ./crush{{exeExt}} {{.CLI_ARGS}}
+      - ./braid{{exeExt}} {{.CLI_ARGS}}
 
   run:onboarding:
     desc: Run build with custom config to test onboarding
@@ -77,7 +77,7 @@ tasks:
     cmds:
       - task: build
       - rm -rf tmp/onboarding
-      - ./crush{{exeExt}} {{.CLI_ARGS}}
+      - ./braid{{exeExt}} {{.CLI_ARGS}}
 
   test:
     desc: Run tests
@@ -116,7 +116,7 @@ tasks:
   install:
     desc: Install the application
     vars:
-      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
+      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/rave-soft/braid/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
       - task: fetch-tags
       - go install {{.LDFLAGS}} -v .

@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/rave-soft/braid/internal/agent/tools/mcp"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/lsp"
+	"github.com/rave-soft/braid/internal/skills"
 )
 
 const CrushInfoToolName = "crush_info"

@@ -15,14 +15,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/ui/util"
-	"github.com/charmbracelet/crush/internal/version"
+	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/braid/internal/ui/util"
+	"github.com/rave-soft/braid/internal/version"
 	"github.com/google/uuid"
 )
 

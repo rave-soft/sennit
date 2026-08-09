@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/rave-soft/braid/internal/shell"
 )
 
 func init() {

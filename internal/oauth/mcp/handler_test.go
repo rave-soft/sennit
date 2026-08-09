@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/oauth"
+	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"

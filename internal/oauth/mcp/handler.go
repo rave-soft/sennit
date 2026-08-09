@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/callback"
+	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/braid/internal/oauth/callback"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/pkg/browser"
