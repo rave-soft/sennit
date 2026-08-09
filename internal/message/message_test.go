@@ -708,7 +708,7 @@ func TestUnmarshalParts_UnknownTypeSkipped(t *testing.T) {
 		{"type":"text","data":{"text":"after"}}
 	]`
 
-	parts, err := unmarshalParts([]byte(raw), "msg-1")
+	parts, err := UnmarshalParts([]byte(raw), "msg-1")
 	require.NoError(t, err)
 	require.Equal(t, []ContentPart{
 		TextContent{Text: "before"},
@@ -720,7 +720,7 @@ func TestUnmarshalParts_UnknownTypeSkipped(t *testing.T) {
 func TestUnmarshalParts_Empty(t *testing.T) {
 	t.Parallel()
 
-	parts, err := unmarshalParts([]byte(`[]`), "msg-1")
+	parts, err := UnmarshalParts([]byte(`[]`), "msg-1")
 	require.NoError(t, err)
 	require.Empty(t, parts)
 }
@@ -733,7 +733,7 @@ func TestUnmarshalParts_OldFormatNoMeta(t *testing.T) {
 
 	raw := `[{"type":"text","data":{"text":"hello"}}]`
 
-	parts, err := unmarshalParts([]byte(raw), "msg-1")
+	parts, err := UnmarshalParts([]byte(raw), "msg-1")
 	require.NoError(t, err)
 	require.Equal(t, []ContentPart{TextContent{Text: "hello"}}, parts)
 }
@@ -750,7 +750,7 @@ func TestMarshalUnmarshalParts_RoundTrip(t *testing.T) {
 		Finish{Reason: FinishReasonEndTurn, Time: 42},
 	}
 
-	data, err := marshalParts(original)
+	data, err := MarshalParts(original)
 	require.NoError(t, err)
 
 	// The wrapper array must carry the "_meta" marker as element 0.
@@ -763,7 +763,7 @@ func TestMarshalUnmarshalParts_RoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw[0], &firstWrapper))
 	require.Equal(t, "_meta", firstWrapper.Type)
 
-	parts, err := unmarshalParts(data, "msg-1")
+	parts, err := UnmarshalParts(data, "msg-1")
 	require.NoError(t, err)
 	require.Equal(t, original, parts)
 }
@@ -777,7 +777,7 @@ func TestUnmarshalParts_MalformedNotSwallowed(t *testing.T) {
 
 	t.Run("broken JSON syntax", func(t *testing.T) {
 		t.Parallel()
-		_, err := unmarshalParts([]byte(`[{"type":"text","data":`), "msg-1")
+		_, err := UnmarshalParts([]byte(`[{"type":"text","data":`), "msg-1")
 		require.Error(t, err)
 	})
 
@@ -786,7 +786,7 @@ func TestUnmarshalParts_MalformedNotSwallowed(t *testing.T) {
 		// finish's Time field is int64; a string payload must fail
 		// to unmarshal rather than being silently dropped.
 		raw := `[{"type":"finish","data":{"time":"not-a-number"}}]`
-		_, err := unmarshalParts([]byte(raw), "msg-1")
+		_, err := UnmarshalParts([]byte(raw), "msg-1")
 		require.Error(t, err)
 	})
 }

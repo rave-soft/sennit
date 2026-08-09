@@ -26,6 +26,23 @@ const (
 	Tool      MessageRole = "tool"
 )
 
+// MarshalText implements the [encoding.TextMarshaler] interface. It
+// lives here (rather than only in internal/proto, where it originated)
+// because [github.com/rave-soft/braid/internal/proto.MessageRole] is
+// now a type alias for MessageRole, and Go requires methods on an
+// aliased type to be defined in the package that declares the
+// underlying type.
+func (r MessageRole) MarshalText() ([]byte, error) {
+	return []byte(r), nil
+}
+
+// UnmarshalText implements the [encoding.TextUnmarshaler] interface.
+// See [MessageRole.MarshalText] for why this lives here.
+func (r *MessageRole) UnmarshalText(data []byte) error {
+	*r = MessageRole(data)
+	return nil
+}
+
 // mediaLoadFailedPlaceholder is the text substituted for image data that
 // cannot be decoded during session replay.
 const mediaLoadFailedPlaceholder = "[Image data could not be loaded]"
@@ -47,6 +64,19 @@ const (
 	// Should never happen
 	FinishReasonUnknown FinishReason = "unknown"
 )
+
+// MarshalText implements the [encoding.TextMarshaler] interface. See
+// [MessageRole.MarshalText] for why this lives here rather than in
+// internal/proto.
+func (fr FinishReason) MarshalText() ([]byte, error) {
+	return []byte(fr), nil
+}
+
+// UnmarshalText implements the [encoding.TextUnmarshaler] interface.
+func (fr *FinishReason) UnmarshalText(data []byte) error {
+	*fr = FinishReason(data)
+	return nil
+}
 
 type ContentPart interface {
 	isPart()

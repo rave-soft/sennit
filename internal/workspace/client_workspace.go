@@ -1273,66 +1273,22 @@ func protoToFile(f proto.File) history.File {
 	}
 }
 
+// protoToMessage converts a wire [proto.Message] to a [message.Message].
+// This used to be a 9-way type switch rebuilding every content part by
+// hand; now that proto's content part types are aliases of message's
+// (see proto/message.go), a [proto.Message]'s Parts slice already *is*
+// a []message.ContentPart, so there's nothing left to convert.
 func protoToMessage(m proto.Message) message.Message {
-	msg := message.Message{
+	return message.Message{
 		ID:        m.ID,
 		SessionID: m.SessionID,
-		Role:      message.MessageRole(m.Role),
+		Role:      m.Role,
+		Parts:     m.Parts,
 		Model:     m.Model,
 		Provider:  m.Provider,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}
-
-	for _, p := range m.Parts {
-		switch v := p.(type) {
-		case proto.TextContent:
-			msg.Parts = append(msg.Parts, message.TextContent{Text: v.Text})
-		case proto.ReasoningContent:
-			msg.Parts = append(msg.Parts, message.ReasoningContent{
-				Thinking:   v.Thinking,
-				Signature:  v.Signature,
-				StartedAt:  v.StartedAt,
-				FinishedAt: v.FinishedAt,
-			})
-		case proto.ToolCall:
-			msg.Parts = append(msg.Parts, message.ToolCall{
-				ID:       v.ID,
-				Name:     v.Name,
-				Input:    v.Input,
-				Finished: v.Finished,
-			})
-		case proto.ToolResult:
-			msg.Parts = append(msg.Parts, message.ToolResult{
-				ToolCallID: v.ToolCallID,
-				Name:       v.Name,
-				Content:    v.Content,
-				Data:       v.Data,
-				MIMEType:   v.MIMEType,
-				Metadata:   v.Metadata,
-				IsError:    v.IsError,
-			})
-		case proto.Finish:
-			msg.Parts = append(msg.Parts, message.Finish{
-				Reason:  message.FinishReason(v.Reason),
-				Time:    v.Time,
-				Message: v.Message,
-				Details: v.Details,
-			})
-		case proto.ImageURLContent:
-			msg.Parts = append(msg.Parts, message.ImageURLContent{URL: v.URL, Detail: v.Detail})
-		case proto.BinaryContent:
-			msg.Parts = append(msg.Parts, message.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
-		case proto.ShellCommand:
-			msg.Parts = append(msg.Parts, message.ShellCommand{
-				Command:  v.Command,
-				Output:   v.Output,
-				ExitCode: v.ExitCode,
-			})
-		}
-	}
-
-	return msg
 }
 
 func protoToMessages(msgs []proto.Message) []message.Message {

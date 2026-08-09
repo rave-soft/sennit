@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/stretchr/testify/require"
 )
@@ -125,4 +126,90 @@ func TestMessage_JSONRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &got))
 	require.Equal(t, msg.Parts, got.Parts)
 	require.Equal(t, msg.ID, got.ID)
+}
+
+// TestMessage_FullRoundTrip exercises message.Message -> proto.Message
+// -> JSON -> proto.Message -> message.Message without any data loss.
+// Content part types are now aliases (see message.go), so
+// server.messageToProto / workspace.protoToMessage reduce to a field
+// copy with no per-part conversion; this test is the guardrail that
+// every part type still survives the wire in full, including the
+// provider-bookkeeping fields (ThoughtSignature, ToolID, ResponsesData,
+// ProviderExecuted) that only [message.ContentPart] carries.
+func TestMessage_FullRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	original := message.Message{
+		ID:        "msg-1",
+		SessionID: "sess-1",
+		Role:      message.Assistant,
+		Model:     "claude",
+		Provider:  "anthropic",
+		CreatedAt: 100,
+		UpdatedAt: 200,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "hello"},
+			message.ReasoningContent{
+				Thinking:         "thinking...",
+				Signature:        "sig",
+				ThoughtSignature: "thought-sig",
+				ToolID:           "tool-1",
+				StartedAt:        1,
+				FinishedAt:       2,
+			},
+			message.ToolCall{
+				ID:               "call-1",
+				Name:             "bash",
+				Input:            `{"command":"ls"}`,
+				ProviderExecuted: true,
+				Finished:         true,
+			},
+			message.ToolResult{
+				ToolCallID: "call-1",
+				Name:       "bash",
+				Content:    "output",
+				Data:       "ZGF0YQ==",
+				MIMEType:   "text/plain",
+				Metadata:   `{"k":"v"}`,
+				IsError:    false,
+			},
+			message.ImageURLContent{URL: "https://example.com/x.png", Detail: "auto"},
+			message.BinaryContent{Path: "/tmp/x.png", MIMEType: "image/png", Data: []byte{1, 2, 3}},
+			message.ShellCommand{Command: "ls -la", Output: "total 0", ExitCode: 0},
+			message.Finish{Reason: message.FinishReasonEndTurn, Time: 300, Message: "done"},
+		},
+	}
+
+	// message.Message -> proto.Message: a plain field copy now that
+	// ContentPart and every concrete part type are aliases.
+	protoMsg := proto.Message{
+		ID:        original.ID,
+		SessionID: original.SessionID,
+		Role:      original.Role,
+		Parts:     original.Parts,
+		Model:     original.Model,
+		Provider:  original.Provider,
+		CreatedAt: original.CreatedAt,
+		UpdatedAt: original.UpdatedAt,
+	}
+
+	data, err := json.Marshal(protoMsg)
+	require.NoError(t, err)
+
+	var wireMsg proto.Message
+	require.NoError(t, json.Unmarshal(data, &wireMsg))
+
+	// proto.Message -> message.Message: likewise a plain field copy.
+	roundTripped := message.Message{
+		ID:        wireMsg.ID,
+		SessionID: wireMsg.SessionID,
+		Role:      wireMsg.Role,
+		Parts:     wireMsg.Parts,
+		Model:     wireMsg.Model,
+		Provider:  wireMsg.Provider,
+		CreatedAt: wireMsg.CreatedAt,
+		UpdatedAt: wireMsg.UpdatedAt,
+	}
+
+	require.Equal(t, original, roundTripped)
 }

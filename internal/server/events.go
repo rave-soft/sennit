@@ -265,66 +265,22 @@ func fileToProto(f history.File) proto.File {
 	}
 }
 
+// messageToProto converts a [message.Message] to its wire form. This
+// used to be a 9-way type switch rebuilding every content part by
+// hand; now that proto's content part types are aliases of message's
+// (see proto/message.go), a [message.Message]'s Parts slice already
+// *is* a []proto.ContentPart, so there's nothing left to convert.
 func messageToProto(m message.Message) proto.Message {
-	msg := proto.Message{
+	return proto.Message{
 		ID:        m.ID,
 		SessionID: m.SessionID,
-		Role:      proto.MessageRole(m.Role),
+		Role:      m.Role,
+		Parts:     m.Parts,
 		Model:     m.Model,
 		Provider:  m.Provider,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}
-
-	for _, p := range m.Parts {
-		switch v := p.(type) {
-		case message.TextContent:
-			msg.Parts = append(msg.Parts, proto.TextContent{Text: v.Text})
-		case message.ReasoningContent:
-			msg.Parts = append(msg.Parts, proto.ReasoningContent{
-				Thinking:   v.Thinking,
-				Signature:  v.Signature,
-				StartedAt:  v.StartedAt,
-				FinishedAt: v.FinishedAt,
-			})
-		case message.ToolCall:
-			msg.Parts = append(msg.Parts, proto.ToolCall{
-				ID:       v.ID,
-				Name:     v.Name,
-				Input:    v.Input,
-				Finished: v.Finished,
-			})
-		case message.ToolResult:
-			msg.Parts = append(msg.Parts, proto.ToolResult{
-				ToolCallID: v.ToolCallID,
-				Name:       v.Name,
-				Content:    v.Content,
-				Data:       v.Data,
-				MIMEType:   v.MIMEType,
-				Metadata:   v.Metadata,
-				IsError:    v.IsError,
-			})
-		case message.Finish:
-			msg.Parts = append(msg.Parts, proto.Finish{
-				Reason:  proto.FinishReason(v.Reason),
-				Time:    v.Time,
-				Message: v.Message,
-				Details: v.Details,
-			})
-		case message.ImageURLContent:
-			msg.Parts = append(msg.Parts, proto.ImageURLContent{URL: v.URL, Detail: v.Detail})
-		case message.BinaryContent:
-			msg.Parts = append(msg.Parts, proto.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
-		case message.ShellCommand:
-			msg.Parts = append(msg.Parts, proto.ShellCommand{
-				Command:  v.Command,
-				Output:   v.Output,
-				ExitCode: v.ExitCode,
-			})
-		}
-	}
-
-	return msg
 }
 
 // skillsEventToProto converts a skills.Event into its wire form. Errors

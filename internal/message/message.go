@@ -166,7 +166,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 			Reason: "stop",
 		})
 	}
-	partsJSON, err := marshalParts(params.Parts)
+	partsJSON, err := MarshalParts(params.Parts)
 	if err != nil {
 		return Message{}, err
 	}
@@ -392,7 +392,7 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 // write performs the unguarded SQL write + UpdatedAt stamp. Caller
 // owns publishing.
 func (s *service) write(ctx context.Context, msg Message) error {
-	parts, err := marshalParts(msg.Parts)
+	parts, err := MarshalParts(msg.Parts)
 	if err != nil {
 		return err
 	}
@@ -500,7 +500,7 @@ func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {
-	parts, err := unmarshalParts([]byte(item.Parts), item.ID)
+	parts, err := UnmarshalParts([]byte(item.Parts), item.ID)
 	if err != nil {
 		return Message{}, err
 	}
@@ -521,7 +521,7 @@ type partType string
 
 const (
 	// metaType marks the synthetic version-marker element that
-	// marshalParts always prepends. It is never surfaced as a
+	// MarshalParts always prepends. It is never surfaced as a
 	// [ContentPart] to callers.
 	metaType         partType = "_meta"
 	reasoningType    partType = "reasoning"
@@ -544,7 +544,7 @@ const (
 // wrapper type — including "_meta" — as fatal, so it cannot read a
 // blob written by this or a later binary, exactly as it could not read
 // a blob containing any other new part type. Binaries at or after this
-// change tolerate unknown wrapper types (see unmarshalParts) and so
+// change tolerate unknown wrapper types (see UnmarshalParts) and so
 // remain forward-compatible with each other from here on: a future new
 // part type, or a future version bump gated on this field, will not
 // break reads.
@@ -564,7 +564,12 @@ type partWrapper struct {
 	Data ContentPart `json:"data"`
 }
 
-func marshalParts(parts []ContentPart) ([]byte, error) {
+// MarshalParts marshals content parts to JSON, wrapping each in a
+// type-tagged envelope plus a synthetic "_meta" version marker (see
+// [partsFormatVersion]). Exported so [github.com/rave-soft/braid/internal/proto]
+// can reuse it for the client/server wire format, which shares the
+// exact same shape as the SQLite storage format.
+func MarshalParts(parts []ContentPart) ([]byte, error) {
 	wrappedParts := make([]partWrapper, 0, len(parts)+1)
 	wrappedParts = append(wrappedParts, partWrapper{
 		Type: metaType,
@@ -603,7 +608,7 @@ func marshalParts(parts []ContentPart) ([]byte, error) {
 	return json.Marshal(wrappedParts)
 }
 
-// unmarshalParts decodes a parts blob. msgID is included in warning
+// UnmarshalParts decodes a parts blob. msgID is included in warning
 // logs for unrecognized part types; it is not otherwise used and may
 // be empty (e.g. before the message has an ID).
 //
@@ -613,7 +618,7 @@ func marshalParts(parts []ContentPart) ([]byte, error) {
 // an otherwise-readable session unreadable. A malformed envelope or a
 // known type with a payload that fails to unmarshal is still a real
 // error (data corruption), so those remain fatal.
-func unmarshalParts(data []byte, msgID string) ([]ContentPart, error) {
+func UnmarshalParts(data []byte, msgID string) ([]ContentPart, error) {
 	temp := []json.RawMessage{}
 
 	if err := json.Unmarshal(data, &temp); err != nil {
