@@ -128,8 +128,6 @@ VCR-матчера.
   происхождение поля или стиля (`internal/ui/logo/logo.go`,
   `internal/ui/styles/styles.go`). Это факты, а не оформление, поэтому не
   тронуты.
-- В `internal/ui/logo` сохранились `hyperLetterforms` и опция `Opts.Hyper` —
-  мёртвый код после удаления Hyper.
 - Буквы логотипа B, A, I, D нарисованы под ребрендинг и по стилю грубее
   оригинальных C, R, U, S, H.
 
