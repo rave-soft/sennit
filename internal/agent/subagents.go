@@ -1,0 +1,117 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"charm.land/fantasy"
+)
+
+// subAgentParams holds the parameters for running a sub-agent.
+type subAgentParams struct {
+	Agent          SessionAgent
+	SessionID      string
+	AgentMessageID string
+	ToolCallID     string
+	Prompt         string
+	SessionTitle   string
+	// SessionSetup is an optional callback invoked after session creation
+	// but before agent execution, for custom session configuration.
+	SessionSetup func(sessionID string)
+}
+
+// runSubAgent runs a sub-agent and handles session management and cost accumulation.
+// It creates a sub-session, runs the agent with the given prompt, and propagates
+// the cost to the parent session.
+func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+	// Create sub-session
+	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
+	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
+	if err != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
+	}
+
+	// Call session setup function if provided
+	if params.SessionSetup != nil {
+		params.SessionSetup(session.ID)
+	}
+
+	// Get model configuration
+	model := params.Agent.Model()
+	maxTokens := model.CatwalkCfg.DefaultMaxTokens
+	if model.ModelCfg.MaxTokens != 0 {
+		maxTokens = model.ModelCfg.MaxTokens
+	}
+
+	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+	if !ok {
+		return fantasy.ToolResponse{}, errModelProviderNotConfigured
+	}
+
+	// Run the agent
+	run := func() (*fantasy.AgentResult, error) {
+		return params.Agent.Run(ctx, SessionAgentCall{
+			SessionID:        session.ID,
+			Prompt:           params.Prompt,
+			MaxOutputTokens:  maxTokens,
+			ProviderOptions:  getProviderOptions(model, providerCfg),
+			Temperature:      model.ModelCfg.Temperature,
+			TopP:             model.ModelCfg.TopP,
+			TopK:             model.ModelCfg.TopK,
+			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
+			PresencePenalty:  model.ModelCfg.PresencePenalty,
+			NonInteractive:   true,
+			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+		})
+	}
+	result, err := run()
+	if err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
+	}
+
+	// Update parent session cost on a best-effort basis. A failure here must
+	// not discard the sub-agent output that was already produced.
+	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
+		slog.Warn(
+			"Failed to update parent session cost",
+			"child_session", session.ID,
+			"parent_session", params.SessionID,
+			"error", err,
+		)
+	}
+
+	output := subAgentOutput(result)
+	if output == "" {
+		return fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."), nil
+	}
+	return fantasy.NewTextResponse(output), nil
+}
+
+func subAgentOutput(result *fantasy.AgentResult) string {
+	if result == nil {
+		return ""
+	}
+	return result.Response.Content.Text()
+}
+
+// updateParentSessionCost accumulates the cost from a child session to its parent session.
+func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionID, parentSessionID string) error {
+	childSession, err := c.sessions.Get(ctx, childSessionID)
+	if err != nil {
+		return fmt.Errorf("get child session: %w", err)
+	}
+
+	parentSession, err := c.sessions.Get(ctx, parentSessionID)
+	if err != nil {
+		return fmt.Errorf("get parent session: %w", err)
+	}
+
+	parentSession.Cost += childSession.Cost
+
+	if _, err := c.sessions.Save(ctx, parentSession); err != nil {
+		return fmt.Errorf("save parent session: %w", err)
+	}
+
+	return nil
+}

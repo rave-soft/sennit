@@ -105,23 +105,20 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	// Skip permission for whitelisted Docker MCP tools.
 	if !slices.Contains(whitelistDockerTools, params.Name) {
 		permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
-		p, err := m.permissions.Request(
-			ctx,
-			permission.CreatePermissionRequest{
-				SessionID:   sessionID,
-				ToolCallID:  params.ID,
-				Path:        m.workingDir,
-				ToolName:    m.Info().Name,
-				Action:      "execute",
-				Description: permissionDescription,
-				Params:      params.Input,
-			},
-		)
+		resp, denied, err := requirePermission(ctx, m.permissions, permission.CreatePermissionRequest{
+			SessionID:   sessionID,
+			ToolCallID:  params.ID,
+			Path:        m.workingDir,
+			ToolName:    m.Info().Name,
+			Action:      "execute",
+			Description: permissionDescription,
+			Params:      params.Input,
+		})
 		if err != nil {
 			return fantasy.ToolResponse{}, err
 		}
-		if !p {
-			return NewPermissionDeniedResponse(), nil
+		if denied {
+			return resp, nil
 		}
 	}
 

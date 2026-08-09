@@ -4,9 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -60,7 +58,7 @@ func NewWriteTool(
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
+				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
 			}
 
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
@@ -86,9 +84,8 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
 			}
 
-			dir := filepath.Dir(filePath)
-			if err = os.MkdirAll(dir, 0o755); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
+			if err := ensureParentDir(filePath); err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			oldContent := ""
@@ -105,63 +102,33 @@ func NewWriteTool(
 				strings.TrimPrefix(filePath, workingDir),
 			)
 
-			p, err := permissions.Request(
-				ctx,
-				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        fsext.PathOrPrefix(filePath, workingDir),
-					ToolCallID:  call.ID,
-					ToolName:    WriteToolName,
-					Action:      "write",
-					Description: fmt.Sprintf("Create file %s", filePath),
-					Params: WritePermissionsParams{
-						FilePath:   filePath,
-						OldContent: oldContent,
-						NewContent: params.Content,
-					},
+			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        fsext.PathOrPrefix(filePath, workingDir),
+				ToolCallID:  call.ID,
+				ToolName:    WriteToolName,
+				Action:      "write",
+				Description: fmt.Sprintf("Create file %s", filePath),
+				Params: WritePermissionsParams{
+					FilePath:   filePath,
+					OldContent: oldContent,
+					NewContent: params.Content,
 				},
-			)
+			})
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
-				resp := NewPermissionDeniedResponse()
-				resp = fantasy.WithResponseMetadata(resp, WriteResponseMetadata{
+			if denied {
+				return fantasy.WithResponseMetadata(resp, WriteResponseMetadata{
 					Diff:      diff,
 					Additions: additions,
 					Removals:  removals,
-				})
-				return resp, nil
+				}), nil
 			}
 
-			err = os.WriteFile(filePath, []byte(params.Content), 0o644)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error writing file: %w", err)
+			if err := writeFileWithHistory(ctx, files, filetracker, sessionID, filePath, oldContent, params.Content); err != nil {
+				return fantasy.ToolResponse{}, err
 			}
-
-			// Check if file exists in history
-			file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
-			if err != nil {
-				_, err = files.Create(ctx, sessionID, filePath, oldContent)
-				if err != nil {
-					// Log error but don't fail the operation
-					return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-				}
-			}
-			if file.Content != oldContent {
-				// User manually changed the content; store an intermediate version
-				_, err = files.CreateVersion(ctx, sessionID, filePath, oldContent)
-				if err != nil {
-					slog.Error("Error creating file history version", "error", err)
-				}
-			}
-			// Store the new version
-			_, err = files.CreateVersion(ctx, sessionID, filePath, params.Content)
-			if err != nil {
-				slog.Error("Error creating file history version", "error", err)
-			}
-
-			filetracker.RecordRead(ctx, sessionID, filePath)
 
 			notifyLSPs(ctx, lspManager, params.FilePath)
 

@@ -4,9 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"charm.land/fantasy"
@@ -160,9 +158,8 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	}
 
 	// Create parent directories
-	dir := filepath.Dir(params.FilePath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
+	if err := ensureParentDir(params.FilePath); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
 
 	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
@@ -183,7 +180,7 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	} else {
 		description = fmt.Sprintf("Create file %s with %d edits", params.FilePath, editsApplied)
 	}
-	p, err := edit.permissions.Request(edit.ctx, permission.CreatePermissionRequest{
+	permResp, denied, err := requirePermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
 		ToolCallID:  call.ID,
@@ -199,37 +196,20 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
-		resp := NewPermissionDeniedResponse()
-		resp = fantasy.WithResponseMetadata(resp, MultiEditResponseMetadata{
+	if denied {
+		return fantasy.WithResponseMetadata(permResp, MultiEditResponseMetadata{
 			OldContent:   "",
 			NewContent:   currentContent,
 			Additions:    additions,
 			Removals:     removals,
 			EditsApplied: editsApplied,
 			EditsFailed:  failedEdits,
-		})
-		return resp, nil
+		}), nil
 	}
 
-	// Write the file
-	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, params.FilePath, "", currentContent); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
-
-	// Update file history
-	_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, "")
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-	}
-
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
-	if err != nil {
-		slog.Error("Error creating file history version", "error", err)
-	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -288,7 +268,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	} else {
 		description = fmt.Sprintf("Apply %d edits to file %s", editsApplied, params.FilePath)
 	}
-	p, err := edit.permissions.Request(edit.ctx, permission.CreatePermissionRequest{
+	permResp, denied, err := requirePermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, edit.workingDir),
 		ToolCallID:  call.ID,
@@ -304,17 +284,15 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
-		resp := NewPermissionDeniedResponse()
-		resp = fantasy.WithResponseMetadata(resp, MultiEditResponseMetadata{
+	if denied {
+		return fantasy.WithResponseMetadata(permResp, MultiEditResponseMetadata{
 			OldContent:   oldContent,
 			NewContent:   currentContent,
 			Additions:    additions,
 			Removals:     removals,
 			EditsApplied: editsApplied,
 			EditsFailed:  failedEdits,
-		})
-		return resp, nil
+		}), nil
 	}
 
 	writeContent := currentContent
@@ -322,7 +300,7 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, params.FilePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
 

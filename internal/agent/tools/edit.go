@@ -5,9 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -115,9 +113,8 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
-	dir := filepath.Dir(filePath)
-	if err = os.MkdirAll(dir, 0o755); err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
+	if err := ensureParentDir(filePath); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
 
 	sessionID := GetSessionFromContext(edit.ctx)
@@ -130,56 +127,34 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		content,
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
-	p, err := edit.permissions.Request(
-		edit.ctx,
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Create file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: "",
-				NewContent: content,
-			},
+	resp, denied, err := requirePermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+		ToolCallID:  call.ID,
+		ToolName:    EditToolName,
+		Action:      "write",
+		Description: fmt.Sprintf("Create file %s", filePath),
+		Params: EditPermissionsParams{
+			FilePath:   filePath,
+			OldContent: "",
+			NewContent: content,
 		},
-	)
+	})
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
-		resp := NewPermissionDeniedResponse()
-		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
+	if denied {
+		return fantasy.WithResponseMetadata(resp, EditResponseMetadata{
 			OldContent: "",
 			NewContent: content,
 			Additions:  additions,
 			Removals:   removals,
-		})
-		return resp, nil
+		}), nil
 	}
 
-	err = os.WriteFile(filePath, []byte(content), 0o644)
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, "", content); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
-
-	// File can't be in the history so we create a new file history
-	_, err = edit.files.Create(edit.ctx, sessionID, filePath, "")
-	if err != nil {
-		// Log error but don't fail the operation
-		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-	}
-
-	// Add the new content to the file history
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, content)
-	if err != nil {
-		// Log error but don't fail the operation
-		slog.Error("Error creating file history version", "error", err)
-	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
@@ -238,35 +213,6 @@ func notFoundError(content, old string) error {
 		msg += "\n\n" + hint
 	}
 	return errors.New(msg)
-}
-
-// commitFileChange writes newContent to filePath, updates the file history,
-// and records the read in the file tracker. Callers must convert line endings
-// before calling this function.
-func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string) error {
-	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-
-	file, err := edit.files.GetByPathAndSession(edit.ctx, filePath, sessionID)
-	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent)
-		if err != nil {
-			return fmt.Errorf("error creating file history: %w", err)
-		}
-	}
-	if file.Content != oldContent {
-		// User manually changed the content; store an intermediate version.
-		if _, err := edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent); err != nil {
-			slog.Error("Error creating file history version", "error", err)
-		}
-	}
-	if _, err := edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent); err != nil {
-		slog.Error("Error creating file history version", "error", err)
-	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
-	return nil
 }
 
 func loadExistingFile(edit editContext, filePath, sessionError string) (sessionID, oldContent string, isCrlf bool, resp fantasy.ToolResponse, err error) {
@@ -331,34 +277,29 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
 
-	p, err := edit.permissions.Request(
-		edit.ctx,
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Delete content from file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: newContent,
-			},
+	permResp, denied, err := requirePermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+		ToolCallID:  call.ID,
+		ToolName:    EditToolName,
+		Action:      "write",
+		Description: fmt.Sprintf("Delete content from file %s", filePath),
+		Params: EditPermissionsParams{
+			FilePath:   filePath,
+			OldContent: oldContent,
+			NewContent: newContent,
 		},
-	)
+	})
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
-		resp := NewPermissionDeniedResponse()
-		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
+	if denied {
+		return fantasy.WithResponseMetadata(permResp, EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: newContent,
 			Additions:  additions,
 			Removals:   removals,
-		})
-		return resp, nil
+		}), nil
 	}
 
 	writeContent := newContent
@@ -366,7 +307,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
 
@@ -404,34 +345,29 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
 
-	p, err := edit.permissions.Request(
-		edit.ctx,
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Replace content in file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: result,
-			},
+	permResp, denied, err := requirePermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
+		SessionID:   sessionID,
+		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
+		ToolCallID:  call.ID,
+		ToolName:    EditToolName,
+		Action:      "write",
+		Description: fmt.Sprintf("Replace content in file %s", filePath),
+		Params: EditPermissionsParams{
+			FilePath:   filePath,
+			OldContent: oldContent,
+			NewContent: result,
 		},
-	)
+	})
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if !p {
-		resp := NewPermissionDeniedResponse()
-		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
+	if denied {
+		return fantasy.WithResponseMetadata(permResp, EditResponseMetadata{
 			OldContent: oldContent,
 			NewContent: result,
 			Additions:  additions,
 			Removals:   removals,
-		})
-		return resp, nil
+		}), nil
 	}
 
 	writeContent := result
@@ -439,7 +375,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
 

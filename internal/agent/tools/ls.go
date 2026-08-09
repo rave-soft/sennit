@@ -84,41 +84,30 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 			searchPath = filepathext.SmartJoin(workingDir, searchPath)
 
 			// Check if directory is outside working directory and request permission if needed
-			absWorkingDir, err := filepath.Abs(workingDir)
+			absSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
 			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("error resolving working directory: %v", err)), nil
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
-
-			absSearchPath, err := filepath.Abs(searchPath)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("error resolving search path: %v", err)), nil
-			}
-
-			relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
-			if err != nil || strings.HasPrefix(relPath, "..") {
-				// Directory is outside working directory, request permission
+			if outside {
 				sessionID := GetSessionFromContext(ctx)
 				if sessionID == "" {
 					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing directories outside working directory")
 				}
 
-				granted, err := permissions.Request(
-					ctx,
-					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        absSearchPath,
-						ToolCallID:  call.ID,
-						ToolName:    LSToolName,
-						Action:      "list",
-						Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),
-						Params:      LSPermissionsParams(params),
-					},
-				)
+				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        absSearchPath,
+					ToolCallID:  call.ID,
+					ToolName:    LSToolName,
+					Action:      "list",
+					Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),
+					Params:      LSPermissionsParams(params),
+				})
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
-				if !granted {
-					return NewPermissionDeniedResponse(), nil
+				if denied {
+					return resp, nil
 				}
 			}
 

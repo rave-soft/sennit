@@ -50,23 +50,20 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 			}
 
 			relPath := filepathext.SmartJoin(cfg.WorkingDir(), cmp.Or(params.URI, "mcp-resource"))
-			p, err := permissions.Request(
-				ctx,
-				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        relPath,
-					ToolCallID:  call.ID,
-					ToolName:    ReadMCPResourceToolName,
-					Action:      "read",
-					Description: fmt.Sprintf("Read MCP resource from %s", params.MCPName),
-					Params:      ReadMCPResourcePermissionsParams(params),
-				},
-			)
+			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
+				SessionID:   sessionID,
+				Path:        relPath,
+				ToolCallID:  call.ID,
+				ToolName:    ReadMCPResourceToolName,
+				Action:      "read",
+				Description: fmt.Sprintf("Read MCP resource from %s", params.MCPName),
+				Params:      ReadMCPResourcePermissionsParams(params),
+			})
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if !p {
-				return NewPermissionDeniedResponse(), nil
+			if denied {
+				return resp, nil
 			}
 
 			contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)

@@ -62,7 +62,7 @@ func NewRenameTool(
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID != "" && permissions != nil {
-				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
+				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					ToolName:    RenameToolName,
 					Description: fmt.Sprintf("Rename '%s' to '%s'", params.Symbol, params.NewName),
@@ -70,8 +70,8 @@ func NewRenameTool(
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
 				}
-				if !granted {
-					return NewPermissionDeniedResponse(), nil
+				if denied {
+					return resp, nil
 				}
 			}
 

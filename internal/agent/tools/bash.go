@@ -225,23 +225,20 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
 			}
 			if !isSafeReadOnly {
-				p, err := permissions.Request(
-					ctx,
-					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        execWorkingDir,
-						ToolCallID:  call.ID,
-						ToolName:    BashToolName,
-						Action:      "execute",
-						Description: fmt.Sprintf("Execute command: %s", params.Command),
-						Params:      BashPermissionsParams(params),
-					},
-				)
+				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
+					SessionID:   sessionID,
+					Path:        execWorkingDir,
+					ToolCallID:  call.ID,
+					ToolName:    BashToolName,
+					Action:      "execute",
+					Description: fmt.Sprintf("Execute command: %s", params.Command),
+					Params:      BashPermissionsParams(params),
+				})
 				if err != nil {
 					return fantasy.ToolResponse{}, err
 				}
-				if !p {
-					return NewPermissionDeniedResponse(), nil
+				if denied {
+					return resp, nil
 				}
 			}
 
