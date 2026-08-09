@@ -4523,14 +4523,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 				return util.ReportWarn("Paste is too big (>5mb)")
 			}
 			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
-			mimeBufferSize := min(512, len(content))
-			mimeType := http.DetectContentType(content[:mimeBufferSize])
-			return message.Attachment{
-				FileName: name,
-				FilePath: name,
-				MimeType: mimeType,
-				Content:  content,
-			}
+			return common.AttachmentFromBytes(name, name, content)
 		}
 	}
 
@@ -4605,20 +4598,12 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 			return util.ReportWarn("File is too big (>5mb)")
 		}
 
-		content, err := os.ReadFile(path)
+		attachment, err := common.AttachmentFromPath(path)
 		if err != nil {
 			return util.ReportError(err)
 		}
 
-		mimeBufferSize := min(512, len(content))
-		mimeType := http.DetectContentType(content[:mimeBufferSize])
-		fileName := filepath.Base(path)
-		return message.Attachment{
-			FilePath: path,
-			FileName: fileName,
-			MimeType: mimeType,
-			Content:  content,
-		}
+		return attachment
 	}
 }
 

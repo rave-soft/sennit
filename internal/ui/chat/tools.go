@@ -203,6 +203,45 @@ func newBaseToolMessageItem(
 	return t
 }
 
+// toolMessageItemFactory constructs a [ToolMessageItem] for one tool name.
+type toolMessageItemFactory func(sty *styles.Styles, toolCall message.ToolCall, result *message.ToolResult, canceled bool) ToolMessageItem
+
+// toolMessageItemFactories maps tool names to the constructor for their
+// dedicated renderer. Tool names with no entry here (MCP tools, unrecognized
+// tools) fall through to the default chain in NewToolMessageItem.
+var toolMessageItemFactories = map[string]toolMessageItemFactory{
+	tools.BashToolName:        NewBashToolMessageItem,
+	tools.JobOutputToolName:   NewJobOutputToolMessageItem,
+	tools.JobKillToolName:     NewJobKillToolMessageItem,
+	tools.ViewToolName:        NewViewToolMessageItem,
+	tools.WriteToolName:       NewWriteToolMessageItem,
+	tools.EditToolName:        NewEditToolMessageItem,
+	tools.MultiEditToolName:   NewMultiEditToolMessageItem,
+	tools.GlobToolName:        NewGlobToolMessageItem,
+	tools.GrepToolName:        NewGrepToolMessageItem,
+	tools.LSToolName:          NewLSToolMessageItem,
+	tools.DownloadToolName:    NewDownloadToolMessageItem,
+	tools.FetchToolName:       NewFetchToolMessageItem,
+	tools.DiagnosticsToolName: NewDiagnosticsToolMessageItem,
+	agent.AgentToolName: func(sty *styles.Styles, toolCall message.ToolCall, result *message.ToolResult, canceled bool) ToolMessageItem {
+		return NewAgentToolMessageItem(sty, toolCall, result, canceled)
+	},
+	tools.AgenticFetchToolName: func(sty *styles.Styles, toolCall message.ToolCall, result *message.ToolResult, canceled bool) ToolMessageItem {
+		return NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
+	},
+	tools.WebFetchToolName:      NewWebFetchToolMessageItem,
+	tools.WebSearchToolName:     NewWebSearchToolMessageItem,
+	tools.TodosToolName:         NewTodosToolMessageItem,
+	tools.QuestionToolName:      NewQuestionToolMessageItem,
+	tools.ReferencesToolName:    NewReferencesToolMessageItem,
+	tools.DefinitionToolName:    NewDefinitionToolMessageItem,
+	tools.RenameToolName:        NewRenameToolMessageItem,
+	tools.ReplaceSymbolToolName: NewReplaceSymbolToolMessageItem,
+	tools.CallHierarchyToolName: NewCallHierarchyToolMessageItem,
+	tools.SymbolsToolName:       NewSymbolsToolMessageItem,
+	tools.LSPRestartToolName:    NewLSPRestartToolMessageItem,
+}
+
 // NewToolMessageItem creates a new [ToolMessageItem] based on the tool call name.
 //
 // It returns a specific tool message item type if implemented, otherwise it
@@ -216,67 +255,14 @@ func NewToolMessageItem(
 	canceled bool,
 ) ToolMessageItem {
 	var item ToolMessageItem
-	switch toolCall.Name {
-	case tools.BashToolName:
-		item = NewBashToolMessageItem(sty, toolCall, result, canceled)
-	case tools.JobOutputToolName:
-		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
-	case tools.JobKillToolName:
-		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
-	case tools.ViewToolName:
-		item = NewViewToolMessageItem(sty, toolCall, result, canceled)
-	case tools.WriteToolName:
-		item = NewWriteToolMessageItem(sty, toolCall, result, canceled)
-	case tools.EditToolName:
-		item = NewEditToolMessageItem(sty, toolCall, result, canceled)
-	case tools.MultiEditToolName:
-		item = NewMultiEditToolMessageItem(sty, toolCall, result, canceled)
-	case tools.GlobToolName:
-		item = NewGlobToolMessageItem(sty, toolCall, result, canceled)
-	case tools.GrepToolName:
-		item = NewGrepToolMessageItem(sty, toolCall, result, canceled)
-	case tools.LSToolName:
-		item = NewLSToolMessageItem(sty, toolCall, result, canceled)
-	case tools.DownloadToolName:
-		item = NewDownloadToolMessageItem(sty, toolCall, result, canceled)
-	case tools.FetchToolName:
-		item = NewFetchToolMessageItem(sty, toolCall, result, canceled)
-	case tools.DiagnosticsToolName:
-		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
-	case agent.AgentToolName:
-		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
-	case tools.AgenticFetchToolName:
-		item = NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
-	case tools.WebFetchToolName:
-		item = NewWebFetchToolMessageItem(sty, toolCall, result, canceled)
-	case tools.WebSearchToolName:
-		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
-	case tools.TodosToolName:
-		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
-	case tools.QuestionToolName:
-		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
-	case tools.ReferencesToolName:
-		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
-	case tools.DefinitionToolName:
-		item = NewDefinitionToolMessageItem(sty, toolCall, result, canceled)
-	case tools.RenameToolName:
-		item = NewRenameToolMessageItem(sty, toolCall, result, canceled)
-	case tools.ReplaceSymbolToolName:
-		item = NewReplaceSymbolToolMessageItem(sty, toolCall, result, canceled)
-	case tools.CallHierarchyToolName:
-		item = NewCallHierarchyToolMessageItem(sty, toolCall, result, canceled)
-	case tools.SymbolsToolName:
-		item = NewSymbolsToolMessageItem(sty, toolCall, result, canceled)
-	case tools.LSPRestartToolName:
-		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
-	default:
-		if IsDockerMCPTool(toolCall.Name) {
-			item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled)
-		} else if strings.HasPrefix(toolCall.Name, "mcp_") {
-			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
-		} else {
-			item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
-		}
+	if factory, ok := toolMessageItemFactories[toolCall.Name]; ok {
+		item = factory(sty, toolCall, result, canceled)
+	} else if IsDockerMCPTool(toolCall.Name) {
+		item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled)
+	} else if strings.HasPrefix(toolCall.Name, "mcp_") {
+		item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
+	} else {
+		item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
 	}
 	item.SetMessageID(messageID)
 	return item

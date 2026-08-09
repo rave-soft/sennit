@@ -1,11 +1,6 @@
 package dialog
 
 import (
-	"charm.land/bubbles/v2/help"
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/notification"
@@ -36,20 +31,12 @@ var AllNotificationStyles = []NotificationStyle{
 	{ID: "disabled", Title: "Disabled", Description: "Turn off notifications"},
 }
 
-// Notifications represents a dialog for selecting notification style.
+// Notifications is a dialog for selecting notification style. It is a thin
+// wrapper around [selectDialog]: the fixed, non-scrolling height strategy
+// (notificationsDialogMaxHeight, no min-height) is what distinguishes it
+// from [Reasoning].
 type Notifications struct {
-	com   *common.Common
-	help  help.Model
-	list  *list.FilterableList
-	input textinput.Model
-
-	keyMap struct {
-		Select   key.Binding
-		Next     key.Binding
-		Previous key.Binding
-		UpDown   key.Binding
-		Close    key.Binding
-	}
+	*selectDialog
 }
 
 // NotificationItem represents a notification style list item.
@@ -76,165 +63,26 @@ var (
 
 // NewNotifications creates a new notification style picker dialog.
 func NewNotifications(com *common.Common) *Notifications {
-	n := &Notifications{com: com}
-
-	h := help.New()
-	h.Styles = com.Styles.DialogHelpStyles()
-	n.help = h
-
-	n.list = list.NewFilterableList()
-	n.list.Focus()
-
-	n.input = textinput.New()
-	n.input.SetVirtualCursor(false)
-	n.input.Placeholder = "Type to filter"
-	n.input.SetStyles(com.Styles.TextInput)
-	n.input.Focus()
-
-	n.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "confirm"),
-	)
-	n.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "ctrl+n"),
-		key.WithHelp("↓", "next item"),
-	)
-	n.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
-	)
-	n.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
-	n.keyMap.Close = CloseKey
-
-	n.setItems()
-	return n
+	// buildItems never fails for notifications, so the error from
+	// newSelectDialog is always nil here.
+	sd, _ := newSelectDialog(com, selectDialogConfig{
+		id:            NotificationsID,
+		title:         "Notification Style",
+		maxWidth:      notificationsDialogMaxWidth,
+		dynamicHeight: false,
+		maxHeight:     notificationsDialogMaxHeight,
+		buildItems:    func() ([]list.FilterableItem, int, error) { return notificationItems(com) },
+		onSelect: func(id string) Action {
+			return ActionSelectNotificationStyle{Style: id}
+		},
+	})
+	return &Notifications{selectDialog: sd}
 }
 
-// ID implements Dialog.
-func (n *Notifications) ID() string {
-	return NotificationsID
-}
-
-// HandleMsg implements [Dialog].
-func (n *Notifications) HandleMsg(msg tea.Msg) Action {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, n.keyMap.Close):
-			return ActionClose{}
-		case key.Matches(msg, n.keyMap.Previous):
-			n.list.Focus()
-			if n.list.IsSelectedFirst() {
-				n.list.SelectLast()
-				n.list.ScrollToBottom()
-				break
-			}
-			n.list.SelectPrev()
-			n.list.ScrollToSelected()
-		case key.Matches(msg, n.keyMap.Next):
-			n.list.Focus()
-			if n.list.IsSelectedLast() {
-				n.list.SelectFirst()
-				n.list.ScrollToTop()
-				break
-			}
-			n.list.SelectNext()
-			n.list.ScrollToSelected()
-		case key.Matches(msg, n.keyMap.Select):
-			selectedItem := n.list.SelectedItem()
-			if selectedItem == nil {
-				break
-			}
-			notifItem, ok := selectedItem.(*NotificationItem)
-			if !ok {
-				break
-			}
-			return ActionSelectNotificationStyle{Style: notifItem.style.ID}
-		default:
-			var cmd tea.Cmd
-			n.input, cmd = n.input.Update(msg)
-			value := n.input.Value()
-			n.list.SetFilter(value)
-			n.list.ScrollToTop()
-			n.list.SetSelected(0)
-			return ActionCmd{cmd}
-		}
-	}
-	return nil
-}
-
-// Cursor returns the cursor position relative to the dialog.
-func (n *Notifications) Cursor() *tea.Cursor {
-	return InputCursor(n.com.Styles, n.input.Cursor())
-}
-
-// Draw implements [Dialog].
-func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	t := n.com.Styles
-	width := max(0, min(notificationsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(notificationsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-
-	n.input.SetWidth(dialogInputTextWidth(t, n.input, innerWidth))
-	n.list.SetSize(innerWidth, max(0, height-heightOffset))
-
-	rc := NewRenderContext(t, width)
-	rc.Title = "Notification Style"
-	inputView := t.Dialog.InputPrompt.Render(n.input.View())
-	rc.AddPart(inputView)
-
-	visibleCount := len(n.list.FilteredItems())
-	if n.list.Height() >= visibleCount {
-		n.list.ScrollToTop()
-	} else {
-		n.list.ScrollToSelected()
-	}
-
-	listView := t.Dialog.List.Height(n.list.Height()).Render(n.list.Render())
-	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(t, &n.help, n, innerWidth)
-
-	view := rc.Render()
-
-	cur := n.Cursor()
-	DrawCenterCursor(scr, area, view, cur)
-	return cur
-}
-
-// ShortHelp implements [help.KeyMap].
-func (n *Notifications) ShortHelp() []key.Binding {
-	return []key.Binding{
-		n.keyMap.UpDown,
-		n.keyMap.Select,
-		n.keyMap.Close,
-	}
-}
-
-// FullHelp implements [help.KeyMap].
-func (n *Notifications) FullHelp() [][]key.Binding {
-	m := [][]key.Binding{}
-	slice := []key.Binding{
-		n.keyMap.Select,
-		n.keyMap.Next,
-		n.keyMap.Previous,
-		n.keyMap.Close,
-	}
-	for i := 0; i < len(slice); i += 4 {
-		end := min(i+4, len(slice))
-		m = append(m, slice[i:end])
-	}
-	return m
-}
-
-func (n *Notifications) setItems() {
-	cfg := n.com.Config()
+// notificationItems builds the notification style list items, returning the
+// index of the currently active style.
+func notificationItems(com *common.Common) ([]list.FilterableItem, int, error) {
+	cfg := com.Config()
 	currentStyle := "auto"
 	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
 		currentStyle = cfg.Options.Notifications
@@ -252,7 +100,7 @@ func (n *Notifications) setItems() {
 			Versioned: list.NewVersioned(),
 			style:     style,
 			isCurrent: style.ID == currentStyle,
-			t:         n.com.Styles,
+			t:         com.Styles,
 		}
 		if style.ID == currentStyle {
 			selectedIndex = len(items)
@@ -260,9 +108,7 @@ func (n *Notifications) setItems() {
 		items = append(items, item)
 	}
 
-	n.list.SetItems(items...)
-	n.list.SetSelected(selectedIndex)
-	n.list.ScrollToSelected()
+	return items, selectedIndex, nil
 }
 
 // Filter returns the filter value for the notification item.

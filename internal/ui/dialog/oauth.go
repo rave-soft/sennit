@@ -44,6 +44,7 @@ const OAuthID = "oauth"
 type OAuth struct {
 	com          *common.Common
 	isOnboarding bool
+	Base
 
 	provider      catwalk.Provider
 	model         config.SelectedModel
@@ -61,7 +62,6 @@ type OAuth struct {
 		Close   key.Binding
 	}
 
-	width           int
 	deviceCode      string
 	userCode        string
 	verificationURL string
@@ -87,11 +87,11 @@ func newOAuth(
 	m := OAuth{}
 	m.com = com
 	m.isOnboarding = isOnboarding
+	m.Base = NewBase(com, 60)
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
 	m.oAuthProvider = oAuthProvider
-	m.width = 0 // Set dynamically in Draw().
 	m.State = OAuthStateInitializing
 
 	m.spinner = spinner.New(
@@ -233,17 +233,12 @@ type oauthSaveErrMsg struct {
 
 // View renders the device flow dialog.
 func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	var (
-		t           = m.com.Styles
-		dialogWidth = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-		dialogStyle = t.Dialog.View.Width(dialogWidth)
-	)
-	m.width = dialogWidth
+	m.Resize(area)
 	if m.isOnboarding {
 		view := m.dialogContent()
 		DrawOnboarding(scr, area, view)
 	} else {
-		view := dialogStyle.Render(m.dialogContent())
+		view := m.Frame(m.dialogContent())
 		DrawCenter(scr, area, view)
 	}
 	return nil
@@ -254,13 +249,13 @@ func (m *OAuth) dialogContent() string {
 
 	switch m.State {
 	case OAuthStateInitializing, OAuthStateSaving:
-		return m.innerDialogContent()
+		return m.innerContent()
 
 	default:
-		innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+		innerWidth := m.InnerWidth()
 		elements := []string{
 			m.headerContent(),
-			m.innerDialogContent(),
+			m.innerContent(),
 			renderDialogHelp(t, &m.help, m, innerWidth),
 		}
 		return strings.Join(elements, "\n")
@@ -272,17 +267,17 @@ func (m *OAuth) headerContent() string {
 		t            = m.com.Styles
 		titleStyle   = t.Dialog.Title
 		textStyle    = t.Dialog.PrimaryText
-		dialogStyle  = t.Dialog.View.Width(m.width)
+		dialogStyle  = t.Dialog.View.Width(m.Width())
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
 	)
 	if m.isOnboarding {
 		return textStyle.Render(dialogTitle)
 	}
-	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.Width()-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 
-func (m *OAuth) innerDialogContent() string {
+func (m *OAuth) innerContent() string {
 	var (
 		t                = m.com.Styles
 		instructionStyle = t.Dialog.OAuth.Instructions
@@ -296,7 +291,7 @@ func (m *OAuth) innerDialogContent() string {
 	// innerWidth is the dialog's content area: total width minus the
 	// View frame (border). Every block sizes to this so nothing gets
 	// re-wrapped when the dialog frame renders it.
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := m.InnerWidth()
 
 	switch m.State {
 	case OAuthStateInitializing:

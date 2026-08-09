@@ -3,15 +3,11 @@ package dialog
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/session"
@@ -186,7 +182,7 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 			}
 		}
 
-		content, err := os.ReadFile(path)
+		attachment, err := common.AttachmentFromPath(path)
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
@@ -194,15 +190,6 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 			}
 		}
 
-		mimeBufferSize := min(512, len(content))
-		mimeType := http.DetectContentType(content[:mimeBufferSize])
-		fileName := filepath.Base(path)
-
-		return message.Attachment{
-			FilePath: path,
-			FileName: fileName,
-			MimeType: mimeType,
-			Content:  content,
-		}
+		return attachment
 	}
 }
