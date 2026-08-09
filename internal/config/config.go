@@ -179,7 +179,16 @@ func (c *ProviderConfig) ToProvider() catwalk.Provider {
 	return provider
 }
 
+// SetupGitHubCopilot adds the headers Copilot requires to the provider.
+//
+// The map is created when absent: a provider declared without extra_headers
+// decodes with a nil map, and copying into a nil map panics. That is reachable
+// from the OAuth refresh path, where a Copilot entry holding only a token would
+// take down the process.
 func (c *ProviderConfig) SetupGitHubCopilot() {
+	if c.ExtraHeaders == nil {
+		c.ExtraHeaders = make(map[string]string)
+	}
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
 }
 

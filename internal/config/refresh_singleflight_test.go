@@ -279,14 +279,6 @@ func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
 // whose in-memory credential has aged out adopts a peer's still-valid
 // token from disk without spending an exchange at all.
 func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
-	// Disabled by the removal of Charm's provider catalog. These tests pin a
-	// provider entry to disk and expect it to survive the config reload that
-	// follows a token write. Upstream that held because the provider came from
-	// the fetched catalog; Braid ships only the embedded one, so the entry is
-	// re-validated as a custom provider and dropped. The refresh logic itself
-	// is unchanged — the fixtures need rebuilding on a provider that survives
-	// a reload.
-	t.Skip("fixture depends on the removed provider catalog")
 
 	t.Parallel()
 
