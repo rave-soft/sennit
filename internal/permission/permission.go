@@ -104,8 +104,20 @@ type permissionService struct {
 	skip                  atomic.Bool
 	allowedTools          []string
 
-	// used to make sure we only process one request at a time
-	requestMu sync.Mutex
+	// dialogMu guards current and queue below, which together implement
+	// a one-at-a-time dispatch of permission requests to the UI. The UI
+	// relies on exactly one PermissionRequest event being outstanding
+	// at any time (see openPermissionsDialog in internal/ui), so a
+	// second request must wait to be published until the first is
+	// resolved. This lock is only ever held for the brief bookkeeping
+	// below, never across a Request call's wait for a user response.
+	dialogMu sync.Mutex
+	// current is the ID of the request currently published to the UI,
+	// or "" if none is outstanding.
+	current string
+	// queue holds requests that have arrived while another request is
+	// current, in FIFO order.
+	queue []PermissionRequest
 }
 
 // resolve atomically removes the pending request entry for the given
@@ -145,7 +157,58 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 	// so this send never blocks.
 	respCh <- granted
 
+	// This request no longer occupies the "currently shown" slot (if it
+	// ever did); let the next queued request take its place.
+	s.dispatchNext(permission.ID)
+
 	return true
+}
+
+// enqueue publishes the request immediately if no other request is
+// currently awaiting a response, otherwise it appends to the queue to be
+// published once the current one resolves. This is what guarantees the
+// UI only ever sees one PermissionRequest event outstanding at a time.
+func (s *permissionService) enqueue(permission PermissionRequest) {
+	s.dialogMu.Lock()
+	if s.current == "" {
+		s.current = permission.ID
+		s.dialogMu.Unlock()
+		s.Publish(pubsub.CreatedEvent, permission)
+		return
+	}
+	s.queue = append(s.queue, permission)
+	s.dialogMu.Unlock()
+}
+
+// dispatchNext is called once a request identified by id has been finally
+// settled (resolved via Grant/Deny/GrantPersistent, or canceled via ctx).
+// If id was the request currently shown to the UI, the next queued request
+// (if any) is published and becomes current. If id was still waiting in
+// the queue (e.g. resolved or canceled before ever being shown), it is
+// simply removed. Calling this more than once for the same id is safe: by
+// the time a second call arrives, id is neither current nor in the queue,
+// so both branches are no-ops.
+func (s *permissionService) dispatchNext(id string) {
+	s.dialogMu.Lock()
+	if s.current != id {
+		s.queue = slices.DeleteFunc(s.queue, func(p PermissionRequest) bool {
+			return p.ID == id
+		})
+		s.dialogMu.Unlock()
+		return
+	}
+
+	if len(s.queue) == 0 {
+		s.current = ""
+		s.dialogMu.Unlock()
+		return
+	}
+
+	next := s.queue[0]
+	s.queue = s.queue[1:]
+	s.current = next.ID
+	s.dialogMu.Unlock()
+	s.Publish(pubsub.CreatedEvent, next)
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
@@ -193,9 +256,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		})
 		return true, nil
 	}
-
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
 
 	// tell the UI that a permission was requested
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
@@ -253,13 +313,23 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
-	defer s.pendingRequests.Del(permission.ID)
 
-	// Publish the request
-	s.Publish(pubsub.CreatedEvent, permission)
+	// Publish the request now if no other request is being shown to the
+	// user, otherwise queue it to be published once the current one is
+	// resolved. Request no longer holds a lock across this wait: the
+	// dispatch above (and dispatchNext, called from resolve/cancel) is
+	// what serializes what the UI sees, not this goroutine blocking.
+	s.enqueue(permission)
 
 	select {
 	case <-ctx.Done():
+		// Only the goroutine that wins the Take is responsible for
+		// advancing the queue: if Grant/Deny raced us and already took
+		// the entry, resolve has already called dispatchNext and this
+		// is a safe no-op.
+		if _, ok := s.pendingRequests.Take(permission.ID); ok {
+			s.dispatchNext(permission.ID)
+		}
 		return false, ctx.Err()
 	case granted := <-respCh:
 		return granted, nil

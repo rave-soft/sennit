@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -611,5 +612,196 @@ func TestPermissionService_ResolveIdempotency(t *testing.T) {
 		case <-time.After(50 * time.Millisecond):
 			// good: no notification.
 		}
+	})
+}
+
+// queueLen reports how many requests are currently waiting behind the
+// one shown to the UI. It reaches into the service's private dispatch
+// state, which is fine since this test file lives in package permission.
+func queueLen(t *testing.T, svc Service) int {
+	t.Helper()
+	ps := svc.(*permissionService)
+	ps.dialogMu.Lock()
+	defer ps.dialogMu.Unlock()
+	return len(ps.queue)
+}
+
+// TestPermissionService_QueuedDispatch covers the fix for the
+// requestMu-held-across-the-wait bug described in ARCHITECTURE_REVIEW.md
+// §3.5: Request must not block *posting* a second request behind a
+// first one still awaiting a user response, but the UI must still only
+// ever see one PermissionRequest event outstanding at a time.
+func TestPermissionService_QueuedDispatch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("second request is queued, not blocked, and published only after the first resolves", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		req1 := CreatePermissionRequest{SessionID: "s1", ToolCallID: "call-1", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		req2 := CreatePermissionRequest{SessionID: "s2", ToolCallID: "call-2", ToolName: "bash", Action: "execute", Path: "/tmp"}
+
+		var wg sync.WaitGroup
+		var granted1, granted2 bool
+		wg.Go(func() {
+			granted1, _ = service.Request(t.Context(), req1)
+		})
+
+		var pending1 PermissionRequest
+		select {
+		case ev := <-events:
+			pending1 = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("first request was never published")
+		}
+
+		// Fire the second request while the first is still pending a
+		// user response. This call must return from enqueueing without
+		// waiting on the first to resolve — only the goroutine blocks
+		// on its own respCh, not the caller of Request.
+		done2 := make(chan struct{})
+		wg.Go(func() {
+			granted2, _ = service.Request(t.Context(), req2)
+			close(done2)
+		})
+
+		// The second request must land in the queue rather than being
+		// published: the UI must never see two outstanding requests.
+		require.Eventually(t, func() bool {
+			return queueLen(t, service) == 1
+		}, 2*time.Second, 5*time.Millisecond, "second request should be queued")
+
+		select {
+		case ev := <-events:
+			t.Fatalf("second request published before the first resolved: %+v", ev.Payload)
+		case <-time.After(100 * time.Millisecond):
+			// good: still queued.
+		}
+
+		service.Grant(pending1)
+
+		var pending2 PermissionRequest
+		select {
+		case ev := <-events:
+			pending2 = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("second request was never published after the first resolved")
+		}
+		assert.Equal(t, "call-2", pending2.ToolCallID)
+
+		service.Deny(pending2)
+		<-done2
+		wg.Wait()
+
+		assert.True(t, granted1)
+		assert.False(t, granted2)
+	})
+
+	t.Run("canceling a queued request removes it without ever showing it", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		req1 := CreatePermissionRequest{SessionID: "s1", ToolCallID: "call-1", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		req2 := CreatePermissionRequest{SessionID: "s2", ToolCallID: "call-2", ToolName: "bash", Action: "execute", Path: "/tmp"}
+
+		var wg sync.WaitGroup
+		var granted1 bool
+		wg.Go(func() {
+			granted1, _ = service.Request(t.Context(), req1)
+		})
+
+		var pending1 PermissionRequest
+		select {
+		case ev := <-events:
+			pending1 = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("first request was never published")
+		}
+
+		ctx2, cancel2 := context.WithCancel(t.Context())
+		var granted2 bool
+		var err2 error
+		wg.Go(func() {
+			granted2, err2 = service.Request(ctx2, req2)
+		})
+
+		require.Eventually(t, func() bool {
+			return queueLen(t, service) == 1
+		}, 2*time.Second, 5*time.Millisecond, "second request should be queued")
+
+		cancel2()
+
+		// Wait for req2's cancellation to be fully processed before
+		// resolving req1, so we can assert the queue was drained by the
+		// cancellation itself rather than by req1's resolution.
+		require.Eventually(t, func() bool {
+			return queueLen(t, service) == 0
+		}, 2*time.Second, 5*time.Millisecond, "canceled queued request must be removed")
+
+		select {
+		case ev := <-events:
+			t.Fatalf("canceled queued request must never be published: %+v", ev.Payload)
+		case <-time.After(50 * time.Millisecond):
+			// good: never shown.
+		}
+
+		service.Grant(pending1)
+		wg.Wait()
+
+		assert.ErrorIs(t, err2, context.Canceled)
+		assert.False(t, granted2)
+		assert.True(t, granted1)
+	})
+
+	t.Run("canceling the current request publishes the next queued one", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		req1 := CreatePermissionRequest{SessionID: "s1", ToolCallID: "call-1", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		req2 := CreatePermissionRequest{SessionID: "s2", ToolCallID: "call-2", ToolName: "bash", Action: "execute", Path: "/tmp"}
+
+		ctx1, cancel1 := context.WithCancel(t.Context())
+		var wg sync.WaitGroup
+		var granted1 bool
+		var err1 error
+		wg.Go(func() {
+			granted1, err1 = service.Request(ctx1, req1)
+		})
+
+		select {
+		case <-events:
+		case <-time.After(2 * time.Second):
+			t.Fatal("first request was never published")
+		}
+
+		var granted2 bool
+		wg.Go(func() {
+			granted2, _ = service.Request(t.Context(), req2)
+		})
+
+		require.Eventually(t, func() bool {
+			return queueLen(t, service) == 1
+		}, 2*time.Second, 5*time.Millisecond, "second request should be queued")
+
+		cancel1()
+
+		var pending2 PermissionRequest
+		select {
+		case ev := <-events:
+			pending2 = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("second request was never published after the current one was canceled")
+		}
+		assert.Equal(t, "call-2", pending2.ToolCallID)
+
+		service.Grant(pending2)
+		wg.Wait()
+
+		assert.ErrorIs(t, err1, context.Canceled)
+		assert.False(t, granted1)
+		assert.True(t, granted2)
 	})
 }
