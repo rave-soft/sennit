@@ -85,6 +85,32 @@ provider add deepseek \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 ```
 
+`proxy_url` (routes this provider's requests through an http/https/socks5
+proxy, or forces a direct connection with the sentinel `"none"` even when
+`HTTP_PROXY`/`HTTPS_PROXY` are set) has **no `provider add` flag**. Set it in
+`braid.json` only:
+
+```json
+{ "providers": { "deepseek": { "proxy_url": "socks5://localhost:1080" } } }
+```
+
+`proxy_url` goes through shell expansion in `braid.json` (see [Shell
+expansion](#shell-expansion-in-braidjson)), so `"$CORP_PROXY"` works too.
+
+### Model discovery
+
+A custom provider (one with a `base_url` outside the built-in catwalk
+catalog) auto-discovers its models from `/v1/models` on load when `models` is
+empty, or always when `discover_models: true` — the discovered list is merged
+onto the provider and persisted into the data-directory config
+(`~/.local/share/braid/braid.json`) so later loads skip the HTTP round trip.
+Force a full re-discovery (overwriting the persisted list) with:
+
+```bash
+braid models refresh              # every custom provider
+braid models refresh my-local-llm # one provider
+```
+
 ### models
 
 ```bash
@@ -107,6 +133,21 @@ model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
   usable in `$(model large)`.
 
 `large` is the primary coding model; `small` is used for summarization.
+
+`model add` flags cover the common `catwalk.Model` fields. Two fields have no
+flag and are `braid.json`-only: `reasoning_levels` (list of efforts the model
+advertises) and `id`/`name` beyond the required minimum. A hand-written model
+entry needs at least:
+
+```json
+{
+  "id": "my-model", "name": "My Model",
+  "context_window": 128000, "default_max_tokens": 8192,
+  "cost_per_1m_in": 0, "cost_per_1m_out": 0,
+  "cost_per_1m_in_cached": 0, "cost_per_1m_out_cached": 0,
+  "can_reason": false, "supports_attachments": false
+}
+```
 
 ### mcp
 
@@ -286,6 +327,67 @@ unchanged:
 }
 ```
 
+## Subagents
+
+Subagents are named roles the main agent can delegate to as a tool call. Two
+ways to define one; both can coexist and a JSON `agents` entry overrides a
+markdown file of the same id.
+
+### Markdown files
+
+Drop a file in `.braid/agents/*.md` (also read: `.claude/agents/`,
+`.opencode/agent/`, and an `agents/` directory next to the global config —
+lowest to highest priority):
+
+```markdown
+---
+name: reviewer
+description: Reviews Go code for correctness and idiom.
+model: anthropic/claude-sonnet-4   # optional; provider/model-id
+reasoning_effort: low              # optional; low | medium | high
+tools: [view, grep, glob]
+---
+
+You are a Go code reviewer. Report real defects, not style opinions.
+```
+
+- The file name (or `name`) becomes the delegation tool's name; the body is
+  the system prompt (required, non-empty).
+- `model` is optional and, when set, must resolve to a `provider/model-id`
+  among configured providers; an unresolvable value (including the literal
+  words `large`/`small`, which have no special meaning here) is dropped with
+  a warning and the agent falls back to the app's main model. **There are no
+  `large`/`small` model slots for agents** — that only applies to the global
+  `model large`/`model small` selection above.
+- Tool names from Claude Code (`Read`, `Grep`, `Bash`, `WebFetch`, …) are
+  translated to Braid's; unknown names are dropped silently.
+- opencode's `permission:` blocks are **not enforced** — restrict an agent via
+  `tools` or the config's `permissions` section instead.
+
+### braid.json `agents` block
+
+```json
+{
+  "agents": {
+    "reviewer": {
+      "description": "Reviews Go code for correctness and idiom.",
+      "model": "anthropic/claude-sonnet-4",
+      "reasoning_effort": "low",
+      "prompt": "You are a Go code reviewer...",
+      "allowed_tools": ["view", "grep", "glob"],
+      "allowed_mcp": { "github": null },
+      "context_paths": ["AGENTS.md"]
+    }
+  }
+}
+```
+
+`prompt` is required for a JSON-defined agent (markdown files use the file
+body instead). `allowed_tools`/`context_paths` omitted (`null`) inherit the
+coder's; an empty list is a deliberate "no tools". `allowed_mcp` maps an MCP
+server name to its allowed tool names, or `null` for all of that server's
+tools; omitted entirely means all configured MCPs are available.
+
 ## User-invocable skills
 
 Skills can be invoked as commands. Add `user-invocable: true` to the skill's
@@ -345,6 +447,8 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
+| *(no braidrc equivalent)*            | `providers.<id>.proxy_url = "http://host:8080"`        |
+| *(no braidrc equivalent)*            | `agents.<id> = {"prompt": "...", "model": "p/m"}`      |
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |
@@ -356,7 +460,7 @@ time (in `braidrc`, everything is native Bash so this table does not apply):
 
 | Surface                                                         | Expansion                          |
 | --------------------------------------------------------------- | ---------------------------------- |
-| Provider `api_key`, `base_url`, `api_endpoint`, `extra_headers` | yes                                |
+| Provider `api_key`, `base_url`, `api_endpoint`, `proxy_url`, `extra_headers` | yes                    |
 | Provider `extra_body`                                           | **no** (JSON passthrough)          |
 | MCP `command`, `args`, `env`, `headers`, `url`                  | yes                                |
 | LSP `command`, `args`, `env`                                    | yes                                |
