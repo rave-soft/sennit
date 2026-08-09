@@ -27,6 +27,22 @@ func TestSetupAgentsKeepsBuiltinsWithoutUserAgents(t *testing.T) {
 	require.Contains(t, cfg.Agents, AgentTask)
 }
 
+func TestSetupAgentsTaskAgentHasNetworkTools(t *testing.T) {
+	// The Task agent is read-only with respect to local state, but it may
+	// still need to pull in outside context (docs, issue trackers, etc.),
+	// so fetch/web_fetch/web_search are part of its default palette. Those
+	// calls still go through the real permission.Service, same as the
+	// coder's.
+	cfg := newAgentConfig(t, "")
+	cfg.SetupAgents()
+
+	taskAgent, ok := cfg.Agents[AgentTask]
+	require.True(t, ok)
+	require.Contains(t, taskAgent.AllowedTools, "fetch")
+	require.Contains(t, taskAgent.AllowedTools, "web_fetch")
+	require.Contains(t, taskAgent.AllowedTools, "web_search")
+}
+
 func TestSetupAgentsRegistersUserAgent(t *testing.T) {
 	cfg := newAgentConfig(t, `{"agents":{"reviewer":{
 		"description":"Reviews code",

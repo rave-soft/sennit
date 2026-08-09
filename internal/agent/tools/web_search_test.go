@@ -11,7 +11,7 @@ import (
 
 func TestWebSearchToolDeniedPermission(t *testing.T) {
 	perms := &stubPermissionService{granted: false}
-	tool := NewWebSearchTool(perms, t.TempDir(), nil)
+	tool := NewWebSearchTool(perms, t.TempDir(), nil, nil)
 
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 	resp, err := runWebSearchTool(t, tool, ctx, WebSearchParams{Query: "braid coding agent"})
@@ -23,7 +23,7 @@ func TestWebSearchToolDeniedPermission(t *testing.T) {
 
 func TestWebSearchToolRequiresQuery(t *testing.T) {
 	// nil permissions: sub-agent mode, no permission check should occur.
-	tool := NewWebSearchTool(nil, t.TempDir(), nil)
+	tool := NewWebSearchTool(nil, t.TempDir(), nil, nil)
 
 	resp, err := runWebSearchTool(t, tool, context.Background(), WebSearchParams{Query: ""})
 	require.NoError(t, err)

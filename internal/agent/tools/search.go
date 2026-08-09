@@ -16,12 +16,30 @@ import (
 	"golang.org/x/net/html"
 )
 
-// SearchResult represents a single search result from DuckDuckGo.
+// SearchResult represents a single web search result.
 type SearchResult struct {
 	Title    string
 	Link     string
 	Snippet  string
 	Position int
+}
+
+// SearchBackend performs a web search. The DuckDuckGo Lite scraper is the
+// default, keyless implementation; NewSearchBackend also builds keyed
+// implementations (e.g. Tavily) selected via options.web_search.provider.
+type SearchBackend interface {
+	Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error)
+}
+
+// duckDuckGoBackend is the default SearchBackend: it scrapes DuckDuckGo
+// Lite and needs no API key.
+type duckDuckGoBackend struct {
+	client *http.Client
+}
+
+func (b *duckDuckGoBackend) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	maybeDelaySearch()
+	return searchDuckDuckGo(ctx, b.client, query, maxResults)
 }
 
 var userAgents = []string{

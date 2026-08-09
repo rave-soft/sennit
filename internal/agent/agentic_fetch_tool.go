@@ -149,11 +149,16 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
 
+			searchBackend, err := c.webSearchBackend()
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("web_search: %w", err)
+			}
+
 			// nil permissions: this sub-agent's parent agentic_fetch call is
 			// already permission-gated above, so its own fetch/search tools
 			// run unauthenticated.
 			webFetchTool := tools.NewWebFetchTool(nil, tmpDir, client)
-			webSearchTool := tools.NewWebSearchTool(nil, tmpDir, client)
+			webSearchTool := tools.NewWebSearchTool(nil, tmpDir, client, searchBackend)
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
 				webSearchTool,

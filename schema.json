@@ -629,6 +629,10 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "web_search": {
+          "$ref": "#/$defs/WebSearchOptions",
+          "description": "Web search backend configuration. Defaults to the keyless DuckDuckGo scraper when omitted."
         }
       },
       "additionalProperties": false,
@@ -957,6 +961,42 @@
         },
         "glob": {
           "$ref": "#/$defs/ToolGlob"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "WebSearchOptions": {
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "duckduckgo",
+            "tavily"
+          ],
+          "description": "Web search backend to use",
+          "default": "duckduckgo"
+        },
+        "api_key": {
+          "type": "string",
+          "description": "API key for the web search provider (shell-expanded), e.g. $TAVILY_API_KEY. Not used by the duckduckgo provider.",
+          "examples": [
+            "$TAVILY_API_KEY"
+          ]
+        },
+        "base_url": {
+          "type": "string",
+          "description": "Override the search provider's default API endpoint (self-hosted or proxy-compatible deployments)",
+          "examples": [
+            "https://api.tavily.com/search"
+          ]
+        },
+        "proxy_url": {
+          "type": "string",
+          "description": "Proxy URL for web search requests (http/https/socks5); set to \"none\" to force a direct connection even if HTTP_PROXY/HTTPS_PROXY are set in the environment",
+          "examples": [
+            "http://localhost:8080"
+          ]
         }
       },
       "additionalProperties": false,

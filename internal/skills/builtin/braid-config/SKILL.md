@@ -247,6 +247,40 @@ option ui diff unified
 > `skill-path`: `.agents/skills`, `.braid/skills`, `.claude/skills`,
 > `.cursor/skills`.
 
+### options.web_search
+
+The `web_search` tool's backend is configurable via `options.web_search` in
+`braid.json` (no braidrc builtin yet — edit the JSON directly). Omitting the
+section, or setting `provider` to `"duckduckgo"`, keeps the default: a keyless
+scraper of DuckDuckGo Lite.
+
+```json
+{
+  "options": {
+    "web_search": {
+      "provider": "tavily",
+      "api_key": "$TAVILY_API_KEY",
+      "base_url": "https://api.tavily.com/search",
+      "proxy_url": "http://localhost:8080"
+    }
+  }
+}
+```
+
+- **`provider`**: `"duckduckgo"` (default) or `"tavily"`.
+- **`api_key`**: required for `tavily`; shell-expanded the same as provider
+  `api_key` (`$VAR`, `${VAR:-default}`, `$(cmd)`). Unused by `duckduckgo`.
+- **`base_url`**: optional override of the provider's default endpoint, for
+  self-hosted or proxy-compatible search APIs.
+- **`proxy_url`**: optional, routes search requests through a proxy
+  (`http`/`https`/`socks5`); set to `"none"` to force a direct connection
+  even when `HTTP_PROXY`/`HTTPS_PROXY` are set. Web search has no LLM
+  provider of its own to inherit a proxy from, so it's configured here
+  instead — unlike provider `proxy_url`, this only affects `web_search`, not
+  `fetch`/`web_fetch`.
+- An auth or quota error from the configured provider is returned to the
+  model as a tool error (not a crashed step) so it can retry or fall back.
+
 ## Hooks runtime
 
 Hooks are user-defined shell commands that fire on agent events. Currently only
@@ -452,6 +486,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |
+| *(no braidrc equivalent)*            | `options.web_search = {"provider":"tavily","api_key":"$K"}` |
 
 ### Shell expansion in braid.json
 
@@ -461,6 +496,7 @@ time (in `braidrc`, everything is native Bash so this table does not apply):
 | Surface                                                         | Expansion                          |
 | --------------------------------------------------------------- | ---------------------------------- |
 | Provider `api_key`, `base_url`, `api_endpoint`, `proxy_url`, `extra_headers` | yes                    |
+| `options.web_search` `api_key`, `proxy_url`                     | yes                                |
 | Provider `extra_body`                                           | **no** (JSON passthrough)          |
 | MCP `command`, `args`, `env`, `headers`, `url`                  | yes                                |
 | LSP `command`, `args`, `env`                                    | yes                                |

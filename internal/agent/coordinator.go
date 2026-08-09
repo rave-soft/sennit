@@ -441,6 +441,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 	}
 
+	searchBackend, err := c.webSearchBackend()
+	if err != nil {
+		return nil, fmt.Errorf("web_search: %w", err)
+	}
+
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
@@ -453,7 +458,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewWebFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil),
+		tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil, searchBackend),
 		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
 		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
@@ -532,6 +537,18 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
 
 	return filteredTools, nil
+}
+
+// webSearchBackend builds the SearchBackend selected by options.web_search,
+// defaulting to the keyless DuckDuckGo scraper when the section is absent.
+// api_key and proxy_url run through the same shell-expansion resolver used
+// for provider api_key/proxy_url.
+func (c *coordinator) webSearchBackend() (tools.SearchBackend, error) {
+	var opts config.WebSearchOptions
+	if ws := c.cfg.Config().Options.WebSearch; ws != nil {
+		opts = *ws
+	}
+	return tools.NewSearchBackend(opts, c.cfg.Resolver(), nil)
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config

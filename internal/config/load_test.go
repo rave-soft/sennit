@@ -792,7 +792,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "grep", "ls", "view"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -814,7 +814,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "ls", "view"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithWebSearchDisabled(t *testing.T) {
@@ -845,6 +845,9 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 				"lsp_definition",
 				"lsp_symbols",
 				"view",
+				"fetch",
+				"web_fetch",
+				"web_search",
 			},
 		},
 	}
@@ -852,7 +855,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
