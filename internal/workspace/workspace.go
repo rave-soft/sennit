@@ -158,6 +158,17 @@ type Workspace interface {
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel
+	// AgentRunStream sends prompt as a new turn on the already-resolved
+	// sessionID (see ResolveSession) and streams the turn to
+	// completion. The returned channel is closed after the terminal
+	// AgentRunEvent (Done: true) is sent, or immediately alongside a
+	// synchronous error if the turn could not be started at all (e.g.
+	// agent not ready). The caller owns all presentation concerns
+	// (spinner, progress bar) and must either drain the channel to
+	// completion or cancel ctx to stop it early; cancelling ctx
+	// delivers a terminal event derived from ctx.Err() unless the turn
+	// already finished on its own.
+	AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error)
 
 	// Permissions
 	//
@@ -203,6 +214,15 @@ type Workspace interface {
 
 	// Config mutations (proxied to server in client mode)
 	UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error
+	// OverridePreferredModel applies a preferred-model override for the
+	// current process, for callers (namely `braid run -m/--small-model`)
+	// that must not surprise the user with a config-file write from a
+	// single invocation. In local mode this is purely in-memory (see
+	// config.ConfigStore.OverridePreferredModel). Client/server mode has
+	// no equivalent ephemeral primitive on the server, so it falls back
+	// to a persisted UpdatePreferredModel at ScopeWorkspace — matching
+	// braid run -m's pre-existing behavior in that mode.
+	OverridePreferredModel(modelType config.SelectedModelType, model config.SelectedModel) error
 	SetCompactMode(scope config.Scope, enabled bool) error
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
 	SetConfigField(scope config.Scope, key string, value any) error
@@ -234,6 +254,22 @@ type Workspace interface {
 	// Events
 	Subscribe(program *tea.Program)
 	Shutdown()
+}
+
+// AgentRunEvent is one increment of a non-interactive agent turn
+// driven through Workspace.AgentRunStream. TextDelta carries new,
+// already de-duplicated/reconciled assistant text to append verbatim
+// to stdout — callers must not track byte offsets themselves. Done is
+// set on the terminal event (success, cancellation, or failure); Err
+// is non-nil only on failure. A clean cancellation reports Done=true,
+// Err=nil when the turn itself reports a clean cancellation (e.g. the
+// server-side run was cancelled); a caller-driven ctx cancellation
+// still surfaces ctx.Err(), matching the pre-refactor behavior of
+// `braid run`'s select-on-ctx.Done() branch.
+type AgentRunEvent struct {
+	TextDelta string
+	Done      bool
+	Err       error
 }
 
 // MCPResourceContents holds the contents of an MCP resource.

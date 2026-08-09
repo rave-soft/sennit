@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/google/uuid"
 	"github.com/pkg/browser"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
@@ -334,6 +335,244 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.Selecte
 	return *model
 }
 
+// AgentRunStream sends prompt as a new turn over the client SDK and
+// streams the SSE event feed to completion. This is the run-loop body
+// that used to live in cmd's runNonInteractive/runStream, moved here
+// so cmd only ever talks to the Workspace interface.
+//
+// herdr integration for the client/server path lives here rather than
+// in cmd: local mode already gets it transparently via
+// herdr.BridgeLocal wired up inside app.New, so mirroring that inside
+// ClientWorkspace (instead of leaking raw SSE events back to cmd for
+// translation) keeps the two Workspace implementations symmetric.
+func (w *ClientWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
+	wsID := w.workspaceID()
+
+	if err := w.waitForAgent(ctx); err != nil {
+		return nil, fmt.Errorf("agent not ready: %w", err)
+	}
+
+	// Force-update agent models so MCP tools are loaded.
+	if err := w.client.UpdateAgent(ctx, wsID); err != nil {
+		slog.Warn("Failed to update agent", "error", err)
+	}
+
+	events, err := w.client.SubscribeEvents(ctx, wsID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe to events: %w", err)
+	}
+
+	// Mint a per-call RunID so we can correlate the terminal
+	// RunComplete with *this* SendMessage even if the session was busy
+	// and another turn finished first. Without it the stream loop
+	// would exit on whichever RunComplete arrived first for the same
+	// session and drop the queued prompt's output.
+	runID := uuid.New().String()
+	if err := w.client.SendMessage(ctx, wsID, sessionID, runID, prompt); err != nil {
+		return nil, fmt.Errorf("failed to send message: %w", err)
+	}
+
+	// Start herdr integration for this run; released when the stream
+	// loop exits, mirroring the pre-refactor one-shot `braid run`
+	// process lifetime (the process exits shortly after this
+	// returns).
+	w.herdrClient.SetSessionID(sessionID)
+
+	stream := &runStream{sessionID: sessionID, runID: runID}
+	out := make(chan AgentRunEvent)
+
+	go func() {
+		defer close(out)
+		defer w.herdrClient.Close()
+
+		for {
+			select {
+			case ev, ok := <-events:
+				if !ok {
+					out <- AgentRunEvent{Done: true}
+					return
+				}
+
+				// Forward events to herdr if running inside a herdr pane.
+				if hev := herdr.Translate(ev); hev != nil {
+					w.herdrClient.HandleEvent(hev)
+				}
+
+				delta, done, err := stream.handle(ev)
+				if delta != "" {
+					out <- AgentRunEvent{TextDelta: delta}
+				}
+				if done {
+					out <- AgentRunEvent{Done: true, Err: err}
+					return
+				}
+
+			case <-ctx.Done():
+				out <- AgentRunEvent{Done: true, Err: ctx.Err()}
+				return
+			}
+		}
+	}()
+
+	return out, nil
+}
+
+// waitForAgent polls GetAgentInfo until the agent is ready, with a
+// timeout.
+func (w *ClientWorkspace) waitForAgent(ctx context.Context) error {
+	wsID := w.workspaceID()
+	timeout := time.After(30 * time.Second)
+	for {
+		info, err := w.client.GetAgentInfo(ctx, wsID)
+		if err == nil && info.IsReady {
+			return nil
+		}
+		select {
+		case <-timeout:
+			if err != nil {
+				return fmt.Errorf("timeout waiting for agent: %w", err)
+			}
+			return fmt.Errorf("timeout waiting for agent readiness")
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// runStream tracks the per-message read cursor and the reconciliation
+// state used by [ClientWorkspace.AgentRunStream] to translate
+// streaming SSE events into a de-duplicated sequence of text deltas
+// for `braid run`. It is split out so the state machine can be
+// exercised in unit tests without spinning up the full server/client
+// harness.
+//
+// runID, when non-empty, is the authoritative correlator for the
+// terminal RunComplete event: the stream suppresses live message
+// events and only exits on a RunComplete whose RunID matches, so a
+// turn that finishes first on the same session (e.g. when our prompt
+// was queued behind a busy session) cannot contaminate the output or
+// terminate us prematurely. When empty (older servers, tests that
+// don't supply one) the stream falls back to SessionID-only matching
+// and live message streaming, which is still correct for the
+// single-turn case.
+type runStream struct {
+	sessionID string
+	runID     string
+	read      map[string]int
+	printed   bool
+}
+
+// handle processes one SSE event. Returns delta (new text to emit,
+// already trimmed/de-duplicated), done=true when the run loop should
+// exit (RunComplete observed), and a non-nil err only when the agent
+// run failed (not on context cancel — that path is handled by the
+// caller's select).
+func (s *runStream) handle(ev any) (delta string, done bool, err error) {
+	if s.read == nil {
+		s.read = make(map[string]int)
+	}
+	switch e := ev.(type) {
+	case pubsub.Event[proto.Message]:
+		msg := e.Payload
+		if msg.SessionID != s.sessionID || msg.Role != proto.Assistant || len(msg.Parts) == 0 {
+			return "", false, nil
+		}
+		if s.runID != "" {
+			return "", false, nil
+		}
+
+		content := msg.Content().String()
+		readBytes := s.read[msg.ID]
+		if len(content) < readBytes {
+			slog.Error("Non-interactive: message content shorter than read bytes",
+				"message_length", len(content), "read_bytes", readBytes)
+			return "", false, fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+		}
+
+		part := content[readBytes:]
+		if readBytes == 0 {
+			part = strings.TrimLeft(part, " \t")
+		}
+		s.read[msg.ID] = len(content)
+		if !s.printed && strings.TrimSpace(part) == "" {
+			return "", false, nil
+		}
+		s.printed = true
+		return part, false, nil
+
+	case pubsub.Event[proto.RunComplete]:
+		// RunComplete is the authoritative end-of-run signal. We exit
+		// on it instead of guessing from message finish parts, which
+		// fire on every tool-call step too and were the source of the
+		// regression where `braid run` exited mid-turn on
+		// finish.reason == tool_use.
+		//
+		// Correlation:
+		//   - if we minted a RunID for this SendMessage, only the
+		//     event whose RunID matches is ours; any other turn
+		//     finishing first on the same session (busy-session queue
+		//     path) must be ignored.
+		//   - if we have no RunID (older server, tests), fall back to
+		//     SessionID matching.
+		if s.runID != "" {
+			if e.Payload.RunID != s.runID {
+				return "", false, nil
+			}
+		} else if e.Payload.SessionID != s.sessionID {
+			return "", false, nil
+		}
+		if e.Payload.Error != "" && !e.Payload.Cancelled {
+			return "", true, fmt.Errorf("agent run failed: %s", e.Payload.Error)
+		}
+		// Reconcile against the authoritative final assistant text
+		// carried in the event. The pubsub fan-in does not serialize
+		// publishes across upstream brokers, so the final message
+		// event may not have reached this loop yet; the embedded Text
+		// field is the backstop that guarantees the full final text
+		// always appears in the output.
+		var tail string
+		if e.Payload.MessageID != "" {
+			full := e.Payload.Text
+			readBytes := s.read[e.Payload.MessageID]
+			if readBytes < len(full) {
+				t := full[readBytes:]
+				if readBytes == 0 {
+					t = strings.TrimLeft(t, " \t")
+				}
+				if s.printed || strings.TrimSpace(t) != "" {
+					s.printed = true
+					tail = t
+				}
+			}
+		}
+		return tail, true, nil
+
+	case pubsub.Event[proto.AgentEvent]:
+		if e.Payload.Error == nil {
+			return "", false, nil
+		}
+		// Attribute the error to our run before treating it as fatal.
+		// Async errors from an unrelated workspace run share this
+		// channel, so a foreign failure must not abort us:
+		//   - if the event carries a RunID, it is the authoritative
+		//     correlator: it must match our run exactly, otherwise it
+		//     belongs to a different request and we ignore it.
+		//   - if the event carries no RunID (older server), fall back
+		//     to SessionID: it must be present and match our session,
+		//     otherwise we ignore it.
+		if e.Payload.RunID != "" {
+			if e.Payload.RunID != s.runID {
+				return "", false, nil
+			}
+		} else if e.Payload.SessionID == "" || e.Payload.SessionID != s.sessionID {
+			return "", false, nil
+		}
+		return "", true, fmt.Errorf("agent error: %w", e.Payload.Error)
+	}
+	return "", false, nil
+}
+
 // -- Permissions --
 
 func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
@@ -534,6 +773,13 @@ func (w *ClientWorkspace) UpdatePreferredModel(scope config.Scope, modelType con
 		w.refreshWorkspace()
 	}
 	return err
+}
+
+// OverridePreferredModel has no server-side ephemeral equivalent, so
+// it falls back to a persisted workspace-scoped update. See the
+// Workspace interface doc.
+func (w *ClientWorkspace) OverridePreferredModel(modelType config.SelectedModelType, model config.SelectedModel) error {
+	return w.UpdatePreferredModel(config.ScopeWorkspace, modelType, model)
 }
 
 func (w *ClientWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {

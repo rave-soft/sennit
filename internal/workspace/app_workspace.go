@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/agent"
 	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/app"
@@ -242,6 +244,112 @@ func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedMo
 	return w.app.GetDefaultSmallModel(providerID)
 }
 
+// AgentRunStream starts a non-interactive turn against the local
+// agent coordinator and streams it to completion. This is the
+// run-loop body that used to live in app.App.RunNonInteractive,
+// stripped of everything that isn't "run the turn and hand back
+// text": no spinner, no progress bar, no stdout writer. Those stay
+// the caller's job (see cmd/run.go).
+func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
+	if w.app.AgentCoordinator == nil {
+		return nil, errors.New("agent coordinator not initialized")
+	}
+
+	// Wait for MCP initialization to complete before reading MCP tools.
+	if err := mcptools.WaitForInit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	// Force-update agent models before running so MCP tools are loaded.
+	w.app.AgentCoordinator.UpdateModels(ctx)
+
+	// Automatically approve all permission requests for this
+	// non-interactive run.
+	w.app.Permissions.AutoApproveSession(sessionID)
+
+	// Report session identity to herdr. Local mode's Messages/RunComplete
+	// event bridge (see herdr.BridgeLocal in app.New) does the rest.
+	w.app.ReportCurrentSession(sessionID)
+
+	ctx, cancel := context.WithCancel(ctx)
+	out := make(chan AgentRunEvent)
+
+	type response struct {
+		result *fantasy.AgentResult
+		err    error
+	}
+	done := make(chan response, 1)
+
+	go func() {
+		result, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt)
+		if err != nil {
+			done <- response{err: fmt.Errorf("failed to start agent processing stream: %w", err)}
+			return
+		}
+		done <- response{result: result}
+	}()
+
+	go func() {
+		defer cancel()
+		defer close(out)
+
+		messageEvents := w.app.Messages.Subscribe(ctx)
+		readBytes := make(map[string]int)
+		var printed bool
+
+		for {
+			select {
+			case result := <-done:
+				if result.err != nil {
+					if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
+						out <- AgentRunEvent{Done: true}
+						return
+					}
+					out <- AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)}
+					return
+				}
+				out <- AgentRunEvent{Done: true}
+				return
+
+			case ev := <-messageEvents:
+				msg := ev.Payload
+				if msg.SessionID != sessionID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
+					continue
+				}
+
+				content := msg.Content().String()
+				rb := readBytes[msg.ID]
+				if len(content) < rb {
+					out <- AgentRunEvent{Done: true, Err: fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), rb)}
+					return
+				}
+
+				part := content[rb:]
+				// Trim leading whitespace. Sometimes the LLM includes
+				// leading formatting and indentation, which we don't
+				// want here.
+				if rb == 0 {
+					part = strings.TrimLeft(part, " \t")
+				}
+				readBytes[msg.ID] = len(content)
+
+				// Ignore initial whitespace-only messages.
+				if !printed && strings.TrimSpace(part) == "" {
+					continue
+				}
+				printed = true
+				out <- AgentRunEvent{TextDelta: part}
+
+			case <-ctx.Done():
+				out <- AgentRunEvent{Done: true, Err: ctx.Err()}
+				return
+			}
+		}
+	}()
+
+	return out, nil
+}
+
 // -- Permissions --
 
 func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
@@ -345,6 +453,13 @@ func (w *AppWorkspace) Resolver() config.VariableResolver {
 
 func (w *AppWorkspace) UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
 	return w.store.UpdatePreferredModel(scope, modelType, model)
+}
+
+// OverridePreferredModel sets the model in memory only, without
+// touching the user's config file. See the Workspace interface doc.
+func (w *AppWorkspace) OverridePreferredModel(modelType config.SelectedModelType, model config.SelectedModel) error {
+	w.store.OverridePreferredModel(modelType, model)
+	return nil
 }
 
 func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
