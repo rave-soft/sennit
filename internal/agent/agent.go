@@ -21,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -174,58 +173,9 @@ type sessionAgent struct {
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
 
-	messageQueue   *csync.Map[string, []SessionAgentCall]
-	activeRequests *csync.Map[string, *activeCancel]
-
-	// dispatchMu holds a per-session mutex that serializes the
-	// accepted -> (cancel-on-entry | queued | active) transition in
-	// Run against a concurrent Cancel. The lock is held only during
-	// the brief handoff (no DB or LLM I/O under the lock).
-	//
-	// Entries are never removed: sessionMu below hands out the *sync.Mutex
-	// pointer without holding dispatchMuCreate on the fast path, so a
-	// caller can be holding (or about to look up) a session's mutex at
-	// the same time a cleanup elsewhere decides the session is idle and
-	// deletes it. If a new mutex were then created for the same session,
-	// the two instances would no longer exclude each other, silently
-	// breaking the invariant this map exists to provide. Safe removal
-	// needs a refcount on top of the mutex (increment under
-	// dispatchMuCreate in sessionMu, decrement - and delete at zero - when
-	// the caller is done with it), which is a bigger change than this
-	// leak justifies: the map is bounded by the number of distinct
-	// sessions touched over the process lifetime, not by request volume.
-	dispatchMu *csync.Map[string, *sync.Mutex]
-	// acceptedRuns counts dispatched-but-not-yet-active runs per
-	// session. A counter > 0 means a dispatched prompt is in flight
-	// and has not yet completed the dispatch handoff in Run. Only
-	// BeginAccepted increments it; only AcceptedRun.Close decrements
-	// it.
-	acceptedRuns *csync.Map[string, int]
-	// cancelMark records, per session, a high-water accept sequence: an
-	// accepted handle is canceled by it iff the handle's sequence is at
-	// or below the mark. Cancel raises the mark to the latest sequence
-	// assigned at cancel time, so a single Cancel covers every prompt
-	// accepted-but-not-yet-active then, while a prompt accepted later
-	// (higher sequence) is never poisoned. Absent or 0 means no pending
-	// cancel. It is only raised by Cancel when acceptedRuns > 0, so an
-	// idle Escape never records a mark.
-	cancelMark *csync.Map[string, uint64]
-	// dispatchMuCreate guards lazy creation of per-session entries in
-	// dispatchMu so two goroutines can't race to lock different mutex
-	// instances for the same session.
-	dispatchMuCreate sync.Mutex
-	// acceptedMu serializes increments/decrements of acceptedRuns and
-	// the assignment of accept sequence numbers from acceptSeqGen. It
-	// is separate from dispatchMu so AcceptedRun.Close (which may run
-	// while Run holds dispatchMu for the same session) does not
-	// deadlock by re-entering the dispatch lock.
-	acceptedMu sync.Mutex
-	// acceptSeqGen is the monotonic source of accept sequence numbers.
-	// Each BeginAccepted increments it under acceptedMu and stamps the
-	// returned handle, so sequences strictly increase in accept order
-	// across the agent. Cancel uses its current value as the per-session
-	// high-water mark.
-	acceptSeqGen uint64
+	// dispatch owns the accept/queue/cancel protocol state shared by Run
+	// and Summarize's dispatch handoffs. See dispatch.go.
+	dispatch *dispatcher
 }
 
 type SessionAgentOptions struct {
@@ -257,11 +207,7 @@ func NewSessionAgent(
 		tools:                csync.NewSliceFrom(opts.Tools),
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
-		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:       csync.NewMap[string, *activeCancel](),
-		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:         csync.NewMap[string, int](),
-		cancelMark:           csync.NewMap[string, uint64](),
+		dispatch:             newDispatcher(),
 	}
 }
 
@@ -271,160 +217,26 @@ func NewSessionAgent(
 // counter > 0 means a dispatched prompt is in flight and has not yet
 // completed the dispatch handoff in Run. Close is the only way to
 // release the reservation and is idempotent.
-type AcceptedRun struct {
-	agent     *sessionAgent
-	sessionID string
-	// seq is the monotonic accept sequence stamped by BeginAccepted. A
-	// cancel covers this handle iff seq is at or below the session's
-	// cancel mark, so a handle accepted after a cancel (higher seq) is
-	// never poisoned by it.
-	seq  uint64
-	done atomic.Bool
-}
-
-// Close decrements the accept counter for this reservation. It is safe
-// to call multiple times; only the first call has effect.
-func (r *AcceptedRun) Close() {
-	if r == nil {
-		return
-	}
-	if !r.done.CompareAndSwap(false, true) {
-		return
-	}
-	r.agent.endAccepted(r.sessionID)
-}
-
-// SessionID exposes the session this reservation is for so the run path
-// can use it without an extra parameter.
-func (r *AcceptedRun) SessionID() string {
-	if r == nil {
-		return ""
-	}
-	return r.sessionID
-}
+//
+// AcceptedRun and BeginAccepted/endAccepted live in dispatch.go as part of
+// the dispatcher type.
 
 // BeginAccepted increments the accept counter for sessionID and returns
-// a handle whose Close is the only way to decrement it. It is the only
-// entry point that mutates acceptedRuns.
+// a handle whose Close is the only way to decrement it.
 func (a *sessionAgent) BeginAccepted(sessionID string) *AcceptedRun {
-	a.acceptedMu.Lock()
-	defer a.acceptedMu.Unlock()
-	count, _ := a.acceptedRuns.Get(sessionID)
-	a.acceptedRuns.Set(sessionID, count+1)
-	a.acceptSeqGen++
-	return &AcceptedRun{agent: a, sessionID: sessionID, seq: a.acceptSeqGen}
+	return a.dispatch.BeginAccepted(sessionID)
 }
 
-// endAccepted decrements the accept counter for sessionID. It is only
-// called via AcceptedRun.Close. It uses a dedicated lock (not the
-// per-session dispatch mutex) so it can run while Run holds dispatchMu
-// for the same session without deadlocking.
-//
-// When the count reaches zero the session's cancel mark is dropped: no
-// accepted handle remains for it to cover, and any handle accepted later
-// gets a strictly higher sequence that the mark would not match anyway.
-// Handles canceled on entry never reach RunComplete, so this is the only
-// place that clears the mark for an all-canceled batch. Sibling handles
-// covered by the same mark are serialized on the per-session dispatch
-// mutex and read the mark before they Close, so this never clears it out
-// from under a covered handle still waiting to enter Run.
-func (a *sessionAgent) endAccepted(sessionID string) {
-	a.acceptedMu.Lock()
-	defer a.acceptedMu.Unlock()
-	count, ok := a.acceptedRuns.Get(sessionID)
-	if !ok || count <= 1 {
-		a.acceptedRuns.Del(sessionID)
-		a.cancelMark.Del(sessionID)
-		return
-	}
-	a.acceptedRuns.Set(sessionID, count-1)
-}
-
-// sessionMu returns the per-session dispatch mutex, creating it on first
-// use. Creation is guarded so concurrent callers always observe the same
-// mutex instance for a given session.
-func (a *sessionAgent) sessionMu(sessionID string) *sync.Mutex {
-	if mu, ok := a.dispatchMu.Get(sessionID); ok {
-		return mu
-	}
-	a.dispatchMuCreate.Lock()
-	defer a.dispatchMuCreate.Unlock()
-	if mu, ok := a.dispatchMu.Get(sessionID); ok {
-		return mu
-	}
-	mu := &sync.Mutex{}
-	a.dispatchMu.Set(sessionID, mu)
-	return mu
-}
-
-// enqueueCall appends call to the session's message queue. The
-// OnComplete hook is stripped: the caller that supplied it (typically
-// coordinator.Run) has its own retry/coalesce scope that ends when it
-// returns, so by the time the queue drains nobody is left to consume the
-// buffered terminal event. The recursive Run falls back to the default
-// broker publish, which is what existing subscribers expect for queued
-// turns.
+// enqueueCall appends call to the session's message queue. See
+// dispatcher.enqueueCall.
 func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
-	existing, ok := a.messageQueue.Get(call.SessionID)
-	if !ok {
-		existing = []SessionAgentCall{}
-	}
-	queued := call
-	if call.Accepted != nil {
-		// Preserve the accept sequence after the handle is stripped so
-		// the queue-drain paths can tell a follow-up queued before a
-		// cancel (covered by the mark) from one queued after it.
-		queued.acceptSeq = call.Accepted.seq
-	}
-	queued.OnComplete = nil
-	queued.Accepted = nil
-	existing = append(existing, queued)
-	a.messageQueue.Set(call.SessionID, existing)
+	a.dispatch.enqueueCall(call)
 }
 
 // drainQueueForStep partitions the session's queued calls for the current
-// streaming step under the per-session dispatch mutex so the filtering is
-// atomic against a concurrent Cancel: canceledBySeq requires the caller to
-// hold that mutex, and evaluating it here (rather than after unlocking)
-// prevents a cancel recorded between the drain and the check from being
-// observed inconsistently.
-//
-// Calls covered by a pending cancel are dropped; the dropped ones that
-// carry a RunID are returned in canceledWithRunID so the caller can
-// publish their terminal cancelled RunComplete (a caller waiting on that
-// RunID, e.g. `braid run`, would otherwise hang). Uncanceled calls without
-// a RunID are returned in fold to be folded into the active turn,
-// preserving the existing follow-up behavior. Uncanceled calls that carry
-// a RunID are left in the queue so each runs as its own turn via the
-// recursive run path and publishes its own RunComplete, giving every
-// RunID-bearing prompt an explicit lifecycle instead of being silently
-// absorbed into another turn. fold is processed by the caller without the
-// lock held.
+// streaming step. See dispatcher.drainQueueForStep.
 func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
-	dispatchLock := a.sessionMu(sessionID)
-	dispatchLock.Lock()
-	defer dispatchLock.Unlock()
-	queuedCalls, _ := a.messageQueue.Get(sessionID)
-	var keep []SessionAgentCall
-	for _, queued := range queuedCalls {
-		if a.canceledBySeq(sessionID, queued.acceptSeq) {
-			if queued.RunID != "" {
-				canceledWithRunID = append(canceledWithRunID, queued)
-			}
-			continue
-		}
-		if queued.RunID != "" {
-			keep = append(keep, queued)
-			continue
-		}
-		fold = append(fold, queued)
-	}
-	if len(keep) == 0 {
-		a.messageQueue.Del(sessionID)
-	} else {
-		a.messageQueue.Set(sessionID, keep)
-	}
-	return fold, canceledWithRunID
+	return a.dispatch.drainQueueForStep(sessionID)
 }
 
 // publishCanceledQueueDrops emits a terminal cancelled RunComplete for
@@ -461,45 +273,10 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 	}
 }
 
-// clearQueueAndNotify removes all queued prompts for the session and
-// publishes a terminal cancelled RunComplete for any that carried a RunID,
-// so callers waiting on those RunIDs (e.g. `braid run`) are not left
-// hanging when their queued prompt is discarded without running.
-func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
-	queued, ok := a.messageQueue.Get(sessionID)
-	a.messageQueue.Del(sessionID)
-	if !ok {
-		return
-	}
-	a.publishCanceledQueueDrops(queued)
-}
-
-// clearPendingCancel removes any pending-cancel mark for sessionID. It
-// takes the per-session dispatch lock so it is ordered against Cancel
-// and the dispatch handoff.
+// clearPendingCancel removes any pending-cancel mark for sessionID. See
+// dispatcher.clearPendingCancel.
 func (a *sessionAgent) clearPendingCancel(sessionID string) {
-	mu := a.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
-	a.cancelMark.Del(sessionID)
-}
-
-// canceledBySeq reports whether an accepted handle or queued call with
-// the given accept sequence is covered by a pending cancel for the
-// session. Callers must hold the session's dispatch mutex. A tracked
-// sequence (seq > 0) is covered only when it is at or below the cancel
-// high-water mark, so a prompt accepted after the cancel (higher seq) is
-// never poisoned. An untracked sequence (seq == 0, an in-process enqueue
-// with no accept reservation) is covered whenever any mark is present,
-// preserving the pre-sequence behavior. The mark is not consumed: it
-// stays so every sibling handle it covers observes the same cancel, and
-// a later handle (higher seq) ignores it regardless.
-func (a *sessionAgent) canceledBySeq(sessionID string, seq uint64) bool {
-	mark, ok := a.cancelMark.Get(sessionID)
-	if !ok || mark == 0 {
-		return false
-	}
-	return seq == 0 || seq <= mark
+	a.dispatch.clearPendingCancel(sessionID)
 }
 
 // persistCanceledTurn writes the user/assistant records for a turn that
@@ -589,10 +366,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// two concurrent in-process callers — a burst of channel events, or a
 	// channel event racing a typed prompt — cannot both pass the busy check
 	// and start two runs on the same session.
-	sessMu := a.sessionMu(call.SessionID)
+	sessMu := a.dispatch.sessionMu(call.SessionID)
 	sessMu.Lock()
 
-	if call.Accepted != nil && a.canceledBySeq(call.SessionID, call.Accepted.seq) {
+	if call.Accepted != nil && a.dispatch.canceledBySeq(call.SessionID, call.Accepted.seq) {
 		// Cancel-on-entry: a cancel arrived while this accepted run was
 		// dispatched but not yet active, and this handle's accept sequence
 		// is at or below the session's cancel mark. The mark is left in
@@ -647,7 +424,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
-	a.activeRequests.Set(call.SessionID, ac)
+	a.dispatch.activeRequests.Set(call.SessionID, ac)
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}
@@ -658,7 +435,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// by a newer run. Without this guard, the deferred Del fires after a
 	// concurrent run registers in the completion window, silently wiping
 	// the new run's cancel and breaking cancellation.
-	defer csync.CompareAndDelete(a.activeRequests, call.SessionID, ac)
+	defer csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
@@ -1200,19 +977,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// defer above. An unconditional Del here would erase a newer
 		// run's entry if one raced in and won the session in the window
 		// this release opens up before Summarize does its own busy check.
-		csync.CompareAndDelete(a.activeRequests, call.SessionID, ac)
+		csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
 		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
 		if len(currentAssistant.ToolCalls()) > 0 {
-			existing, ok := a.messageQueue.Get(call.SessionID)
+			existing, ok := a.dispatch.messageQueue.Get(call.SessionID)
 			if !ok {
 				existing = []SessionAgentCall{}
 			}
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
 			existing = append(existing, call)
-			a.messageQueue.Set(call.SessionID, existing)
+			a.dispatch.messageQueue.Set(call.SessionID, existing)
 		}
 	}
 
@@ -1228,7 +1005,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// first), so this behaves exactly like the unconditional Del it
 	// replaces. Either way, our own entry can't leak: we only ever remove
 	// it, never re-register it, after this point.
-	csync.CompareAndDelete(a.activeRequests, call.SessionID, ac)
+	csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for
@@ -1241,60 +1018,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		})
 	}
 
-	// Hand off to the next queued prompt (if any) under dispatchMu so
-	// the transition from this finished run to the queued run is atomic
-	// against a concurrent Cancel. activeRequests for this session was
-	// just deleted above, so without the lock there is a window in
-	// which the session looks idle and a cancel becomes a no-op that
-	// fails to stop the queued prompt. Holding the lock lets us observe
-	// a pending cancel recorded against the session and drop the queue
-	// instead of running it, and (for the recursion) hand a fresh
-	// accept reservation to the dequeued call so acceptedRuns stays > 0
-	// across the recursive Run's own dispatch handoff — keeping the
-	// session observable to Cancel for the entire transition and
-	// closing the dequeue -> re-register window.
-	mu := a.sessionMu(call.SessionID)
-	mu.Lock()
-	queuedMessages, _ := a.messageQueue.Get(call.SessionID)
-	if mark, ok := a.cancelMark.Get(call.SessionID); ok && mark > 0 && len(queuedMessages) > 0 {
-		// A cancel was recorded for this session (e.g. it arrived while
-		// this run was active and follow-ups had been queued). Drop the
-		// queued prompts it covers (accept sequence at or below the
-		// mark, or untracked); keep any queued after the cancel (higher
-		// sequence) so they still run.
-		var kept []SessionAgentCall
-		var canceledRunIDDrops []SessionAgentCall
-		for _, q := range queuedMessages {
-			if q.acceptSeq == 0 || q.acceptSeq <= mark {
-				if q.RunID != "" {
-					canceledRunIDDrops = append(canceledRunIDDrops, q)
-				}
-				continue
-			}
-			kept = append(kept, q)
-		}
-		queuedMessages = kept
-		a.messageQueue.Set(call.SessionID, kept)
-		// A dropped prompt carrying a RunID must still publish its
-		// terminal cancelled RunComplete so a caller waiting on that
-		// RunID does not hang.
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
-	}
-	if len(queuedMessages) == 0 {
-		// No queued work. Clear the cancel mark only when no accepted
-		// run remains in flight that it might still cover; otherwise a
-		// sibling prompt (sequence at or below the mark) waiting to
-		// enter Run would lose its cancellation. When accepted runs are
-		// gone, this also clears a stale mark so it can't catch a
-		// future run.
-		a.messageQueue.Del(call.SessionID)
-		a.acceptedMu.Lock()
-		inFlight, _ := a.acceptedRuns.Get(call.SessionID)
-		a.acceptedMu.Unlock()
-		if inFlight == 0 {
-			a.cancelMark.Del(call.SessionID)
-		}
-		mu.Unlock()
+	// Hand off to the next queued prompt (if any). drainNext filters the
+	// queue against the cancel mark and reserves a fresh accept for the
+	// survivor under the same per-session dispatch lock used throughout,
+	// keeping the session observable to Cancel for the entire transition
+	// and closing the dequeue -> re-register window.
+	queuedMessages, firstQueued, canceledRunIDDrops := a.dispatch.drainNext(call.SessionID)
+	// A dropped prompt carrying a RunID must still publish its terminal
+	// cancelled RunComplete so a caller waiting on that RunID does not
+	// hang.
+	a.publishCanceledQueueDrops(canceledRunIDDrops)
+	if firstQueued == nil {
 		return result, err
 	}
 	// There are queued messages, restart the loop. Suppress the outer
@@ -1320,16 +1054,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 		}
 	}
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
-	// Reserve a fresh accept for the dequeued prompt before dropping the
-	// lock so acceptedRuns > 0 across the handoff into the recursive
-	// Run. This closes the window between this dequeue and the recursive
-	// Run registering its activeRequests entry: a cancel arriving in
-	// that window now records a pending cancel (acceptedRuns > 0) that
-	// the recursive Run's accepted path observes as cancel-on-entry.
-	firstQueuedMessage.Accepted = a.BeginAccepted(call.SessionID)
-	mu.Unlock()
 	if outerOwesRunComplete {
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
 		if currentAssistant != nil {
@@ -1341,7 +1065,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		a.publishRunComplete(ctx, call, complete)
 	}
-	return a.Run(ctx, firstQueuedMessage)
+	return a.Run(ctx, *firstQueued)
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
@@ -1370,8 +1094,8 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
-	a.activeRequests.Set(sessionID, ac)
-	defer csync.CompareAndDelete(a.activeRequests, sessionID, ac)
+	a.dispatch.activeRequests.Set(sessionID, ac)
+	defer csync.CompareAndDelete(a.dispatch.activeRequests, sessionID, ac)
 	defer cancel()
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
@@ -1482,17 +1206,19 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	// Run() does not see the session as busy. Conditional release, like the
 	// defer above: only clear our own entry so a newer run that raced in
 	// and won the session is not erased.
-	csync.CompareAndDelete(a.activeRequests, sessionID, ac)
+	csync.CompareAndDelete(a.dispatch.activeRequests, sessionID, ac)
 	cancel()
 
-	// Process any messages that were queued while summarizing.
-	queuedMessages, ok := a.messageQueue.Get(sessionID)
-	if !ok || len(queuedMessages) == 0 {
+	// Process any messages that were queued while summarizing. drainNext
+	// filters the queue against the session's cancel mark, the same check
+	// Run's own end-of-turn handoff applies: a prompt queued during
+	// summarization and then canceled must not run afterward.
+	_, next, canceledRunIDDrops := a.dispatch.drainNext(sessionID)
+	a.publishCanceledQueueDrops(canceledRunIDDrops)
+	if next == nil {
 		return nil
 	}
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(sessionID, queuedMessages[1:])
-	_, qErr := a.Run(ctx, firstQueuedMessage)
+	_, qErr := a.Run(ctx, *next)
 	return qErr
 }
 
@@ -1962,69 +1688,26 @@ func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message
 	return approxTokenCount(summaryMessage.Content().Text) + approxTokenCount(summaryMessage.ReasoningContent().String())
 }
 
+// Cancel cancels sessionID's active run (if any) and any accepted or
+// queued follow-ups. See dispatcher.cancel.
 func (a *sessionAgent) Cancel(sessionID string) {
-	// Serialize against the dispatch handoff in Run so the accepted ->
-	// (cancel-on-entry | queued | active) transition is atomic against
-	// this cancel. Every cancel observes at least one of: an active
-	// request, an accepted run (recorded as a pending cancel), or a
-	// queue entry it then clears. If none of those hold, an idle Escape
-	// is a true no-op and must not poison the next prompt.
-	mu := a.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Cancel regular requests. Don't use Take() here - we need the entry to
-	// remain in activeRequests so IsBusy() returns true until the goroutine
-	// fully completes (including error handling that may access the DB).
-	// The defer in processRequest will clean up the entry.
-	if ac, ok := a.activeRequests.Get(sessionID); ok && ac != nil {
-		slog.Debug("Request cancellation initiated", "session_id", sessionID)
-		ac.cancel()
-	}
-
-	// Record a pending cancel only when a dispatched-but-not-yet-active
-	// run exists. This catches runs still in the goroutine scheduler or
-	// about to enter Run's busy-queue branch, while leaving an idle
-	// session untouched. Active and accepted are not mutually exclusive:
-	// when a run is active and a follow-up has been accepted, both the
-	// cancel above and this pending record fire.
-	//
-	// Raise the session's cancel mark to the latest accept sequence
-	// assigned so far. Every prompt currently accepted-but-not-yet-
-	// active has a sequence at or below that value, so one cancel covers
-	// all of them; a prompt accepted after this cancel gets a strictly
-	// higher sequence and is never poisoned. Using max keeps repeated
-	// cancels idempotent while the same prompts are in flight and lets a
-	// later cancel extend coverage to prompts accepted since.
-	a.acceptedMu.Lock()
-	count, ok := a.acceptedRuns.Get(sessionID)
-	mark := a.acceptSeqGen
-	a.acceptedMu.Unlock()
-	if ok && count > 0 {
-		slog.Debug("Recording cancel mark for accepted runs", "session_id", sessionID, "count", count, "mark", mark)
-		existing, _ := a.cancelMark.Get(sessionID)
-		a.cancelMark.Set(sessionID, max(existing, mark))
-	}
-
-	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Debug("Clearing queued prompts", "session_id", sessionID)
-		a.clearQueueAndNotify(sessionID)
-	}
+	drops := a.dispatch.cancel(sessionID)
+	a.publishCanceledQueueDrops(drops)
 }
 
+// ClearQueue drops sessionID's queued follow-ups without touching the
+// active run or any pending cancel mark. See dispatcher.clearQueue.
 func (a *sessionAgent) ClearQueue(sessionID string) {
-	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Debug("Clearing queued prompts", "session_id", sessionID)
-		a.clearQueueAndNotify(sessionID)
-	}
+	drops := a.dispatch.clearQueue(sessionID)
+	a.publishCanceledQueueDrops(drops)
 }
 
 func (a *sessionAgent) CancelAll() {
 	if !a.IsBusy() {
 		return
 	}
-	for key := range a.activeRequests.Seq2() {
-		a.Cancel(key) // key is sessionID
+	for _, sessionID := range a.dispatch.activeSessionIDs() {
+		a.Cancel(sessionID)
 	}
 
 	// Poll IsBusy on a short tick until every canceled run's cleanup has
@@ -2047,39 +1730,19 @@ func (a *sessionAgent) CancelAll() {
 }
 
 func (a *sessionAgent) IsBusy() bool {
-	var busy bool
-	for ac := range a.activeRequests.Seq() {
-		if ac != nil {
-			busy = true
-			break
-		}
-	}
-	return busy
+	return a.dispatch.IsBusy()
 }
 
 func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
-	_, busy := a.activeRequests.Get(sessionID)
-	return busy
+	return a.dispatch.IsSessionBusy(sessionID)
 }
 
 func (a *sessionAgent) QueuedPrompts(sessionID string) int {
-	l, ok := a.messageQueue.Get(sessionID)
-	if !ok {
-		return 0
-	}
-	return len(l)
+	return a.dispatch.QueuedPrompts(sessionID)
 }
 
 func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
-	l, ok := a.messageQueue.Get(sessionID)
-	if !ok {
-		return nil
-	}
-	prompts := make([]string, len(l))
-	for i, call := range l {
-		prompts[i] = call.Prompt
-	}
-	return prompts
+	return a.dispatch.QueuedPromptsList(sessionID)
 }
 
 func (a *sessionAgent) SetModels(large Model, small Model) {

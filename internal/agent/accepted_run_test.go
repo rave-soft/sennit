@@ -23,17 +23,17 @@ func newCancelTestAgent(t *testing.T) (*sessionAgent, fakeEnv) {
 }
 
 func (a *sessionAgent) acceptedCount(sessionID string) int {
-	c, _ := a.acceptedRuns.Get(sessionID)
+	c, _ := a.dispatch.acceptedRuns.Get(sessionID)
 	return c
 }
 
 func (a *sessionAgent) hasPendingCancel(sessionID string) bool {
-	mark, ok := a.cancelMark.Get(sessionID)
+	mark, ok := a.dispatch.cancelMark.Get(sessionID)
 	return ok && mark > 0
 }
 
 func (a *sessionAgent) pendingCancelMark(sessionID string) uint64 {
-	mark, _ := a.cancelMark.Get(sessionID)
+	mark, _ := a.dispatch.cancelMark.Get(sessionID)
 	return mark
 }
 

@@ -105,7 +105,7 @@ func TestRun_AutoSummarizeDoesNotClobberConcurrentActiveRequest(t *testing.T) {
 	}).(*sessionAgent)
 
 	model.onFinish = func() {
-		sa.activeRequests.Set(sess.ID, racer)
+		sa.dispatch.activeRequests.Set(sess.ID, racer)
 	}
 
 	_, err = sa.Run(t.Context(), SessionAgentCall{
@@ -117,7 +117,7 @@ func TestRun_AutoSummarizeDoesNotClobberConcurrentActiveRequest(t *testing.T) {
 	// shouldSummarize cleanup instead of being erased.
 	require.ErrorIs(t, err, ErrSessionBusy)
 
-	got, ok := sa.activeRequests.Get(sess.ID)
+	got, ok := sa.dispatch.activeRequests.Get(sess.ID)
 	require.True(t, ok, "the concurrently-installed entry must survive this run's cleanup")
 	require.Same(t, racer, got, "this run's cleanup must not replace a newer run's entry")
 	require.False(t, racerCanceled.Load(), "this run's cleanup must not cancel a newer run's context")
