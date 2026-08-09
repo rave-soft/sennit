@@ -45,14 +45,14 @@ func newTestUI() *UI {
 	ta.Focus()
 
 	u := &UI{
-		com:      com,
-		status:   NewStatus(com, nil),
-		chat:     NewChat(com, config.ScrollbarDefault),
-		textarea: ta,
-		state:    uiChat,
-		focus:    uiFocusEditor,
-		width:    140,
-		height:   45,
+		com:    com,
+		status: NewStatus(com, nil),
+		chat:   NewChat(com, config.ScrollbarDefault),
+		editor: editorState{textarea: ta},
+		state:  uiChat,
+		focus:  uiFocusEditor,
+		width:  140,
+		height: 45,
 	}
 
 	return u
@@ -70,9 +70,9 @@ func TestUpdateLayoutAndSize_EditorGrowthShrinksChat(t *testing.T) {
 
 	// Increase textarea content enough to trigger growth, then run the
 	// same resize hook used in the real update path.
-	prevHeight := u.textarea.Height()
-	u.textarea.SetValue(strings.Repeat("line\n", 8))
-	u.textarea.MoveToEnd()
+	prevHeight := u.editor.textarea.Height()
+	u.editor.textarea.SetValue(strings.Repeat("line\n", 8))
+	u.editor.textarea.MoveToEnd()
 	_ = u.handleTextareaHeightChange(prevHeight)
 
 	if got := u.layout.editor.Dy(); got <= initialEditorHeight {
@@ -109,9 +109,9 @@ func TestHandleTextareaHeightChange_FollowModeStaysAtBottom(t *testing.T) {
 
 	// Grow the editor; follow mode should keep the chat pinned to the end
 	// even as the chat viewport shrinks.
-	prevHeight := u.textarea.Height()
-	u.textarea.SetValue(strings.Repeat("line\n", 10))
-	u.textarea.MoveToEnd()
+	prevHeight := u.editor.textarea.Height()
+	u.editor.textarea.SetValue(strings.Repeat("line\n", 10))
+	u.editor.textarea.MoveToEnd()
 	_ = u.handleTextareaHeightChange(prevHeight)
 
 	if !u.chat.Follow() {

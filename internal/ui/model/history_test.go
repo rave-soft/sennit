@@ -25,14 +25,14 @@ func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {
 
 	u := newTestUI()
 	u.com.Workspace = historyWorkspace{}
-	u.promptHistory.messages = []string{"!echo one", "!echo two"}
-	u.promptHistory.index = -1
+	u.editor.promptHistory.messages = []string{"!echo one", "!echo two"}
+	u.editor.promptHistory.index = -1
 
 	require.True(t, u.historyPrev())
-	require.True(t, u.bangMode)
-	require.Equal(t, "echo one", u.textarea.Value())
+	require.True(t, u.editor.bangMode)
+	require.Equal(t, "echo one", u.editor.textarea.Value())
 
 	require.True(t, u.historyPrev())
-	require.True(t, u.bangMode)
-	require.Equal(t, "echo two", u.textarea.Value())
+	require.True(t, u.editor.bangMode)
+	require.Equal(t, "echo two", u.editor.textarea.Value())
 }

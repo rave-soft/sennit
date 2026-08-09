@@ -33,13 +33,13 @@ func newAttachmentClickTestUI(t *testing.T) (*UI, int) {
 		sty.Skill,
 		sty.Remove,
 	)
-	u.attachments = attachments.New(renderer, attachments.Keymap{})
+	u.editor.attachments = attachments.New(renderer, attachments.Keymap{})
 	u.updateLayoutAndSize()
-	require.True(t, u.attachments.Update(message.Attachment{FileName: "test.txt"}))
-	_ = u.attachments.Render(u.layout.editor.Dx())
+	require.True(t, u.editor.attachments.Update(message.Attachment{FileName: "test.txt"}))
+	_ = u.editor.attachments.Render(u.layout.editor.Dx())
 
 	for x := range u.layout.editor.Dx() {
-		if renderer.HitTestRemove(u.attachments.List(), x) == 0 {
+		if renderer.HitTestRemove(u.editor.attachments.List(), x) == 0 {
 			return u, x
 		}
 	}
@@ -65,7 +65,7 @@ func TestAttachmentClickIgnoredWhileInlineEditorIsActive(t *testing.T) {
 		Button: uv.MouseLeft,
 	}))
 
-	require.Len(t, u.attachments.List(), 1)
+	require.Len(t, u.editor.attachments.List(), 1)
 }
 
 func TestAttachmentClickRequiresLeftMouseButton(t *testing.T) {
@@ -92,7 +92,7 @@ func TestAttachmentClickRequiresLeftMouseButton(t *testing.T) {
 				Button: tt.button,
 			}))
 
-			require.Len(t, u.attachments.List(), tt.remaining)
+			require.Len(t, u.editor.attachments.List(), tt.remaining)
 		})
 	}
 }

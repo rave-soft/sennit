@@ -129,18 +129,20 @@ func (w *countingWorkspace) resetCounters() {
 func newBusyUI(ws *countingWorkspace) *UI {
 	com := common.DefaultCommon(context.Background(), ws)
 	return &UI{
-		com:         com,
-		status:      NewStatus(com, nil),
-		chat:        NewChat(com, config.ScrollbarDefault),
-		textarea:    textarea.New(),
-		state:       uiChat,
-		focus:       uiFocusEditor,
-		width:       140,
-		height:      45,
-		session:     &session.Session{ID: "s1"},
-		keyMap:      DefaultKeyMap(),
-		dialog:      dialog.NewOverlay(),
-		attachments: attachments.New(nil, attachments.Keymap{}),
+		com:    com,
+		status: NewStatus(com, nil),
+		chat:   NewChat(com, config.ScrollbarDefault),
+		editor: editorState{
+			textarea:    textarea.New(),
+			attachments: attachments.New(nil, attachments.Keymap{}),
+		},
+		state:   uiChat,
+		focus:   uiFocusEditor,
+		width:   140,
+		height:  45,
+		session: &session.Session{ID: "s1"},
+		keyMap:  DefaultKeyMap(),
+		dialog:  dialog.NewOverlay(),
 	}
 }
 
@@ -755,16 +757,16 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 
 	ws := &countingWorkspace{ready: true}
 	m := newBusyUI(ws)
-	m.textarea.Focus()
-	m.textarea.SetWidth(40)
+	m.editor.textarea.Focus()
+	m.editor.textarea.SetWidth(40)
 	m.wsCache.yoloCache.set(false)
 	m.setEditorPrompt(false)
-	normalPrompt := ansi.Strip(m.textarea.View())
+	normalPrompt := ansi.Strip(m.editor.textarea.View())
 
 	// A remote toggle flips yolo on; delivered via an off-thread refresh.
 	m.applyBusyState(busyStateMsg{gen: m.wsCache.busyFetchGen, yolo: true})
 	require.True(t, m.yoloModeCached(), "the refresh must write the new yolo value through the cache")
-	yoloPrompt := ansi.Strip(m.textarea.View())
+	yoloPrompt := ansi.Strip(m.editor.textarea.View())
 	require.NotEqual(t, normalPrompt, yoloPrompt,
 		"a remote yolo toggle must change the rendered editor prompt")
 	require.Contains(t, yoloPrompt, "Y",
@@ -773,6 +775,6 @@ func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
 	// Flipping back off must restore the normal prompt.
 	m.applyBusyState(busyStateMsg{gen: m.wsCache.busyFetchGen, yolo: false})
 	require.False(t, m.yoloModeCached())
-	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
+	require.Equal(t, normalPrompt, ansi.Strip(m.editor.textarea.View()),
 		"toggling yolo off must restore the normal editor prompt")
 }

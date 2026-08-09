@@ -201,21 +201,9 @@ type UI struct {
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
-	// bangMode tracks whether the editor is in bang (!) shell mode.
-	bangMode     bool
-	bangWasEmpty bool // true when bang prompt became empty on last keystroke
-
-	// pendingBangCommand holds a shell command that was issued before
-	// the session finished loading. The loadSessionMsg handler creates
-	// the pending UI item and starts execution once the chat list is
-	// stable, eliminating races between session load and shell output.
-	pendingBangCommand string
-
-	// bangCancel cancels a running bang-mode shell command. Nil when no
-	// bang command is in progress. Set by runShellCommand, cleared by
-	// shellResultMsg. Checked by isAgentBusy and cancelAgent so that
-	// Escape works for bang commands the same way it does for agent runs.
-	bangCancel context.CancelFunc
+	// editor holds the prompt textarea, attachments, completions popup
+	// state, bang (!) shell-mode flags, and prompt history. See editor.go.
+	editor editorState
 
 	header *header
 
@@ -227,27 +215,14 @@ type UI struct {
 	// caps hold different terminal capabilities that we query for.
 	caps common.Capabilities
 
-	// Editor components
-	textarea textarea.Model
-
 	// Active inline editor replaces the textarea when non-nil.
 	activeInline dialog.InlineEditor
 	// inlineCursor stores the cursor from the last inline editor
 	// Draw call, used by the cursor positioning logic below.
 	inlineCursor *tea.Cursor
 
-	// Attachment list
-	attachments *attachments.Attachments
-
 	readyPlaceholder   string
 	workingPlaceholder string
-
-	// Completions state
-	completions              *completions.Completions
-	completionsOpen          bool
-	completionsStartIndex    int
-	completionsQuery         string
-	completionsPositionStart image.Point // x,y where user typed '@'
 
 	// Chat components
 	chat *Chat
@@ -320,13 +295,6 @@ type UI struct {
 	lastClickTime time.Time
 	hoverX        int
 	hoverY        int
-
-	// Prompt history for up/down navigation through previous messages.
-	promptHistory struct {
-		messages []string
-		index    int
-		draft    string
-	}
 }
 
 // New creates a new instance of the [UI] model.
@@ -382,14 +350,16 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	header := newHeader(com)
 
 	ui := &UI{
-		com:                 com,
-		dialog:              dialog.NewOverlay(),
-		keyMap:              keyMap,
-		textarea:            ta,
+		com:    com,
+		dialog: dialog.NewOverlay(),
+		keyMap: keyMap,
+		editor: editorState{
+			textarea:    ta,
+			completions: comp,
+			attachments: attachments,
+		},
 		chat:                ch,
 		header:              header,
-		completions:         comp,
-		attachments:         attachments,
 		todoSpinner:         todoSpinner,
 		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
@@ -417,7 +387,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 	ui.setEditorPrompt(yolo)
 	ui.randomizePlaceholders()
-	ui.textarea.Placeholder = ui.readyPlaceholder
+	ui.editor.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
 
 	// Initialize compact mode from config
@@ -716,9 +686,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// If a bang command was issued before the session finished
 		// loading, start it now that the chat list is stable.
-		if m.pendingBangCommand != "" {
-			cmds = append(cmds, m.runShellCommandInternal(m.pendingBangCommand, true))
-			m.pendingBangCommand = ""
+		if m.editor.pendingBangCommand != "" {
+			cmds = append(cmds, m.runShellCommandInternal(m.editor.pendingBangCommand, true))
+			m.editor.pendingBangCommand = ""
 		}
 		if hasInProgressTodo(m.session.Todos) {
 			// only start spinner if there is an in-progress todo
@@ -729,7 +699,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateLayoutAndSize()
 		}
 		// Reload prompt history for the new session.
-		m.historyReset()
+		m.editor.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
 
@@ -775,9 +745,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case promptHistoryLoadedMsg:
-		m.promptHistory.messages = msg.messages
-		m.promptHistory.index = -1
-		m.promptHistory.draft = ""
+		m.editor.promptHistory.messages = msg.messages
+		m.editor.promptHistory.index = -1
+		m.editor.promptHistory.draft = ""
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
@@ -959,7 +929,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
 					if done {
 						m.activeInline = nil
-						m.textarea.Focus()
+						m.editor.textarea.Focus()
 						m.updateLayoutAndSize()
 					}
 					return m, tea.Batch(cmds...)
@@ -974,9 +944,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if the click landed on an attachment's remove button.
 		// The attachment chips are rendered on the first row of the
 		// editor layout area, above the textarea.
-		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
+		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.editor.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
 			relX := msg.X - m.layout.editor.Min.X
-			if m.attachments.HandleClick(relX) {
+			if m.editor.attachments.HandleClick(relX) {
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -1194,9 +1164,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case openEditorMsg:
-		prevHeight := m.textarea.Height()
-		m.textarea.SetValue(msg.Text)
-		m.textarea.MoveToEnd()
+		prevHeight := m.editor.textarea.Height()
+		m.editor.textarea.SetValue(msg.Text)
+		m.editor.textarea.MoveToEnd()
 		m.syncBangModeFromTextarea()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 	case shellStreamMsg:
@@ -1222,9 +1192,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case shellResultMsg:
 		// Clear the bang cancel func — command is done.
-		if m.bangCancel != nil {
-			m.bangCancel()
-			m.bangCancel = nil
+		if m.editor.bangCancel != nil {
+			m.editor.bangCancel()
+			m.editor.bangCancel = nil
 		}
 		// Complete the pending shell item if it exists, otherwise create a new one.
 		completed := false
@@ -1289,8 +1259,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
 	case completions.CompletionItemsLoadedMsg:
-		if m.completionsOpen {
-			m.completions.SetItems(msg.Files, msg.Resources)
+		if m.editor.completionsOpen {
+			m.editor.completions.SetItems(msg.Files, msg.Resources)
 		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
@@ -1319,15 +1289,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
-		if m.bangMode {
-			m.textarea.Placeholder = "Run a shell command"
+		if m.editor.bangMode {
+			m.editor.textarea.Placeholder = "Run a shell command"
 		} else if m.isAgentBusy() {
-			m.textarea.Placeholder = m.workingPlaceholder
+			m.editor.textarea.Placeholder = m.workingPlaceholder
 		} else {
-			m.textarea.Placeholder = m.readyPlaceholder
+			m.editor.textarea.Placeholder = m.readyPlaceholder
 		}
-		if !m.bangMode && m.yoloModeCached() {
-			m.textarea.Placeholder = "Yolo mode!"
+		if !m.editor.bangMode && m.yoloModeCached() {
+			m.editor.textarea.Placeholder = "Yolo mode!"
 		}
 	}
 
@@ -1338,7 +1308,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// at this point this can only handle [message.Attachment] message, and we
 	// should return all cmds anyway.
-	_ = m.attachments.Update(msg)
+	_ = m.editor.attachments.Update(msg)
 	return m, tea.Batch(cmds...)
 }
 
@@ -1595,7 +1565,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		return nil
 	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.sidebar.scrollable:
 		m.focus = uiFocusSidebar
-		m.textarea.Blur()
+		m.editor.textarea.Blur()
 		m.chat.Blur()
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
@@ -1603,14 +1573,14 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		if m.activeInline != nil {
 			m.activeInline.SetFocused(true)
 		} else {
-			cmd = m.textarea.Focus()
+			cmd = m.editor.textarea.Focus()
 		}
 		m.sidebar.hideScrollbar()
 		m.chat.Blur()
 	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
 		m.focus = uiFocusMain
 		m.sidebar.hideScrollbar()
-		m.textarea.Blur()
+		m.editor.textarea.Blur()
 		m.chat.Focus()
 	}
 	return cmd
@@ -1815,7 +1785,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if m.focus == uiFocusEditor {
-			cmds = append(cmds, m.textarea.Focus())
+			cmds = append(cmds, m.editor.textarea.Focus())
 		}
 	case dialog.ActionCmd:
 		if msg.Cmd != nil {
@@ -1881,8 +1851,8 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 			break
 		}
-		editorValue := m.textarea.Value()
-		if m.bangMode {
+		editorValue := m.editor.textarea.Value()
+		if m.editor.bangMode {
 			editorValue = "!" + editorValue
 		}
 		cmds = append(cmds, m.openEditor(editorValue))
@@ -2287,7 +2257,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	if m.activeInline != nil && m.focus == uiFocusEditor {
 		if done, cmd := m.activeInline.HandleKey(msg); done {
 			m.activeInline = nil
-			m.textarea.Focus()
+			m.editor.textarea.Focus()
 			m.updateLayoutAndSize()
 		} else {
 			if cmd != nil {
@@ -2320,27 +2290,27 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		switch m.focus {
 		case uiFocusEditor:
 			// Handle completions if open.
-			if m.completionsOpen {
-				if msg, ok := m.completions.Update(msg); ok {
+			if m.editor.completionsOpen {
+				if msg, ok := m.editor.completions.Update(msg); ok {
 					switch msg := msg.(type) {
 					case completions.SelectionMsg[completions.FileCompletionValue]:
 						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
 						if !msg.KeepOpen {
-							m.closeCompletions()
+							m.editor.closeCompletions()
 						}
 					case completions.SelectionMsg[completions.ResourceCompletionValue]:
 						cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
 						if !msg.KeepOpen {
-							m.closeCompletions()
+							m.editor.closeCompletions()
 						}
 					case completions.ClosedMsg:
-						m.completionsOpen = false
+						m.editor.completionsOpen = false
 					}
 					return tea.Batch(cmds...)
 				}
 			}
 
-			if ok := m.attachments.Update(msg); ok {
+			if ok := m.editor.attachments.Update(msg); ok {
 				return tea.Batch(cmds...)
 			}
 
@@ -2360,11 +2330,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.pasteImageFromClipboard)
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
-				prevHeight := m.textarea.Height()
-				value := m.textarea.Value()
+				prevHeight := m.editor.textarea.Height()
+				value := m.editor.textarea.Value()
 				if before, ok := strings.CutSuffix(value, "\\"); ok {
 					// If the last character is a backslash, remove it and add a newline.
-					m.textarea.SetValue(before)
+					m.editor.textarea.SetValue(before)
 					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
@@ -2372,7 +2342,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 				// Otherwise, send the message
-				m.textarea.Reset()
+				m.editor.textarea.Reset()
 				if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -2382,22 +2352,22 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return m.openQuitDialog()
 				}
 
-				if m.bangMode && value != "" {
-					m.bangMode = false
+				if m.editor.bangMode && value != "" {
+					m.editor.bangMode = false
 					m.setEditorPrompt(m.yoloModeCached())
 					m.randomizePlaceholders()
-					m.historyReset()
+					m.editor.historyReset()
 					return tea.Batch(m.runShellCommand(value))
 				}
 
-				attachments := m.attachments.List()
-				m.attachments.Reset()
+				attachments := m.editor.attachments.List()
+				m.editor.attachments.Reset()
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					return nil
 				}
 
 				m.randomizePlaceholders()
-				m.historyReset()
+				m.editor.historyReset()
 
 				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
@@ -2414,7 +2384,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Tab):
 				if m.state != uiLanding {
 					m.setState(m.state, uiFocusMain)
-					m.textarea.Blur()
+					m.editor.textarea.Blur()
 					m.chat.Focus()
 					m.chat.SetSelected(m.chat.Len() - 1)
 				}
@@ -2423,15 +2393,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 					break
 				}
-				editorValue := m.textarea.Value()
-				if m.bangMode {
+				editorValue := m.editor.textarea.Value()
+				if m.editor.bangMode {
 					editorValue = "!" + editorValue
 				}
 				cmds = append(cmds, m.openEditor(editorValue))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
-				prevHeight := m.textarea.Height()
-				m.textarea.InsertRune('\n')
-				m.closeCompletions()
+				prevHeight := m.editor.textarea.Height()
+				m.editor.textarea.InsertRune('\n')
+				m.editor.closeCompletions()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 				cmd := m.handleHistoryUp(msg)
@@ -2448,7 +2418,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-			case key.Matches(msg, m.keyMap.Editor.Commands) && m.textarea.Value() == "":
+			case key.Matches(msg, m.keyMap.Editor.Commands) && m.editor.textarea.Value() == "":
 				if cmd := m.openCommandsDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -2459,27 +2429,27 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 
 				// Bang mode: backspace on already-empty prompt exits.
-				if m.bangMode && m.bangWasEmpty && msg.Code == tea.KeyBackspace {
-					m.bangMode = false
-					m.bangWasEmpty = false
+				if m.editor.bangMode && m.editor.bangWasEmpty && msg.Code == tea.KeyBackspace {
+					m.editor.bangMode = false
+					m.editor.bangWasEmpty = false
 					m.setEditorPrompt(m.yoloModeCached())
 					break
 				}
 
 				// Check for @ trigger before passing to textarea.
-				curValue := m.textarea.Value()
+				curValue := m.editor.textarea.Value()
 				curIdx := len(curValue)
 
 				// Trigger completions on @.
-				if msg.String() == "@" && !m.completionsOpen {
+				if msg.String() == "@" && !m.editor.completionsOpen {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
-						m.completionsOpen = true
-						m.completionsQuery = ""
-						m.completionsStartIndex = curIdx
-						m.completionsPositionStart = m.completionsPosition()
+						m.editor.completionsOpen = true
+						m.editor.completionsQuery = ""
+						m.editor.completionsStartIndex = curIdx
+						m.editor.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.Open(depth, limit, m.loadMCPResourceCompletions))
+						cmds = append(cmds, m.editor.completions.Open(depth, limit, m.loadMCPResourceCompletions))
 					}
 				}
 
@@ -2489,59 +2459,59 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.updateLayoutAndSize()
 				}
 
-				prevHeight := m.textarea.Height()
+				prevHeight := m.editor.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
 				// Bang mode: enter when "!" is typed at the start of the
 				// prompt, optionally preceded by whitespace (either on an
 				// empty/whitespace-only prompt or prepended to existing text).
 				// Exit on backspace clearing the last character.
-				newVal := m.textarea.Value()
+				newVal := m.editor.textarea.Value()
 				trimmedNew := strings.TrimLeftFunc(newVal, unicode.IsSpace)
 				trimmedCur := strings.TrimLeftFunc(curValue, unicode.IsSpace)
-				if !m.bangMode && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
-					m.bangMode = true
-					m.bangWasEmpty = len(strings.TrimSpace(curValue)) == 0
+				if !m.editor.bangMode && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
+					m.editor.bangMode = true
+					m.editor.bangWasEmpty = len(strings.TrimSpace(curValue)) == 0
 					// Strip leading whitespace and the "!" from the textarea
 					// while preserving the cursor position relative to the
 					// command text.
-					col := m.textarea.Column()
-					line := m.textarea.Line()
+					col := m.editor.textarea.Column()
+					line := m.editor.textarea.Line()
 					stripped := trimmedNew[1:]
-					m.textarea.SetValue(stripped)
-					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
+					m.editor.textarea.SetValue(stripped)
+					m.editor.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					_ = line // cursor line doesn't change; prefix removed
 					m.setEditorPrompt(m.yoloModeCached())
-				} else if m.bangMode && newVal == "" && curValue != "" {
+				} else if m.editor.bangMode && newVal == "" && curValue != "" {
 					// Just cleared last character; mark empty, stay in bang mode.
-					m.bangWasEmpty = true
-				} else if m.bangMode && newVal != "" {
-					m.bangWasEmpty = false
+					m.editor.bangWasEmpty = true
+				} else if m.editor.bangMode && newVal != "" {
+					m.editor.bangWasEmpty = false
 				}
 
 				// Any text modification becomes the current draft.
-				m.updateHistoryDraft(curValue)
+				m.editor.updateHistoryDraft(curValue)
 
 				// After updating textarea, check if we need to filter completions.
 				// Skip filtering on the initial @ keystroke since items are loading async.
-				if m.completionsOpen && msg.String() != "@" {
-					newValue := m.textarea.Value()
+				if m.editor.completionsOpen && msg.String() != "@" {
+					newValue := m.editor.textarea.Value()
 					newIdx := len(newValue)
 
 					// Close completions if cursor moved before start.
-					if newIdx <= m.completionsStartIndex {
-						m.closeCompletions()
+					if newIdx <= m.editor.completionsStartIndex {
+						m.editor.closeCompletions()
 					} else if msg.String() == "space" {
 						// Close on space.
-						m.closeCompletions()
+						m.editor.closeCompletions()
 					} else {
 						// Extract current word and filter.
-						word := m.textareaWord()
+						word := m.editor.textareaWord()
 						if strings.HasPrefix(word, "@") {
-							m.completionsQuery = word[1:]
-							m.completions.Filter(m.completionsQuery)
-						} else if m.completionsOpen {
-							m.closeCompletions()
+							m.editor.completionsQuery = word[1:]
+							m.editor.completions.Filter(m.editor.completionsQuery)
+						} else if m.editor.completionsOpen {
+							m.editor.closeCompletions()
 						}
 					}
 				}
@@ -2551,7 +2521,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Tab):
 				m.focus = uiFocusEditor
 				m.sidebar.hideScrollbar()
-				cmds = append(cmds, m.textarea.Focus())
+				cmds = append(cmds, m.editor.textarea.Focus())
 				m.chat.Blur()
 			case key.Matches(msg, m.keyMap.Chat.FocusSidebar):
 				if m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebar.scrollable {
@@ -2659,7 +2629,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Tab):
 				m.focus = uiFocusEditor
 				m.sidebar.hideScrollbar()
-				cmds = append(cmds, m.textarea.Focus())
+				cmds = append(cmds, m.editor.textarea.Focus())
 				m.chat.Blur()
 			default:
 				handleGlobalKeys(msg)
@@ -2789,10 +2759,10 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.status.Draw(scr, layout.status)
 
 	// Draw completions popup if open
-	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
-		w, h := m.completions.Size()
-		x := m.completionsPositionStart.X
-		y := m.completionsPositionStart.Y - h
+	if !isOnboarding && m.editor.completionsOpen && m.editor.completions.HasItems() {
+		w, h := m.editor.completions.Size()
+		x := m.editor.completionsPositionStart.X
+		y := m.editor.completionsPositionStart.Y - h
 
 		screenW := area.Dx()
 		if x+w > screenW {
@@ -2801,7 +2771,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		x = max(0, x)
 		y = max(0, y+1) // Offset for attachments row
 
-		completionsView := uv.NewStyledString(m.completions.Render())
+		completionsView := uv.NewStyledString(m.editor.completions.Render())
 		completionsView.Draw(scr, image.Rectangle{
 			Min: image.Pt(x, y),
 			Max: image.Pt(x+w, y+h),
@@ -2845,8 +2815,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			return nil
 		}
 
-		if m.textarea.Focused() {
-			cur := m.textarea.Cursor()
+		if m.editor.textarea.Focused() {
+			cur := m.editor.textarea.Cursor()
 			cur.X++                            // Adjust for app margins
 			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
 			return cur
@@ -2904,7 +2874,7 @@ func (m *UI) ShortHelp() []key.Binding {
 
 	tab := k.Tab
 	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
+	if m.focus == uiFocusEditor && m.editor.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
 
@@ -2994,10 +2964,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 	k := &m.keyMap
 	help := k.Help
 	help.SetHelp("ctrl+g", "less")
-	hasAttachments := len(m.attachments.List()) > 0
+	hasAttachments := len(m.editor.attachments.List()) > 0
 	hasSession := m.hasSession()
 	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
+	if m.focus == uiFocusEditor && m.editor.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
 	}
 
@@ -3189,12 +3159,12 @@ func (m *UI) updateLayoutAndSize() {
 
 	// First pass sizes components from the current textarea height.
 	m.layout = m.generateLayout(m.width, m.height)
-	prevHeight := m.textarea.Height()
+	prevHeight := m.editor.textarea.Height()
 	m.updateSize()
 
 	// SetWidth can change textarea height due to soft-wrap recalculation.
 	// If that happens, run one reconciliation pass with the new height.
-	if m.textarea.Height() != prevHeight {
+	if m.editor.textarea.Height() != prevHeight {
 		m.layout = m.generateLayout(m.width, m.height)
 		m.updateSize()
 	}
@@ -3205,7 +3175,7 @@ func (m *UI) updateLayoutAndSize() {
 // the view scrolled to the bottom. The returned command, if non-nil, must be
 // batched by the caller.
 func (m *UI) handleTextareaHeightChange(prevHeight int) tea.Cmd {
-	if m.textarea.Height() == prevHeight {
+	if m.editor.textarea.Height() == prevHeight {
 		return nil
 	}
 	m.updateLayoutAndSize()
@@ -3218,7 +3188,7 @@ func (m *UI) handleTextareaHeightChange(prevHeight int) tea.Cmd {
 // updateTextarea updates the textarea for msg and then reconciles layout if
 // the textarea height changed as a result.
 func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
-	return m.updateTextareaWithPrevHeight(msg, m.textarea.Height())
+	return m.updateTextareaWithPrevHeight(msg, m.editor.textarea.Height())
 }
 
 // updateTextareaWithPrevHeight is for cases when the height of the layout may
@@ -3230,8 +3200,8 @@ func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
 // "before" vs "after" sizing and recalculate the layout if the textarea grew
 // or shrank.
 func (m *UI) updateTextareaWithPrevHeight(msg tea.Msg, prevHeight int) tea.Cmd {
-	ta, cmd := m.textarea.Update(msg)
-	m.textarea = ta
+	ta, cmd := m.editor.textarea.Update(msg)
+	m.editor.textarea = ta
 	return tea.Batch(cmd, m.handleTextareaHeightChange(prevHeight))
 }
 
@@ -3241,8 +3211,8 @@ func (m *UI) updateSize() {
 	m.status.SetWidth(m.layout.status.Dx())
 
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
-	m.textarea.MaxHeight = TextareaMaxHeight
-	m.textarea.SetWidth(m.layout.editor.Dx())
+	m.editor.textarea.MaxHeight = TextareaMaxHeight
+	m.editor.textarea.SetWidth(m.layout.editor.Dx())
 	m.renderPills()
 
 	// Handle different app states
@@ -3264,7 +3234,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	helpHeight := 1
 	// The editor height: textarea height + margin for attachments and bottom spacing.
 	// When an inline editor is active, use its height instead.
-	editorHeight := m.textarea.Height() + editorHeightMargin
+	editorHeight := m.editor.textarea.Height() + editorHeightMargin
 	if m.activeInline != nil {
 		// The editor content width depends only on terminal width
 		// and layout (not on editor height), so passing the current
@@ -3500,8 +3470,8 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		"braid",
 		tmpPath,
 		editor.AtPosition(
-			m.textarea.Line()+1,
-			m.textarea.Column()+1,
+			m.editor.textarea.Line()+1,
+			m.editor.textarea.Column()+1,
 		),
 	)
 	if err != nil {
@@ -3531,15 +3501,15 @@ func (m *UI) openEditor(value string) tea.Cmd {
 // setEditorPrompt configures the textarea prompt function based on whether
 // yolo mode or bang mode is enabled.
 func (m *UI) setEditorPrompt(yolo bool) {
-	if m.bangMode {
-		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
+	if m.editor.bangMode {
+		m.editor.textarea.SetPromptFunc(4, m.bangPromptFunc)
 		return
 	}
 	if yolo {
-		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
+		m.editor.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
 	}
-	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
+	m.editor.textarea.SetPromptFunc(4, m.normalPromptFunc)
 }
 
 // normalPromptFunc returns the normal editor prompt style ("  > " on first
@@ -3591,36 +3561,11 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 	return t.Editor.PromptBangDotsBlurred.Render()
 }
 
-// closeCompletions closes the completions popup and resets state.
-func (m *UI) closeCompletions() {
-	m.completionsOpen = false
-	m.completionsQuery = ""
-	m.completionsStartIndex = 0
-	m.completions.Close()
-}
-
-// insertCompletionText replaces the @query in the textarea with the given text.
-// Returns false if the replacement cannot be performed.
-func (m *UI) insertCompletionText(text string) bool {
-	value := m.textarea.Value()
-	if m.completionsStartIndex > len(value) {
-		return false
-	}
-
-	word := m.textareaWord()
-	endIdx := min(m.completionsStartIndex+len(word), len(value))
-	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
-	m.textarea.SetValue(newValue)
-	m.textarea.MoveToEnd()
-	m.textarea.InsertRune(' ')
-	return true
-}
-
 // insertFileCompletion inserts the selected file path into the textarea,
 // replacing the @query, and adds the file as an attachment.
 func (m *UI) insertFileCompletion(path string) tea.Cmd {
-	prevHeight := m.textarea.Height()
-	if !m.insertCompletionText(path) {
+	prevHeight := m.editor.textarea.Height()
+	if !m.editor.insertCompletionText(path) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
@@ -3664,8 +3609,8 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := cmp.Or(item.Title, item.URI)
 
-	prevHeight := m.textarea.Height()
-	if !m.insertCompletionText(displayText) {
+	prevHeight := m.editor.textarea.Height()
+	if !m.editor.insertCompletionText(displayText) {
 		return nil
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
@@ -3715,7 +3660,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 
 // completionsPosition returns the X and Y position for the completions popup.
 func (m *UI) completionsPosition() image.Point {
-	cur := m.textarea.Cursor()
+	cur := m.editor.textarea.Cursor()
 	if cur == nil {
 		return image.Point{
 			X: m.layout.editor.Min.X,
@@ -3726,11 +3671,6 @@ func (m *UI) completionsPosition() image.Point {
 		X: cur.X + m.layout.editor.Min.X,
 		Y: m.layout.editor.Min.Y + cur.Y,
 	}
-}
-
-// textareaWord returns the current word at the cursor position.
-func (m *UI) textareaWord() string {
-	return m.textarea.Word()
 }
 
 // isWhitespace returns true if the byte is a whitespace character.
@@ -3744,7 +3684,7 @@ func isWhitespace(b byte) bool {
 // would be an HTTP round-trip per keystroke in client/server mode); the
 // value is refreshed off-thread, see workspace_cache.go.
 func (m *UI) isAgentBusy() bool {
-	if m.bangCancel != nil {
+	if m.editor.bangCancel != nil {
 		return true
 	}
 	return m.wsCache.agentBusyCache.val
@@ -3787,12 +3727,12 @@ func (m *UI) randomizePlaceholders() {
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
 	var attachmentsView string
-	if len(m.attachments.List()) > 0 {
-		attachmentsView = m.attachments.Render(width)
+	if len(m.editor.attachments.List()) > 0 {
+		attachmentsView = m.editor.attachments.Render(width)
 	}
 	return strings.Join([]string{
 		attachmentsView,
-		m.textarea.View(),
+		m.editor.textarea.View(),
 		"", // margin at bottom of editor
 	}, "\n")
 }
@@ -3924,7 +3864,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		m.setState(uiChat, m.focus)
 		// Defer shell execution until loadSessionMsg fires so the chat
 		// list is stable before we add items or start streaming.
-		m.pendingBangCommand = command
+		m.editor.pendingBangCommand = command
 		return tea.Batch(cmds...)
 	}
 
@@ -3964,7 +3904,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	m.bangCancel = cancel
+	m.editor.bangCancel = cancel
 
 	cmds = append(cmds, func() tea.Msg {
 		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
@@ -4017,9 +3957,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.isCanceling = false
 
 		// Cancel a running bang command if one is in progress.
-		if m.bangCancel != nil {
-			m.bangCancel()
-			m.bangCancel = nil
+		if m.editor.bangCancel != nil {
+			m.editor.bangCancel()
+			m.editor.bangCancel = nil
 		}
 
 		m.com.Workspace.AgentCancel(m.session.ID)
@@ -4293,7 +4233,7 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 		m.com.Workspace.QuestionCancel()
 	}
 	m.activeInline = form
-	m.textarea.Blur()
+	m.editor.textarea.Blur()
 	m.focus = uiFocusEditor
 	m.activeInline.SetFocused(true)
 	m.updateLayoutAndSize()
@@ -4306,7 +4246,7 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 func (m *UI) handleQuestionNotification(_ question.Notification) {
 	if _, ok := m.activeInline.(*dialog.QuestionForm); ok {
 		m.activeInline = nil
-		m.textarea.Focus()
+		m.editor.textarea.Focus()
 		m.updateLayoutAndSize()
 	}
 }
@@ -4467,7 +4407,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
 	m.setState(uiLanding, uiFocusEditor)
-	m.textarea.Focus()
+	m.editor.textarea.Focus()
 	m.chat.Blur()
 	m.chat.ClearMessages()
 	m.pills.expanded = false
@@ -4478,7 +4418,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
 	m.pills.view = ""
-	m.historyReset()
+	m.editor.historyReset()
 	agenttools.ResetCache()
 	return tea.Batch(
 		func() tea.Msg {
@@ -4494,20 +4434,20 @@ func (m *UI) newSession() tea.Cmd {
 // optional whitespace followed by "!". It strips the prefix and adjusts
 // the cursor, mirroring the keypress bang-mode entry logic.
 func (m *UI) checkBangModeAfterPaste() {
-	if m.bangMode {
+	if m.editor.bangMode {
 		return
 	}
-	val := m.textarea.Value()
+	val := m.editor.textarea.Value()
 	trimmed := strings.TrimLeftFunc(val, unicode.IsSpace)
 	if !strings.HasPrefix(trimmed, "!") {
 		return
 	}
-	m.bangMode = true
-	m.bangWasEmpty = true
+	m.editor.bangMode = true
+	m.editor.bangWasEmpty = true
 	stripped := trimmed[1:]
-	m.textarea.SetValue(stripped)
-	col := m.textarea.Column()
-	m.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
+	m.editor.textarea.SetValue(stripped)
+	col := m.editor.textarea.Column()
+	m.editor.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
 	m.setEditorPrompt(m.yoloModeCached())
 }
 
@@ -4563,7 +4503,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		return true
 	}
 	if !allExistsAndValid() {
-		prevHeight := m.textarea.Height()
+		prevHeight := m.editor.textarea.Height()
 		cmd := m.updateTextareaWithPrevHeight(msg, prevHeight)
 		m.checkBangModeAfterPaste()
 		return cmd
@@ -4693,7 +4633,7 @@ var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
 
 func (m *UI) pasteIdx() int {
 	result := 0
-	for _, at := range m.attachments.List() {
+	for _, at := range m.editor.attachments.List() {
 		found := pasteRE.FindStringSubmatch(at.FileName)
 		if len(found) == 0 {
 			continue
