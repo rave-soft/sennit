@@ -1,69 +1,68 @@
-package app
+package config
 
 import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseModelStr(t *testing.T) {
+func TestParseModelString(t *testing.T) {
 	tests := []struct {
 		name            string
 		modelStr        string
 		expectedFilter  string
 		expectedModelID string
-		setupProviders  func() map[string]config.ProviderConfig
+		setupProviders  func() map[string]ProviderConfig
 	}{
 		{
 			name:            "simple model with no slashes",
 			modelStr:        "gpt-4o",
 			expectedFilter:  "",
 			expectedModelID: "gpt-4o",
-			setupProviders:  setupMockProviders,
+			setupProviders:  setupMockProvidersForResolve,
 		},
 		{
 			name:            "valid provider and model",
 			modelStr:        "openai/gpt-4o",
 			expectedFilter:  "openai",
 			expectedModelID: "gpt-4o",
-			setupProviders:  setupMockProviders,
+			setupProviders:  setupMockProvidersForResolve,
 		},
 		{
 			name:            "model with multiple slashes and first part is invalid provider",
 			modelStr:        "moonshot/kimi-k2",
 			expectedFilter:  "",
 			expectedModelID: "moonshot/kimi-k2",
-			setupProviders:  setupMockProviders,
+			setupProviders:  setupMockProvidersForResolve,
 		},
 		{
 			name:            "full path with valid provider and model with slashes",
 			modelStr:        "synthetic/moonshot/kimi-k2",
 			expectedFilter:  "synthetic",
 			expectedModelID: "moonshot/kimi-k2",
-			setupProviders:  setupMockProvidersWithSlashes,
+			setupProviders:  setupMockProvidersWithSlashesForResolve,
 		},
 		{
 			name:            "empty model string",
 			modelStr:        "",
 			expectedFilter:  "",
 			expectedModelID: "",
-			setupProviders:  setupMockProviders,
+			setupProviders:  setupMockProvidersForResolve,
 		},
 		{
 			name:            "model with trailing slash but valid provider",
 			modelStr:        "openai/",
 			expectedFilter:  "openai",
 			expectedModelID: "",
-			setupProviders:  setupMockProviders,
+			setupProviders:  setupMockProvidersForResolve,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			providers := tt.setupProviders()
-			filter, modelID := parseModelStr(providers, tt.modelStr)
+			filter, modelID := ParseModelString(providers, tt.modelStr)
 
 			require.Equal(t, tt.expectedFilter, filter, "provider filter mismatch")
 			require.Equal(t, tt.expectedModelID, modelID, "model ID mismatch")
@@ -71,8 +70,8 @@ func TestParseModelStr(t *testing.T) {
 	}
 }
 
-func setupMockProviders() map[string]config.ProviderConfig {
-	return map[string]config.ProviderConfig{
+func setupMockProvidersForResolve() map[string]ProviderConfig {
+	return map[string]ProviderConfig{
 		"openai": {
 			ID:     "openai",
 			Name:   "OpenAI",
@@ -86,8 +85,8 @@ func setupMockProviders() map[string]config.ProviderConfig {
 	}
 }
 
-func setupMockProvidersWithSlashes() map[string]config.ProviderConfig {
-	return map[string]config.ProviderConfig{
+func setupMockProvidersWithSlashesForResolve() map[string]ProviderConfig {
+	return map[string]ProviderConfig{
 		"synthetic": {
 			ID:   "synthetic",
 			Name: "Synthetic",
@@ -104,7 +103,7 @@ func setupMockProvidersWithSlashes() map[string]config.ProviderConfig {
 	}
 }
 
-func TestFindModels(t *testing.T) {
+func TestFindModelMatches(t *testing.T) {
 	tests := []struct {
 		name             string
 		modelStr         string
@@ -112,7 +111,7 @@ func TestFindModels(t *testing.T) {
 		expectedModelID  string
 		expectError      bool
 		errorContains    string
-		setupProviders   func() map[string]config.ProviderConfig
+		setupProviders   func() map[string]ProviderConfig
 	}{
 		{
 			name:             "simple model found in one provider",
@@ -120,7 +119,7 @@ func TestFindModels(t *testing.T) {
 			expectedProvider: "openai",
 			expectedModelID:  "gpt-4o",
 			expectError:      false,
-			setupProviders:   setupMockProviders,
+			setupProviders:   setupMockProvidersForResolve,
 		},
 		{
 			name:             "model with slashes in ID",
@@ -128,7 +127,7 @@ func TestFindModels(t *testing.T) {
 			expectedProvider: "synthetic",
 			expectedModelID:  "moonshot/kimi-k2",
 			expectError:      false,
-			setupProviders:   setupMockProvidersWithSlashes,
+			setupProviders:   setupMockProvidersWithSlashesForResolve,
 		},
 		{
 			name:             "provider and model with slashes in ID",
@@ -136,29 +135,29 @@ func TestFindModels(t *testing.T) {
 			expectedProvider: "synthetic",
 			expectedModelID:  "moonshot/kimi-k2",
 			expectError:      false,
-			setupProviders:   setupMockProvidersWithSlashes,
+			setupProviders:   setupMockProvidersWithSlashesForResolve,
 		},
 		{
 			name:           "model not found",
 			modelStr:       "nonexistent-model",
 			expectError:    true,
 			errorContains:  "not found",
-			setupProviders: setupMockProviders,
+			setupProviders: setupMockProvidersForResolve,
 		},
 		{
 			name:           "invalid provider specified",
 			modelStr:       "nonexistent-provider/gpt-4o",
 			expectError:    true,
 			errorContains:  "provider",
-			setupProviders: setupMockProviders,
+			setupProviders: setupMockProvidersForResolve,
 		},
 		{
 			name:          "model found in multiple providers without provider filter",
 			modelStr:      "shared-model",
 			expectError:   true,
 			errorContains: "multiple providers",
-			setupProviders: func() map[string]config.ProviderConfig {
-				return map[string]config.ProviderConfig{
+			setupProviders: func() map[string]ProviderConfig {
+				return map[string]ProviderConfig{
 					"openai": {
 						ID:     "openai",
 						Models: []catwalk.Model{{ID: "shared-model"}},
@@ -175,7 +174,32 @@ func TestFindModels(t *testing.T) {
 			modelStr:       "",
 			expectError:    true,
 			errorContains:  "not found",
-			setupProviders: setupMockProviders,
+			setupProviders: setupMockProvidersForResolve,
+		},
+		{
+			name:             "model ID casing is case-insensitive",
+			modelStr:         "openai/GPT-4O",
+			expectedProvider: "openai",
+			expectedModelID:  "gpt-4o",
+			expectError:      false,
+			setupProviders:   setupMockProvidersForResolve,
+		},
+		{
+			name:             "model ID with slash but no matching provider resolves as full model ID",
+			modelStr:         "moonshot/kimi-k2",
+			expectedProvider: "synthetic",
+			expectedModelID:  "moonshot/kimi-k2",
+			expectError:      false,
+			setupProviders: func() map[string]ProviderConfig {
+				// No "moonshot" provider registered, only "synthetic" hosting
+				// a model whose ID itself contains a slash.
+				return map[string]ProviderConfig{
+					"synthetic": {
+						ID:     "synthetic",
+						Models: []catwalk.Model{{ID: "moonshot/kimi-k2"}},
+					},
+				}
+			},
 		},
 	}
 
@@ -183,8 +207,8 @@ func TestFindModels(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			providers := tt.setupProviders()
 
-			// Use findModels with the model as "large" and empty "small".
-			matches, _, err := findModels(providers, tt.modelStr, "")
+			// Use FindModelMatches with the model as "large" and empty "small".
+			matches, _, err := FindModelMatches(providers, tt.modelStr, "")
 			if err != nil {
 				if tt.expectError {
 					require.Contains(t, err.Error(), tt.errorContains)
@@ -195,16 +219,26 @@ func TestFindModels(t *testing.T) {
 			}
 
 			// Validate the matches.
-			match, err := validateMatches(matches, tt.modelStr, "large")
+			match, err := ValidateModelMatches(matches, tt.modelStr, "large")
 
 			if tt.expectError {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.errorContains)
 			} else {
 				require.NoError(t, err)
-				require.Equal(t, tt.expectedProvider, match.provider)
-				require.Equal(t, tt.expectedModelID, match.modelID)
+				require.Equal(t, tt.expectedProvider, match.Provider)
+				require.Equal(t, tt.expectedModelID, match.ModelID)
 			}
 		})
 	}
+}
+
+// TestModelFilterMatches_CaseInsensitiveProviderName pins the fix where
+// provider name comparisons must ignore case: the previous cmd/run.go
+// implementation (matchesModel) compared provider names with an exact
+// string match, so a differently-cased provider filter would silently
+// fail to match.
+func TestModelFilterMatches_CaseInsensitiveProviderName(t *testing.T) {
+	require.True(t, modelFilterMatches("gpt-4o", "OpenAI", "gpt-4o", "openai"))
+	require.False(t, modelFilterMatches("gpt-4o", "Anthropic", "gpt-4o", "openai"))
 }
