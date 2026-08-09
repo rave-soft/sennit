@@ -71,12 +71,12 @@ func printDirs(cmd *cobra.Command, dirs []string) {
 	}
 
 	for i, d := range dirs {
-		lipgloss.Println(labelStyle.Render(labels[i]) +
+		_, _ = lipgloss.Println(labelStyle.Render(labels[i]) + // terminal output
 			strings.Repeat(" ", longest-len(labels[i])) +
 			" " + d)
 	}
 
-	lipgloss.Println(lipgloss.NewStyle().Foreground(charmtone.Squid).Render("Configs merge from top to bottom"))
+	_, _ = lipgloss.Println(lipgloss.NewStyle().Foreground(charmtone.Squid).Render("Configs merge from top to bottom")) // terminal output
 }
 
 func dirLabel(i int) string {

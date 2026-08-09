@@ -207,12 +207,16 @@ func PushPopBraidEnv() func() {
 	}
 
 	for _, ev := range found {
-		os.Setenv(ev, os.Getenv("BRAID_"+ev))
+		if err := os.Setenv(ev, os.Getenv("BRAID_"+ev)); err != nil {
+			slog.Warn("Failed to set env var from BRAID_ override", "key", ev, "error", err)
+		}
 	}
 
 	restore := func() {
 		for k, v := range backups {
-			os.Setenv(k, v)
+			if err := os.Setenv(k, v); err != nil {
+				slog.Warn("Failed to restore env var", "key", k, "error", err)
+			}
 		}
 	}
 	return restore
@@ -616,7 +620,9 @@ func (c *Config) applyEnv(resolver VariableResolver) {
 			slog.Warn("Skipping env var due to resolution failure.", "key", k, "value", c.Env[k], "error", err)
 			continue
 		}
-		os.Setenv(k, resolved)
+		if err := os.Setenv(k, resolved); err != nil {
+			slog.Warn("Failed to set env var", "key", k, "error", err)
+		}
 	}
 }
 

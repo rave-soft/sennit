@@ -159,7 +159,9 @@ func (c *Client) registerInitial() {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.snd.send(c.newRequestLocked("pane.report_agent", "init", stateIdle))
+	if err := c.snd.send(c.newRequestLocked("pane.report_agent", "init", stateIdle)); err != nil {
+		slog.Debug("Herdr report failed", "error", err)
+	}
 }
 
 // Close releases the agent's authority on the pane and shuts down
@@ -298,7 +300,9 @@ func (c *Client) reportLocked(state string) {
 		return
 	}
 	c.state = state
-	c.snd.send(c.newRequestLocked("pane.report_agent", "report", state))
+	if err := c.snd.send(c.newRequestLocked("pane.report_agent", "report", state)); err != nil {
+		slog.Debug("Herdr report failed", "error", err)
+	}
 }
 
 // reportRequest is the JSON-RPC envelope sent to herdr.

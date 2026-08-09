@@ -21,7 +21,7 @@ func TestOmlxEnricher(t *testing.T) {
 			// includes /v1), so the resolved path keeps the prefix.
 			require.Equal(t, "/v1/models/status", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(omlxModelsStatusResponse{
+			_ = json.NewEncoder(w).Encode(omlxModelsStatusResponse{
 				Models: []omlxModelStatus{
 					{ID: "qwen3:latest", MaxContextWindow: ptr(int64(32768)), MaxTokens: ptr(int64(16384))},
 					{ID: "llama3:latest", MaxContextWindow: ptr(int64(8192)), MaxTokens: ptr(int64(4096))},
@@ -52,7 +52,7 @@ func TestOmlxEnricher(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(omlxModelsStatusResponse{
+			_ = json.NewEncoder(w).Encode(omlxModelsStatusResponse{
 				Models: []omlxModelStatus{
 					{ID: "m1", MaxContextWindow: ptr(int64(32768)), MaxTokens: ptr(int64(16384))},
 				},

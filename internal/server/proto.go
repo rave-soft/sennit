@@ -309,7 +309,9 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	// keeps the client's SubscribeEvents call blocked on the
 	// initial RoundTrip.
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	if err := flusher.Flush(); err != nil {
+		c.server.logDebug(r, "Failed to flush event stream headers", "error", err)
+	}
 
 	for {
 		select {
@@ -331,7 +333,9 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			}
 
 			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+			if err := flusher.Flush(); err != nil {
+				c.server.logDebug(r, "Failed to flush event stream", "error", err)
+			}
 		}
 	}
 }

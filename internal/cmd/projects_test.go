@@ -37,8 +37,8 @@ func TestProjectsJSON(t *testing.T) {
 	projectsCmd.SetIn(bytes.NewReader(nil))
 
 	// Set the --json flag
-	projectsCmd.Flags().Set("json", "true")
-	defer projectsCmd.Flags().Set("json", "false")
+	require.NoError(t, projectsCmd.Flags().Set("json", "true"))
+	defer func() { _ = projectsCmd.Flags().Set("json", "false") }()
 
 	err = projectsCmd.RunE(projectsCmd, nil)
 	require.NoError(t, err)

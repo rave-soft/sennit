@@ -63,7 +63,7 @@ func TestLmstudioEnricher(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+			_ = json.NewEncoder(w).Encode(lmstudioModelsResponse{
 				Models: []lmstudioModelEntry{
 					{
 						Key:              "m1",
@@ -90,7 +90,7 @@ func TestLmstudioEnricher(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+			_ = json.NewEncoder(w).Encode(lmstudioModelsResponse{
 				Models: []lmstudioModelEntry{
 					{
 						Key:              "m1",
@@ -135,7 +135,7 @@ func TestLmstudioEnricher(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(lmstudioModelsResponse{
+			_ = json.NewEncoder(w).Encode(lmstudioModelsResponse{
 				Models: []lmstudioModelEntry{
 					{Key: "m1", DisplayName: "API Name"},
 				},

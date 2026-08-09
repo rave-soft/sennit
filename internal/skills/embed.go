@@ -32,7 +32,7 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 	var discovered []*Skill
 	var states []*SkillState
 
-	fs.WalkDir(builtinFS, "builtin", func(path string, d fs.DirEntry, err error) error {
+	if err := fs.WalkDir(builtinFS, "builtin", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -73,7 +73,9 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 		discovered = append(discovered, skill)
 		states = append(states, &SkillState{Name: skill.Name, Path: skill.SkillFilePath, State: StateNormal})
 		return nil
-	})
+	}); err != nil {
+		slog.Warn("Failed to walk builtin skills", "error", err)
+	}
 
 	return discovered, states
 }

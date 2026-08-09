@@ -993,9 +993,12 @@ func TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu(t *testing.T) {
 		"other config mutators must remain usable while discovery is in flight")
 
 	// Regardless of the assertion above, confirm the reload eventually
-	// completes successfully so the test doesn't leak a goroutine.
+	// completes successfully so the test doesn't leak a goroutine. The
+	// Lock/Unlock pair is intentionally empty: it's a synchronization
+	// barrier that blocks until any in-flight ReloadFromDisk releases
+	// writeMu, not a mistakenly-discarded critical section.
 	store.writeMu.Lock()
-	store.writeMu.Unlock()
+	store.writeMu.Unlock() //nolint:staticcheck // SA2001: deliberate barrier, see comment above
 	require.NoError(t, <-reloadDone)
 }
 

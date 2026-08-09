@@ -149,13 +149,13 @@ func TestBraidLogs_MalformedLines(t *testing.T) {
 	// Write some valid and some invalid lines.
 	validEntry := makeLogEntry("INFO", "Valid entry", "app.go", 1, nil)
 	line, _ := json.Marshal(validEntry)
-	file.WriteString(string(line) + "\n")
-	file.WriteString("this is not json\n")
-	file.WriteString(`{"incomplete": "json` + "\n")
+	_, _ = file.WriteString(string(line) + "\n")
+	_, _ = file.WriteString("this is not json\n")
+	_, _ = file.WriteString(`{"incomplete": "json` + "\n")
 
 	validEntry2 := makeLogEntry("INFO", "Another valid entry", "app.go", 2, nil)
 	line2, _ := json.Marshal(validEntry2)
-	file.WriteString(string(line2) + "\n")
+	_, _ = file.WriteString(string(line2) + "\n")
 
 	file.Close()
 
@@ -309,7 +309,7 @@ func TestBraidLogs_OversizedLines(t *testing.T) {
 	// Create a valid entry first.
 	validEntry := makeLogEntry("INFO", "Valid entry", "app.go", 1, nil)
 	line, _ := json.Marshal(validEntry)
-	file.WriteString(string(line) + "\n")
+	_, _ = file.WriteString(string(line) + "\n")
 
 	// Create an oversized line (more than 1 MB).
 	bigValue := strings.Repeat("x", maxLogLineSize+1000)
@@ -321,12 +321,12 @@ func TestBraidLogs_OversizedLines(t *testing.T) {
 		"data":   bigValue,
 	}
 	bigLine, _ := json.Marshal(bigEntry)
-	file.WriteString(string(bigLine) + "\n")
+	_, _ = file.WriteString(string(bigLine) + "\n")
 
 	// Create another valid entry.
 	validEntry2 := makeLogEntry("INFO", "Second valid entry", "app.go", 2, nil)
 	line2, _ := json.Marshal(validEntry2)
-	file.WriteString(string(line2) + "\n")
+	_, _ = file.WriteString(string(line2) + "\n")
 
 	file.Close()
 
@@ -352,11 +352,11 @@ func TestBraidLogs_PartialTrailingLine(t *testing.T) {
 	for i := range 5 {
 		entry := makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i, nil)
 		line, _ := json.Marshal(entry)
-		file.WriteString(string(line) + "\n")
+		_, _ = file.WriteString(string(line) + "\n")
 	}
 
 	// Write a partial/truncated line (no closing brace or newline).
-	file.WriteString(`{"time": "2024-01-15T10:00:00Z", "level": "INFO", "msg": "Truncated`)
+	_, _ = file.WriteString(`{"time": "2024-01-15T10:00:00Z", "level": "INFO", "msg": "Truncated`)
 	file.Close()
 
 	result := runBraidLogs(logFile, BraidLogsParams{Lines: 10})

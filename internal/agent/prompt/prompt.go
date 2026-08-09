@@ -115,7 +115,7 @@ func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 		return contexts
 	}
 	if info.IsDir() {
-		filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
+		if err := filepath.WalkDir(fullPath, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -125,7 +125,9 @@ func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 				}
 			}
 			return nil
-		})
+		}); err != nil {
+			slog.Warn("Failed to walk context path", "path", fullPath, "error", err)
+		}
 	} else {
 		result := processFile(fullPath)
 		if result != nil {

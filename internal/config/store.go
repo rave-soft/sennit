@@ -1143,7 +1143,9 @@ func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
 	slices.Sort(s.trackedConfigPaths)
 
 	// Capture initial snapshots
-	s.RefreshStalenessSnapshot()
+	if err := s.RefreshStalenessSnapshot(); err != nil {
+		slog.Warn("Failed to capture initial config staleness snapshot", "error", err)
+	}
 }
 
 // captureStalenessSnapshot is an alias for CaptureStalenessSnapshot for internal use.

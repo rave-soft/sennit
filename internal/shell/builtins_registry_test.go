@@ -14,7 +14,7 @@ import (
 // the full args slice and the I/O streams from the interpreter context.
 func TestRegisterBuiltin_DispatchedThroughRun(t *testing.T) {
 	RegisterBuiltin("braidtest-echo", func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-		io.WriteString(stdout, "builtin:"+args[1])
+		_, _ = io.WriteString(stdout, "builtin:"+args[1])
 		return nil
 	})
 	t.Cleanup(func() { delete(builtins, "braidtest-echo") })
@@ -51,7 +51,7 @@ func TestRegisterBuiltin_OverridesPATHBinary(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	RegisterBuiltin("braidtest-shadowed", func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-		io.WriteString(stdout, "from-builtin")
+		_, _ = io.WriteString(stdout, "from-builtin")
 		return nil
 	})
 	t.Cleanup(func() { delete(builtins, "braidtest-shadowed") })

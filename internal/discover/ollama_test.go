@@ -21,24 +21,24 @@ func TestOllamaEnricher(t *testing.T) {
 			require.Equal(t, http.MethodPost, r.Method)
 
 			var req map[string]string
-			json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewDecoder(r.Body).Decode(&req)
 
 			w.Header().Set("Content-Type", "application/json")
 			switch req["model"] {
 			case "llama3:latest":
-				json.NewEncoder(w).Encode(ollamaShowResponse{
+				_ = json.NewEncoder(w).Encode(ollamaShowResponse{
 					ModelInfo: map[string]any{
 						"llama.context_length": float64(8192),
 					},
 				})
 			case "qwen2:latest":
-				json.NewEncoder(w).Encode(ollamaShowResponse{
+				_ = json.NewEncoder(w).Encode(ollamaShowResponse{
 					ModelInfo: map[string]any{
 						"qwen2.context_length": float64(32768),
 					},
 				})
 			default:
-				json.NewEncoder(w).Encode(ollamaShowResponse{})
+				_ = json.NewEncoder(w).Encode(ollamaShowResponse{})
 			}
 		}))
 		defer srv.Close()
@@ -65,7 +65,7 @@ func TestOllamaEnricher(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(ollamaShowResponse{
+			_ = json.NewEncoder(w).Encode(ollamaShowResponse{
 				ModelInfo: map[string]any{
 					"llama.context_length": float64(8192),
 				},
@@ -90,7 +90,7 @@ func TestOllamaEnricher(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			calls++
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(ollamaShowResponse{})
+			_ = json.NewEncoder(w).Encode(ollamaShowResponse{})
 		}))
 		defer srv.Close()
 

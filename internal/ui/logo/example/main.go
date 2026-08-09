@@ -37,9 +37,9 @@ func main() {
 		return logo.Render(s.Logo.GradCanvas, "v1.0.0", false, opts)
 	}
 
-	lipgloss.Println(renderCompact())
+	_, _ = lipgloss.Println(renderCompact()) // terminal output
 
 	for range 6 {
-		lipgloss.Println(renderWide())
+		_, _ = lipgloss.Println(renderWide()) // terminal output
 	}
 }

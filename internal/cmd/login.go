@@ -98,11 +98,11 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 		fmt.Println()
 		fmt.Println("The following code should be on clipboard already:")
 		fmt.Println()
-		lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
+		_, _ = lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode)) // terminal output
 		fmt.Println()
 		fmt.Println("Press enter to open this URL and authenticate with GitHub Copilot:")
 		fmt.Println()
-		lipgloss.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
+		_, _ = lipgloss.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI)) // terminal output
 		fmt.Println()
 		waitEnter()
 		if err := browser.OpenURL(dc.VerificationURI); err != nil {
@@ -116,11 +116,11 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 			fmt.Println()
 			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
 			fmt.Println()
-			lipgloss.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL))
+			_, _ = lipgloss.Println(lipgloss.NewStyle().Hyperlink(copilot.SignupURL, "id=copilot-signup").Render(copilot.SignupURL)) // terminal output
 			fmt.Println()
 			fmt.Println("You may be able to request free access if eligible. For more information, see:")
 			fmt.Println()
-			lipgloss.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL))
+			_, _ = lipgloss.Println(lipgloss.NewStyle().Hyperlink(copilot.FreeURL, "id=copilot-free").Render(copilot.FreeURL)) // terminal output
 		}
 		if err != nil {
 			return err

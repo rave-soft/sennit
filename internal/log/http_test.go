@@ -13,7 +13,7 @@ func TestHTTPRoundTripLogger(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Custom-Header", "test-value")
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": "Internal server error", "code": 500}`))
+		_, _ = w.Write([]byte(`{"error": "Internal server error", "code": 500}`))
 	}))
 	defer server.Close()
 

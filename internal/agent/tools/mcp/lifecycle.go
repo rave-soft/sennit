@@ -131,7 +131,9 @@ func (r *Registry) reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
 			r.removeServer(name)
 		case reinitDisable:
 			slog.Info("Disabling MCP server", "name", name)
-			r.DisableSingle(cfg, name)
+			if err := r.DisableSingle(cfg, name); err != nil {
+				slog.Warn("Failed to disable MCP server", "name", name, "error", err)
+			}
 		case reinitStart:
 			m := current[name]
 			if _, exists := r.states.Get(name); exists {

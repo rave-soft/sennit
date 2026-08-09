@@ -60,7 +60,7 @@ braid projects --json
 			for _, p := range projectList {
 				t.Row(p.Path, p.DataDir, p.LastAccessed.Local().Format("2006-01-02 15:04"))
 			}
-			lipgloss.Println(t)
+			_, _ = lipgloss.Println(t) // terminal output
 			return nil
 		}
 

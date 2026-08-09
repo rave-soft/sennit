@@ -200,7 +200,9 @@ func (m *MCPAuth) advance() Action {
 
 func (m *MCPAuth) openAuthURL() {
 	if u := m.authURL(); u != "" {
-		browser.OpenURL(u)
+		if err := browser.OpenURL(u); err != nil {
+			m.err = fmt.Errorf("failed to open browser: %w", err)
+		}
 	}
 }
 

@@ -96,7 +96,7 @@ func openaiCompatBuilder(model string) builderFunc {
 
 func testEnv(t *testing.T) fakeEnv {
 	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
-	os.RemoveAll(workingDir)
+	_ = os.RemoveAll(workingDir)
 
 	err := os.MkdirAll(workingDir, 0o755)
 	require.NoError(t, err)
@@ -114,8 +114,8 @@ func testEnv(t *testing.T) fakeEnv {
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
 	t.Cleanup(func() {
-		conn.Close()
-		os.RemoveAll(workingDir)
+		_ = conn.Close()
+		_ = os.RemoveAll(workingDir)
 	})
 
 	return fakeEnv{

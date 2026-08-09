@@ -261,7 +261,9 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 	}
 
 	// Force-update agent models before running so MCP tools are loaded.
-	w.app.AgentCoordinator.UpdateModels(ctx)
+	if err := w.app.AgentCoordinator.UpdateModels(ctx); err != nil {
+		return nil, fmt.Errorf("failed to update agent models: %w", err)
+	}
 
 	// Automatically approve all permission requests for this
 	// non-interactive run.

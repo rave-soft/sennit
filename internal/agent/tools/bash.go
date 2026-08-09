@@ -259,7 +259,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 				if done {
 					// Command failed or completed very quickly
-					bgManager.Remove(bgShell.ID)
+					_ = bgManager.Remove(bgShell.ID) // shell already finished; nothing to clean up on failure
 
 					interrupted := shell.IsInterrupt(execErr)
 					exitCode := shell.ExitCode(execErr)
@@ -334,7 +334,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				case <-ctx.Done():
 					// Incoming context was cancelled before we moved to background
 					// Kill the shell and return error
-					bgManager.Kill(bgShell.ID)
+					_ = bgManager.Kill(bgShell.ID) // best-effort; ctx.Err() below is what we report
 					return fantasy.ToolResponse{}, ctx.Err()
 				}
 			}
@@ -343,7 +343,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				// Command completed within threshold - return synchronously
 				// Remove from background manager since we're returning directly
 				// Don't call Kill() as it cancels the context and corrupts the exit code
-				bgManager.Remove(bgShell.ID)
+				_ = bgManager.Remove(bgShell.ID) // shell already finished; nothing to clean up
 
 				interrupted := shell.IsInterrupt(execErr)
 				exitCode := shell.ExitCode(execErr)

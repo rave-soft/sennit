@@ -19,7 +19,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			require.Equal(t, "/v1/models", r.URL.Path)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(llamacppModelsResponse{
+			_ = json.NewEncoder(w).Encode(llamacppModelsResponse{
 				Data: []llamacppModelEntry{
 					{
 						ID:   "ggml-org/Qwen2.5-Coder-1.5B-Instruct-Q8_0-GGUF",
@@ -54,7 +54,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(llamacppModelsResponse{
+			_ = json.NewEncoder(w).Encode(llamacppModelsResponse{
 				Data: []llamacppModelEntry{
 					{
 						ID:   "m1",
@@ -78,7 +78,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(llamacppModelsResponse{
+			_ = json.NewEncoder(w).Encode(llamacppModelsResponse{
 				Data: []llamacppModelEntry{
 					{
 						ID:   "m1",
@@ -119,7 +119,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		t.Parallel()
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte("not json"))
+			_, _ = w.Write([]byte("not json"))
 		}))
 		defer srv.Close()
 

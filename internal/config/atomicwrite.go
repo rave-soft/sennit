@@ -19,20 +19,20 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	tmp := f.Name()
 	if _, err := f.Write(data); err != nil {
 		f.Close()
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup; the write error above is what matters
 		return err
 	}
 	if err := f.Chmod(perm); err != nil {
 		f.Close()
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup; the chmod error above is what matters
 		return err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup; the close error above is what matters
 		return err
 	}
 	if err := renameFile(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup; the rename error above is what matters
 		return err
 	}
 	return nil
