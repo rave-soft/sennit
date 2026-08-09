@@ -47,11 +47,44 @@ type modelPair struct {
 	smallModel builderFunc
 }
 
-func hyperBuilder(model string) builderFunc {
+// defaultTestOpenAIBaseURL is Ollama's default local listen address — a
+// reasonable default for anyone re-recording cassettes without configuring
+// anything else. There is deliberately no default model: what's available
+// locally varies too much to guess, so callers must set
+// BRAID_TEST_OPENAI_MODEL.
+const defaultTestOpenAIBaseURL = "http://localhost:11434/v1"
+
+// recordCassettes reports whether TestCoderAgent should hit a live
+// OpenAI-compatible endpoint and overwrite its VCR cassettes, instead of the
+// default replay-from-testdata/ behavior. Setting BRAID_TEST_OPENAI_BASE_URL
+// is what opts a run into recording — its presence is the trigger.
+func recordCassettes() bool {
+	return os.Getenv("BRAID_TEST_OPENAI_BASE_URL") != ""
+}
+
+// openaiCompatBuilder builds a language model against any OpenAI-compatible
+// endpoint (Ollama, llama.cpp, vLLM, ...), configured via env vars so
+// cassettes can be re-recorded without touching code:
+//
+//   - BRAID_TEST_OPENAI_BASE_URL: API base URL (default: defaultTestOpenAIBaseURL)
+//   - BRAID_TEST_OPENAI_MODEL: overrides the model name given below, if set
+//   - BRAID_TEST_OPENAI_API_KEY: optional; most local servers don't need one
+//
+// This replaces the old hyperBuilder, which pointed at Charm's
+// hyper.charm.land — a service this fork no longer has access to (see
+// TECHDEBT.md).
+func openaiCompatBuilder(model string) builderFunc {
 	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
+		baseURL := os.Getenv("BRAID_TEST_OPENAI_BASE_URL")
+		if baseURL == "" {
+			baseURL = defaultTestOpenAIBaseURL
+		}
+		if m := os.Getenv("BRAID_TEST_OPENAI_MODEL"); m != "" {
+			model = m
+		}
 		provider, err := openaicompat.New(
-			openaicompat.WithBaseURL("https://hyper.charm.land/v1"),
-			openaicompat.WithAPIKey(os.Getenv("BRAID_HYPER_API_KEY")),
+			openaicompat.WithBaseURL(baseURL),
+			openaicompat.WithAPIKey(os.Getenv("BRAID_TEST_OPENAI_API_KEY")),
 			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
 		)
 		if err != nil {

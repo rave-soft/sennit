@@ -20,6 +20,7 @@ import (
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -30,7 +31,7 @@ func TestMain(m *testing.M) {
 }
 
 var modelPairs = []modelPair{
-	{"glm-5.1", hyperBuilder("glm-5.1"), hyperBuilder("gpt-oss-120b")},
+	{"glm-5.1", openaiCompatBuilder("glm-5.1"), openaiCompatBuilder("gpt-oss-120b")},
 }
 
 func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
@@ -42,7 +43,13 @@ func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageM
 }
 
 func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
-	r := vcr.NewRecorder(t)
+	var opts []vcr.Option
+	if recordCassettes() {
+		// Force a fresh recording rather than replaying (and failing to
+		// match) the stale cassette already on disk.
+		opts = append(opts, vcr.WithMode(recorder.ModeRecordOnly))
+	}
+	r := vcr.NewRecorder(t, opts...)
 	large, small := getModels(t, r, pair)
 	env := testEnv(t)
 
@@ -60,14 +67,21 @@ func TestCoderAgent(t *testing.T) {
 	// These cassettes replay traffic Charm recorded against hyper.charm.land,
 	// and the recorded request bodies embed the full tool schema and system
 	// prompt of the time — including the crush_info / crush_logs tool names and
-	// the old product name. The rebrand changes both, so no request can ever
-	// match again and the recordings cannot be refreshed without a key for
-	// Charm's service.
+	// the old product name. The rebrand changes both, so no request in this
+	// cassette can ever match a request built with today's code.
 	//
-	// The test and its fixtures are kept rather than deleted: re-pointing
-	// hyperBuilder at any OpenAI-compatible endpoint and re-recording would
-	// bring the whole suite back.
-	t.Skip("recorded against Charm's hyper service before the rebrand; needs re-recording")
+	// The test and its fixtures are kept rather than deleted: openaiCompatBuilder
+	// (common_test.go) points at any OpenAI-compatible endpoint via env vars, so
+	// re-recording is one command away once such an endpoint is available. See
+	// TECHDEBT.md for the state of this and what re-recording changes.
+	if !recordCassettes() {
+		t.Skip("cassettes recorded pre-rebrand are stale (old crush_info/crush_logs tool names, old system " +
+			"prompt); re-record with BRAID_TEST_OPENAI_BASE_URL=<endpoint> BRAID_TEST_OPENAI_MODEL=<model> " +
+			"go test ./internal/agent/ -run TestCoderAgent -v")
+	}
+	if os.Getenv("BRAID_TEST_OPENAI_MODEL") == "" {
+		t.Skip("BRAID_TEST_OPENAI_MODEL is required to record cassettes; there is no default model")
+	}
 
 	for _, pair := range modelPairs {
 		t.Run(pair.name, func(t *testing.T) {
