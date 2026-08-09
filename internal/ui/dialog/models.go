@@ -74,8 +74,7 @@ const defaultModelsDialogMaxWidth = 73
 
 // Models represents a model selection dialog.
 type Models struct {
-	com          *common.Common
-	isOnboarding bool
+	com *common.Common
 
 	modelType ModelType
 	providers []catwalk.Provider
@@ -97,11 +96,10 @@ type Models struct {
 var _ Dialog = (*Models)(nil)
 
 // NewModels creates a new Models dialog.
-func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
+func NewModels(com *common.Common) (*Models, error) {
 	t := com.Styles
 	m := &Models{}
 	m.com = com
-	m.isOnboarding = isOnboarding
 
 	help := help.New()
 	help.Styles = t.DialogHelpStyles()
@@ -209,9 +207,6 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Tab):
-			if m.isOnboarding {
-				break
-			}
 			if m.modelType == ModelTypeLarge {
 				m.modelType = ModelTypeSmall
 			} else {
@@ -273,11 +268,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Title = "Switch Model"
 	rc.TitleInfo = m.modelTypeRadioView()
 
-	if m.isOnboarding {
-		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
-		rc.AddPart(titleText)
-	}
-
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
 
@@ -288,29 +278,13 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	cur := m.Cursor()
-
-	if m.isOnboarding {
-		rc.Title = ""
-		rc.TitleInfo = ""
-		rc.IsOnboarding = true
-		view := rc.Render()
-		cur = adjustOnboardingInputCursor(t, cur)
-		DrawOnboardingCursor(scr, area, view, cur)
-	} else {
-		view := rc.Render()
-		DrawCenterCursor(scr, area, view, cur)
-	}
+	view := rc.Render()
+	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }
 
 // ShortHelp returns the short help view.
 func (m *Models) ShortHelp() []key.Binding {
-	if m.isOnboarding {
-		return []key.Binding{
-			m.keyMap.UpDown,
-			m.keyMap.Select,
-		}
-	}
 	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
@@ -494,9 +468,7 @@ func (m *Models) setProviderItems() error {
 	}
 
 	// Update placeholder based on model type
-	if !m.isOnboarding {
-		m.input.Placeholder = m.modelType.Placeholder()
-	}
+	m.input.Placeholder = m.modelType.Placeholder()
 
 	return nil
 }

@@ -841,6 +841,41 @@ func (c *Config) SmallModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
+// DefaultModelForProvider resolves the default large model for a single,
+// already-configured provider: its catalog DefaultLargeModelID when the
+// provider is known, otherwise the first model in its configured list
+// (covers custom providers and any provider outside the catalog, whose
+// only models are the ones the user discovered/entered).
+func (c *Config) DefaultModelForProvider(providerID string, knownProviders []catwalk.Provider) (SelectedModel, error) {
+	providerConfig, ok := c.Providers.Get(providerID)
+	if !ok {
+		return SelectedModel{}, fmt.Errorf("provider %s is not configured", providerID)
+	}
+
+	var defaultLargeModelID string
+	for _, p := range knownProviders {
+		if string(p.ID) == providerID {
+			defaultLargeModelID = p.DefaultLargeModelID
+			break
+		}
+	}
+
+	model := c.GetModel(providerID, defaultLargeModelID)
+	if model == nil {
+		if len(providerConfig.Models) == 0 {
+			return SelectedModel{}, fmt.Errorf("provider %s has no models configured", providerID)
+		}
+		model = &providerConfig.Models[0]
+	}
+
+	return SelectedModel{
+		Provider:        providerID,
+		Model:           model.ID,
+		MaxTokens:       model.DefaultMaxTokens,
+		ReasoningEffort: model.DefaultReasoningEffort,
+	}, nil
+}
+
 const maxRecentModelsPerType = 5
 
 // AllToolNames returns the names of every built-in tool the agent can be
