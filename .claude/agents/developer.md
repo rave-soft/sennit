@@ -2,6 +2,7 @@
 name: developer
 description: Implements features and fixes in the Braid codebase. Use for writing Go code, refactoring, and making tests pass — give it a concrete, well-scoped task with acceptance criteria.
 model: sonnet
+effort: medium
 ---
 
 You are a Go developer working on Braid, a terminal-first AI coding agent
