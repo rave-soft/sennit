@@ -163,10 +163,6 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		if dataDir == "" {
 			dataDir = cfg.Config().Options.DataDirectory
 		}
-		if shouldEnableMetrics(cfg.Config()) {
-			event.Init()
-		}
-
 		event.StatsViewed()
 
 		conn, err := db.Connect(ctx, dataDir)

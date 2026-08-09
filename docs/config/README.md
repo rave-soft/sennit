@@ -475,7 +475,6 @@ Boolean Keys:
   progress                       show progress indicators
   metrics                        send anonymous usage metrics
   auto-summarize                 automatically summarize long conversations
-  provider-auto-update           update the provider catalog automatically
   default-providers              include built-in providers
   attribution-generated-with     add the Generated with Braid line
 

@@ -180,8 +180,8 @@ option reset <list-key>    # clear a list option back to empty
 - **Boolean keys** (value optional, defaults `true`): `debug`, `debug-lsp`,
   `auto-lsp`, `progress`.
 - **Boolean keys phrased positively** (stored as the negated field): `metrics`,
-  `auto-summarize`, `provider-auto-update`,
-  `default-providers`. Example: `option metrics false` disables metrics.
+  `auto-summarize`, `default-providers`. Example: `option metrics false`
+  disables metrics.
 - **String keys**: `data-directory`, `initialize-as`, `notifications`.
 - **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
   `assisted-by`) and `attribution-generated-with` (boolean).

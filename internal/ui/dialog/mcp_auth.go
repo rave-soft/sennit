@@ -276,8 +276,8 @@ func (m *MCPAuth) innerContent() string {
 		progress = fmt.Sprintf(" (%d/%d)", m.current+1, len(m.pending))
 	}
 
-	// urlText renders the URL as a green hyperlink, matching the Hyper
-	// OAuth dialog's link style. No label, no box — just the URL.
+	// urlText renders the URL as a green hyperlink, matching the OAuth
+	// dialog's link style. No label, no box — just the URL.
 	urlText := func(u string) string {
 		if u == "" {
 			return ""

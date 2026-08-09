@@ -27,18 +27,6 @@ func NewMapFrom[K comparable, V any](m map[K]V) *Map[K, V] {
 	}
 }
 
-// NewLazyMap creates a new lazy-loaded map. The provided load function is
-// executed in a separate goroutine to populate the map.
-func NewLazyMap[K comparable, V any](load func() map[K]V) *Map[K, V] {
-	m := &Map[K, V]{}
-	m.mu.Lock()
-	go func() {
-		defer m.mu.Unlock()
-		m.inner = load()
-	}()
-	return m
-}
-
 // Reset replaces the inner map with the new one.
 func (m *Map[K, V]) Reset(input map[K]V) {
 	m.mu.Lock()

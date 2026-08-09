@@ -33,8 +33,6 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const defaultCatwalkURL = "https://catwalk.charm.land"
-
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
@@ -586,10 +584,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 
 	// Project specific skills dirs.
 	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
-
-	if str, ok := os.LookupEnv("BRAID_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
-		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
-	}
 
 	if str, ok := os.LookupEnv("BRAID_DISABLE_DEFAULT_PROVIDERS"); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)

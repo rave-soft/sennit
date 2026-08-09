@@ -24,9 +24,6 @@ var loginCmd = &cobra.Command{
 The platform should be provided as an argument.
 Available platforms are: copilot.`,
 	Example: `
-# Authenticate with Charm Hyper
-braid login
-
 # Authenticate with GitHub Copilot
 braid login copilot
 

@@ -10,8 +10,8 @@ const docTemplate = `{
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
         "contact": {
-            "name": "Charm",
-            "url": "https://charm.sh"
+            "name": "rave-soft",
+            "url": "https://github.com/rave-soft/braid"
         },
         "license": {
             "name": "MIT",
@@ -3499,9 +3499,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "disable_metrics": {
-                    "type": "boolean"
-                },
-                "disable_provider_auto_update": {
                     "type": "boolean"
                 },
                 "disabled_skills": {

@@ -26,7 +26,6 @@ type Opts struct {
 	CharmColor   color.Color // Charm™ text color
 	VersionColor color.Color // version text color
 	Width        int         // width of the rendered logo, used for truncation
-	Hyper        bool        // whether it is Braid or Hyperbraid
 
 	// When true, stretch a random letterform on each render. Has no effect in
 	// compact mode. Mainly for testing. In production you will want to cache
@@ -40,10 +39,7 @@ type Opts struct {
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
 func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
-	charm := "rave-soft"
-	if !o.Hyper {
-		charm = " " + charm
-	}
+	charm := " rave-soft"
 
 	fg := func(c color.Color, s string) string {
 		return lipgloss.NewStyle().Foreground(c).Render(s)
@@ -51,25 +47,12 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 
 	// Title.
 	const spacing = 1
-	var hyperLetterforms []letterform
-	if o.Hyper {
-		hyperLetterforms = []letterform{
-			LetterH,
-			LetterYAlt,
-			LetterP,
-			LetterE,
-			LetterR,
-		}
-	}
 	braidLetterforms := []letterform{
 		LetterB,
 		LetterR,
 		LetterA,
 		LetterI,
 		LetterD,
-	}
-	if o.Hyper && !compact {
-		braidLetterforms = append(hyperLetterforms, braidLetterforms...)
 	}
 
 	stretchIndex := -1 // -1 means no stretching.
@@ -81,9 +64,6 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 		stretchIndex = rand.IntN(len(braidLetterforms))
 	}
 	braid := renderWord(spacing, stretchIndex, braidLetterforms...)
-	if o.Hyper && compact {
-		braid = renderWord(spacing, stretchIndex, hyperLetterforms...) + "\n" + braid
-	}
 	braidWidth := lipgloss.Width(braid)
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(braid, "\n") {
@@ -95,16 +75,13 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	metaRowGap := 1
 	maxVersionWidth := braidWidth - lipgloss.Width(charm) - metaRowGap
 	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
-	if o.Hyper && compact {
-		version += " "
-	}
 	gap := max(0, braidWidth-lipgloss.Width(charm)-lipgloss.Width(version))
 	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
 
 	// Join the meta row and big Braid title.
 	braid = strings.TrimSpace(metaRow + "\n" + braid)
 
-	// Narrow version. If this is Hyperbraid, this is also a stacked version.
+	// Narrow version.
 	if compact {
 		field := fg(o.FieldColor, strings.Repeat(diag, braidWidth))
 		return strings.Join([]string{field, field, braid, field, ""}, "\n")
@@ -150,9 +127,6 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int, o Opts) string {
 	name := "Braid"
-	if o.Hyper {
-		name = "HYPERBRAID"
-	}
 	charm := "rave-soft"
 	title := t.Logo.SmallCharm.Render(charm)
 	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, name, t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor))

@@ -83,6 +83,9 @@ internal/
   `internal/shellconfig/`.
 - **Persistence**: SQLite + sqlc. All queries live in `internal/db/sql/`,
   generated code in `internal/db/`. Migrations in `internal/db/migrations/`.
+- **Timestamps**: SQLite timestamps are Unix seconds (`strftime('%s','now')`);
+  `Finish.Time` is seconds. Exception: `StartTime`/`EndTime` in the bash tool
+  are milliseconds.
 - **Pub/sub**: `internal/pubsub` for decoupled communication between agent,
   UI, and services.
 - **Hooks**: User-defined shell commands in `braidrc` (or `braid.json`)

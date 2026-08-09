@@ -11,16 +11,6 @@ type LazySlice[K any] struct {
 	wg    sync.WaitGroup
 }
 
-// NewLazySlice creates a new slice and runs the [load] function in a goroutine
-// to populate it.
-func NewLazySlice[K any](load func() []K) *LazySlice[K] {
-	s := &LazySlice[K]{}
-	s.wg.Go(func() {
-		s.inner = load()
-	})
-	return s
-}
-
 // Seq returns an iterator that yields elements from the slice.
 func (s *LazySlice[K]) Seq() iter.Seq[K] {
 	s.wg.Wait()

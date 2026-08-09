@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -18,10 +19,16 @@ import (
 var (
 	initOnce    sync.Once
 	initialized atomic.Bool
+	// logDir is the directory of the log file passed to Setup, reused by
+	// RecoverPanic so panic dumps land next to the regular logs instead of
+	// wherever the process happened to be started from.
+	logDir atomic.Value // string
 )
 
 func Setup(logFile string, debug bool, ws ...io.Writer) {
 	initOnce.Do(func() {
+		logDir.Store(filepath.Dir(logFile))
+
 		logRotator := &lumberjack.Logger{
 			Filename:   logFile,
 			MaxSize:    10,    // Max size in MB
@@ -63,6 +70,30 @@ func Initialized() bool {
 	return initialized.Load()
 }
 
+// panicLogPath resolves the full path for a panic log file named
+// filename. It reuses the directory Setup configured for the regular log
+// file if available, falling back to the user's cache directory, and as a
+// last resort the bare filename in the process's cwd. It never panics.
+func panicLogPath(filename string) string {
+	if dir, ok := logDir.Load().(string); ok && dir != "" {
+		return filepath.Join(dir, filename)
+	}
+
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		slog.Error("Failed to determine user cache dir for panic log", "error", err)
+		return filename
+	}
+
+	dir := filepath.Join(cacheDir, "braid")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		slog.Error("Failed to create braid cache dir for panic log", "dir", dir, "error", err)
+		return filename
+	}
+
+	return filepath.Join(dir, filename)
+}
+
 func RecoverPanic(name string, cleanup func()) {
 	if r := recover(); r != nil {
 		event.Error(r, "panic", true, "name", name)
@@ -71,7 +102,7 @@ func RecoverPanic(name string, cleanup func()) {
 		timestamp := time.Now().Format("20060102-150405")
 		filename := fmt.Sprintf("braid-panic-%s-%s.log", name, timestamp)
 
-		file, err := os.Create(filename)
+		file, err := os.Create(panicLogPath(filename))
 		if err == nil {
 			defer file.Close()
 

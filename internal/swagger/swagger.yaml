@@ -376,8 +376,6 @@ definitions:
         type: boolean
       disable_metrics:
         type: boolean
-      disable_provider_auto_update:
-        type: boolean
       disabled_skills:
         items:
           type: string
@@ -1035,8 +1033,8 @@ definitions:
     - Hour
 info:
   contact:
-    name: Charm
-    url: https://charm.sh
+    name: rave-soft
+    url: https://github.com/rave-soft/braid
   description: Braid is a terminal-based AI coding assistant. This API is served over
     a Unix socket (or Windows named pipe) and provides programmatic access to workspaces,
     sessions, agents, LSP, MCP, and more.

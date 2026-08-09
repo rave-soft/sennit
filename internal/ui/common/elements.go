@@ -40,7 +40,7 @@ type ModelContextInfo struct {
 
 // ModelInfo renders model information including name, provider, reasoning
 // settings, and optional context usage/cost.
-func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int, hyperCredits *int) string {
+func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int) string {
 	modelIcon := t.ModelInfo.Icon.Render(styles.ModelIcon)
 	modelName = t.ModelInfo.Name.Render(modelName)
 

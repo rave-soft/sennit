@@ -29,21 +29,17 @@ func main() {
 		Unstable:     true,
 	}
 
-	renderCompact := func(hyper bool) string {
-		opts.Hyper = hyper
+	renderCompact := func() string {
 		return logo.Render(s.Logo.GradCanvas, "v1.0.0", true, opts)
 	}
 
-	renderWide := func(hyper bool) string {
-		opts.Hyper = hyper
+	renderWide := func() string {
 		return logo.Render(s.Logo.GradCanvas, "v1.0.0", false, opts)
 	}
 
-	lipgloss.Println(
-		lipgloss.JoinHorizontal(lipgloss.Top, renderCompact(false), "  ", renderCompact(true)),
-	)
+	lipgloss.Println(renderCompact())
 
-	for i := range 6 {
-		lipgloss.Println(renderWide(i > 0))
+	for range 6 {
+		lipgloss.Println(renderWide())
 	}
 }

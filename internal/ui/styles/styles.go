@@ -18,11 +18,10 @@ import (
 )
 
 const (
-	CheckIcon       string = "✓"
-	SpinnerIcon     string = "⋯"
-	LoadingIcon     string = "⟳"
-	ModelIcon       string = "◇"
-	HypercreditIcon string = "◆"
+	CheckIcon   string = "✓"
+	SpinnerIcon string = "⋯"
+	LoadingIcon string = "⟳"
+	ModelIcon   string = "◇"
 
 	ArrowRightIcon string = "→"
 
@@ -77,7 +76,6 @@ type Styles struct {
 		Charm             lipgloss.Style // Style for "Charm™" label
 		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
 		Percentage        lipgloss.Style // Style for context percentage
-		HypercreditIcon   lipgloss.Style // Style for Hypercredit count (◆ N)
 		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
 		KeystrokeTip      lipgloss.Style // Style for keystroke action text (e.g., "open", "close")
 		WorkingDir        lipgloss.Style // Style for current working directory
@@ -241,8 +239,6 @@ type Styles struct {
 		TokenPercentage      lipgloss.Style // "42%" percent of context window
 		EstimatedUsagePrefix lipgloss.Style // "~" prefix for estimated usage
 		Cost                 lipgloss.Style // "$0.42" cost readout
-		HypercreditIcon      lipgloss.Style // Hypercredit icon (◆)
-		HypercreditText      lipgloss.Style // Remaining Hypercredits text
 	}
 
 	// Resource styles the LSP/MCP/skills sidebar lists: their heading,

@@ -401,7 +401,6 @@ func (m *Models) setProviderItems() error {
 	}
 
 	// Now add known providers from the predefined list.
-	// Providers already has Hyper at the front of the list.
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
 		if addedProviders[providerID] {

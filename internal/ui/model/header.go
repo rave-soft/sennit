@@ -65,11 +65,10 @@ func (h *header) drawHeader(
 	detailsOpen bool,
 	width int,
 	lspErrorCount int,
-	hyperCredits *int,
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
-		h.logo = renderLogo(h.com.Styles, compact, false, width)
+		h.logo = renderLogo(h.com.Styles, compact, width)
 	}
 
 	h.width = width
@@ -94,7 +93,6 @@ func (h *header) drawHeader(
 		lspErrorCount,
 		detailsOpen,
 		availDetailWidth,
-		hyperCredits,
 	)
 
 	remainingWidth := width -
@@ -126,7 +124,6 @@ func renderHeaderDetails(
 	lspErrorCount int,
 	detailsOpen bool,
 	availWidth int,
-	hyperCredits *int,
 ) string {
 	t := com.Styles
 

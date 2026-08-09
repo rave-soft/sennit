@@ -20,11 +20,6 @@ func init() {
 }
 
 // mdCacheMu guards mdCache and quietMDCache.
-//
-// Lock ordering: when both mdCacheMu and rendererLocksMu are
-// needed (only in InvalidateMarkdownRendererCache), acquire
-// mdCacheMu FIRST, then rendererLocksMu. No other call site may
-// hold rendererLocksMu while acquiring mdCacheMu.
 var (
 	mdCacheMu    sync.Mutex
 	mdCache      = map[int]*glamour.TermRenderer{}
@@ -33,8 +28,7 @@ var (
 
 // MarkdownRenderer returns a glamour [glamour.TermRenderer] configured with
 // the given styles and width. Renderers are memoized per width and shared
-// across callers; call InvalidateMarkdownRendererCache when the active
-// styles change.
+// across callers.
 //
 // The returned renderer is NOT safe for concurrent Render calls
 // (goldmark's BlockStack carries state across the public Render
@@ -76,37 +70,10 @@ func QuietMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer 
 	return r
 }
 
-// InvalidateMarkdownRendererCache drops every cached renderer
-// AND every per-renderer mutex in a single atomic critical
-// section so the two maps cannot disagree mid-toggle. Call this
-// whenever the active styles change so subsequent renderers
-// pick up the new ansi.StyleConfig.
-//
-// Existing holders of an old mutex (mid-Render goroutines) keep
-// their reference safely; new renderers minted after the
-// invalidation get freshly minted mutexes.
-//
-// Lock ordering: mdCacheMu is acquired first, then
-// rendererLocksMu — see the comments on each mutex.
-func InvalidateMarkdownRendererCache() {
-	mdCacheMu.Lock()
-	defer mdCacheMu.Unlock()
-	rendererLocksMu.Lock()
-	defer rendererLocksMu.Unlock()
-
-	mdCache = map[int]*glamour.TermRenderer{}
-	quietMDCache = map[int]*glamour.TermRenderer{}
-	rendererLocks = map[*glamour.TermRenderer]*sync.Mutex{}
-}
-
 // rendererLocksMu guards rendererLocks. We key per-renderer
 // mutexes by pointer so the lock granularity matches the
 // renderer cache granularity (one mutex per (width, palette)
 // renderer instance, not one mutex for the entire cache).
-//
-// Lock ordering: when both mdCacheMu and rendererLocksMu are
-// needed (only in InvalidateMarkdownRendererCache), acquire
-// mdCacheMu FIRST, then rendererLocksMu.
 var (
 	rendererLocksMu sync.Mutex
 	rendererLocks   = map[*glamour.TermRenderer]*sync.Mutex{}
@@ -115,8 +82,7 @@ var (
 // LockMarkdownRenderer returns the per-renderer mutex used to
 // serialize concurrent Render calls on a shared
 // [glamour.TermRenderer] instance. The returned [*sync.Mutex] is
-// stable for the lifetime of the renderer (i.e. until
-// [InvalidateMarkdownRendererCache] is called).
+// stable for the lifetime of the renderer.
 //
 // Callers that issue more than one Render call in the same
 // logical operation should hold the mutex for the entire

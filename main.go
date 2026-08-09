@@ -3,8 +3,8 @@
 //	@title			Braid API
 //	@version		1.0
 //	@description	Braid is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.
-//	@contact.name	Charm
-//	@contact.url	https://charm.sh
+//	@contact.name	rave-soft
+//	@contact.url	https://github.com/rave-soft/braid
 //	@license.name	MIT
 //	@license.url	https://github.com/rave-soft/braid/blob/main/LICENSE
 //	@BasePath		/v1

@@ -155,25 +155,12 @@ type (
 	// closeDialogMsg is sent to close the current dialog.
 	closeDialogMsg struct{}
 
-	// hyperRefreshDoneMsg is sent after a silent Hyper OAuth refresh
-	// finishes. It carries the original model-selection action so the
-	// selection can be resumed.
-	hyperRefreshDoneMsg struct {
-		action dialog.ActionSelectModel
-	}
-
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
 
 	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
-	}
-	// creditsUpdatedMsg is sent when the remaining Hyper credits have been
-	// fetched from the API. credits is nil when the team has hypercredit
-	// display disabled.
-	creditsUpdatedMsg struct {
-		credits *int
 	}
 )
 
@@ -199,11 +186,6 @@ type UI struct {
 	layout uiLayout
 
 	isTransparent bool
-
-	// themeKey identifies the currently applied theme so applyTheme can
-	// skip the expensive style rebuild when switching to a provider that
-	// resolves to the same theme.
-	themeKey string
 
 	focus uiFocusState
 	state uiState
@@ -369,11 +351,6 @@ type UI struct {
 	hoverX        int
 	hoverY        int
 
-	// hyperCredits is the remaining Hyper credits, updated after each prompt.
-	// It is nil when unknown, or when the team has hypercredit display
-	// disabled, and no balance is rendered in either case.
-	hyperCredits *int
-
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
 		messages []string
@@ -454,12 +431,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	}
 
 	status := NewStatus(com, ui)
-
-	// Seed the active theme key from the large model provider so the
-	// first model selection can correctly skip a redundant theme swap.
-	if cfg := com.Config(); cfg != nil {
-		ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
-	}
 
 	// Seed the yolo cache once at construction; afterwards it is kept
 	// fresh by write-through toggles and off-thread refreshes so Update
@@ -1304,12 +1275,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		cmds = append(cmds, m.loadPromptHistory())
-	case hyperRefreshDoneMsg:
-		if cmd := m.handleSelectModel(msg.action); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case creditsUpdatedMsg:
-		m.hyperCredits = msg.credits
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2107,24 +2072,8 @@ func substituteArgs(content string, args map[string]string) string {
 	return content
 }
 
-// refreshHyperAndRetrySelect returns a command that silently refreshes
-// the Hyper OAuth token and then re-runs the model selection. If the
-// refresh fails, the selection resumes with ReAuthenticate set so the
-// OAuth dialog opens.
-func (m *UI) refreshHyperAndRetrySelect(msg dialog.ActionSelectModel) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := m.com.Workspace.RefreshOAuthToken(ctx, config.ScopeGlobal, "hyper"); err != nil {
-			slog.Warn("Hyper OAuth refresh failed, requesting re-auth", "error", err)
-			msg.ReAuthenticate = true
-		}
-		return hyperRefreshDoneMsg{action: msg}
-	}
-}
-
 // handleSelectModel performs the model selection after any provider
-// pre-checks (such as a silent Hyper OAuth refresh) have completed.
+// pre-checks have completed.
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -2145,16 +2094,6 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		isOnboarding = m.state == uiOnboarding
 	)
 
-	// For Hyper, if the stored OAuth token is expired, try a silent
-	// refresh before deciding whether the provider is configured. Keeps
-	// users from hitting a 401 on their first message after the
-	// short-lived access token ages out.
-	if !msg.ReAuthenticate && providerID == "hyper" {
-		if pc, ok := cfg.Providers.Get(providerID); ok && pc.OAuthToken != nil && pc.OAuthToken.IsExpired() {
-			return m.refreshHyperAndRetrySelect(msg)
-		}
-	}
-
 	// Attempt to import GitHub Copilot tokens from VSCode if available.
 	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
 		m.com.Workspace.ImportCopilot()
@@ -2171,13 +2110,6 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
 		cmds = append(cmds, util.ReportError(err))
 	} else {
-		if msg.ModelType == config.SelectedModelTypeLarge {
-			// Swap the theme live based on the newly selected large
-			// model's provider. Skipped when the provider resolves to
-			// the already-active theme, which avoids a full markdown
-			// re-render of the transcript on every selection.
-			m.applyThemeForProvider(providerID)
-		}
 		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
 			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
@@ -2758,7 +2690,6 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.detailsOpen,
 		area.Dx(),
 		m.lspErrorCount(),
-		m.hyperCredits,
 	)
 }
 
@@ -3874,54 +3805,7 @@ func (m *UI) renderEditorView(width int) string {
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = renderLogo(m.com.Styles, true, false, width)
-}
-
-// applyThemeForProvider swaps the active theme to the one associated with
-// the given provider, but only when that theme differs from the one
-// already applied. Most providers share a single theme, so re-selecting a
-// model from the same theme family would otherwise pay the full cost of
-// invalidating the markdown renderer cache and re-rendering the entire
-// transcript for no visible change.
-func (m *UI) applyThemeForProvider(providerID string) {
-	key := styles.ThemeKeyForProvider(providerID)
-	if key == m.themeKey {
-		return
-	}
-	m.themeKey = key
-	m.applyTheme(styles.ThemeForProvider(providerID))
-}
-
-// applyTheme replaces the active styles with the given theme, drops the
-// shared markdown renderer cache, and refreshes every component that
-// caches style data.
-func (m *UI) applyTheme(s styles.Styles) {
-	*m.com.Styles = s
-	common.InvalidateMarkdownRendererCache()
-	m.refreshStyles()
-}
-
-// refreshStyles pushes the current *m.com.Styles into every subcomponent
-// that copies or pre-renders style-dependent values at construction time.
-func (m *UI) refreshStyles() {
-	t := m.com.Styles
-	m.header.refresh()
-	if m.layout.sidebar.Dx() > 0 {
-		m.cacheSidebarLogo(m.layout.sidebar.Dx())
-	}
-	m.textarea.SetStyles(t.Editor.Textarea)
-	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
-	m.attachments.Renderer().SetStyles(
-		t.Attachments.Normal,
-		t.Attachments.Deleting,
-		t.Attachments.Image,
-		t.Attachments.Text,
-		t.Attachments.Skill,
-		t.Attachments.Remove,
-	)
-	m.todoSpinner.Style = t.Pills.TodoSpinner
-	m.status.help.Styles = t.Help
-	m.chat.InvalidateRenderCaches()
+	m.sidebarLogo = renderLogo(m.com.Styles, true, width)
 }
 
 // attachSkill reads a skill's content by ID and returns it as a markdown
@@ -4927,7 +4811,7 @@ func (m *UI) disableDockerMCP() tea.Msg {
 }
 
 // renderLogo renders the Braid logo with the given styles and dimensions.
-func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
+func renderLogo(t *styles.Styles, compact bool, width int) string {
 	return logo.Render(t.Logo.GradCanvas, version.Version, compact, logo.Opts{
 		FieldColor:   t.Logo.FieldColor,
 		TitleColorA:  t.Logo.TitleColorA,
@@ -4935,6 +4819,5 @@ func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
 		CharmColor:   t.Logo.CharmColor,
 		VersionColor: t.Logo.VersionColor,
 		Width:        width,
-		Hyper:        hyper,
 	})
 }

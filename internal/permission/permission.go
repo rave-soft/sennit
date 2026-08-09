@@ -105,9 +105,7 @@ type permissionService struct {
 	allowedTools          []string
 
 	// used to make sure we only process one request at a time
-	requestMu       sync.Mutex
-	activeRequest   *PermissionRequest
-	activeRequestMu sync.Mutex
+	requestMu sync.Mutex
 }
 
 // resolve atomically removes the pending request entry for the given
@@ -147,11 +145,6 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 	// so this send never blocks.
 	respCh <- granted
 
-	s.activeRequestMu.Lock()
-	if s.activeRequest != nil && s.activeRequest.ID == permission.ID {
-		s.activeRequest = nil
-	}
-	s.activeRequestMu.Unlock()
 	return true
 }
 
@@ -257,10 +250,6 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		})
 		return true, nil
 	}
-
-	s.activeRequestMu.Lock()
-	s.activeRequest = &permission
-	s.activeRequestMu.Unlock()
 
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)

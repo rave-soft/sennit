@@ -115,7 +115,6 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 		LargeModel:   largeModel,
 		SmallModel:   smallModel,
 		SystemPrompt: systemPrompt,
-		IsYolo:       true,
 		Sessions:     env.sessions,
 		Messages:     env.messages,
 		Tools:        tools,
