@@ -65,8 +65,7 @@ func (b *Backend) GetWorkspaceProviders(workspaceID string) (any, error) {
 		return nil, err
 	}
 
-	providers, _ := config.Providers(ws.Cfg.Config())
-	return providers, nil
+	return ws.Cfg.KnownProviders(), nil
 }
 
 // LSPStart starts an LSP server for the given path.

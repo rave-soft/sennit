@@ -23,8 +23,6 @@ func TestConfigPathInvariant_MatchesReloadReadSet(t *testing.T) {
 		envDir := t.TempDir()
 		t.Setenv("BRAID_GLOBAL_CONFIG", envDir)
 		t.Setenv("BRAID_GLOBAL_DATA", envDir)
-		resetProviderState()
-		t.Cleanup(resetProviderState)
 
 		store, err := Load(workingDir, "", false)
 		if err != nil {

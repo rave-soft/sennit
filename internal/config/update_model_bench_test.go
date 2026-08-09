@@ -17,8 +17,6 @@ func BenchmarkUpdatePreferredModel(b *testing.B) {
 
 	b.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	b.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	b.Cleanup(resetProviderState)
 
 	cfg := `{
 		"models": {
@@ -79,8 +77,6 @@ func BenchmarkReloadFromDisk(b *testing.B) {
 
 	b.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	b.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	b.Cleanup(resetProviderState)
 
 	cfg := `{
 		"models": {"large": {"provider": "openai", "model": "gpt-4"}},

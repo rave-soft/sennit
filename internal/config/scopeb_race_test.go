@@ -22,8 +22,6 @@ func TestScopeB_InPlaceMutationRace(t *testing.T) {
 
 	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	t.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	t.Cleanup(resetProviderState)
 
 	cfg := `{
 		"models": {"large": {"provider": "openai", "model": "gpt-4"}},

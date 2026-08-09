@@ -40,8 +40,6 @@ func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 
 	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	t.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	t.Cleanup(resetProviderState)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
@@ -77,8 +75,6 @@ func TestModelSelectionYieldsToDiskWhenUnchosen(t *testing.T) {
 
 	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	t.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	t.Cleanup(resetProviderState)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 

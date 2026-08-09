@@ -327,8 +327,6 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	// providers are visible.
 	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	t.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	t.Cleanup(resetProviderState)
 
 	// Create initial config with one model preference
 	initialConfig := `{
@@ -796,8 +794,6 @@ func TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload(t *testing.T) {
 	// test-provided provider and the embedded catalog are visible.
 	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	t.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	t.Cleanup(resetProviderState)
 
 	initialConfig := `{
 		"providers": {
@@ -858,8 +854,6 @@ func TestSetProviderAPIKey_CatalogProviderOmitsBaseURL(t *testing.T) {
 
 	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	t.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	t.Cleanup(resetProviderState)
 
 	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 
@@ -897,8 +891,6 @@ func TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace(t *testing.T) {
 
 	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
 	t.Setenv("BRAID_GLOBAL_DATA", dir)
-	resetProviderState()
-	t.Cleanup(resetProviderState)
 
 	const initialConfig = `{"options": {"debug": false}}`
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))

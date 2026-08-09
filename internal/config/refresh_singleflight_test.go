@@ -62,8 +62,6 @@ func newRefreshTestStore(t *testing.T, configPath string, exchange func(ctx cont
 
 	t.Setenv("BRAID_GLOBAL_CONFIG", t.TempDir())
 	t.Setenv("BRAID_GLOBAL_DATA", filepath.Dir(configPath))
-	resetProviderState()
-	t.Cleanup(resetProviderState)
 
 	expired := &oauth.Token{
 		AccessToken:  "at0",
