@@ -95,6 +95,13 @@ type ProviderConfig struct {
 	Name string `json:"name,omitempty" jsonschema:"description=Human-readable name for the provider,example=OpenAI"`
 	// The provider's API endpoint.
 	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
+	// The provider's proxy URL (http/https/socks5). The value runs
+	// through shell expansion at config-load time, the same as api_key
+	// and extra_headers, so $VAR and $(cmd) work. Empty means no
+	// per-provider proxy override — requests fall back to the standard
+	// HTTP_PROXY/HTTPS_PROXY/NO_PROXY environment variables via net/http's
+	// default proxy resolution.
+	ProxyURL string `json:"proxy_url,omitempty" jsonschema:"description=Proxy URL for requests to this provider (http/https/socks5),example=http://localhost:8080"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
 	// The provider's API key.

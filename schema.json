@@ -683,6 +683,13 @@
             "https://api.openai.com/v1"
           ]
         },
+        "proxy_url": {
+          "type": "string",
+          "description": "Proxy URL for requests to this provider (http/https/socks5)",
+          "examples": [
+            "http://localhost:8080"
+          ]
+        },
         "type": {
           "type": "string",
           "enum": [

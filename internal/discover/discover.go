@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -17,6 +18,44 @@ import (
 // even if the caller forgets to set a context deadline.
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
+// newProxyHTTPClient builds an *http.Client whose Transport routes requests
+// through proxyURL. This intentionally duplicates config.NewProxyHTTPClient's
+// small parse-and-validate logic instead of importing internal/config: config
+// already builds discover.Config (see load.go's discoverCustomProviderModels),
+// so importing config from here would create an import cycle, and pulling in
+// the whole config package just for this one helper isn't warranted anyway.
+// http, https, socks5, and socks5h schemes are all supported natively by
+// net/http's Transport.Proxy.
+func newProxyHTTPClient(proxyURL string) (*http.Client, error) {
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid proxy_url %q: %w", proxyURL, err)
+	}
+	switch u.Scheme {
+	case "http", "https", "socks5", "socks5h":
+	default:
+		return nil, fmt.Errorf("invalid proxy_url %q: unsupported scheme %q (expected http, https, socks5, or socks5h)", proxyURL, u.Scheme)
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyURL(u)
+	return &http.Client{Timeout: 10 * time.Second, Transport: transport}, nil
+}
+
+// httpClient returns the client to use for requests against this provider:
+// the shared package-level client normally (so discovery and enrichment
+// calls across providers reuse connections), or a dedicated proxying client
+// when ProxyURL is set.
+func (c Config) httpClient() (*http.Client, error) {
+	if c.ProxyURL == "" {
+		return httpClient, nil
+	}
+	client, err := newProxyHTTPClient(c.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("provider %s: proxy_url: %w", c.ID, err)
+	}
+	return client, nil
+}
+
 // stripV1Suffix removes a trailing /v1 from a base URL. Enricher
 // endpoints (e.g. Ollama's /api/show, LM Studio's /api/v1/models) are
 // served at the server root, not under the OpenAI-compatible /v1
@@ -27,11 +66,11 @@ func stripV1Suffix(baseURL string) string {
 	return strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
 }
 
-// doRequest builds and executes an authenticated HTTP request using the
-// shared client. It resolves variable references in the base URL, API
-// key, and extra headers via the provided Resolver. The path is joined
-// to the base URL with proper slash handling.
-func doRequest(ctx context.Context, method, baseURL, path, apiKey string, extraHeaders map[string]string, resolver Resolver, body any) (*http.Response, error) {
+// doRequest builds and executes an authenticated HTTP request using client.
+// It resolves variable references in the base URL, API key, and extra
+// headers via the provided Resolver. The path is joined to the base URL
+// with proper slash handling.
+func doRequest(ctx context.Context, client *http.Client, method, baseURL, path, apiKey string, extraHeaders map[string]string, resolver Resolver, body any) (*http.Response, error) {
 	resolvedBase, _ := resolver.ResolveValue(baseURL)
 	resolvedKey, _ := resolver.ResolveValue(apiKey)
 
@@ -71,7 +110,7 @@ func doRequest(ctx context.Context, method, baseURL, path, apiKey string, extraH
 		req.Header.Set(k, resolved)
 	}
 
-	return httpClient.Do(req)
+	return client.Do(req)
 }
 
 // Config holds the provider configuration needed for model discovery.
@@ -83,6 +122,11 @@ type Config struct {
 	// Existing models from config — IDs present in this list are skipped
 	// during discovery (user-specified models win).
 	ExistingModels []catwalk.Model
+	// ProxyURL, if set, routes discovery requests through this proxy
+	// instead of the shared package-level httpClient. Already resolved
+	// (shell-expanded) by the caller. Empty means use default client
+	// behavior (env HTTP_PROXY etc, via the shared client).
+	ProxyURL string
 }
 
 // Resolver resolves variable references (e.g. $ENV_VAR) in config values.
@@ -105,7 +149,12 @@ type modelsResponse struct {
 // Models whose IDs already appear in cfg.ExistingModels are skipped —
 // user-specified models take precedence.
 func DiscoverModels(ctx context.Context, cfg Config, resolver Resolver) ([]catwalk.Model, error) {
-	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
+	client, err := cfg.httpClient()
+	if err != nil {
+		return nil, fmt.Errorf("discover models for provider %s: %w", cfg.ID, err)
+	}
+
+	resp, err := doRequest(ctx, client, http.MethodGet, cfg.BaseURL, "/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
 	if err != nil {
 		return nil, fmt.Errorf("discover models for provider %s: %w", cfg.ID, err)
 	}

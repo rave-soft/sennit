@@ -385,6 +385,19 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 		prepared.Type = p.Type
 		prepared.Models = p.Models
 		prepared.ExtraHeaders = headers
+		// The proxy URL only ever comes from the user's override (the
+		// catwalk catalog has no notion of a proxy), and it's purely
+		// optional: unlike api_key, a failed or empty resolution must
+		// not block the provider from loading, so we just warn and
+		// leave it unset.
+		if config.ProxyURL != "" {
+			resolvedProxy, err := resolver.ResolveValue(config.ProxyURL)
+			if err != nil || resolvedProxy == "" {
+				slog.Warn("Ignoring provider proxy_url due to resolution failure", "provider", p.ID, "error", err)
+			} else {
+				prepared.ProxyURL = resolvedProxy
+			}
+		}
 		if prepared.ExtraParams == nil {
 			prepared.ExtraParams = make(map[string]string)
 		}
@@ -498,6 +511,7 @@ func discoverCustomProviderModels(ctx context.Context, providers *csync.Map[stri
 			APIKey:         pc.APIKey,
 			ExtraHeaders:   pc.ExtraHeaders,
 			ExistingModels: pc.Models,
+			ProxyURL:       pc.ProxyURL,
 		}
 		providerType := cmp.Or(pc.Type, catwalk.TypeOpenAICompat)
 		wg.Go(func() {
@@ -597,6 +611,19 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 				continue
 			}
 			providerConfig.ExtraHeaders[k] = resolved
+		}
+
+		// The proxy is optional and must never block provider loading the
+		// way a missing api_key/base_url does, so a resolution failure
+		// just clears the field and warns instead of skipping the provider.
+		if providerConfig.ProxyURL != "" {
+			resolvedProxy, err := resolver.ResolveValue(providerConfig.ProxyURL)
+			if err != nil || resolvedProxy == "" {
+				slog.Warn("Ignoring provider proxy_url due to resolution failure", "provider", id, "error", err)
+				providerConfig.ProxyURL = ""
+			} else {
+				providerConfig.ProxyURL = resolvedProxy
+			}
 		}
 
 		c.Providers.Set(id, providerConfig)

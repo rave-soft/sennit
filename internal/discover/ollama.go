@@ -36,6 +36,11 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 		return models, nil
 	}
 
+	client, err := cfg.httpClient()
+	if err != nil {
+		return models, nil
+	}
+
 	// Fetch metadata concurrently with bounded parallelism.
 	type result struct {
 		index         int
@@ -51,7 +56,7 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			resp, err := doRequest(ctx, http.MethodPost, stripV1Suffix(cfg.BaseURL), "/api/show",
+			resp, err := doRequest(ctx, client, http.MethodPost, stripV1Suffix(cfg.BaseURL), "/api/show",
 				cfg.APIKey, cfg.ExtraHeaders, resolver,
 				map[string]string{"model": models[idx].ID})
 			if err != nil {

@@ -201,6 +201,47 @@ func TestDiscoverModels_NoAuthWhenNoAPIKey(t *testing.T) {
 	require.Len(t, models, 1)
 }
 
+func TestDiscoverModels_RoutesThroughProxy(t *testing.T) {
+	var proxyRequestURI string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A Transport with Proxy set sends an absolute-URI request line to
+		// the proxy for plain HTTP targets, so the proxy sees the full
+		// target URL rather than just a path.
+		proxyRequestURI = r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "model-a", "object": "model"}]}`))
+	}))
+	defer proxy.Close()
+
+	cfg := Config{
+		ID: "test",
+		// TEST-NET-1 (RFC 5737): guaranteed non-routable, so a successful
+		// result proves the request went through the proxy, not directly.
+		BaseURL:  "http://192.0.2.1/v1",
+		ProxyURL: proxy.URL,
+	}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	require.Equal(t, "model-a", models[0].ID)
+	require.Contains(t, proxyRequestURI, "192.0.2.1")
+}
+
+func TestDiscoverModels_InvalidProxyURL(t *testing.T) {
+	cfg := Config{
+		ID:       "my-provider",
+		BaseURL:  "http://example.com/v1",
+		ProxyURL: "ftp://proxy:21",
+	}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.Error(t, err)
+	require.Nil(t, models)
+	require.Contains(t, err.Error(), "my-provider")
+	require.Contains(t, err.Error(), "proxy_url")
+}
+
 func TestStripV1Suffix(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

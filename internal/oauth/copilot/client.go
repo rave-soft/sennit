@@ -15,16 +15,19 @@ import (
 var assistantRolePattern = regexp.MustCompile(`"role"\s*:\s*"assistant"`)
 
 // NewClient creates a new HTTP client with a custom transport that adds the
-// X-Initiator header based on message history in the request body.
-func NewClient(isSubAgent, debug bool) *http.Client {
+// X-Initiator header based on message history in the request body. base is
+// the underlying transport requests are sent through (e.g. a proxy-routing
+// transport); a nil base falls back to http.DefaultTransport.
+func NewClient(isSubAgent, debug bool, base http.RoundTripper) *http.Client {
 	return &http.Client{
-		Transport: &initiatorTransport{debug: debug, isSubAgent: isSubAgent},
+		Transport: &initiatorTransport{debug: debug, isSubAgent: isSubAgent, base: base},
 	}
 }
 
 type initiatorTransport struct {
 	debug      bool
 	isSubAgent bool
+	base       http.RoundTripper
 }
 
 func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -74,8 +77,12 @@ func (t *initiatorTransport) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 func (t *initiatorTransport) roundTrip(req *http.Request) (*http.Response, error) {
-	if t.debug {
-		return log.NewHTTPClient().Transport.RoundTrip(req)
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
 	}
-	return http.DefaultTransport.RoundTrip(req)
+	if t.debug {
+		base = &log.HTTPRoundTripLogger{Transport: base}
+	}
+	return base.RoundTrip(req)
 }

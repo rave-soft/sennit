@@ -35,7 +35,11 @@ func (e *omlxEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Re
 	// oMLX serves /models/status under the OpenAI-compatible /v1
 	// namespace, so the path is relative to the configured base URL
 	// (which already includes /v1) rather than the server root.
-	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/models/status", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
+	client, err := cfg.httpClient()
+	if err != nil {
+		return models, nil
+	}
+	resp, err := doRequest(ctx, client, http.MethodGet, cfg.BaseURL, "/models/status", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
 	if err != nil {
 		return models, nil
 	}
