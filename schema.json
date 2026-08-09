@@ -567,7 +567,7 @@
             "type": "string",
             "examples": [
               "bash",
-              "sourcegraph"
+              "web_search"
             ]
           },
           "type": "array",

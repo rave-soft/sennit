@@ -341,7 +341,7 @@ type Options struct {
 	// resolved against the working directory; absolute paths are used
 	// verbatim. After defaulting the stored value is always absolute.
 	DataDirectory           string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.braid,example=.braid"`
-	DisabledTools           []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
+	DisabledTools           []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=web_search"`
 	DisableDefaultProviders bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
 	Attribution             *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics          bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
@@ -821,6 +821,15 @@ func (c *Config) SmallModel() *catwalk.Model {
 
 const maxRecentModelsPerType = 5
 
+// AllToolNames returns the names of every built-in tool the agent can be
+// given, in the order buildTools constructs them. It is the single source
+// of truth for what a "known tool" is — used both to resolve
+// disabled_tools/allowed_tools and (from internal/ui) to verify every
+// tool has a rendering path.
+func AllToolNames() []string {
+	return allToolNames()
+}
+
 func allToolNames() []string {
 	return []string{
 		"agent",
@@ -842,6 +851,8 @@ func allToolNames() []string {
 		"lsp_replace_symbol",
 		"fetch",
 		"agentic_fetch",
+		"web_fetch",
+		"web_search",
 		"glob",
 		"grep",
 		"ls",

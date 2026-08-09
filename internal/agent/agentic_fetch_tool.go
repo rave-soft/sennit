@@ -110,27 +110,13 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			if params.URL != "" {
 				// URL mode: fetch the URL content first.
-				content, err := tools.FetchURLAndConvert(ctx, client, params.URL)
+				content, filePath, err := tools.FetchLargeContent(ctx, client, tmpDir, params.URL)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 				}
 
-				hasLargeContent := len(content) > tools.LargeContentThreshold
-
-				if hasLargeContent {
-					tempFile, err := os.CreateTemp(tmpDir, "page-*.md")
-					if err != nil {
-						return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary file: %s", err)), nil
-					}
-					tempFilePath := tempFile.Name()
-
-					if _, err := tempFile.WriteString(content); err != nil {
-						tempFile.Close()
-						return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to write content to file: %s", err)), nil
-					}
-					tempFile.Close()
-
-					fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the view and grep tools to analyze this file and extract the requested information.", params.Prompt, params.URL, tempFilePath)
+				if filePath != "" {
+					fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the view and grep tools to analyze this file and extract the requested information.", params.Prompt, params.URL, filePath)
 				} else {
 					fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
 				}
@@ -163,8 +149,11 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
 
-			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
-			webSearchTool := tools.NewWebSearchTool(client)
+			// nil permissions: this sub-agent's parent agentic_fetch call is
+			// already permission-gated above, so its own fetch/search tools
+			// run unauthenticated.
+			webFetchTool := tools.NewWebFetchTool(nil, tmpDir, client)
+			webSearchTool := tools.NewWebSearchTool(nil, tmpDir, client)
 			fetchTools := []fantasy.AgentTool{
 				webFetchTool,
 				webSearchTool,

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -76,6 +77,39 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 	}
 
 	return content, nil
+}
+
+// FetchLargeContent fetches url and converts it to markdown via
+// FetchURLAndConvert. If the result exceeds LargeContentThreshold it is
+// written to a temp file under dir instead of being returned inline, so
+// callers can point the agent at grep/view instead of dumping a huge page
+// into the conversation. Exactly one of content/filePath is non-empty on
+// success.
+func FetchLargeContent(ctx context.Context, client *http.Client, dir, url string) (content string, filePath string, err error) {
+	content, err = FetchURLAndConvert(ctx, client, url)
+	if err != nil {
+		return "", "", err
+	}
+
+	if len(content) <= LargeContentThreshold {
+		return content, "", nil
+	}
+
+	tempFile, err := os.CreateTemp(dir, "page-*.md")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	tempFilePath := tempFile.Name()
+
+	if _, err := tempFile.WriteString(content); err != nil {
+		_ = tempFile.Close() // Best effort close
+		return "", "", fmt.Errorf("failed to write content to file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return "", "", fmt.Errorf("failed to close temporary file: %w", err)
+	}
+
+	return "", tempFilePath, nil
 }
 
 // removeNoisyElements removes script, style, nav, header, footer, and other

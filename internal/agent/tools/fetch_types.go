@@ -29,10 +29,21 @@ type WebFetchParams struct {
 	URL string `json:"url" description:"The URL to fetch content from"`
 }
 
+// WebFetchPermissionsParams defines the permission parameters for the web_fetch tool.
+type WebFetchPermissionsParams struct {
+	URL string `json:"url"`
+}
+
 // WebSearchParams defines the parameters for the web_search tool.
 type WebSearchParams struct {
 	Query      string `json:"query" description:"The search query to find information on the web"`
 	MaxResults int    `json:"max_results,omitempty" description:"Maximum number of results to return (default: 10, max: 20)"`
+}
+
+// WebSearchPermissionsParams defines the permission parameters for the web_search tool.
+type WebSearchPermissionsParams struct {
+	Query      string `json:"query"`
+	MaxResults int    `json:"max_results,omitempty"`
 }
 
 // FetchParams defines the parameters for the simple fetch tool.
