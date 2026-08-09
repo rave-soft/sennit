@@ -110,12 +110,10 @@ type AgentModel struct {
 	ModelCfg   config.SelectedModel
 }
 
-// Workspace is the main abstraction consumed by the TUI and CLI. It
-// groups every operation a frontend needs to perform against a running
-// workspace, regardless of whether the workspace is in-process or
-// remote.
-type Workspace interface {
-	// Sessions
+// SessionStore covers session CRUD and message reads: everything the
+// sessions dialog, chat loading, and history/summarization code need
+// without pulling in the rest of Workspace.
+type SessionStore interface {
 	CreateSession(ctx context.Context, title string) (session.Session, error)
 	GetSession(ctx context.Context, sessionID string) (session.Session, error)
 	ListSessions(ctx context.Context) ([]session.Session, error)
@@ -130,12 +128,15 @@ type Workspace interface {
 	// observers can compute attached-client counts per session.
 	SetCurrentSession(ctx context.Context, sessionID string) error
 
-	// Messages
 	ListMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListAllUserMessages(ctx context.Context) ([]message.Message, error)
+}
 
-	// Agent
+// AgentController runs and inspects agent turns: starting/cancelling runs,
+// busy/ready probes, the queued-prompt list, and the model the coordinator
+// is currently using.
+type AgentController interface {
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
@@ -169,50 +170,58 @@ type Workspace interface {
 	// delivers a terminal event derived from ctx.Err() unless the turn
 	// already finished on its own.
 	AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error)
+}
 
-	// Permissions
-	//
-	// PermissionGrant, PermissionGrantPersistent, and PermissionDeny
-	// return true if the call resolved the pending request and false if
-	// it had already been resolved by another subscriber (or is no
-	// longer pending). A false return is not an error; the modal can
-	// still close locally because the resolution will arrive via the
-	// PermissionNotification event stream regardless of which client
-	// won the race.
+// PermissionResolver resolves or inspects pending tool-permission requests.
+//
+// PermissionGrant, PermissionGrantPersistent, and PermissionDeny return
+// true if the call resolved the pending request and false if it had
+// already been resolved by another subscriber (or is no longer pending).
+// A false return is not an error; the modal can still close locally
+// because the resolution will arrive via the PermissionNotification event
+// stream regardless of which client won the race.
+type PermissionResolver interface {
 	PermissionGrant(perm permission.PermissionRequest) bool
 	PermissionGrantPersistent(perm permission.PermissionRequest) bool
 	PermissionDeny(perm permission.PermissionRequest) bool
 	PermissionSkipRequests() bool
 	PermissionSetSkipRequests(skip bool)
+}
 
-	// Questions
-	//
+// QuestionResponder resolves or cancels a pending agent question.
+type QuestionResponder interface {
 	// QuestionAnswer resolves the pending question with responses.
 	QuestionAnswer(responses []question.Answer) bool
-
 	// QuestionCancel cancels the pending question.
 	QuestionCancel() bool
+}
 
-	// FileTracker
+// FileServices covers per-session file tracking (what's been read, when)
+// and the on-disk edit history used to render diffs.
+type FileServices interface {
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
 	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time
 	FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error)
 
-	// History
 	ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error)
+}
 
-	// LSP
+// LSPController starts/stops LSP servers and reports their state and
+// diagnostic counts.
+type LSPController interface {
 	LSPStart(ctx context.Context, path string)
 	LSPStopAll(ctx context.Context)
 	LSPGetStates() map[string]LSPClientInfo
 	LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts
+}
 
-	// Config (read-only data)
+// ConfigAccessor reads the resolved configuration and applies mutations to
+// it (proxied to the server in client mode).
+type ConfigAccessor interface {
 	Config() *config.Config
 	WorkingDir() string
 	Resolver() config.VariableResolver
 
-	// Config mutations (proxied to server in client mode)
 	UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error
 	// OverridePreferredModel applies a preferred-model override for the
 	// current process, for callers (namely `braid run -m/--small-model`)
@@ -229,15 +238,21 @@ type Workspace interface {
 	RemoveConfigField(scope config.Scope, key string) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
+}
 
-	// Project lifecycle
+// ProjectLifecycle covers first-run project initialization and skill
+// discovery/reads.
+type ProjectLifecycle interface {
 	ProjectNeedsInitialization() (bool, error)
 	MarkProjectInitialized() error
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+}
 
-	// MCP operations (server-side in client mode)
+// MCPController manages MCP server connections and their tools, prompts,
+// and resources (server-side in client mode).
+type MCPController interface {
 	MCPGetStates() map[string]mcptools.ClientInfo
 	MCPRefreshPrompts(ctx context.Context, name string)
 	MCPRefreshResources(ctx context.Context, name string)
@@ -250,10 +265,34 @@ type Workspace interface {
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []mcptools.PendingAuthServer
 	MCPAuthURL(name string) string
+}
 
-	// Events
+// EventSubscriber wires a frontend into the workspace's event stream and
+// tears it down.
+type EventSubscriber interface {
 	Subscribe(program *tea.Program)
 	Shutdown()
+}
+
+// Workspace is the main abstraction consumed by the TUI and CLI. It
+// groups every operation a frontend needs to perform against a running
+// workspace, regardless of whether the workspace is in-process or
+// remote. It is a composition of narrower role interfaces (SessionStore,
+// AgentController, ...) so that consumers who only need one slice of it —
+// test stubs, most dialogs — can depend on the narrow interface instead of
+// all ~65 methods. Implementations are unaffected: this is purely a
+// grouping of the same method set.
+type Workspace interface {
+	SessionStore
+	AgentController
+	PermissionResolver
+	QuestionResponder
+	FileServices
+	LSPController
+	ConfigAccessor
+	ProjectLifecycle
+	MCPController
+	EventSubscriber
 }
 
 // AgentRunEvent is one increment of a non-interactive agent turn

@@ -127,7 +127,7 @@ func (w *countingWorkspace) resetCounters() {
 // newBusyUI builds a UI wired to the stub workspace with an active session
 // "s1", enough state for Update to run end to end.
 func newBusyUI(ws *countingWorkspace) *UI {
-	com := common.DefaultCommon(ws)
+	com := common.DefaultCommon(context.Background(), ws)
 	return &UI{
 		com:         com,
 		status:      NewStatus(com, nil),

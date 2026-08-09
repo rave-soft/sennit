@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -56,16 +55,14 @@ type Session struct {
 
 var _ Dialog = (*Session)(nil)
 
-// NewSessions creates a new Session dialog.
-func NewSessions(com *common.Common, selectedSessionID string) (*Session, error) {
+// NewSessions creates a new Session dialog from an already-fetched session
+// list. ListSessions can be a synchronous HTTP round-trip in client/server
+// mode, so callers load it off the Update goroutine first (see
+// UI.openSessionsDialog) rather than fetching it here.
+func NewSessions(com *common.Common, sessions []session.Session, selectedSessionID string) *Session {
 	s := new(Session)
 	s.sessionsMode = sessionsModeNormal
 	s.com = com
-	sessions, err := com.Workspace.ListSessions(context.TODO())
-	if err != nil {
-		return nil, err
-	}
-
 	s.sessions = sessions
 	for i, sess := range sessions {
 		if sess.ID == selectedSessionID {
@@ -130,7 +127,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	)
 	s.keyMap.Close = CloseKey
 
-	return s, nil
+	return s
 }
 
 // ID implements Dialog.
@@ -348,7 +345,7 @@ func (s *Session) removeSession(id string) {
 
 func (s *Session) deleteSessionCmd(id string) tea.Cmd {
 	return func() tea.Msg {
-		err := s.com.Workspace.DeleteSession(context.TODO(), id)
+		err := s.com.Workspace.DeleteSession(s.com.Context(), id)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
@@ -384,7 +381,7 @@ func (s *Session) updateSession(session session.Session) {
 
 func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
 	return func() tea.Msg {
-		_, err := s.com.Workspace.SaveSession(context.TODO(), session)
+		_, err := s.com.Workspace.SaveSession(s.com.Context(), session)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}

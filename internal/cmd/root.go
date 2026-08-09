@@ -118,7 +118,7 @@ braid --continue
 
 		event.AppInitialized()
 
-		com := common.DefaultCommon(ws)
+		com := common.DefaultCommon(cmd.Context(), ws)
 		model := ui.New(com, sessionID, continueLast)
 
 		inputFilter := ui.NewFilter()

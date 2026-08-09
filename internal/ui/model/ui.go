@@ -344,6 +344,12 @@ type UI struct {
 	busyFetchGen uint64
 	pillsView    string
 
+	// sessionsDialogLoading / sessionsDialogGen track the off-thread
+	// ListSessions fetch dispatched by openSessionsDialog; see
+	// sessionsLoadedMsg.
+	sessionsDialogLoading bool
+	sessionsDialogGen     uint64
+
 	// Todo spinner
 	todoSpinner    spinner.Model
 	todoIsSpinning bool
@@ -678,6 +684,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyWindowFocused = false
 	case pubsub.Event[notify.Notification]:
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case sessionsLoadedMsg:
+		if cmd := m.applySessionsLoaded(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case busyStateMsg:
@@ -1942,7 +1952,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
-			m.com.Workspace.UpdateAgentModel(context.TODO())
+			m.com.Workspace.UpdateAgentModel(m.com.Context())
 			status := "disabled"
 			if currentModel.Think {
 				status = "enabled"
@@ -2017,7 +2027,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			m.com.Workspace.UpdateAgentModel(context.TODO())
+			m.com.Workspace.UpdateAgentModel(m.com.Context())
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		}))
 		m.dialog.CloseDialog(dialog.ReasoningID)
@@ -2149,9 +2159,29 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 	}
 
+	m.dialog.CloseDialog(dialog.APIKeyInputID)
+	m.dialog.CloseDialog(dialog.OAuthID)
+	m.dialog.CloseDialog(dialog.ModelsID)
+
+	if isOnboarding {
+		m.setState(uiLanding, uiFocusEditor)
+		m.com.Config().SetupAgents()
+	}
+
+	ws := m.com.Workspace
+	ctx := m.com.Context()
 	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)
+		// InitCoderAgent brings the coder agent up for the first time
+		// (onboarding); it must complete before UpdateAgentModel touches
+		// it, so both run in this single off-thread step rather than as
+		// separate commands racing each other.
+		if isOnboarding {
+			if err := ws.InitCoderAgent(ctx); err != nil {
+				return util.NewErrorMsg(err)
+			}
+		}
+		if err := ws.UpdateAgentModel(ctx); err != nil {
+			return util.NewErrorMsg(err)
 		}
 
 		var (
@@ -2165,25 +2195,6 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 		return util.NewInfoMsg(modelMsg)
 	}))
-
-	m.dialog.CloseDialog(dialog.APIKeyInputID)
-	m.dialog.CloseDialog(dialog.OAuthID)
-	m.dialog.CloseDialog(dialog.ModelsID)
-
-	if isOnboarding {
-		m.setState(uiLanding, uiFocusEditor)
-		m.com.Config().SetupAgents()
-		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-		}
-		// The agent just came up: re-fetch the memoized ready/model state
-		// so the landing view shows the selected model without waiting for
-		// the TTL backstop.
-		m.invalidateBusyCaches()
-		if cmd := m.dispatchBusyRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	}
 
 	return tea.Batch(cmds...)
 }
@@ -4213,13 +4224,30 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 	return nil
 }
 
-// openSessionsDialog opens the sessions dialog. If the dialog is already open,
-// it brings it to the front. Otherwise, it will list all the sessions and open
-// the dialog.
+// sessionsLoadedMsg delivers the result of the off-thread ListSessions
+// fetch dispatched by openSessionsDialog. gen guards against a stale fetch
+// (superseded by a later open request) opening the dialog after the fact;
+// see applySessionsLoaded.
+type sessionsLoadedMsg struct {
+	gen               uint64
+	sessions          []session.Session
+	selectedSessionID string
+	err               error
+}
+
+// openSessionsDialog opens the sessions dialog. If the dialog is already
+// open, it brings it to the front. Otherwise it dispatches an off-thread
+// ListSessions fetch (a synchronous HTTP round-trip in client/server mode)
+// and opens the dialog once sessionsLoadedMsg lands; see
+// applySessionsLoaded.
 func (m *UI) openSessionsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SessionsID) {
 		// Bring to front
 		m.dialog.BringToFront(dialog.SessionsID)
+		return nil
+	}
+	if m.sessionsDialogLoading {
+		// A fetch is already in flight; don't stack another one.
 		return nil
 	}
 
@@ -4228,12 +4256,39 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		selectedSessionID = m.session.ID
 	}
 
-	dialog, err := dialog.NewSessions(m.com, selectedSessionID)
-	if err != nil {
-		return util.ReportError(err)
+	m.sessionsDialogLoading = true
+	m.sessionsDialogGen++
+	gen := m.sessionsDialogGen
+	ws := m.com.Workspace
+	ctx := m.com.Context()
+	return func() tea.Msg {
+		sessions, err := ws.ListSessions(ctx)
+		return sessionsLoadedMsg{
+			gen:               gen,
+			sessions:          sessions,
+			selectedSessionID: selectedSessionID,
+			err:               err,
+		}
 	}
+}
 
-	m.dialog.OpenDialog(dialog)
+// applySessionsLoaded opens the sessions dialog with the fetched list once
+// it lands. A generation mismatch means a newer openSessionsDialog call
+// superseded this fetch (e.g. the user pressed the key again before it
+// landed), so the stale result is dropped instead of popping the dialog
+// open unexpectedly.
+func (m *UI) applySessionsLoaded(msg sessionsLoadedMsg) tea.Cmd {
+	if msg.gen != m.sessionsDialogGen {
+		return nil
+	}
+	m.sessionsDialogLoading = false
+	if msg.err != nil {
+		return util.ReportError(msg.err)
+	}
+	if m.dialog.ContainsDialog(dialog.SessionsID) {
+		return nil
+	}
+	m.dialog.OpenDialog(dialog.NewSessions(m.com, msg.sessions, msg.selectedSessionID))
 	return nil
 }
 
@@ -4785,21 +4840,21 @@ func (m *UI) handleStateChanged() tea.Cmd {
 	})
 }
 
-func handleMCPPromptsEvent(ws workspace.Workspace, name string) tea.Cmd {
+func handleMCPPromptsEvent(ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
 		ws.MCPRefreshPrompts(context.Background(), name)
 		return nil
 	}
 }
 
-func handleMCPToolsEvent(ws workspace.Workspace, name string) tea.Cmd {
+func handleMCPToolsEvent(ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
 		ws.RefreshMCPTools(context.Background(), name)
 		return nil
 	}
 }
 
-func handleMCPResourcesEvent(ws workspace.Workspace, name string) tea.Cmd {
+func handleMCPResourcesEvent(ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
 		ws.MCPRefreshResources(context.Background(), name)
 		return nil

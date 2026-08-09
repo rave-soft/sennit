@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"os"
@@ -24,6 +25,13 @@ var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 type Common struct {
 	Workspace workspace.Workspace
 	Styles    *styles.Styles
+	// Ctx is the process lifecycle context (typically the cobra command's
+	// context, cancelled on interrupt/shutdown). The model and dialogs use
+	// it for workspace calls issued from a tea.Cmd instead of
+	// context.TODO(), so in-flight requests are cancelled with the
+	// program rather than outliving it. Use Context() to read it, which
+	// tolerates a zero-value Common (tests construct it without Ctx).
+	Ctx context.Context
 }
 
 // Config returns the pure-data configuration associated with this [Common] instance.
@@ -31,20 +39,31 @@ func (c *Common) Config() *config.Config {
 	return c.Workspace.Config()
 }
 
+// Context returns the lifecycle context for workspace calls, falling back
+// to context.Background() when none was set (e.g. Common built directly by
+// tests).
+func (c *Common) Context() context.Context {
+	if c.Ctx == nil {
+		return context.Background()
+	}
+	return c.Ctx
+}
+
 // DefaultCommon returns the default common UI configurations. When the
 // workspace has a large model selected, the theme is chosen based on its
 // provider; otherwise the default theme is used.
-func DefaultCommon(ws workspace.Workspace) *Common {
+func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
 	s := styles.ThemeForProvider(largeModelProviderID(ws))
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
+		Ctx:       ctx,
 	}
 }
 
 // largeModelProviderID returns the provider ID of the currently selected
 // large model, or the empty string if none is set or the workspace is nil.
-func largeModelProviderID(ws workspace.Workspace) string {
+func largeModelProviderID(ws workspace.ConfigAccessor) string {
 	if ws == nil {
 		return ""
 	}
