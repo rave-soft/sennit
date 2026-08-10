@@ -55,3 +55,4 @@ completions/braid.*sh
 .prettierignore
 .task
 .claude/worktrees/
+internal/ui/logo/example/example
