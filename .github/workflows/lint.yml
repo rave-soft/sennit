@@ -4,8 +4,15 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: read
     uses: charmbracelet/meta/.github/workflows/lint.yml@main
     with:
       golangci_path: .golangci.yml
