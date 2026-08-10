@@ -791,6 +791,17 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Section.Title = subtle
 	s.Section.Line = base.Foreground(o.separator)
 
+	// ChildBanner: high-contrast, same treatment as a primary button
+	// (background fill + onPrimary text) so it reads as the main "where
+	// am I" orientation cue rather than blending in like a muted hint.
+	bannerBase := lipgloss.NewStyle().Background(o.primary).Foreground(o.onPrimary).Padding(0, 1)
+	s.ChildBanner.Base = bannerBase
+	s.ChildBanner.Path = bannerBase.Foreground(o.onPrimary)
+	s.ChildBanner.Sep = bannerBase.Foreground(o.onPrimary).Faint(true)
+	s.ChildBanner.Current = bannerBase.Bold(true)
+	s.ChildBanner.Button = bannerBase.Underline(true)
+	s.ChildBanner.ButtonHover = bannerBase.Bold(true).Reverse(true)
+
 	// Initialize
 	s.Initialize.Header = base
 	s.Initialize.Content = muted

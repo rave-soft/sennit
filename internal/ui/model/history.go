@@ -32,10 +32,21 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 			return promptHistoryLoadedMsg{messages: nil}
 		}
 
+		// The SQL layer already excludes child-session (sub-agent) prompts;
+		// the init prompt is the one machine-generated message that lands
+		// in a top-level session as role=user, so it is filtered here by
+		// its template prefix.
+		initPrefix := ""
+		if tpl, tplErr := m.com.Workspace.InitializePrompt(); tplErr == nil {
+			initPrefix = firstTemplateLine(tpl)
+		}
+
 		texts := make([]string, 0, len(messages))
 		for _, msg := range messages {
 			if text := msg.Content().Text; text != "" {
-				texts = append(texts, text)
+				if initPrefix == "" || !strings.HasPrefix(text, initPrefix) {
+					texts = append(texts, text)
+				}
 			}
 			for _, sc := range msg.ShellCommands() {
 				texts = append(texts, "!"+sc.Command)
@@ -166,4 +177,16 @@ func (m *UI) historyNext() bool {
 	m.editor.textarea.InsertString(m.editor.promptHistory.messages[nextIndex])
 	m.syncBangModeFromTextarea()
 	return true
+}
+
+// firstTemplateLine returns the first non-empty line of a prompt template,
+// used as a stable prefix to recognize (and hide from prompt history)
+// messages the UI generated itself rather than the user typing them.
+func firstTemplateLine(tpl string) string {
+	for line := range strings.SplitSeq(tpl, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

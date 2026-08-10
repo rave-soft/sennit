@@ -104,6 +104,10 @@ func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message
 	return nil, nil
 }
 
+func (w *countingWorkspace) InitializePrompt() (string, error) {
+	return "", nil
+}
+
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
 
 func (w *countingWorkspace) Config() *config.Config { return nil }

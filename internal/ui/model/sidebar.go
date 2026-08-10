@@ -186,13 +186,6 @@ func (m *UI) updateSidebarScrollState() {
 	m.sidebar.scrollable = totalLines > contentHeight
 	m.sidebar.maxOffset = max(0, totalLines-contentHeight)
 
-	// If the sidebar is focused but no longer scrollable (e.g. after a
-	// resize), return focus to the chat.
-	if m.focus == uiFocusSidebar && !m.sidebar.scrollable {
-		m.focus = uiFocusMain
-		m.chat.Focus()
-	}
-
 	// Clamp sidebarOffset.
 	if m.sidebar.offset > m.sidebar.maxOffset {
 		m.sidebar.offset = m.sidebar.maxOffset
@@ -224,9 +217,10 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	visibleLines := lines[m.sidebar.offset:end]
 	visibleStr := strings.Join(visibleLines, "\n")
 
-	// Determine scrollbar visibility: always visible when focused, otherwise
-	// auto-hide.
-	scrollbarVisible := totalLines > contentHeight && (m.sidebar.scrollbarVisible || m.focus == uiFocusSidebar)
+	// Determine scrollbar visibility: shown briefly after a wheel scroll,
+	// then auto-hidden (see sidebarScrollbarHideMsg). The sidebar can no
+	// longer hold keyboard focus, so hover/wheel is the only trigger.
+	scrollbarVisible := totalLines > contentHeight && m.sidebar.scrollbarVisible
 
 	// Draw the fixed logo.
 	uv.NewStyledString(

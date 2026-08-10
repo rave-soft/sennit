@@ -112,7 +112,6 @@ func TestDrawCursor_VisibleOnlyWhenEditorFocused(t *testing.T) {
 		{"none", uiFocusNone},
 		{"editor", uiFocusEditor},
 		{"main-chat", uiFocusMain},
-		{"sidebar", uiFocusSidebar},
 	}
 
 	for _, dialogOpen := range []bool{false, true} {
@@ -145,19 +144,16 @@ func TestDrawCursor_VisibleOnlyWhenEditorFocused(t *testing.T) {
 	}
 }
 
-// TestFocusSidebarGuard_DoesNotSwallowPillNavigation is a regression test
-// for a keybinding collision introduced when pills navigation (PillLeft/
-// PillRight, bound to left/right) was added reusing the same left/right/"h"/
-// "l" keys as the pre-existing FocusSidebar/FocusChat bindings (see
-// key.NewBinding for Chat.FocusSidebar in keys.go). uiFocusMain matched
-// FocusSidebar's key first and only checked its eligibility (non-compact,
-// scrollable sidebar, has session) inside the case body; when that guard
-// failed the case had already claimed the keypress, so it never reached the
-// PillRight handling in handleGlobalKeys — right arrow silently did
-// nothing instead of switching the pill section. The guard now lives in the
-// case predicate so an ineligible FocusSidebar falls through instead of
-// swallowing the key.
-func TestFocusSidebarGuard_DoesNotSwallowPillNavigation(t *testing.T) {
+// TestPillNavigation_RightArrowSwitchesSection is a regression test for a
+// keybinding collision that used to exist between pills navigation
+// (PillLeft/PillRight, bound to left/right) and a since-removed
+// FocusSidebar binding that shared the same keys: FocusSidebar matched
+// first and swallowed the keypress whenever its eligibility guard failed,
+// so right arrow silently did nothing instead of switching the pill
+// section. The sidebar can no longer take keyboard focus at all (see
+// uiFocusState), so PillRight is now the only handler left for right
+// arrow in uiFocusMain.
+func TestPillNavigation_RightArrowSwitchesSection(t *testing.T) {
 	t.Parallel()
 
 	u := newCursorTestUI(t)
@@ -168,40 +164,13 @@ func TestFocusSidebarGuard_DoesNotSwallowPillNavigation(t *testing.T) {
 	u.wsCache.promptQueue = 2
 	u.pills.expanded = true
 	u.pills.focusedSection = pillSectionTodos
-	// forceCompactMode (set by newCursorTestUI) makes FocusSidebar
-	// ineligible (!m.isCompact is one of its guard conditions), which is
-	// exactly the scenario that used to swallow the key.
 	u.updateLayoutAndSize()
 
 	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyRight})
 
-	require.Equal(t, uiFocusMain, u.focus, "an ineligible FocusSidebar must not move focus")
+	require.Equal(t, uiFocusMain, u.focus, "right arrow must never move focus off the chat pane")
 	require.Equal(t, pillSectionQueue, u.pills.focusedSection,
 		"right arrow must reach PillRight and switch the pill section")
-}
-
-// TestFocusSidebarGuard_StillClaimsRightWhenEligible confirms the fix above
-// only widens PillRight's reach when FocusSidebar is not applicable; when the
-// sidebar really is focusable, right arrow must still move focus there (the
-// documented, longstanding behavior), not be captured by pill navigation.
-func TestFocusSidebarGuard_StillClaimsRightWhenEligible(t *testing.T) {
-	t.Parallel()
-
-	u := newCursorTestUI(t)
-	u.forceCompactMode = false
-	u.focus = uiFocusMain
-	u.session.Todos = []session.Todo{
-		{Status: session.TodoStatusInProgress, Content: "do work"},
-	}
-	u.sidebar.scrollable = true
-	u.pills.expanded = true
-	u.pills.focusedSection = pillSectionTodos
-	u.updateLayoutAndSize()
-
-	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyRight})
-
-	require.Equal(t, uiFocusSidebar, u.focus, "an eligible FocusSidebar must still claim right arrow")
-	require.Equal(t, pillSectionTodos, u.pills.focusedSection, "pill section must not change here")
 }
 
 // TestClickOnPlainToolItem_DoesNotMoveFocus is the regression test for the
@@ -234,12 +203,13 @@ func TestClickOnPlainToolItem_DoesNotMoveFocus(t *testing.T) {
 	require.True(t, u.editor.textarea.Focused(), "the editor must stay focused (and so keep the terminal cursor)")
 }
 
-// TestClickOnAssistantText_StillFocusesChat is the control case for
-// PlainToolItemAt: clicking ordinary chat content (not a plain tool call)
-// keeps its existing behavior of moving focus into the chat pane. Only
-// plain tool rows are special-cased — delegations, todos, and the
-// assistant's own text are unaffected.
-func TestClickOnAssistantText_StillFocusesChat(t *testing.T) {
+// TestClickOnAssistantText_DoesNotMoveFocus pins the "mouse never changes
+// focus" invariant from uiFocusState's doc comment: clicking ordinary chat
+// content (not a plain tool call) used to move focus into the chat pane
+// (uiFocusMain), hiding the terminal cursor. Selection/copy still works via
+// Chat.HandleMouseDown regardless of m.focus, so there's nothing left that
+// requires the click to steal focus.
+func TestClickOnAssistantText_DoesNotMoveFocus(t *testing.T) {
 	t.Parallel()
 
 	u := newCursorTestUI(t)
@@ -263,5 +233,6 @@ func TestClickOnAssistantText_StillFocusesChat(t *testing.T) {
 		Button: uv.MouseLeft,
 	}))
 
-	require.Equal(t, uiFocusMain, u.focus, "clicking ordinary chat content must still focus the chat pane")
+	require.Equal(t, uiFocusEditor, u.focus, "clicking chat content must not move focus off the editor")
+	require.True(t, u.editor.textarea.Focused(), "the editor must stay focused")
 }

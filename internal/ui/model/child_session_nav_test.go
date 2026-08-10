@@ -149,3 +149,34 @@ func TestEnterChildSessionKeyNoOpOnNonNestedItem(t *testing.T) {
 	require.Empty(t, u.navStack, "selecting a non-nested-tool item must not push a nav frame")
 	_ = cmd
 }
+
+// TestAltUpExitsChildSessionThroughUpdate is a regression test for a
+// reported "alt+up does nothing while viewing a subagent session" bug:
+// ExitChildSession is only matched in the uiFocusMain arm of
+// handleKeyPressMsg's focus switch, so the key only does anything if
+// entering a child session reliably forces m.focus there (see
+// enterChildSession and uiFocusState's doc comment) and nothing upstream
+// (dialogs, activeInline, the textarea) intercepts the keypress first.
+// Exercised through the full Update() dispatch — not a direct
+// exitChildSession() call — so it catches routing bugs, not just the
+// nav-stack bookkeeping.
+func TestAltUpExitsChildSessionThroughUpdate(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionTestUI(t)
+	u.session = &session.Session{ID: "parent-session", Title: "Parent"}
+	u.state = uiChat
+	u.keyMap = DefaultKeyMap()
+	u.dialog = dialog.NewOverlay()
+	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
+
+	require.NotNil(t, u.enterChildSession("msg1", "tc-1"))
+	require.Len(t, u.navStack, 1)
+	require.Equal(t, uiFocusMain, u.focus, "entering a child session must force focus off the editor")
+
+	_, cmd := u.Update(tea.KeyPressMsg{Mod: tea.ModAlt, Code: tea.KeyUp})
+
+	require.Empty(t, u.navStack, "alt+up must pop the nav stack through the normal key-routing path")
+	require.NotNil(t, cmd, "must return the loadSession cmd for the parent")
+}

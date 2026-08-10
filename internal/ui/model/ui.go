@@ -95,6 +95,24 @@ const editorHeightMargin = 2
 const TextareaMinHeight = 3
 
 // uiFocusState represents the current focus state of the UI.
+//
+// The hard invariant (see internal/ui/AGENTS.md) is: input focus is ALWAYS
+// on the prompt editor. There are exactly two exceptions, both entered and
+// left through dedicated, deliberate transitions rather than mouse clicks
+// or incidental keystrokes:
+//
+//   - A dialog is open: the dialog owns the cursor outright (see Draw);
+//     m.focus itself doesn't need to change for this, since dialogs are
+//     checked first regardless of focus. Closing the last dialog forces
+//     focus back to uiFocusEditor (or uiFocusMain, if a child session is
+//     still being viewed underneath) — see handleDialogMsg.
+//   - A child session is being viewed (read-only drill-in) or an inline
+//     editor has been collapsed via Tab to browse the chat: uiFocusMain,
+//     which hides the terminal cursor and routes keys to chat navigation
+//     instead of the textarea. Neither the mouse nor arrow/vim keys can
+//     reach this state anymore — only enterChildSession and the explicit
+//     activeInline+Tab toggle set it, and exiting always funnels back
+//     through focusEditor.
 type uiFocusState uint8
 
 // Possible uiFocusState values.
@@ -102,7 +120,6 @@ const (
 	uiFocusNone uiFocusState = iota
 	uiFocusEditor
 	uiFocusMain
-	uiFocusSidebar
 )
 
 type uiState uint8
@@ -245,6 +262,15 @@ type UI struct {
 	// alt+left/alt+right can cycle through, without re-scanning the
 	// (possibly no-longer-loaded) parent chat. See enterChildSession.
 	navStack []sessionNavFrame
+
+	// childBannerHover is set while the pointer is over the "exit up" button
+	// in the child-session banner (see drawChildSessionBanner), for hover
+	// feedback matching the status bar's back-button pattern.
+	childBannerHover bool
+	// childBannerButtonRect is the screen area of the banner's "exit up"
+	// button, recomputed on every drawChildSessionBanner call. Used to
+	// scope hover feedback to the button itself rather than the whole row.
+	childBannerButtonRect image.Rectangle
 
 	// onboarding state
 	onboarding struct {
@@ -993,20 +1019,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// A click anywhere on the status bar while it's showing the
-		// child-session back banner (see enterChildSession) exits the
-		// child session — the only mouse-clickable spot the status bar
-		// has. Must come before handleClickFocus, which would otherwise
-		// treat this as a click on the main pane.
-		if msg.Button == tea.MouseLeft && m.status.IsChildSessionBack() && image.Pt(msg.X, msg.Y).In(m.layout.status) {
+		// A click anywhere on the child-session banner (see drawChildSessionBanner)
+		// or the status bar's back-breadcrumb exits the child session. Mouse
+		// clicks never change m.focus (see uiFocusState) — this is the one
+		// dedicated, deliberate transition a click is allowed to trigger.
+		if msg.Button == tea.MouseLeft && m.viewingChildSession() &&
+			(image.Pt(msg.X, msg.Y).In(m.layout.childBanner) ||
+				(m.status.IsChildSessionBack() && image.Pt(msg.X, msg.Y).In(m.layout.status))) {
 			if cmd := m.exitChildSession(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return m, tea.Batch(cmds...)
-		}
-
-		if cmd := m.handleClickFocus(msg); cmd != nil {
-			cmds = append(cmds, cmd)
 		}
 
 		// Check if the click landed on an attachment's remove button.
@@ -1045,6 +1068,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Hover feedback for the status bar's child-session back banner.
 		if m.status.IsChildSessionBack() {
 			m.status.SetBackHover(image.Pt(msg.X, msg.Y).In(m.layout.status))
+		}
+
+		// Hover feedback for the child-session banner's "exit up" button.
+		if m.viewingChildSession() {
+			m.childBannerHover = image.Pt(msg.X, msg.Y).In(m.childBannerButtonRect)
 		}
 
 		// Track hover position for inline editors.
@@ -1140,8 +1168,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
-			// When sidebar is focused, route wheel events to sidebar scrolling.
-			if m.focus == uiFocusSidebar {
+			// When the mouse is hovering the sidebar, route wheel events to
+			// sidebar scrolling. Focus never enters the sidebar (see
+			// uiFocusState), so this is purely a hover check.
+			if m.sidebar.scrollable && image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.layout.sidebar) {
 				lines := int(msg.DeltaY)
 				if lines != 0 {
 					seq := m.sidebar.scrollByWheel(lines)
@@ -1201,7 +1231,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case sidebarScrollbarHideMsg:
-		if msg.seq == m.sidebar.scrollbarSeq && m.focus != uiFocusSidebar {
+		if msg.seq == m.sidebar.scrollbarSeq {
 			m.sidebar.hideScrollbar()
 		}
 	case spinner.TickMsg:
@@ -1634,38 +1664,6 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
-func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
-	switch {
-	case m.state != uiChat:
-		return nil
-	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.sidebar.scrollable:
-		m.focus = uiFocusSidebar
-		m.editor.textarea.Blur()
-		m.chat.Blur()
-		return nil
-	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor) && !m.viewingChildSession():
-		m.focus = uiFocusEditor
-		if m.activeInline != nil {
-			m.activeInline.SetFocused(true)
-		} else {
-			cmd = m.editor.textarea.Focus()
-		}
-		m.sidebar.hideScrollbar()
-		m.chat.Blur()
-	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main) &&
-		!m.chat.PlainToolItemAt(msg.X-m.layout.main.Min.X, msg.Y-m.layout.main.Min.Y):
-		// A click that lands on a plain tool call (see PlainToolItemAt)
-		// must not steal focus from the editor — there's nothing to
-		// interact with there anymore (no expand/preview), so the cursor
-		// should stay put instead of visibly jumping out of the editor.
-		m.focus = uiFocusMain
-		m.sidebar.hideScrollbar()
-		m.editor.textarea.Blur()
-		m.chat.Focus()
-	}
-	return cmd
-}
-
 // updateSessionMessage updates an existing message in the current session in
 // the chat when an assistant message is updated it may include updated tool
 // calls as well that is why we need to handle creating/updating each tool call
@@ -1760,7 +1758,13 @@ type sessionNavFrame struct {
 	// enterChildSession time. m.session is repointed to the child as soon
 	// as navigation starts, so this is the only cheap way to recover the
 	// parent's title later (e.g. for the breadcrumb) without extra IO.
-	parentTitle  string
+	parentTitle string
+	// label is the short name of the child session this frame descends
+	// into (see childSessionLabel), captured whenever the frame is pushed
+	// or its sibling index changes. Used to render the full breadcrumb
+	// chain in drawChildSessionBanner without needing the parent's chat
+	// items, which usually aren't loaded once navigation has moved on.
+	label        string
 	siblings     []childSessionRef
 	siblingIndex int
 }
@@ -1854,9 +1858,15 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 		}
 	}
 
+	label := "subagent"
+	if item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem); ok {
+		label = childSessionLabel(item)
+	}
+
 	m.navStack = append(m.navStack, sessionNavFrame{
 		parentSessionID: m.session.ID,
 		parentTitle:     parentTitle,
+		label:           label,
 		siblings:        siblings,
 		siblingIndex:    siblingIndex,
 	})
@@ -1866,10 +1876,6 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	m.focus = uiFocusMain
 	m.editor.textarea.Blur()
 
-	label := "subagent"
-	if item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem); ok {
-		label = childSessionLabel(item)
-	}
 	breadcrumb := childSessionBreadcrumb(parentTitle, label, siblingIndex, len(siblings))
 	m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: breadcrumb})
 	m.status.SetChildSessionBack(true)
@@ -1919,6 +1925,7 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 	if item, ok := m.chat.MessageItem(sibling.toolCallID).(chat.ToolMessageItem); ok {
 		label = childSessionLabel(item)
 	}
+	frame.label = label
 	breadcrumb := childSessionBreadcrumb(frame.parentTitle, label, frame.siblingIndex, n)
 	m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: breadcrumb})
 
@@ -2665,6 +2672,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	case uiChat, uiLanding:
 		switch m.focus {
 		case uiFocusEditor:
+			// Double-Esc clears the draft outright (see the Editor.Escape
+			// case below): any key other than Escape breaks the sequence.
+			if !key.Matches(msg, m.keyMap.Editor.Escape) {
+				m.editor.lastKeyWasEsc = false
+			}
+
 			// Handle completions if open.
 			if m.editor.completionsOpen {
 				if msg, ok := m.editor.completions.Update(msg); ok {
@@ -2790,9 +2803,27 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Editor.Escape):
-				cmd := m.handleHistoryEscape(msg)
-				if cmd != nil {
-					cmds = append(cmds, cmd)
+				consecutive := m.editor.lastKeyWasEsc
+				m.editor.lastKeyWasEsc = true
+				if !consecutive {
+					// First Esc: its own job (exit history nav to the draft,
+					// or whatever the textarea itself does with Escape).
+					if cmd := m.handleHistoryEscape(msg); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				} else {
+					// Second Esc right after the first: the first one
+					// already did whatever it could (exited history nav,
+					// etc.), so this one wipes the draft outright instead
+					// of leaving stale text sitting in the editor.
+					prevHeight := m.editor.textarea.Height()
+					m.editor.promptHistory.index = -1
+					m.editor.promptHistory.draft = ""
+					m.editor.textarea.Reset()
+					m.syncBangModeFromTextarea()
+					if cmd := m.updateTextareaWithPrevHeight(nil, prevHeight); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 				}
 			case key.Matches(msg, m.keyMap.Editor.Commands) && m.editor.textarea.Value() == "":
 				if cmd := m.openCommandsDialog(); cmd != nil {
@@ -2899,16 +2930,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.sidebar.hideScrollbar()
 				cmds = append(cmds, m.editor.textarea.Focus())
 				m.chat.Blur()
-			case key.Matches(msg, m.keyMap.Chat.FocusSidebar) &&
-				m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebar.scrollable:
-				// FocusSidebar shares its keys ("l"/"right") with PillRight.
-				// The eligibility guard must live in the case predicate, not
-				// the body: with the guard in the body, this case still
-				// claims the keypress whenever the guard fails, swallowing
-				// "right" before it can reach the PillRight handling in
-				// handleGlobalKeys below (right arrow, pills expanded).
-				m.focus = uiFocusSidebar
-				m.chat.Blur()
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -3008,31 +3029,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					handleGlobalKeys(msg)
 				}
 			}
-		case uiFocusSidebar:
-			if m.state != uiChat || m.isCompact || !m.hasSession() {
-				break
-			}
-			switch {
-			case key.Matches(msg, m.keyMap.Chat.Up):
-				m.sidebar.pageUp(4)
-			case key.Matches(msg, m.keyMap.Chat.Down):
-				m.sidebar.pageDown(4)
-			case key.Matches(msg, m.keyMap.Chat.Home):
-				m.sidebar.toHome()
-			case key.Matches(msg, m.keyMap.Chat.End):
-				m.sidebar.toEnd()
-			case key.Matches(msg, m.keyMap.Chat.FocusChat):
-				m.focus = uiFocusMain
-				m.sidebar.hideScrollbar()
-				m.chat.Focus()
-			case key.Matches(msg, m.keyMap.Tab):
-				m.focus = uiFocusEditor
-				m.sidebar.hideScrollbar()
-				cmds = append(cmds, m.editor.textarea.Focus())
-				m.chat.Blur()
-			default:
-				handleGlobalKeys(msg)
-			}
 		default:
 			handleGlobalKeys(msg)
 		}
@@ -3121,6 +3117,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		m.chat.Draw(scr, layout.main)
+		if m.viewingChildSession() {
+			m.drawChildSessionBanner(scr, layout.childBanner)
+		}
 		if layout.pills.Dy() > 0 && m.pills.view != "" {
 			uv.NewStyledString(m.pills.view).Draw(scr, layout.pills)
 		}
@@ -3321,12 +3320,6 @@ func (m *UI) ShortHelp() []key.Binding {
 				binds,
 				k.Editor.Newline,
 			)
-		case uiFocusSidebar:
-			binds = append(
-				binds,
-				k.Chat.UpDown,
-				k.Chat.FocusChat,
-			)
 		case uiFocusMain:
 			binds = append(
 				binds,
@@ -3454,20 +3447,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 					},
 				)
 			}
-		case uiFocusSidebar:
-			binds = append(
-				binds,
-				[]key.Binding{
-					k.Chat.UpDown,
-				},
-				[]key.Binding{
-					k.Chat.FocusChat,
-				},
-				[]key.Binding{
-					k.Chat.Home,
-					k.Chat.End,
-				},
-			)
 		case uiFocusMain:
 			binds = append(
 				binds,
@@ -3482,7 +3461,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.HalfPageDown,
 					k.Chat.Home,
 					k.Chat.End,
-					k.Chat.FocusSidebar,
 				},
 				[]key.Binding{
 					k.Chat.Copy,
@@ -3848,6 +3826,19 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		}
 	}
 
+	// Reserve the top row of main for the child-session banner. Carved out
+	// here (after main/editor/pills are settled) so chat sizing, scroll
+	// math, and every existing m.layout.main consumer automatically account
+	// for it without special-casing child-view everywhere.
+	if m.state == uiChat && m.viewingChildSession() && uiLayout.main.Dy() > 0 {
+		var bannerRect image.Rectangle
+		layout.Vertical(
+			layout.Len(1),
+			layout.Fill(1),
+		).Split(uiLayout.main).Assign(&bannerRect, &uiLayout.main)
+		uiLayout.childBanner = bannerRect
+	}
+
 	return uiLayout
 }
 
@@ -3879,6 +3870,11 @@ type uiLayout struct {
 
 	// session details is the area for the session details overlay in compact mode.
 	sessionDetails uv.Rectangle
+
+	// childBanner is the persistent "main › agent1 › agent2" banner drawn
+	// at the top of main while a sub-agent session is being viewed. Empty
+	// (zero Rectangle) unless viewingChildSession() — see generateLayout.
+	childBanner uv.Rectangle
 }
 
 func (m *UI) openEditor(value string) tea.Cmd {

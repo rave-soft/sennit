@@ -48,8 +48,6 @@ type KeyMap struct {
 		Expand         key.Binding
 		ScrollLeft     key.Binding
 		ScrollRight    key.Binding
-		FocusSidebar   key.Binding
-		FocusChat      key.Binding
 
 		// Sub-agent session navigation.
 		EnterChildSession key.Binding
@@ -267,14 +265,6 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.ScrollRight = key.NewBinding(
 		key.WithKeys("shift+right", "L"),
 		key.WithHelp("shift+→/L", "scroll right"),
-	)
-	km.Chat.FocusSidebar = key.NewBinding(
-		key.WithKeys("l", "right"),
-		key.WithHelp("l/→", "focus sidebar"),
-	)
-	km.Chat.FocusChat = key.NewBinding(
-		key.WithKeys("h", "left"),
-		key.WithHelp("h/←", "focus chat"),
 	)
 	km.Chat.EnterChildSession = key.NewBinding(
 		key.WithKeys("alt+down"),

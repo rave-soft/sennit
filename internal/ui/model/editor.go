@@ -56,6 +56,12 @@ type editorState struct {
 		index    int
 		draft    string
 	}
+
+	// lastKeyWasEsc tracks whether the immediately preceding key event was
+	// Escape, so a second consecutive Esc can clear the draft outright
+	// (see the Editor.Escape case in UI.handleKeyPressMsg). Reset by any
+	// other key.
+	lastKeyWasEsc bool
 }
 
 // closeCompletions closes the completions popup and resets state.

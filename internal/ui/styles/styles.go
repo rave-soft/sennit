@@ -201,6 +201,20 @@ type Styles struct {
 	WorkingLabelColor    color.Color // Label text color next to the indicator
 	WorkingTimerColor    color.Color // Elapsed timer suffix color
 
+	// ChildBanner is the persistent, high-contrast banner drawn at the top
+	// of the chat area while viewing a sub-agent's session (see
+	// UI.drawChildSessionBanner). Deliberately not muted — it's the primary
+	// "where am I" orientation cue, so it uses the same background/foreground
+	// pairing as a primary button rather than blending into the chat.
+	ChildBanner struct {
+		Base        lipgloss.Style // banner row background
+		Path        lipgloss.Style // ancestor breadcrumb segments ("main › agent1")
+		Sep         lipgloss.Style // "›" separators between segments
+		Current     lipgloss.Style // current (last) breadcrumb segment
+		Button      lipgloss.Style // "↑ exit up (alt+up)" button, idle
+		ButtonHover lipgloss.Style // button, hovered
+	}
+
 	// Section Title
 	Section struct {
 		Title lipgloss.Style

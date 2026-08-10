@@ -108,12 +108,17 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 }
 
 const listAllUserMessages = `-- name: ListAllUserMessages :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message
+SELECT messages.id, messages.session_id, messages.role, messages.parts, messages.model, messages.created_at, messages.updated_at, messages.finished_at, messages.provider, messages.is_summary_message
 FROM messages
-WHERE role = 'user'
-ORDER BY created_at DESC
+JOIN sessions ON sessions.id = messages.session_id
+WHERE messages.role = 'user'
+  AND sessions.parent_session_id IS NULL
+ORDER BY messages.created_at DESC
 `
 
+// Prompt-history source: only messages a human typed. Sub-agent and thread
+// child sessions carry machine-generated delegation prompts as user-role
+// messages, so anything below a parent session is excluded.
 func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	rows, err := q.query(ctx, q.listAllUserMessagesStmt, listAllUserMessages)
 	if err != nil {

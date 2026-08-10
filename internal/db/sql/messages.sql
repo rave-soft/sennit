@@ -49,7 +49,12 @@ WHERE session_id = ? AND role = 'user'
 ORDER BY created_at DESC;
 
 -- name: ListAllUserMessages :many
-SELECT *
+-- Prompt-history source: only messages a human typed. Sub-agent and thread
+-- child sessions carry machine-generated delegation prompts as user-role
+-- messages, so anything below a parent session is excluded.
+SELECT messages.*
 FROM messages
-WHERE role = 'user'
-ORDER BY created_at DESC;
+JOIN sessions ON sessions.id = messages.session_id
+WHERE messages.role = 'user'
+  AND sessions.parent_session_id IS NULL
+ORDER BY messages.created_at DESC;
