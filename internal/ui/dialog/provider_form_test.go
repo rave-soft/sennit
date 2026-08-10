@@ -17,7 +17,7 @@ func newTestProviderForm(t *testing.T) *ProviderForm {
 	return NewProviderForm(com)
 }
 
-func typeInto(t *testing.T, m *ProviderForm, s string) {
+func typeIntoProviderForm(t *testing.T, m *ProviderForm, s string) {
 	t.Helper()
 	for _, r := range s {
 		action := m.HandleMsg(keyMsg(r))
@@ -36,7 +36,7 @@ func TestProviderForm_SubmitBlockedWithoutRequiredFields(t *testing.T) {
 	require.False(t, m.submitting)
 
 	// ID filled in but base URL still empty.
-	typeInto(t, m, "my-provider")
+	typeIntoProviderForm(t, m, "my-provider")
 	action = m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, action)
 	require.Equal(t, "Base URL is required", m.errMsg)
@@ -46,9 +46,9 @@ func TestProviderForm_SubmitBlockedWithoutRequiredFields(t *testing.T) {
 func TestProviderForm_SubmitWithValidFields(t *testing.T) {
 	m := newTestProviderForm(t)
 
-	typeInto(t, m, "my-provider")
+	typeIntoProviderForm(t, m, "my-provider")
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}) // -> base URL field
-	typeInto(t, m, "https://api.example.com/v1")
+	typeIntoProviderForm(t, m, "https://api.example.com/v1")
 
 	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	submit, ok := action.(ActionSubmitCustomProvider)
@@ -64,13 +64,13 @@ func TestProviderForm_SubmitWithValidFields(t *testing.T) {
 func TestProviderForm_SubmitIncludesAPIKeyAndType(t *testing.T) {
 	m := newTestProviderForm(t)
 
-	typeInto(t, m, "my-provider")
+	typeIntoProviderForm(t, m, "my-provider")
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}) // -> base URL
-	typeInto(t, m, "https://api.example.com/v1")
+	typeIntoProviderForm(t, m, "https://api.example.com/v1")
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}) // -> type
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyRight})
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}) // -> api key
-	typeInto(t, m, "secret")
+	typeIntoProviderForm(t, m, "secret")
 
 	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	submit, ok := action.(ActionSubmitCustomProvider)
@@ -81,9 +81,9 @@ func TestProviderForm_SubmitIncludesAPIKeyAndType(t *testing.T) {
 
 func TestProviderForm_ResultRoundTrip(t *testing.T) {
 	m := newTestProviderForm(t)
-	typeInto(t, m, "my-provider")
+	typeIntoProviderForm(t, m, "my-provider")
 	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
-	typeInto(t, m, "https://api.example.com/v1")
+	typeIntoProviderForm(t, m, "https://api.example.com/v1")
 	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	_, ok := action.(ActionSubmitCustomProvider)
 	require.True(t, ok)
