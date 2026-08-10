@@ -191,8 +191,8 @@ Usage:
 
 ### model
 
-Manage custom models and the large/small model slots. Model references use the
-same `<provider>/<id>` form printed by `braid models`.
+Manage custom models and the selected model. Model references use the same
+`<provider>/<id>` form printed by `braid models`.
 
 ```text
 Usage:
@@ -202,8 +202,7 @@ Available Commands:
   add       Register a custom model on an existing provider
   remove    Remove a custom model
   rm        Alias for remove
-  large     Set or print the large model
-  small     Set or print the small model
+  (none)    Set or print the selected model
 ```
 
 #### `model add`
@@ -237,15 +236,15 @@ Usage:
   model rm <provider>/<id>
 ```
 
-#### `model large`, `model small`
+#### `model`
 
-Set the large or small model slot. With no model argument, print the current
-selection.
+Set the selected model. With no model argument, print the current selection.
+Braid picks a smaller/cheaper model automatically for internal work like
+titles and summarization; that choice is not user-configurable.
 
 ```text
 Usage:
-  model large [<provider>/<id>] [flags]
-  model small [<provider>/<id>] [flags]
+  model [<provider>/<id>] [flags]
 
 Flags:
       --think                       enable thinking mode
@@ -260,8 +259,8 @@ Flags:
 ```
 
 ```bash
-model large openai/gpt-4o --think
-echo "coding with: $(model large)"   # prints: openai/gpt-4o
+model openai/gpt-4o --think
+echo "coding with: $(model)"   # prints: openai/gpt-4o
 ```
 
 ### mcp
@@ -576,9 +575,7 @@ to Bash-based config.
   "providers": {
     "anthropic": { "api_key": "$ANTHROPIC_API_KEY" },
   },
-  "models": {
-    "large": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
-  },
+  "model": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
   "permissions": { "allowed_tools": ["view", "ls", "grep"] },
 }
 ```

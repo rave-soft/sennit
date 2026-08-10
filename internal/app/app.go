@@ -330,7 +330,7 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 // provider. Falls back to the large model if no default is found.
 func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	cfg := app.config.Config()
-	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
+	largeModelCfg := cfg.Model
 
 	// Find the provider in the known providers list to get its default small model.
 	knownProviders := app.config.KnownProviders()

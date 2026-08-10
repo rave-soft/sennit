@@ -37,12 +37,12 @@ import (
 var (
 	errCoderAgentNotConfigured         = errors.New("coder agent not configured")
 	errModelProviderNotConfigured      = errors.New("model provider not configured")
-	errLargeModelNotSelected           = errors.New("large model not selected")
-	errSmallModelNotSelected           = errors.New("small model not selected")
-	errLargeModelProviderNotConfigured = errors.New("large model provider not configured")
-	errSmallModelProviderNotConfigured = errors.New("small model provider not configured")
-	errLargeModelNotFound              = errors.New("large model not found in provider config")
-	errSmallModelNotFound              = errors.New("small model not found in provider config")
+	errLargeModelNotSelected           = errors.New("model not selected")
+	errSmallModelNotSelected           = errors.New("no default model available for summarization")
+	errLargeModelProviderNotConfigured = errors.New("model provider not configured")
+	errSmallModelProviderNotConfigured = errors.New("provider not configured for the summarization model")
+	errLargeModelNotFound              = errors.New("model not found in provider config")
+	errSmallModelNotFound              = errors.New("summarization model not found in provider config")
 )
 
 type Coordinator interface {
@@ -594,9 +594,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, agenticFetchTool)
 	}
 
-	// Get the model name for the agent
+	// Get the model name for the agent.
 	modelID := ""
-	if modelCfg, ok := c.cfg.Config().Models[config.SelectedModelType(agent.Model)]; ok {
+	if modelCfg := c.cfg.Config().Model; modelCfg.Model != "" {
 		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
 			modelID = model.ID
 		}
@@ -744,12 +744,12 @@ func (c *coordinator) webSearchBackend() (tools.SearchBackend, error) {
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
 func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeLarge]
-	if !ok {
+	largeModelCfg := c.cfg.Config().Model
+	if largeModelCfg.Model == "" {
 		return Model{}, Model{}, errLargeModelNotSelected
 	}
-	smallModelCfg, ok := c.cfg.Config().Models[config.SelectedModelTypeSmall]
-	if !ok {
+	smallModelCfg := c.defaultSmallModel(largeModelCfg)
+	if smallModelCfg.Model == "" {
 		return Model{}, Model{}, errSmallModelNotSelected
 	}
 
@@ -826,6 +826,40 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 			ModelCfg:   smallModelCfg,
 			FlatRate:   smallProviderCfg.FlatRate,
 		}, nil
+}
+
+// defaultSmallModel derives the auto-selected "small" model Braid uses
+// internally for cheap session tasks like title generation and
+// summarization. It always stays on the main model's own provider,
+// preferring that provider's catwalk-declared default small model and
+// falling back to the main model itself when no such default is known
+// (unknown/local providers, or a catalog missing the hint). This mirrors
+// App.GetDefaultSmallModel, which does the same resolution for the
+// model-selection UI; it is duplicated here rather than shared because
+// internal/agent must not import internal/app.
+func (c *coordinator) defaultSmallModel(main config.SelectedModel) config.SelectedModel {
+	var knownProvider *catwalk.Provider
+	for _, p := range c.cfg.KnownProviders() {
+		if string(p.ID) == main.Provider {
+			knownProvider = &p
+			break
+		}
+	}
+	if knownProvider == nil {
+		return main
+	}
+
+	model := c.cfg.Config().GetModel(main.Provider, knownProvider.DefaultSmallModelID)
+	if model == nil {
+		return main
+	}
+
+	return config.SelectedModel{
+		Provider:        main.Provider,
+		Model:           knownProvider.DefaultSmallModelID,
+		MaxTokens:       model.DefaultMaxTokens,
+		ReasoningEffort: model.DefaultReasoningEffort,
+	}
 }
 
 // buildCustomAgentModel builds the Model for an agent whose Model field

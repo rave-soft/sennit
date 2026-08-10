@@ -10,7 +10,7 @@ package model
 // yolo and ready/model caches synchronously so the first frame has values to
 // render; Init then refreshes them off-thread.)
 //
-//   - Reads (isAgentBusy, yoloModeCached, promptQueue, selectedLargeModel,
+//   - Reads (isAgentBusy, yoloModeCached, promptQueue, selectedModel,
 //     lspInfo) always return the memoized value, stale or not.
 //   - State edges (message created, agent finished/errored, prompt
 //     submitted, cancel, session switch, yolo toggle, model change, LSP

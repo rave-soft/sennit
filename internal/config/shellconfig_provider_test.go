@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
+// TestShellConfigProviderAddAndModel covers the provider/model catalog
+// builtins plus model selection via the single-model `model <provider/id>`
+// form (internal/shellconfig has no more large/small slots).
 func TestShellConfigProviderAddAndModel(t *testing.T) {
 	store := loadBraidSh(t, `provider add myllm \
   --type openai-compat \
@@ -23,11 +25,7 @@ provider add myllm \
 model add myllm/foo-1 --name "Foo 1" --context-window 8000 \
   --price-input 1.25 --price-output 5 \
   --price-cache-create 2 --price-cache-hit 0.25
-model large myllm/foo-1 \
-  --top-p 0.9 --top-k 40 \
-  --frequency-penalty 0.2 --presence-penalty 0.1 \
-  --provider-options '{"routing":{"tier":"fast"}}'
-model large myllm/foo-1 --provider-options '{"timeout":30}'`)
+model myllm/foo-1 --think`)
 
 	cfg := store.Config()
 
@@ -52,21 +50,9 @@ model large myllm/foo-1 --provider-options '{"timeout":30}'`)
 	require.Equal(t, 2.0, model.CostPer1MOutCached)
 	require.Equal(t, 0.25, model.CostPer1MInCached)
 
-	large := cfg.Models[config.SelectedModelTypeLarge]
-	require.Equal(t, "myllm", large.Provider)
-	require.Equal(t, "foo-1", large.Model)
-	require.NotNil(t, large.TopP)
-	require.Equal(t, 0.9, *large.TopP)
-	require.NotNil(t, large.TopK)
-	require.Equal(t, int64(40), *large.TopK)
-	require.NotNil(t, large.FrequencyPenalty)
-	require.Equal(t, 0.2, *large.FrequencyPenalty)
-	require.NotNil(t, large.PresencePenalty)
-	require.Equal(t, 0.1, *large.PresencePenalty)
-	require.Equal(t, map[string]any{
-		"routing": map[string]any{"tier": "fast"},
-		"timeout": float64(30),
-	}, large.ProviderOptions)
+	require.Equal(t, "myllm", store.Config().Model.Provider)
+	require.Equal(t, "foo-1", store.Config().Model.Model)
+	require.True(t, store.Config().Model.Think)
 }
 
 func TestShellConfigProviderRemove(t *testing.T) {

@@ -305,14 +305,6 @@ definitions:
       top_p:
         type: number
     type: object
-  config.SelectedModelType:
-    enum:
-    - large
-    - small
-    type: string
-    x-enum-varnames:
-    - SelectedModelTypeLarge
-    - SelectedModelTypeSmall
   config.TUIOptions:
     properties:
       compact_mode:
@@ -430,11 +422,10 @@ definitions:
         $ref: '#/definitions/config.LSPs'
       mcp:
         $ref: '#/definitions/config.MCPs'
-      models:
-        additionalProperties:
-          $ref: '#/definitions/config.SelectedModel'
-        description: We currently only support large/small as values here.
-        type: object
+      model:
+        allOf:
+        - $ref: '#/definitions/config.SelectedModel'
+        description: Model is the single model Braid uses for the session.
       options:
         $ref: '#/definitions/github_com_rave-soft_braid_internal_config.Options'
       permissions:
@@ -444,12 +435,12 @@ definitions:
         - $ref: '#/definitions/csync.Map-string-config_ProviderConfig'
         description: The providers that are configured
       recent_models:
-        additionalProperties:
-          items:
-            $ref: '#/definitions/config.SelectedModel'
-          type: array
-        description: Recently used models stored in the data directory config.
-        type: object
+        description: |-
+          RecentModels lists recently used models, most-recent-first. Stored
+          in the data directory config.
+        items:
+          $ref: '#/definitions/config.SelectedModel'
+        type: array
       tools:
         $ref: '#/definitions/config.Tools'
     type: object
@@ -666,8 +657,6 @@ definitions:
     properties:
       model:
         $ref: '#/definitions/config.SelectedModel'
-      model_type:
-        $ref: '#/definitions/config.SelectedModelType'
       scope:
         $ref: '#/definitions/github_com_rave-soft_braid_internal_config.Scope'
     type: object

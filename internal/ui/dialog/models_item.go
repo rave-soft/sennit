@@ -80,9 +80,8 @@ func (m *ModelItem) SelectedModel() config.SelectedModel {
 }
 
 // SelectedModelType returns the type of model represented by this item.
-// The models dialog only ever picks the large model slot now — the small
-// slot is config-driven only (see ui.go's handleSelectModel auto-fill) —
-// so this is always [config.SelectedModelTypeLarge].
+// There is only one configurable model slot now, so this is always
+// [config.SelectedModelTypeLarge].
 func (m *ModelItem) SelectedModelType() config.SelectedModelType {
 	return config.SelectedModelTypeLarge
 }

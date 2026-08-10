@@ -768,8 +768,8 @@ func (w *ClientWorkspace) Resolver() config.VariableResolver {
 
 // -- Config mutations --
 
-func (w *ClientWorkspace) UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
-	err := w.client.UpdatePreferredModel(context.Background(), w.workspaceID(), scope, modelType, model)
+func (w *ClientWorkspace) UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error {
+	err := w.client.UpdatePreferredModel(context.Background(), w.workspaceID(), scope, model)
 	if err == nil {
 		w.refreshWorkspace()
 	}
@@ -779,8 +779,8 @@ func (w *ClientWorkspace) UpdatePreferredModel(scope config.Scope, modelType con
 // OverridePreferredModel has no server-side ephemeral equivalent, so
 // it falls back to a persisted workspace-scoped update. See the
 // Workspace interface doc.
-func (w *ClientWorkspace) OverridePreferredModel(modelType config.SelectedModelType, model config.SelectedModel) error {
-	return w.UpdatePreferredModel(config.ScopeWorkspace, modelType, model)
+func (w *ClientWorkspace) OverridePreferredModel(model config.SelectedModel) error {
+	return w.UpdatePreferredModel(config.ScopeWorkspace, model)
 }
 
 func (w *ClientWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {

@@ -507,13 +507,13 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 
 	// Add reasoning toggle for models that support it
 	cfg := com.Config()
-	// The coder agent leaves Model unset (it inherits the app's main model),
-	// so the model it actually runs on always lives in the large slot.
+	// The coder agent leaves Model unset (it inherits the app's configured
+	// model), so the model it actually runs on is always cfg.Model.
 	if _, ok := cfg.Agents[config.AgentCoder]; ok {
 		providerCfg := cfg.GetProviderForModel(config.SelectedModelTypeLarge)
 		model := cfg.GetModelByType(config.SelectedModelTypeLarge)
 		if providerCfg != nil && model != nil && model.CanReason {
-			selectedModel := cfg.Models[config.SelectedModelTypeLarge]
+			selectedModel := cfg.Model
 
 			// Anthropic models: thinking toggle
 			if model.CanReason && len(model.ReasoningLevels) == 0 {
@@ -539,8 +539,8 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 		commands = append(commands, NewCommandItem(sty, "toggle_sidebar", "sidebar", "", ActionToggleCompactMode{}).WithAliases("toggle sidebar").WithDescription("toggle sidebar"))
 	}
 	if hasSession {
-		// See the reasoning-toggle block above: the coder inherits the main
-		// (large) model.
+		// See the reasoning-toggle block above: the coder inherits the
+		// configured model.
 		model := cfg.GetModelByType(config.SelectedModelTypeLarge)
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(sty, "file_picker", "files", "ctrl+f", ActionOpenDialog{

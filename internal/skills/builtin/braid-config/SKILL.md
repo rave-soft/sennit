@@ -43,8 +43,7 @@ source ~/.config/braid/shared.sh
 
 provider add anthropic --api-key "$ANTHROPIC_API_KEY"
 
-model large anthropic/claude-sonnet-4-20250514 --max-tokens 16384
-model small anthropic/claude-haiku-4-20250514
+model anthropic/claude-sonnet-4-20250514 --max-tokens 16384
 
 option skill-path ./skills
 permissions allow view ls grep edit
@@ -114,10 +113,9 @@ braid models refresh my-local-llm # one provider
 ### models
 
 ```bash
-model add <provider>/<id> [flags]      # register a custom model (provider must exist)
-model remove <provider>/<id>           # alias: rm
-model large [<provider>/<id>] [flags]  # set the large slot; no arg prints it
-model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
+model add <provider>/<id> [flags]  # register a custom model (provider must exist)
+model remove <provider>/<id>       # alias: rm
+model [<provider>/<id>] [flags]    # set the model; no arg prints the current one
 ```
 
 - `<provider>/<id>` is the same form `braid models` prints. A missing slash is
@@ -126,13 +124,15 @@ model small [<provider>/<id>] [flags]  # set the small slot; no arg prints it
   `--can-reason BOOL`, `--supports-images BOOL`, `--price-input F`,
   `--price-output F`, `--price-cache-create F`, `--price-cache-hit F`,
   `--reasoning-effort low|medium|high`.
-- `model large`/`model small` flags: `--think`, `--reasoning-effort`,
-  `--max-tokens N`, `--temperature F`, `--top-p F`, `--top-k N`,
-  `--frequency-penalty F`, `--presence-penalty F`, `--provider-options JSON`.
-- `model large` with no argument prints the current selection as `provider/id`,
-  usable in `$(model large)`.
+- `model` flags: `--think`, `--reasoning-effort`, `--max-tokens N`,
+  `--temperature F`, `--top-p F`, `--top-k N`, `--frequency-penalty F`,
+  `--presence-penalty F`, `--provider-options JSON`.
+- `model` with no argument prints the current selection as `provider/id`,
+  usable in `$(model)`.
 
-`large` is the primary coding model; `small` is used for summarization.
+There is a single configured model — Braid picks a smaller/cheaper model
+automatically for internal work like titles and summarization, and that
+choice is not user-configurable.
 
 `model add` flags cover the common `catwalk.Model` fields. Two fields have no
 flag and are `braid.json`-only: `reasoning_levels` (list of efforts the model
@@ -388,11 +388,8 @@ You are a Go code reviewer. Report real defects, not style opinions.
 - The file name (or `name`) becomes the delegation tool's name; the body is
   the system prompt (required, non-empty).
 - `model` is optional and, when set, must resolve to a `provider/model-id`
-  among configured providers; an unresolvable value (including the literal
-  words `large`/`small`, which have no special meaning here) is dropped with
-  a warning and the agent falls back to the app's main model. **There are no
-  `large`/`small` model slots for agents** — that only applies to the global
-  `model large`/`model small` selection above.
+  among configured providers; an unresolvable value is dropped with a
+  warning and the agent falls back to the app's main model.
 - Tool names from Claude Code (`Read`, `Grep`, `Bash`, `WebFetch`, …) are
   translated to Braid's; unknown names are dropped silently.
 - opencode's `permission:` blocks are **not enforced** — restrict an agent via
@@ -456,7 +453,7 @@ user-invocable: true
 ```json
 {
   "$schema": "https://charm.land/braid.json",
-  "models": {},
+  "model": {},
   "providers": {},
   "mcp": {},
   "lsp": {},
@@ -474,7 +471,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | ------------------------------------ | ------------------------------------------------------ |
 | `provider add openai --api-key "$K"` | `providers.openai = {"api_key": "$K"}`                 |
 | `model add openai/gpt-x --name X`    | append to `providers.openai.models[]`                  |
-| `model large openai/gpt-x`           | `models.large = {"provider":"openai","model":"gpt-x"}` |
+| `model openai/gpt-x`                 | `model = {"provider":"openai","model":"gpt-x"}`        |
 | `mcp add gh --type http --url U`     | `mcp.gh = {"type":"http","url":"U"}`                   |
 | `lsp add go --command gopls`         | `lsp.go = {"command":"gopls"}`                         |
 | `hook add PreToolUse --command C`    | append to `hooks.PreToolUse[]`                         |

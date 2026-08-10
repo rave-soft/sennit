@@ -57,6 +57,33 @@ func TestConfig_LoadFromBytes_ThreadsWorktreeDir(t *testing.T) {
 	require.Equal(t, "../thread-worktrees", loadedConfig.Options.Threads.WorktreeDir)
 }
 
+// TestConfig_LoadFromBytes_SingleModel verifies that a top-level "model" key
+// (the replacement for the old "models": {"large": ...} shape) unmarshals
+// into cfg.Model.
+func TestConfig_LoadFromBytes_SingleModel(t *testing.T) {
+	data := []byte(`{"model":{"provider":"openai","model":"gpt-4o"},"providers": {}}`)
+
+	loadedConfig, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	require.Equal(t, "openai", loadedConfig.Model.Provider)
+	require.Equal(t, "gpt-4o", loadedConfig.Model.Model)
+}
+
+// TestConfig_LoadFromBytes_DropsIncompatibleRecentModels verifies that a
+// pre-refactor "recent_models" value (an object keyed by "large"/"small")
+// is dropped instead of failing json.Unmarshal, so old data-dir configs
+// don't stop braid from starting.
+func TestConfig_LoadFromBytes_DropsIncompatibleRecentModels(t *testing.T) {
+	data := []byte(`{"recent_models":{"large":[{"provider":"openai","model":"gpt-4o"}]},"providers": {}}`)
+	data = dropIncompatibleRecentModels(data, "test.json")
+
+	loadedConfig, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	require.Empty(t, loadedConfig.RecentModels)
+}
+
 // TestConfig_LoadFromBytes_DeprecatedStrandsAlias verifies that the old
 // "options.strands" key (from before the strands→threads rename) still
 // populates Options.Threads, so existing braid.json/braidrc files keep
@@ -307,7 +334,6 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NotNil(t, cfg.Options.TUI)
 		require.NotNil(t, cfg.Options.ContextPaths)
 		require.NotNil(t, cfg.Providers)
-		require.NotNil(t, cfg.Models)
 		require.NotNil(t, cfg.LSP)
 		require.NotNil(t, cfg.MCP)
 		require.Equal(t, filepath.Join(workingDir, ".braid"), cfg.Options.DataDirectory)
@@ -1552,14 +1578,11 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		large, small, err := cfg.defaultModelSelection(knownProviders)
+		model, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
-		require.Equal(t, "large-model", large.Model)
-		require.Equal(t, "openai", large.Provider)
-		require.Equal(t, int64(1000), large.MaxTokens)
-		require.Equal(t, "small-model", small.Model)
-		require.Equal(t, "openai", small.Provider)
-		require.Equal(t, int64(500), small.MaxTokens)
+		require.Equal(t, "large-model", model.Model)
+		require.Equal(t, "openai", model.Provider)
+		require.Equal(t, int64(1000), model.MaxTokens)
 	})
 	t.Run("should error if no providers configured", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
@@ -1588,7 +1611,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		_, _, err = cfg.defaultModelSelection(knownProviders)
+		_, err = cfg.defaultModelSelection(knownProviders)
 		require.Error(t, err)
 	})
 	t.Run("should not error if model is missing", func(t *testing.T) {
@@ -1617,7 +1640,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
-		_, _, err = cfg.defaultModelSelection(knownProviders)
+		_, err = cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
 	})
 
@@ -1660,14 +1683,11 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
-		large, small, err := cfg.defaultModelSelection(knownProviders)
+		model, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
-		require.Equal(t, "model", large.Model)
-		require.Equal(t, "custom", large.Provider)
-		require.Equal(t, int64(600), large.MaxTokens)
-		require.Equal(t, "model", small.Model)
-		require.Equal(t, "custom", small.Provider)
-		require.Equal(t, int64(600), small.MaxTokens)
+		require.Equal(t, "model", model.Model)
+		require.Equal(t, "custom", model.Provider)
+		require.Equal(t, int64(600), model.MaxTokens)
 	})
 
 	t.Run("should fail if no model configured", func(t *testing.T) {
@@ -1704,7 +1724,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
-		_, _, err = cfg.defaultModelSelection(knownProviders)
+		_, err = cfg.defaultModelSelection(knownProviders)
 		require.Error(t, err)
 	})
 	t.Run("should use the default provider first", func(t *testing.T) {
@@ -1746,14 +1766,11 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
-		large, small, err := cfg.defaultModelSelection(knownProviders)
+		model, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
-		require.Equal(t, "large-model", large.Model)
-		require.Equal(t, "openai", large.Provider)
-		require.Equal(t, int64(1000), large.MaxTokens)
-		require.Equal(t, "small-model", small.Model)
-		require.Equal(t, "openai", small.Provider)
-		require.Equal(t, int64(500), small.MaxTokens)
+		require.Equal(t, "large-model", model.Model)
+		require.Equal(t, "openai", model.Provider)
+		require.Equal(t, int64(1000), model.MaxTokens)
 	})
 }
 
@@ -1972,25 +1989,21 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 	t.Run("reload mode should not persist fallback defaults", func(t *testing.T) {
 		dir := t.TempDir()
 		globalPath := filepath.Join(dir, "braid.json")
-		require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"ghost","model":"missing"}}}`), 0o600))
+		require.NoError(t, os.WriteFile(globalPath, []byte(`{"model":{"provider":"ghost","model":"missing"}}`), 0o600))
 
 		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
-				DefaultSmallModelID: "small-model",
 				Models: []catwalk.Model{
 					{ID: "large-model", DefaultMaxTokens: 1000},
-					{ID: "small-model", DefaultMaxTokens: 500},
 				},
 			},
 		}
 
 		cfg := &Config{
-			Models: map[SelectedModelType]SelectedModel{
-				SelectedModelTypeLarge: {Provider: "ghost", Model: "missing"},
-			},
+			Model: SelectedModel{Provider: "ghost", Model: "missing"},
 		}
 		cfg.setDefaults(dir, "")
 		store := &ConfigStore{config: cfg, globalDataPath: globalPath}
@@ -1999,17 +2012,16 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err := cfg.configureProviders(context.Background(), store, env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		resolved, resolveErr := resolveSelectedModels(cfg, knownProviders)
+		resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 		require.NoError(t, resolveErr)
-		cfg.Models[SelectedModelTypeLarge] = resolved.Large
-		cfg.Models[SelectedModelTypeSmall] = resolved.Small
+		cfg.Model = resolved.Model
 
 		// In-memory falls back to default.
-		require.True(t, resolved.LargeFallback)
-		require.Equal(t, "openai", cfg.Models[SelectedModelTypeLarge].Provider)
-		require.Equal(t, "large-model", cfg.Models[SelectedModelTypeLarge].Model)
+		require.True(t, resolved.Fallback)
+		require.Equal(t, "openai", cfg.Model.Provider)
+		require.Equal(t, "large-model", cfg.Model.Model)
 
-		// Disk remains unchanged (resolveSelectedModels never persists).
+		// Disk remains unchanged (resolveSelectedModel never persists).
 		data, readErr := os.ReadFile(globalPath)
 		require.NoError(t, readErr)
 		require.Contains(t, string(data), `"provider":"ghost"`)
@@ -2021,7 +2033,6 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
-				DefaultSmallModelID: "small-model",
 				Models: []catwalk.Model{
 					{
 						ID:               "larger-model",
@@ -2031,20 +2042,12 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
 					},
-					{
-						ID:               "small-model",
-						DefaultMaxTokens: 500,
-					},
 				},
 			},
 		}
 
 		cfg := &Config{
-			Models: map[SelectedModelType]SelectedModel{
-				"large": {
-					Model: "larger-model",
-				},
-			},
+			Model: SelectedModel{Model: "larger-model"},
 		}
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
@@ -2052,34 +2055,23 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		resolved, resolveErr := resolveSelectedModels(cfg, knownProviders)
+		resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 		require.NoError(t, resolveErr)
-		cfg.Models[SelectedModelTypeLarge] = resolved.Large
-		cfg.Models[SelectedModelTypeSmall] = resolved.Small
-		large := cfg.Models[SelectedModelTypeLarge]
-		small := cfg.Models[SelectedModelTypeSmall]
-		require.Equal(t, "larger-model", large.Model)
-		require.Equal(t, "openai", large.Provider)
-		require.Equal(t, int64(2000), large.MaxTokens)
-		require.Equal(t, "small-model", small.Model)
-		require.Equal(t, "openai", small.Provider)
-		require.Equal(t, int64(500), small.MaxTokens)
+		cfg.Model = resolved.Model
+		require.Equal(t, "larger-model", cfg.Model.Model)
+		require.Equal(t, "openai", cfg.Model.Provider)
+		require.Equal(t, int64(2000), cfg.Model.MaxTokens)
 	})
-	t.Run("should be possible to use multiple providers", func(t *testing.T) {
+	t.Run("should be possible to select a model from a non-default provider", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
-				DefaultSmallModelID: "small-model",
 				Models: []catwalk.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
-					},
-					{
-						ID:               "small-model",
-						DefaultMaxTokens: 500,
 					},
 				},
 			},
@@ -2087,27 +2079,20 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				ID:                  "anthropic",
 				APIKey:              "abc",
 				DefaultLargeModelID: "a-large-model",
-				DefaultSmallModelID: "a-small-model",
 				Models: []catwalk.Model{
 					{
 						ID:               "a-large-model",
 						DefaultMaxTokens: 1000,
-					},
-					{
-						ID:               "a-small-model",
-						DefaultMaxTokens: 200,
 					},
 				},
 			},
 		}
 
 		cfg := &Config{
-			Models: map[SelectedModelType]SelectedModel{
-				"small": {
-					Model:     "a-small-model",
-					Provider:  "anthropic",
-					MaxTokens: 300,
-				},
+			Model: SelectedModel{
+				Model:     "a-large-model",
+				Provider:  "anthropic",
+				MaxTokens: 300,
 			},
 		}
 		cfg.setDefaults("/tmp", "")
@@ -2116,18 +2101,12 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		resolved, resolveErr := resolveSelectedModels(cfg, knownProviders)
+		resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 		require.NoError(t, resolveErr)
-		cfg.Models[SelectedModelTypeLarge] = resolved.Large
-		cfg.Models[SelectedModelTypeSmall] = resolved.Small
-		large := cfg.Models[SelectedModelTypeLarge]
-		small := cfg.Models[SelectedModelTypeSmall]
-		require.Equal(t, "large-model", large.Model)
-		require.Equal(t, "openai", large.Provider)
-		require.Equal(t, int64(1000), large.MaxTokens)
-		require.Equal(t, "a-small-model", small.Model)
-		require.Equal(t, "anthropic", small.Provider)
-		require.Equal(t, int64(300), small.MaxTokens)
+		cfg.Model = resolved.Model
+		require.Equal(t, "a-large-model", cfg.Model.Model)
+		require.Equal(t, "anthropic", cfg.Model.Provider)
+		require.Equal(t, int64(300), cfg.Model.MaxTokens)
 	})
 
 	t.Run("should override the max tokens only", func(t *testing.T) {
@@ -2136,26 +2115,17 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
-				DefaultSmallModelID: "small-model",
 				Models: []catwalk.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
-					},
-					{
-						ID:               "small-model",
-						DefaultMaxTokens: 500,
 					},
 				},
 			},
 		}
 
 		cfg := &Config{
-			Models: map[SelectedModelType]SelectedModel{
-				"large": {
-					MaxTokens: 100,
-				},
-			},
+			Model: SelectedModel{MaxTokens: 100},
 		}
 		cfg.setDefaults("/tmp", "")
 		env := env.NewFromMap(map[string]string{})
@@ -2163,14 +2133,12 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		resolved, resolveErr := resolveSelectedModels(cfg, knownProviders)
+		resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 		require.NoError(t, resolveErr)
-		cfg.Models[SelectedModelTypeLarge] = resolved.Large
-		cfg.Models[SelectedModelTypeSmall] = resolved.Small
-		large := cfg.Models[SelectedModelTypeLarge]
-		require.Equal(t, "large-model", large.Model)
-		require.Equal(t, "openai", large.Provider)
-		require.Equal(t, int64(100), large.MaxTokens)
+		cfg.Model = resolved.Model
+		require.Equal(t, "large-model", cfg.Model.Model)
+		require.Equal(t, "openai", cfg.Model.Provider)
+		require.Equal(t, int64(100), cfg.Model.MaxTokens)
 	})
 	t.Run("resolve and persist fallback under writeMu does not deadlock", func(t *testing.T) {
 		dir := t.TempDir()
@@ -2182,19 +2150,14 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
-				DefaultSmallModelID: "small-model",
 				Models: []catwalk.Model{
 					{ID: "large-model", DefaultMaxTokens: 1000},
-					{ID: "small-model", DefaultMaxTokens: 500},
 				},
 			},
 		}
 
 		cfg := &Config{
-			Models: map[SelectedModelType]SelectedModel{
-				SelectedModelTypeLarge: {Provider: "openai", Model: "this-model-does-not-exist"},
-				SelectedModelTypeSmall: {Provider: "openai", Model: "also-does-not-exist"},
-			},
+			Model: SelectedModel{Provider: "openai", Model: "this-model-does-not-exist"},
 		}
 		cfg.setDefaults(dir, "")
 		store := &ConfigStore{config: cfg, globalDataPath: globalPath}
@@ -2203,33 +2166,24 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		err := cfg.configureProviders(context.Background(), store, env, resolver, knownProviders)
 		require.NoError(t, err)
 
-		// Simulate the Load path: resolve (pure), then persist fallbacks
+		// Simulate the Load path: resolve (pure), then persist the fallback
 		// under writeMu using updateLocked. Before the refactor, the
 		// combined configureSelectedModels(persist=true) self-deadlocked
 		// because UpdatePreferredModel re-acquired writeMu.
 		done := make(chan error, 1)
 		go func() {
-			resolved, resolveErr := resolveSelectedModels(cfg, knownProviders)
+			resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 			if resolveErr != nil {
 				done <- resolveErr
 				return
 			}
-			cfg.Models[SelectedModelTypeLarge] = resolved.Large
-			cfg.Models[SelectedModelTypeSmall] = resolved.Small
+			cfg.Model = resolved.Model
 
 			store.writeMu.Lock()
 			defer store.writeMu.Unlock()
-			if resolved.LargeFallback {
+			if resolved.Fallback {
 				if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-					return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
-				}); err != nil {
-					done <- err
-					return
-				}
-			}
-			if resolved.SmallFallback {
-				if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-					return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
+					return store.updatePreferredModelFields(c, resolved.Model)
 				}); err != nil {
 					done <- err
 					return
@@ -2241,9 +2195,8 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		select {
 		case err := <-done:
 			require.NoError(t, err)
-			// Should have fallen back to defaults.
-			require.Equal(t, "large-model", cfg.Models[SelectedModelTypeLarge].Model)
-			require.Equal(t, "small-model", cfg.Models[SelectedModelTypeSmall].Model)
+			// Should have fallen back to the default.
+			require.Equal(t, "large-model", cfg.Model.Model)
 		case <-time.After(5 * time.Second):
 			t.Fatal("resolve + persist deadlocked under writeMu")
 		}

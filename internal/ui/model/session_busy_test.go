@@ -598,7 +598,7 @@ func TestStalePromptQueuePreservesSessionScoping(t *testing.T) {
 }
 
 // TestRenderHelpersDoNotProbeWorkspace pins the render-path side of the
-// invariant for the model and LSP info: selectedLargeModel, lspInfo, and
+// invariant for the model and LSP info: selectedModel, lspInfo, and
 // lspErrorCount render from memoized state only. They run on every frame
 // (landing view, sidebar, compact header), and the probes behind them
 // (AgentIsReady, AgentModel, LSPGetStates, LSPGetDiagnosticCounts) are
@@ -617,7 +617,7 @@ func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 	}
 
 	for range 10 {
-		require.NotNil(t, m.selectedLargeModel())
+		require.NotNil(t, m.selectedModel())
 		m.lspInfo(40, 5, true)
 		require.Equal(t, 3, m.lspErrorCount())
 	}
@@ -643,13 +643,13 @@ func TestBusyRefreshCarriesReadyAndModel(t *testing.T) {
 		model: workspace.AgentModel{ModelCfg: config.SelectedModel{Model: "test-model", Provider: "prov"}},
 	}
 	m := newBusyUI(ws)
-	require.Nil(t, m.selectedLargeModel(), "before any probe the model is unknown")
+	require.Nil(t, m.selectedModel(), "before any probe the model is unknown")
 
 	_, cmd := m.Update(plainMsg{}) // stale caches: the backstop dispatches
 	runCmds(m, cmd)
 
 	require.True(t, m.wsCache.agentReady, "the probe must land readiness in the cache")
-	sel := m.selectedLargeModel()
+	sel := m.selectedModel()
 	require.NotNil(t, sel)
 	require.Equal(t, "test-model", sel.ModelCfg.Model, "the probe must land the model in the cache")
 }

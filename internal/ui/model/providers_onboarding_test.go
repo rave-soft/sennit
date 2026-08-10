@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
+	"github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -26,41 +27,48 @@ import (
 // initAgentAndReportModel tail (InitCoderAgent/UpdateAgentModel run inside
 // tea.Sequence's first slot) actually execute during a test.
 func runTeaCmd(cmd tea.Cmd) {
+	collectTeaMsgs(cmd)
+}
+
+// collectTeaMsgs is runTeaCmd's sibling: it walks the same tea.Batch/
+// tea.Sequence tree but also gathers every leaf (non-slice) message so
+// tests can assert on what the command chain actually reported.
+func collectTeaMsgs(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
-		return
+		return nil
 	}
 	msg := cmd()
 	v := reflect.ValueOf(msg)
 	if v.Kind() != reflect.Slice {
-		return
+		return []tea.Msg{msg}
 	}
+	var out []tea.Msg
 	for i := range v.Len() {
 		if sub, ok := v.Index(i).Interface().(tea.Cmd); ok {
-			runTeaCmd(sub)
+			out = append(out, collectTeaMsgs(sub)...)
 		}
 	}
+	return out
 }
 
 // preferredModelCall records one UpdatePreferredModel invocation so tests
-// can assert both which model type was persisted and what model landed.
+// can assert what model landed.
 type preferredModelCall struct {
-	scope     config.Scope
-	modelType config.SelectedModelType
-	model     config.SelectedModel
+	scope config.Scope
+	model config.SelectedModel
 }
 
 // onboardingTestWorkspace is a [workspace.Workspace] stub covering the
 // onboarding-provider-selection flow: New()/Init() (which probe agent
 // readiness and project state), plus ActionProviderConfigured's model
-// bootstrap (UpdatePreferredModel, GetDefaultSmallModel, InitCoderAgent,
-// UpdateAgentModel). It must embed the full interface (see testWorkspace
-// above for the rationale).
+// bootstrap (UpdatePreferredModel, InitCoderAgent, UpdateAgentModel). It
+// must embed the full interface (see testWorkspace above for the
+// rationale).
 type onboardingTestWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
 
 	preferredCalls []preferredModelCall
-	smallModel     config.SelectedModel
 
 	initCoderAgentCalled   bool
 	updateAgentModelCalled bool
@@ -76,13 +84,9 @@ func (w *onboardingTestWorkspace) AgentModel() workspace.AgentModel { return wor
 
 func (w *onboardingTestWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }
 
-func (w *onboardingTestWorkspace) UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
-	w.preferredCalls = append(w.preferredCalls, preferredModelCall{scope, modelType, model})
+func (w *onboardingTestWorkspace) UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error {
+	w.preferredCalls = append(w.preferredCalls, preferredModelCall{scope, model})
 	return nil
-}
-
-func (w *onboardingTestWorkspace) GetDefaultSmallModel(_ string) config.SelectedModel {
-	return w.smallModel
 }
 
 func (w *onboardingTestWorkspace) InitCoderAgent(_ context.Context) error {
@@ -178,18 +182,15 @@ func newProviderConfiguredTestConfig(providerID string) *config.Config {
 // TestActionProviderConfigured_OnboardingSelectsDefaultModelAndEntersLanding
 // covers the first-run path: a provider was just configured, no model has
 // ever been selected, so the handler must fall back to the provider's own
-// default model, persist it as both the large and small model, bring the
-// coder agent up, and transition into uiLanding.
+// default model, persist it as the configured model, bring the coder agent
+// up, and transition into uiLanding.
 func TestActionProviderConfigured_OnboardingSelectsDefaultModelAndEntersLanding(t *testing.T) {
 	t.Parallel()
 
 	const providerID = "custom-test-provider"
 
 	cfg := newProviderConfiguredTestConfig(providerID)
-	ws := &onboardingTestWorkspace{
-		cfg:        cfg,
-		smallModel: config.SelectedModel{Provider: providerID, Model: "small-model"},
-	}
+	ws := &onboardingTestWorkspace{cfg: cfg}
 	action := dialog.ActionProviderConfigured{ProviderID: providerID}
 	ui := newOnboardingTestUI(ws, uiOnboarding, action)
 
@@ -200,20 +201,42 @@ func TestActionProviderConfigured_OnboardingSelectsDefaultModelAndEntersLanding(
 	require.Equal(t, uiLanding, ui.state)
 	require.False(t, ui.dialog.ContainsDialog(dialog.ProvidersID))
 
-	require.Len(t, ws.preferredCalls, 2, "expected the large and small model to be persisted")
-	large := ws.preferredCalls[0]
-	require.Equal(t, config.ScopeGlobal, large.scope)
-	require.Equal(t, config.SelectedModelTypeLarge, large.modelType)
-	require.Equal(t, providerID, large.model.Provider)
-	require.Equal(t, "default-model", large.model.Model,
+	require.Len(t, ws.preferredCalls, 1, "expected the model to be persisted once")
+	call := ws.preferredCalls[0]
+	require.Equal(t, config.ScopeGlobal, call.scope)
+	require.Equal(t, providerID, call.model.Provider)
+	require.Equal(t, "default-model", call.model.Model,
 		"first run must fall back to the provider's own default model")
-
-	small := ws.preferredCalls[1]
-	require.Equal(t, config.SelectedModelTypeSmall, small.modelType)
-	require.Equal(t, ws.smallModel, small.model)
 
 	require.True(t, ws.initCoderAgentCalled)
 	require.True(t, ws.updateAgentModelCalled)
+}
+
+// TestActionProviderConfigured_ReportsModelChangedStatus covers the status
+// toast emitted once onboarding lands a model: it must read "Model changed
+// to ...", not the old "Large model changed to ..." wording — there is only
+// one configurable model now, so the type label is gone entirely.
+func TestActionProviderConfigured_ReportsModelChangedStatus(t *testing.T) {
+	t.Parallel()
+
+	const providerID = "custom-test-provider"
+
+	cfg := newProviderConfiguredTestConfig(providerID)
+	ws := &onboardingTestWorkspace{cfg: cfg}
+	action := dialog.ActionProviderConfigured{ProviderID: providerID}
+	ui := newOnboardingTestUI(ws, uiOnboarding, action)
+
+	cmd := ui.handleDialogMsg(struct{}{})
+	require.NotNil(t, cmd)
+	msgs := collectTeaMsgs(cmd)
+
+	var infoMsgs []string
+	for _, msg := range msgs {
+		if info, ok := msg.(util.InfoMsg); ok {
+			infoMsgs = append(infoMsgs, info.Msg)
+		}
+	}
+	require.Contains(t, infoMsgs, "Model changed to default-model")
 }
 
 // TestActionProviderConfigured_OutsideOnboardingOnlyClosesDialogs covers

@@ -53,7 +53,6 @@ import (
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/skills"
-	"github.com/rave-soft/braid/internal/stringext"
 	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/attachments"
 	"github.com/rave-soft/braid/internal/ui/chat"
@@ -2188,12 +2187,12 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 				return util.ReportError(errors.New("agent configuration not found"))()
 			}
 
-			// The coder agent leaves Model unset (it inherits the app's main
-			// model), so the model it actually runs on always lives in the
-			// large slot.
-			currentModel := cfg.Models[config.SelectedModelTypeLarge]
+			// The coder agent leaves Model unset (it inherits the app's
+			// configured model), so the model it actually runs on is always
+			// cfg.Model.
+			currentModel := cfg.Model
 			currentModel.Think = !currentModel.Think
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, currentModel); err != nil {
+			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, currentModel); err != nil {
 				return util.ReportError(err)()
 			}
 			if err := m.com.Workspace.UpdateAgentModel(m.com.Context()); err != nil {
@@ -2264,12 +2263,12 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 			break
 		}
 
-		// The coder agent leaves Model unset (it inherits the app's main
-		// model), so the model it actually runs on always lives in the large
-		// slot.
-		currentModel := cfg.Models[config.SelectedModelTypeLarge]
+		// The coder agent leaves Model unset (it inherits the app's
+		// configured model), so the model it actually runs on is always
+		// cfg.Model.
+		currentModel := cfg.Model
 		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, currentModel); err != nil {
+		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, currentModel); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 			break
 		}
@@ -2364,8 +2363,8 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 		cfg := m.com.Config()
 		ws := m.com.Workspace
 
-		large := cfg.Models[config.SelectedModelTypeLarge]
-		if cfg.GetModel(large.Provider, large.Model) == nil {
+		model := cfg.Model
+		if cfg.GetModel(model.Provider, model.Model) == nil {
 			// No valid model carried over (this is the normal first-run
 			// case, where no model has ever been selected) — fall back to
 			// this provider's own default rather than whatever
@@ -2380,23 +2379,17 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 				cmds = append(cmds, util.ReportError(err))
 				break
 			}
-			large = def
+			model = def
 		}
 
-		if err := ws.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, large); err != nil {
+		if err := ws.UpdatePreferredModel(config.ScopeGlobal, model); err != nil {
 			cmds = append(cmds, util.ReportError(err))
-		}
-		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-			small := ws.GetDefaultSmallModel(large.Provider)
-			if err := ws.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, small); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
 		}
 
 		m.setState(uiLanding, uiFocusEditor)
 		m.com.Config().SetupAgents()
 
-		cmds = append(cmds, m.initAgentAndReportModel(true, config.SelectedModelTypeLarge, large))
+		cmds = append(cmds, m.initAgentAndReportModel(true, model))
 
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
@@ -2464,16 +2457,8 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.Model); err != nil {
 		cmds = append(cmds, util.ReportError(err))
-	} else {
-		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-			// Ensure small model is set is unset.
-			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
-		}
 	}
 
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
@@ -2485,7 +2470,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		m.com.Config().SetupAgents()
 	}
 
-	cmds = append(cmds, m.initAgentAndReportModel(isOnboarding, msg.ModelType, msg.Model))
+	cmds = append(cmds, m.initAgentAndReportModel(isOnboarding, msg.Model))
 
 	return tea.Batch(cmds...)
 }
@@ -2495,7 +2480,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 // which model is now active. Shared by handleSelectModel and
 // ActionProviderConfigured's onboarding branch, which both land here right
 // after a model has been chosen.
-func (m *UI) initAgentAndReportModel(isOnboarding bool, modelType config.SelectedModelType, model config.SelectedModel) tea.Cmd {
+func (m *UI) initAgentAndReportModel(isOnboarding bool, model config.SelectedModel) tea.Cmd {
 	cfg := m.com.Config()
 	ws := m.com.Workspace
 	ctx := m.com.Context()
@@ -2513,14 +2498,11 @@ func (m *UI) initAgentAndReportModel(isOnboarding bool, modelType config.Selecte
 			return util.NewErrorMsg(err)
 		}
 
-		var (
-			modelTypeLabel = stringext.Capitalize(string(modelType))
-			modelName      = model.Model
-		)
+		modelName := model.Model
 		if catwalkModel := cfg.GetModel(model.Provider, model.Model); catwalkModel != nil && catwalkModel.Name != "" {
 			modelName = catwalkModel.Name
 		}
-		return util.NewInfoMsg(fmt.Sprintf("%s model changed to %s", modelTypeLabel, modelName))
+		return util.NewInfoMsg(fmt.Sprintf("Model changed to %s", modelName))
 	})
 }
 
@@ -3551,8 +3533,8 @@ func (m *UI) currentModelSupportsImages() bool {
 	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
 		return false
 	}
-	// The coder agent leaves Model unset (it inherits the app's main model),
-	// so the model it actually runs on always lives in the large slot.
+	// The coder agent leaves Model unset (it inherits the app's configured
+	// model), so the model it actually runs on is always cfg.Model.
 	model := cfg.GetModelByType(config.SelectedModelTypeLarge)
 	return model != nil && model.SupportsImages
 }
@@ -4968,9 +4950,9 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 	if _, ok := cfg.Agents[config.AgentCoder]; !ok {
 		return nil
 	}
-	// The coder agent leaves Model unset (it inherits the app's main model),
-	// so the model it actually runs on always lives in the large slot.
-	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[config.SelectedModelTypeLarge], config.SelectedModelTypeLarge)
+	// The coder agent leaves Model unset (it inherits the app's configured
+	// model), so the model it actually runs on is always cfg.Model.
+	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Model, config.SelectedModelTypeLarge)
 }
 
 // handleAWSSSOAuth opens the AWS SSO progress dialog (or updates the SSO URL

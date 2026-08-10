@@ -56,12 +56,11 @@ braid run --continue "Follow up on your last response"
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var (
-			quiet, _      = cmd.Flags().GetBool("quiet")
-			verbose, _    = cmd.Flags().GetBool("verbose")
-			largeModel, _ = cmd.Flags().GetString("model")
-			smallModel, _ = cmd.Flags().GetString("small-model")
-			sessionID, _  = cmd.Flags().GetString("session")
-			useLast, _    = cmd.Flags().GetBool("continue")
+			quiet, _     = cmd.Flags().GetBool("quiet")
+			verbose, _   = cmd.Flags().GetBool("verbose")
+			model, _     = cmd.Flags().GetString("model")
+			sessionID, _ = cmd.Flags().GetString("session")
+			useLast, _   = cmd.Flags().GetBool("continue")
 		)
 
 		// Cancel on SIGINT or SIGTERM.
@@ -133,7 +132,7 @@ braid run --continue "Follow up on your last response"
 			sessionID = sess.ID
 		}
 
-		return runAgent(ctx, ws, prompt, largeModel, smallModel, quiet || verbose, sessionID, useLast)
+		return runAgent(ctx, ws, prompt, model, quiet || verbose, sessionID, useLast)
 	},
 }
 
@@ -141,7 +140,6 @@ func init() {
 	runCmd.Flags().BoolP("quiet", "q", false, "Hide spinner")
 	runCmd.Flags().BoolP("verbose", "v", false, "Show logs")
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
-	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
 	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
 	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
 	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
@@ -165,7 +163,7 @@ const progressBarRefresh = 500 * time.Millisecond
 func runAgent(
 	ctx context.Context,
 	ws workspace.Workspace,
-	prompt, largeModel, smallModel string,
+	prompt, model string,
 	hideSpinner bool,
 	continueSessionID string,
 	useLast bool,
@@ -179,8 +177,8 @@ func runAgent(
 		return fmt.Errorf("failed to initialize agent: %w", err)
 	}
 
-	if err := overrideModels(ctx, ws, largeModel, smallModel); err != nil {
-		return fmt.Errorf("failed to override models: %w", err)
+	if err := overrideModel(ctx, ws, model); err != nil {
+		return fmt.Errorf("failed to override model: %w", err)
 	}
 
 	sess, err := workspace.ResolveSession(ctx, ws, continueSessionID, useLast, "non-interactive")
@@ -198,7 +196,7 @@ func runAgent(
 
 	var spinner *format.Spinner
 	if !hideSpinner && stderrTTY {
-		t := styles.ThemeForProvider(ws.Config().Models[config.SelectedModelTypeLarge].Provider)
+		t := styles.ThemeForProvider(ws.Config().Model.Provider)
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,
@@ -263,56 +261,33 @@ func runAgent(
 	}
 }
 
-// overrideModels resolves model strings and updates the workspace
+// overrideModel resolves the model string and updates the workspace
 // configuration. Shared by both Workspace implementations so
-// client/server and local mode apply -m/--small-model identically.
-func overrideModels(ctx context.Context, ws workspace.Workspace, largeModel, smallModel string) error {
-	if largeModel == "" && smallModel == "" {
+// client/server and local mode apply -m/--model identically. Helper
+// (small) model resolution is fully automatic and needs no CLI-side
+// override.
+func overrideModel(ctx context.Context, ws workspace.Workspace, model string) error {
+	if model == "" {
 		return nil
 	}
 
 	providers := ws.Config().Providers.Copy()
 
-	largeMatches, smallMatches, err := config.FindModelMatches(providers, largeModel, smallModel)
+	matches, err := config.FindModelMatches(providers, model)
 	if err != nil {
 		return err
 	}
 
-	var largeProviderID string
-
-	if largeModel != "" {
-		found, err := config.ValidateModelMatches(largeMatches, largeModel, "large")
-		if err != nil {
-			return err
-		}
-		largeProviderID = found.Provider
-		slog.Info("Overriding large model", "provider", found.Provider, "model", found.ModelID)
-		if err := ws.OverridePreferredModel(config.SelectedModelTypeLarge, config.SelectedModel{
-			Provider: found.Provider,
-			Model:    found.ModelID,
-		}); err != nil {
-			return fmt.Errorf("failed to set large model: %w", err)
-		}
+	found, err := config.ValidateModelMatches(matches, model, "model")
+	if err != nil {
+		return err
 	}
-
-	switch {
-	case smallModel != "":
-		found, err := config.ValidateModelMatches(smallMatches, smallModel, "small")
-		if err != nil {
-			return err
-		}
-		slog.Info("Overriding small model", "provider", found.Provider, "model", found.ModelID)
-		if err := ws.OverridePreferredModel(config.SelectedModelTypeSmall, config.SelectedModel{
-			Provider: found.Provider,
-			Model:    found.ModelID,
-		}); err != nil {
-			return fmt.Errorf("failed to set small model: %w", err)
-		}
-
-	case largeModel != "":
-		if err := ws.OverridePreferredModel(config.SelectedModelTypeSmall, ws.GetDefaultSmallModel(largeProviderID)); err != nil {
-			return fmt.Errorf("failed to set small model: %w", err)
-		}
+	slog.Info("Overriding model", "provider", found.Provider, "model", found.ModelID)
+	if err := ws.OverridePreferredModel(config.SelectedModel{
+		Provider: found.Provider,
+		Model:    found.ModelID,
+	}); err != nil {
+		return fmt.Errorf("failed to set model: %w", err)
 	}
 
 	return ws.UpdateAgentModel(ctx)

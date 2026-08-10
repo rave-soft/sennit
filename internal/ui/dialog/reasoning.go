@@ -77,9 +77,9 @@ func reasoningItems(com *common.Common) ([]list.FilterableItem, int, error) {
 		return nil, 0, errors.New("agent configuration not found")
 	}
 
-	// The coder agent leaves Model unset (it inherits the app's main model),
-	// so the model it actually runs on always lives in the large slot.
-	selectedModel := cfg.Models[config.SelectedModelTypeLarge]
+	// The coder agent leaves Model unset (it inherits the app's configured
+	// model), so the model it actually runs on is always cfg.Model.
+	selectedModel := cfg.Model
 	model := cfg.GetModelByType(config.SelectedModelTypeLarge)
 	if model == nil {
 		return nil, 0, errors.New("model configuration not found")

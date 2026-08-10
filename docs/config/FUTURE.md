@@ -14,19 +14,19 @@ it as a scratchpad for what's next, not as documentation of current behavior.
 ### Motivation
 
 Right now `braidrc` runs once, at startup. If you want to change something
-mid-session — swap the large model, allow a tool, add an MCP server — you edit
+mid-session — swap the model, allow a tool, add an MCP server — you edit
 the file and restart.
 
 The idea: let the agent's `bash` tool run the same config commands
-(`model large …`, `option …`, `mcp add …`) to reconfigure the **running
+(`model …`, `option …`, `mcp add …`) to reconfigure the **running
 session**. The mental model is exactly a shell and its `.bashrc`:
 
 - Running a config command changes the **current session only** — like typing
   `export` or `alias` at a live prompt.
 - To make it stick, you edit your `braidrc` — like editing `.bashrc`.
 
-So you could say "Braid, switch to the small model for a bit" and it just
-runs `model small …`, live, no restart.
+So you could say "Braid, switch to a cheaper model for a bit" and it just
+runs `model …`, live, no restart.
 
 > [!IMPORTANT]
 > **Persistence is a non-goal.** The bash tool never writes config files.
@@ -55,9 +55,9 @@ No new commands — the same builtins, now live:
 
 ```bash
 # Inside a session, via the bash tool:
-model small anthropic/claude-haiku-4-20250514   # switch models for this turn
-option progress false                            # quiet the UI
-permissions allow grep                           # stop asking about grep
+model anthropic/claude-haiku-4-20250514   # switch models for this turn
+option progress false                       # quiet the UI
+permissions allow grep                      # stop asking about grep
 ```
 
 Each applies immediately to the session and is forgotten on exit.
@@ -72,8 +72,7 @@ Each applies immediately to the session and is forgotten on exit.
 3. **Reconcile subsystems**, roughly in order of difficulty:
    - Easy: `option` flags, `permissions allow`, disabled tools/skills — read
      on demand.
-   - Medium: `model large|small` — already reconciled live by the switch
-     dialog.
+   - Medium: `model` — already reconciled live by the switch dialog.
    - Harder: `provider add` — rebuild the model client with the new
      key/base-url.
    - Hardest: `mcp` / `lsp` add/remove — process lifecycle
@@ -100,11 +99,11 @@ larger, later increment.
 
 ### Open questions
 
-- Should a live change be echoed back to the user somehow ("switched large
-  model to …"), so it's not silent?
+- Should a live change be echoed back to the user somehow ("switched model
+  to …"), so it's not silent?
 - Do we want a way to *see* the effective live config from the bash tool
-  (a read-only `option get` / `model large` print)? `model large` already
-  prints its selection; a broader introspection surface could follow.
+  (a read-only `option get` / `model` print)? `model` already prints its
+  selection; a broader introspection surface could follow.
 - Should sub-agents be allowed to reconfigure the session, or only the
   top-level agent? Probably top-level only, mirroring how hooks scope.
 
@@ -158,14 +157,10 @@ should include a format version and an explicit generated-file notice.
 ```json
 {
   "version": 1,
-  "recent_models": {
-    "large": [
-      {"provider": "openai", "model": "gpt-5"}
-    ]
-  },
-  "preferred_models": {
-    "large": {"provider": "openai", "model": "gpt-5"}
-  },
+  "recent_models": [
+    {"provider": "openai", "model": "gpt-5"}
+  ],
+  "preferred_model": {"provider": "openai", "model": "gpt-5"},
   "ui": {
     "compact_mode": true
   }

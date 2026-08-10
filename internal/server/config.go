@@ -87,7 +87,7 @@ func (c *controllerV1) handlePostWorkspaceConfigModel(w http.ResponseWriter, r *
 		return
 	}
 
-	if err := c.backend.UpdatePreferredModel(id, req.Scope, req.ModelType, req.Model); err != nil {
+	if err := c.backend.UpdatePreferredModel(id, req.Scope, req.Model); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

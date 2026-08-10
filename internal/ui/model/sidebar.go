@@ -80,7 +80,7 @@ func (s *sidebarState) hideScrollbar() {
 // modelInfo renders the current model information including reasoning
 // settings and context usage/cost for the sidebar.
 func (m *UI) modelInfo(width int) string {
-	model := m.selectedLargeModel()
+	model := m.selectedModel()
 	reasoningInfo := ""
 	providerName := ""
 

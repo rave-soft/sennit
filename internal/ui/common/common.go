@@ -50,10 +50,10 @@ func (c *Common) Context() context.Context {
 }
 
 // DefaultCommon returns the default common UI configurations. When the
-// workspace has a large model selected, the theme is chosen based on its
+// workspace has a model selected, the theme is chosen based on its
 // provider; otherwise the default theme is used.
 func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
-	s := styles.ThemeForProvider(largeModelProviderID(ws))
+	s := styles.ThemeForProvider(modelProviderID(ws))
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
@@ -61,9 +61,9 @@ func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
 	}
 }
 
-// largeModelProviderID returns the provider ID of the currently selected
-// large model, or the empty string if none is set or the workspace is nil.
-func largeModelProviderID(ws workspace.ConfigAccessor) string {
+// modelProviderID returns the provider ID of the currently selected model,
+// or the empty string if none is set or the workspace is nil.
+func modelProviderID(ws workspace.ConfigAccessor) string {
 	if ws == nil {
 		return ""
 	}
@@ -71,7 +71,7 @@ func largeModelProviderID(ws workspace.ConfigAccessor) string {
 	if cfg == nil {
 		return ""
 	}
-	return cfg.Models[config.SelectedModelTypeLarge].Provider
+	return cfg.Model.Provider
 }
 
 // CenterRect returns a new [Rectangle] centered within the given area with the

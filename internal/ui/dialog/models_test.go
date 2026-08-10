@@ -112,10 +112,8 @@ func TestSetProviderItems_RecentEntriesFromUnconfiguredProviderAreDropped(t *tes
 	// itemsMap only ever contains configured providers' models now, so this
 	// entry should be silently dropped from "Recently used" rather than
 	// crashing or leaking an unconfigured provider into the dialog.
-	cfg.RecentModels = map[config.SelectedModelType][]config.SelectedModel{
-		config.SelectedModelTypeLarge: {
-			{Provider: string(catwalk.InferenceProviderOpenAI), Model: "gpt-4o"},
-		},
+	cfg.RecentModels = []config.SelectedModel{
+		{Provider: string(catwalk.InferenceProviderOpenAI), Model: "gpt-4o"},
 	}
 	com := newModelsTestCommon(t, cfg)
 
@@ -130,8 +128,8 @@ func TestSetProviderItems_RecentEntriesFromUnconfiguredProviderAreDropped(t *tes
 	// Pruning the stale recent entry writes back through SetConfigField;
 	// confirm that happened rather than silently mutating cfg in place.
 	ws := com.Workspace.(*modelsTestWorkspace)
-	require.Contains(t, ws.setConfigFields, "recent_models.large")
-	require.Empty(t, ws.setConfigFields["recent_models.large"])
+	require.Contains(t, ws.setConfigFields, "recent_models")
+	require.Empty(t, ws.setConfigFields["recent_models"])
 }
 
 func TestSetProviderItems_EmptyStateShowsPlaceholderAndNoPanic(t *testing.T) {
@@ -163,10 +161,9 @@ func TestModelGroup_RenderNoLongerShowsConfiguredBadge(t *testing.T) {
 	require.NotContains(t, rendered, "Configured")
 }
 
-// TestModels_NoTabToggle covers the removal of the Large/Small task-type
-// toggle: this dialog only ever operates on the large model slot now, so
-// there is no key binding to switch type and pressing tab must not disturb
-// the list.
+// TestModels_NoTabToggle covers that there is no key binding to switch
+// between model types (there is only one model now), so pressing tab must
+// not disturb the list.
 func TestModels_NoTabToggle(t *testing.T) {
 	cfg := newModelsTestConfig()
 	cfg.Providers.Set(string(catwalk.InferenceProviderAnthropic), config.ProviderConfig{
@@ -179,7 +176,7 @@ func TestModels_NoTabToggle(t *testing.T) {
 
 	for _, kb := range m.ShortHelp() {
 		require.NotEqual(t, "toggle type", kb.Help().Desc,
-			"the Large/Small task-type toggle must not appear in help anymore")
+			"there is no task-type toggle anymore")
 	}
 
 	groupsBefore := m.list.groups
@@ -189,34 +186,9 @@ func TestModels_NoTabToggle(t *testing.T) {
 	require.Equal(t, groupsBefore, m.list.groups, "tab must not rebuild the list around a different model type")
 }
 
-// TestSetProviderItems_RecentUsedOnlyTracksLargeSlot covers that "Recently
-// used" is now sourced exclusively from the large model slot: a recent entry
-// filed under the small slot (still maintained internally for
-// titles/summaries) must not leak into this dialog.
-func TestSetProviderItems_RecentUsedOnlyTracksLargeSlot(t *testing.T) {
-	cfg := newModelsTestConfig()
-	cfg.Providers.Set(string(catwalk.InferenceProviderAnthropic), config.ProviderConfig{
-		ID: string(catwalk.InferenceProviderAnthropic),
-	})
-	cfg.RecentModels = map[config.SelectedModelType][]config.SelectedModel{
-		config.SelectedModelTypeSmall: {
-			{Provider: string(catwalk.InferenceProviderAnthropic), Model: "claude-3-5-haiku-20241022"},
-		},
-	}
-	com := newModelsTestCommon(t, cfg)
-
-	m, err := NewModels(com)
-	require.NoError(t, err)
-
-	for _, g := range m.list.groups {
-		require.NotEqual(t, "Recently used", g.Title,
-			"the only recent entry belongs to the small slot, which this dialog no longer consults")
-	}
-}
-
 // TestModels_SelectAlwaysTargetsLargeSlot covers that choosing a model from
-// this dialog always reports the large slot, regardless of what used to be
-// toggled via Tab.
+// this dialog always reports [config.SelectedModelTypeLarge], the only
+// model type the dialog operates on.
 func TestModels_SelectAlwaysTargetsLargeSlot(t *testing.T) {
 	cfg := newModelsTestConfig()
 	cfg.Providers.Set(string(catwalk.InferenceProviderAnthropic), config.ProviderConfig{

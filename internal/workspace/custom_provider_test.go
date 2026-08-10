@@ -27,12 +27,12 @@ func (a *testConfigAccessor) Config() *config.Config            { return a.store
 func (a *testConfigAccessor) WorkingDir() string                { return a.store.WorkingDir() }
 func (a *testConfigAccessor) Resolver() config.VariableResolver { return a.store.Resolver() }
 
-func (a *testConfigAccessor) UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
-	return a.store.UpdatePreferredModel(scope, modelType, model)
+func (a *testConfigAccessor) UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error {
+	return a.store.UpdatePreferredModel(scope, model)
 }
 
-func (a *testConfigAccessor) OverridePreferredModel(modelType config.SelectedModelType, model config.SelectedModel) error {
-	a.store.OverridePreferredModel(modelType, model)
+func (a *testConfigAccessor) OverridePreferredModel(model config.SelectedModel) error {
+	a.store.OverridePreferredModel(model)
 	return nil
 }
 

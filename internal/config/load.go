@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"slices"
@@ -65,6 +66,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		if !json.Valid(wsData) {
 			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
 		}
+		wsData = dropIncompatibleRecentModels(wsData, store.workspacePath)
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			// Preserve defaults that setDefaults already applied.
@@ -122,29 +124,21 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return store, nil
 	}
 
-	resolved, err := resolveSelectedModels(cfg, store.knownProviders)
+	resolved, err := resolveSelectedModel(cfg, store.knownProviders)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure selected models: %w", err)
 	}
-	cfg.Models[SelectedModelTypeLarge] = resolved.Large
-	cfg.Models[SelectedModelTypeSmall] = resolved.Small
+	cfg.Model = resolved.Model
 
 	store.writeMu.Lock()
 	defer store.writeMu.Unlock()
 
-	// Persist any fallback corrections.
-	if resolved.LargeFallback {
+	// Persist any fallback correction.
+	if resolved.Fallback {
 		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, SelectedModelTypeLarge, resolved.Large)
+			return store.updatePreferredModelFields(c, resolved.Model)
 		}); err != nil {
-			return nil, fmt.Errorf("failed to update preferred large model: %w", err)
-		}
-	}
-	if resolved.SmallFallback {
-		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, SelectedModelTypeSmall, resolved.Small)
-		}); err != nil {
-			return nil, fmt.Errorf("failed to update preferred small model: %w", err)
+			return nil, fmt.Errorf("failed to update preferred model: %w", err)
 		}
 	}
 	store.SetupAgents()
@@ -733,12 +727,6 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
 	}
-	if c.Models == nil {
-		c.Models = make(map[SelectedModelType]SelectedModel)
-	}
-	if c.RecentModels == nil {
-		c.RecentModels = make(map[SelectedModelType][]SelectedModel)
-	}
 	if c.MCP == nil {
 		c.MCP = make(map[string]MCPConfig)
 	}
@@ -859,10 +847,10 @@ func (c *Config) applyLSPDefaults() {
 	}
 }
 
-func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
+func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (model SelectedModel, err error) {
 	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
-		return largeModel, smallModel, err
+		return model, err
 	}
 
 	// Use the first provider enabled based on the known providers order
@@ -872,36 +860,21 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 		if !ok || providerConfig.Disable {
 			continue
 		}
-		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
-		if defaultLargeModel == nil {
-			slog.Warn("Default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+		defaultModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
+		if defaultModel == nil {
+			slog.Warn("Default model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
 			if len(providerConfig.Models) == 0 {
-				return largeModel, smallModel, fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+				return model, fmt.Errorf("default model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
 			}
-			defaultLargeModel = &providerConfig.Models[0]
+			defaultModel = &providerConfig.Models[0]
 		}
-		largeModel = SelectedModel{
+		model = SelectedModel{
 			Provider:        string(p.ID),
-			Model:           defaultLargeModel.ID,
-			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
-			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
+			Model:           defaultModel.ID,
+			MaxTokens:       defaultModel.DefaultMaxTokens,
+			ReasoningEffort: defaultModel.DefaultReasoningEffort,
 		}
-
-		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
-		if defaultSmallModel == nil {
-			slog.Warn("Default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			if len(providerConfig.Models) == 0 {
-				return largeModel, smallModel, fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			}
-			defaultSmallModel = &providerConfig.Models[0]
-		}
-		smallModel = SelectedModel{
-			Provider:        string(p.ID),
-			Model:           defaultSmallModel.ID,
-			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
-			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
-		}
-		return largeModel, smallModel, err
+		return model, err
 	}
 
 	enabledProviders := c.EnabledProviders()
@@ -911,161 +884,94 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (large
 
 	if len(enabledProviders) == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
-		return largeModel, smallModel, err
+		return model, err
 	}
 
 	providerConfig := enabledProviders[0]
 	if len(providerConfig.Models) == 0 {
 		err = fmt.Errorf("provider %s has no models configured", providerConfig.ID)
-		return largeModel, smallModel, err
+		return model, err
 	}
-	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
-	largeModel = SelectedModel{
+	defaultModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
+	model = SelectedModel{
 		Provider:  providerConfig.ID,
-		Model:     defaultLargeModel.ID,
-		MaxTokens: defaultLargeModel.DefaultMaxTokens,
+		Model:     defaultModel.ID,
+		MaxTokens: defaultModel.DefaultMaxTokens,
 	}
-	defaultSmallModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
-	smallModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultSmallModel.ID,
-		MaxTokens: defaultSmallModel.DefaultMaxTokens,
-	}
-	return largeModel, smallModel, err
+	return model, err
 }
 
-// resolvedModels holds the result of resolving user-configured model
-// selections against the provider catalog.
-type resolvedModels struct {
-	Large         SelectedModel
-	Small         SelectedModel
-	LargeFallback bool // true if Large was corrected to a default
-	SmallFallback bool // true if Small was corrected to a default
+// resolvedModel holds the result of resolving the user-configured model
+// selection against the provider catalog.
+type resolvedModel struct {
+	Model    SelectedModel
+	Fallback bool // true if Model was corrected to a default
 }
 
-// resolveSelectedModels validates the user's configured model selections
-// against the provider catalog, falling back to defaults when a model ID is
-// invalid. It is pure resolution logic: it does not mutate the store or
-// touch disk. The caller assigns the results to c.Models and persists any
-// fallback corrections as appropriate.
-func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (resolvedModels, error) {
-	var result resolvedModels
-	defaultLarge, defaultSmall, err := cfg.defaultModelSelection(knownProviders)
+// resolveSelectedModel validates the user's configured model selection
+// against the provider catalog, falling back to a default when the model ID
+// is invalid. It is pure resolution logic: it does not mutate the store or
+// touch disk. The caller assigns the result to cfg.Model and persists any
+// fallback correction as appropriate.
+func resolveSelectedModel(cfg *Config, knownProviders []catwalk.Provider) (resolvedModel, error) {
+	var result resolvedModel
+	def, err := cfg.defaultModelSelection(knownProviders)
 	if err != nil {
-		return result, fmt.Errorf("failed to select default models: %w", err)
+		return result, fmt.Errorf("failed to select default model: %w", err)
 	}
-	large, small := defaultLarge, defaultSmall
+	selected := def
 
-	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
-	if largeModelConfigured {
-		if largeModelSelected.Model != "" {
-			large.Model = largeModelSelected.Model
+	modelSelected := cfg.Model
+	// The zero SelectedModel{} is the "unset" sentinel (Config.Model has no
+	// map to check key presence against anymore), so any field the user set
+	// — even just max_tokens, with provider/model left to inherit the
+	// default — marks the model as configured.
+	modelConfigured := !reflect.DeepEqual(modelSelected, SelectedModel{})
+	if modelConfigured {
+		if modelSelected.Model != "" {
+			selected.Model = modelSelected.Model
 		}
-		if largeModelSelected.Provider != "" {
-			large.Provider = largeModelSelected.Provider
+		if modelSelected.Provider != "" {
+			selected.Provider = modelSelected.Provider
 		}
-		model := cfg.GetModel(large.Provider, large.Model)
+		model := cfg.GetModel(selected.Provider, selected.Model)
 		if model == nil {
-			large = defaultLarge
-			result.LargeFallback = true
+			selected = def
+			result.Fallback = true
 		} else {
-			if largeModelSelected.MaxTokens > 0 {
-				large.MaxTokens = largeModelSelected.MaxTokens
+			if modelSelected.MaxTokens > 0 {
+				selected.MaxTokens = modelSelected.MaxTokens
 			} else {
-				large.MaxTokens = model.DefaultMaxTokens
+				selected.MaxTokens = model.DefaultMaxTokens
 			}
-			if largeModelSelected.ReasoningEffort != "" {
-				large.ReasoningEffort = largeModelSelected.ReasoningEffort
+			if modelSelected.ReasoningEffort != "" {
+				selected.ReasoningEffort = modelSelected.ReasoningEffort
 			} else {
-				large.ReasoningEffort = model.DefaultReasoningEffort
+				selected.ReasoningEffort = model.DefaultReasoningEffort
 			}
-			large.Think = largeModelSelected.Think
-			if largeModelSelected.Temperature != nil {
-				large.Temperature = largeModelSelected.Temperature
+			selected.Think = modelSelected.Think
+			if modelSelected.Temperature != nil {
+				selected.Temperature = modelSelected.Temperature
 			}
-			if largeModelSelected.TopP != nil {
-				large.TopP = largeModelSelected.TopP
+			if modelSelected.TopP != nil {
+				selected.TopP = modelSelected.TopP
 			}
-			if largeModelSelected.TopK != nil {
-				large.TopK = largeModelSelected.TopK
+			if modelSelected.TopK != nil {
+				selected.TopK = modelSelected.TopK
 			}
-			if largeModelSelected.FrequencyPenalty != nil {
-				large.FrequencyPenalty = largeModelSelected.FrequencyPenalty
+			if modelSelected.FrequencyPenalty != nil {
+				selected.FrequencyPenalty = modelSelected.FrequencyPenalty
 			}
-			if largeModelSelected.PresencePenalty != nil {
-				large.PresencePenalty = largeModelSelected.PresencePenalty
+			if modelSelected.PresencePenalty != nil {
+				selected.PresencePenalty = modelSelected.PresencePenalty
 			}
-			if largeModelSelected.ProviderOptions != nil {
-				large.ProviderOptions = maps.Clone(largeModelSelected.ProviderOptions)
+			if modelSelected.ProviderOptions != nil {
+				selected.ProviderOptions = maps.Clone(modelSelected.ProviderOptions)
 			}
 		}
 	}
-	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
-	if smallModelConfigured {
-		if smallModelSelected.Model != "" {
-			small.Model = smallModelSelected.Model
-		}
-		if smallModelSelected.Provider != "" {
-			small.Provider = smallModelSelected.Provider
-		}
 
-		model := cfg.GetModel(small.Provider, small.Model)
-		if model == nil {
-			small = defaultSmall
-			result.SmallFallback = true
-		} else {
-			if smallModelSelected.MaxTokens > 0 {
-				small.MaxTokens = smallModelSelected.MaxTokens
-			} else {
-				small.MaxTokens = model.DefaultMaxTokens
-			}
-			if smallModelSelected.ReasoningEffort != "" {
-				small.ReasoningEffort = smallModelSelected.ReasoningEffort
-			} else {
-				small.ReasoningEffort = model.DefaultReasoningEffort
-			}
-			if smallModelSelected.Temperature != nil {
-				small.Temperature = smallModelSelected.Temperature
-			}
-			if smallModelSelected.TopP != nil {
-				small.TopP = smallModelSelected.TopP
-			}
-			if smallModelSelected.TopK != nil {
-				small.TopK = smallModelSelected.TopK
-			}
-			if smallModelSelected.FrequencyPenalty != nil {
-				small.FrequencyPenalty = smallModelSelected.FrequencyPenalty
-			}
-			if smallModelSelected.PresencePenalty != nil {
-				small.PresencePenalty = smallModelSelected.PresencePenalty
-			}
-			if smallModelSelected.ProviderOptions != nil {
-				small.ProviderOptions = maps.Clone(smallModelSelected.ProviderOptions)
-			}
-			small.Think = smallModelSelected.Think
-		}
-	}
-
-	// When small isn't explicitly configured and the provider isn't a
-	// known built-in, use the large model as the small model. This
-	// prevents two different models from being requested concurrently
-	// for local/openai-compat providers.
-	if !smallModelConfigured {
-		isKnownProvider := false
-		for _, kp := range knownProviders {
-			if string(kp.ID) == small.Provider {
-				isKnownProvider = true
-				break
-			}
-		}
-		if !isKnownProvider {
-			slog.Warn("Using large model as small model for unknown provider", "provider", large.Provider, "model", large.Model)
-			small = large
-		}
-	}
-
-	result.Large = large
-	result.Small = small
+	result.Model = selected
 	return result, nil
 }
 
@@ -1146,6 +1052,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 					return nil, nil, fmt.Errorf("shell config %s produced invalid JSON", path)
 				}
 				jsonBytes = migrateDeprecatedKey(jsonBytes, "options.strands", "options.threads", path)
+				jsonBytes = dropIncompatibleRecentModels(jsonBytes, path)
 				addTopLevelKeys(shDirKeys, dir, jsonBytes)
 				configs = append(configs, jsonBytes)
 				loaded = append(loaded, path)
@@ -1155,6 +1062,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
 			}
 			data = migrateDeprecatedKey(data, "options.strands", "options.threads", path)
+			data = dropIncompatibleRecentModels(data, path)
 			addTopLevelKeys(jsonDirKeys, dir, data)
 			configs = append(configs, data)
 			loaded = append(loaded, path)
@@ -1201,6 +1109,24 @@ func addTopLevelKeys(m map[string]map[string]bool, dir string, data []byte) {
 		keys[key.String()] = true
 		return true
 	})
+}
+
+// dropIncompatibleRecentModels drops a pre-refactor "recent_models" value
+// (an object keyed by "large"/"small") that no longer unmarshals into the
+// current flat-array shape. Old configs are not migrated — the field is
+// simply dropped and rebuilt from scratch — but a stale shape must not turn
+// into a hard json.Unmarshal failure that stops braid from starting.
+func dropIncompatibleRecentModels(data []byte, path string) []byte {
+	v := gjson.GetBytes(data, "recent_models")
+	if !v.Exists() || v.IsArray() {
+		return data
+	}
+	slog.Warn("Ignoring recent_models from a pre-refactor config (large/small slots are gone)", "path", path)
+	out, err := sjson.DeleteBytes(data, "recent_models")
+	if err != nil {
+		return data
+	}
+	return out
 }
 
 // migrateDeprecatedKey renames a deprecated JSON key (gjson/sjson dotted

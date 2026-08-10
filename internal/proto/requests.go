@@ -23,9 +23,8 @@ type ConfigRemoveRequest struct {
 
 // ConfigModelRequest represents a request to update the preferred model.
 type ConfigModelRequest struct {
-	Scope     config.Scope             `json:"scope"`
-	ModelType config.SelectedModelType `json:"model_type"`
-	Model     config.SelectedModel     `json:"model"`
+	Scope config.Scope         `json:"scope"`
+	Model config.SelectedModel `json:"model"`
 }
 
 // ConfigCompactRequest represents a request to set compact mode.

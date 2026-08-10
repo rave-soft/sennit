@@ -103,17 +103,11 @@ func writeConfigStaleness(b *strings.Builder, cfg *config.ConfigStore) {
 
 func writeModels(b *strings.Builder, cfg *config.ConfigStore) {
 	c := cfg.Config()
-	if len(c.Models) == 0 {
+	if c.Model.Model == "" {
 		return
 	}
 	b.WriteString("[model]\n")
-	for _, typ := range []config.SelectedModelType{config.SelectedModelTypeLarge, config.SelectedModelTypeSmall} {
-		m, ok := c.Models[typ]
-		if !ok {
-			continue
-		}
-		fmt.Fprintf(b, "%s = %s (%s)\n", typ, m.Model, m.Provider)
-	}
+	fmt.Fprintf(b, "model = %s (%s)\n", c.Model.Model, c.Model.Provider)
 	b.WriteString("\n")
 }
 

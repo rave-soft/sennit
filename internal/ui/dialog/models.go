@@ -16,11 +16,8 @@ import (
 	"github.com/rave-soft/braid/internal/ui/common"
 )
 
-// modelInputPlaceholder is shown in the filter input. This dialog only ever
-// picks the large model slot now; the small slot is config-driven only (see
-// the auto-fill in ui.go's handleSelectModel), so there is no per-type
-// placeholder to switch between anymore.
-const modelInputPlaceholder = "Choose a model for large, complex tasks"
+// modelInputPlaceholder is shown in the filter input.
+const modelInputPlaceholder = "Choose a model"
 
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
@@ -240,12 +237,8 @@ func (m *Models) setProviderItems() error {
 	cfg := m.com.Config()
 
 	var selectedItemID string
-	// This dialog only ever operates on the large model slot now; the small
-	// slot is filled in automatically (see ui.go's handleSelectModel) and is
-	// not user-selectable here.
-	selectedType := config.SelectedModelTypeLarge
-	currentModel := cfg.Models[selectedType]
-	recentItems := cfg.RecentModels[selectedType]
+	currentModel := cfg.Model
+	recentItems := cfg.RecentModels
 
 	// Track providers already added to avoid duplicates
 	addedProviders := make(map[string]bool)
@@ -383,7 +376,7 @@ func (m *Models) setProviderItems() error {
 
 		if len(validRecentItems) != len(recentItems) {
 			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, fmt.Sprintf("recent_models.%s", selectedType), validRecentItems); err != nil {
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "recent_models", validRecentItems); err != nil {
 				return fmt.Errorf("failed to update recent models: %w", err)
 			}
 		}

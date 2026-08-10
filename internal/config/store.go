@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,11 +60,12 @@ type RuntimeOverrides struct {
 	// pushes channel events when it also appears here. Entries may be written
 	// as "server:<name>" or as a bare "<name>".
 	EnabledChannels []string
-	// Models records the model choices made in this instance, whether
-	// persisted or not. They are reapplied after a config reload so that a
+	// Model records the model choice made in this instance, whether
+	// persisted or not. It is reapplied after a config reload so that a
 	// selection made here always outranks whatever the shared config file
-	// happens to hold — see pinPreferredModelLocked.
-	Models map[SelectedModelType]SelectedModel
+	// happens to hold — see pinPreferredModelLocked. Nil means this instance
+	// never chose a model, so a reload should follow whatever is on disk.
+	Model *SelectedModel
 }
 
 // ConfigStore is the single entry point for all config access. It owns the
@@ -421,17 +421,13 @@ func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]
 	return nil
 }
 
-// OverridePreferredModel sets the preferred model for the given type in
-// memory only, without persisting. It is for per-run overrides (such as the
-// non-interactive --model flags) that must not be written to the user's
-// config file.
-func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model SelectedModel) {
+// OverridePreferredModel sets the preferred model in memory only, without
+// persisting. It is for per-run overrides (such as the non-interactive
+// --model flag) that must not be written to the user's config file.
+func (s *ConfigStore) OverridePreferredModel(model SelectedModel) {
 	s.mutateInMemory(func(c *Config) {
-		if c.Models == nil {
-			c.Models = make(map[SelectedModelType]SelectedModel)
-		}
-		c.Models[modelType] = model
-		s.pinPreferredModelLocked(modelType, model)
+		c.Model = model
+		s.pinPreferredModelLocked(model)
 	})
 }
 
@@ -443,11 +439,9 @@ func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model 
 // switch models out from under the user mid-session.
 //
 // Caller must hold writeMu.
-func (s *ConfigStore) pinPreferredModelLocked(modelType SelectedModelType, model SelectedModel) {
-	if s.overrides.Models == nil {
-		s.overrides.Models = make(map[SelectedModelType]SelectedModel)
-	}
-	s.overrides.Models[modelType] = model
+func (s *ConfigStore) pinPreferredModelLocked(model SelectedModel) {
+	m := model
+	s.overrides.Model = &m
 }
 
 // RemoveConfigField removes a key from the config file for the given scope.
@@ -474,39 +468,33 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 	return nil
 }
 
-// UpdatePreferredModel updates the preferred model for the given type and
-// persists it to the config file at the given scope. The selected model and
-// the recent-models list are written together in a single config write.
+// UpdatePreferredModel updates the preferred model and persists it to the
+// config file at the given scope. The selected model and the recent-models
+// list are written together in a single config write.
 //
 // The write skips the full disk reparse/reload (which would rebuild the
 // provider catalog and agents on every model switch and dominate selection
 // latency); agents are refreshed separately by the caller (see
 // UpdateAgentModel).
-func (s *ConfigStore) UpdatePreferredModel(scope Scope, modelType SelectedModelType, model SelectedModel) error {
+func (s *ConfigStore) UpdatePreferredModel(scope Scope, model SelectedModel) error {
 	return s.update(scope, func(c *Config) map[string]any {
-		return s.updatePreferredModelFields(c, modelType, model)
+		return s.updatePreferredModelFields(c, model)
 	})
 }
 
 // updatePreferredModelFields builds the fields map for persisting a preferred
 // model change. Shared between UpdatePreferredModel and direct updateLocked
 // callers (e.g. Load). Caller must hold writeMu.
-func (s *ConfigStore) updatePreferredModelFields(c *Config, modelType SelectedModelType, model SelectedModel) map[string]any {
-	if c.Models == nil {
-		c.Models = make(map[SelectedModelType]SelectedModel)
-	}
-	c.Models[modelType] = model
-	s.pinPreferredModelLocked(modelType, model)
+func (s *ConfigStore) updatePreferredModelFields(c *Config, model SelectedModel) map[string]any {
+	c.Model = model
+	s.pinPreferredModelLocked(model)
 
 	fields := map[string]any{
-		fmt.Sprintf("models.%s", modelType): model,
+		"model": model,
 	}
-	if updated, changed := nextRecentModels(c, modelType, model); changed {
-		if c.RecentModels == nil {
-			c.RecentModels = make(map[SelectedModelType][]SelectedModel)
-		}
-		c.RecentModels[modelType] = updated
-		fields[fmt.Sprintf("recent_models.%s", modelType)] = updated
+	if updated, changed := nextRecentModels(c, model); changed {
+		c.RecentModels = updated
+		fields["recent_models"] = updated
 	}
 	return fields
 }
@@ -959,12 +947,12 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 	return &token, nil
 }
 
-// nextRecentModels computes the recent-models list for the given type
-// after recording the supplied model at the front, operating on the
-// provided config without persisting anything. It returns the new slice
-// and whether it differs from cfg's current list. Callers fold the result
-// into a clone they are about to publish.
-func nextRecentModels(cfg *Config, modelType SelectedModelType, model SelectedModel) ([]SelectedModel, bool) {
+// nextRecentModels computes the recent-models list after recording the
+// supplied model at the front, operating on the provided config without
+// persisting anything. It returns the new slice and whether it differs from
+// cfg's current list. Callers fold the result into a clone they are about
+// to publish.
+func nextRecentModels(cfg *Config, model SelectedModel) ([]SelectedModel, bool) {
 	if model.Provider == "" || model.Model == "" {
 		return nil, false
 	}
@@ -978,14 +966,14 @@ func nextRecentModels(cfg *Config, modelType SelectedModelType, model SelectedMo
 		Model:    model.Model,
 	}
 
-	current := cfg.RecentModels[modelType]
+	current := cfg.RecentModels
 	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
 		return eq(existing, entry)
 	})
 
 	updated := append([]SelectedModel{entry}, withoutCurrent...)
-	if len(updated) > maxRecentModelsPerType {
-		updated = updated[:maxRecentModelsPerType]
+	if len(updated) > maxRecentModels {
+		updated = updated[:maxRecentModels]
 	}
 
 	if slices.EqualFunc(current, updated, eq) {
@@ -1183,16 +1171,21 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 
 // snapshotOverrides returns a copy of the runtime overrides deep enough to
 // read without holding writeMu afterward: the top-level struct plus its
-// slice/map fields are cloned so a concurrent mutator (which mutates
-// overrides.Models in place under writeMu, see pinPreferredModelLocked)
-// cannot race a caller ranging over the snapshot later.
+// slice/pointer fields are cloned so a concurrent mutator (which replaces
+// overrides.Model under writeMu, see pinPreferredModelLocked) cannot race a
+// caller reading the snapshot later.
 func (s *ConfigStore) snapshotOverrides() RuntimeOverrides {
 	s.writeMu.RLock()
 	defer s.writeMu.RUnlock()
+	var model *SelectedModel
+	if s.overrides.Model != nil {
+		m := *s.overrides.Model
+		model = &m
+	}
 	return RuntimeOverrides{
 		SkipPermissionRequests: s.overrides.SkipPermissionRequests,
 		EnabledChannels:        slices.Clone(s.overrides.EnabledChannels),
-		Models:                 maps.Clone(s.overrides.Models),
+		Model:                  model,
 	}
 }
 
@@ -1254,15 +1247,17 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// Snapshot runtime overrides up front (a brief writeMu.RLock) rather
 	// than reading s.overrides directly, since the rest of this function
 	// runs without writeMu held and a concurrent mutator could otherwise
-	// race a later read of the same map.
+	// race a later read of the same field.
 	overrides := s.snapshotOverrides()
 
-	// Reapply model choices made in this instance. The global config file is
-	// shared, so it may now name a model a sibling instance selected; a
+	// Reapply a model choice made in this instance. The global config file
+	// is shared, so it may now name a model a sibling instance selected; a
 	// reload triggered by an unrelated write must not swap the user's model
-	// mid-session. An external edit to the config still takes effect for any
-	// model type this instance never chose.
-	maps.Copy(cfg.Models, overrides.Models)
+	// mid-session. An external edit to the config still takes effect when
+	// this instance never chose a model of its own.
+	if overrides.Model != nil {
+		cfg.Model = *overrides.Model
+	}
 
 	// Reconfigure providers
 	env := env.New()
@@ -1288,15 +1283,14 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		return fmt.Errorf("failed to configure providers during reload: %w", err)
 	}
 
-	var resolved resolvedModels
+	var resolved resolvedModel
 	configured := cfg.IsConfigured()
 	if configured {
-		resolved, err = resolveSelectedModels(cfg, providers)
+		resolved, err = resolveSelectedModel(cfg, providers)
 		if err != nil {
 			return fmt.Errorf("failed to configure selected models during reload: %w", err)
 		}
-		cfg.Models[SelectedModelTypeLarge] = resolved.Large
-		cfg.Models[SelectedModelTypeSmall] = resolved.Small
+		cfg.Model = resolved.Model
 	} else {
 		slog.Warn("No providers configured after reload")
 	}

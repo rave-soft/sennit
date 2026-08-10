@@ -708,11 +708,12 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
 
-	// We currently only support large/small as values here.
-	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
+	// Model is the single model Braid uses for the session.
+	Model SelectedModel `json:"model,omitzero" jsonschema:"description=The model configuration,example={\"model\":\"gpt-4o\",\"provider\":\"openai\"}"`
 
-	// Recently used models stored in the data directory config.
-	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"-"`
+	// RecentModels lists recently used models, most-recent-first. Stored
+	// in the data directory config.
+	RecentModels []SelectedModel `json:"recent_models,omitempty" jsonschema:"-"`
 
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
@@ -750,15 +751,15 @@ type Config struct {
 // Reads of a published Config take no lock beyond the pointer load, so a
 // mutator must never write through the live pointer. Instead it clones,
 // mutates the clone, and atomically swaps it in. The clone gives fresh
-// copies of every field a typed mutator touches in place — Models,
-// RecentModels, MCP, and Options (with its nested TUI pointer). Providers
-// is a *csync.Map (internally synchronized) and is shared by reference;
-// the remaining fields are immutable after load from the mutators'
-// standpoint and are likewise shared.
+// copies of every field a typed mutator touches in place — Model (a plain
+// value, copied by the struct copy above), RecentModels, MCP, and Options
+// (with its nested TUI pointer). Providers is a *csync.Map (internally
+// synchronized) and is shared by reference; the remaining fields are
+// immutable after load from the mutators' standpoint and are likewise
+// shared.
 func (c *Config) cloneForWrite() *Config {
 	nc := *c
-	nc.Models = maps.Clone(c.Models)
-	nc.RecentModels = maps.Clone(c.RecentModels)
+	nc.RecentModels = slices.Clone(c.RecentModels)
 	nc.MCP = maps.Clone(c.MCP)
 	if c.Options != nil {
 		opts := *c.Options
@@ -819,39 +820,27 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	return nil
 }
 
+// GetProviderForModel returns the provider configured for c.Model. The
+// modelType parameter is retained (rather than dropped) purely so callers
+// that still pass SelectedModelTypeLarge/Small compile unchanged; there is
+// only one configured model now, so the argument is ignored.
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
-	model, ok := c.Models[modelType]
-	if !ok {
-		return nil
-	}
-	if providerConfig, ok := c.Providers.Get(model.Provider); ok {
+	if providerConfig, ok := c.Providers.Get(c.Model.Provider); ok {
 		return &providerConfig
 	}
 	return nil
 }
 
+// GetModelByType returns the catalog entry for c.Model. See
+// GetProviderForModel for why modelType is still accepted but ignored.
 func (c *Config) GetModelByType(modelType SelectedModelType) *catwalk.Model {
-	model, ok := c.Models[modelType]
-	if !ok {
-		return nil
-	}
-	return c.GetModel(model.Provider, model.Model)
+	return c.GetModel(c.Model.Provider, c.Model.Model)
 }
 
+// LargeModel returns the catalog entry for the one model Braid is
+// configured to use.
 func (c *Config) LargeModel() *catwalk.Model {
-	model, ok := c.Models[SelectedModelTypeLarge]
-	if !ok {
-		return nil
-	}
-	return c.GetModel(model.Provider, model.Model)
-}
-
-func (c *Config) SmallModel() *catwalk.Model {
-	model, ok := c.Models[SelectedModelTypeSmall]
-	if !ok {
-		return nil
-	}
-	return c.GetModel(model.Provider, model.Model)
+	return c.GetModel(c.Model.Provider, c.Model.Model)
 }
 
 // DefaultModelForProvider resolves the default large model for a single,
@@ -889,7 +878,7 @@ func (c *Config) DefaultModelForProvider(providerID string, knownProviders []cat
 	}, nil
 }
 
-const maxRecentModelsPerType = 5
+const maxRecentModels = 5
 
 // AllToolNames returns the names of every built-in tool the agent can be
 // given, in the order buildTools constructs them. It is the single source

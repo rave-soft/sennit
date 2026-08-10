@@ -112,12 +112,9 @@
         "$schema": {
           "type": "string"
         },
-        "models": {
-          "additionalProperties": {
-            "$ref": "#/$defs/SelectedModel"
-          },
-          "type": "object",
-          "description": "Model configurations for different model types"
+        "model": {
+          "$ref": "#/$defs/SelectedModel",
+          "description": "The model configuration"
         },
         "providers": {
           "additionalProperties": {

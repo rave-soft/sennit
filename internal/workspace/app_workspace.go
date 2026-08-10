@@ -453,14 +453,14 @@ func (w *AppWorkspace) Resolver() config.VariableResolver {
 
 // -- Config mutations --
 
-func (w *AppWorkspace) UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error {
-	return w.store.UpdatePreferredModel(scope, modelType, model)
+func (w *AppWorkspace) UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error {
+	return w.store.UpdatePreferredModel(scope, model)
 }
 
 // OverridePreferredModel sets the model in memory only, without
 // touching the user's config file. See the Workspace interface doc.
-func (w *AppWorkspace) OverridePreferredModel(modelType config.SelectedModelType, model config.SelectedModel) error {
-	w.store.OverridePreferredModel(modelType, model)
+func (w *AppWorkspace) OverridePreferredModel(model config.SelectedModel) error {
+	w.store.OverridePreferredModel(model)
 	return nil
 }
 

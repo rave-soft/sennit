@@ -9,12 +9,12 @@ import (
 	"github.com/rave-soft/braid/internal/workspace"
 )
 
-// selectedLargeModel returns the currently selected large language model as
-// memoized by the off-thread busy/agent probe (see workspace_cache.go), or
-// nil when the agent isn't ready. It must never probe the workspace: it is
-// called on every frame and AgentIsReady/AgentModel are synchronous HTTP
-// round-trips in client/server mode.
-func (m *UI) selectedLargeModel() *workspace.AgentModel {
+// selectedModel returns the currently selected model as memoized by the
+// off-thread busy/agent probe (see workspace_cache.go), or nil when the
+// agent isn't ready. It must never probe the workspace: it is called on
+// every frame and AgentIsReady/AgentModel are synchronous HTTP round-trips
+// in client/server mode.
+func (m *UI) selectedModel() *workspace.AgentModel {
 	if m.wsCache.agentReady {
 		model := m.wsCache.agentModel
 		return &model

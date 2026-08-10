@@ -18,23 +18,24 @@ import (
 //	    [--price-output F] [--price-cache-create F]
 //	    [--price-cache-hit F] [--reasoning-effort low|medium|high]
 //	model remove <provider>/<id>   (alias: rm)
-//	model large [<provider>/<id>] [--think] [--reasoning-effort L]
+//	model [<provider>/<id>] [--think] [--reasoning-effort L]
 //	    [--max-tokens N] [--temperature F] [--top-p F] [--top-k N]
 //	    [--frequency-penalty F] [--presence-penalty F]
 //	    [--provider-options JSON]
-//	model small [<provider>/<id>] [...]
 //
 // "add" registers a model on an existing provider (the provider must have
-// been declared with `provider add` first). "remove" removes it. "large" and
-// "small" set the selected model for that slot, or print the current
-// selection as <provider>/<id> when given no argument.
+// been declared with `provider add` first). "remove" removes it. Given a
+// <provider>/<id>, the bare form sets the selected model; given no argument
+// it prints the current selection as <provider>/<id>. The old `model large`
+// and `model small` slot syntax is rejected: Braid now selects a single
+// model, not a large/small pair.
 func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: model add|remove <provider>/<id> | model large|small [<provider>/<id>]")
+		return modelPrint(b, stdout)
 	}
 
 	switch args[1] {
@@ -43,9 +44,9 @@ func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	case "remove", "rm":
 		return modelRemove(b, args, stderr)
 	case "large", "small":
-		return modelSelect(b, args, stdout, stderr)
+		return usage(stderr, "model: slots are gone; use model <provider/id>")
 	default:
-		return usage(stderr, fmt.Sprintf("model: unknown subcommand %q (expected add, remove, large, or small)", args[1]))
+		return modelSet(b, args, stderr)
 	}
 }
 
@@ -138,7 +139,8 @@ func modelRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	return nil
 }
 
-// modelSelectFlags is the declarative flag surface for `model large`/`small`.
+// modelSelectFlags is the declarative flag surface for the bare `model`
+// select form.
 var modelSelectFlags = []flagSpec{
 	{name: "--think", jsonKey: "think", kind: flagBoolTrue, op: opSet},
 	{name: "--reasoning-effort", jsonKey: "reasoning_effort", kind: flagString, op: opSet},
@@ -157,36 +159,40 @@ var modelSelectFlags = []flagSpec{
 	{name: "--provider-options", child: "provider_options", kind: flagJSONObject, op: opMergeChild},
 }
 
-func modelSelect(b *ConfigBuilder, args []string, stdout, stderr io.Writer) error {
-	slot := args[1]
-
-	// No argument: print the current selection as <provider>/<id>.
-	if len(args) == 2 {
-		if models, ok := b.root["models"].(map[string]any); ok {
-			if sel, ok := models[slot].(map[string]any); ok {
-				provider, _ := sel["provider"].(string)
-				id, _ := sel["model"].(string)
-				if provider != "" && id != "" {
-					fmt.Fprintln(stdout, provider+"/"+id)
-				}
-			}
+// modelPrint prints the current selection as <provider>/<id>, or nothing if
+// no model is configured yet.
+func modelPrint(b *ConfigBuilder, stdout io.Writer) error {
+	if sel, ok := b.root["model"].(map[string]any); ok {
+		provider, _ := sel["provider"].(string)
+		id, _ := sel["model"].(string)
+		if provider != "" && id != "" {
+			fmt.Fprintln(stdout, provider+"/"+id)
 		}
-		return nil
 	}
+	return nil
+}
 
-	provider, id, ok := splitProviderModel(args[2])
+// modelSet handles the bare `model <provider>/<id> [flags]` form, which sets
+// the single selected model.
+func modelSet(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	provider, id, ok := splitProviderModel(args[1])
 	if !ok {
-		return usage(stderr, fmt.Sprintf("model %s: expected <provider>/<id>, got %q", slot, args[2]))
+		return usage(stderr, fmt.Sprintf("model: expected <provider>/<id>, got %q", args[1]))
 	}
 
-	sel := childMap(b.section("models"), slot)
+	sel := b.section("model")
 	sel["provider"] = provider
 	sel["model"] = id
 
-	if err := applyFlags(modelSelectFlags, args, sel, "model "+slot, stderr); err != nil {
+	// applyFlags always reads flags starting at args[applyFlagsStart]
+	// (offset 3, matching "builtin subcommand name"), but the no-slot
+	// form only has "model <provider/id>" before its flags. Pad with a
+	// placeholder token to keep the shared offset.
+	padded := append([]string{args[0], "model", args[1]}, args[2:]...)
+	if err := applyFlags(modelSelectFlags, padded, sel, "model", stderr); err != nil {
 		return err
 	}
 
-	slog.Info("Model selected in shell config", "slot", slot, "provider", provider, "model", id)
+	slog.Info("Model selected in shell config", "provider", provider, "model", id)
 	return nil
 }

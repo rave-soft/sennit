@@ -30,9 +30,8 @@ delegate. The body is the system prompt.
 `anthropic/claude-sonnet-4`) to pin an agent to a model of its own; a bare
 model id also works if it's unambiguous across your configured providers.
 Omitting it makes the agent use the app's main model. A value that doesn't
-resolve to a configured provider/model — including the words `large` or
-`small`, which carry no special meaning here — is ignored with a warning and
-the agent falls back to the main model. `reasoning_effort` overrides the
+resolve to a configured provider/model is ignored with a warning and the
+agent falls back to the main model. `reasoning_effort` overrides the
 model's effort for this agent alone, and applies the same way regardless of
 whether `model` is set or omitted; an effort the model doesn't offer is
 ignored at call time in favor of the model's own default.

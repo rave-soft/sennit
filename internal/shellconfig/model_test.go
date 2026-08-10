@@ -77,7 +77,7 @@ func TestModelSelectRejectsInvalidTopP(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "braidrc")
-	_, err := LoadShellConfig(t.Context(), path, []byte(`model large openai/gpt-x --top-p 1.5`))
+	_, err := LoadShellConfig(t.Context(), path, []byte(`model openai/gpt-x --top-p 1.5`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "between 0 and 1")
 }
@@ -86,7 +86,7 @@ func TestModelSelectRejectsNonObjectProviderOptions(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "braidrc")
-	_, err := LoadShellConfig(t.Context(), path, []byte(`model large openai/gpt-x --provider-options '[]'`))
+	_, err := LoadShellConfig(t.Context(), path, []byte(`model openai/gpt-x --provider-options '[]'`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "expects a JSON object")
 }
@@ -134,32 +134,54 @@ model remove openai/a`)
 	require.Equal(t, "b", models[0].(map[string]any)["id"])
 }
 
-func TestModelLargeSmall(t *testing.T) {
+func TestModelSet(t *testing.T) {
 	t.Parallel()
 
-	result := loadScript(t, `model large openai/gpt-4o --think
-model small anthropic/claude-3-5-haiku`)
+	result := loadScript(t, `model openai/gpt-4o --think`)
 
-	models := result["models"].(map[string]any)
-	large := models["large"].(map[string]any)
-	require.Equal(t, "openai", large["provider"])
-	require.Equal(t, "gpt-4o", large["model"])
-	require.Equal(t, true, large["think"])
-
-	small := models["small"].(map[string]any)
-	require.Equal(t, "anthropic", small["provider"])
-	require.Equal(t, "claude-3-5-haiku", small["model"])
+	model := result["model"].(map[string]any)
+	require.Equal(t, "openai", model["provider"])
+	require.Equal(t, "gpt-4o", model["model"])
+	require.Equal(t, true, model["think"])
 }
 
-// TestModelLargePrint verifies that `model large` with no argument prints the
-// current selection, capturable via command substitution.
-func TestModelLargePrint(t *testing.T) {
+// TestModelPrint verifies that `model` with no argument prints the current
+// selection, capturable via command substitution.
+func TestModelPrint(t *testing.T) {
 	t.Parallel()
 
-	result := loadScript(t, `model large openai/gpt-4o
-option data-directory "$(model large)"`)
+	result := loadScript(t, `model openai/gpt-4o
+option data-directory "$(model)"`)
 
 	require.Equal(t, "openai/gpt-4o", result["options"].(map[string]any)["data_directory"])
+}
+
+// TestModelPrintNothingConfigured verifies that `model` with no argument and
+// no prior selection succeeds without printing or erroring.
+func TestModelPrintNothingConfigured(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "braidrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`model`))
+	require.NoError(t, err)
+}
+
+// TestModelLargeSmallRejected verifies that the old large/small slot syntax
+// is rejected now that Braid selects a single model.
+func TestModelLargeSmallRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, script := range []string{
+		"model large",
+		"model large openai/gpt-4o",
+		"model small foo/bar",
+		"model small --think",
+	} {
+		path := filepath.Join(t.TempDir(), "braidrc")
+		_, err := LoadShellConfig(t.Context(), path, []byte(script))
+		require.Error(t, err, script)
+		require.Contains(t, err.Error(), "slots are gone", script)
+	}
 }
 
 func TestProviderUnset(t *testing.T) {

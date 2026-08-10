@@ -32,44 +32,30 @@ func ParseModelString(providers map[string]ProviderConfig, modelStr string) (pro
 	return "", modelStr
 }
 
-// FindModelMatches searches providers for large/small model strings and
-// returns their matches. Provider and model name comparisons are
-// case-insensitive.
-func FindModelMatches(providers map[string]ProviderConfig, largeModel, smallModel string) ([]ModelMatch, []ModelMatch, error) {
-	largeProviderFilter, largeModelID := ParseModelString(providers, largeModel)
-	smallProviderFilter, smallModelID := ParseModelString(providers, smallModel)
+// FindModelMatches searches providers for a model string and returns its
+// matches. Provider and model name comparisons are case-insensitive.
+func FindModelMatches(providers map[string]ProviderConfig, modelStr string) ([]ModelMatch, error) {
+	providerFilter, modelID := ParseModelString(providers, modelStr)
 
-	// Validate provider filters exist.
-	for _, pf := range []struct {
-		filter, label string
-	}{
-		{largeProviderFilter, "large"},
-		{smallProviderFilter, "small"},
-	} {
-		if pf.filter != "" {
-			if _, ok := providers[pf.filter]; !ok {
-				return nil, nil, fmt.Errorf("%s model: provider %q not found in configuration. Use 'braid models' to list available models", pf.label, pf.filter)
-			}
+	if providerFilter != "" {
+		if _, ok := providers[providerFilter]; !ok {
+			return nil, fmt.Errorf("provider %q not found in configuration. Use 'braid models' to list available models", providerFilter)
 		}
 	}
 
-	// Find matching models in a single pass.
-	var largeMatches, smallMatches []ModelMatch
+	var matches []ModelMatch
 	for name, provider := range providers {
 		if provider.Disable {
 			continue
 		}
 		for _, m := range provider.Models {
-			if modelFilterMatches(largeModelID, largeProviderFilter, m.ID, name) {
-				largeMatches = append(largeMatches, ModelMatch{Provider: name, ModelID: m.ID})
-			}
-			if modelFilterMatches(smallModelID, smallProviderFilter, m.ID, name) {
-				smallMatches = append(smallMatches, ModelMatch{Provider: name, ModelID: m.ID})
+			if modelFilterMatches(modelID, providerFilter, m.ID, name) {
+				matches = append(matches, ModelMatch{Provider: name, ModelID: m.ID})
 			}
 		}
 	}
 
-	return largeMatches, smallMatches, nil
+	return matches, nil
 }
 
 // modelFilterMatches reports whether a model/provider pair satisfies the

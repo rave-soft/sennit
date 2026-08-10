@@ -3893,17 +3893,6 @@ const docTemplate = `{
                 }
             }
         },
-        "config.SelectedModelType": {
-            "type": "string",
-            "enum": [
-                "large",
-                "small"
-            ],
-            "x-enum-varnames": [
-                "SelectedModelTypeLarge",
-                "SelectedModelTypeSmall"
-            ]
-        },
         "config.TUIOptions": {
             "type": "object",
             "properties": {
@@ -4046,12 +4035,13 @@ const docTemplate = `{
                 "mcp": {
                     "$ref": "#/definitions/config.MCPs"
                 },
-                "models": {
-                    "description": "We currently only support large/small as values here.",
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/config.SelectedModel"
-                    }
+                "model": {
+                    "description": "Model is the single model Braid uses for the session.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.SelectedModel"
+                        }
+                    ]
                 },
                 "options": {
                     "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Options"
@@ -4068,13 +4058,10 @@ const docTemplate = `{
                     ]
                 },
                 "recent_models": {
-                    "description": "Recently used models stored in the data directory config.",
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/definitions/config.SelectedModel"
-                        }
+                    "description": "RecentModels lists recently used models, most-recent-first. Stored\nin the data directory config.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.SelectedModel"
                     }
                 },
                 "tools": {
@@ -4391,9 +4378,6 @@ const docTemplate = `{
             "properties": {
                 "model": {
                     "$ref": "#/definitions/config.SelectedModel"
-                },
-                "model_type": {
-                    "$ref": "#/definitions/config.SelectedModelType"
                 },
                 "scope": {
                     "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Scope"

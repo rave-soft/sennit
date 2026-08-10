@@ -227,16 +227,16 @@ type ConfigAccessor interface {
 	WorkingDir() string
 	Resolver() config.VariableResolver
 
-	UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error
+	UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error
 	// OverridePreferredModel applies a preferred-model override for the
-	// current process, for callers (namely `braid run -m/--small-model`)
-	// that must not surprise the user with a config-file write from a
+	// current process, for callers (namely `braid run -m/--model`) that
+	// must not surprise the user with a config-file write from a
 	// single invocation. In local mode this is purely in-memory (see
 	// config.ConfigStore.OverridePreferredModel). Client/server mode has
 	// no equivalent ephemeral primitive on the server, so it falls back
 	// to a persisted UpdatePreferredModel at ScopeWorkspace — matching
 	// braid run -m's pre-existing behavior in that mode.
-	OverridePreferredModel(modelType config.SelectedModelType, model config.SelectedModel) error
+	OverridePreferredModel(model config.SelectedModel) error
 	SetCompactMode(scope config.Scope, enabled bool) error
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
 	SetConfigField(scope config.Scope, key string, value any) error

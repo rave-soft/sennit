@@ -133,8 +133,8 @@ func renderHeaderDetails(
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
 	}
 
-	// The coder agent leaves Model unset (it inherits the app's main model),
-	// so the model it actually runs on always lives in the large slot.
+	// The coder agent leaves Model unset (it inherits the app's configured
+	// model), so the model it actually runs on is always cfg.Model.
 	model := com.Config().GetModelByType(config.SelectedModelTypeLarge)
 	if model != nil && model.ContextWindow > 0 {
 		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100

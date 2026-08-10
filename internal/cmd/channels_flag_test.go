@@ -35,3 +35,13 @@ func TestChannelsFlagAvailableOnRootCmd(t *testing.T) {
 	}
 	require.NotNil(t, flag, "the --channels flag must be available on `braid` (rootCmd)")
 }
+
+// TestSmallModelFlagRemovedFromRunCmd guards against --small-model
+// reappearing on `braid run`. Helper (small) model selection is fully
+// automatic now, so it must not be exposed as a CLI override.
+func TestSmallModelFlagRemovedFromRunCmd(t *testing.T) {
+	t.Parallel()
+
+	flag := runCmd.Flags().Lookup("small-model")
+	require.Nil(t, flag, "--small-model must not be registered on `braid run`; helper model selection is automatic")
+}
