@@ -839,7 +839,7 @@ func renderAgentStatusLine(sty *styles.Styles, width int, startTime time.Time, n
 
 	parts := []string{formatElapsed(time.Since(startTime)), fmt.Sprintf("step %d", len(nestedTools))}
 	if len(nestedTools) > 0 {
-		if summary := lastToolSummary(nestedTools[len(nestedTools)-1].ToolCall()); summary != "" {
+		if summary := LastToolSummary(nestedTools[len(nestedTools)-1].ToolCall()); summary != "" {
 			parts = append(parts, "→ "+summary)
 		}
 	}
@@ -975,10 +975,13 @@ func capTodosForDelegation(todos []session.Todo, maxLines int) []session.Todo {
 	return out
 }
 
-// lastToolSummary describes a single child tool call as "name key-arg" for
-// the status line, e.g. `grep "Provider" internal/config`. Falls back to
-// just the tool name when there's no argument worth summarizing.
-func lastToolSummary(tc message.ToolCall) string {
+// LastToolSummary describes a single child tool call as "name key-arg" for
+// a status line, e.g. `grep "Provider" internal/config`. Falls back to
+// just the tool name when there's no argument worth summarizing. Exported
+// for the child-session panel in internal/ui/model, which builds the same
+// "→ last tool" activity text from the child session's own loaded chat
+// while viewing it directly (see Chat.LastToolCall).
+func LastToolSummary(tc message.ToolCall) string {
 	if arg := toolKeyArgument(tc); arg != "" {
 		return tc.Name + " " + arg
 	}

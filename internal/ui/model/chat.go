@@ -12,6 +12,7 @@ import (
 	"github.com/clipperhouse/displaywidth"
 	"github.com/clipperhouse/uax29/v2/words"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
@@ -901,6 +902,33 @@ func (m *Chat) NestedToolContainerRefs() []childSessionRef {
 		refs = append(refs, childSessionRef{messageID: toolItem.MessageID(), toolCallID: toolItem.ToolCall().ID})
 	}
 	return refs
+}
+
+// ToolStepCount returns the number of top-level tool-call items in the
+// list — a cheap proxy for "how many steps has this session taken so far".
+// Used by the child-session panel's live activity line while a child
+// session is loaded directly (m.chat then holds the child's own items,
+// not the parent's).
+func (m *Chat) ToolStepCount() int {
+	n := 0
+	for i := range m.list.Len() {
+		if _, ok := m.list.ItemAt(i).(chat.ToolMessageItem); ok {
+			n++
+		}
+	}
+	return n
+}
+
+// LastToolCall returns the most recent top-level tool call in the list and
+// true, or a zero value and false if the list has none. Companion to
+// ToolStepCount for the child-session panel's "→ last tool" activity.
+func (m *Chat) LastToolCall() (message.ToolCall, bool) {
+	for i := m.list.Len() - 1; i >= 0; i-- {
+		if item, ok := m.list.ItemAt(i).(chat.ToolMessageItem); ok {
+			return item.ToolCall(), true
+		}
+	}
+	return message.ToolCall{}, false
 }
 
 // IsSelectedShellItem returns true if the currently selected item is a

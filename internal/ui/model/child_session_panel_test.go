@@ -7,16 +7,20 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/attachments"
+	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
 )
 
 // newChildSessionPanelTestUI builds a UI in uiChat with a two-level-deep
-// nav stack (main -> agent1 -> agent2), mirroring what enterChildSession
+// nav stack (developer-junior -> task), mirroring what enterChildSession
 // leaves behind after two descents, and a real layout so u.layout.editor
-// is a real rectangle sized for the panel.
+// is a real rectangle sized for the panel. The top-level frame has 3
+// siblings (this is the 3rd), the current frame has none, matching the
+// target example: "developer-junior (3/3) › task (...)".
 func newChildSessionPanelTestUI(t *testing.T) *UI {
 	t.Helper()
 	u := newTestUI()
@@ -25,24 +29,41 @@ func newChildSessionPanelTestUI(t *testing.T) *UI {
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
 	u.session = &session.Session{ID: "grandchild-session", PromptTokens: 800, CompletionTokens: 200}
 	u.navStack = []sessionNavFrame{
-		{parentSessionID: "main-session", parentTitle: "main", label: "agent1"},
 		{
-			parentSessionID: "child-session", parentTitle: "agent1",
-			label: "agent2", agentName: "developer", model: "claude-sonnet-5", effort: "medium",
+			parentSessionID: "main-session", parentTitle: "main",
+			label: "fix the login bug", agentName: "developer-junior",
+			siblings: make([]childSessionRef, 3), siblingIndex: 2,
+		},
+		{
+			parentSessionID: "child-session", parentTitle: "developer-junior",
+			label:     "Read the entire file and summarize its contents",
+			agentName: "task", model: "claude-sonnet-5", effort: "medium",
 		},
 	}
+	// Wide enough that the full activity parenthetical fits in row 1
+	// without invoking the width-pressure fallbacks (those are covered on
+	// their own by the TestChildSessionHeaderText_* tests below).
+	u.width = 220
 	u.updateLayoutAndSize()
 	return u
 }
 
-// TestChildSessionBreadcrumbChain covers the chain builder that feeds
-// drawChildSessionPanel: root title first, then each frame's label, in
-// descent order.
-func TestChildSessionBreadcrumbChain(t *testing.T) {
+// TestChildSessionLevelName covers the per-level breadcrumb text: the
+// agent name, a "(n/m)" sibling counter only when there's more than one
+// sibling, and a fallback to the prompt-snippet label when agentName
+// wasn't resolved (e.g. a cycled-to sibling never rendered in this chat).
+func TestChildSessionLevelName(t *testing.T) {
 	t.Parallel()
 
-	u := newChildSessionPanelTestUI(t)
-	require.Equal(t, []string{"main", "agent1", "agent2"}, u.childSessionBreadcrumbChain())
+	require.Equal(t, "task", childSessionLevelName(sessionNavFrame{agentName: "task"}))
+	require.Equal(t, "developer-junior (3/3)", childSessionLevelName(sessionNavFrame{
+		agentName: "developer-junior", siblings: make([]childSessionRef, 3), siblingIndex: 2,
+	}))
+	require.Equal(t, "task", childSessionLevelName(sessionNavFrame{
+		agentName: "task", siblings: make([]childSessionRef, 1),
+	}), "a single sibling must not show a counter")
+	require.Equal(t, "some prompt snippet", childSessionLevelName(sessionNavFrame{label: "some prompt snippet"}),
+		"must fall back to the label when agentName is unresolved")
 }
 
 // TestChildSessionPanelReplacesEditor: generateLayout must give the editor
@@ -56,7 +77,7 @@ func TestChildSessionPanelReplacesEditor(t *testing.T) {
 	require.NotEqual(t, childSessionPanelHeight, u.layout.editor.Dy(),
 		"outside child-session view the editor must size to the textarea, not the panel")
 
-	u.navStack = []sessionNavFrame{{parentSessionID: "parent", parentTitle: "main", label: "agent1"}}
+	u.navStack = []sessionNavFrame{{parentSessionID: "parent", parentTitle: "main", agentName: "agent1"}}
 	u.updateLayoutAndSize()
 
 	require.Equal(t, childSessionPanelHeight, u.layout.editor.Dy(),
@@ -64,8 +85,7 @@ func TestChildSessionPanelReplacesEditor(t *testing.T) {
 }
 
 // TestChildSessionPanelClickExitsChildSession: a click anywhere in the
-// editor area (now occupied by the panel) must pop the nav stack, the same
-// as alt+up or the status bar's back-button click.
+// editor area (now occupied by the panel) must pop the nav stack.
 func TestChildSessionPanelClickExitsChildSession(t *testing.T) {
 	t.Parallel()
 
@@ -102,30 +122,34 @@ func TestChildSessionPanelButtonHover(t *testing.T) {
 	require.False(t, u.childPanelHover, "moving off the button must clear childPanelHover")
 }
 
-// TestDrawChildSessionPanel_ShowsBreadcrumbNameModelEffortTokens covers the
-// panel's content: the muted ancestor breadcrumb leading into the
-// subagent's own name (not the prompt-snippet label) with a sibling
-// counter, the delegation's model/effort, and the child session's own
-// split token usage.
-func TestDrawChildSessionPanel_ShowsBreadcrumbNameModelEffortTokens(t *testing.T) {
+// TestDrawChildSessionPanel_ShowsBreadcrumbActivityModelEffortTokens covers
+// the panel's content end to end: the ancestor's name+counter, the current
+// level's bold name, its activity parenthetical (prompt snippet, step
+// count, last tool while running), the model/effort line, and the split
+// token usage. "main" must never appear — the back button already means
+// "go up".
+func TestDrawChildSessionPanel_ShowsBreadcrumbActivityModelEffortTokens(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].siblings = make([]childSessionRef, 3)
-	u.navStack[len(u.navStack)-1].siblingIndex = 1
+	u.chat.AppendMessages(
+		chat.NewToolMessageItem(u.com.Styles, "m1", message.ToolCall{ID: "tc-1", Name: "view", Input: `{}`, Finished: true}, nil, false, nil),
+		chat.NewToolMessageItem(u.com.Styles, "m1", message.ToolCall{ID: "tc-2", Name: "view", Input: `{}`, Finished: true}, nil, false, nil),
+		chat.NewToolMessageItem(u.com.Styles, "m1",
+			message.ToolCall{ID: "tc-3", Name: "grep", Input: `{"pattern":"login"}`, Finished: true}, nil, false, nil),
+	)
+	u.wsCache.agentBusyCache.set(true)
 
 	scr := uv.NewScreenBuffer(u.width, u.height)
 	u.drawChildSessionPanel(scr, u.layout.editor)
 	out := ansi.Strip(scr.Render())
 
-	require.Contains(t, out, "main")
-	require.Contains(t, out, "agent1")
-	require.Contains(t, out, "developer (2/3)",
-		"the emphasized name must be the delegation's agentName, not the prompt-snippet label, with the sibling counter")
-	require.NotContains(t, out, "agent2 (2/3)", "the raw label must not be shown once agentName is known")
-	// The trailing ")" can land exactly on the drawn area's last column
-	// depending on how the arrow glyph's display width is accounted for,
-	// so check the stable prefix rather than the full label.
+	require.NotContains(t, out, "main", `"main" must never appear in the breadcrumb`)
+	require.Contains(t, out, "developer-junior (3/3)", "ancestor level: name + sibling counter")
+	require.Contains(t, out, "› task", "current level separated from its ancestor")
+	require.Contains(t, out, "Read the entire file", "current level's prompt snippet")
+	require.Contains(t, out, "step 3", "current level's step count, from the loaded child chat")
+	require.Contains(t, out, `grep "login"`, "current level's last tool call, while running")
 	require.Contains(t, out, "back (alt+up")
 	require.Contains(t, out, "claude-sonnet-5")
 	require.Contains(t, out, "effort medium")
@@ -133,21 +157,101 @@ func TestDrawChildSessionPanel_ShowsBreadcrumbNameModelEffortTokens(t *testing.T
 	require.Contains(t, out, "200", "completion token count must be shown")
 }
 
-// TestDrawChildSessionPanel_FallsBackToLabelWithoutAgentName covers the
-// degraded case (e.g. a cycled-to sibling whose item never rendered in
-// this chat, see cycleChildSession): with no agentName resolved, the panel
-// falls back to the prompt-snippet label instead of showing nothing.
-func TestDrawChildSessionPanel_FallsBackToLabelWithoutAgentName(t *testing.T) {
+// TestChildSessionCurrentActivity_OmitsLastToolWhenNotRunning: the last
+// tool call is only interesting while the delegation is actively running —
+// once idle, only the snippet and step count remain.
+func TestChildSessionCurrentActivity_OmitsLastToolWhenNotRunning(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].agentName = ""
+	u.chat.AppendMessages(
+		chat.NewToolMessageItem(u.com.Styles, "m1",
+			message.ToolCall{ID: "tc-1", Name: "grep", Input: `{"pattern":"login"}`, Finished: true}, nil, false, nil),
+	)
+	u.wsCache.agentBusyCache.set(false)
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChildSessionPanel(scr, u.layout.editor)
-	out := ansi.Strip(scr.Render())
+	activity := u.childSessionCurrentActivity()
+	require.Contains(t, activity, "step 1")
+	require.NotContains(t, activity, "grep", "an idle delegation's last tool call is not shown")
+}
 
-	require.Contains(t, out, "agent2", "must fall back to label when agentName is unresolved")
+// TestChildSessionHeaderText_DropsActivityBeforeAncestors covers the
+// agreed sacrifice order (requirement 5): under width pressure, the
+// activity parenthetical is dropped first, while the full ancestor
+// breadcrumb is kept as long as it still fits.
+func TestChildSessionHeaderText_DropsActivityBeforeAncestors(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+
+	full := u.childSessionHeaderText(u.com.Styles, 200)
+	require.Contains(t, ansi.Strip(full), "Read the entire file", "plenty of width: activity parenthetical shown")
+
+	// Narrow enough to drop the parenthetical but not the ancestor name.
+	narrower := u.childSessionHeaderText(u.com.Styles, ansi.StringWidth(ansi.Strip(full))-5)
+	out := ansi.Strip(narrower)
+	require.NotContains(t, out, "Read the entire file", "activity parenthetical must be dropped first")
+	require.Contains(t, out, "developer-junior (3/3)", "ancestor breadcrumb must still be shown")
+	require.Contains(t, out, "task")
+}
+
+// TestChildSessionHeaderText_CollapsesMiddleLevels covers a 3+ level deep
+// stack: once even the plain (no-activity) breadcrumb doesn't fit, the
+// middle levels collapse into a single "…", keeping the root and the
+// current (bold) level.
+func TestChildSessionHeaderText_CollapsesMiddleLevels(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	u.navStack = append([]sessionNavFrame{
+		{parentSessionID: "root", parentTitle: "main", agentName: "root-agent-with-a-long-name"},
+	}, u.navStack...)
+	u.navStack[len(u.navStack)-1].label = "" // no activity to simplify this test
+
+	root := childSessionLevelName(u.navStack[0])
+	middle := childSessionLevelName(u.navStack[1])
+	last := childSessionLevelName(u.navStack[2])
+	full := root + " › " + middle + " › " + last
+
+	// Narrower than the full plain breadcrumb, but wide enough for
+	// "root › … › last".
+	collapsed := root + " › … › " + last
+	avail := ansi.StringWidth(collapsed) + 2
+	require.Less(t, avail, ansi.StringWidth(full), "test width must be too narrow for the uncollapsed breadcrumb")
+
+	out := ansi.Strip(u.childSessionHeaderText(u.com.Styles, avail))
+	require.Contains(t, out, "root-agent-with-a-long-name")
+	require.Contains(t, out, "…", "the middle level must collapse to an ellipsis")
+	require.Contains(t, out, "task")
+	require.NotContains(t, out, "developer-junior", "the collapsed middle level's real name must not appear")
+}
+
+// TestChildSessionHeaderText_DropsAncestorsKeepsCurrentName covers the
+// next sacrifice tier: too narrow even for the collapsed breadcrumb, so
+// only the current level's own name remains.
+func TestChildSessionHeaderText_DropsAncestorsKeepsCurrentName(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	u.navStack[len(u.navStack)-1].label = ""
+
+	out := ansi.Strip(u.childSessionHeaderText(u.com.Styles, len("task")+1))
+	require.Equal(t, "task", out)
+}
+
+// TestChildSessionHeaderText_HardTruncatesCurrentName is the last resort:
+// even the bare current name doesn't fit, so it gets hard-truncated with
+// an ellipsis rather than overflowing.
+func TestChildSessionHeaderText_HardTruncatesCurrentName(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	u.navStack[len(u.navStack)-1].agentName = "a-very-long-subagent-name"
+	u.navStack[len(u.navStack)-1].label = ""
+
+	out := ansi.Strip(u.childSessionHeaderText(u.com.Styles, 6))
+	require.LessOrEqual(t, ansi.StringWidth(out), 6)
+	require.Contains(t, out, "…")
 }
 
 // TestDrawChildSessionPanel_NoModelEffortShowsDefaultModel covers the

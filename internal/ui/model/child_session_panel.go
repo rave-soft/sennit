@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/chat"
+	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
 // childSessionPanelHeight is the fixed height of the child-session info
@@ -34,31 +35,125 @@ func delegationInfo(item chat.ToolMessageItem) (displayName, model, effort strin
 	return "", "", "", time.Time{}, 0
 }
 
-// childSessionBreadcrumbChain returns the ordered list of session labels
-// from the root down to the currently viewed child, for
-// drawChildSessionPanel: element 0 is the root session's title ("main"),
-// and each subsequent element is one navStack frame's label (see
-// sessionNavFrame.label). The last element is always the level currently
-// being viewed.
-func (m *UI) childSessionBreadcrumbChain() []string {
-	if len(m.navStack) == 0 {
-		return nil
+// childSessionLevelName formats one breadcrumb level's plain text: the
+// delegation's agent name (falling back to the prompt-snippet label if the
+// item couldn't be resolved — see delegationInfo), plus a "(n/m)" sibling
+// counter when that level had more than one sibling to cycle through.
+// "main" is deliberately not part of any level — the back button already
+// means "go up", and the levels shown are exactly what alt+up walks back
+// through.
+func childSessionLevelName(frame sessionNavFrame) string {
+	name := frame.agentName
+	if name == "" {
+		name = frame.label
 	}
-	chain := make([]string, 0, len(m.navStack)+1)
-	chain = append(chain, m.navStack[0].parentTitle)
-	for _, frame := range m.navStack {
-		chain = append(chain, frame.label)
+	if len(frame.siblings) > 1 {
+		name = fmt.Sprintf("%s (%d/%d)", name, frame.siblingIndex+1, len(frame.siblings))
 	}
-	return chain
+	return name
+}
+
+// childSessionCurrentActivity builds the current level's compact activity
+// parenthetical: the delegation's own prompt snippet (frame.label, already
+// first-line-and-~40-chars via childSessionLabel), how many steps it's
+// taken so far, and — only while still running — the last tool call. Steps
+// and the last tool come from the currently loaded chat directly (m.chat
+// holds the child session's own items while it's being viewed, so this
+// reflects whichever level is deepest/current regardless of how many
+// levels are stacked above it) rather than from stale data captured at
+// enterChildSession time. Returns "" if there's nothing to show.
+func (m *UI) childSessionCurrentActivity() string {
+	var parts []string
+	if len(m.navStack) > 0 {
+		if label := m.navStack[len(m.navStack)-1].label; label != "" && label != "subagent" {
+			parts = append(parts, label)
+		}
+	}
+	if m.chat != nil {
+		if n := m.chat.ToolStepCount(); n > 0 {
+			parts = append(parts, fmt.Sprintf("step %d", n))
+		}
+		if m.isAgentBusy() {
+			if tc, ok := m.chat.LastToolCall(); ok {
+				if summary := chat.LastToolSummary(tc); summary != "" {
+					parts = append(parts, "→ "+summary)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// childSessionHeaderText renders row 1's breadcrumb — levels joined by
+// " › ", the last one bold with its activity parenthetical — degrading
+// through progressively shorter candidates until one fits avail, in the
+// agreed sacrifice order: the activity parenthetical goes first, then
+// middle levels collapse to a single "…", and only as a last resort is the
+// current name itself hard-truncated.
+func (m *UI) childSessionHeaderText(s *styles.Styles, avail int) string {
+	cb := &s.ChildBanner
+	n := len(m.navStack)
+	last := m.navStack[n-1]
+	lastName := cb.Current.Render(childSessionLevelName(last))
+
+	renderRange := func(lo, hi int) string {
+		var b strings.Builder
+		for i := lo; i < hi; i++ {
+			if i > lo {
+				b.WriteString(cb.Sep.Render(" › "))
+			}
+			b.WriteString(cb.Path.Render(childSessionLevelName(m.navStack[i])))
+		}
+		return b.String()
+	}
+
+	ancestors := renderRange(0, n-1)
+	sep := ""
+	if ancestors != "" {
+		sep = cb.Sep.Render(" › ")
+	}
+
+	activity := ""
+	if a := m.childSessionCurrentActivity(); a != "" {
+		activity = " " + cb.Base.Render("("+a+")")
+	}
+
+	// Candidate 1: everything.
+	if full := ancestors + sep + lastName + activity; ansi.StringWidth(full) <= avail {
+		return full
+	}
+	// Candidate 2: drop the activity parenthetical.
+	if withoutActivity := ancestors + sep + lastName; ansi.StringWidth(withoutActivity) <= avail {
+		return withoutActivity
+	}
+	// Candidate 3: collapse every ancestor between the root and the
+	// current level into a single "…" (only meaningful with 2+ ancestors).
+	if n > 2 {
+		collapsed := cb.Path.Render(childSessionLevelName(m.navStack[0])) +
+			cb.Sep.Render(" › … › ") + lastName
+		if ansi.StringWidth(collapsed) <= avail {
+			return collapsed
+		}
+	}
+	// Candidate 4: the current level alone, no ancestors.
+	if ansi.StringWidth(lastName) <= avail {
+		return lastName
+	}
+	// Last resort: hard-truncate the current level's own name.
+	return ansi.Truncate(lastName, avail, "…")
 }
 
 // drawChildSessionPanel draws the info panel that replaces the editor while
 // a sub-agent session is being viewed, in three compact rows:
 //
-//  1. the ancestor breadcrumb (muted) leading into the subagent's own name
-//     (bold/accented) with a sibling counter when relevant
-//     ("main › agent1 › developer (2/3)"), and the "back" button, styled
-//     as a real accent-filled button rather than a text link;
+//  1. the breadcrumb of subagent names (never "main" — the back button
+//     already means "go up"), each with a "(n/m)" sibling counter when
+//     relevant, the last one bold with its live activity in parens —
+//     e.g. "developer-junior (3/3) › task (Read the entire file… · step 34)"
+//     — and the "back" button, styled as a real accent-filled button
+//     rather than a text link. Narrow terminals shed, in order: the
+//     activity parenthetical, then middle levels (collapsed to "…"), then
+//     truncate the current name itself — see childSessionHeaderText;
 //  2. the delegation's model/effort override;
 //  3. the child session's own cumulative token usage and either a live
 //     ticking elapsed time (still running) or the final duration (done).
@@ -77,9 +172,8 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
 	frame := m.navStack[len(m.navStack)-1]
 
-	// Row 1: muted ancestor breadcrumb, the subagent's own name in bold
-	// (with a sibling counter when there's more than one to cycle
-	// through), and the back button.
+	// Row 1: the level breadcrumb (see childSessionHeaderText for
+	// the degrade-under-width-pressure logic) and the back button.
 	buttonSty := sty.Button
 	if m.childPanelHover {
 		buttonSty = sty.ButtonHover
@@ -91,27 +185,13 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	row1 := area
 	row1.Max.Y = row1.Min.Y + 1
 	if avail := width - buttonWidth - gap; avail < 0 {
-		// Terminal too narrow for both name and button; drop the name.
+		// Terminal too narrow for both the breadcrumb and button; drop
+		// the breadcrumb entirely.
 		uv.NewStyledString(ansi.Truncate(button, width, "")).Draw(scr, row1)
 	} else {
-		name := frame.agentName
-		if name == "" {
-			name = frame.label
-		}
-		if len(frame.siblings) > 1 {
-			name = fmt.Sprintf("%s (%d/%d)", name, frame.siblingIndex+1, len(frame.siblings))
-		}
-
-		var b strings.Builder
-		if chain := m.childSessionBreadcrumbChain(); len(chain) > 1 {
-			b.WriteString(sty.Path.Render(strings.Join(chain[:len(chain)-1], " › ")))
-			b.WriteString(sty.Sep.Render(" › "))
-		}
-		b.WriteString(sty.Current.Render(name))
-
-		path := ansi.Truncate(b.String(), avail, "…")
-		pad := max(0, avail-ansi.StringWidth(path))
-		row := path + strings.Repeat(" ", pad+gap) + button
+		header := m.childSessionHeaderText(m.com.Styles, avail)
+		pad := max(0, avail-ansi.StringWidth(header))
+		row := header + strings.Repeat(" ", pad+gap) + button
 		uv.NewStyledString(row).Draw(scr, row1)
 
 		m.childPanelButtonRect = uv.Rectangle{
