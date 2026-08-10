@@ -2853,8 +2853,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				curValue := m.editor.textarea.Value()
 				curIdx := len(curValue)
 
-				// Trigger completions on @.
-				if msg.String() == "@" && !m.editor.completionsOpen {
+				// Trigger completions on @. Suppressed in bang mode: "@" is
+				// just a character in a shell command (e.g. "git log @{u}"),
+				// not a file-mention trigger.
+				if msg.String() == "@" && !m.editor.completionsOpen && !m.editor.bangMode {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 						m.editor.completionsOpen = true
@@ -2863,19 +2865,23 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.editor.completionsStartIndex = curIdx
 						m.editor.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+						m.editor.completions.SetMaxWidth(m.completionsMaxWidth())
 						cmds = append(cmds, m.editor.completions.Open(depth, limit, m.loadMCPResourceCompletions))
 					}
 				}
 
 				// Trigger command completions on "/" at the very start of an
 				// otherwise-empty editor, mirroring opencode/Claude Code: a
-				// "/" mid-message is just a character.
-				if msg.String() == "/" && !m.editor.completionsOpen && curValue == "" {
+				// "/" mid-message is just a character. Suppressed in bang
+				// mode: a shell command is very plausibly an absolute path
+				// like "/usr/bin/env", not a command trigger.
+				if msg.String() == "/" && !m.editor.completionsOpen && !m.editor.bangMode && curValue == "" {
 					m.editor.completionsOpen = true
 					m.editor.completionsMode = completionsModeCommand
 					m.editor.completionsQuery = ""
 					m.editor.completionsStartIndex = curIdx
 					m.editor.completionsPositionStart = m.completionsPosition()
+					m.editor.completions.SetMaxWidth(m.completionsMaxWidth())
 					m.editor.completions.OpenCommands(m.commandCompletionItems())
 				}
 
@@ -4866,6 +4872,18 @@ func (m *UI) editorContentWidth() int {
 		width -= 30 // sidebar column
 	}
 	return width
+}
+
+// completionsMaxWidth caps the "/"/"@" completions popup so it never
+// outgrows the terminal: 60% of the terminal width, but no wider than the
+// editor's own content width, since completionsPosition anchors the popup
+// to the editor's cursor column.
+func (m *UI) completionsMaxWidth() int {
+	maxW := m.width * 6 / 10
+	if ew := m.editorContentWidth(); ew > 0 && ew < maxW {
+		maxW = ew
+	}
+	return maxW
 }
 
 // shouldCollapseQuestion reports whether a question form should render

@@ -73,6 +73,11 @@ type Completions struct {
 
 	allItems []list.FilterableItem
 	filtered []list.FilterableItem
+
+	// capWidth is an additional ceiling on top of maxWidth, supplied by the
+	// caller (e.g. the editor's available width) so the popup never asks
+	// for more room than the terminal has. Zero means "no extra cap".
+	capWidth int
 }
 
 type namePriorityRule struct {
@@ -148,6 +153,14 @@ func (c *Completions) KeyMap() KeyMap {
 	return c.keyMap
 }
 
+// SetMaxWidth caps the popup width to at most maxW columns, in addition to
+// the package-wide maxWidth ceiling. Callers should call this before Open /
+// OpenCommands with the currently available editor width, since the popup
+// is positioned relative to the editor. A value <= 0 clears the extra cap.
+func (c *Completions) SetMaxWidth(maxW int) {
+	c.capWidth = maxW
+}
+
 // Open opens the completions with file items from the filesystem and MCP
 // resources from loadResources, which the caller supplies bound to its
 // workspace.Workspace (this package has no backend dependency of its own).
@@ -220,12 +233,10 @@ func (c *Completions) setAllItems(items []list.FilterableItem) {
 	c.list.SetFilter("")
 	c.list.Focus()
 
-	c.width = maxWidth
-	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
-	c.list.SetSize(c.width, c.height)
-	c.list.SelectFirst()
-	c.list.ScrollToSelected()
-
+	// Width is sized once, from the full item set, and held fixed through
+	// filtering below (see Filter) — recomputing it as the set narrows
+	// would make the popup visibly shrink while the user types.
+	c.width = c.computeWidth(items)
 	c.updateSize()
 }
 
@@ -299,23 +310,39 @@ func hasPathSegment(pathLower, queryLower string) bool {
 	}), queryLower)
 }
 
+// updateSize recomputes the popup height for the current filtered set and
+// re-selects/scrolls. Width is intentionally not touched here: it's fixed
+// once at open time (see setAllItems) so the popup doesn't shrink as
+// filtering narrows the set.
 func (c *Completions) updateSize() {
 	items := c.filtered
-	start, end := c.list.VisibleItemIndices()
-	width := 0
-	for i := start; i <= end; i++ {
-		item := c.list.ItemAt(i)
-		if item == nil {
-			continue
-		}
-		s := item.(interface{ Text() string }).Text()
-		width = max(width, ansi.StringWidth(s))
-	}
-	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
 	c.list.SetSize(c.width, c.height)
 	c.list.SelectFirst()
 	c.list.ScrollToSelected()
+}
+
+// computeWidth measures the widest "title (description)" item in items and
+// clamps it to [minWidth, effective max], where the effective max is the
+// package ceiling (maxWidth) further capped by capWidth if the caller set
+// one via SetMaxWidth.
+func (c *Completions) computeWidth(items []list.FilterableItem) int {
+	width := 0
+	for _, item := range items {
+		if w, ok := item.(interface{ popupWidth() int }); ok {
+			width = max(width, w.popupWidth())
+			continue
+		}
+		if t, ok := item.(interface{ Text() string }); ok {
+			width = max(width, ansi.StringWidth(t.Text()))
+		}
+	}
+	upperBound := maxWidth
+	if c.capWidth > 0 {
+		upperBound = min(upperBound, c.capWidth)
+	}
+	upperBound = max(upperBound, int(minWidth))
+	return ordered.Clamp(width+2, int(minWidth), int(upperBound))
 }
 
 // HasItems returns whether there are visible items.

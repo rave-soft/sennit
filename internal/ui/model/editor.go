@@ -140,9 +140,23 @@ func (e *editorState) isAtEditorEnd() bool {
 // updateHistoryDraft updates history state when text is modified.
 func (e *editorState) updateHistoryDraft(oldValue string) {
 	if e.textarea.Value() != oldValue {
-		e.promptHistory.draft = e.textarea.Value()
+		e.promptHistory.draft = e.draftValue()
 		e.promptHistory.index = -1
 	}
+}
+
+// draftValue returns the textarea's value as it should be captured into
+// promptHistory.draft: with a leading "!" restored if bang mode is active,
+// matching how bang commands are stored in promptHistory.messages (see
+// loadPromptHistory) and decoded back by syncBangModeFromTextarea. Without
+// this, browsing away from an in-progress bang command and back (Up then
+// Esc) would silently drop out of bang mode — the textarea's raw Value()
+// never carries the "!" once it's been stripped on entry.
+func (e *editorState) draftValue() string {
+	if e.bangMode {
+		return "!" + e.textarea.Value()
+	}
+	return e.textarea.Value()
 }
 
 // historyReset resets the history, but does not clear the message

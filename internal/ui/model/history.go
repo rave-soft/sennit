@@ -144,7 +144,7 @@ func (m *UI) historyPrev() bool {
 		return false
 	}
 	if m.editor.promptHistory.index == -1 {
-		m.editor.promptHistory.draft = m.editor.textarea.Value()
+		m.editor.promptHistory.draft = m.editor.draftValue()
 	}
 	nextIndex := m.editor.promptHistory.index + 1
 	if nextIndex >= len(m.editor.promptHistory.messages) {

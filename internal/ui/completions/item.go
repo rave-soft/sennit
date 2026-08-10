@@ -103,6 +103,18 @@ func (c *CompletionItem) Text() string {
 	return c.text
 }
 
+// popupWidth returns the width used to size the completions popup: the
+// title plus, for command items, its untruncated "(description)" suffix.
+// This is only for sizing the popup — Render still fits/truncates the
+// description into whatever width that produces, via fitDescriptionSuffix.
+func (c *CompletionItem) popupWidth() int {
+	width := ansi.StringWidth(c.text)
+	if c.desc != "" {
+		width += ansi.StringWidth(" (" + c.desc + ")")
+	}
+	return width
+}
+
 // Value returns the value of the item.
 func (c *CompletionItem) Value() any {
 	return c.value
