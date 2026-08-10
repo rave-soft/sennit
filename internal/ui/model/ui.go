@@ -31,6 +31,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/rave-soft/braid/internal/agent"
@@ -575,6 +576,57 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 	return m.notifyBackend.Send(n)
 }
 
+// maxNotificationBodyLen caps notification body text so OS notification
+// centers don't clip or wrap it awkwardly. Long session titles and error
+// messages get truncated with an ellipsis.
+const maxNotificationBodyLen = 120
+
+// notificationTitle returns the desktop notification title. Appending the
+// project directory name lets a user running Braid in several workspaces
+// at once tell which one a notification came from; falls back to plain
+// "Braid" when the working directory is unknown or root.
+func notificationTitle(workingDir string) string {
+	name := filepath.Base(filepath.Clean(workingDir))
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return "Braid"
+	}
+	return "Braid — " + name
+}
+
+// notificationBodyTaskFinished formats the body for an agent-turn-completed
+// notification.
+func notificationBodyTaskFinished(sessionTitle string) string {
+	if sessionTitle == "" {
+		return "Task finished"
+	}
+	return "Task finished: " + ansi.Truncate(sessionTitle, maxNotificationBodyLen, "…")
+}
+
+// notificationBodyTaskFailed formats the body for an agent-turn-errored
+// notification.
+func notificationBodyTaskFailed(errMessage string) string {
+	errMessage = strings.TrimSpace(errMessage)
+	if errMessage == "" {
+		return "Task failed"
+	}
+	return "Task failed: " + ansi.Truncate(errMessage, maxNotificationBodyLen, "…")
+}
+
+// notificationBodyPermission formats the body for a permission-request
+// notification.
+func notificationBodyPermission(toolName string) string {
+	return "Permission needed: " + toolName
+}
+
+// notificationBodyQuestions formats the body for a question-request
+// notification.
+func notificationBodyQuestions(count int) string {
+	if count == 1 {
+		return "Input needed: 1 question"
+	}
+	return fmt.Sprintf("Input needed: %d questions", count)
+}
+
 // selectNotificationBackend chooses the appropriate notification backend based
 // on terminal capabilities, environment, and user configuration. This is a pure
 // function that should be called once during initialization or when capabilities
@@ -967,8 +1019,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Braid is waiting...",
-			Message: fmt.Sprintf("Permission required to execute \"%s\"", msg.Payload.ToolName),
+			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
+			Message: notificationBodyPermission(msg.Payload.ToolName),
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -980,8 +1032,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Braid is waiting...",
-			Message: fmt.Sprintf("%d questions need your input", len(msg.Payload.Questions)),
+			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
+			Message: notificationBodyQuestions(len(msg.Payload.Questions)),
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -5002,12 +5054,18 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentFinished:
 		common.StopTurn()
 		cmds = append(cmds, m.sendNotification(notification.Notification{
-			Title:   "Braid is waiting...",
-			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
+			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
+			Message: notificationBodyTaskFinished(n.SessionTitle),
 		}))
 	case notify.TypeAgentError:
-		// Terminal edge like TypeAgentFinished; fall through to the
-		// busy/queue refresh below.
+		// Terminal edge like TypeAgentFinished, but the turn ended with an
+		// error rather than a normal completion — surface it too instead of
+		// leaving the user to notice the failure on their own.
+		common.StopTurn()
+		cmds = append(cmds, m.sendNotification(notification.Notification{
+			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
+			Message: notificationBodyTaskFailed(n.Message),
+		}))
 	case notify.TypeReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
 	case notify.TypeAWSSSOAuth:

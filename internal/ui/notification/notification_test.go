@@ -3,6 +3,7 @@ package notification_test
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -45,6 +46,33 @@ func TestNativeBackend_Send(t *testing.T) {
 	require.Equal(t, "Hello", capturedTitle)
 	require.Equal(t, "World", capturedMessage)
 	require.Nil(t, capturedIcon)
+}
+
+// TestNativeBackend_Send_CachesIconPath verifies that, when constructed with
+// icon data, the backend passes notifyFunc a filesystem path (cached via
+// CacheIcon) rather than raw bytes on every send.
+func TestNativeBackend_Send_CachesIconPath(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	iconData := []byte("fake-png-data")
+	backend := notification.NewNativeBackend(iconData)
+
+	var capturedIcon any
+	backend.SetNotifyFunc(func(_, _ string, icon any) error {
+		capturedIcon = icon
+		return nil
+	})
+
+	cmd := backend.Send(notification.Notification{Title: "Hello"})
+	require.NotNil(t, cmd)
+	cmd()
+
+	path, ok := capturedIcon.(string)
+	require.True(t, ok, "expected a cached file path, got %T", capturedIcon)
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, iconData, got)
 }
 
 func extractRawString(t *testing.T, cmd tea.Cmd) string {

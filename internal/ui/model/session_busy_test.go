@@ -112,6 +112,11 @@ func (w *countingWorkspace) LSPStart(context.Context, string) {}
 
 func (w *countingWorkspace) Config() *config.Config { return nil }
 
+// WorkingDir is called when formatting desktop notification titles; it's
+// not part of the synchronous-probe invariant this stub otherwise pins, so
+// it doesn't need a counter.
+func (w *countingWorkspace) WorkingDir() string { return "" }
+
 // syncProbes sums every synchronous counter; Update/View must keep this at
 // zero — the invariant is that no workspace call ever happens on the Update
 // goroutine (which is also the render loop).
