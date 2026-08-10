@@ -89,7 +89,7 @@ func staleVersion() proto.VersionInfo {
 // BuildID derives from the executable's mtime, so any rebuild — including
 // every `go run` — makes a second session look like an upgrade. Launching
 // it used to shut down the first session's server, taking its workspaces
-// with it and stranding it on a dead workspace ID. Now the server has the
+// with it and threading it on a dead workspace ID. Now the server has the
 // final say, and a refusal means "keep using me".
 func TestRestartIfStale_HonorsRefusedShutdown(t *testing.T) {
 	t.Parallel()

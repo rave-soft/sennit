@@ -12,13 +12,13 @@ type Querier interface {
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
-	CreateStrand(ctx context.Context, arg CreateStrandParams) (Strand, error)
+	CreateThread(ctx context.Context, arg CreateThreadParams) (Thread, error)
 	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
-	DeleteStrand(ctx context.Context, id string) error
+	DeleteThread(ctx context.Context, id string) error
 	GetAverageResponseTime(ctx context.Context) (int64, error)
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
@@ -28,8 +28,8 @@ type Querier interface {
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
-	GetStrand(ctx context.Context, id string) (Strand, error)
-	GetStrandByName(ctx context.Context, name string) (Strand, error)
+	GetThread(ctx context.Context, id string) (Thread, error)
+	GetThreadByName(ctx context.Context, name string) (Thread, error)
 	GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error)
 	GetTotalStats(ctx context.Context) (GetTotalStatsRow, error)
 	GetUsageByDay(ctx context.Context) ([]GetUsageByDayRow, error)
@@ -44,7 +44,7 @@ type Querier interface {
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
-	ListStrands(ctx context.Context) ([]Strand, error)
+	ListThreads(ctx context.Context) ([]Thread, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	NextFileVersion(ctx context.Context, path string) (int64, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
@@ -52,8 +52,8 @@ type Querier interface {
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
-	UpdateStrandSession(ctx context.Context, arg UpdateStrandSessionParams) (Strand, error)
-	UpdateStrandStatus(ctx context.Context, arg UpdateStrandStatusParams) (Strand, error)
+	UpdateThreadSession(ctx context.Context, arg UpdateThreadSessionParams) (Thread, error)
+	UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) (Thread, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -74,7 +74,7 @@ type KeyMap struct {
 	Sessions   key.Binding
 	Tab        key.Binding
 	ToggleYolo key.Binding
-	Strands    key.Binding
+	Threads    key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -111,9 +111,9 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("ctrl+y"),
 			key.WithHelp("ctrl+y", "toggle yolo"),
 		),
-		Strands: key.NewBinding(
+		Threads: key.NewBinding(
 			key.WithKeys("ctrl+e"),
-			key.WithHelp("ctrl+e", "strands"),
+			key.WithHelp("ctrl+e", "threads"),
 		),
 	}
 

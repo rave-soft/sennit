@@ -158,11 +158,11 @@ type (
 	// closeDialogMsg is sent to close the current dialog.
 	closeDialogMsg struct{}
 
-	// showStrandsDashboardMsg requests switching to the strands dashboard
+	// showThreadsDashboardMsg requests switching to the threads dashboard
 	// screen. Handled by the Root router (root.go); a bare *UI has no
 	// dashboard screen of its own, so this falls through Update's default
 	// case harmlessly when UI is driven directly (e.g. in tests).
-	showStrandsDashboardMsg struct{}
+	showThreadsDashboardMsg struct{}
 
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
@@ -196,7 +196,7 @@ type UI struct {
 
 	isTransparent bool
 
-	// embedded is true for a UI instance attached to a strand's own
+	// embedded is true for a UI instance attached to a thread's own
 	// workspace rather than the top-level session — it skips
 	// onboarding/initialize and doesn't drive the terminal progress bar,
 	// since only one UI instance may own those.
@@ -319,9 +319,9 @@ type UI struct {
 // Option configures a [UI] instance at construction time.
 type Option func(*UI)
 
-// WithEmbedded marks the UI as attached to a strand's own workspace rather
+// WithEmbedded marks the UI as attached to a thread's own workspace rather
 // than the top-level session (see the embedded field doc). Used by the Root
-// router when attaching to a strand.
+// router when attaching to a thread.
 func WithEmbedded() Option {
 	return func(m *UI) { m.embedded = true }
 }
@@ -431,7 +431,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
 	if ui.embedded {
-		// A strand's embedded chat always lands directly in uiLanding —
+		// A thread's embedded chat always lands directly in uiLanding —
 		// onboarding/initialize are one-time, top-level-session concerns.
 	} else if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
@@ -457,7 +457,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 }
 
 // KeyMap returns the UI's key bindings. Exposed so the Root router (root.go)
-// can recognize app-wide keys (e.g. the strands toggle) without duplicating
+// can recognize app-wide keys (e.g. the threads toggle) without duplicating
 // the binding.
 func (m *UI) KeyMap() *KeyMap {
 	return &m.keyMap
@@ -2541,12 +2541,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
-		case key.Matches(msg, m.keyMap.Strands):
-			if !m.com.Workspace.SupportsStrands() {
-				cmds = append(cmds, util.ReportInfo("This workspace doesn't support strands."))
+		case key.Matches(msg, m.keyMap.Threads):
+			if !m.com.Workspace.SupportsThreads() {
+				cmds = append(cmds, util.ReportInfo("This workspace doesn't support threads."))
 				return true
 			}
-			cmds = append(cmds, util.CmdHandler(showStrandsDashboardMsg{}))
+			cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
 			return true
 		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
 			m.detailsOpen = !m.detailsOpen

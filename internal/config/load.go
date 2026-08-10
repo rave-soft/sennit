@@ -1145,6 +1145,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 				if !json.Valid(jsonBytes) {
 					return nil, nil, fmt.Errorf("shell config %s produced invalid JSON", path)
 				}
+				jsonBytes = migrateDeprecatedKey(jsonBytes, "options.strands", "options.threads", path)
 				addTopLevelKeys(shDirKeys, dir, jsonBytes)
 				configs = append(configs, jsonBytes)
 				loaded = append(loaded, path)
@@ -1153,6 +1154,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 			if !json.Valid(data) {
 				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
 			}
+			data = migrateDeprecatedKey(data, "options.strands", "options.threads", path)
 			addTopLevelKeys(jsonDirKeys, dir, data)
 			configs = append(configs, data)
 			loaded = append(loaded, path)
@@ -1199,6 +1201,36 @@ func addTopLevelKeys(m map[string]map[string]bool, dir string, data []byte) {
 		keys[key.String()] = true
 		return true
 	})
+}
+
+// migrateDeprecatedKey renames a deprecated JSON key (gjson/sjson dotted
+// path) to its replacement in-memory so old config files (e.g. an
+// "options.strands" key from before the threads rename) keep working
+// without editing them on disk. If newKey is already present, the
+// deprecated oldKey is dropped in favor of it rather than overwriting the
+// value the user already migrated.
+func migrateDeprecatedKey(data []byte, oldKey, newKey, path string) []byte {
+	old := gjson.GetBytes(data, oldKey)
+	if !old.Exists() {
+		return data
+	}
+	slog.Warn(fmt.Sprintf("Config key %q is deprecated, use %q instead", oldKey, newKey), "path", path)
+	if gjson.GetBytes(data, newKey).Exists() {
+		out, err := sjson.DeleteBytes(data, oldKey)
+		if err != nil {
+			return data
+		}
+		return out
+	}
+	out, err := sjson.SetRawBytes(data, newKey, []byte(old.Raw))
+	if err != nil {
+		return data
+	}
+	out, err = sjson.DeleteBytes(out, oldKey)
+	if err != nil {
+		return data
+	}
+	return out
 }
 
 func loadFromBytes(configs [][]byte) (*Config, error) {

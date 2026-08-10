@@ -284,7 +284,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
-	attachLocalStrands(ctx, boot.App, cwd)
+	attachLocalThreads(ctx, boot.App, cwd)
 
 	ws := workspace.NewAppWorkspace(boot.App, boot.Config)
 	cleanup := func() { boot.App.Shutdown() }

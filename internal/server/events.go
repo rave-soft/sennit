@@ -18,7 +18,7 @@ import (
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/skills"
-	"github.com/rave-soft/braid/internal/strand"
+	"github.com/rave-soft/braid/internal/thread"
 )
 
 // wrapEvent converts a raw tea.Msg (a pubsub.Event[T] from the app
@@ -166,15 +166,15 @@ func wrapEvent(ev any) *pubsub.Payload {
 			Type:    e.Type,
 			Payload: skillsEventToProto(e.Payload),
 		})
-	case pubsub.Event[strand.Event]:
+	case pubsub.Event[thread.Event]:
 		// This event was forwarded raw from Manager.Subscribe (see
-		// app.ForwardEvents in internal/backend/strands.go /
-		// internal/cmd/strands.go), so wrapEvent has no *strand.Manager
+		// app.ForwardEvents in internal/backend/threads.go /
+		// internal/cmd/threads.go), so wrapEvent has no *thread.Manager
 		// reference here to resolve a live WorkspaceID from — pass "" and
-		// let clients that need it re-GET the strand.
-		return envelope(pubsub.PayloadTypeStrandEvent, pubsub.Event[proto.StrandEvent]{
+		// let clients that need it re-GET the thread.
+		return envelope(pubsub.PayloadTypeThreadEvent, pubsub.Event[proto.ThreadEvent]{
 			Type:    e.Type,
-			Payload: strand.EventToProto(e.Payload, ""),
+			Payload: thread.EventToProto(e.Payload, ""),
 		})
 	default:
 		slog.Warn("Unrecognized event type for SSE wrapping", "type", fmt.Sprintf("%T", ev))

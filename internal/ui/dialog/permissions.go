@@ -766,7 +766,7 @@ func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
 
 	// Center when stacked or when the dialog fills the screen; otherwise
 	// hug the right edge next to the content. Right-aligning across a
-	// full-screen width leaves the buttons stranded in the corner.
+	// full-screen width leaves the buttons threaded in the corner.
 	align := lipgloss.Right
 	if fullscreen {
 		align = lipgloss.Center

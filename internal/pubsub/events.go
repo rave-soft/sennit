@@ -31,7 +31,7 @@ const (
 	PayloadTypeQuestionRequest        PayloadType = "question_batch_request"
 	PayloadTypeQuestionNotification   PayloadType = "question_batch_notification"
 	PayloadTypeServerNotice           PayloadType = "server_notice"
-	PayloadTypeStrandEvent            PayloadType = "strand_event"
+	PayloadTypeThreadEvent            PayloadType = "thread_event"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.

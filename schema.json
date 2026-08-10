@@ -634,9 +634,9 @@
           "$ref": "#/$defs/WebSearchOptions",
           "description": "Web search backend configuration. Defaults to the keyless DuckDuckGo scraper when omitted."
         },
-        "strands": {
-          "$ref": "#/$defs/StrandsOptions",
-          "description": "Strands (parallel agent work stream) configuration."
+        "threads": {
+          "$ref": "#/$defs/ThreadsOptions",
+          "description": "Threads (parallel agent work stream) configuration."
         }
       },
       "additionalProperties": false,
@@ -849,20 +849,6 @@
         "provider"
       ]
     },
-    "StrandsOptions": {
-      "properties": {
-        "worktree_dir": {
-          "type": "string",
-          "description": "Parent directory for strand worktrees (\u003cworktree_dir\u003e/\u003cstrand-name\u003e). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to a \"\u003crepo\u003e-strands\" sibling of the repository root.",
-          "examples": [
-            "/var/tmp/braid-strands",
-            "../strand-worktrees"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
     "TUIOptions": {
       "properties": {
         "compact_mode": {
@@ -896,6 +882,20 @@
           ],
           "description": "Chat scrollbar visibility",
           "default": "default"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ThreadsOptions": {
+      "properties": {
+        "worktree_dir": {
+          "type": "string",
+          "description": "Parent directory for thread worktrees (\u003cworktree_dir\u003e/\u003cthread-name\u003e). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to a \"\u003crepo\u003e-threads\" sibling of the repository root.",
+          "examples": [
+            "/var/tmp/braid-threads",
+            "../thread-worktrees"
+          ]
         }
       },
       "additionalProperties": false,

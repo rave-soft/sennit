@@ -142,36 +142,36 @@ func TestEvents_NConsumers(t *testing.T) {
 }
 
 // TestForwardEvents verifies that ForwardEvents subscribes to a
-// post-construction event source (standing in for a strand manager
-// attached after New(), see internal/cmd/strands.go) and fans its events
+// post-construction event source (standing in for a thread manager
+// attached after New(), see internal/cmd/threads.go) and fans its events
 // into app.events, so they surface through App.Events like every
 // statically-wired source.
 func TestForwardEvents(t *testing.T) {
 	t.Parallel()
 
-	type fakeStrandEvent struct{ ID string }
+	type fakeThreadEvent struct{ ID string }
 
 	a := NewForTest(t.Context())
 	defer a.ShutdownForTest()
 
-	src := pubsub.NewBroker[fakeStrandEvent]()
+	src := pubsub.NewBroker[fakeThreadEvent]()
 	defer src.Shutdown()
 
 	ch := a.Events(t.Context())
 
-	ForwardEvents(a, "test-strand", src.Subscribe)
+	ForwardEvents(a, "test-thread", src.Subscribe)
 
 	// Yield so the forwarding goroutine can call src.Subscribe before we
 	// publish; otherwise the publish could race ahead of the subscribe.
 	time.Sleep(10 * time.Millisecond)
 
-	src.Publish(pubsub.UpdatedEvent, fakeStrandEvent{ID: "strand-1"})
+	src.Publish(pubsub.UpdatedEvent, fakeThreadEvent{ID: "thread-1"})
 
 	select {
 	case ev := <-ch:
-		payload, ok := ev.Payload.(pubsub.Event[fakeStrandEvent])
+		payload, ok := ev.Payload.(pubsub.Event[fakeThreadEvent])
 		require.True(t, ok, "unexpected payload type %T", ev.Payload)
-		require.Equal(t, "strand-1", payload.Payload.ID)
+		require.Equal(t, "thread-1", payload.Payload.ID)
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for forwarded event")
 	}

@@ -51,7 +51,7 @@ type Session struct {
 	Todos            sql.NullString `json:"todos"`
 }
 
-type Strand struct {
+type Thread struct {
 	ID            string        `json:"id"`
 	Name          string        `json:"name"`
 	Goal          string        `json:"goal"`

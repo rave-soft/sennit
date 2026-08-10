@@ -1,5 +1,5 @@
 // Package git shells out to the git CLI for the repository operations
-// needed by strands (parallel agent work streams, each running in its own
+// needed by threads (parallel agent work streams, each running in its own
 // git worktree and auto-merged back into a base branch). It deliberately
 // avoids go-git for repo operations — go-git in this codebase is used only
 // for .gitignore parsing — so behavior matches whatever git binary the user

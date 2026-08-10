@@ -345,14 +345,14 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	return b.createWorkspace(args, true)
 }
 
-// createWorkspace is CreateWorkspace's implementation. attachStrands gates
-// whether a newly created workspace is given ownership of a strand
-// manager; strandSpawner (same package, used to spawn a strand's own
+// createWorkspace is CreateWorkspace's implementation. attachThreads gates
+// whether a newly created workspace is given ownership of a thread
+// manager; threadSpawner (same package, used to spawn a thread's own
 // isolated workspace through this same bootstrap path) passes false to
-// prevent strand workspaces from nesting managers of their own. It has no
+// prevent thread workspaces from nesting managers of their own. It has no
 // effect when the call dedupes onto an already-running workspace, which
 // keeps whatever it was given when it was actually created.
-func (b *Backend) createWorkspace(args proto.Workspace, attachStrands bool) (*Workspace, proto.Workspace, error) {
+func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool) (*Workspace, proto.Workspace, error) {
 	if args.Path == "" {
 		return nil, proto.Workspace{}, ErrPathRequired
 	}
@@ -451,14 +451,14 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachStrands bool) (*Wo
 		clients:      make(map[string]*clientState),
 	}
 
-	if attachStrands {
-		b.attachServerStrands(wsCtx, ws.App, args.Path)
+	if attachThreads {
+		b.attachServerThreads(wsCtx, ws.App, args.Path)
 	}
 
 	b.mu.Lock()
 	// Re-check admission: the client may have retired while the slow
 	// init above ran with b.mu released, and registering a claim for a
-	// client that has already announced its exit would strand the
+	// client that has already announced its exit would thread the
 	// workspace. (b.closing cannot have flipped: every shutdown decision
 	// requires pending == 0, and this create has held pending since
 	// before it released b.mu.)

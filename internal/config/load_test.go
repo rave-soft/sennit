@@ -47,14 +47,48 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
 }
 
-func TestConfig_LoadFromBytes_StrandsWorktreeDir(t *testing.T) {
-	data := []byte(`{"options":{"strands":{"worktree_dir":"../strand-worktrees"}},"providers": {}}`)
+func TestConfig_LoadFromBytes_ThreadsWorktreeDir(t *testing.T) {
+	data := []byte(`{"options":{"threads":{"worktree_dir":"../thread-worktrees"}},"providers": {}}`)
 
 	loadedConfig, err := loadFromBytes([][]byte{data})
 
 	require.NoError(t, err)
-	require.NotNil(t, loadedConfig.Options.Strands)
-	require.Equal(t, "../strand-worktrees", loadedConfig.Options.Strands.WorktreeDir)
+	require.NotNil(t, loadedConfig.Options.Threads)
+	require.Equal(t, "../thread-worktrees", loadedConfig.Options.Threads.WorktreeDir)
+}
+
+// TestConfig_LoadFromBytes_DeprecatedStrandsAlias verifies that the old
+// "options.strands" key (from before the strands→threads rename) still
+// populates Options.Threads, so existing braid.json/braidrc files keep
+// working without edits.
+func TestConfig_LoadFromBytes_DeprecatedStrandsAlias(t *testing.T) {
+	data := []byte(`{"options":{"strands":{"worktree_dir":"../thread-worktrees"}},"providers": {}}`)
+	data = migrateDeprecatedKey(data, "options.strands", "options.threads", "test.json")
+
+	loadedConfig, err := loadFromBytes([][]byte{data})
+
+	require.NoError(t, err)
+	require.NotNil(t, loadedConfig.Options.Threads)
+	require.Equal(t, "../thread-worktrees", loadedConfig.Options.Threads.WorktreeDir)
+}
+
+// TestConfig_LoadFromConfigPaths_DeprecatedStrandsAlias exercises the
+// alias through the full file-loading path.
+func TestConfig_LoadFromConfigPaths_DeprecatedStrandsAlias(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "braid.json")
+	require.NoError(t, os.WriteFile(
+		path,
+		[]byte(`{"options":{"strands":{"worktree_dir":"../thread-worktrees"}},"providers": {}}`),
+		0o644,
+	))
+
+	cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{path})
+
+	require.NoError(t, err)
+	require.Contains(t, loaded, path)
+	require.NotNil(t, cfg.Options.Threads)
+	require.Equal(t, "../thread-worktrees", cfg.Options.Threads.WorktreeDir)
 }
 
 func TestLookupConfigs_BoundedByProject(t *testing.T) {
@@ -820,7 +854,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "ls", "question", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource", "strand_create", "strand_list", "strand_status", "strand_send", "strand_wait", "strand_merge", "strand_remove"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "ls", "question", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_send", "thread_wait", "thread_merge", "thread_remove"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -865,7 +899,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource", "strand_create", "strand_list", "strand_status", "strand_send", "strand_wait", "strand_merge", "strand_remove"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_send", "thread_wait", "thread_merge", "thread_remove"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)

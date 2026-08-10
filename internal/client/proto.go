@@ -219,8 +219,8 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
-			case pubsub.PayloadTypeStrandEvent:
-				var e pubsub.Event[proto.StrandEvent]
+			case pubsub.PayloadTypeThreadEvent:
+				var e pubsub.Event[proto.ThreadEvent]
 				_ = json.Unmarshal(p.Payload, &e)
 				if !sendEvent(ctx, events, e) {
 					return

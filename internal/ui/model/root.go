@@ -1,10 +1,10 @@
 package model
 
 // Root is the top-level Bubble Tea model (see internal/cmd/root.go). It
-// routes between three screens — the main session UI, the strands
-// dashboard, and an attached strand's own embedded UI — and owns the pieces
-// that don't belong to any single screen: the strand cache/dashboard is
-// lazily created on first use, and an attached strand's workspace/event
+// routes between three screens — the main session UI, the threads
+// dashboard, and an attached thread's own embedded UI — and owns the pieces
+// that don't belong to any single screen: the thread cache/dashboard is
+// lazily created on first use, and an attached thread's workspace/event
 // pump lives here rather than inside *UI, since only one *UI (main) is ever
 // the terminal's progress-bar owner.
 //
@@ -35,43 +35,43 @@ type screenID uint8
 const (
 	screenMain screenID = iota
 	screenDashboard
-	screenStrand
+	screenThread
 )
 
-// strandEventSubscriber is implemented by the concrete workspace types
-// returned from AttachStrand (see internal/workspace/strands.go). It is not
+// threadEventSubscriber is implemented by the concrete workspace types
+// returned from AttachThread (see internal/workspace/threads.go). It is not
 // part of workspace.Workspace itself — SubscribeWith is a second,
 // independently stoppable subscription, distinct from the primary
 // ws.Subscribe(program) pump cmd/root.go starts for the main workspace —
-// so a strand's own event stream can be torn down on detach without
+// so a thread's own event stream can be torn down on detach without
 // disturbing the main one.
-type strandEventSubscriber interface {
+type threadEventSubscriber interface {
 	SubscribeWith(send func(tea.Msg)) func()
 }
 
-// strandAttachment holds everything tied to the strand currently attached
+// threadAttachment holds everything tied to the thread currently attached
 // for viewing: its own workspace, an embedded UI over that workspace, and
 // the teardown funcs for both the event pump and the workspace connection
 // itself.
-type strandAttachment struct {
-	strandID string
+type threadAttachment struct {
+	threadID string
 	ws       workspace.Workspace
 	ui       *UI
 	stop     func() // stops the SubscribeWith event pump
-	detach   func() // releases the attached workspace (from AttachStrand)
+	detach   func() // releases the attached workspace (from AttachThread)
 }
 
 // Root is the top-level tea.Model. See the package doc comment above.
 type Root struct {
 	com             *common.Common
 	main            *UI
-	dashboard       *strandsDashboard // lazily created on first ctrl+e
-	dashboardDialog *dialog.Overlay   // hosts the strand-create dialog while on the dashboard screen
-	strand          *strandAttachment // non-nil while attached to a strand
+	dashboard       *threadsDashboard // lazily created on first ctrl+e
+	dashboardDialog *dialog.Overlay   // hosts the thread-create dialog while on the dashboard screen
+	thread          *threadAttachment // non-nil while attached to a thread
 	active          screenID
 
 	// send delivers messages back into the Bubble Tea event loop from
-	// outside Update (the per-strand SubscribeWith pump runs its own
+	// outside Update (the per-thread SubscribeWith pump runs its own
 	// goroutine and cannot return a tea.Cmd). Wired by cmd/root.go via
 	// SetSend once the tea.Program exists.
 	send func(tea.Msg)
@@ -89,20 +89,20 @@ func NewRoot(com *common.Common, initialSessionID string, continueLast bool) *Ro
 	}
 }
 
-// SetSend wires the tea.Program's Send method so the strand event pump
+// SetSend wires the tea.Program's Send method so the thread event pump
 // (started outside Update) can deliver messages back into the loop.
 func (r *Root) SetSend(send func(tea.Msg)) { r.send = send }
 
-// strandEventMsg tags a message from an attached strand's own event pump
-// with the strand ID it came from, so a detach racing the pump's goroutine
-// can be dropped instead of misrouted to whatever strand is attached next.
-type strandEventMsg struct {
-	strandID string
+// threadEventMsg tags a message from an attached thread's own event pump
+// with the thread ID it came from, so a detach racing the pump's goroutine
+// can be dropped instead of misrouted to whatever thread is attached next.
+type threadEventMsg struct {
+	threadID string
 	inner    tea.Msg
 }
 
-// strandAttachedMsg delivers the result of an off-thread AttachStrand call.
-type strandAttachedMsg struct {
+// threadAttachedMsg delivers the result of an off-thread AttachThread call.
+type threadAttachedMsg struct {
 	id        string
 	sessionID string
 	ws        workspace.Workspace
@@ -110,15 +110,15 @@ type strandAttachedMsg struct {
 	err       error
 }
 
-// strandActionDoneMsg delivers the result of an off-thread merge/remove
+// threadActionDoneMsg delivers the result of an off-thread merge/remove
 // call; both actions only need pass/fail plus a dashboard refresh.
-type strandActionDoneMsg struct {
+type threadActionDoneMsg struct {
 	err error
 }
 
-// strandCreatedMsg delivers the result of an off-thread CreateStrand call.
-type strandCreatedMsg struct {
-	strand proto.Strand
+// threadCreatedMsg delivers the result of an off-thread CreateThread call.
+type threadCreatedMsg struct {
+	thread proto.Thread
 	err    error
 }
 
@@ -130,8 +130,8 @@ func (r *Root) Init() tea.Cmd {
 // View implements tea.Model.
 func (r *Root) View() tea.View {
 	switch r.active {
-	case screenStrand:
-		return r.strand.ui.View()
+	case screenThread:
+		return r.thread.ui.View()
 	case screenDashboard:
 		return r.dashboardView()
 	default:
@@ -139,15 +139,15 @@ func (r *Root) View() tea.View {
 	}
 }
 
-// dashboardView builds the strands dashboard's screen from scratch — unlike
-// screenMain/screenStrand, it has no *UI of its own to delegate to. String
+// dashboardView builds the threads dashboard's screen from scratch — unlike
+// screenMain/screenThread, it has no *UI of its own to delegate to. String
 // hygiene (newline normalization, trailing-space trim) mirrors UI.View.
 func (r *Root) dashboardView() tea.View {
 	var v tea.View
 	v.AltScreen = true
 	v.BackgroundColor = r.com.Styles.Background
 	v.MouseMode = tea.MouseModeCellMotion
-	v.WindowTitle = "braid strands"
+	v.WindowTitle = "braid threads"
 
 	canvas := uv.NewScreenBuffer(r.width, r.height)
 	r.dashboard.Draw(canvas, canvas.Bounds())
@@ -170,47 +170,47 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return r.handleWindowSize(msg)
-	case strandEventMsg:
-		// A message from an attached strand's own event pump. Racing a
+	case threadEventMsg:
+		// A message from an attached thread's own event pump. Racing a
 		// detach is expected (the pump's goroutine can't be joined
 		// synchronously), so a mismatch is silently dropped, not an error.
-		if r.strand != nil && r.strand.strandID == msg.strandID {
-			_, cmd := r.strand.ui.Update(msg.inner)
+		if r.thread != nil && r.thread.threadID == msg.threadID {
+			_, cmd := r.thread.ui.Update(msg.inner)
 			return r, cmd
 		}
 		return r, nil
-	case pubsub.Event[proto.Strand]:
+	case pubsub.Event[proto.Thread]:
 		var cmds []tea.Cmd
 		_, cmd := r.main.Update(msg)
 		cmds = append(cmds, cmd)
 		if r.dashboard != nil {
-			cmds = append(cmds, r.dashboard.ApplyStrandEvent(msg))
+			cmds = append(cmds, r.dashboard.ApplyThreadEvent(msg))
 		}
 		return r, tea.Batch(cmds...)
 	case tea.KeyPressMsg:
 		return r.handleKeyPress(msg)
-	case showStrandsDashboardMsg:
+	case showThreadsDashboardMsg:
 		if r.dashboard == nil {
-			r.dashboard = newStrandsDashboard(r.com)
+			r.dashboard = newThreadsDashboard(r.com)
 			r.dashboard.SetSize(r.width, r.height)
 		}
 		cmd := r.dashboard.SetActive(true)
 		r.active = screenDashboard
 		return r, cmd
-	case strandsLoadedMsg:
+	case threadsLoadedMsg:
 		if r.dashboard == nil {
 			return r, nil
 		}
-		return r, tea.Batch(r.dashboard.ApplyStrandsLoaded(msg)...)
-	case enterStrandMsg:
-		return r, r.attachStrandCmd(msg.id, msg.sessionID)
-	case strandAttachedMsg:
-		return r.handleStrandAttached(msg)
-	case mergeStrandMsg:
-		return r, r.mergeStrandCmd(msg.id)
-	case removeStrandMsg:
-		return r, r.removeStrandCmd(msg.id)
-	case strandActionDoneMsg:
+		return r, tea.Batch(r.dashboard.ApplyThreadsLoaded(msg)...)
+	case enterThreadMsg:
+		return r, r.attachThreadCmd(msg.id, msg.sessionID)
+	case threadAttachedMsg:
+		return r.handleThreadAttached(msg)
+	case mergeThreadMsg:
+		return r, r.mergeThreadCmd(msg.id)
+	case removeThreadMsg:
+		return r, r.removeThreadCmd(msg.id)
+	case threadActionDoneMsg:
 		if msg.err != nil {
 			return r, util.ReportError(msg.err)
 		}
@@ -218,29 +218,29 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, r.dashboard.Refresh()
 		}
 		return r, nil
-	case strandCreatedMsg:
+	case threadCreatedMsg:
 		if msg.err != nil {
 			return r, util.ReportError(msg.err)
 		}
 		if r.dashboard != nil {
-			return r, r.dashboard.ApplyStrandEvent(pubsub.Event[proto.Strand]{
+			return r, r.dashboard.ApplyThreadEvent(pubsub.Event[proto.Thread]{
 				Type:    pubsub.CreatedEvent,
-				Payload: msg.strand,
+				Payload: msg.thread,
 			})
 		}
 		return r, nil
 	case util.InfoMsg:
-		// Errors from strand actions (attach/merge/remove/create) surface
-		// here. Known limitation: the dashboard and strand screens have no
+		// Errors from thread actions (attach/merge/remove/create) surface
+		// here. Known limitation: the dashboard and thread screens have no
 		// status line of their own yet, so these only become visible once
 		// the user returns to the main screen.
 		_, cmd := r.main.Update(msg)
 		return r, cmd
 	default:
 		switch r.active {
-		case screenStrand:
-			if r.strand != nil {
-				_, cmd := r.strand.ui.Update(msg)
+		case screenThread:
+			if r.thread != nil {
+				_, cmd := r.thread.ui.Update(msg)
 				return r, cmd
 			}
 			return r, nil
@@ -265,8 +265,8 @@ func (r *Root) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	if r.dashboard != nil {
 		r.dashboard.SetSize(msg.Width, msg.Height)
 	}
-	if r.strand != nil {
-		_, cmd := r.strand.ui.Update(msg)
+	if r.thread != nil {
+		_, cmd := r.thread.ui.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 	return r, tea.Batch(cmds...)
@@ -277,7 +277,7 @@ func (r *Root) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 // bindings, per AGENTS.md's "dialog messages are intercepted first" —
 // applied here one level up, to screen navigation.
 func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	toggle := key.Matches(msg, r.main.KeyMap().Strands)
+	toggle := key.Matches(msg, r.main.KeyMap().Threads)
 
 	if r.active != screenMain {
 		switch {
@@ -285,8 +285,8 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			r.active = screenMain
 			r.dashboard.SetActive(false)
 			return r, nil
-		case toggle && r.active == screenStrand:
-			return r, r.leaveStrand()
+		case toggle && r.active == screenThread:
+			return r, r.leaveThread()
 		case key.Matches(msg, dialog.CloseKey) && r.active == screenDashboard && !r.dashboardDialog.HasDialogs():
 			r.active = screenMain
 			r.dashboard.SetActive(false)
@@ -297,8 +297,8 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch r.active {
 	case screenDashboard:
 		return r.handleDashboardKey(msg)
-	case screenStrand:
-		_, cmd := r.strand.ui.Update(msg)
+	case screenThread:
+		_, cmd := r.thread.ui.Update(msg)
 		return r, cmd
 	default:
 		_, cmd := r.main.Update(msg)
@@ -307,7 +307,7 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleDashboardKey routes a key press while the dashboard screen is
-// active: the create-strand dialog wins when open, otherwise the dashboard
+// active: the create-thread dialog wins when open, otherwise the dashboard
 // list itself handles it.
 func (r *Root) handleDashboardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if r.dashboardDialog.HasDialogs() {
@@ -319,36 +319,36 @@ func (r *Root) handleDashboardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleDashboardDialogAction mirrors UI.handleDialogMsg's shape, but only
-// for the actions the strand-create dialog can produce.
+// for the actions the thread-create dialog can produce.
 func (r *Root) handleDashboardDialogAction(action dialog.Action) tea.Cmd {
 	switch action := action.(type) {
 	case dialog.ActionClose:
 		r.dashboardDialog.CloseFrontDialog()
 	case dialog.ActionCmd:
 		return action.Cmd
-	case dialog.ActionCreateStrand:
+	case dialog.ActionCreateThread:
 		r.dashboardDialog.CloseFrontDialog()
-		return r.createStrandCmd(action.Name, action.Goal)
+		return r.createThreadCmd(action.Name, action.Goal)
 	}
 	return nil
 }
 
-// attachStrandCmd calls AttachStrand off-thread. Per AGENTS.md, model state
+// attachThreadCmd calls AttachThread off-thread. Per AGENTS.md, model state
 // is never touched inside a command closure — only locals are captured.
-func (r *Root) attachStrandCmd(id, sessionID string) tea.Cmd {
+func (r *Root) attachThreadCmd(id, sessionID string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
 	return func() tea.Msg {
-		attached, detach, err := ws.AttachStrand(ctx, id)
-		return strandAttachedMsg{id: id, sessionID: sessionID, ws: attached, detach: detach, err: err}
+		attached, detach, err := ws.AttachThread(ctx, id)
+		return threadAttachedMsg{id: id, sessionID: sessionID, ws: attached, detach: detach, err: err}
 	}
 }
 
-// handleStrandAttached applies the result of attachStrandCmd. On success it
-// builds the strand's own embedded UI, starts its event pump, and switches
+// handleThreadAttached applies the result of attachThreadCmd. On success it
+// builds the thread's own embedded UI, starts its event pump, and switches
 // the active screen; on failure it reports the error once the user is back
 // on the main screen (see the util.InfoMsg case in Update).
-func (r *Root) handleStrandAttached(msg strandAttachedMsg) (tea.Model, tea.Cmd) {
+func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		return r, util.ReportError(msg.err)
 	}
@@ -357,23 +357,23 @@ func (r *Root) handleStrandAttached(msg strandAttachedMsg) (tea.Model, tea.Cmd) 
 	childUI := New(com, msg.sessionID, false, WithEmbedded())
 
 	stop := func() {}
-	if sub, ok := msg.ws.(strandEventSubscriber); ok {
+	if sub, ok := msg.ws.(threadEventSubscriber); ok {
 		id := msg.id
 		stop = sub.SubscribeWith(func(m tea.Msg) {
 			if r.send != nil {
-				r.send(strandEventMsg{strandID: id, inner: m})
+				r.send(threadEventMsg{threadID: id, inner: m})
 			}
 		})
 	}
 
-	r.strand = &strandAttachment{
-		strandID: msg.id,
+	r.thread = &threadAttachment{
+		threadID: msg.id,
 		ws:       msg.ws,
 		ui:       childUI,
 		stop:     stop,
 		detach:   msg.detach,
 	}
-	r.active = screenStrand
+	r.active = screenThread
 
 	var cmds []tea.Cmd
 	cmds = append(cmds, childUI.Init())
@@ -382,81 +382,81 @@ func (r *Root) handleStrandAttached(msg strandAttachedMsg) (tea.Model, tea.Cmd) 
 	return r, tea.Batch(cmds...)
 }
 
-// leaveStrand tears down the attached strand and returns to the dashboard.
+// leaveThread tears down the attached thread and returns to the dashboard.
 // detach may do IO (e.g. shutting down a client connection), so it runs
 // inside the returned tea.Cmd rather than synchronously here.
-func (r *Root) leaveStrand() tea.Cmd {
-	if r.strand == nil {
+func (r *Root) leaveThread() tea.Cmd {
+	if r.thread == nil {
 		r.active = screenDashboard
 		return nil
 	}
-	strand := r.strand
-	if strand.stop != nil {
-		strand.stop()
+	thread := r.thread
+	if thread.stop != nil {
+		thread.stop()
 	}
-	r.strand = nil
+	r.thread = nil
 	r.active = screenDashboard
 
 	var cmds []tea.Cmd
-	if strand.detach != nil {
+	if thread.detach != nil {
 		cmds = append(cmds, func() tea.Msg {
-			strand.detach()
+			thread.detach()
 			return nil
 		})
 	}
 	if r.dashboard != nil {
-		// The strand may have changed status while attached (e.g.
+		// The thread may have changed status while attached (e.g.
 		// completed); invalidate so the dashboard doesn't sit on a stale
 		// row until the TTL backstop catches up.
-		r.dashboard.cache.invalidateStrands()
+		r.dashboard.cache.invalidateThreads()
 		cmds = append(cmds, r.dashboard.Refresh())
 	}
 	return tea.Batch(cmds...)
 }
 
-// mergeStrandCmd calls MergeStrand off-thread.
-func (r *Root) mergeStrandCmd(id string) tea.Cmd {
+// mergeThreadCmd calls MergeThread off-thread.
+func (r *Root) mergeThreadCmd(id string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
 	return func() tea.Msg {
-		_, err := ws.MergeStrand(ctx, id)
-		return strandActionDoneMsg{err: err}
+		_, err := ws.MergeThread(ctx, id)
+		return threadActionDoneMsg{err: err}
 	}
 }
 
-// removeStrandCmd calls RemoveStrand off-thread.
-func (r *Root) removeStrandCmd(id string) tea.Cmd {
+// removeThreadCmd calls RemoveThread off-thread.
+func (r *Root) removeThreadCmd(id string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
 	return func() tea.Msg {
-		err := ws.RemoveStrand(ctx, id, proto.RemoveStrandOptions{})
-		return strandActionDoneMsg{err: err}
+		err := ws.RemoveThread(ctx, id, proto.RemoveThreadOptions{})
+		return threadActionDoneMsg{err: err}
 	}
 }
 
-// createStrandCmd calls CreateStrand off-thread with the dialog's validated
+// createThreadCmd calls CreateThread off-thread with the dialog's validated
 // input.
-func (r *Root) createStrandCmd(name, goal string) tea.Cmd {
+func (r *Root) createThreadCmd(name, goal string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
 	return func() tea.Msg {
-		strand, err := ws.CreateStrand(ctx, proto.CreateStrandRequest{Name: name, Goal: goal})
-		return strandCreatedMsg{strand: strand, err: err}
+		thread, err := ws.CreateThread(ctx, proto.CreateThreadRequest{Name: name, Goal: goal})
+		return threadCreatedMsg{thread: thread, err: err}
 	}
 }
 
-// Cleanup releases the attached strand's resources, if any. Called once by
+// Cleanup releases the attached thread's resources, if any. Called once by
 // cmd/root.go after program.Run() returns — best-effort, since there is no
 // further chance to surface an error through the (now-stopped) TUI.
 func (r *Root) Cleanup() {
-	if r.strand == nil {
+	if r.thread == nil {
 		return
 	}
-	if r.strand.stop != nil {
-		r.strand.stop()
+	if r.thread.stop != nil {
+		r.thread.stop()
 	}
-	if r.strand.detach != nil {
-		r.strand.detach()
+	if r.thread.detach != nil {
+		r.thread.detach()
 	}
-	r.strand = nil
+	r.thread = nil
 }

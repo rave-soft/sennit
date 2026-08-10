@@ -849,7 +849,7 @@ func (s *ConfigStore) newerDiskToken(scope Scope, providerID string, entryToken 
 		return nil
 	}
 	if diskToken.RefreshToken == "" && entryToken.RefreshToken != "" {
-		// Adopting would strand us with no way to refresh later, and
+		// Adopting would thread us with no way to refresh later, and
 		// there is nothing to borrow for an exchange.
 		return nil
 	}

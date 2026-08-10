@@ -3179,15 +3179,15 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/strands": {
+        "/workspaces/{id}/threads": {
             "get": {
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "strands"
+                    "threads"
                 ],
-                "summary": "List strands",
+                "summary": "List threads",
                 "parameters": [
                     {
                         "type": "string",
@@ -3203,7 +3203,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/proto.Strand"
+                                "$ref": "#/definitions/proto.Thread"
                             }
                         }
                     },
@@ -3235,9 +3235,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "strands"
+                    "threads"
                 ],
-                "summary": "Create strand",
+                "summary": "Create thread",
                 "parameters": [
                     {
                         "type": "string",
@@ -3247,12 +3247,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Strand creation params",
+                        "description": "Thread creation params",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/proto.CreateStrandRequest"
+                            "$ref": "#/definitions/proto.CreateThreadRequest"
                         }
                     }
                 ],
@@ -3260,7 +3260,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/proto.Strand"
+                            "$ref": "#/definitions/proto.Thread"
                         }
                     },
                     "400": {
@@ -3290,15 +3290,15 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/strands/{strandID}": {
+        "/workspaces/{id}/threads/{threadID}": {
             "get": {
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "strands"
+                    "threads"
                 ],
-                "summary": "Get strand",
+                "summary": "Get thread",
                 "parameters": [
                     {
                         "type": "string",
@@ -3309,8 +3309,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Strand ID or name",
-                        "name": "strandID",
+                        "description": "Thread ID or name",
+                        "name": "threadID",
                         "in": "path",
                         "required": true
                     }
@@ -3319,7 +3319,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/proto.Strand"
+                            "$ref": "#/definitions/proto.Thread"
                         }
                     },
                     "404": {
@@ -3344,9 +3344,9 @@ const docTemplate = `{
             },
             "delete": {
                 "tags": [
-                    "strands"
+                    "threads"
                 ],
-                "summary": "Remove strand",
+                "summary": "Remove thread",
                 "parameters": [
                     {
                         "type": "string",
@@ -3357,20 +3357,20 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Strand ID or name",
-                        "name": "strandID",
+                        "description": "Thread ID or name",
+                        "name": "threadID",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "boolean",
-                        "description": "Force removal of an active or dirty strand",
+                        "description": "Force removal of an active or dirty thread",
                         "name": "force",
                         "in": "query"
                     },
                     {
                         "type": "boolean",
-                        "description": "Also delete the strand's git branch",
+                        "description": "Also delete the thread's git branch",
                         "name": "delete_branch",
                         "in": "query"
                     }
@@ -3400,15 +3400,15 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/strands/{strandID}/merge": {
+        "/workspaces/{id}/threads/{threadID}/merge": {
             "post": {
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "strands"
+                    "threads"
                 ],
-                "summary": "Merge strand",
+                "summary": "Merge thread",
                 "parameters": [
                     {
                         "type": "string",
@@ -3419,8 +3419,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Strand ID or name",
-                        "name": "strandID",
+                        "description": "Thread ID or name",
+                        "name": "threadID",
                         "in": "path",
                         "required": true
                     }
@@ -3429,7 +3429,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/proto.Strand"
+                            "$ref": "#/definitions/proto.Thread"
                         }
                     },
                     "404": {
@@ -3453,15 +3453,15 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/strands/{strandID}/send": {
+        "/workspaces/{id}/threads/{threadID}/send": {
             "post": {
                 "consumes": [
                     "application/json"
                 ],
                 "tags": [
-                    "strands"
+                    "threads"
                 ],
-                "summary": "Send message to strand",
+                "summary": "Send message to thread",
                 "parameters": [
                     {
                         "type": "string",
@@ -3472,8 +3472,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Strand ID or name",
-                        "name": "strandID",
+                        "description": "Thread ID or name",
+                        "name": "threadID",
                         "in": "path",
                         "required": true
                     },
@@ -3483,7 +3483,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/proto.SendStrandRequest"
+                            "$ref": "#/definitions/proto.SendThreadRequest"
                         }
                     }
                 ],
@@ -3924,6 +3924,15 @@ const docTemplate = `{
                 }
             }
         },
+        "config.ThreadsOptions": {
+            "type": "object",
+            "properties": {
+                "worktree_dir": {
+                    "description": "WorktreeDir is the parent directory under which each thread's git\nworktree is created (at \u003cworktree_dir\u003e/\u003cthread-name\u003e). A relative\npath is resolved against the parent of the repository root (the\nsame directory the default sibling \"\u003crepo\u003e-threads\" lives in), not\nagainst the working directory. Absolute paths are used as-is.\nDefaults to a \"\u003crepo\u003e-threads\" sibling of the repository root.",
+                    "type": "string"
+                }
+            }
+        },
         "config.ToolGlob": {
             "type": "object",
             "properties": {
@@ -4139,6 +4148,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "threads": {
+                    "$ref": "#/definitions/config.ThreadsOptions"
                 },
                 "tui": {
                     "$ref": "#/definitions/config.TUIOptions"
@@ -4442,7 +4454,7 @@ const docTemplate = `{
                 "value": {}
             }
         },
-        "proto.CreateStrandRequest": {
+        "proto.CreateThreadRequest": {
             "type": "object",
             "properties": {
                 "base_branch": {
@@ -4884,7 +4896,7 @@ const docTemplate = `{
                 }
             }
         },
-        "proto.SendStrandRequest": {
+        "proto.SendThreadRequest": {
             "type": "object",
             "properties": {
                 "message": {
@@ -5040,7 +5052,7 @@ const docTemplate = `{
                 }
             }
         },
-        "proto.Strand": {
+        "proto.Thread": {
             "type": "object",
             "properties": {
                 "base_branch": {
@@ -5083,7 +5095,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "workspace_id": {
-                    "description": "WorkspaceID is the runtime workspace ID of the strand's currently\nspawned isolated workspace (see internal/strand.Manager.WorkspaceID),\nempty when the strand's workspace is not currently spawned (e.g.\ncompleted/merged/failed, or interrupted and not yet resumed).",
+                    "description": "WorkspaceID is the runtime workspace ID of the thread's currently\nspawned isolated workspace (see internal/thread.Manager.WorkspaceID),\nempty when the thread's workspace is not currently spawned (e.g.\ncompleted/merged/failed, or interrupted and not yet resumed).",
                     "type": "string"
                 },
                 "worktree_path": {

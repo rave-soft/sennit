@@ -326,6 +326,18 @@ definitions:
       transparent:
         type: boolean
     type: object
+  config.ThreadsOptions:
+    properties:
+      worktree_dir:
+        description: |-
+          WorktreeDir is the parent directory under which each thread's git
+          worktree is created (at <worktree_dir>/<thread-name>). A relative
+          path is resolved against the parent of the repository root (the
+          same directory the default sibling "<repo>-threads" lives in), not
+          against the working directory. Absolute paths are used as-is.
+          Defaults to a "<repo>-threads" sibling of the repository root.
+        type: string
+    type: object
   config.ToolGlob:
     properties:
       timeout:
@@ -490,6 +502,8 @@ definitions:
         items:
           type: string
         type: array
+      threads:
+        $ref: '#/definitions/config.ThreadsOptions'
       tui:
         $ref: '#/definitions/config.TUIOptions'
       web_search:
@@ -692,7 +706,7 @@ definitions:
         $ref: '#/definitions/github_com_rave-soft_braid_internal_config.Scope'
       value: {}
     type: object
-  proto.CreateStrandRequest:
+  proto.CreateThreadRequest:
     properties:
       base_branch:
         type: string
@@ -988,7 +1002,7 @@ definitions:
       result:
         $ref: '#/definitions/proto.SkillReadResult'
     type: object
-  proto.SendStrandRequest:
+  proto.SendThreadRequest:
     properties:
       message:
         type: string
@@ -1090,7 +1104,7 @@ definitions:
       state:
         $ref: '#/definitions/proto.SkillDiscoveryState'
     type: object
-  proto.Strand:
+  proto.Thread:
     properties:
       base_branch:
         type: string
@@ -1120,9 +1134,9 @@ definitions:
         type: integer
       workspace_id:
         description: |-
-          WorkspaceID is the runtime workspace ID of the strand's currently
-          spawned isolated workspace (see internal/strand.Manager.WorkspaceID),
-          empty when the strand's workspace is not currently spawned (e.g.
+          WorkspaceID is the runtime workspace ID of the thread's currently
+          spawned isolated workspace (see internal/thread.Manager.WorkspaceID),
+          empty when the thread's workspace is not currently spawned (e.g.
           completed/merged/failed, or interrupted and not yet resumed).
         type: string
       worktree_path:
@@ -3287,7 +3301,7 @@ paths:
       summary: Read skill content
       tags:
       - skills
-  /workspaces/{id}/strands:
+  /workspaces/{id}/threads:
     get:
       parameters:
       - description: Workspace ID
@@ -3302,7 +3316,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/proto.Strand'
+              $ref: '#/definitions/proto.Thread'
             type: array
         "404":
           description: Not Found
@@ -3316,9 +3330,9 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: List strands
+      summary: List threads
       tags:
-      - strands
+      - threads
     post:
       consumes:
       - application/json
@@ -3328,19 +3342,19 @@ paths:
         name: id
         required: true
         type: string
-      - description: Strand creation params
+      - description: Thread creation params
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/proto.CreateStrandRequest'
+          $ref: '#/definitions/proto.CreateThreadRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/proto.Strand'
+            $ref: '#/definitions/proto.Thread'
         "400":
           description: Bad Request
           schema:
@@ -3357,10 +3371,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Create strand
+      summary: Create thread
       tags:
-      - strands
-  /workspaces/{id}/strands/{strandID}:
+      - threads
+  /workspaces/{id}/threads/{threadID}:
     delete:
       parameters:
       - description: Workspace ID
@@ -3368,16 +3382,16 @@ paths:
         name: id
         required: true
         type: string
-      - description: Strand ID or name
+      - description: Thread ID or name
         in: path
-        name: strandID
+        name: threadID
         required: true
         type: string
-      - description: Force removal of an active or dirty strand
+      - description: Force removal of an active or dirty thread
         in: query
         name: force
         type: boolean
-      - description: Also delete the strand's git branch
+      - description: Also delete the thread's git branch
         in: query
         name: delete_branch
         type: boolean
@@ -3396,9 +3410,9 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Remove strand
+      summary: Remove thread
       tags:
-      - strands
+      - threads
     get:
       parameters:
       - description: Workspace ID
@@ -3406,9 +3420,9 @@ paths:
         name: id
         required: true
         type: string
-      - description: Strand ID or name
+      - description: Thread ID or name
         in: path
-        name: strandID
+        name: threadID
         required: true
         type: string
       produces:
@@ -3417,7 +3431,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/proto.Strand'
+            $ref: '#/definitions/proto.Thread'
         "404":
           description: Not Found
           schema:
@@ -3430,10 +3444,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Get strand
+      summary: Get thread
       tags:
-      - strands
-  /workspaces/{id}/strands/{strandID}/merge:
+      - threads
+  /workspaces/{id}/threads/{threadID}/merge:
     post:
       parameters:
       - description: Workspace ID
@@ -3441,9 +3455,9 @@ paths:
         name: id
         required: true
         type: string
-      - description: Strand ID or name
+      - description: Thread ID or name
         in: path
-        name: strandID
+        name: threadID
         required: true
         type: string
       produces:
@@ -3452,7 +3466,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/proto.Strand'
+            $ref: '#/definitions/proto.Thread'
         "404":
           description: Not Found
           schema:
@@ -3465,10 +3479,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Merge strand
+      summary: Merge thread
       tags:
-      - strands
-  /workspaces/{id}/strands/{strandID}/send:
+      - threads
+  /workspaces/{id}/threads/{threadID}/send:
     post:
       consumes:
       - application/json
@@ -3478,9 +3492,9 @@ paths:
         name: id
         required: true
         type: string
-      - description: Strand ID or name
+      - description: Thread ID or name
         in: path
-        name: strandID
+        name: threadID
         required: true
         type: string
       - description: Message to send
@@ -3488,7 +3502,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/proto.SendStrandRequest'
+          $ref: '#/definitions/proto.SendThreadRequest'
       responses:
         "200":
           description: OK
@@ -3508,7 +3522,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Send message to strand
+      summary: Send message to thread
       tags:
-      - strands
+      - threads
 swagger: "2.0"

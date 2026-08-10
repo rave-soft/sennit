@@ -69,13 +69,13 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
-	// SetStrands wires (or clears, with nil) the strand manager the
-	// strand_* tools are built against. It takes effect on the next
+	// SetThreads wires (or clears, with nil) the thread manager the
+	// thread_* tools are built against. It takes effect on the next
 	// UpdateModels/buildTools pass, which every run performs, so callers
-	// don't need to trigger a rebuild themselves. See buildTools: strand
+	// don't need to trigger a rebuild themselves. See buildTools: thread
 	// tools are only ever offered to the top-level agent of the
 	// workspace the manager belongs to, never to sub-agents.
-	SetStrands(strands tools.StrandManager)
+	SetThreads(threads tools.ThreadManager)
 }
 
 type coordinator struct {
@@ -92,12 +92,12 @@ type coordinator struct {
 	interactive bool
 	mcp         *mcp.Registry
 
-	// strandsMu guards strands, which SetStrands may set after
-	// construction (strand managers are wired in post-bootstrap; see
+	// threadsMu guards threads, which SetThreads may set after
+	// construction (thread managers are wired in post-bootstrap; see
 	// internal/cmd/root.go and internal/backend/backend.go) and buildTools
 	// reads on every run via UpdateModels.
-	strandsMu sync.RWMutex
-	strands   tools.StrandManager
+	threadsMu sync.RWMutex
+	threads   tools.ThreadManager
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -184,13 +184,13 @@ type CoordinatorOptions struct {
 	// states, or auth handlers keyed by MCP server name. See
 	// ARCHITECTURE_REVIEW.md section 3.1.
 	MCP *mcp.Registry
-	// Strands is nil-safe: when nil, the strand_* tools are simply
+	// Threads is nil-safe: when nil, the thread_* tools are simply
 	// omitted from the top-level agent's tool list. It is normally wired
-	// after construction via [Coordinator.SetStrands] instead of here,
-	// since the strand manager is set up post-bootstrap; this field
+	// after construction via [Coordinator.SetThreads] instead of here,
+	// since the thread manager is set up post-bootstrap; this field
 	// exists mainly so tests and other in-process callers can supply one
 	// up front.
-	Strands tools.StrandManager
+	Threads tools.ThreadManager
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -224,7 +224,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
 		mcp:          opts.MCP,
-		strands:      opts.Strands,
+		threads:      opts.Threads,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -452,7 +452,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// are rebuilt from scratch on every UpdateModels -> buildTools ->
 	// agentTool pass, i.e. on every coordinator.Run call. Sharing
 	// c.readyWg across those rebuilds raced sync.WaitGroup's Add against
-	// a concurrent run's Wait once strands started dispatching multiple
+	// a concurrent run's Wait once threads started dispatching multiple
 	// Run calls at once on the same coordinator (Manager.dispatch, fired
 	// from both Create and Send with no coordinator-level serialization),
 	// and — independent of concurrency — errgroup.Group only remembers
@@ -586,24 +586,24 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
-	// Strand tools manage parallel agent work streams in their own git
+	// Thread tools manage parallel agent work streams in their own git
 	// worktrees. Offered only to the top-level agent of the workspace
-	// that owns the strand manager: sub-agents never get them (spawning
-	// strands from a delegated task would nest workspace ownership in a
+	// that owns the thread manager: sub-agents never get them (spawning
+	// threads from a delegated task would nest workspace ownership in a
 	// way the manager doesn't support), and there simply is no manager
-	// for non-git or strand-spawned workspaces (see internal/cmd/root.go
+	// for non-git or thread-spawned workspaces (see internal/cmd/root.go
 	// and internal/backend/backend.go).
 	if !isSubAgent {
-		if strands := c.strandsManager(); strands != nil {
+		if threads := c.threadsManager(); threads != nil {
 			allTools = append(
 				allTools,
-				tools.NewStrandCreateTool(strands, c.permissions),
-				tools.NewStrandListTool(strands),
-				tools.NewStrandStatusTool(strands),
-				tools.NewStrandSendTool(strands),
-				tools.NewStrandWaitTool(strands),
-				tools.NewStrandMergeTool(strands, c.permissions),
-				tools.NewStrandRemoveTool(strands, c.permissions),
+				tools.NewThreadCreateTool(threads, c.permissions),
+				tools.NewThreadListTool(threads),
+				tools.NewThreadStatusTool(threads),
+				tools.NewThreadSendTool(threads),
+				tools.NewThreadWaitTool(threads),
+				tools.NewThreadMergeTool(threads, c.permissions),
+				tools.NewThreadRemoveTool(threads, c.permissions),
 			)
 		}
 	}
@@ -866,18 +866,18 @@ func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent.ClearQueue(sessionID)
 }
 
-// SetStrands implements Coordinator.
-func (c *coordinator) SetStrands(strands tools.StrandManager) {
-	c.strandsMu.Lock()
-	c.strands = strands
-	c.strandsMu.Unlock()
+// SetThreads implements Coordinator.
+func (c *coordinator) SetThreads(threads tools.ThreadManager) {
+	c.threadsMu.Lock()
+	c.threads = threads
+	c.threadsMu.Unlock()
 }
 
-// strandsManager returns the currently wired strand manager, or nil.
-func (c *coordinator) strandsManager() tools.StrandManager {
-	c.strandsMu.RLock()
-	defer c.strandsMu.RUnlock()
-	return c.strands
+// threadsManager returns the currently wired thread manager, or nil.
+func (c *coordinator) threadsManager() tools.ThreadManager {
+	c.threadsMu.RLock()
+	defer c.threadsMu.RUnlock()
+	return c.threads
 }
 
 func (c *coordinator) IsBusy() bool {

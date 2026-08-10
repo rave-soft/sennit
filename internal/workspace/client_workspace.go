@@ -32,7 +32,7 @@ import (
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/skills"
-	"github.com/rave-soft/braid/internal/strand"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/version"
 )
 
@@ -1074,7 +1074,7 @@ func (w *ClientWorkspace) Subscribe(program *tea.Program) {
 // maxRecoveryEscalate is the number of consecutive failed workspace
 // recovery attempts after which the loop tells the UI the connection
 // looks unrecoverable. It keeps retrying regardless: a hard stop would
-// strand a user whose server comes back a minute later, and Shutdown can
+// thread a user whose server comes back a minute later, and Shutdown can
 // always cancel it.
 const maxRecoveryEscalate = 20
 
@@ -1421,10 +1421,10 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Type:    e.Type,
 			Payload: protoToSession(e.Payload),
 		}
-	case pubsub.Event[proto.StrandEvent]:
-		return pubsub.Event[strand.Event]{
+	case pubsub.Event[proto.ThreadEvent]:
+		return pubsub.Event[thread.Event]{
 			Type:    e.Type,
-			Payload: strand.EventFromProto(e.Payload),
+			Payload: thread.EventFromProto(e.Payload),
 		}
 	case pubsub.Event[proto.File]:
 		return pubsub.Event[history.File]{

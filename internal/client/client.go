@@ -79,9 +79,9 @@ func (c *Client) ClientID() string {
 // c's own. The copy shares the underlying *http.Client (and its
 // connection pool), so it costs nothing beyond the copy itself.
 // Intended for derived identities that must be retirable
-// independently of the parent — see workspace.ClientWorkspace.AttachStrand,
-// which derives "<parent-client-id>/strand/<strand-id>" so detaching an
-// attached strand's view can never release the parent workspace's own
+// independently of the parent — see workspace.ClientWorkspace.AttachThread,
+// which derives "<parent-client-id>/thread/<thread-id>" so detaching an
+// attached thread's view can never release the parent workspace's own
 // claims.
 func (c *Client) WithClientID(clientID string) *Client {
 	cp := *c

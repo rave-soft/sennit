@@ -14,19 +14,19 @@ import (
 )
 
 // rootTestWorkspace is a minimal workspace.Workspace stub sized for driving
-// Root/New end to end: unlike strandsTestWorkspace (which only exercises
-// the cache's ListStrands round trip), New() also touches
+// Root/New end to end: unlike threadsTestWorkspace (which only exercises
+// the cache's ListThreads round trip), New() also touches
 // PermissionSkipRequests/AgentIsReady/Config on construction, so those need
 // stubbing here too.
 type rootTestWorkspace struct {
 	workspace.Workspace
-	supportsStrands bool
+	supportsThreads bool
 }
 
 func (w *rootTestWorkspace) Config() *config.Config {
 	providers := csync.NewMap[string, config.ProviderConfig]()
 	// New() must land in uiLanding/uiFocusEditor (not uiOnboarding) so
-	// handleGlobalKeys — and therefore the strands key — is reachable; that
+	// handleGlobalKeys — and therefore the threads key — is reachable; that
 	// needs at least one enabled provider (see Config.IsConfigured).
 	providers.Set("test-provider", config.ProviderConfig{ID: "test-provider"})
 	return &config.Config{
@@ -37,20 +37,20 @@ func (w *rootTestWorkspace) Config() *config.Config {
 
 func (w *rootTestWorkspace) PermissionSkipRequests() bool              { return false }
 func (w *rootTestWorkspace) AgentIsReady() bool                        { return false }
-func (w *rootTestWorkspace) SupportsStrands() bool                     { return w.supportsStrands }
+func (w *rootTestWorkspace) SupportsThreads() bool                     { return w.supportsThreads }
 func (w *rootTestWorkspace) WorkingDir() string                        { return "/tmp" }
 func (w *rootTestWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }
 
-func (w *rootTestWorkspace) ListStrands(context.Context) ([]proto.Strand, error) {
+func (w *rootTestWorkspace) ListThreads(context.Context) ([]proto.Thread, error) {
 	return nil, nil
 }
 
 // newTestRoot builds a Root over rootTestWorkspace, configured so New()
 // lands in uiLanding/uiFocusEditor where the global key switch (and
-// therefore the strands key) is reachable.
-func newTestRoot(t *testing.T, supportsStrands bool) *Root {
+// therefore the threads key) is reachable.
+func newTestRoot(t *testing.T, supportsThreads bool) *Root {
 	t.Helper()
-	ws := &rootTestWorkspace{supportsStrands: supportsStrands}
+	ws := &rootTestWorkspace{supportsThreads: supportsThreads}
 	com := common.DefaultCommon(context.Background(), ws)
 	return NewRoot(com, "", false)
 }
@@ -60,8 +60,8 @@ func ctrlE() tea.KeyPressMsg {
 }
 
 // drainShowDashboard runs cmd the way the Bubble Tea runtime would (unwrapping
-// tea.BatchMsg) until it finds the showStrandsDashboardMsg that
-// UI.handleGlobalKeys produces for the strands key, feeding it back into
+// tea.BatchMsg) until it finds the showThreadsDashboardMsg that
+// UI.handleGlobalKeys produces for the threads key, feeding it back into
 // r.Update. Other leaf messages are executed for side effects and dropped,
 // mirroring runCmds in session_busy_test.go.
 func drainShowDashboard(t *testing.T, r *Root, cmd tea.Cmd) *Root {
@@ -69,11 +69,11 @@ func drainShowDashboard(t *testing.T, r *Root, cmd tea.Cmd) *Root {
 	if cmd == nil {
 		return r
 	}
-	// Alongside the strands key, handleGlobalKeys' surrounding Update pass
+	// Alongside the threads key, handleGlobalKeys' surrounding Update pass
 	// also kicks off unrelated background refreshes (LSP, busy state, ...)
 	// that rootTestWorkspace's minimal stub doesn't implement. Those leaves
 	// aren't what this test is after, so a panic from one is swallowed —
-	// only the showStrandsDashboardMsg branch matters here.
+	// only the showThreadsDashboardMsg branch matters here.
 	msg := safeRunCmd(cmd)
 	switch msg := msg.(type) {
 	case tea.BatchMsg:
@@ -81,7 +81,7 @@ func drainShowDashboard(t *testing.T, r *Root, cmd tea.Cmd) *Root {
 			r = drainShowDashboard(t, r, c)
 		}
 		return r
-	case showStrandsDashboardMsg:
+	case showThreadsDashboardMsg:
 		model, next := r.Update(msg)
 		r = model.(*Root)
 		return drainShowDashboard(t, r, next)
@@ -101,31 +101,31 @@ func safeRunCmd(cmd tea.Cmd) (msg tea.Msg) {
 	return cmd()
 }
 
-// TestStrandsKeyIgnoredWhenUnsupported pins that pressing the strands
+// TestThreadsKeyIgnoredWhenUnsupported pins that pressing the threads
 // toggle never switches screens when the workspace doesn't support
-// strands: the check lives inside UI.handleGlobalKeys, reached because
+// threads: the check lives inside UI.handleGlobalKeys, reached because
 // screenMain forwards keys straight to r.main.
-func TestStrandsKeyIgnoredWhenUnsupported(t *testing.T) {
+func TestThreadsKeyIgnoredWhenUnsupported(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, false)
 	_, cmd := r.Update(ctrlE())
-	// drainShowDashboard only switches screens on showStrandsDashboardMsg;
-	// with SupportsStrands() false, UI.handleGlobalKeys reports an info
-	// message instead (see the ui.go Strands case), so this must be a
+	// drainShowDashboard only switches screens on showThreadsDashboardMsg;
+	// with SupportsThreads() false, UI.handleGlobalKeys reports an info
+	// message instead (see the ui.go Threads case), so this must be a
 	// no-op regardless of whatever leaf messages the cmd tree contains.
 	r = drainShowDashboard(t, r, cmd)
 	require.Equal(t, screenMain, r.active)
 }
 
-// TestStrandsKeyTogglesDashboard drives ctrl+e main -> dashboard -> main.
-func TestStrandsKeyTogglesDashboard(t *testing.T) {
+// TestThreadsKeyTogglesDashboard drives ctrl+e main -> dashboard -> main.
+func TestThreadsKeyTogglesDashboard(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
 
 	// main -> dashboard: ctrl+e is handled by UI.handleGlobalKeys, which
-	// returns a cmd carrying showStrandsDashboardMsg; Root must apply it.
+	// returns a cmd carrying showThreadsDashboardMsg; Root must apply it.
 	_, cmd := r.Update(ctrlE())
 	require.NotNil(t, cmd)
 	r = drainShowDashboard(t, r, cmd)
@@ -145,7 +145,7 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
-	r.dashboard = newStrandsDashboard(r.com)
+	r.dashboard = newThreadsDashboard(r.com)
 
 	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	r = model.(*Root)
@@ -157,44 +157,44 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 	require.Equal(t, 40, r.dashboard.height)
 }
 
-// TestStrandEventMsgDroppedWhenNotAttached exercises both "no strand
-// attached" and "different strand attached" cases; neither should panic or
+// TestThreadEventMsgDroppedWhenNotAttached exercises both "no thread
+// attached" and "different thread attached" cases; neither should panic or
 // misroute.
-func TestStrandEventMsgDroppedWhenNotAttached(t *testing.T) {
+func TestThreadEventMsgDroppedWhenNotAttached(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
 
 	require.NotPanics(t, func() {
-		_, cmd := r.Update(strandEventMsg{strandID: "s1", inner: tea.WindowSizeMsg{}})
+		_, cmd := r.Update(threadEventMsg{threadID: "s1", inner: tea.WindowSizeMsg{}})
 		require.Nil(t, cmd)
 	})
 
-	strandUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
-	r.strand = &strandAttachment{strandID: "s1", ui: strandUI}
-	r.active = screenStrand
+	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
+	r.thread = &threadAttachment{threadID: "s1", ui: threadUI}
+	r.active = screenThread
 
 	require.NotPanics(t, func() {
-		_, cmd := r.Update(strandEventMsg{strandID: "s2", inner: tea.WindowSizeMsg{}})
+		_, cmd := r.Update(threadEventMsg{threadID: "s2", inner: tea.WindowSizeMsg{}})
 		require.Nil(t, cmd)
 	})
 }
 
-// TestStrandEventMsgReachesAttachedStrand confirms a tagged event matching
-// the currently attached strand is forwarded into that strand's own *UI.
-func TestStrandEventMsgReachesAttachedStrand(t *testing.T) {
+// TestThreadEventMsgReachesAttachedThread confirms a tagged event matching
+// the currently attached thread is forwarded into that thread's own *UI.
+func TestThreadEventMsgReachesAttachedThread(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
-	strandUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
-	r.strand = &strandAttachment{strandID: "s1", ui: strandUI}
-	r.active = screenStrand
+	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
+	r.thread = &threadAttachment{threadID: "s1", ui: threadUI}
+	r.active = screenThread
 
-	_, cmd := r.Update(strandEventMsg{strandID: "s1", inner: tea.WindowSizeMsg{Width: 80, Height: 24}})
+	_, cmd := r.Update(threadEventMsg{threadID: "s1", inner: tea.WindowSizeMsg{Width: 80, Height: 24}})
 	if cmd != nil {
 		cmd()
 	}
 
-	require.Equal(t, 80, strandUI.width)
-	require.Equal(t, 24, strandUI.height)
+	require.Equal(t, 80, threadUI.width)
+	require.Equal(t, 24, threadUI.height)
 }

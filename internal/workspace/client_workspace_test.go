@@ -692,7 +692,7 @@ func TestClientWorkspace_ResyncsAfterPlainStreamDrop(t *testing.T) {
 
 // TestClientWorkspace_EscalatesUnrecoverableConnection checks the loop
 // keeps trying when re-registration itself keeps failing, and escalates
-// the UI notice rather than stopping: a hard stop would strand a user
+// the UI notice rather than stopping: a hard stop would thread a user
 // whose server comes back a minute later.
 func TestClientWorkspace_EscalatesUnrecoverableConnection(t *testing.T) {
 	t.Cleanup(SetSSEBackoffForTest(time.Millisecond, 2*time.Millisecond))
