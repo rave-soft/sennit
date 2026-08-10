@@ -293,6 +293,18 @@ func (s *ConfigStore) configPath(scope Scope) (string, error) {
 	}
 }
 
+// ProviderFieldKey builds a "providers.<id>.<suffix>" gjson/sjson path for a
+// dynamic, user-supplied provider ID. Custom provider IDs are free text (a
+// domain-style ID like "api.example.com" is common), but sjson/gjson paths
+// use '.' (and a handful of other characters) as path separators, so an
+// unescaped ID splits into nested path segments instead of naming one
+// literal "providers" key — silently writing (and later reading back
+// nothing for) the wrong location. gjson.Escape backslash-escapes those
+// metacharacters so the ID round-trips as a single literal key.
+func ProviderFieldKey(providerID, suffix string) string {
+	return fmt.Sprintf("providers.%s.%s", gjson.Escape(providerID), suffix)
+}
+
 // HasConfigField checks whether a key exists in the config file for the given
 // scope.
 func (s *ConfigStore) HasConfigField(scope Scope, key string) bool {
@@ -570,7 +582,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	switch v := apiKey.(type) {
 	case string:
 		providerConfig.APIKey = v
-		fields[fmt.Sprintf("providers.%s.api_key", providerID)] = v
+		fields[ProviderFieldKey(providerID, "api_key")] = v
 	case *oauth.Token:
 		isToken = true
 		providerConfig.APIKey = v.AccessToken
@@ -578,8 +590,8 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		if providerID == string(catwalk.InferenceProviderCopilot) {
 			providerConfig.SetupGitHubCopilot()
 		}
-		fields[fmt.Sprintf("providers.%s.api_key", providerID)] = v.AccessToken
-		fields[fmt.Sprintf("providers.%s.oauth", providerID)] = v
+		fields[ProviderFieldKey(providerID, "api_key")] = v.AccessToken
+		fields[ProviderFieldKey(providerID, "oauth")] = v
 	default:
 		return fmt.Errorf("unsupported credential type %T for provider %s", apiKey, providerID)
 	}
@@ -588,9 +600,9 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 	// reconstruct their identity from on reload, so persist it alongside
 	// the credential. Catalog providers get it from the embedded list.
 	if !s.isCatalogProvider(providerID) {
-		fields[fmt.Sprintf("providers.%s.type", providerID)] = providerConfig.Type
-		fields[fmt.Sprintf("providers.%s.base_url", providerID)] = providerConfig.BaseURL
-		fields[fmt.Sprintf("providers.%s.name", providerID)] = providerConfig.Name
+		fields[ProviderFieldKey(providerID, "type")] = providerConfig.Type
+		fields[ProviderFieldKey(providerID, "base_url")] = providerConfig.BaseURL
+		fields[ProviderFieldKey(providerID, "name")] = providerConfig.Name
 	}
 
 	// Providers is a shared, thread-safe map (csync.Map) referenced by
@@ -725,8 +737,8 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	s.applyToken(providerConfig, refreshedToken, providerID)
 
 	fields := map[string]any{
-		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
-		fmt.Sprintf("providers.%s.oauth", providerID):   refreshedToken,
+		ProviderFieldKey(providerID, "api_key"): refreshedToken.AccessToken,
+		ProviderFieldKey(providerID, "oauth"):   refreshedToken,
 	}
 	// Persist identity fields for providers outside the embedded catalog —
 	// see isCatalogProvider. Without this, a custom OAuth provider's
@@ -734,9 +746,9 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	// Config from disk (configureProviders), finds no base_url for this
 	// provider, and drops it as an invalid custom provider.
 	if !s.isCatalogProvider(providerID) {
-		fields[fmt.Sprintf("providers.%s.type", providerID)] = providerConfig.Type
-		fields[fmt.Sprintf("providers.%s.base_url", providerID)] = providerConfig.BaseURL
-		fields[fmt.Sprintf("providers.%s.name", providerID)] = providerConfig.Name
+		fields[ProviderFieldKey(providerID, "type")] = providerConfig.Type
+		fields[ProviderFieldKey(providerID, "base_url")] = providerConfig.BaseURL
+		fields[ProviderFieldKey(providerID, "name")] = providerConfig.Name
 	}
 
 	// Use update() rather than SetConfigFields: applyToken already
@@ -929,7 +941,7 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 		return nil, err
 	}
 
-	oauthKey := fmt.Sprintf("providers.%s.oauth", providerID)
+	oauthKey := ProviderFieldKey(providerID, "oauth")
 	oauthResult := gjson.Get(string(data), oauthKey)
 	if !oauthResult.Exists() {
 		return nil, nil

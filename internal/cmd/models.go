@@ -281,7 +281,7 @@ braid models refresh my-local-llm`,
 				}
 			}
 
-			key := fmt.Sprintf("providers.%s.models", id)
+			key := config.ProviderFieldKey(id, "models")
 			if err := cfg.SetConfigFields(config.ScopeGlobal, map[string]any{key: models}); err != nil {
 				hadFailure = true
 				cmd.PrintErrf("%s: refresh failed: %v\n", id, err)

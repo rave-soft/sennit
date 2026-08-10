@@ -160,3 +160,97 @@ func TestConfigureCustomProvider_RequiresIDAndBaseURL(t *testing.T) {
 	_, err = ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, ConfigureCustomProviderParams{ID: "x"})
 	require.Error(t, err)
 }
+
+// TestConfigureCustomProvider_FullCycle_SurvivesRestartWithEndpointDown
+// exercises the whole "Configure Providers → Custom provider…" flow end to
+// end: configure against a live discovery endpoint, confirm the provider is
+// usable immediately, then simulate a process restart (a fresh config.Load
+// against the same on-disk config) with the endpoint unreachable. A custom
+// provider must not depend on its endpoint being reachable at every
+// startup — its models were already discovered and must have been
+// persisted to disk, not just held in memory.
+func TestConfigureCustomProvider_FullCycle_SurvivesRestartWithEndpointDown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/models", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "model-a"}, {"id": "model-b"}]}`))
+	}))
+	baseURL := server.URL + "/v1"
+
+	ws, configPath := newTestConfigAccessor(t)
+
+	params := ConfigureCustomProviderParams{
+		ID:      "restart-test",
+		Name:    "Restart Test",
+		BaseURL: baseURL,
+		Type:    string(catwalk.TypeOpenAICompat),
+		APIKey:  "test-key",
+	}
+
+	models, err := ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, params)
+	require.NoError(t, err)
+	require.Len(t, models, 2)
+
+	// (a) provider must be live in memory immediately.
+	pc, ok := ws.Config().Providers.Get("restart-test")
+	require.True(t, ok, "provider should be live in memory right after configuring")
+	require.Equal(t, baseURL, pc.BaseURL)
+	require.Len(t, pc.Models, 2)
+
+	// (b) the config file on disk must carry base_url/type and models.
+	raw, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, baseURL, gjson.GetBytes(raw, "providers.restart-test.base_url").String())
+	require.Equal(t, string(catwalk.TypeOpenAICompat), gjson.GetBytes(raw, "providers.restart-test.type").String())
+	require.Len(t, gjson.GetBytes(raw, "providers.restart-test.models").Array(), 2)
+
+	// (c) simulate a restart with the endpoint unreachable: a brand new
+	// config.Load, against the same directories, must still find the
+	// provider alive with its previously-discovered models rather than
+	// dropping it for want of a fresh (and now-impossible) discovery call.
+	server.Close()
+
+	store2, err := config.Load(ws.WorkingDir(), ws.store.Config().Options.DataDirectory, false)
+	require.NoError(t, err)
+
+	pc2, ok := store2.Config().Providers.Get("restart-test")
+	require.True(t, ok, "custom provider must survive a restart even when its endpoint is down")
+	require.Equal(t, baseURL, pc2.BaseURL)
+	require.Len(t, pc2.Models, 2)
+}
+
+// TestConfigureCustomProvider_IDWithDots verifies that a provider ID
+// containing '.' — a common shape for domain-style IDs like
+// "api.example.com" — round-trips correctly. providers.<id>.<field> is a
+// gjson/sjson path, and an unescaped '.' inside <id> splits into nested
+// path segments instead of naming one literal "providers" entry, so the
+// provider silently vanishes (SetConfigField succeeds, but writes to the
+// wrong place, and the in-memory reload can't find it either).
+func TestConfigureCustomProvider_IDWithDots(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "model-a"}]}`))
+	}))
+	defer server.Close()
+
+	ws, configPath := newTestConfigAccessor(t)
+
+	params := ConfigureCustomProviderParams{
+		ID:      "api.example.com",
+		BaseURL: server.URL + "/v1",
+		Type:    string(catwalk.TypeOpenAICompat),
+	}
+
+	models, err := ConfigureCustomProvider(context.Background(), ws, config.ScopeGlobal, params)
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+
+	pc, ok := ws.Config().Providers.Get("api.example.com")
+	require.True(t, ok, "provider with a dotted ID must be saved under its literal ID")
+	require.Equal(t, server.URL+"/v1", pc.BaseURL)
+	require.Len(t, pc.Models, 1)
+
+	raw, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, server.URL+"/v1", gjson.GetBytes(raw, `providers.api\.example\.com.base_url`).String())
+}

@@ -626,7 +626,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 				// a down endpoint never touches disk.
 				actions = append(actions, pendingDiskAction{
 					scope:  ScopeGlobal,
-					fields: map[string]any{fmt.Sprintf("providers.%s.models", id): result.models},
+					fields: map[string]any{ProviderFieldKey(id, "models"): result.models},
 				})
 			}
 		}

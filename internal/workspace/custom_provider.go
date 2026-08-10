@@ -63,20 +63,20 @@ func ConfigureCustomProvider(ctx context.Context, ws ConfigAccessor, scope confi
 		}
 	}
 
-	if err := ws.SetConfigField(scope, fmt.Sprintf("providers.%s.type", params.ID), params.Type); err != nil {
+	if err := ws.SetConfigField(scope, config.ProviderFieldKey(params.ID, "type"), params.Type); err != nil {
 		return nil, fmt.Errorf("failed to save provider type: %w", err)
 	}
 	if params.Name != "" {
-		if err := ws.SetConfigField(scope, fmt.Sprintf("providers.%s.name", params.ID), params.Name); err != nil {
+		if err := ws.SetConfigField(scope, config.ProviderFieldKey(params.ID, "name"), params.Name); err != nil {
 			return nil, fmt.Errorf("failed to save provider name: %w", err)
 		}
 	}
 	if len(models) > 0 {
-		if err := ws.SetConfigField(scope, fmt.Sprintf("providers.%s.models", params.ID), models); err != nil {
+		if err := ws.SetConfigField(scope, config.ProviderFieldKey(params.ID, "models"), models); err != nil {
 			return nil, fmt.Errorf("failed to save discovered models: %w", err)
 		}
 	}
-	if err := ws.SetConfigField(scope, fmt.Sprintf("providers.%s.base_url", params.ID), params.BaseURL); err != nil {
+	if err := ws.SetConfigField(scope, config.ProviderFieldKey(params.ID, "base_url"), params.BaseURL); err != nil {
 		return nil, fmt.Errorf("failed to save provider base URL: %w", err)
 	}
 
@@ -89,7 +89,7 @@ func ConfigureCustomProvider(ctx context.Context, ws ConfigAccessor, scope confi
 		// in-memory catalog (see the loader-race comment above), so fall
 		// back to a raw field write to make sure the key isn't lost.
 		if err := ws.SetProviderAPIKey(scope, params.ID, params.APIKey); err != nil {
-			if fieldErr := ws.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", params.ID), params.APIKey); fieldErr != nil {
+			if fieldErr := ws.SetConfigField(scope, config.ProviderFieldKey(params.ID, "api_key"), params.APIKey); fieldErr != nil {
 				return nil, fmt.Errorf("failed to save provider API key: %w", err)
 			}
 		}
