@@ -238,14 +238,14 @@ func TestClickOnAssistantText_DoesNotMoveFocus(t *testing.T) {
 }
 
 // TestClickWhileBrowsingChat_DoesNotMoveFocusStripe covers a leftover from
-// the old click-to-expand/click-to-focus behavior: Tab still enters a
-// legitimate keyboard "browse mode" (uiFocusMain) that highlights the
-// keyboard-selected message with a bordered stripe (see
+// the old click-to-expand/click-to-focus behavior: viewing a child session
+// still enters a legitimate keyboard "browse mode" (uiFocusMain) that
+// highlights the keyboard-selected message with a bordered stripe (see
 // styles.Messages.AssistantFocused/UserFocused, painted via
 // list.FocusedRenderCallback keyed on the list's selectedIdx). Before this
 // fix, Chat.HandleMouseDown also called list.SetSelected on every click, so
-// once a user had pressed Tab at some point, later mouse clicks anywhere in
-// the chat — pure text-selection clicks with no keyboard-navigation intent —
+// once browse mode had been entered, later mouse clicks anywhere in the
+// chat — pure text-selection clicks with no keyboard-navigation intent —
 // dragged that stripe along with the cursor to whatever row was clicked.
 // Clicks must still resolve click-driven behavior (delayed-click
 // expand/drill-in, word/line selection) by item index directly, without
@@ -266,9 +266,9 @@ func TestClickWhileBrowsingChat_DoesNotMoveFocusStripe(t *testing.T) {
 	u.chat.AppendMessages(newMsg("m1", "first message"), newMsg("m2", "second message"))
 	u.updateLayoutAndSize()
 
-	// Enter keyboard browse mode on the first item, as Tab does in normal
-	// use, then click on the second item — a plain text-selection click,
-	// not a keyboard navigation action.
+	// Enter keyboard browse mode on the first item, as viewing a child
+	// session does in normal use, then click on the second item — a plain
+	// text-selection click, not a keyboard navigation action.
 	u.chat.Focus()
 	u.chat.SetSelected(0)
 

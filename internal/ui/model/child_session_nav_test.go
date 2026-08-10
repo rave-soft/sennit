@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
@@ -119,6 +120,7 @@ func TestExitChildSessionPopsStack(t *testing.T) {
 	})
 
 	u.session = &session.Session{ID: "parent-session"}
+	u.editor.textarea = textarea.New()
 	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
 	require.NotNil(t, u.enterChildSession("msg1", "tc-1"))
 	require.Len(t, u.navStack, 1)
@@ -169,6 +171,7 @@ func TestAltUpExitsChildSessionThroughUpdate(t *testing.T) {
 	u.keyMap = DefaultKeyMap()
 	u.dialog = dialog.NewOverlay()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+	u.editor.textarea = textarea.New()
 	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
 
 	require.NotNil(t, u.enterChildSession("msg1", "tc-1"))

@@ -103,7 +103,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
-			key.WithHelp("tab", "change focus"),
+			key.WithHelp("tab", ""),
 		),
 		ToggleYolo: key.NewBinding(
 			key.WithKeys("ctrl+y"),
@@ -179,7 +179,7 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Chat.Tab = key.NewBinding(
 		key.WithKeys("tab"),
-		key.WithHelp("tab", "change focus"),
+		key.WithHelp("tab", ""),
 	)
 	km.Chat.Details = key.NewBinding(
 		key.WithKeys("ctrl+d"),

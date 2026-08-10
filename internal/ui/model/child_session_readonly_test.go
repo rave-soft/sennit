@@ -71,6 +71,7 @@ func TestExitChildSessionClearsBreadcrumb(t *testing.T) {
 
 	u := newChildSessionTestUI(t)
 	u.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
+	u.editor.textarea = textarea.New()
 	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
 
 	require.NotNil(t, u.enterChildSession("msg1", "tc-1"))
@@ -78,6 +79,29 @@ func TestExitChildSessionClearsBreadcrumb(t *testing.T) {
 
 	require.NotNil(t, u.exitChildSession())
 	require.True(t, u.status.InfoMsg().IsEmpty())
+}
+
+// TestExitChildSessionRestoresEditorFocus: once the nav stack empties (the
+// user has backed all the way out of the last child session), focus must
+// return to the editor. Tab no longer offers a manual way back to
+// uiFocusEditor, so exitChildSession is now the only path that restores it.
+func TestExitChildSessionRestoresEditorFocus(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionTestUI(t)
+	u.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
+	u.editor.textarea = textarea.New()
+	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
+
+	require.NotNil(t, u.enterChildSession("msg1", "tc-1"))
+	require.Equal(t, uiFocusMain, u.focus)
+
+	cmd := u.exitChildSession()
+	require.NotNil(t, cmd)
+
+	require.Equal(t, uiFocusEditor, u.focus)
+	require.False(t, u.chat.list.Focused())
+	require.True(t, u.editor.textarea.Focused(), "textarea.Focus() sets focused state synchronously")
 }
 
 // currentExpanded reads an item's current expanded state via two

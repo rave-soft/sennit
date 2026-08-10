@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"image"
+	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 
@@ -58,6 +59,18 @@ type editorState struct {
 		index    int
 		draft    string
 	}
+
+	// ghostQuery/ghostSuggestion memoize the last prefix-scan result so
+	// Draw() (called every frame) doesn't rescan history when the input
+	// hasn't changed since the last computation.
+	ghostQuery      string
+	ghostSuggestion string
+
+	// ghostHiddenFor holds the textarea value at the moment Esc hid the
+	// suggestion. The hide only applies while the value is unchanged;
+	// typing anything (which changes the value) implicitly un-hides it,
+	// so no separate invalidation call is needed anywhere else.
+	ghostHiddenFor string
 
 	// lastKeyWasEsc tracks whether the immediately preceding key event was
 	// Escape, so a second consecutive Esc can clear the draft outright
@@ -137,4 +150,27 @@ func (e *editorState) updateHistoryDraft(oldValue string) {
 func (e *editorState) historyReset() {
 	e.promptHistory.index = -1
 	e.promptHistory.draft = ""
+}
+
+// ghostSuggestionFor returns the most recent prompt-history entry that
+// starts with value, or "" if none matches. Memoized by value: repeated
+// calls with the same value (e.g. multiple Draw calls in one frame) don't
+// rescan history. History is ordered newest-first (index 0 = most recent,
+// see historyPrev), so the first prefix match found scanning forward is the
+// one to use.
+func (e *editorState) ghostSuggestionFor(value string) string {
+	if value == e.ghostQuery {
+		return e.ghostSuggestion
+	}
+	e.ghostQuery = value
+	e.ghostSuggestion = ""
+	if value != "" {
+		for _, msg := range e.promptHistory.messages {
+			if len(msg) > len(value) && strings.HasPrefix(msg, value) {
+				e.ghostSuggestion = msg
+				break
+			}
+		}
+	}
+	return e.ghostSuggestion
 }

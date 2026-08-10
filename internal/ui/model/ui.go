@@ -106,13 +106,12 @@ const TextareaMinHeight = 3
 //     checked first regardless of focus. Closing the last dialog forces
 //     focus back to uiFocusEditor (or uiFocusMain, if a child session is
 //     still being viewed underneath) — see handleDialogMsg.
-//   - A child session is being viewed (read-only drill-in) or an inline
-//     editor has been collapsed via Tab to browse the chat: uiFocusMain,
+//   - A child session is being viewed (read-only drill-in): uiFocusMain,
 //     which hides the terminal cursor and routes keys to chat navigation
 //     instead of the textarea. Neither the mouse nor arrow/vim keys can
-//     reach this state anymore — only enterChildSession and the explicit
-//     activeInline+Tab toggle set it, and exiting always funnels back
-//     through focusEditor.
+//     reach this state anymore — only enterChildSession sets it, and
+//     exitChildSession restores uiFocusEditor once the nav stack has been
+//     unwound back to a top-level session.
 type uiFocusState uint8
 
 // Possible uiFocusState values.
@@ -1900,6 +1899,11 @@ func (m *UI) exitChildSession() tea.Cmd {
 	m.navStack = m.navStack[:len(m.navStack)-1]
 	if len(m.navStack) == 0 {
 		m.status.ClearInfoMsg()
+		// Back at a top-level session: restore normal editor focus, since
+		// Tab no longer offers a manual way back in.
+		m.focus = uiFocusEditor
+		m.chat.Blur()
+		return tea.Batch(m.loadSession(frame.parentSessionID), m.editor.textarea.Focus())
 	}
 	return m.loadSession(frame.parentSessionID)
 }
@@ -2633,24 +2637,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleDialogMsg(msg)
 	}
 
-	// Tab always toggles focus between editor and chat, even when
-	// an inline editor is active. This lets users collapse the
-	// question form to view chat.
-	if m.activeInline != nil && key.Matches(msg, m.keyMap.Tab) {
-		if m.focus == uiFocusEditor {
-			m.focus = uiFocusMain
-			m.activeInline.SetFocused(false)
-			m.chat.Focus()
-			m.chat.SetSelected(m.chat.Len() - 1)
-		} else {
-			m.focus = uiFocusEditor
-			m.activeInline.SetFocused(true)
-			m.chat.Blur()
-		}
-		m.updateLayoutAndSize()
-		return tea.Batch(cmds...)
-	}
-
 	// Route keys to active inline editor if one is showing.
 	if m.activeInline != nil && m.focus == uiFocusEditor {
 		if done, cmd := m.activeInline.HandleKey(msg); done {
@@ -2800,13 +2786,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-			case key.Matches(msg, m.keyMap.Tab):
-				if m.state != uiLanding {
-					m.setState(m.state, uiFocusMain)
-					m.editor.textarea.Blur()
-					m.chat.Focus()
-					m.chat.SetSelected(m.chat.Len() - 1)
-				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
@@ -2832,6 +2811,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Tab):
+				// Tab accepts the inline history prediction, if one is
+				// showing. It's otherwise a no-op here (deliberately: it
+				// no longer toggles focus, and must not fall through to
+				// the default branch below, which would hand it to the
+				// raw textarea and insert a literal tab character).
+				if tail := m.activeGhostTail(); tail != "" {
+					prevHeight := m.editor.textarea.Height()
+					m.editor.textarea.InsertString(tail)
+					m.editor.textarea.MoveToEnd()
+					if cmd := m.updateTextareaWithPrevHeight(nil, prevHeight); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
 			case key.Matches(msg, m.keyMap.Editor.Escape):
 				consecutive := m.editor.lastKeyWasEsc
 				m.editor.lastKeyWasEsc = true
@@ -2841,6 +2834,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					if cmd := m.handleHistoryEscape(msg); cmd != nil {
 						cmds = append(cmds, cmd)
 					}
+					// Hide any active ghost prediction until the input
+					// changes again. Applied after handleHistoryEscape so
+					// it hides relative to the value Esc left behind (e.g.
+					// the restored draft), not the pre-Esc value.
+					m.editor.ghostHiddenFor = m.editor.textarea.Value()
 				} else {
 					// Second Esc right after the first: the first one
 					// already did whatever it could (exited history nav,
@@ -2970,11 +2968,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case uiFocusMain:
 			switch {
-			case key.Matches(msg, m.keyMap.Tab) && !m.viewingChildSession():
-				m.focus = uiFocusEditor
-				m.sidebar.hideScrollbar()
-				cmds = append(cmds, m.editor.textarea.Focus())
-				m.chat.Blur()
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -3151,6 +3144,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		} else {
 			editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
 			editor.Draw(scr, layout.editor)
+			m.drawGhostText(scr)
 			m.inlineCursor = nil
 		}
 
@@ -3186,6 +3180,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			}
 			editor := uv.NewStyledString(m.renderEditorView(editorWidth))
 			editor.Draw(scr, layout.editor)
+			m.drawGhostText(scr)
 			m.inlineCursor = nil
 		}
 
@@ -3315,7 +3310,6 @@ func (m *UI) ShortHelp() []key.Binding {
 		return m.activeInline.ShortHelp()
 	}
 
-	tab := k.Tab
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.editor.textarea.Value() == "" {
 		commands.SetHelp("/ or ctrl+p", "commands")
@@ -3345,16 +3339,8 @@ func (m *UI) ShortHelp() []key.Binding {
 			}
 		}
 
-		switch m.focus {
-		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
-		default:
-			tab.SetHelp("tab", "focus editor")
-		}
-
 		binds = append(
 			binds,
-			tab,
 			commands,
 			k.Models,
 		)
@@ -3439,17 +3425,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 
 		mainBinds := []key.Binding{}
-		tab := k.Tab
-		switch m.focus {
-		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
-		default:
-			tab.SetHelp("tab", "focus editor")
-		}
-
 		mainBinds = append(
 			mainBinds,
-			tab,
 			commands,
 			k.Models,
 			k.Sessions,
@@ -4124,6 +4101,66 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 		}
 	}
 	return tea.Batch(heightCmd, resourceCmd)
+}
+
+// activeGhostTail returns the acceptable/renderable suffix of the current
+// history-based ghost prediction for the editor, or "" if none should be
+// shown right now (wrong focus, completions open, bang mode, empty input,
+// no match, or hidden by a preceding Esc).
+func (m *UI) activeGhostTail() string {
+	if m.focus != uiFocusEditor || m.editor.completionsOpen || m.editor.bangMode {
+		return ""
+	}
+	value := m.editor.textarea.Value()
+	if value == "" {
+		return ""
+	}
+	full := m.editor.ghostSuggestionFor(value)
+	if full == "" || m.editor.ghostHiddenFor == value {
+		return ""
+	}
+	return full[len(value):]
+}
+
+// drawGhostText overlays the inline history prediction (if any) onto the
+// editor at the cursor position, on top of the already-drawn textarea. It
+// is a pure overlay: it only paints the cells for the predicted text and
+// never affects layout/height.
+func (m *UI) drawGhostText(scr uv.Screen) {
+	tail := m.activeGhostTail()
+	if tail == "" {
+		return
+	}
+	cur := m.editor.textarea.Cursor()
+	if cur == nil {
+		return
+	}
+	// Same cursor-to-screen mapping as completionsPosition(): textarea
+	// cursor coordinates offset by the editor layout rect's origin, plus
+	// one row for the attachments line that renderEditorView always
+	// prepends above the textarea (mirrors the y+1 "offset for
+	// attachments row" applied where the completions popup position is
+	// used, above).
+	x := m.layout.editor.Min.X + cur.X
+	y := m.layout.editor.Min.Y + cur.Y + 1
+	if x >= m.layout.editor.Max.X || y >= m.layout.editor.Max.Y {
+		return
+	}
+
+	// Only the first line of a multi-line prediction is shown, with a
+	// trailing "…" marker to indicate there's more; Tab still accepts the
+	// full multi-line tail regardless of what's rendered here.
+	display := tail
+	if idx := strings.IndexByte(tail, '\n'); idx >= 0 {
+		display = tail[:idx] + "…"
+	}
+
+	ghost := uv.NewStyledString(m.com.Styles.Editor.Textarea.Focused.Placeholder.Render(display))
+	ghost.Tail = "…" // mark truncation if it overflows the editor width
+	ghost.Draw(scr, image.Rectangle{
+		Min: image.Pt(x, y),
+		Max: image.Pt(m.layout.editor.Max.X, y+1),
+	})
 }
 
 // completionsPosition returns the X and Y position for the completions popup.
