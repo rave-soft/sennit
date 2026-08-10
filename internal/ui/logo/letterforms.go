@@ -421,11 +421,14 @@ func stretchLetterformPart(s string, p letterformProps) string {
 // LetterB renders the letter B in a stylized way. It takes a bool that
 // determines whether to stretch the letter.
 func LetterB(stretch bool) string {
-	// Here's what we're making:
+	// Here's what we're making. The middle row is a solid crossbar (█
+	// instead of ▀), giving B an actual waist to anchor on instead of
+	// implying one through half-block shading — that's what sets it apart
+	// from R, which leaves that row open.
 	//
-	// █▀▀▀▄
-	// █▀▀▀▄
-	// ▀▀▀▀▀
+	// █▀▀▄
+	// ███▄
+	// ▀▀▀▀
 
 	left := heredoc.Doc(`
 		█
@@ -433,7 +436,7 @@ func LetterB(stretch bool) string {
 		▀`)
 	middle := heredoc.Doc(`
 		▀
-		▀
+		█
 		▀`)
 	right := heredoc.Doc(`
 		▄
@@ -443,7 +446,7 @@ func LetterB(stretch bool) string {
 		left,
 		stretchLetterformPart(middle, letterformProps{
 			stretch:    stretch,
-			width:      3,
+			width:      2,
 			minStretch: 7,
 			maxStretch: 12,
 		}),
@@ -503,11 +506,15 @@ func LetterI(_ bool) string {
 // LetterD renders the letter D in a stylized way. It takes a bool that
 // determines whether to stretch the letter.
 func LetterD(stretch bool) string {
-	// Here's what we're making:
+	// Here's what we're making. The bottom row is pure ▀ (plus padding),
+	// same as every other letterform in this word — a closing curve made
+	// of █/▄ would sit below the shared baseline and make D look taller
+	// than its neighbors. Rounding comes only from the ▄ cap on top; the
+	// wall itself (▄, █, ▀) stays closed on every row.
 	//
-	// █▀▀▀▄
-	// █   █
-	// ▀▀▀▀▀
+	// █▀▀▄
+	// █  █
+	// ▀▀▀▀
 
 	left := heredoc.Doc(`
 		█
@@ -525,7 +532,7 @@ func LetterD(stretch bool) string {
 		left,
 		stretchLetterformPart(middle, letterformProps{
 			stretch:    stretch,
-			width:      3,
+			width:      2,
 			minStretch: 7,
 			maxStretch: 12,
 		}),
