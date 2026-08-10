@@ -821,6 +821,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.renderPills()
 			}
 			m.autoExpandPillsIfReasonable()
+		} else {
+			// Not the current session — it may be a running delegation's
+			// child session, updated as its own turns complete. Surface
+			// its running token count on the parent's status line.
+			m.handleChildSessionUpdate(msg.Payload)
 		}
 	case pubsub.Event[message.Message]:
 		// Check if this is a child session message for an agent tool.
@@ -1702,6 +1707,48 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
+// findNestedToolContainer looks up the top-level tool item in the chat
+// whose tool call ID matches toolCallID and that can hold nested
+// child-session tool calls (agent / agentic_fetch). Returns nil if the
+// item is missing or isn't a nested-tool container — e.g. a custom-agent
+// delegation, which currently falls back to the generic renderer and has
+// no live-update path yet.
+func (m *UI) findNestedToolContainer(toolCallID string) chat.NestedToolContainer {
+	item := m.chat.MessageItem(toolCallID)
+	if item == nil {
+		return nil
+	}
+	toolMessageItem, ok := item.(chat.ToolMessageItem)
+	if !ok || toolMessageItem.ToolCall().ID != toolCallID {
+		return nil
+	}
+	container, ok := item.(chat.NestedToolContainer)
+	if !ok {
+		return nil
+	}
+	return container
+}
+
+// handleChildSessionUpdate propagates a child agent-tool session's running
+// token count up to the parent delegation's status line. Best-effort: it's
+// a no-op when the session isn't an agent-tool child session, the parent
+// item can't be found (e.g. scrolled out of the loaded window), or the
+// parent has no dedicated status line to update (custom-agent delegations
+// currently fall back to the generic renderer).
+func (m *UI) handleChildSessionUpdate(payload session.Session) {
+	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(payload.ID)
+	if !ok {
+		return
+	}
+	container := m.findNestedToolContainer(toolCallID)
+	if container == nil {
+		return
+	}
+	if tracker, ok := container.(chat.ChildSessionTokenTracker); ok {
+		tracker.SetChildSessionTokens(payload.PromptTokens, payload.CompletionTokens)
+	}
+}
+
 // handleChildSessionMessage handles messages from child sessions (agent tools).
 func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
 	var cmds []tea.Cmd
@@ -1718,25 +1765,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 		return nil
 	}
 
-	// Find the parent agent tool item.
-	var agentItem chat.NestedToolContainer
-	for i := 0; i < m.chat.Len(); i++ {
-		item := m.chat.MessageItem(toolCallID)
-		if item == nil {
-			continue
-		}
-		if agent, ok := item.(chat.NestedToolContainer); ok {
-			if toolMessageItem, ok := item.(chat.ToolMessageItem); ok {
-				if toolMessageItem.ToolCall().ID == toolCallID {
-					// Verify this agent belongs to the correct parent message.
-					// We can't directly check parentMessageID on the item, so we trust the session parsing.
-					agentItem = agent
-					break
-				}
-			}
-		}
-	}
-
+	agentItem := m.findNestedToolContainer(toolCallID)
 	if agentItem == nil {
 		return nil
 	}
