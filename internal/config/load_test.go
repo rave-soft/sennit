@@ -230,6 +230,49 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.Contains(t, got, filepath.Join(project, ".braidrc"))
 	})
 
+	t.Run(".braid/braid.json and .braid/braidrc are discovered", func(t *testing.T) {
+		project := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(project, ".braid"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braid.json"), []byte("{}"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braidrc"), []byte(""), 0o644))
+
+		got := lookupConfigs(project)
+		require.Contains(t, got, filepath.Join(project, ".braid", "braid.json"))
+		require.Contains(t, got, filepath.Join(project, ".braid", "braidrc"))
+	})
+
+	t.Run(".braid/braid.json outranks root braid.json and .braid.json", func(t *testing.T) {
+		project := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(project, "braid.json"),
+			[]byte(`{"options":{"data_directory":"from-root-json"}}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid.json"),
+			[]byte(`{"options":{"data_directory":"from-dot-json"}}`), 0o644))
+		require.NoError(t, os.MkdirAll(filepath.Join(project, ".braid"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braid.json"),
+			[]byte(`{"options":{"data_directory":"from-braid-subdir"}}`), 0o644))
+
+		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project))
+		require.NoError(t, err)
+		require.Equal(t, "from-braid-subdir", cfg.Options.DataDirectory)
+	})
+
+	t.Run(".braid/braidrc outranks root braidrc, .braidrc, and .braid/braid.json", func(t *testing.T) {
+		project := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(project, "braidrc"),
+			[]byte("option data-directory from-root-braidrc\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".braidrc"),
+			[]byte("option data-directory from-dot-braidrc\n"), 0o644))
+		require.NoError(t, os.MkdirAll(filepath.Join(project, ".braid"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braid.json"),
+			[]byte(`{"options":{"data_directory":"from-braid-subdir-json"}}`), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braidrc"),
+			[]byte("option data-directory from-braid-subdir-rc\n"), 0o644))
+
+		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project))
+		require.NoError(t, err)
+		require.Equal(t, "from-braid-subdir-rc", cfg.Options.DataDirectory)
+	})
+
 	t.Run("system config is loaded first", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("system config not supported on Windows")

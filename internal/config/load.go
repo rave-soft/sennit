@@ -121,6 +121,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
+		// Capture the staleness snapshot even on this early return.
+		// Without it, trackedConfigPaths stays empty and a background
+		// watcher (WatchForExternalChanges) would treat every discovered
+		// config path as "new" on every poll, reloading in a busy loop
+		// until a provider gets configured.
+		store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
 		return store, nil
 	}
 
@@ -1061,11 +1067,21 @@ func lookupConfigs(cwd string) []string {
 
 	// Ordered high-to-low priority within a directory. LookupBounded returns
 	// matches in this order, and the later reverse + merge make the earliest
-	// listed name win on conflict. So: .braidrc beats braidrc, both beat the
+	// listed name win on conflict. So: the .braid/ subdirectory variants beat
+	// their root-level counterparts, .braidrc beats braidrc, both beat the
 	// JSON configs, and .braid.json beats braid.json.
+	//
+	// The .braid/ variants are looked up as literal names — ".braid" here is
+	// not options.data_directory (which is configurable and resolved
+	// separately, see workspacePath in Load/reloadFromDisk); it is the
+	// project's canonical config subdirectory, checked at every directory in
+	// the upward walk just like the other names. defaultDataDirectory holds
+	// the same literal (".braid") so the two don't drift.
 	configNames := []string{
+		filepath.Join(defaultDataDirectory, appName+"rc"),
 		"." + appName + "rc",
 		appName + "rc",
+		filepath.Join(defaultDataDirectory, appName+".json"),
 		"." + appName + ".json",
 		appName + ".json",
 	}

@@ -58,6 +58,10 @@ global locations.
 ## Configuration
 
 Config lives in `braid.json` (project or global) and follows `schema.json`.
+The canonical project location is `.braid/braid.json` — it has the highest
+priority of any project config and is where `braid config set` and
+agent-driven writes land; a bare `braid.json`/`.braid.json` at the project
+root is still supported at lower priority.
 Any OpenAI-compatible endpoint works as a provider, including a local
 `llama.cpp`, `ollama` or `lmstudio` server:
 

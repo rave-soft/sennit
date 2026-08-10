@@ -451,6 +451,14 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool) (*Wo
 		clients:      make(map[string]*clientState),
 	}
 
+	// Reload config on external changes to this workspace's config files
+	// (e.g. an agent's Edit/Write tool touching .braid/braid.json
+	// directly, bypassing SetConfigFields) and route the result through
+	// the same publishConfigChanged path SetConfigField et al. use, so
+	// MCP servers re-init and clients see the change without a restart.
+	ws.Cfg.OnExternalChange(func() { publishConfigChanged(ws) })
+	go ws.Cfg.WatchForExternalChanges(wsCtx)
+
 	if attachThreads {
 		b.attachServerThreads(wsCtx, ws.App, args.Path)
 	}

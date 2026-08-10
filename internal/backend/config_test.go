@@ -2,6 +2,8 @@ package backend
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,7 +19,15 @@ import (
 // event types are ignored.
 func awaitConfigChanged(t *testing.T, evc <-chan pubsub.Event[any], workspaceID string) {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	awaitConfigChangedWithin(t, evc, workspaceID, 2*time.Second)
+}
+
+// awaitConfigChangedWithin is awaitConfigChanged with a caller-supplied
+// timeout, for callers (like the external-edit watcher test) whose
+// ConfigChanged arrives on a slower, poll-driven cadence.
+func awaitConfigChangedWithin(t *testing.T, evc <-chan pubsub.Event[any], workspaceID string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
 	for {
 		select {
 		case ev, ok := <-evc:
@@ -41,13 +51,22 @@ func awaitConfigChanged(t *testing.T, evc <-chan pubsub.Event[any], workspaceID 
 // the backend, the workspace, and a fresh event subscription.
 func newPublishingWorkspace(t *testing.T) (*Backend, *Workspace, <-chan pubsub.Event[any]) {
 	t.Helper()
+	return newPublishingWorkspaceWithGrace(t, 2*time.Second)
+}
+
+// newPublishingWorkspaceWithGrace is newPublishingWorkspace with a
+// caller-chosen create-grace window, for tests that need to keep the
+// workspace alive (unattached) longer than the default 2s -- e.g. one
+// waiting on the poll-driven external-change watcher.
+func newPublishingWorkspaceWithGrace(t *testing.T, grace time.Duration) (*Backend, *Workspace, <-chan pubsub.Event[any]) {
+	t.Helper()
 	xdgIsolated(t)
 
 	cwd := t.TempDir()
 	dataDir := t.TempDir()
 
 	b := New(context.Background(), nil, func() {})
-	b.SetCreateGrace(2 * time.Second)
+	b.SetCreateGrace(grace)
 	t.Cleanup(func() { drainBackend(t, b) })
 
 	cid := uuid.New().String()
@@ -181,6 +200,38 @@ func TestDisableDockerMCP_PublishesConfigChanged(t *testing.T) {
 
 	require.NoError(t, b.DisableDockerMCP(ws.ID))
 	awaitConfigChanged(t, evc, ws.ID)
+}
+
+// TestExternalConfigEdit_ReloadsAndReinitializesMCP simulates the reported
+// bug: an agent's Edit/Write tool adds an MCP server to the project config
+// file directly on disk, bypassing SetConfigField entirely, and the running
+// workspace is expected to pick it up without a restart. Before the
+// ConfigStore watcher, nothing polled for that kind of external edit, so the
+// server stayed invisible until the next process start.
+func TestExternalConfigEdit_ReloadsAndReinitializesMCP(t *testing.T) {
+	_, ws, evc := newPublishingWorkspaceWithGrace(t, 10*time.Second)
+	drainEvents(evc, 100*time.Millisecond)
+
+	require.NotContains(t, ws.Cfg.Config().MCP, "added-externally")
+
+	// Write directly to the workspace config file on disk -- the same
+	// thing an agent's Write/Edit tool would do -- instead of going
+	// through ws.Cfg.SetConfigField.
+	workspacePath := filepath.Join(ws.Cfg.Config().Options.DataDirectory, "braid.json")
+	require.NoError(t, os.WriteFile(workspacePath,
+		[]byte(`{"mcp":{"added-externally":{"command":"echo"}}}`), 0o600))
+
+	// The watcher polls every externalChangePollInterval (2s); allow a
+	// full cycle plus margin rather than racing the tick.
+	awaitConfigChangedWithin(t, evc, ws.ID, 6*time.Second)
+
+	require.Contains(t, ws.Cfg.Config().MCP, "added-externally")
+	// Reinitialize runs async off the ConfigChanged publish; give it a
+	// moment to reach the registry rather than asserting immediately.
+	require.Eventually(t, func() bool {
+		_, ok := ws.MCP.GetState("added-externally")
+		return ok
+	}, 5*time.Second, 20*time.Millisecond, "expected the externally-added MCP server to reach the registry")
 }
 
 // drainEvents reads from evc until quiet for the given window. Used

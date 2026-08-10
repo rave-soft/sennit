@@ -15,11 +15,21 @@ Braid supports two config formats:
 
 Both are discovered together and deep-merged. Priority (highest to lowest):
 
-1. `.braidrc` / `braidrc` / `.braid.json` / `braid.json` (project-local,
-   closer-to-cwd wins; Windows uses `.\.braidrc` / `.\braidrc`)
-2. `$XDG_CONFIG_HOME/braid/braidrc` or `~/.config/braid/braidrc`
+1. `.braid/braid.json` — the canonical, highest-priority project config.
+   This is also where `braid config set` and agent-driven config writes land
+   (the workspace scope), so it always wins on conflicts, including over
+   `.braidrc`/`braidrc` in the same directory.
+2. `.braid/braidrc` / `.braidrc` / `braidrc` / `.braid.json` / `braid.json`
+   (project-local, closer-to-cwd wins; Windows uses `.\.braidrc` /
+   `.\braidrc`)
+3. `$XDG_CONFIG_HOME/braid/braidrc` or `~/.config/braid/braidrc`
    (`%XDG_CONFIG_HOME%\braid\braidrc` or
    `%USERPROFILE%\.config\braid\braidrc` on Windows)
+
+`.braid/braid.json` and `.braid/braidrc` are checked at every directory in the
+upward walk, same as the root-level names; `.braid/braid.json` is the highest
+priority among the JSON variants, and `.braid/braidrc` the highest among the
+`braidrc` variants.
 
 Data directories (`~/.local/share/braid` and `%LOCALAPPDATA%\braid`) contain
 machine-owned JSON state only; Braid does not discover or execute a `braidrc`

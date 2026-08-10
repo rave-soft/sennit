@@ -110,6 +110,16 @@ type ConfigStore struct {
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
 
+	// stalenessMu guards trackedConfigPaths and snapshots. Writers
+	// (CaptureStalenessSnapshot, RefreshStalenessSnapshot) already run
+	// under writeMu via updateLocked/reloadFromDisk, but ConfigStaleness
+	// is a read-only diagnostic called from other goroutines without
+	// writeMu (the braid_info tool, and WatchForExternalChanges' poll
+	// loop in watch.go) — a separate mutex, rather than reusing writeMu,
+	// keeps that read cheap and avoids adding staleness bookkeeping to
+	// writeMu's contention.
+	stalenessMu sync.Mutex
+
 	// configMu guards the config pointer field against concurrent
 	// readers (Config) and the writeMu-serialised swap (setConfig). It
 	// protects the pointer word only; the pointed-to Config is treated
@@ -139,6 +149,13 @@ type ConfigStore struct {
 	// on the next wait.
 	authSignalMu sync.Mutex
 	authSignals  map[string]chan struct{}
+
+	// onExternalChangeMu guards onExternalChange, the callback
+	// WatchForExternalChanges runs after a reload it triggered itself
+	// (as opposed to one caused by this process's own writes). See
+	// watch.go.
+	onExternalChangeMu sync.Mutex
+	onExternalChange   func()
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -1034,6 +1051,9 @@ type StalenessResult struct {
 // missing, along with sorted lists of affected paths. Stat errors are
 // captured in Errors map but still treated as non-existence for dirty detection.
 func (s *ConfigStore) ConfigStaleness() StalenessResult {
+	s.stalenessMu.Lock()
+	defer s.stalenessMu.Unlock()
+
 	var result StalenessResult
 	result.Errors = make(map[string]error)
 
@@ -1083,6 +1103,15 @@ func (s *ConfigStore) ConfigStaleness() StalenessResult {
 // RefreshStalenessSnapshot captures fresh snapshots of all tracked config files.
 // Call this after reloading config to clear dirty state.
 func (s *ConfigStore) RefreshStalenessSnapshot() error {
+	s.stalenessMu.Lock()
+	defer s.stalenessMu.Unlock()
+	s.refreshStalenessSnapshotLocked()
+	return nil
+}
+
+// refreshStalenessSnapshotLocked is the lock-free core of
+// RefreshStalenessSnapshot. Caller must hold stalenessMu.
+func (s *ConfigStore) refreshStalenessSnapshotLocked() {
 	if s.snapshots == nil {
 		s.snapshots = make(map[string]fileSnapshot)
 	}
@@ -1103,13 +1132,14 @@ func (s *ConfigStore) RefreshStalenessSnapshot() error {
 
 		s.snapshots[path] = snapshot
 	}
-
-	return nil
 }
 
 // CaptureStalenessSnapshot captures snapshots for the given paths, building the
 // tracked config paths list. Paths are deduplicated and normalized.
 func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
+	s.stalenessMu.Lock()
+	defer s.stalenessMu.Unlock()
+
 	// Build unique set of normalized paths
 	seen := make(map[string]struct{})
 	for _, p := range paths {
@@ -1146,14 +1176,25 @@ func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
 	slices.Sort(s.trackedConfigPaths)
 
 	// Capture initial snapshots
-	if err := s.RefreshStalenessSnapshot(); err != nil {
-		slog.Warn("Failed to capture initial config staleness snapshot", "error", err)
-	}
+	s.refreshStalenessSnapshotLocked()
 }
 
 // captureStalenessSnapshot is an alias for CaptureStalenessSnapshot for internal use.
 func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
 	s.CaptureStalenessSnapshot(paths)
+}
+
+// trackedConfigPathSet returns a copy of the currently tracked config paths
+// as a set, for callers (externalChangeDetected in watch.go) that need to
+// check membership without racing CaptureStalenessSnapshot/reloadFromDisk.
+func (s *ConfigStore) trackedConfigPathSet() map[string]struct{} {
+	s.stalenessMu.Lock()
+	defer s.stalenessMu.Unlock()
+	set := make(map[string]struct{}, len(s.trackedConfigPaths))
+	for _, p := range s.trackedConfigPaths {
+		set[p] = struct{}{}
+	}
+	return set
 }
 
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory

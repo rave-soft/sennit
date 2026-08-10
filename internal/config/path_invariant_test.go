@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -53,6 +54,54 @@ func TestConfigPathInvariant_MatchesReloadReadSet(t *testing.T) {
 					"a write to this scope would be lost on the next reload", scope, abs)
 			}
 		}
+	}
+}
+
+// TestConfigPathInvariant_WorkspaceScopeReadableViaLookupConfigs guards the
+// project-scope write target added for .braid/braid.json: configPath
+// (ScopeWorkspace) must land inside lookupConfigs' own result set, not just
+// the separately-read workspace file Load/reloadFromDisk layer on top. Before
+// .braid/braid.json and .braid/braidrc were added as literal candidates in
+// lookupConfigs' configNames, this only held via the extra "plus workspace
+// path" union in TestConfigPathInvariant_MatchesReloadReadSet above; now
+// that .braid/braid.json is a first-class candidate, the default-DataDirectory
+// case should not need that union at all.
+func TestConfigPathInvariant_WorkspaceScopeReadableViaLookupConfigs(t *testing.T) {
+	workingDir := t.TempDir()
+
+	envDir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", envDir)
+	t.Setenv("BRAID_GLOBAL_DATA", envDir)
+
+	// lookupConfigs only lists candidates that exist on disk, so create the
+	// workspace file up front -- the invariant is about where reads and
+	// writes land once the file is there, not about a file that has never
+	// been written.
+	if err := os.MkdirAll(filepath.Join(workingDir, ".braid"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workingDir, ".braid", "braid.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	store, err := Load(workingDir, "", false)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", workingDir, err)
+	}
+
+	path, err := store.configPath(ScopeWorkspace)
+	if err != nil {
+		t.Fatalf("configPath(ScopeWorkspace): %v", err)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("filepath.Abs(%q): %v", path, err)
+	}
+
+	readSet := absSet(t, lookupConfigs(workingDir))
+	if _, ok := readSet[abs]; !ok {
+		t.Errorf("configPath(ScopeWorkspace) = %q is not among lookupConfigs(workingDir) candidates; "+
+			"expected .braid/braid.json to be a literal candidate there", abs)
 	}
 }
 
