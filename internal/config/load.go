@@ -99,6 +99,14 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 	store.knownProviders = providers
 
+	// One-time migration: move any auto-discovered models still sitting in
+	// the data-dir config file (from before the model-discovery cache
+	// existed) into the cache, so the JSON config stops carrying arrays that
+	// can run into the thousands of entries for providers with large
+	// catalogs. Needs the known-provider list to tell a catalog provider's
+	// legitimate override apart from a custom provider's discovery dump.
+	migrateBloatedModelCache(store.globalDataPath, providers)
+
 	env := env.New()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
@@ -249,9 +257,15 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		return err
 	}
 
+	// Fill in Models for custom providers from the cache before discovery
+	// runs, so a restart doesn't re-trigger an HTTP round trip just because
+	// the JSON config no longer carries the discovered list (see
+	// applyCachedModelsForCustomProviders).
+	applyCachedModelsForCustomProviders(c.Providers, knownProviderNames, store.globalDataPath)
+
 	discoveryResults := discoverCustomProviderModels(ctx, c.Providers, knownProviderNames, resolver)
 
-	validateActions, err := c.validateCustomProviders(knownProviderNames, resolver, discoveryResults)
+	validateActions, err := c.validateCustomProviders(knownProviderNames, resolver, discoveryResults, store.globalDataPath)
 	if err != nil {
 		return err
 	}
@@ -536,6 +550,26 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 	return knownProviderNames, actions, nil
 }
 
+// applyCachedModelsForCustomProviders fills in Models for custom providers
+// whose config has none, from the global model-discovery cache (see
+// saveCachedModels). This lets a restart skip discoverCustomProviderModels'
+// HTTP round trip for an empty models list — the cache, not
+// providers.<id>.models in braid.json, is where auto-discovered models
+// live now. A provider with discover_models: true explicitly still
+// refreshes over HTTP regardless (discoverCustomProviderModels's
+// wantsDiscovery branch doesn't check Models length).
+func applyCachedModelsForCustomProviders(providers *csync.Map[string, ProviderConfig], knownProviderNames map[string]bool, globalDataPath string) {
+	for id, pc := range providers.Seq2() {
+		if knownProviderNames[id] || pc.Disable || pc.BaseURL == "" || len(pc.Models) > 0 {
+			continue
+		}
+		if models, ok := loadCachedModels(globalDataPath, id); ok {
+			pc.Models = models
+			providers.Set(id, pc)
+		}
+	}
+}
+
 // discoveryResult holds the outcome of a single custom provider's
 // model-discovery HTTP call.
 type discoveryResult struct {
@@ -601,11 +635,13 @@ func discoverCustomProviderModels(ctx context.Context, providers *csync.Map[stri
 // validateCustomProviders validates every provider outside the known
 // catalog, applies any discovery results computed for it, and drops
 // providers that end up unusable (unsupported type, disabled, no models, no
-// endpoint). It also returns disk-persist actions for providers whose
-// models were freshly discovered, so a later load can skip the HTTP round
-// trip; see configureProviders for why these are returned rather than
-// written here.
-func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, resolver VariableResolver, discoveryResults map[string]discoveryResult) ([]pendingDiskAction, error) {
+// endpoint). Providers whose models were freshly discovered have that list
+// written into the global model-discovery cache (see saveCachedModels), so
+// a later load can skip the HTTP round trip; the cache write happens
+// directly here rather than through a pendingDiskAction because it never
+// touches braid.json, unlike the actions this still returns for other
+// cleanup (see configureProviders for why those go through the caller).
+func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, resolver VariableResolver, discoveryResults map[string]discoveryResult, globalDataPath string) ([]pendingDiskAction, error) {
 	var actions []pendingDiskAction
 	for id, providerConfig := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
@@ -659,14 +695,13 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 			} else if len(result.models) > 0 {
 				providerConfig.Models = result.models
 				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
-				// Persist so the next load finds a non-empty models list
-				// and skips this HTTP round trip entirely. A failed
-				// discovery (the branch above) must never reach here, so
-				// a down endpoint never touches disk.
-				actions = append(actions, pendingDiskAction{
-					scope:  ScopeGlobal,
-					fields: map[string]any{ProviderFieldKey(id, "models"): result.models},
-				})
+				// Persist to the model cache (not braid.json) so the next
+				// load finds a non-empty models list via
+				// applyCachedModelsForCustomProviders and skips this HTTP
+				// round trip entirely. A failed discovery (the branch
+				// above) must never reach here, so a down endpoint never
+				// touches the cache.
+				saveCachedModels(globalDataPath, id, result.models)
 			}
 		}
 
@@ -1211,6 +1246,69 @@ func dropIncompatibleRecentModels(data []byte, path string) []byte {
 		return data
 	}
 	return out
+}
+
+// migrateBloatedModelCache is a one-time, idempotent migration that moves
+// auto-discovered models still sitting in the data-dir config file (from
+// before the model-discovery cache existed) into the cache, and strips
+// them out of the JSON. It operates on the raw bytes of globalDataPath
+// directly, never on the in-memory cfg and never on ~/.config/braid.json:
+// only the data-dir file (machine-owned, writable state) is a candidate,
+// and only for provider IDs outside the known catalog — a catalog
+// provider's models field is a legitimate user override, not a discovery
+// dump, and must be left alone.
+//
+// This process's already-parsed in-memory cfg keeps whatever models it
+// unmarshaled before this runs; that's fine; only the next Load() benefits,
+// via applyCachedModelsForCustomProviders reading the now-populated cache.
+func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Provider) {
+	if globalDataPath == "" {
+		return
+	}
+	data, err := os.ReadFile(globalDataPath)
+	if err != nil || len(data) == 0 {
+		return
+	}
+
+	known := make(map[string]bool, len(knownProviders))
+	for _, p := range knownProviders {
+		known[string(p.ID)] = true
+	}
+
+	updated := string(data)
+	changed := false
+	gjson.Get(updated, "providers").ForEach(func(id, provider gjson.Result) bool {
+		providerID := id.String()
+		if known[providerID] {
+			return true
+		}
+		models := provider.Get("models")
+		if !models.Exists() || !models.IsArray() || len(models.Array()) == 0 {
+			return true
+		}
+
+		var parsed []catwalk.Model
+		if err := json.Unmarshal([]byte(models.Raw), &parsed); err != nil {
+			slog.Warn("Skipping bloated model cache migration for provider with unparseable models", "provider", providerID, "error", err)
+			return true
+		}
+
+		saveCachedModels(globalDataPath, providerID, parsed)
+		if out, err := sjson.Delete(updated, ProviderFieldKey(providerID, "models")); err == nil {
+			updated = out
+			changed = true
+		}
+		return true
+	})
+
+	if !changed {
+		return
+	}
+	if err := atomicWriteFile(globalDataPath, []byte(updated), 0o600); err != nil {
+		slog.Warn("Failed to migrate bloated model cache", "path", globalDataPath, "error", err)
+		return
+	}
+	slog.Info("Migrated auto-discovered provider models out of the data-dir config into the model cache", "path", globalDataPath)
 }
 
 // migrateDeprecatedKey renames a deprecated JSON key (gjson/sjson dotted

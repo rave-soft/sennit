@@ -2,6 +2,9 @@ package tools
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -558,4 +561,42 @@ func TestBraidInfo_Problems_MCPError(t *testing.T) {
 	require.Contains(t, output, "[problems]")
 	require.Contains(t, output, "mcp.filesystem")
 	require.Contains(t, output, "connection refused")
+}
+
+// TestBraidInfo_Providers_CachedCustomProviderModels verifies that a
+// custom provider's model count shows up in [providers] when those models
+// come from the global model-discovery cache (internal/config's
+// applyCachedModelsForCustomProviders) rather than from braid.json — i.e.
+// that writeProviders needs no changes of its own now that discovered
+// models are cache-backed, since it only ever reads len(pc.Models) off the
+// already-loaded config.
+func TestBraidInfo_Providers_CachedCustomProviderModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "cached-model-1", "object": "model"}, {"id": "cached-model-2", "object": "model"}]}`))
+	}))
+	defer server.Close()
+
+	globalDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+
+	dataConfigPath := config.GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
+	seed := fmt.Sprintf(`{"providers": {"custom": {"api_key": "test-key", "base_url": %q}}}`, server.URL+"/v1")
+	require.NoError(t, os.WriteFile(dataConfigPath, []byte(seed), 0o644))
+
+	// First load discovers over HTTP and populates the cache as a side
+	// effect (internal/config.validateCustomProviders).
+	_, err := config.Load(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	// Second, independent load must pick the models up from the cache, with
+	// no models array left in braid.json to source them from.
+	store, err := config.Load(t.TempDir(), "", false)
+	require.NoError(t, err)
+
+	output := buildBraidInfo(store, nil, nil, nil, nil, nil)
+	require.Contains(t, output, "custom = enabled (2 models)")
 }

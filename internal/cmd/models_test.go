@@ -80,14 +80,22 @@ func TestModelsRefreshCmd_SingleProvider(t *testing.T) {
 	require.Contains(t, stdout.String(), "custom:")
 	require.Contains(t, stdout.String(), "2 models")
 
+	// Refreshed models must land in the model cache, not
+	// providers.custom.models in the data-dir JSON.
 	persisted, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
-	models := gjson.GetBytes(persisted, "providers.custom.models")
-	require.True(t, models.Exists())
-	require.Len(t, models.Array(), 2)
+	require.False(t, gjson.GetBytes(persisted, "providers.custom.models").Exists())
+
+	// A subsequent load must see the refreshed models via the cache
+	// without needing the (now closed-by-defer) network endpoint.
+	cfg, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+	pc, ok := cfg.Config().Providers.Get("custom")
+	require.True(t, ok)
+	require.Len(t, pc.Models, 2)
 	var ids []string
-	for _, m := range models.Array() {
-		ids = append(ids, m.Get("id").String())
+	for _, m := range pc.Models {
+		ids = append(ids, m.ID)
 	}
 	require.ElementsMatch(t, []string{"model-a", "model-b"}, ids)
 }
@@ -114,14 +122,29 @@ func TestModelsRefreshCmd_AllProviders(t *testing.T) {
 
 	persisted, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
-	require.Len(t, gjson.GetBytes(persisted, "providers.custom-a.models").Array(), 1)
-	require.Len(t, gjson.GetBytes(persisted, "providers.custom-b.models").Array(), 2)
+	require.False(t, gjson.GetBytes(persisted, "providers.custom-a.models").Exists())
+	require.False(t, gjson.GetBytes(persisted, "providers.custom-b.models").Exists())
+
+	cfg, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+	pcA, ok := cfg.Config().Providers.Get("custom-a")
+	require.True(t, ok)
+	require.Len(t, pcA.Models, 1)
+	pcB, ok := cfg.Config().Providers.Get("custom-b")
+	require.True(t, ok)
+	require.Len(t, pcB.Models, 2)
 }
 
 func TestModelsRefreshCmd_UnreachableEndpointLeavesDiskUntouched(t *testing.T) {
 	seed := `{"providers": {"custom": {"api_key": "key", "base_url": "http://127.0.0.1:1/v1", "models": [{"id": "seed", "name": "seed"}]}}}`
 	dataConfigPath := setupHermeticConfigEnv(t, seed)
 
+	// A plain load migrates the seeded models out of the data-dir JSON and
+	// into the cache (see migrateBloatedModelCache); do that once up front
+	// so "before" reflects the steady state a failed refresh must preserve,
+	// rather than incidentally asserting migration never ran.
+	_, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
 	before, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
 

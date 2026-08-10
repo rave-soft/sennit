@@ -1352,15 +1352,19 @@ func TestConfig_Load_DiscoveredModelsPersistAcrossReload(t *testing.T) {
 	require.Equal(t, "auto-model", pc.Models[0].ID)
 	require.Equal(t, int64(1), requests.Load(), "first load should discover over HTTP")
 
-	// The discovered models must now be on disk in the data-dir config.
+	// The discovered models must now live in the model cache, not on disk
+	// in the data-dir config.
 	persisted, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
-	models := gjson.GetBytes(persisted, "providers.custom.models")
-	require.True(t, models.Exists())
-	require.NotEmpty(t, models.Array())
+	require.False(t, gjson.GetBytes(persisted, "providers.custom.models").Exists())
+	cached, ok := loadCachedModels(dataConfigPath, "custom")
+	require.True(t, ok)
+	require.Len(t, cached, 1)
+	require.Equal(t, "auto-model", cached[0].ID)
 
 	// A second, independent Load of the same data dir must find the
-	// models already populated and skip discovery entirely.
+	// models already populated (from the cache) and skip discovery
+	// entirely.
 	workingDir2 := t.TempDir()
 	store2, err := Load(workingDir2, "", false)
 	require.NoError(t, err)
@@ -1403,7 +1407,11 @@ func TestConfig_Load_FailedDiscoveryLeavesDiskUntouched(t *testing.T) {
 // project-level braid.json's explicit, non-empty models list merges with a
 // stale models list already persisted in the data-dir config, and that a
 // non-empty merged list is enough to skip discovery entirely (no HTTP
-// request is made, and the data-dir file is left untouched).
+// request is made). The stale data-dir models list is migrated out of the
+// JSON file and into the model cache as a side effect of Load (see
+// migrateBloatedModelCache); this test only cares that no HTTP discovery
+// leaks in, not about that migration's own bookkeeping (covered by
+// TestConfig_Load_MigratesBloatedModelCache).
 func TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels(t *testing.T) {
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1452,15 +1460,6 @@ func TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels(t *testing.T) {
 
 	// A non-empty merged models list must short-circuit discovery.
 	require.Equal(t, int64(0), requests.Load(), "discovery must not run when merged models is already non-empty")
-
-	// The data-dir file must not be clobbered with the project's models:
-	// persistence only ever writes discovery results, and none ran here.
-	persisted, err := os.ReadFile(dataConfigPath)
-	require.NoError(t, err)
-	models := gjson.GetBytes(persisted, "providers.custom.models")
-	require.True(t, models.Exists())
-	require.Len(t, models.Array(), 1)
-	require.Equal(t, "stale-model", models.Array()[0].Get("id").String())
 }
 
 func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {

@@ -281,8 +281,10 @@ braid models refresh my-local-llm`,
 				}
 			}
 
-			key := config.ProviderFieldKey(id, "models")
-			if err := cfg.SetConfigFields(config.ScopeGlobal, map[string]any{key: models}); err != nil {
+			// Discovered models live in the global model-discovery cache,
+			// not providers.<id>.models in braid.json — see
+			// validateCustomProviders in internal/config/load.go.
+			if err := cfg.SaveCachedProviderModels(id, models); err != nil {
 				hadFailure = true
 				cmd.PrintErrf("%s: refresh failed: %v\n", id, err)
 				continue
