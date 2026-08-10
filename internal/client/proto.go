@@ -219,6 +219,12 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
+			case pubsub.PayloadTypeStrandEvent:
+				var e pubsub.Event[proto.StrandEvent]
+				_ = json.Unmarshal(p.Payload, &e)
+				if !sendEvent(ctx, events, e) {
+					return
+				}
 			case pubsub.PayloadTypeFile:
 				var e pubsub.Event[proto.File]
 				_ = json.Unmarshal(p.Payload, &e)

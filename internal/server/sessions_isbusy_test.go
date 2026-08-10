@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/backend"
 	"github.com/rave-soft/braid/internal/message"
@@ -53,6 +54,7 @@ func (s *stubCoordinator) Summarize(context.Context, string) error {
 func (s *stubCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (s *stubCoordinator) UpdateModels(context.Context) error            { return nil }
 func (s *stubCoordinator) GenerateTitle(context.Context, string, string) {}
+func (s *stubCoordinator) SetStrands(tools.StrandManager)                {}
 
 // stubSessions is a minimal session.Service that returns a fixed list
 // (and supports Get by ID). All other methods return zero values; the

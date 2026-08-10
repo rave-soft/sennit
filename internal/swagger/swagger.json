@@ -3171,6 +3171,345 @@
                     }
                 }
             }
+        },
+        "/workspaces/{id}/strands": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strands"
+                ],
+                "summary": "List strands",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.Strand"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strands"
+                ],
+                "summary": "Create strand",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Strand creation params",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.CreateStrandRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Strand"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/strands/{strandID}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strands"
+                ],
+                "summary": "Get strand",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Strand ID or name",
+                        "name": "strandID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Strand"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "strands"
+                ],
+                "summary": "Remove strand",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Strand ID or name",
+                        "name": "strandID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Force removal of an active or dirty strand",
+                        "name": "force",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Also delete the strand's git branch",
+                        "name": "delete_branch",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/strands/{strandID}/merge": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strands"
+                ],
+                "summary": "Merge strand",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Strand ID or name",
+                        "name": "strandID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Strand"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/strands/{strandID}/send": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "strands"
+                ],
+                "summary": "Send message to strand",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Strand ID or name",
+                        "name": "strandID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Message to send",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.SendStrandRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -3283,7 +3622,8 @@
                     "type": "string"
                 },
                 "model": {
-                    "$ref": "#/definitions/config.SelectedModelType"
+                    "description": "Model optionally pins this agent to a specific \"provider/model-id\",\nletting a sub-agent use a model other agents don't. Left empty, the\nagent inherits the application's main model. A value that does not\nresolve to a known provider/model falls back to the empty default\nwith a warning logged.",
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
@@ -3631,6 +3971,27 @@
                 "TrailerStyleAssistedBy"
             ]
         },
+        "config.WebSearchOptions": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "APIKey authenticates with the selected provider. Runs through shell\nexpansion at tool-build time, the same as provider api_key, so $VAR\nand $(cmd) work. Unused by the duckduckgo provider.",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "BaseURL overrides the provider's default API endpoint, for\nself-hosted or proxy-compatible search APIs.",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider selects the search backend. \"duckduckgo\" (default) scrapes\nDuckDuckGo Lite and needs no API key; \"tavily\" calls the Tavily\nSearch API and requires APIKey.",
+                    "type": "string"
+                },
+                "proxy_url": {
+                    "description": "ProxyURL routes web search requests through a proxy. Web search has\nno LLM provider of its own to inherit proxy_url from, so it is\nconfigured here; same semantics as ProviderConfig.ProxyURL,\nincluding the \"none\" sentinel and shell expansion.",
+                    "type": "string"
+                }
+            }
+        },
         "csync.Map-string-config_ProviderConfig": {
             "type": "object"
         },
@@ -3774,6 +4135,9 @@
                 },
                 "tui": {
                     "$ref": "#/definitions/config.TUIOptions"
+                },
+                "web_search": {
+                    "$ref": "#/definitions/config.WebSearchOptions"
                 }
             }
         },
@@ -4069,6 +4433,23 @@
                     "$ref": "#/definitions/github_com_rave-soft_braid_internal_config.Scope"
                 },
                 "value": {}
+            }
+        },
+        "proto.CreateStrandRequest": {
+            "type": "object",
+            "properties": {
+                "base_branch": {
+                    "type": "string"
+                },
+                "goal": {
+                    "type": "string"
+                },
+                "merge_policy": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
             }
         },
         "proto.CurrentSession": {
@@ -4496,6 +4877,14 @@
                 }
             }
         },
+        "proto.SendStrandRequest": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "proto.ServerControl": {
             "type": "object",
             "properties": {
@@ -4641,6 +5030,57 @@
                 },
                 "state": {
                     "$ref": "#/definitions/proto.SkillDiscoveryState"
+                }
+            }
+        },
+        "proto.Strand": {
+            "type": "object",
+            "properties": {
+                "base_branch": {
+                    "type": "string"
+                },
+                "branch": {
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "goal": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "merge_policy": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "result_summary": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "integer"
+                },
+                "workspace_id": {
+                    "description": "WorkspaceID is the runtime workspace ID of the strand's currently\nspawned isolated workspace (see internal/strand.Manager.WorkspaceID),\nempty when the strand's workspace is not currently spawned (e.g.\ncompleted/merged/failed, or interrupted and not yet resumed).",
+                    "type": "string"
+                },
+                "worktree_path": {
+                    "type": "string"
                 }
             }
         },

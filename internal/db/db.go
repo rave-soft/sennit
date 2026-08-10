@@ -11,10 +11,10 @@ import (
 )
 
 type DBTX interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	PrepareContext(context.Context, string) (*sql.Stmt, error)
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
 func New(db DBTX) *Queries {
@@ -33,6 +33,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createSessionStmt, err = db.PrepareContext(ctx, createSession); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateSession: %w", err)
 	}
+	if q.createStrandStmt, err = db.PrepareContext(ctx, createStrand); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateStrand: %w", err)
+	}
 	if q.deleteFileStmt, err = db.PrepareContext(ctx, deleteFile); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteFile: %w", err)
 	}
@@ -47,6 +50,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteSessionMessagesStmt, err = db.PrepareContext(ctx, deleteSessionMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSessionMessages: %w", err)
+	}
+	if q.deleteStrandStmt, err = db.PrepareContext(ctx, deleteStrand); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteStrand: %w", err)
 	}
 	if q.getAverageResponseTimeStmt, err = db.PrepareContext(ctx, getAverageResponseTime); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAverageResponseTime: %w", err)
@@ -74,6 +80,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getSessionByIDStmt, err = db.PrepareContext(ctx, getSessionByID); err != nil {
 		return nil, fmt.Errorf("error preparing query GetSessionByID: %w", err)
+	}
+	if q.getStrandStmt, err = db.PrepareContext(ctx, getStrand); err != nil {
+		return nil, fmt.Errorf("error preparing query GetStrand: %w", err)
+	}
+	if q.getStrandByNameStmt, err = db.PrepareContext(ctx, getStrandByName); err != nil {
+		return nil, fmt.Errorf("error preparing query GetStrandByName: %w", err)
 	}
 	if q.getToolUsageStmt, err = db.PrepareContext(ctx, getToolUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetToolUsage: %w", err)
@@ -117,6 +129,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listSessionsStmt, err = db.PrepareContext(ctx, listSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessions: %w", err)
 	}
+	if q.listStrandsStmt, err = db.PrepareContext(ctx, listStrands); err != nil {
+		return nil, fmt.Errorf("error preparing query ListStrands: %w", err)
+	}
 	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
 	}
@@ -138,6 +153,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateSessionTitleAndUsageStmt, err = db.PrepareContext(ctx, updateSessionTitleAndUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateSessionTitleAndUsage: %w", err)
 	}
+	if q.updateStrandSessionStmt, err = db.PrepareContext(ctx, updateStrandSession); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateStrandSession: %w", err)
+	}
+	if q.updateStrandStatusStmt, err = db.PrepareContext(ctx, updateStrandStatus); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateStrandStatus: %w", err)
+	}
 	return &q, nil
 }
 
@@ -156,6 +177,11 @@ func (q *Queries) Close() error {
 	if q.createSessionStmt != nil {
 		if cerr := q.createSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createSessionStmt: %w", cerr)
+		}
+	}
+	if q.createStrandStmt != nil {
+		if cerr := q.createStrandStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createStrandStmt: %w", cerr)
 		}
 	}
 	if q.deleteFileStmt != nil {
@@ -181,6 +207,11 @@ func (q *Queries) Close() error {
 	if q.deleteSessionMessagesStmt != nil {
 		if cerr := q.deleteSessionMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteSessionMessagesStmt: %w", cerr)
+		}
+	}
+	if q.deleteStrandStmt != nil {
+		if cerr := q.deleteStrandStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteStrandStmt: %w", cerr)
 		}
 	}
 	if q.getAverageResponseTimeStmt != nil {
@@ -226,6 +257,16 @@ func (q *Queries) Close() error {
 	if q.getSessionByIDStmt != nil {
 		if cerr := q.getSessionByIDStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getSessionByIDStmt: %w", cerr)
+		}
+	}
+	if q.getStrandStmt != nil {
+		if cerr := q.getStrandStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getStrandStmt: %w", cerr)
+		}
+	}
+	if q.getStrandByNameStmt != nil {
+		if cerr := q.getStrandByNameStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getStrandByNameStmt: %w", cerr)
 		}
 	}
 	if q.getToolUsageStmt != nil {
@@ -298,6 +339,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listSessionsStmt: %w", cerr)
 		}
 	}
+	if q.listStrandsStmt != nil {
+		if cerr := q.listStrandsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listStrandsStmt: %w", cerr)
+		}
+	}
 	if q.listUserMessagesBySessionStmt != nil {
 		if cerr := q.listUserMessagesBySessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listUserMessagesBySessionStmt: %w", cerr)
@@ -331,6 +377,16 @@ func (q *Queries) Close() error {
 	if q.updateSessionTitleAndUsageStmt != nil {
 		if cerr := q.updateSessionTitleAndUsageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateSessionTitleAndUsageStmt: %w", cerr)
+		}
+	}
+	if q.updateStrandSessionStmt != nil {
+		if cerr := q.updateStrandSessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateStrandSessionStmt: %w", cerr)
+		}
+	}
+	if q.updateStrandStatusStmt != nil {
+		if cerr := q.updateStrandStatusStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateStrandStatusStmt: %w", cerr)
 		}
 	}
 	return err
@@ -375,11 +431,13 @@ type Queries struct {
 	createFileStmt                 *sql.Stmt
 	createMessageStmt              *sql.Stmt
 	createSessionStmt              *sql.Stmt
+	createStrandStmt               *sql.Stmt
 	deleteFileStmt                 *sql.Stmt
 	deleteMessageStmt              *sql.Stmt
 	deleteSessionStmt              *sql.Stmt
 	deleteSessionFilesStmt         *sql.Stmt
 	deleteSessionMessagesStmt      *sql.Stmt
+	deleteStrandStmt               *sql.Stmt
 	getAverageResponseTimeStmt     *sql.Stmt
 	getFileStmt                    *sql.Stmt
 	getFileByPathAndSessionStmt    *sql.Stmt
@@ -389,6 +447,8 @@ type Queries struct {
 	getMessageStmt                 *sql.Stmt
 	getRecentActivityStmt          *sql.Stmt
 	getSessionByIDStmt             *sql.Stmt
+	getStrandStmt                  *sql.Stmt
+	getStrandByNameStmt            *sql.Stmt
 	getToolUsageStmt               *sql.Stmt
 	getTotalStatsStmt              *sql.Stmt
 	getUsageByDayStmt              *sql.Stmt
@@ -403,6 +463,7 @@ type Queries struct {
 	listNewFilesStmt               *sql.Stmt
 	listSessionReadFilesStmt       *sql.Stmt
 	listSessionsStmt               *sql.Stmt
+	listStrandsStmt                *sql.Stmt
 	listUserMessagesBySessionStmt  *sql.Stmt
 	nextFileVersionStmt            *sql.Stmt
 	recordFileReadStmt             *sql.Stmt
@@ -410,6 +471,8 @@ type Queries struct {
 	updateMessageStmt              *sql.Stmt
 	updateSessionStmt              *sql.Stmt
 	updateSessionTitleAndUsageStmt *sql.Stmt
+	updateStrandSessionStmt        *sql.Stmt
+	updateStrandStatusStmt         *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
@@ -419,11 +482,13 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createFileStmt:                 q.createFileStmt,
 		createMessageStmt:              q.createMessageStmt,
 		createSessionStmt:              q.createSessionStmt,
+		createStrandStmt:               q.createStrandStmt,
 		deleteFileStmt:                 q.deleteFileStmt,
 		deleteMessageStmt:              q.deleteMessageStmt,
 		deleteSessionStmt:              q.deleteSessionStmt,
 		deleteSessionFilesStmt:         q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:      q.deleteSessionMessagesStmt,
+		deleteStrandStmt:               q.deleteStrandStmt,
 		getAverageResponseTimeStmt:     q.getAverageResponseTimeStmt,
 		getFileStmt:                    q.getFileStmt,
 		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
@@ -433,6 +498,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getMessageStmt:                 q.getMessageStmt,
 		getRecentActivityStmt:          q.getRecentActivityStmt,
 		getSessionByIDStmt:             q.getSessionByIDStmt,
+		getStrandStmt:                  q.getStrandStmt,
+		getStrandByNameStmt:            q.getStrandByNameStmt,
 		getToolUsageStmt:               q.getToolUsageStmt,
 		getTotalStatsStmt:              q.getTotalStatsStmt,
 		getUsageByDayStmt:              q.getUsageByDayStmt,
@@ -447,6 +514,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listNewFilesStmt:               q.listNewFilesStmt,
 		listSessionReadFilesStmt:       q.listSessionReadFilesStmt,
 		listSessionsStmt:               q.listSessionsStmt,
+		listStrandsStmt:                q.listStrandsStmt,
 		listUserMessagesBySessionStmt:  q.listUserMessagesBySessionStmt,
 		nextFileVersionStmt:            q.nextFileVersionStmt,
 		recordFileReadStmt:             q.recordFileReadStmt,
@@ -454,5 +522,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateMessageStmt:              q.updateMessageStmt,
 		updateSessionStmt:              q.updateSessionStmt,
 		updateSessionTitleAndUsageStmt: q.updateSessionTitleAndUsageStmt,
+		updateStrandSessionStmt:        q.updateStrandSessionStmt,
+		updateStrandStatusStmt:         q.updateStrandStatusStmt,
 	}
 }

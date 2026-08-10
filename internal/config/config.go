@@ -351,6 +351,19 @@ type Options struct {
 	Notifications           string            `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
 	DisabledSkills          []string          `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=braid-config"`
 	WebSearch               *WebSearchOptions `json:"web_search,omitempty" jsonschema:"description=Web search backend configuration. Defaults to the keyless DuckDuckGo scraper when omitted."`
+	Strands                 *StrandsOptions   `json:"strands,omitempty" jsonschema:"description=Strands (parallel agent work stream) configuration."`
+}
+
+// StrandsOptions configures the strands feature (parallel agent work
+// streams running in isolated git worktrees).
+type StrandsOptions struct {
+	// WorktreeDir is the parent directory under which each strand's git
+	// worktree is created (at <worktree_dir>/<strand-name>). A relative
+	// path is resolved against the parent of the repository root (the
+	// same directory the default sibling "<repo>-strands" lives in), not
+	// against the working directory. Absolute paths are used as-is.
+	// Defaults to a "<repo>-strands" sibling of the repository root.
+	WorktreeDir string `json:"worktree_dir,omitempty" jsonschema:"description=Parent directory for strand worktrees (<worktree_dir>/<strand-name>). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to a \"<repo>-strands\" sibling of the repository root.,example=/var/tmp/braid-strands,example=../strand-worktrees"`
 }
 
 // WebSearchOptions configures the backend used by the web_search tool.
@@ -884,6 +897,13 @@ func allToolNames() []string {
 		"write",
 		"list_mcp_resources",
 		"read_mcp_resource",
+		"strand_create",
+		"strand_list",
+		"strand_status",
+		"strand_send",
+		"strand_wait",
+		"strand_merge",
+		"strand_remove",
 	}
 }
 

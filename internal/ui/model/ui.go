@@ -157,6 +157,12 @@ type (
 	// closeDialogMsg is sent to close the current dialog.
 	closeDialogMsg struct{}
 
+	// showStrandsDashboardMsg requests switching to the strands dashboard
+	// screen. Handled by the Root router (root.go); a bare *UI has no
+	// dashboard screen of its own, so this falls through Update's default
+	// case harmlessly when UI is driven directly (e.g. in tests).
+	showStrandsDashboardMsg struct{}
+
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
 
@@ -188,6 +194,12 @@ type UI struct {
 	layout uiLayout
 
 	isTransparent bool
+
+	// embedded is true for a UI instance attached to a strand's own
+	// workspace rather than the top-level session — it skips
+	// onboarding/initialize and doesn't drive the terminal progress bar,
+	// since only one UI instance may own those.
+	embedded bool
 
 	focus uiFocusState
 	state uiState
@@ -297,8 +309,18 @@ type UI struct {
 	hoverY        int
 }
 
+// Option configures a [UI] instance at construction time.
+type Option func(*UI)
+
+// WithEmbedded marks the UI as attached to a strand's own workspace rather
+// than the top-level session (see the embedded field doc). Used by the Root
+// router when attaching to a strand.
+func WithEmbedded() Option {
+	return func(m *UI) { m.embedded = true }
+}
+
 // New creates a new instance of the [UI] model.
-func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
+func New(com *common.Common, initialSessionID string, continueLast bool, opts ...Option) *UI {
 	// Editor components
 	ta := textarea.New()
 	ta.SetStyles(com.Styles.Editor.Textarea)
@@ -369,6 +391,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
 	}
+	for _, opt := range opts {
+		opt(ui)
+	}
 
 	status := NewStatus(com, ui)
 
@@ -398,7 +423,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
-	if !com.Config().IsConfigured() {
+	if ui.embedded {
+		// A strand's embedded chat always lands directly in uiLanding —
+		// onboarding/initialize are one-time, top-level-session concerns.
+	} else if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
 	} else if n, _ := com.Workspace.ProjectNeedsInitialization(); n {
 		desiredState = uiInitialize
@@ -407,14 +435,25 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// set initial state
 	ui.setState(desiredState, desiredFocus)
 
-	opts := com.Config().Options
+	cfgOpts := com.Config().Options
 
 	// disable indeterminate progress bar
-	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
+	ui.progressBarEnabled = cfgOpts.Progress == nil || *cfgOpts.Progress
 	// enable transparent mode
-	ui.isTransparent = opts.TUI.Transparent != nil && *opts.TUI.Transparent
+	ui.isTransparent = cfgOpts.TUI.Transparent != nil && *cfgOpts.TUI.Transparent
+	if ui.embedded {
+		// Only one UI instance may own the terminal's progress bar.
+		ui.progressBarEnabled = false
+	}
 
 	return ui
+}
+
+// KeyMap returns the UI's key bindings. Exposed so the Root router (root.go)
+// can recognize app-wide keys (e.g. the strands toggle) without duplicating
+// the binding.
+func (m *UI) KeyMap() *KeyMap {
+	return &m.keyMap
 }
 
 // Init initializes the UI model.
@@ -2184,6 +2223,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			if cmd := m.openSessionsDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			return true
+		case key.Matches(msg, m.keyMap.Strands):
+			if !m.com.Workspace.SupportsStrands() {
+				cmds = append(cmds, util.ReportInfo("This workspace doesn't support strands."))
+				return true
+			}
+			cmds = append(cmds, util.CmdHandler(showStrandsDashboardMsg{}))
 			return true
 		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
 			m.detailsOpen = !m.detailsOpen

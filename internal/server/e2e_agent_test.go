@@ -15,6 +15,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/backend"
 	"github.com/rave-soft/braid/internal/message"
@@ -221,6 +222,7 @@ func (c *scriptedCoordinator) Summarize(context.Context, string) error       { r
 func (c *scriptedCoordinator) Model() agent.Model                            { return agent.Model{} }
 func (c *scriptedCoordinator) UpdateModels(context.Context) error            { return nil }
 func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string) {}
+func (c *scriptedCoordinator) SetStrands(tools.StrandManager)                {}
 
 // agentE2EHarness extends the SSE harness with a scripted coordinator
 // wired into the workspace's embedded app.App, so POST /agent drives a

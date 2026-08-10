@@ -19,7 +19,6 @@ import (
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/skills"
@@ -343,6 +342,17 @@ func (b *Backend) ListWorkspaces() []proto.Workspace {
 // client which is released either by the first SSE attach (which
 // converts it into a stream claim) or by the grace window expiring.
 func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Workspace, error) {
+	return b.createWorkspace(args, true)
+}
+
+// createWorkspace is CreateWorkspace's implementation. attachStrands gates
+// whether a newly created workspace is given ownership of a strand
+// manager; strandSpawner (same package, used to spawn a strand's own
+// isolated workspace through this same bootstrap path) passes false to
+// prevent strand workspaces from nesting managers of their own. It has no
+// effect when the call dedupes onto an already-running workspace, which
+// keeps whatever it was given when it was actually created.
+func (b *Backend) createWorkspace(args proto.Workspace, attachStrands bool) (*Workspace, proto.Workspace, error) {
 	if args.Path == "" {
 		return nil, proto.Workspace{}, ErrPathRequired
 	}
@@ -411,52 +421,38 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}()
 
 	id := uuid.New().String()
-	cfg, err := config.Init(args.Path, args.DataDir, args.Debug)
+	// The backend hosts multiple workspaces concurrently, so it locks the
+	// data directory during connect and builds the skills manager WITHOUT
+	// WithGlobalMirror, to prevent last-writer-wins cross-talk between
+	// workspaces. It also leaves the DB connection open on an app.New
+	// failure, matching this function's prior behavior.
+	boot, err := app.Bootstrap(b.ctx, args.Path, app.BootstrapOptions{
+		DataDir:     args.DataDir,
+		Debug:       args.Debug,
+		YOLO:        args.YOLO,
+		Channels:    args.Channels,
+		DataDirLock: true,
+	})
 	if err != nil {
-		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
-	}
-
-	cfg.Overrides().SkipPermissionRequests = args.YOLO
-	cfg.Overrides().EnabledChannels = args.Channels
-
-	if err := createDotBraidDir(cfg.Config().Options.DataDirectory); err != nil {
-		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
-	}
-
-	conn, err := db.Connect(b.ctx, cfg.Config().Options.DataDirectory, db.WithDataDirLock(true))
-	if err != nil {
-		return nil, proto.Workspace{}, fmt.Errorf("failed to connect to database: %w", err)
-	}
-
-	// Discover skills once per workspace, before app.New. The backend
-	// hosts multiple workspaces concurrently, so the manager is
-	// constructed WITHOUT WithGlobalMirror to prevent last-writer-wins
-	// cross-talk between workspaces.
-	discoveryCfg := skillsDiscoveryConfig(cfg)
-	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
-	skillsMgr := skills.NewManager(
-		allSkills, activeSkills, skillStates,
-		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
-		skills.WithWorkingDir(discoveryCfg.WorkingDir),
-	)
-
-	appWorkspace, err := app.New(b.ctx, conn, cfg, skillsMgr)
-	if err != nil {
-		return nil, proto.Workspace{}, fmt.Errorf("failed to create app workspace: %w", err)
+		return nil, proto.Workspace{}, err
 	}
 
 	wsCtx, wsCancel := context.WithCancel(b.ctx)
 	ws := &Workspace{
-		App:          appWorkspace,
+		App:          boot.App,
 		ID:           id,
 		Path:         args.Path,
-		Cfg:          cfg,
+		Cfg:          boot.Config,
 		Env:          args.Env,
-		Skills:       skillsMgr,
+		Skills:       boot.Skills,
 		resolvedPath: key,
 		ctx:          wsCtx,
 		cancel:       wsCancel,
 		clients:      make(map[string]*clientState),
+	}
+
+	if attachStrands {
+		b.attachServerStrands(wsCtx, ws.App, args.Path)
 	}
 
 	b.mu.Lock()
@@ -505,7 +501,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 			"client", args.Version,
 			"server", version.Version,
 		)
-		appWorkspace.SendEvent(pubsub.Event[proto.ServerNotice]{
+		ws.App.SendEvent(pubsub.Event[proto.ServerNotice]{
 			Type: pubsub.UpdatedEvent,
 			Payload: proto.ServerNotice{
 				Level: proto.ServerNoticeLevelWarn,
@@ -518,27 +514,6 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	return ws, workspaceToProto(ws), nil
-}
-
-// skillsDiscoveryConfig adapts a *config.ConfigStore to the
-// skills.DiscoveryConfig that DiscoverFromConfig consumes.
-func skillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
-	opts := cfg.Config().Options
-	var paths, disabled []string
-	if opts != nil {
-		paths = opts.SkillsPaths
-		disabled = opts.DisabledSkills
-	}
-	var resolver func(string) (string, error)
-	if r := cfg.Resolver(); r != nil {
-		resolver = r.ResolveValue
-	}
-	return skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		WorkingDir:     cfg.WorkingDir(),
-		Resolver:       resolver,
-	}
 }
 
 // skillStatesToProto converts internal skill discovery states into the

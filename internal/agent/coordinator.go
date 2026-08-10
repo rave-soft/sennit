@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -68,6 +69,13 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
+	// SetStrands wires (or clears, with nil) the strand manager the
+	// strand_* tools are built against. It takes effect on the next
+	// UpdateModels/buildTools pass, which every run performs, so callers
+	// don't need to trigger a rebuild themselves. See buildTools: strand
+	// tools are only ever offered to the top-level agent of the
+	// workspace the manager belongs to, never to sub-agents.
+	SetStrands(strands tools.StrandManager)
 }
 
 type coordinator struct {
@@ -83,6 +91,13 @@ type coordinator struct {
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
 	mcp         *mcp.Registry
+
+	// strandsMu guards strands, which SetStrands may set after
+	// construction (strand managers are wired in post-bootstrap; see
+	// internal/cmd/root.go and internal/backend/backend.go) and buildTools
+	// reads on every run via UpdateModels.
+	strandsMu sync.RWMutex
+	strands   tools.StrandManager
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -117,6 +132,13 @@ type CoordinatorOptions struct {
 	// states, or auth handlers keyed by MCP server name. See
 	// ARCHITECTURE_REVIEW.md section 3.1.
 	MCP *mcp.Registry
+	// Strands is nil-safe: when nil, the strand_* tools are simply
+	// omitted from the top-level agent's tool list. It is normally wired
+	// after construction via [Coordinator.SetStrands] instead of here,
+	// since the strand manager is set up post-bootstrap; this field
+	// exists mainly so tests and other in-process callers can supply one
+	// up front.
+	Strands tools.StrandManager
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -150,6 +172,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		skillTracker: skillTracker,
 		interactive:  opts.Interactive,
 		mcp:          opts.MCP,
+		strands:      opts.Strands,
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -467,6 +490,28 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
+	// Strand tools manage parallel agent work streams in their own git
+	// worktrees. Offered only to the top-level agent of the workspace
+	// that owns the strand manager: sub-agents never get them (spawning
+	// strands from a delegated task would nest workspace ownership in a
+	// way the manager doesn't support), and there simply is no manager
+	// for non-git or strand-spawned workspaces (see internal/cmd/root.go
+	// and internal/backend/backend.go).
+	if !isSubAgent {
+		if strands := c.strandsManager(); strands != nil {
+			allTools = append(
+				allTools,
+				tools.NewStrandCreateTool(strands, c.permissions),
+				tools.NewStrandListTool(strands),
+				tools.NewStrandStatusTool(strands),
+				tools.NewStrandSendTool(strands),
+				tools.NewStrandWaitTool(strands),
+				tools.NewStrandMergeTool(strands, c.permissions),
+				tools.NewStrandRemoveTool(strands, c.permissions),
+			)
+		}
+	}
+
 	// Question tool is interactive-only and not available to sub-agents.
 	if !isSubAgent && c.interactive {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
@@ -723,6 +768,20 @@ func (c *coordinator) CancelAll() {
 
 func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent.ClearQueue(sessionID)
+}
+
+// SetStrands implements Coordinator.
+func (c *coordinator) SetStrands(strands tools.StrandManager) {
+	c.strandsMu.Lock()
+	c.strands = strands
+	c.strandsMu.Unlock()
+}
+
+// strandsManager returns the currently wired strand manager, or nil.
+func (c *coordinator) strandsManager() tools.StrandManager {
+	c.strandsMu.RLock()
+	defer c.strandsMu.RUnlock()
+	return c.strands
 }
 
 func (c *coordinator) IsBusy() bool {

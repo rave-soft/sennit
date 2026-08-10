@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
@@ -48,6 +49,7 @@ func (c *errorCoordinator) Summarize(context.Context, string) error           { 
 func (c *errorCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *errorCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *errorCoordinator) GenerateTitle(context.Context, string, string)     {}
+func (c *errorCoordinator) SetStrands(tools.StrandManager)                    {}
 
 // insertRunCompleteWorkspace installs a workspace backed by a real
 // app.App (so the runCompletions broker exists) with the given

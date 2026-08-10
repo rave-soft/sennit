@@ -18,6 +18,16 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.BraidLogsToolName,
 	tools.ListMCPResourcesToolName,
 	tools.ReadMCPResourceToolName,
+	// Strand tools (internal/agent/tools/strand_*.go) don't have a
+	// dedicated renderer yet; they fall back to the generic one until the
+	// TUI grows one.
+	tools.StrandCreateToolName,
+	tools.StrandListToolName,
+	tools.StrandStatusToolName,
+	tools.StrandSendToolName,
+	tools.StrandWaitToolName,
+	tools.StrandMergeToolName,
+	tools.StrandRemoveToolName,
 }
 
 // TestToolMessageItemFactories_MatchExpectedNames checks

@@ -75,6 +75,20 @@ func (c *Client) ClientID() string {
 	return c.clientID
 }
 
+// WithClientID returns a shallow copy of c using clientID instead of
+// c's own. The copy shares the underlying *http.Client (and its
+// connection pool), so it costs nothing beyond the copy itself.
+// Intended for derived identities that must be retirable
+// independently of the parent — see workspace.ClientWorkspace.AttachStrand,
+// which derives "<parent-client-id>/strand/<strand-id>" so detaching an
+// attached strand's view can never release the parent workspace's own
+// claims.
+func (c *Client) WithClientID(clientID string) *Client {
+	cp := *c
+	cp.clientID = clientID
+	return &cp
+}
+
 // GetGlobalConfig retrieves the server's configuration.
 func (c *Client) GetGlobalConfig(ctx context.Context) (*config.Config, error) {
 	var cfg config.Config

@@ -80,7 +80,13 @@ definitions:
       id:
         type: string
       model:
-        $ref: '#/definitions/config.SelectedModelType'
+        description: |-
+          Model optionally pins this agent to a specific "provider/model-id",
+          letting a sub-agent use a model other agents don't. Left empty, the
+          agent inherits the application's main model. A value that does not
+          resolve to a known provider/model falls back to the empty default
+          with a warning logged.
+        type: string
       name:
         type: string
       prompt:
@@ -356,6 +362,33 @@ definitions:
     - TrailerStyleNone
     - TrailerStyleCoAuthoredBy
     - TrailerStyleAssistedBy
+  config.WebSearchOptions:
+    properties:
+      api_key:
+        description: |-
+          APIKey authenticates with the selected provider. Runs through shell
+          expansion at tool-build time, the same as provider api_key, so $VAR
+          and $(cmd) work. Unused by the duckduckgo provider.
+        type: string
+      base_url:
+        description: |-
+          BaseURL overrides the provider's default API endpoint, for
+          self-hosted or proxy-compatible search APIs.
+        type: string
+      provider:
+        description: |-
+          Provider selects the search backend. "duckduckgo" (default) scrapes
+          DuckDuckGo Lite and needs no API key; "tavily" calls the Tavily
+          Search API and requires APIKey.
+        type: string
+      proxy_url:
+        description: |-
+          ProxyURL routes web search requests through a proxy. Web search has
+          no LLM provider of its own to inherit proxy_url from, so it is
+          configured here; same semantics as ProviderConfig.ProxyURL,
+          including the "none" sentinel and shell expansion.
+        type: string
+    type: object
   csync.Map-string-config_ProviderConfig:
     type: object
   github_com_rave-soft_braid_internal_config.Config:
@@ -459,6 +492,8 @@ definitions:
         type: array
       tui:
         $ref: '#/definitions/config.TUIOptions'
+      web_search:
+        $ref: '#/definitions/config.WebSearchOptions'
     type: object
   github_com_rave-soft_braid_internal_config.Scope:
     enum:
@@ -656,6 +691,17 @@ definitions:
       scope:
         $ref: '#/definitions/github_com_rave-soft_braid_internal_config.Scope'
       value: {}
+    type: object
+  proto.CreateStrandRequest:
+    properties:
+      base_branch:
+        type: string
+      goal:
+        type: string
+      merge_policy:
+        type: string
+      name:
+        type: string
     type: object
   proto.CurrentSession:
     properties:
@@ -942,6 +988,11 @@ definitions:
       result:
         $ref: '#/definitions/proto.SkillReadResult'
     type: object
+  proto.SendStrandRequest:
+    properties:
+      message:
+        type: string
+    type: object
   proto.ServerControl:
     properties:
       command:
@@ -1038,6 +1089,44 @@ definitions:
         type: string
       state:
         $ref: '#/definitions/proto.SkillDiscoveryState'
+    type: object
+  proto.Strand:
+    properties:
+      base_branch:
+        type: string
+      branch:
+        type: string
+      completed_at:
+        type: integer
+      created_at:
+        type: integer
+      error:
+        type: string
+      goal:
+        type: string
+      id:
+        type: string
+      merge_policy:
+        type: string
+      name:
+        type: string
+      result_summary:
+        type: string
+      session_id:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: integer
+      workspace_id:
+        description: |-
+          WorkspaceID is the runtime workspace ID of the strand's currently
+          spawned isolated workspace (see internal/strand.Manager.WorkspaceID),
+          empty when the strand's workspace is not currently spawned (e.g.
+          completed/merged/failed, or interrupted and not yet resumed).
+        type: string
+      worktree_path:
+        type: string
     type: object
   proto.Todo:
     properties:
@@ -3198,4 +3287,228 @@ paths:
       summary: Read skill content
       tags:
       - skills
+  /workspaces/{id}/strands:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.Strand'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List strands
+      tags:
+      - strands
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Strand creation params
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.CreateStrandRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Strand'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Create strand
+      tags:
+      - strands
+  /workspaces/{id}/strands/{strandID}:
+    delete:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Strand ID or name
+        in: path
+        name: strandID
+        required: true
+        type: string
+      - description: Force removal of an active or dirty strand
+        in: query
+        name: force
+        type: boolean
+      - description: Also delete the strand's git branch
+        in: query
+        name: delete_branch
+        type: boolean
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Remove strand
+      tags:
+      - strands
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Strand ID or name
+        in: path
+        name: strandID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Strand'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get strand
+      tags:
+      - strands
+  /workspaces/{id}/strands/{strandID}/merge:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Strand ID or name
+        in: path
+        name: strandID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Strand'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Merge strand
+      tags:
+      - strands
+  /workspaces/{id}/strands/{strandID}/send:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Strand ID or name
+        in: path
+        name: strandID
+        required: true
+        type: string
+      - description: Message to send
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.SendStrandRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Send message to strand
+      tags:
+      - strands
 swagger: "2.0"

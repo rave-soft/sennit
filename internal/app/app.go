@@ -13,6 +13,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/clipboard"
 	"github.com/rave-soft/braid/internal/config"
@@ -63,6 +64,28 @@ type App struct {
 	MCP *mcp.Registry
 
 	Skills *skills.Manager
+
+	// Strands is the strand manager owning this workspace's parallel
+	// agent work streams, wired in post-bootstrap by the caller (see
+	// internal/cmd/root.go and internal/backend/backend.go) via
+	// SetStrands. Declared as the tool-facing interface, not
+	// *strand.Manager, because internal/strand imports this package —
+	// see internal/agent/tools/strand_manager.go for the seam. Nil for
+	// workspaces that don't own a strand manager: non-git workspaces and
+	// strand workspaces themselves (nesting is not supported).
+	Strands tools.StrandManager
+
+	// strandManager holds the same strand manager as Strands, but typed
+	// any instead of tools.StrandManager: internal/workspace and
+	// internal/server (added in later steps) need the concrete
+	// *strand.Manager (Subscribe, full-arg Merge/Remove, etc.), which is
+	// richer than the tools.StrandManager seam built for the agent-tool
+	// wiring. app cannot reference *strand.Manager by name because
+	// internal/strand imports internal/app (see the Strands doc above),
+	// so this is deliberately untyped; callers type-assert it back to
+	// *strand.Manager. Set via SetStrandManager, independent of
+	// SetStrands/Strands.
+	strandManager any
 
 	config *config.ConfigStore
 
@@ -218,6 +241,44 @@ func (app *App) Store() *config.ConfigStore {
 	return app.config
 }
 
+// SetStrands wires the strand manager owning this workspace's parallel
+// agent work streams, forwarding it to the coder agent so the strand_*
+// tools become available. Safe to call with nil to clear it. The caller
+// (see internal/cmd/root.go and internal/backend/backend.go) is
+// responsible for deciding whether this workspace should own one at all.
+func (app *App) SetStrands(strands tools.StrandManager) {
+	app.Strands = strands
+	if app.AgentCoordinator != nil {
+		app.AgentCoordinator.SetStrands(strands)
+	}
+}
+
+// SetStrandManager wires the concrete strand manager for callers (see
+// internal/workspace and internal/server) that need more than the
+// tools.StrandManager seam exposes. Kept separate from SetStrands/Strands,
+// which exist purely for the agent-tool wiring; both are set from the
+// same manager by the caller (see internal/cmd/strands.go,
+// internal/backend/strands.go), but this accessor is additive and neither
+// replaces nor is replaced by the other.
+func (app *App) SetStrandManager(m any) {
+	app.strandManager = m
+}
+
+// StrandManager returns the value passed to SetStrandManager, or nil if
+// unset. Typed any for the same import-cycle reason documented on the
+// strandManager field; callers type-assert it to *strand.Manager.
+func (app *App) StrandManager() any {
+	return app.strandManager
+}
+
+// AddCleanup registers fn to run, alongside the built-in cleanup tasks,
+// when Shutdown is called. Used by callers that attach extra resources to
+// an App post-construction — e.g. the strand manager's own database
+// connection — that need to be released on the same schedule.
+func (app *App) AddCleanup(fn func(context.Context) error) {
+	app.cleanupFuncs = append(app.cleanupFuncs, fn)
+}
+
 // Events returns a per-caller subscription channel for application events.
 // Each caller receives its own channel; all callers receive every event.
 func (app *App) Events(ctx context.Context) <-chan pubsub.Event[any] {
@@ -345,6 +406,24 @@ func setupSubscriber[T any](
 			}
 		}
 	})
+}
+
+// ForwardEvents subscribes to an event source attached to app after
+// construction (e.g. the strand manager, wired in post-bootstrap by
+// SetStrandManager — see internal/cmd/strands.go and
+// internal/backend/strands.go) and forwards its events into app's own
+// event fan-in (app.events), so both local-mode (app.Subscribe) and
+// client/server-mode (app.Events/SSE) consumers see them exactly like
+// every source wired in at New() time by setupEvents.
+//
+// A free function rather than a method because Go has no generic
+// methods; T is inferred from subscribe at the call site. Exported
+// because the caller lives in a different package (internal/strand, via
+// internal/cmd or internal/backend). Callers must invoke this before
+// app.Shutdown tears down app.eventsCtx/app.events — true in practice,
+// since strand managers are attached once, early in a workspace's life.
+func ForwardEvents[T any](app *App, name string, subscribe func(context.Context) <-chan pubsub.Event[T]) {
+	setupSubscriber(app.eventsCtx, app.serviceEventsWG, name, subscribe, app.events)
 }
 
 // setupSubscriberMustDeliver is the bounded-blocking fan-in variant of

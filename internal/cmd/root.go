@@ -25,7 +25,6 @@ import (
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/event"
 	"github.com/rave-soft/braid/internal/hostaddr"
 	braidlog "github.com/rave-soft/braid/internal/log"
@@ -33,7 +32,6 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/server/supervisor"
 	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/skills"
 	"github.com/rave-soft/braid/internal/ui/common"
 	ui "github.com/rave-soft/braid/internal/ui/model"
 	"github.com/rave-soft/braid/internal/version"
@@ -119,7 +117,7 @@ braid --continue
 		event.AppInitialized()
 
 		com := common.DefaultCommon(cmd.Context(), ws)
-		model := ui.New(com, sessionID, continueLast)
+		model := ui.NewRoot(com, sessionID, continueLast)
 
 		inputFilter := ui.NewFilter()
 		var env uv.Environ = os.Environ()
@@ -129,9 +127,12 @@ braid --continue
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(inputFilter.Filter),
 		)
+		model.SetSend(program.Send)
 		go ws.Subscribe(program)
 
-		if _, err := program.Run(); err != nil {
+		_, err = program.Run()
+		model.Cleanup()
+		if err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			return errors.New("Braid crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/rave-soft/braid/issues/new?template=bug.yml") //nolint:staticcheck
@@ -253,82 +254,41 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
-	store, err := config.Init(cwd, dataDir, debug)
+	// Local mode hosts a single workspace per process, so it enables
+	// WithGlobalMirror (keeps the package globals the TUI reads via
+	// skills.GetLatestStates in sync with the manager) and closes the DB
+	// connection if app.New fails, since it owns the only reference to it.
+	boot, err := app.Bootstrap(ctx, cwd, app.BootstrapOptions{
+		DataDir:             dataDir,
+		Debug:               debug,
+		YOLO:                yolo,
+		Channels:            channels,
+		GlobalSkillsMirror:  true,
+		CloseDBOnAppFailure: true,
+		PostDataDir: func(cfg *config.ConfigStore) error {
+			if err := projects.Register(cwd, cfg.Config().Options.DataDirectory); err != nil {
+				slog.Warn("Failed to register project", "error", err)
+			}
+			return nil
+		},
+		PostConnect: func(cfg *config.ConfigStore) error {
+			logFile := filepath.Join(cfg.Config().Options.DataDirectory, "logs", "braid.log")
+			braidlog.Setup(logFile, debug)
+			return nil
+		},
+		OnAppInitFailure: func(err error) {
+			slog.Error("Failed to create app instance", "error", err)
+		},
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	cfg := store.Config()
-	store.Overrides().SkipPermissionRequests = yolo
-	store.Overrides().EnabledChannels = channels
+	attachLocalStrands(ctx, boot.App, cwd)
 
-	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("failed to create data directory: %q %w", cfg.Options.DataDirectory, err)
-	}
-
-	gitIgnorePath := filepath.Join(cfg.Options.DataDirectory, ".gitignore")
-	if _, err := os.Stat(gitIgnorePath); os.IsNotExist(err) {
-		if err := os.WriteFile(gitIgnorePath, []byte("*\n"), 0o644); err != nil {
-			return nil, nil, fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
-		}
-	}
-
-	if err := projects.Register(cwd, cfg.Options.DataDirectory); err != nil {
-		slog.Warn("Failed to register project", "error", err)
-	}
-
-	conn, err := db.Connect(ctx, cfg.Options.DataDirectory)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	logFile := filepath.Join(cfg.Options.DataDirectory, "logs", "braid.log")
-	braidlog.Setup(logFile, debug)
-
-	// Discover skills once before app.New. Local mode hosts a single
-	// workspace per process, so WithGlobalMirror keeps the package
-	// globals (which the TUI reads via skills.GetLatestStates) in sync
-	// with the manager.
-	discoveryCfg := localSkillsDiscoveryConfig(store)
-	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
-	skillsMgr := skills.NewManager(
-		allSkills, activeSkills, skillStates,
-		skills.WithGlobalMirror(),
-		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
-		skills.WithWorkingDir(discoveryCfg.WorkingDir),
-	)
-
-	appInstance, err := app.New(ctx, conn, store, skillsMgr)
-	if err != nil {
-		_ = conn.Close()
-		slog.Error("Failed to create app instance", "error", err)
-		return nil, nil, err
-	}
-
-	ws := workspace.NewAppWorkspace(appInstance, store)
-	cleanup := func() { appInstance.Shutdown() }
+	ws := workspace.NewAppWorkspace(boot.App, boot.Config)
+	cleanup := func() { boot.App.Shutdown() }
 	return ws, cleanup, nil
-}
-
-// localSkillsDiscoveryConfig adapts a *config.ConfigStore to the inputs
-// skills.DiscoverFromConfig expects.
-func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfig {
-	opts := store.Config().Options
-	var paths, disabled []string
-	if opts != nil {
-		paths = opts.SkillsPaths
-		disabled = opts.DisabledSkills
-	}
-	var resolver func(string) (string, error)
-	if r := store.Resolver(); r != nil {
-		resolver = r.ResolveValue
-	}
-	return skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		WorkingDir:     store.WorkingDir(),
-		Resolver:       resolver,
-	}
 }
 
 // setupClientServerWorkspace connects to a server process and wraps the

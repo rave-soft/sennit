@@ -633,6 +633,10 @@
         "web_search": {
           "$ref": "#/$defs/WebSearchOptions",
           "description": "Web search backend configuration. Defaults to the keyless DuckDuckGo scraper when omitted."
+        },
+        "strands": {
+          "$ref": "#/$defs/StrandsOptions",
+          "description": "Strands (parallel agent work stream) configuration."
         }
       },
       "additionalProperties": false,
@@ -844,6 +848,20 @@
         "model",
         "provider"
       ]
+    },
+    "StrandsOptions": {
+      "properties": {
+        "worktree_dir": {
+          "type": "string",
+          "description": "Parent directory for strand worktrees (\u003cworktree_dir\u003e/\u003cstrand-name\u003e). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to a \"\u003crepo\u003e-strands\" sibling of the repository root.",
+          "examples": [
+            "/var/tmp/braid-strands",
+            "../strand-worktrees"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     },
     "TUIOptions": {
       "properties": {

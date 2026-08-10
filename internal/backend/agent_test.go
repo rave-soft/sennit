@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
@@ -58,6 +59,7 @@ func (c *blockingCoordinator) Summarize(context.Context, string) error          
 func (c *blockingCoordinator) Model() agent.Model                                { return agent.Model{} }
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
+func (c *blockingCoordinator) SetStrands(tools.StrandManager)                    {}
 
 // insertAgentWorkspace installs a synthetic workspace with the given
 // coordinator (or none) and a workspace run context, mirroring the

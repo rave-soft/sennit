@@ -32,6 +32,7 @@ import (
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/braid/internal/strand"
 	"github.com/rave-soft/braid/internal/version"
 )
 
@@ -1419,6 +1420,11 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 		return pubsub.Event[session.Session]{
 			Type:    e.Type,
 			Payload: protoToSession(e.Payload),
+		}
+	case pubsub.Event[proto.StrandEvent]:
+		return pubsub.Event[strand.Event]{
+			Type:    e.Type,
+			Payload: strand.EventFromProto(e.Payload),
 		}
 	case pubsub.Event[proto.File]:
 		return pubsub.Event[history.File]{

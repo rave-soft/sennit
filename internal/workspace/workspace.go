@@ -46,6 +46,11 @@ var (
 	// the meantime are lost for good, so the client treats it as a
 	// degraded link that requires a resync.
 	ErrStreamClosed = errors.New("the event stream closed; reconnecting")
+	// ErrStrandsNotSupported means this workspace has no strand manager
+	// attached (not a git repository, or is itself a strand's own nested
+	// workspace — nesting is not supported). Returned by every
+	// StrandController method except SupportsStrands when it reports false.
+	ErrStrandsNotSupported = errors.New("workspace does not support strands")
 )
 
 // ConnectionState describes the health of the client-server link as
@@ -275,6 +280,29 @@ type MCPController interface {
 	MCPAuthURL(name string) string
 }
 
+// StrandController manages a workspace's strands: parallel agent work
+// streams, each in its own git worktree/branch (see internal/strand).
+// SupportsStrands reports whether the workspace owns a strand manager at
+// all (false for non-git workspaces and strand workspaces themselves —
+// nesting is not supported); every other method's behavior when it's
+// false is implementation-defined (both implementations return a clear
+// error rather than panicking — see each method's doc below).
+type StrandController interface {
+	SupportsStrands() bool
+	ListStrands(ctx context.Context) ([]proto.Strand, error)
+	GetStrand(ctx context.Context, id string) (proto.Strand, error)
+	CreateStrand(ctx context.Context, req proto.CreateStrandRequest) (proto.Strand, error)
+	SendStrand(ctx context.Context, id, message string) error
+	MergeStrand(ctx context.Context, id string) (proto.Strand, error)
+	RemoveStrand(ctx context.Context, id string, opts proto.RemoveStrandOptions) error
+	// AttachStrand connects to id's own spawned workspace and returns a
+	// Workspace bound to it, plus a detach func to release that
+	// connection (NOT the strand itself — the strand keeps running
+	// regardless of whether anything is attached to view it). Callers
+	// must call detach exactly once when done.
+	AttachStrand(ctx context.Context, id string) (Workspace, func(), error)
+}
+
 // EventSubscriber wires a frontend into the workspace's event stream and
 // tears it down.
 type EventSubscriber interface {
@@ -300,6 +328,7 @@ type Workspace interface {
 	ConfigAccessor
 	ProjectLifecycle
 	MCPController
+	StrandController
 	EventSubscriber
 }
 
