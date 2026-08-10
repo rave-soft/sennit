@@ -282,6 +282,16 @@ option ui diff unified
 > `braid import claude --skills` / `braid import opencode --skills`, which
 > copies and validates them into `.braid/skills` instead.
 
+> [!IMPORTANT] Braid only auto-loads its own context conventions
+> (`AGENTS.md`/`BRAID.md` and casing/`.local` variants). Other tools' files
+> (`CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`, `GEMINI.md`,
+> ...) are **not** read unless you opt in explicitly:
+>
+> ```bash
+> option context-path CLAUDE.md
+> option context-path .cursorrules
+> ```
+
 ### options.web_search
 
 The `web_search` tool's backend is configurable via `options.web_search` in

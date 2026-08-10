@@ -24,13 +24,6 @@ When searching for information:
 3. **Iterate and refine** - If initial results aren't helpful, try different search terms or more specific queries
 4. **Search for different aspects** - For comprehensive answers, search for different angles of the topic
 5. **Follow up on promising results** - When you find a good source, fetch it and look for links to related information
-
-Example workflow for "What are the pros and cons of using Rust vs Go for web services?":
-- Search 1: "Rust web services advantages"
-- Search 2: "Go web services advantages"
-- Search 3: "Rust vs Go performance comparison"
-- Search 4: "Rust vs Go developer experience"
-- Then fetch the most relevant results from each search
 </search_strategy>
 
 <response_format>

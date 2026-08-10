@@ -503,12 +503,12 @@
           "items": {
             "type": "string",
             "examples": [
-              ".cursorrules",
-              "BRAID.md"
+              "BRAID.md",
+              "CLAUDE.md"
             ]
           },
           "type": "array",
-          "description": "Paths to files containing context information for the AI"
+          "description": "Paths to files containing context information for the AI. Braid auto-loads only its own conventions (AGENTS.md/BRAID.md and casing/local variants); list other tools' files here explicitly (e.g. CLAUDE.md) to have Braid read them too"
         },
         "global_context_paths": {
           "items": {

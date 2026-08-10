@@ -26,14 +26,13 @@ const (
 	defaultInitializeAs  = "AGENTS.md"
 )
 
+// defaultContextPaths lists the project files Braid loads as context
+// automatically, without any opt-in. Braid only reads its own conventions
+// here (braid.md/AGENTS.md and casing/local variants); files belonging to
+// other tools (CLAUDE.md, .cursorrules, .github/copilot-instructions.md,
+// etc.) are not auto-loaded — add them explicitly via options.context_paths
+// (braidrc: `option context-path CLAUDE.md`) if you want Braid to read them.
 var defaultContextPaths = []string{
-	".github/copilot-instructions.md",
-	".cursorrules",
-	".cursor/rules/",
-	"CLAUDE.md",
-	"CLAUDE.local.md",
-	"GEMINI.md",
-	"gemini.md",
 	"braid.md",
 	"braid.local.md",
 	"Braid.md",
@@ -356,7 +355,7 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=BRAID.md"`
+	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI. Braid auto-loads only its own conventions (AGENTS.md/BRAID.md and casing/local variants); list other tools' files here explicitly (e.g. CLAUDE.md) to have Braid read them too,example=BRAID.md,example=CLAUDE.md"`
 	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/braid/BRAID.md,default=~/.config/AGENTS.md"`
 	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/braid/skills,example=./skills"`
 	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`

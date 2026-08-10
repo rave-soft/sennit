@@ -14,16 +14,15 @@ Get Braid's current runtime state: active model, provider, LSP/MCP status, skill
 </usage>
 
 <tips>
-- Check [problems] for config issues found by the built-in doctor (e.g. an
-  agent pinned to a model that doesn't exist, silently falling back to the
+- [problems]: config issues found by the built-in doctor (e.g. an agent
+  pinned to a model that doesn't exist, silently falling back to the
   main model)
-- Check [lsp] and [mcp] sections for service health
-- Check [providers] to see which providers are enabled and available, then
-  call again with `models_for` to see that provider's actual model IDs
-  before referencing one
-- Check [skills] to see which skills are available and whether they have been
-  loaded this session
-- Check [hooks] to see which hook events are configured and whether the
-  hook runner is active
+- [lsp]/[mcp]: service health
+- [providers]: which providers are enabled and available, then call again
+  with `models_for` to see that provider's actual model IDs before
+  referencing one
+- [skills]: which skills are available and whether loaded this session
+- [hooks]: which hook events are configured and whether the hook runner
+  is active
 - Pair with the braid-config skill to fix configuration issues
 </tips>
