@@ -28,6 +28,26 @@ import (
 // responseContextHeight limits the number of lines displayed in tool output.
 const responseContextHeight = 10
 
+// previewMaxLines caps how many lines a tool body shows even after the user
+// clicks to expand it. Expanding used to dump the entire file/output inline
+// ("портянка" — a click on `view` rendered the whole file); the chat is not
+// a pager, so expansion now yields a bounded preview and the truncation
+// note always says how much more there is. Full content belongs in an
+// editor or terminal, reached by drilling into the actual file/command.
+const previewMaxLines = 16
+
+// previewMaxDiffLines caps expanded diff bodies. Diffs are denser and more
+// load-bearing per line than plain text, so they get a bit more room than
+// previewMaxLines.
+const previewMaxDiffLines = 24
+
+// previewTruncateFormat is shown when an already-expanded tool body still
+// doesn't fit the bounded preview cap. Unlike assistantMessageTruncateFormat
+// (used for the assistant's own message text), there's nothing further to
+// click into here — previewMaxLines/previewMaxDiffLines is the ceiling, and
+// the rest lives in the actual file/output, not the chat.
+const previewTruncateFormat = "… (%d more lines not shown)"
+
 // toolBodyLeftPaddingTotal represents the padding that should be applied to each tool body
 const toolBodyLeftPaddingTotal = 2
 
@@ -657,6 +677,82 @@ func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, o
 	return prefix + paramsStr
 }
 
+// appendResultSummary appends a short " · outcome" suffix to a collapsed
+// tool's header line — e.g. "342 lines", "+12 −3", "27 matches" — so the
+// single default line still says what happened without showing any
+// content. Returns header unchanged when summary is "".
+func appendResultSummary(sty *styles.Styles, header, summary string) string {
+	if summary == "" {
+		return header
+	}
+	return header + " " + sty.Tool.TodoStatusNote.Render("· "+summary)
+}
+
+// lineCountSummary reports content's line count for a collapsed header,
+// e.g. "342 lines". Returns "" for empty content.
+func lineCountSummary(content string) string {
+	if content == "" {
+		return ""
+	}
+	n := strings.Count(content, "\n") + 1
+	if n == 1 {
+		return "1 line"
+	}
+	return fmt.Sprintf("%d lines", n)
+}
+
+// diffSummary reports a +additions/−removals count for a collapsed diff
+// header, e.g. "+12 −3". Returns "" when there's nothing to report.
+func diffSummary(additions, removals int) string {
+	if additions == 0 && removals == 0 {
+		return ""
+	}
+	return fmt.Sprintf("+%d −%d", additions, removals)
+}
+
+// countSummary reports a labeled count for a collapsed header, e.g.
+// "27 matches" or "4 files". Returns "" for a non-positive count.
+func countSummary(n int, singular, plural string) string {
+	if n <= 0 {
+		return ""
+	}
+	if n == 1 {
+		return "1 " + singular
+	}
+	return fmt.Sprintf("%d %s", n, plural)
+}
+
+// toolOutputTailContent renders plain text output previewing the *tail*
+// rather than the head. Only called once a body is already being shown
+// (i.e. the user expanded a collapsed tool call) — for commands like
+// `bash`, the load-bearing part of output (the final error, a test
+// summary) is almost always the last lines, not the first, so the bash
+// renderer uses this instead of the head-preview toolOutputPlainContent.
+func toolOutputTailContent(sty *styles.Styles, content string, width int) string {
+	content = stringext.NormalizeSpace(content)
+	content = common.StripCursorControl(content)
+	content = common.RemapANSI16(content, sty.ANSI)
+	lines := strings.Split(content, "\n")
+
+	start := max(0, len(lines)-previewMaxLines)
+
+	var out []string
+	if start > 0 {
+		out = append(out, sty.Tool.ContentTruncation.
+			Width(width).
+			Render(fmt.Sprintf(previewTruncateFormat, start)))
+	}
+	for _, ln := range lines[start:] {
+		ln = " " + ln
+		if lipgloss.Width(ln) > width {
+			ln = ansi.Truncate(ln, width, "…")
+		}
+		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
+	}
+
+	return strings.Join(out, "\n")
+}
+
 // toolOutputPlainContent renders plain text with optional expansion support.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
 	content = stringext.NormalizeSpace(content)
@@ -666,8 +762,9 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 
 	maxLines := responseContextHeight
 	if expanded {
-		maxLines = len(lines) // Show all
+		maxLines = previewMaxLines // Bounded preview, never the full dump.
 	}
+	maxLines = min(maxLines, len(lines))
 
 	var out []string
 	for i, ln := range lines {
@@ -681,12 +778,10 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
 	}
 
-	wasTruncated := len(lines) > responseContextHeight
-
-	if !expanded && wasTruncated {
+	if len(lines) > maxLines {
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-responseContextHeight)))
+			Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines)))
 	}
 
 	return strings.Join(out, "\n")
@@ -699,8 +794,9 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	lines := strings.Split(content, "\n")
 	maxLines := responseContextHeight
 	if expanded {
-		maxLines = len(lines)
+		maxLines = previewMaxLines // Bounded preview, never the full dump.
 	}
+	maxLines = min(maxLines, len(lines))
 
 	// Truncate if needed.
 	displayLines := lines
@@ -735,11 +831,11 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	}
 
 	// Add truncation message if needed.
-	if len(lines) > maxLines && !expanded {
+	if len(lines) > maxLines {
 		out = append(
 			out, sty.Tool.ContentCodeTruncation.
 				Width(width).
-				Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)),
+				Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines)),
 		)
 	}
 
@@ -989,13 +1085,14 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	// Truncate if needed.
 	maxLines := responseContextHeight
 	if expanded {
-		maxLines = len(lines)
+		maxLines = previewMaxDiffLines // Bounded preview, never the full dump.
 	}
+	maxLines = min(maxLines, len(lines))
 
-	if len(lines) > maxLines && !expanded {
+	if len(lines) > maxLines {
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(bodyWidth).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
+			Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines))
 		formatted = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
 	}
 
@@ -1039,13 +1136,14 @@ func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.
 	// Truncate if needed.
 	maxLines := responseContextHeight
 	if expanded {
-		maxLines = len(lines)
+		maxLines = previewMaxDiffLines // Bounded preview, never the full dump.
 	}
+	maxLines = min(maxLines, len(lines))
 
-	if len(lines) > maxLines && !expanded {
+	if len(lines) > maxLines {
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(bodyWidth).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
+			Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines))
 		formatted = truncMsg + "\n" + strings.Join(lines[:maxLines], "\n")
 	}
 
@@ -1099,8 +1197,9 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 	lines := strings.Split(rendered, "\n")
 	maxLines := responseContextHeight
 	if expanded {
-		maxLines = len(lines)
+		maxLines = previewMaxLines // Bounded preview, never the full dump.
 	}
+	maxLines = min(maxLines, len(lines))
 
 	var out []string
 	for i, ln := range lines {
@@ -1110,11 +1209,11 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 		out = append(out, ln)
 	}
 
-	if len(lines) > maxLines && !expanded {
+	if len(lines) > maxLines {
 		out = append(
 			out, sty.Tool.ContentTruncation.
 				Width(width).
-				Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)),
+				Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines)),
 		)
 	}
 
@@ -1689,7 +1788,7 @@ func prettifyToolName(name string) string {
 	case tools.TodosToolName:
 		return "To-Do"
 	case tools.ViewToolName:
-		return "View"
+		return "Read"
 	case tools.WriteToolName:
 		return "Write"
 	default:

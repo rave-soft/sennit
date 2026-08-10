@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -93,9 +94,25 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
+	// Collapsed by default: one line, plus how long the command ran.
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, bashDurationSummary(meta))
+	}
+
+	// Expanding previews the *tail* of the output — the load-bearing part
+	// (final error, test summary) is almost always at the end.
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, output, bodyWidth, opts.ExpandedContent))
+	body := sty.Tool.Body.Render(toolOutputTailContent(sty, output, bodyWidth))
 	return joinToolParts(header, body)
+}
+
+// bashDurationSummary renders a short "2.1s" style summary for a finished
+// bash call's collapsed header. Returns "" when timing wasn't recorded.
+func bashDurationSummary(meta tools.BashResponseMetadata) string {
+	if meta.StartTime <= 0 || meta.EndTime <= meta.StartTime {
+		return ""
+	}
+	return formatElapsed(time.Duration(meta.EndTime-meta.StartTime) * time.Millisecond)
 }
 
 // -----------------------------------------------------------------------------
@@ -216,8 +233,12 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 		return header
 	}
 
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, lineCountSummary(content))
+	}
+
 	bodyWidth := width - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, content, bodyWidth, opts.ExpandedContent))
+	body := sty.Tool.Body.Render(toolOutputTailContent(sty, content, bodyWidth))
 	return joinToolParts(header, body)
 }
 
@@ -245,7 +266,12 @@ func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, descripti
 	return prefix + " " + sty.Tool.JobDescription.Render(truncatedDesc)
 }
 
-// joinToolParts joins header and body with a blank line separator.
+// joinToolParts joins header and body with a blank line separator. An empty
+// body (the collapsed default — see appendResultSummary) collapses to just
+// the header instead of leaving a dangling blank line.
 func joinToolParts(header, body string) string {
+	if body == "" {
+		return header
+	}
 	return strings.Join([]string{header, "", body}, "\n")
 }

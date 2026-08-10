@@ -2,8 +2,10 @@ package chat
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/diff"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/styles"
@@ -56,6 +58,16 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 	// Try to render as a diff using metadata.
 	var meta tools.ReplaceSymbolResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.OldContent != "" || meta.NewContent != "" {
+		if !opts.ExpandedContent {
+			_, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, file)
+			header = appendResultSummary(sty, header, diffSummary(additions, removals))
+			if opts.Result.IsError {
+				errLine := toolErrorContent(sty, opts.Result, width)
+				return strings.Join([]string{header, "", errLine}, "\n")
+			}
+			return header
+		}
+
 		diff := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
 
 		// On error, show error above the diff.
@@ -68,6 +80,9 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 	}
 
 	// Fallback to plain text if no metadata.
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+	}
 	bodyWidth := width - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)

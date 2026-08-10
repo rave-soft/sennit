@@ -57,6 +57,10 @@ func (r *ReferencesToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		return header
 	}
 
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+	}
+
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)

@@ -133,11 +133,15 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return header
 	}
 
+	if !opts.ExpandedContent && opts.Result.Data == "" {
+		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+	}
+
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	var parts []string
 
 	// Handle text content.
-	if opts.Result.Content != "" {
+	if opts.Result.Content != "" && opts.ExpandedContent {
 		body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
 		parts = append(parts, body)
 	}

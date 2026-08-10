@@ -63,6 +63,12 @@ func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
+	var meta tools.GlobResponseMetadata
+	_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, countSummary(meta.NumberOfFiles, "file", "files"))
+	}
+
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
@@ -128,6 +134,12 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
+	var meta tools.GrepResponseMetadata
+	_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, countSummary(meta.NumberOfMatches, "match", "matches"))
+	}
+
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
@@ -186,6 +198,12 @@ func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *To
 
 	if opts.HasEmptyResult() {
 		return header
+	}
+
+	var meta tools.LSResponseMetadata
+	_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, countSummary(meta.NumberOfFiles, "entry", "entries"))
 	}
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal

@@ -72,6 +72,10 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 		return header
 	}
 
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+	}
+
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
 	body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
 	return joinToolParts(header, body)

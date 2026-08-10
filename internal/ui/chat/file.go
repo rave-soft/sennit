@@ -39,7 +39,7 @@ type ViewToolRenderContext struct{}
 func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "View", opts.Anim, opts.Compact)
+		return pendingTool(sty, "Read", opts.Anim, opts.Compact)
 	}
 
 	var params tools.ViewParams
@@ -56,7 +56,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "offset", fmt.Sprintf("%d", params.Offset))
 	}
 
-	header := toolHeader(sty, opts.Status, "View", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, "Read", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -90,6 +90,13 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	if content == "" {
 		return header
+	}
+
+	// Collapsed by default: one line, "N lines" instead of a code dump.
+	// Full content is viewed by expanding (bounded preview) — see
+	// toolOutputCodeContent — never by scrolling a wall of text in chat.
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, lineCountSummary(content))
 	}
 
 	// Render code content with syntax highlighting.
@@ -151,14 +158,21 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		var meta tools.WriteResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.Diff != "" {
 			errLine := toolErrorContent(sty, opts.Result, cappedWidth)
+			if !opts.ExpandedContent {
+				return strings.Join([]string{header, "", errLine}, "\n")
+			}
 			diff := toolOutputDiffContentFromUnified(sty, meta.Diff, cappedWidth, opts.ExpandedContent)
 			return strings.Join([]string{header, "", errLine, "", diff}, "\n")
 		}
 		return joinToolParts(header, toolErrorContent(sty, opts.Result, cappedWidth))
 	}
 
-	// Render code content with syntax highlighting.
+	// Collapsed by default: one line, "N lines" instead of the whole file.
 	if params.Content != "" {
+		if !opts.ExpandedContent {
+			return appendResultSummary(sty, header, lineCountSummary(params.Content))
+		}
+		// Render code content with syntax highlighting.
 		body := toolOutputCodeContent(sty, params.FilePath, params.Content, 0, cappedWidth, opts.ExpandedContent)
 		return joinToolParts(header, body)
 	}
@@ -218,9 +232,22 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// Get diff content from metadata.
 	var meta tools.EditResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err != nil {
+		if !opts.ExpandedContent {
+			return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+		}
 		bodyWidth := width - toolBodyLeftPaddingTotal
 		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 		return joinToolParts(header, body)
+	}
+
+	// Collapsed by default: one line, "+A −R" instead of the diff.
+	if !opts.ExpandedContent {
+		header = appendResultSummary(sty, header, diffSummary(meta.Additions, meta.Removals))
+		if opts.Result.IsError {
+			errLine := toolErrorContent(sty, opts.Result, width)
+			return strings.Join([]string{header, "", errLine}, "\n")
+		}
+		return header
 	}
 
 	diff := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
@@ -291,9 +318,22 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	// Get diff content from metadata.
 	var meta tools.MultiEditResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err != nil {
+		if !opts.ExpandedContent {
+			return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+		}
 		bodyWidth := width - toolBodyLeftPaddingTotal
 		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 		return joinToolParts(header, body)
+	}
+
+	// Collapsed by default: one line, "+A −R" instead of the diff.
+	if !opts.ExpandedContent {
+		header = appendResultSummary(sty, header, diffSummary(meta.Additions, meta.Removals))
+		if opts.Result.IsError {
+			errLine := toolErrorContent(sty, opts.Result, width)
+			return strings.Join([]string{header, "", errLine}, "\n")
+		}
+		return header
 	}
 
 	// Render diff with optional failed edits note.
@@ -363,6 +403,10 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 
 	if opts.HasEmptyResult() {
 		return header
+	}
+
+	if !opts.ExpandedContent {
+		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
 	}
 
 	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
