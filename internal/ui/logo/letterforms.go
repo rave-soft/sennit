@@ -454,9 +454,11 @@ func LetterB(stretch bool) string {
 	)
 }
 
-// LetterA renders the letter A in a stylized way. It takes a bool that
-// determines whether to stretch the letter.
-func LetterA(stretch bool) string {
+// LetterA renders the letter A in a stylized way. The stretch argument is
+// accepted for symmetry with the other letterforms but ignored: A's
+// tent-like silhouette stops reading as a letter at any elongation (like
+// LetterI, which has nothing to stretch).
+func LetterA(_ bool) string {
 	// Here's what we're making:
 	//
 	// ▄▀▀▀▄
@@ -478,13 +480,8 @@ func LetterA(stretch bool) string {
 	return joinLetterform(
 		left,
 		stretchLetterformPart(middle, letterformProps{
-			stretch: stretch,
+			stretch: false,
 			width:   3,
-			// A's tent-like silhouette turns into a shapeless wide roof
-			// when stretched as far as the boxier letters, so it gets a
-			// tighter range than the default 7-12.
-			minStretch: 4,
-			maxStretch: 7,
 		}),
 		right,
 	)
