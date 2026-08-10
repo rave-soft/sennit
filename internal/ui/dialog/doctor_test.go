@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
@@ -102,10 +103,151 @@ func TestNewDoctor_ListsProblems(t *testing.T) {
 	d := NewDoctor(com)
 	require.Equal(t, DoctorID, d.ID())
 
-	items, _, err := doctorItems(com)
+	items, _, err := doctorItemsFrom(com, DoctorProblems(com))
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 
 	rendered := items[0].Render(80)
 	require.Contains(t, rendered, "reviewer")
+}
+
+// TestDoctor_EnterOpensDetail is the regression test for the bug report:
+// Enter on a problem used to close the dialog silently (selectDialog's
+// onSelect always returned ActionClose). It must now switch to the detail
+// screen instead, returning no action (the dialog stays open).
+func TestDoctor_EnterOpensDetail(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Options:   &config.Options{},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Problems: []config.Problem{
+			{
+				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
+				Message: "agent reviewer: model x/y not found — falls back to the main model",
+				Hint:    "run 'braid models' to see available provider/model pairs",
+			},
+		},
+	}
+	com := newDoctorTestCommon(t, cfg, nil)
+	d := NewDoctor(com)
+
+	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Nil(t, action, "Enter must not silently close the dialog anymore")
+	require.Equal(t, doctorModeDetail, d.mode)
+	require.Equal(t, "reviewer", d.detail.Subject)
+
+	// The detail screen must show the full text, not the list's truncated
+	// row.
+	require.Contains(t, d.detail.Message, "falls back to the main model")
+	require.Contains(t, d.detail.Hint, "braid models")
+}
+
+// TestDoctor_EscFromList_Closes preserves the pre-existing behavior: esc on
+// the list screen closes the dialog.
+func TestDoctor_EscFromList_Closes(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Options:   &config.Options{},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Problems: []config.Problem{
+			{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
+		},
+	}
+	com := newDoctorTestCommon(t, cfg, nil)
+	d := NewDoctor(com)
+
+	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.IsType(t, ActionClose{}, action)
+	require.Equal(t, doctorModeList, d.mode)
+}
+
+// TestDoctor_EscFromDetail_GoesBackToList verifies esc on the detail screen
+// returns to the list instead of closing the whole dialog.
+func TestDoctor_EscFromDetail_GoesBackToList(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Options:   &config.Options{},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Problems: []config.Problem{
+			{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
+		},
+	}
+	com := newDoctorTestCommon(t, cfg, nil)
+	d := NewDoctor(com)
+
+	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	require.Equal(t, doctorModeDetail, d.mode)
+
+	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Nil(t, action, "esc from detail must go back, not close")
+	require.Equal(t, doctorModeList, d.mode)
+}
+
+// TestDoctor_ProviderDetail_POpensProviders verifies the area-specific fix
+// shortcut: pressing p on a provider problem's detail screen closes Doctor
+// by returning ActionOpenDialog{ProvidersID}.
+func TestDoctor_ProviderDetail_POpensProviders(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Options:   &config.Options{},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Problems: []config.Problem{
+			{Severity: config.SeverityWarn, Area: config.AreaProvider, Subject: "local", Message: "provider local has no api_key"},
+		},
+	}
+	com := newDoctorTestCommon(t, cfg, nil)
+	d := NewDoctor(com)
+
+	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	require.Equal(t, doctorModeDetail, d.mode)
+
+	action := d.HandleMsg(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	require.Equal(t, ActionOpenDialog{DialogID: ProvidersID}, action)
+}
+
+// TestDoctor_ModelDetail_MOpensModels mirrors the provider case for
+// area=model.
+func TestDoctor_ModelDetail_MOpensModels(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Options:   &config.Options{},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Problems: []config.Problem{
+			{Severity: config.SeverityError, Area: config.AreaModel, Subject: "openai/ghost", Message: "main model not found"},
+		},
+	}
+	com := newDoctorTestCommon(t, cfg, nil)
+	d := NewDoctor(com)
+
+	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	require.Equal(t, doctorModeDetail, d.mode)
+
+	action := d.HandleMsg(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	require.Equal(t, ActionOpenDialog{DialogID: ModelsID}, action)
+}
+
+// TestDoctor_AgentDetail_NoFixShortcut verifies agent-area problems (fixed
+// by editing a file, not through a dialog) don't react to p/m.
+func TestDoctor_AgentDetail_NoFixShortcut(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Options:   &config.Options{},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Problems: []config.Problem{
+			{Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer", Message: "problem"},
+		},
+	}
+	com := newDoctorTestCommon(t, cfg, nil)
+	d := NewDoctor(com)
+
+	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
+	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: 'p', Text: "p"}))
+	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: 'm', Text: "m"}))
+	require.Equal(t, doctorModeDetail, d.mode, "unmatched keys must not change screens")
 }
