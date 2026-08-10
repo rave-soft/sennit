@@ -133,7 +133,7 @@ func TestViewToolAllowsSmallSectionsOfLargeFiles(t *testing.T) {
 	require.Equal(t, "target line", meta.Content)
 }
 
-func TestViewToolBlocksOversizedReturnedSections(t *testing.T) {
+func TestViewToolTruncatesOversizedReturnedSections(t *testing.T) {
 	t.Parallel()
 
 	workingDir := t.TempDir()
@@ -150,8 +150,10 @@ func TestViewToolBlocksOversizedReturnedSections(t *testing.T) {
 		FilePath: filePath,
 	})
 
-	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "Content section is too large")
+	// Oversized files are truncated at the cap with continuation
+	// guidance rather than rejected outright.
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "Use 'offset' parameter")
 }
 
 func TestViewToolBlocksOversizedImages(t *testing.T) {
