@@ -32,7 +32,7 @@ func requireGitForWorkspaceStrandsTest(t *testing.T) {
 
 func runGitForWorkspaceStrandsTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, out)
@@ -135,7 +135,7 @@ func (s *fakeStrandSpawner) Release(ctx context.Context, id string) error {
 // newTestStrandAppWorkspace wires an AppWorkspace whose App has a real
 // *strand.Manager attached over a real git repo, a real store, and the
 // fakeStrandSpawner defined above.
-func newTestStrandAppWorkspace(t *testing.T) (*AppWorkspace, *strand.Manager, string) {
+func newTestStrandAppWorkspace(t *testing.T) (*AppWorkspace, *strand.Manager) {
 	t.Helper()
 	repo := initRepoForWorkspaceStrandsTest(t)
 
@@ -151,11 +151,11 @@ func newTestStrandAppWorkspace(t *testing.T) (*AppWorkspace, *strand.Manager, st
 	a.SetStrandManager(mgr)
 
 	store := config.NewTestStore(&config.Config{}, repo)
-	return NewAppWorkspace(a, store), mgr, repo
+	return NewAppWorkspace(a, store), mgr
 }
 
 func TestAppWorkspace_SupportsStrands(t *testing.T) {
-	aw, _, _ := newTestStrandAppWorkspace(t)
+	aw, _ := newTestStrandAppWorkspace(t)
 	require.True(t, aw.SupportsStrands())
 
 	a := app.NewForTest(t.Context())
@@ -165,7 +165,7 @@ func TestAppWorkspace_SupportsStrands(t *testing.T) {
 }
 
 func TestAppWorkspace_CreateListGetStrand(t *testing.T) {
-	aw, _, _ := newTestStrandAppWorkspace(t)
+	aw, _ := newTestStrandAppWorkspace(t)
 	ctx := t.Context()
 
 	strands, err := aw.ListStrands(ctx)
@@ -194,7 +194,7 @@ func TestAppWorkspace_CreateListGetStrand(t *testing.T) {
 }
 
 func TestAppWorkspace_AttachStrand(t *testing.T) {
-	aw, mgr, _ := newTestStrandAppWorkspace(t)
+	aw, mgr := newTestStrandAppWorkspace(t)
 	ctx := t.Context()
 
 	created, err := aw.CreateStrand(ctx, proto.CreateStrandRequest{
@@ -220,7 +220,7 @@ func TestAppWorkspace_AttachStrand(t *testing.T) {
 }
 
 func TestAppWorkspace_AttachStrand_UnknownID(t *testing.T) {
-	aw, _, _ := newTestStrandAppWorkspace(t)
+	aw, _ := newTestStrandAppWorkspace(t)
 
 	_, _, err := aw.AttachStrand(t.Context(), "no-such-strand")
 	require.Error(t, err)

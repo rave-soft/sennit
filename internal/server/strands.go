@@ -19,7 +19,7 @@ func workspaceStrandManager(ws *backend.Workspace) (*strand.Manager, bool) {
 	if ws == nil || ws.App == nil {
 		return nil, false
 	}
-	mgr, ok := ws.App.StrandManager().(*strand.Manager)
+	mgr, ok := ws.StrandManager().(*strand.Manager)
 	return mgr, ok && mgr != nil
 }
 

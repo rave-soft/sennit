@@ -2064,9 +2064,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionOpenCustomProviderForm:
-		if cmd := m.openProviderFormDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		m.openProviderFormDialog()
 	case dialog.ActionSubmitCustomProvider:
 		ws := m.com.Workspace
 		ctx := m.com.Context()
@@ -4260,15 +4258,14 @@ func (m *UI) openProvidersDialog() tea.Cmd {
 }
 
 // openProviderFormDialog opens the custom provider form dialog.
-func (m *UI) openProviderFormDialog() tea.Cmd {
+func (m *UI) openProviderFormDialog() {
 	if m.dialog.ContainsDialog(dialog.ProviderFormID) {
 		m.dialog.BringToFront(dialog.ProviderFormID)
-		return nil
+		return
 	}
 
 	formDialog := dialog.NewProviderForm(m.com)
 	m.dialog.OpenDialog(formDialog)
-	return nil
 }
 
 // configureProvider resolves providerID to its catalog entry and opens the

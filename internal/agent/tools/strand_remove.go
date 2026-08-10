@@ -53,11 +53,7 @@ func NewStrandRemoveTool(manager StrandManager, permissions permission.Service) 
 				ToolName:    StrandRemoveToolName,
 				Action:      "remove",
 				Description: fmt.Sprintf("Remove strand %q", params.ID),
-				Params: StrandRemovePermissionParams{
-					ID:           params.ID,
-					Force:        params.Force,
-					DeleteBranch: params.DeleteBranch,
-				},
+				Params:      StrandRemovePermissionParams(params),
 			})
 			if err != nil {
 				return fantasy.ToolResponse{}, err

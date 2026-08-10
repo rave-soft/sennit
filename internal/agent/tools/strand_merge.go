@@ -49,7 +49,7 @@ func NewStrandMergeTool(manager StrandManager, permissions permission.Service) f
 				ToolName:    StrandMergeToolName,
 				Action:      "merge",
 				Description: fmt.Sprintf("Merge strand %q", params.ID),
-				Params:      StrandMergePermissionParams{ID: params.ID},
+				Params:      StrandMergePermissionParams(params),
 			})
 			if err != nil {
 				return fantasy.ToolResponse{}, err

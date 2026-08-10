@@ -80,12 +80,7 @@ func NewStrandCreateTool(manager StrandManager, permissions permission.Service) 
 				return resp, nil
 			}
 
-			st, err := manager.Create(ctx, StrandCreateArgs{
-				Name:        params.Name,
-				Goal:        params.Goal,
-				BaseBranch:  params.BaseBranch,
-				MergePolicy: params.MergePolicy,
-			})
+			st, err := manager.Create(ctx, StrandCreateArgs(params))
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

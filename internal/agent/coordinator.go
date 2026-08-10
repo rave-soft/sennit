@@ -390,7 +390,27 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// completes.
 	initCtx := context.WithoutCancel(ctx)
 
-	c.readyWg.Go(func() error {
+	// ready is the errgroup these two goroutines report through.
+	// c.readyWg is reserved for the coordinator's own top-level agent,
+	// built exactly once in NewCoordinator: run()'s preamble waits on it
+	// before the first turn. Sub-agents (isSubAgent=true), by contrast,
+	// are rebuilt from scratch on every UpdateModels -> buildTools ->
+	// agentTool pass, i.e. on every coordinator.Run call. Sharing
+	// c.readyWg across those rebuilds raced sync.WaitGroup's Add against
+	// a concurrent run's Wait once strands started dispatching multiple
+	// Run calls at once on the same coordinator (Manager.dispatch, fired
+	// from both Create and Send with no coordinator-level serialization),
+	// and — independent of concurrency — errgroup.Group only remembers
+	// its first error, so one failed sub-agent rebuild would permanently
+	// fail readyWg.Wait() for every later run. A local group per build
+	// keeps each sub-agent's readiness self-contained; nothing needs to
+	// block on it, so failures are logged instead of propagated.
+	ready := &c.readyWg
+	if isSubAgent {
+		ready = &errgroup.Group{}
+	}
+
+	ready.Go(func() error {
 		systemPrompt, err := prompt.Build(initCtx, primary.Model.Provider(), primary.Model.Model(), c.cfg)
 		if err != nil {
 			return err
@@ -399,7 +419,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil
 	})
 
-	c.readyWg.Go(func() error {
+	ready.Go(func() error {
 		// Wait for MCP servers to finish registering their tools before
 		// building the initial tool list. This ensures the first tool set
 		// (used if anything reads it before run() rebuilds) includes all
@@ -414,6 +434,18 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		result.SetTools(tools)
 		return nil
 	})
+
+	if isSubAgent {
+		// Nothing blocks on a sub-agent's readiness today (the delegation
+		// tool isn't invoked until much later in the conversation, by
+		// which point this has long finished), so just surface failures
+		// instead of silently dropping them.
+		go func() {
+			if err := ready.Wait(); err != nil {
+				slog.Error("Failed to prepare sub-agent", "agent", agent.Name, "error", err)
+			}
+		}()
+	}
 
 	return result, nil
 }

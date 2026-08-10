@@ -52,7 +52,7 @@ func NewWebFetchTool(permissions permission.Service, workingDir string, client *
 					ToolName:    WebFetchToolName,
 					Action:      "fetch",
 					Description: fmt.Sprintf("Fetch content from URL: %s", params.URL),
-					Params:      WebFetchPermissionsParams{URL: params.URL},
+					Params:      WebFetchPermissionsParams(params),
 				})
 				if err != nil {
 					return fantasy.ToolResponse{}, err

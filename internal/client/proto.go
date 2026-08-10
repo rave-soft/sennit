@@ -75,7 +75,7 @@ func (c *Client) GetWorkspace(ctx context.Context, id string) (*proto.Workspace,
 // DeleteWorkspace deletes a workspace on the server.
 func (c *Client) DeleteWorkspace(ctx context.Context, id string) error {
 	q := url.Values{"client_id": []string{c.clientID}}
-	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s", id), q, nil)
+	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s", id), q)
 	if err != nil {
 		return fmt.Errorf("failed to delete workspace: %w", err)
 	}
@@ -816,7 +816,7 @@ func (c *Client) SaveSession(ctx context.Context, id string, sess proto.Session)
 
 // DeleteSession deletes a session from a workspace.
 func (c *Client) DeleteSession(ctx context.Context, id string, sessionID string) error {
-	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s", id, sessionID), nil, nil)
+	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s", id, sessionID), nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}

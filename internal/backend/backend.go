@@ -501,7 +501,7 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachStrands bool) (*Wo
 			"client", args.Version,
 			"server", version.Version,
 		)
-		ws.App.SendEvent(pubsub.Event[proto.ServerNotice]{
+		ws.SendEvent(pubsub.Event[proto.ServerNotice]{
 			Type: pubsub.UpdatedEvent,
 			Payload: proto.ServerNotice{
 				Level: proto.ServerNoticeLevelWarn,

@@ -79,7 +79,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 					ToolName:    WebSearchToolName,
 					Action:      "search",
 					Description: fmt.Sprintf("Search the web for: %s", params.Query),
-					Params:      WebSearchPermissionsParams{Query: params.Query, MaxResults: params.MaxResults},
+					Params:      WebSearchPermissionsParams(params),
 				})
 				if err != nil {
 					return fantasy.ToolResponse{}, err

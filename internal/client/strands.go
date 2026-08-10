@@ -102,7 +102,7 @@ func (c *Client) RemoveStrand(ctx context.Context, id, strandID string, opts pro
 	if opts.DeleteBranch {
 		q.Set("delete_branch", "true")
 	}
-	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/strands/%s", id, strandID), q, nil)
+	rsp, err := c.delete(ctx, fmt.Sprintf("/workspaces/%s/strands/%s", id, strandID), q)
 	if err != nil {
 		return fmt.Errorf("failed to remove strand: %w", err)
 	}

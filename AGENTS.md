@@ -235,3 +235,4 @@ func CharmtonePantera() Styles {
 **Adding a new theme**: Add a function in `themes.go` that returns the
 result of `quickStyle` with a `quickStyleOpts` palette (plus any needed
 overrides), then wire it into `ThemeForProvider`.
+- Pre-commit hook: `git config core.hooksPath .githooks` (fmt, tidy, build, lint; full -race suite runs in CI only).

@@ -39,7 +39,7 @@ func requireGitForStrandsTest(t *testing.T) {
 
 func runGitForStrandsTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, out)
@@ -203,7 +203,6 @@ func (h *strandTestHarness) do(t *testing.T, method, path string, body any) *htt
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := h.httpSrv.Client().Do(req)
 	require.NoError(t, err)
-	t.Cleanup(func() { resp.Body.Close() })
 	return resp
 }
 
@@ -221,7 +220,9 @@ func TestHandleWorkspaceStrands_NoManager(t *testing.T) {
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
 
-	resp, err := hs.Client().Get(hs.URL + "/v1/workspaces/" + ws.ID + "/strands")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, hs.URL+"/v1/workspaces/"+ws.ID+"/strands", nil)
+	require.NoError(t, err)
+	resp, err := hs.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusConflict, resp.StatusCode)
@@ -235,12 +236,15 @@ func TestHandleWorkspaceStrand_NotFound(t *testing.T) {
 	h := newStrandTestHarness(t)
 
 	resp := h.do(t, http.MethodGet, "/does-not-exist", nil)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	resp = h.do(t, http.MethodPost, "/does-not-exist/send", proto.SendStrandRequest{Message: "hi"})
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	resp = h.do(t, http.MethodDelete, "/does-not-exist", nil)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
@@ -256,6 +260,7 @@ func TestHandleWorkspaceStrands_CRUD(t *testing.T) {
 		Name: "feature-x",
 		Goal: "do the thing",
 	})
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var created proto.Strand
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
@@ -265,6 +270,7 @@ func TestHandleWorkspaceStrands_CRUD(t *testing.T) {
 
 	// List.
 	resp = h.do(t, http.MethodGet, "", nil)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var list []proto.Strand
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&list))
@@ -273,6 +279,7 @@ func TestHandleWorkspaceStrands_CRUD(t *testing.T) {
 
 	// Get by ID.
 	resp = h.do(t, http.MethodGet, "/"+created.ID, nil)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var got proto.Strand
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
@@ -280,13 +287,16 @@ func TestHandleWorkspaceStrands_CRUD(t *testing.T) {
 
 	// Send a follow-up message.
 	resp = h.do(t, http.MethodPost, "/"+created.ID+"/send", proto.SendStrandRequest{Message: "keep going"})
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Delete (force=true: the strand is still "running" from Create/Send).
 	resp = h.do(t, http.MethodDelete, "/"+created.ID+"?force=true", nil)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp = h.do(t, http.MethodGet, "/"+created.ID, nil)
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
@@ -300,6 +310,7 @@ func TestHandleWorkspaceStrands_CreateInvalid(t *testing.T) {
 		Name: "Not A Valid Name!",
 		Goal: "do the thing",
 	})
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
@@ -319,6 +330,7 @@ func TestStrandEvent_DeliveredOverSSE(t *testing.T) {
 		Name: "sse-check",
 		Goal: "do the thing",
 	})
+	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var created proto.Strand
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))

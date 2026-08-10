@@ -199,7 +199,7 @@ func (c *Client) ShutdownServer(ctx context.Context) error {
 // Servers predating the endpoint answer 404, reported as
 // [ErrUnsupported] so callers can fall back to releasing by workspace ID.
 func (c *Client) RetireClient(ctx context.Context) error {
-	rsp, err := c.delete(ctx, "/clients/"+c.clientID, nil, nil)
+	rsp, err := c.delete(ctx, "/clients/"+c.clientID, nil)
 	if err != nil {
 		return err
 	}
@@ -246,8 +246,8 @@ func (c *Client) post(ctx context.Context, path string, query url.Values, body i
 	return c.sendReq(ctx, http.MethodPost, path, query, body, headers)
 }
 
-func (c *Client) delete(ctx context.Context, path string, query url.Values, headers http.Header) (*http.Response, error) {
-	return c.sendReq(ctx, http.MethodDelete, path, query, nil, headers)
+func (c *Client) delete(ctx context.Context, path string, query url.Values) (*http.Response, error) {
+	return c.sendReq(ctx, http.MethodDelete, path, query, nil, nil)
 }
 
 func (c *Client) put(ctx context.Context, path string, query url.Values, body io.Reader, headers http.Header) (*http.Response, error) {

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Pre-commit checks mirroring the fast half of CI (lint.yml + build.yml).
+# The full -race test suite is too slow for a hook; run it before pushing:
+#   go test -race -failfast ./...
+# Install: git config core.hooksPath .githooks
+# Bypass for a WIP commit: git commit --no-verify
+set -euo pipefail
+
+fail() {
+	echo "pre-commit: $1" >&2
+	exit 1
+}
+
+# 1. gofmt on staged Go files only.
+staged_go=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)
+if [[ -n "$staged_go" ]]; then
+	unformatted=$(gofmt -l $staged_go)
+	[[ -z "$unformatted" ]] || fail "gofmt required: $unformatted"
+fi
+
+# 2. go.mod/go.sum tidy drift (CI: go mod tidy && git diff --exit-code).
+go mod tidy
+git diff --exit-code --quiet go.mod go.sum ||
+	fail "go mod tidy changed go.mod/go.sum — stage the result"
+
+# 3. Build.
+go build ./... || fail "go build failed"
+
+# 4. Lint (cached between runs; CI uses the same config).
+if command -v golangci-lint >/dev/null 2>&1; then
+	golangci-lint run --timeout 10m || fail "golangci-lint found issues"
+else
+	echo "pre-commit: golangci-lint not installed, skipping lint" >&2
+fi

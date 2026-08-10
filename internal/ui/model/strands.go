@@ -344,7 +344,7 @@ func (it *strandItem) Finished() bool {
 // Status.*Message styles (styles.go) rather than inventing new colors.
 func strandBadge(sty *styles.Styles, status string) string {
 	label := strings.ToUpper(status)
-	var style = sty.Status.InfoMessage
+	style := sty.Status.InfoMessage
 	switch strand.Status(status) {
 	case strand.StatusCompleted, strand.StatusMerged:
 		style = sty.Status.SuccessMessage
