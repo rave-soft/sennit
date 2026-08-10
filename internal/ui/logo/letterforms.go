@@ -478,10 +478,13 @@ func LetterA(stretch bool) string {
 	return joinLetterform(
 		left,
 		stretchLetterformPart(middle, letterformProps{
-			stretch:    stretch,
-			width:      3,
-			minStretch: 7,
-			maxStretch: 12,
+			stretch: stretch,
+			width:   3,
+			// A's tent-like silhouette turns into a shapeless wide roof
+			// when stretched as far as the boxier letters, so it gets a
+			// tighter range than the default 7-12.
+			minStretch: 4,
+			maxStretch: 7,
 		}),
 		right,
 	)
