@@ -46,6 +46,7 @@ func (app *App) startExternalChangeWatchers(ctx context.Context) {
 		// registry. Run async so the poll loop is never blocked on MCP
 		// reconciliation (mirrors backend's former publishConfigChanged).
 		go app.MCP.Reinitialize(watchCtx, app.config)
+		app.applyConfigPermissionsBypass()
 		app.publishWorkspaceChanged()
 	})
 	wg.Go(func() { app.config.WatchForExternalChanges(watchCtx) })
@@ -71,6 +72,25 @@ func (app *App) startExternalChangeWatchers(ctx context.Context) {
 		wg.Wait()
 		return nil
 	})
+}
+
+// applyConfigPermissionsBypass re-applies the persisted permissions.bypass
+// value to the live permission service when a config reload changed it.
+// It compares against app.lastConfigBypass — the config value as of the
+// last time it was applied — rather than Permissions.SkipRequests(), so a
+// session-only ctrl+y / /yolo toggle (which also lives on Permissions) is
+// left alone when a reload fires for an unrelated reason (e.g. a provider
+// edit) and permissions.bypass itself did not change.
+func (app *App) applyConfigPermissionsBypass() {
+	var bypass bool
+	if cfg := app.config.Config(); cfg.Permissions != nil {
+		bypass = cfg.Permissions.Bypass
+	}
+	if bypass == app.lastConfigBypass {
+		return
+	}
+	app.Permissions.SetSkipRequests(bypass)
+	app.lastConfigBypass = bypass
 }
 
 // publishWorkspaceChanged publishes a WorkspaceChanged marker on app.events.

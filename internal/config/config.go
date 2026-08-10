@@ -303,6 +303,12 @@ const (
 
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	// Bypass, when true, skips every permission prompt from process start —
+	// equivalent to always-on yolo mode. It is the persistent counterpart to
+	// the session-only --yolo flag / ctrl+y toggle (see permission.Service.
+	// SetSkipRequests), which continue to work as a runtime override on top
+	// of this.
+	Bypass bool `json:"bypass,omitempty" jsonschema:"description=DANGEROUS: skip every permission prompt from startup — the agent runs every tool without asking. Equivalent to always-on yolo mode.,default=false"`
 }
 
 type TrailerStyle string

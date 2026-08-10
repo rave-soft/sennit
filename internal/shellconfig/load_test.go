@@ -204,6 +204,68 @@ func TestLoadShellConfig_PermissionsDeny(t *testing.T) {
 		"deny must not create a permissions section")
 }
 
+// TestLoadShellConfig_PermissionsBypass verifies that `permissions bypass
+// on|off` writes the bool permissions.bypass flag.
+func TestLoadShellConfig_PermissionsBypass(t *testing.T) {
+	t.Parallel()
+
+	t.Run("on", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		script := `permissions bypass on`
+		path := filepath.Join(dir, "braidrc")
+
+		jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+		require.NoError(t, err)
+
+		var result map[string]any
+		require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+		perms := result["permissions"].(map[string]any)
+		require.Equal(t, true, perms["bypass"])
+	})
+
+	t.Run("off", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		script := `permissions bypass off`
+		path := filepath.Join(dir, "braidrc")
+
+		jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+		require.NoError(t, err)
+
+		var result map[string]any
+		require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+		perms := result["permissions"].(map[string]any)
+		require.Equal(t, false, perms["bypass"])
+	})
+
+	t.Run("invalid argument", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		script := `permissions bypass maybe`
+		path := filepath.Join(dir, "braidrc")
+
+		_, err := LoadShellConfig(t.Context(), path, []byte(script))
+		require.Error(t, err)
+	})
+
+	t.Run("missing argument", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		script := `permissions bypass`
+		path := filepath.Join(dir, "braidrc")
+
+		_, err := LoadShellConfig(t.Context(), path, []byte(script))
+		require.Error(t, err)
+	})
+}
+
 // TestLoadShellConfig_Hook verifies the hook builtin.
 func TestLoadShellConfig_Hook(t *testing.T) {
 	t.Parallel()

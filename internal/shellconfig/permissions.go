@@ -13,6 +13,7 @@ import (
 //
 //	permissions allow <tool> [<tool> ...]
 //	permissions deny <tool> [<tool> ...]
+//	permissions bypass on|off
 //
 // "allow" adds tools to the allow-list (tools that skip permission prompts).
 // "deny" hides tools from the agent entirely (options.disabled_tools) — the
@@ -20,13 +21,16 @@ import (
 //
 // Precedence: deny wins. If a tool appears in both allow and deny, it is
 // still removed from the agent's effective tool set via disabled_tools.
+//
+// "bypass" toggles permissions.bypass, which auto-approves every permission
+// prompt from process start.
 func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := configBuilderFromCtx(ctx)
 	if b == nil {
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: permissions allow|deny <tool> [<tool> ...]")
+		return usage(stderr, "usage: permissions allow|deny|bypass <tool> [<tool> ...]")
 	}
 
 	switch args[1] {
@@ -34,8 +38,10 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 		return permissionsAllow(b, args, stderr)
 	case "deny":
 		return permissionsDeny(b, args, stderr)
+	case "bypass":
+		return permissionsBypass(b, args, stderr)
 	default:
-		return usage(stderr, fmt.Sprintf("permissions: unknown subcommand %q (expected allow or deny)", args[1]))
+		return usage(stderr, fmt.Sprintf("permissions: unknown subcommand %q (expected allow, deny, or bypass)", args[1]))
 	}
 }
 
@@ -74,6 +80,20 @@ func permissionsDeny(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	opts["disabled_tools"] = disabled
 
 	slog.Info("Permissions denied in shell config", "tools", args[2:])
+	return nil
+}
+
+// permissionsBypass toggles permissions.bypass, which auto-approves every
+// permission prompt from process start.
+func permissionsBypass(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	if len(args) != 3 || (args[2] != "on" && args[2] != "off") {
+		return usage(stderr, "usage: permissions bypass on|off")
+	}
+	enabled := args[2] == "on"
+	perms := b.section("permissions")
+	perms["bypass"] = enabled
+
+	slog.Info("Permissions bypass set in shell config", "bypass", enabled)
 	return nil
 }
 

@@ -94,6 +94,20 @@ type App struct {
 	// SetThreads/Threads.
 	threadManager any
 
+	// lastConfigBypass is the permissions.bypass value from config as of
+	// the last time it was applied to Permissions.SetSkipRequests —
+	// either at construction or via a hot-reload. It is compared against
+	// the newly reloaded config's value so a reload only touches the
+	// live skip state when permissions.bypass itself actually changed;
+	// otherwise a user's manual ctrl+y / /yolo toggle (a session-only
+	// override on the same service) would get silently overwritten by
+	// an unrelated config reload (e.g. a provider edit) that happens to
+	// run afterward. Only ever read and written from the config-reload
+	// path (New and the OnExternalChange callback in watch.go), which is
+	// single-threaded by construction (see ConfigStore.OnExternalChange's
+	// doc comment), so no lock is needed.
+	lastConfigBypass bool
+
 	config *config.ConfigStore
 
 	serviceEventsWG *sync.WaitGroup
@@ -134,8 +148,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	cfg := store.Config()
 	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
 	var allowedTools []string
-	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
+	var configBypass bool
+	if cfg.Permissions != nil {
 		allowedTools = cfg.Permissions.AllowedTools
+		configBypass = cfg.Permissions.Bypass
+		skipPermissionsRequests = skipPermissionsRequests || configBypass
 	}
 
 	app := &App{
@@ -152,7 +169,8 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 		globalCtx: ctx,
 
-		config: store,
+		lastConfigBypass: configBypass,
+		config:           store,
 
 		events:             pubsub.NewBroker[any](),
 		serviceEventsWG:    &sync.WaitGroup{},

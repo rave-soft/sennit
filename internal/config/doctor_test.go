@@ -174,6 +174,33 @@ func TestDoctorAllowedToolsMCPPrefixSkipped(t *testing.T) {
 	require.Empty(t, Doctor(cfg))
 }
 
+// TestDoctorPermissionsBypassEnabled verifies a persistent permissions.bypass
+// surfaces as a warning, since it silently disables every permission prompt
+// for the life of the process.
+func TestDoctorPermissionsBypassEnabled(t *testing.T) {
+	cfg := doctorTestConfig(t)
+	cfg.Permissions = &Permissions{Bypass: true}
+	cfg.SetupAgents()
+
+	problems := Doctor(cfg)
+	require.Len(t, problems, 1)
+	require.Equal(t, AreaPermission, problems[0].Area)
+	require.Equal(t, SeverityWarn, problems[0].Severity)
+	require.Equal(t, "permissions.bypass", problems[0].Subject)
+	require.Contains(t, problems[0].Message, "never asks for permission")
+}
+
+// TestDoctorPermissionsBypassDisabled covers both the explicit-false and
+// unset (nil Permissions) cases: neither should produce a Problem.
+func TestDoctorPermissionsBypassDisabled(t *testing.T) {
+	cfg := doctorTestConfig(t)
+	cfg.SetupAgents()
+	require.Empty(t, Doctor(cfg))
+
+	cfg.Permissions = &Permissions{Bypass: false}
+	require.Empty(t, Doctor(cfg))
+}
+
 // TestDoctorProviderMissingAPIKey covers a custom provider that survives
 // config load (local providers legitimately have no key) but is still
 // worth flagging.

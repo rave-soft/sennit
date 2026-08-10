@@ -221,10 +221,18 @@ hook add PreToolUse --matcher "^bash$" --command ".braid/hooks/no-haskell.sh" --
 ```bash
 permissions allow <tool> [<tool> ...]   # tools that skip permission prompts
 permissions deny <tool> [<tool> ...]    # hide tools from the agent entirely
+permissions bypass on|off               # DANGEROUS: skip every permission prompt
 ```
 
 `deny` is the inverse of `allow`: it writes `options.disabled_tools`. A denied
 tool is hidden from the agent, not merely prompted for.
+
+`bypass on` writes `permissions.bypass = true`, which auto-approves every
+permission request from process start — the persisted equivalent of always
+running with `--yolo`. It is dangerous: the agent runs every tool, including
+destructive ones, without asking. `braid doctor` flags it as a warning. The
+session-only `ctrl+y` toggle / `/yolo` command still work independently on
+top of this and are not written to config.
 
 ### options
 
@@ -542,6 +550,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `hook add PreToolUse --command C`    | append to `hooks.PreToolUse[]`                         |
 | `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
+| `permissions bypass on`              | `permissions.bypass = true`                            |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
 | *(no braidrc equivalent)*            | `providers.<id>.proxy_url = "http://host:8080"`        |
 | *(no braidrc equivalent)*            | `agents.<id> = {"prompt": "...", "model": "p/m"}`      |

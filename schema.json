@@ -651,6 +651,11 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        },
+        "bypass": {
+          "type": "boolean",
+          "description": "DANGEROUS: skip every permission prompt from startup — the agent runs every tool without asking. Equivalent to always-on yolo mode.",
+          "default": false
         }
       },
       "additionalProperties": false,

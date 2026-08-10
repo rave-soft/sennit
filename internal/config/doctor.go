@@ -20,11 +20,12 @@ const (
 type Area string
 
 const (
-	AreaAgent    Area = "agent"
-	AreaProvider Area = "provider"
-	AreaModel    Area = "model"
-	AreaSkill    Area = "skill"
-	AreaMCP      Area = "mcp"
+	AreaAgent      Area = "agent"
+	AreaProvider   Area = "provider"
+	AreaModel      Area = "model"
+	AreaSkill      Area = "skill"
+	AreaMCP        Area = "mcp"
+	AreaPermission Area = "permission"
 )
 
 // Problem describes one thing that is wrong, or worth flagging, in the
@@ -68,6 +69,7 @@ func Doctor(cfg *Config) []Problem {
 	problems := slices.Clone(cfg.Problems)
 	problems = append(problems, doctorAgentReasoning(cfg)...)
 	problems = append(problems, doctorToolNames(cfg)...)
+	problems = append(problems, doctorPermissionsBypass(cfg)...)
 	return problems
 }
 
@@ -161,4 +163,21 @@ func doctorToolNames(cfg *Config) []Problem {
 		}
 	}
 	return problems
+}
+
+// doctorPermissionsBypass flags a persistently enabled permissions.bypass,
+// since it silently disables every permission prompt for the life of the
+// process — the same effect as always running with --yolo, but easy to
+// forget about once it is checked into braid.json.
+func doctorPermissionsBypass(cfg *Config) []Problem {
+	if cfg.Permissions == nil || !cfg.Permissions.Bypass {
+		return nil
+	}
+	return []Problem{{
+		Severity: SeverityWarn,
+		Area:     AreaPermission,
+		Subject:  "permissions.bypass",
+		Message:  "permissions bypass is enabled — the agent never asks for permission before running a tool",
+		Hint:     "disable permissions.bypass in braid.json (or `permissions bypass off` in braidrc) to restore prompts",
+	}}
 }
