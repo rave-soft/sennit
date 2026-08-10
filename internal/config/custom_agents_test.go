@@ -9,6 +9,11 @@ import (
 
 // newAgentConfig returns a Config with just enough set up for SetupAgents,
 // which reads Options for the disabled-tool and context-path defaults.
+// agentsJSON, if non-empty, is unmarshaled directly into the Config to seed
+// cfg.Agents outside of the normal loadFromBytes pipeline — used only by
+// tests asserting that SetupAgents does not trust a pre-existing Agents
+// field, since a JSON "agents" block itself is never decoded on a real load
+// (see loadFromBytes in load.go).
 func newAgentConfig(t *testing.T, agentsJSON string) *Config {
 	t.Helper()
 	cfg := &Config{Options: &Options{}}
@@ -43,69 +48,42 @@ func TestSetupAgentsTaskAgentHasNetworkTools(t *testing.T) {
 	require.Contains(t, taskAgent.AllowedTools, "web_search")
 }
 
-func TestSetupAgentsRegistersUserAgent(t *testing.T) {
-	cfg := newAgentConfig(t, `{"agents":{"reviewer":{
-		"description":"Reviews code",
-		"prompt":"You review code."
-	}}}`)
-	cfg.SetupAgents()
-
-	reviewer, ok := cfg.Agents["reviewer"]
-	require.True(t, ok, "user agent should survive SetupAgents")
-	require.Equal(t, "reviewer", reviewer.ID)
-	require.Equal(t, "reviewer", reviewer.Name, "name should default to the id")
-	require.Empty(t, reviewer.Model, "empty model means inherit the app's main model")
-	require.NotEmpty(t, reviewer.AllowedTools, "nil allowed_tools means all tools")
-
-	// The coder delegates through a tool named after the agent, so that name
-	// has to be in its allow-list or buildTools filters the tool away.
-	require.Contains(t, cfg.Agents[AgentCoder].AllowedTools, "reviewer")
-}
-
 // An unresolvable model string must not throw the agent out entirely: it
-// falls back to empty (the app's main model), symmetric to the markdown
-// agent loader.
-func TestSetupAgentsFallsBackToLargeForUnresolvableModel(t *testing.T) {
-	cfg := newAgentConfig(t, `{"agents":{"reviewer":{
-		"prompt":"You review code.",
-		"model":"nope/nope"
-	}}}`)
-	cfg.SetupAgents()
+// falls back to empty (the app's main model). Note that this only exercises
+// validUserAgents' fallback path directly, via a hand-built Agent — a real
+// markdown agent file with an unresolvable model never reaches this branch,
+// since parseAgentFile (agents_markdown.go) already resolves or silently
+// drops the model before the agent lands in c.Agents.
+func TestValidUserAgentsFallsBackForUnresolvableModel(t *testing.T) {
+	cfg := newAgentConfig(t, "")
+	cfg.Agents = map[string]Agent{
+		"reviewer": {Prompt: "You review code.", Model: "nope/nope"},
+	}
 
-	reviewer, ok := cfg.Agents["reviewer"]
-	require.True(t, ok, "an invalid model must not reject the whole agent")
-	require.Empty(t, reviewer.Model)
-}
-
-// "large"/"small" are no longer meaningful values for an agent's model: with
-// no provider named "small", this is just another unresolvable string and
-// falls back the same way "nope/nope" does above.
-func TestSetupAgentsSlotWordsAreNotSpecial(t *testing.T) {
-	cfg := newAgentConfig(t, `{"agents":{"reviewer":{
-		"prompt":"You review code.",
-		"model":"small"
-	}}}`)
-	cfg.SetupAgents()
-
-	reviewer, ok := cfg.Agents["reviewer"]
-	require.True(t, ok)
-	require.Empty(t, reviewer.Model)
+	valid, invalid := cfg.validUserAgents()
+	require.Empty(t, invalid)
+	require.Contains(t, valid, "reviewer")
+	require.Empty(t, valid["reviewer"].Model)
 }
 
 func TestSetupAgentsRejectsInvalidDefinitions(t *testing.T) {
 	tests := []struct {
-		name  string
-		agent string
+		name    string
+		file    string
+		content string
 	}{
-		{"no prompt", `"noprompt":{"description":"x"}`},
-		{"blank prompt", `"blank":{"prompt":"   "}`},
-		{"id collides with builtin tool", `"grep":{"prompt":"x"}`},
-		{"id has invalid characters", `"my agent":{"prompt":"x"}`},
+		{"no prompt", "noprompt.md", "---\nname: noprompt\ndescription: x\n---\n   \n"},
+		{"id collides with builtin tool", "grep.md", "---\nname: grep\n---\nx"},
+		{"id has invalid characters", "my-agent-bad.md", "---\nname: my agent\n---\nx"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := newAgentConfig(t, `{"agents":{`+tt.agent+`}}`)
+			root := t.TempDir()
+			writeAgent(t, root, ".braid/agents", tt.file, tt.content)
+
+			cfg := newAgentConfig(t, "")
+			cfg.workingDir = root
 			cfg.SetupAgents()
 
 			require.Len(t, cfg.Agents, 2, "only the built-ins should remain")
@@ -117,10 +95,11 @@ func TestSetupAgentsRejectsInvalidDefinitions(t *testing.T) {
 }
 
 func TestSetupAgentsSkipsDisabledAgent(t *testing.T) {
-	cfg := newAgentConfig(t, `{"agents":{"reviewer":{
-		"prompt":"You review code.",
-		"disabled":true
-	}}}`)
+	root := t.TempDir()
+	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\ndisabled: true\n---\nYou review code.")
+
+	cfg := newAgentConfig(t, "")
+	cfg.workingDir = root
 	cfg.SetupAgents()
 
 	require.NotContains(t, cfg.Agents, "reviewer")
@@ -128,10 +107,11 @@ func TestSetupAgentsSkipsDisabledAgent(t *testing.T) {
 }
 
 func TestSetupAgentsHonoursExplicitEmptyToolList(t *testing.T) {
-	cfg := newAgentConfig(t, `{"agents":{"planner":{
-		"prompt":"You plan.",
-		"allowed_tools":[]
-	}}}`)
+	root := t.TempDir()
+	writeAgent(t, root, ".braid/agents", "planner.md", "---\nname: planner\ntools: []\n---\nYou plan.")
+
+	cfg := newAgentConfig(t, "")
+	cfg.workingDir = root
 	cfg.SetupAgents()
 
 	planner := cfg.Agents["planner"]
@@ -143,7 +123,11 @@ func TestSetupAgentsHonoursExplicitEmptyToolList(t *testing.T) {
 // not treat the built-ins it wrote last time as user definitions, nor keep
 // appending duplicate tool names to the coder.
 func TestSetupAgentsIsIdempotent(t *testing.T) {
-	cfg := newAgentConfig(t, `{"agents":{"reviewer":{"prompt":"You review code."}}}`)
+	root := t.TempDir()
+	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\n---\nYou review code.")
+
+	cfg := newAgentConfig(t, "")
+	cfg.workingDir = root
 
 	cfg.SetupAgents()
 	first := cfg.Agents
@@ -166,11 +150,13 @@ func TestSetupAgentsIsIdempotent(t *testing.T) {
 }
 
 func TestSetupAgentsMultipleRolesGetSortedTools(t *testing.T) {
-	cfg := newAgentConfig(t, `{"agents":{
-		"reviewer":{"prompt":"review"},
-		"dba":{"prompt":"dba"},
-		"security":{"prompt":"sec"}
-	}}`)
+	root := t.TempDir()
+	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\n---\nreview")
+	writeAgent(t, root, ".braid/agents", "dba.md", "---\nname: dba\n---\ndba")
+	writeAgent(t, root, ".braid/agents", "security.md", "---\nname: security\n---\nsec")
+
+	cfg := newAgentConfig(t, "")
+	cfg.workingDir = root
 	cfg.SetupAgents()
 
 	for _, id := range []string{"reviewer", "dba", "security"} {
@@ -192,10 +178,11 @@ func TestValidAgentID(t *testing.T) {
 }
 
 func TestSetupAgentsKeepsReasoningEffort(t *testing.T) {
-	cfg := newAgentConfig(t, `{"agents":{"reviewer":{
-		"prompt":"You review code.",
-		"reasoning_effort":"low"
-	}}}`)
+	root := t.TempDir()
+	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\nreasoning_effort: low\n---\nYou review code.")
+
+	cfg := newAgentConfig(t, "")
+	cfg.workingDir = root
 	cfg.SetupAgents()
 
 	require.Equal(t, "low", cfg.Agents["reviewer"].ReasoningEffort)

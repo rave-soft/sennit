@@ -408,17 +408,20 @@ unchanged:
 
 ## Subagents
 
-Subagents are named roles the main agent can delegate to as a tool call. Two
-ways to define one; both can coexist and a JSON `agents` entry overrides a
-markdown file of the same id.
+Subagents are named roles the main agent can delegate to as a tool call.
+Markdown files under `.braid/agents/*.md` are the only way to define one.
 
-> [!IMPORTANT] Before writing a `model:` field into an agent file or JSON
-> `agents` block, confirm the ID exists — `braid_info {"models_for":
-> "<provider>"}` or `braid models <filter>`. Don't invent one from memory;
-> an unresolvable `model:` is dropped with a warning and the subagent
-> silently falls back to the main model, which is easy to miss. After
-> writing/editing agent files, run `braid doctor` — it flags exactly this
-> (an agent pinned to a model that doesn't exist).
+> [!IMPORTANT] Before writing a `model:` field into an agent file, confirm
+> the ID exists — `braid_info {"models_for": "<provider>"}` or `braid
+> models <filter>`. Don't invent one from memory; an unresolvable `model:`
+> is dropped with a warning and the subagent silently falls back to the
+> main model, which is easy to miss. After writing/editing agent files, run
+> `braid doctor` — it flags exactly this (an agent pinned to a model that
+> doesn't exist).
+
+> [!WARNING] **NEVER** write agent definitions into `braid.json` (or any
+> JSON config) — a JSON `agents` block is silently ignored (flagged by
+> `braid doctor`). Create or edit `.braid/agents/<name>.md` instead.
 
 ### Markdown files
 
@@ -452,30 +455,6 @@ You are a Go code reviewer. Report real defects, not style opinions.
 - opencode's `permission:` blocks are **not enforced**, imported or not —
   restrict an agent via `tools` or the config's `permissions` section
   instead.
-
-### braid.json `agents` block
-
-```json
-{
-  "agents": {
-    "reviewer": {
-      "description": "Reviews Go code for correctness and idiom.",
-      "model": "anthropic/claude-sonnet-4",
-      "reasoning_effort": "low",
-      "prompt": "You are a Go code reviewer...",
-      "allowed_tools": ["view", "grep", "glob"],
-      "allowed_mcp": { "github": null },
-      "context_paths": ["AGENTS.md"]
-    }
-  }
-}
-```
-
-`prompt` is required for a JSON-defined agent (markdown files use the file
-body instead). `allowed_tools`/`context_paths` omitted (`null`) inherit the
-coder's; an empty list is a deliberate "no tools". `allowed_mcp` maps an MCP
-server name to its allowed tool names, or `null` for all of that server's
-tools; omitted entirely means all configured MCPs are available.
 
 ## Importing from Claude Code or opencode
 
@@ -581,7 +560,6 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `permissions bypass on`              | `permissions.bypass = true`                            |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
 | *(no braidrc equivalent)*            | `providers.<id>.proxy_url = "http://host:8080"`        |
-| *(no braidrc equivalent)*            | `agents.<id> = {"prompt": "...", "model": "p/m"}`      |
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |

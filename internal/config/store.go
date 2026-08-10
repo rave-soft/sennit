@@ -1276,6 +1276,10 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
 		if mergeErr == nil {
 			dataDir := cfg.Options.DataDirectory
+			// See the matching comment in Load: OR the flag forward so
+			// detection from the earlier loadFromConfigPaths phase survives
+			// this second loadFromBytes call.
+			merged.jsonAgentsBlockDetected = merged.jsonAgentsBlockDetected || cfg.jsonAgentsBlockDetected
 			*cfg = *merged
 			cfg.setDefaults(s.workingDir, dataDir)
 			loadedPaths = append(loadedPaths, workspacePath)

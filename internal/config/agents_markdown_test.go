@@ -1,8 +1,10 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -15,6 +17,12 @@ func writeAgent(t *testing.T, root, dir, file, content string) {
 	full := filepath.Join(root, dir)
 	require.NoError(t, os.MkdirAll(full, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(full, file), []byte(content), 0o644))
+}
+
+// writeConfigFile drops a raw JSON config file into <root>/<name>.
+func writeConfigFile(t *testing.T, root, name, content string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(content), 0o644))
 }
 
 func TestDiscoverBraidAgent(t *testing.T) {
@@ -155,21 +163,55 @@ func TestDiscoverIgnoresMissingDirs(t *testing.T) {
 	require.Empty(t, discoverMarkdownAgents("", nil), "an unknown working dir must not scan anything")
 }
 
-// Markdown is the primary source, but an explicit JSON entry still wins so a
-// config edit can override a file without editing it.
-func TestSetupAgentsMergesMarkdownAndJSON(t *testing.T) {
+// Markdown files under .braid/agents are the only source of user-defined
+// agents: a JSON "agents" entry of the same id must not win, or even be
+// read at all. This is the direct regression test for the incident that
+// prompted the JSON surface's removal — a braid agent once wrote a junk
+// model into a *global* JSON agents block that silently shadowed a clean
+// project markdown agent of the same name.
+func TestSetupAgentsIgnoresJSONAgentsBlock(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\ndescription: from file\n---\nfile body")
 	writeAgent(t, root, ".braid/agents", "dba.md", "---\nname: dba\ndescription: dba file\n---\ndba body")
+	writeConfigFile(t, root, "braid.json", `{"agents":{"reviewer":{"description":"from json","prompt":"json body"}}}`)
 
-	cfg := newAgentConfig(t, `{"agents":{"reviewer":{"description":"from json","prompt":"json body"}}}`)
+	cfg, _, err := loadFromConfigPaths(context.Background(), []string{filepath.Join(root, "braid.json")})
+	require.NoError(t, err)
+	require.True(t, cfg.jsonAgentsBlockDetected, "loadFromBytes must record a top-level agents key")
+
+	cfg.workingDir = root
+	cfg.Options = &Options{}
+	cfg.SetupAgents()
+
+	require.Equal(t, "from file", cfg.Agents["reviewer"].Description, "the JSON entry must not override the markdown file")
+	require.Equal(t, "file body", cfg.Agents["reviewer"].Prompt)
+	require.Equal(t, "dba file", cfg.Agents["dba"].Description)
+	require.Contains(t, cfg.Agents[AgentCoder].AllowedTools, "reviewer")
+	require.Contains(t, cfg.Agents[AgentCoder].AllowedTools, "dba")
+
+	var warned bool
+	for _, p := range cfg.Problems {
+		if p.Area == AreaAgent && p.Severity == SeverityWarn &&
+			strings.Contains(p.Message, "agents in braid.json are ignored — define agents as .braid/agents/*.md files") {
+			warned = true
+		}
+	}
+	require.True(t, warned, "Doctor should surface a Problem for the ignored JSON agents block")
+}
+
+// Directly seeding cfg.Agents (bypassing loadFromBytes, the way a stale live
+// Config would if SetupAgents still trusted its own previous output) must
+// not survive a SetupAgents call either: only markdown discovery may
+// populate c.Agents.
+func TestSetupAgentsDoesNotTrustPreexistingAgentsField(t *testing.T) {
+	root := t.TempDir()
+	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\ndescription: from file\n---\nfile body")
+
+	cfg := newAgentConfig(t, `{"agents":{"reviewer":{"description":"stale","prompt":"stale body"}}}`)
 	cfg.workingDir = root
 	cfg.SetupAgents()
 
-	require.Equal(t, "from json", cfg.Agents["reviewer"].Description)
-	require.Equal(t, "dba file", cfg.Agents["dba"].Description, "file-only agents survive the merge")
-	require.Contains(t, cfg.Agents[AgentCoder].AllowedTools, "reviewer")
-	require.Contains(t, cfg.Agents[AgentCoder].AllowedTools, "dba")
+	require.Equal(t, "from file", cfg.Agents["reviewer"].Description)
 }
 
 func TestStringListAcceptsBothForms(t *testing.T) {

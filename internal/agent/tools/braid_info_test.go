@@ -567,14 +567,21 @@ func TestBraidInfo_Problems_None(t *testing.T) {
 func TestBraidInfo_Problems_UnresolvedAgentModel(t *testing.T) {
 	t.Parallel()
 
+	// buildBraidInfo's [problems] section is config.Doctor(cfg), which
+	// reads cfg.Problems as-is; the recomputation that would normally add
+	// this Problem is validUserAgents' job (unexported, exercised end to
+	// end in internal/config/doctor_test.go), so it is set directly here.
 	c := &config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{},
-		Agents: map[string]config.Agent{
-			"reviewer": {Prompt: "You review code.", Model: "nope/nope"},
+		Problems: []config.Problem{
+			{
+				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
+				Message: "agent reviewer: model nope/nope not found — falls back to the main model",
+				Hint:    "run 'braid models' to see available provider/model pairs",
+			},
 		},
 	}
-	c.SetupAgents()
 	cfg := config.NewTestStore(c)
 
 	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)

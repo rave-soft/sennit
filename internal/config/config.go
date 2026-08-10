@@ -763,10 +763,12 @@ type Config struct {
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
-	// Agents holds both the built-in agents and any the user defines. User
-	// definitions are read from this field on load; SetupAgents then merges
-	// them with the built-ins and writes the result back here.
-	Agents map[string]Agent `json:"agents,omitempty" jsonschema:"description=User-defined agents. Each key is the agent id and becomes the name of the tool the coder calls to delegate to it"`
+	// Agents holds both the built-in agents and any the user defines.
+	// SetupAgents populates this from .braid/agents/*.md files (via
+	// discoverMarkdownAgents) plus the two built-ins; nothing decodes user
+	// agents into this field from JSON anymore (see loadFromBytes in
+	// load.go), so it is hidden from the generated config schema.
+	Agents map[string]Agent `json:"agents,omitempty" jsonschema:"-"`
 
 	// workingDir is where SetupAgents looks for markdown agent definitions.
 	// It is set by setDefaults, so a Config decoded from the wire (the client
@@ -780,6 +782,14 @@ type Config struct {
 	// the same sites that used to only slog.Warn, and read back by
 	// Doctor. Not persisted to disk.
 	Problems []Problem `json:"-"`
+
+	// jsonAgentsBlockDetected records whether any loaded JSON config layer
+	// contained a top-level "agents" key. loadFromBytes (load.go) strips the
+	// block before unmarshaling instead of decoding it into Agents — a JSON
+	// "agents" entry is no longer read at all, only .braid/agents/*.md files
+	// are. SetupAgents turns this into a doctor Problem so the silent ignore
+	// is visible instead of quietly no-op'ing forever.
+	jsonAgentsBlockDetected bool
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators
@@ -997,17 +1007,18 @@ func filterSlice(data []string, mask []string, include bool) []string {
 	return filtered
 }
 
-// SetupAgents merges the user-defined agents already decoded into c.Agents
-// with the two built-ins and writes the combined set back to c.Agents.
+// SetupAgents discovers user-defined agents from .braid/agents/*.md, merges
+// them with the two built-ins, and writes the combined set back to c.Agents.
 //
 // Every user-defined agent becomes a tool the coder can call to delegate work,
 // named after the agent's id. Those tool names are appended to the coder's
 // allowed tools so the tool filter in the agent package keeps them; the ids are
 // validated first so a role can never shadow a real tool.
 //
-// SetupAgents is idempotent: it reads user definitions from c.Agents and
-// ignores any built-in entry a previous run left there, so repeated calls
-// (config reload, workspace switch) converge on the same result.
+// SetupAgents is idempotent: it fully recomputes c.Agents from markdown on
+// every call — it never trusts whatever was already sitting in c.Agents (a
+// previous run's built-ins, or nothing at all), so repeated calls (config
+// reload, workspace switch) converge on the same result instead of drifting.
 func (c *Config) SetupAgents() {
 	// SetupAgents fully recomputes c.Agents and can run more than once on
 	// the same live Config (e.g. after a markdown agent file changes), so
@@ -1016,17 +1027,24 @@ func (c *Config) SetupAgents() {
 	// even after the offending agent definition is fixed.
 	c.Problems = slices.DeleteFunc(c.Problems, func(p Problem) bool { return p.Area == AreaAgent })
 
+	if c.jsonAgentsBlockDetected {
+		c.addProblem(Problem{
+			Severity: SeverityWarn,
+			Area:     AreaAgent,
+			Subject:  "agents",
+			Message:  "agents in braid.json are ignored — define agents as .braid/agents/*.md files",
+			Hint:     "move each entry to .braid/agents/<name>.md (frontmatter: name, description, model, tools; body is the prompt)",
+		})
+	}
+
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
 	providers := c.providersOrEmpty()
 
-	// Markdown files are the primary way to define an agent; entries in the
-	// JSON config are merged on top so an explicit config edit still wins.
-	merged := make(map[string]Agent)
-	maps.Copy(merged, discoverMarkdownAgents(c.workingDir, providers))
-	for id, agent := range c.Agents {
-		merged[id] = agent
-	}
-	c.Agents = merged
+	// Markdown files under .braid/agents are the only source of user-defined
+	// agents. A JSON "agents" block is never read (see loadFromBytes in
+	// load.go); if one was present, jsonAgentsBlockDetected records it and
+	// the Problem above surfaces it instead of using it.
+	c.Agents = discoverMarkdownAgents(c.workingDir, providers)
 
 	userAgents, invalid := c.validUserAgents()
 	for id, reason := range invalid {

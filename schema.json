@@ -3,62 +3,6 @@
   "$id": "https://github.com/rave-soft/braid/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
-    "Agent": {
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        },
-        "disabled": {
-          "type": "boolean"
-        },
-        "model": {
-          "type": "string",
-          "description": "Specific model as 'provider/model-id'; omit to inherit the app's main model"
-        },
-        "prompt": {
-          "type": "string",
-          "description": "System prompt for this agent. Required for user-defined agents"
-        },
-        "reasoning_effort": {
-          "type": "string",
-          "enum": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "description": "Reasoning effort for this agent, overriding the model's. Ignored if the model does not support it"
-        },
-        "allowed_tools": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "allowed_mcp": {
-          "additionalProperties": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "type": "object"
-        },
-        "context_paths": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
     "Attribution": {
       "properties": {
         "trailer_style": {
@@ -159,13 +103,6 @@
           },
           "type": "object",
           "description": "Environment variables to set on startup"
-        },
-        "agents": {
-          "additionalProperties": {
-            "$ref": "#/$defs/Agent"
-          },
-          "type": "object",
-          "description": "User-defined agents. Each key is the agent id and becomes the name of the tool the coder calls to delegate to it"
         }
       },
       "additionalProperties": false,
@@ -553,7 +490,7 @@
         },
         "data_directory": {
           "type": "string",
-          "description": "Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.",
+          "description": "Project-local directory for workspace-scoped state (lock file, config overrides, legacy pre-migration database) — not the shared session/message database. Relative paths are resolved against the working directory; absolute paths are used as-is.",
           "default": ".braid",
           "examples": [
             ".braid"

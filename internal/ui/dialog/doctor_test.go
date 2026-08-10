@@ -38,14 +38,22 @@ func newDoctorTestCommon(t *testing.T, cfg *config.Config, states map[string]mcp
 func TestDoctorProblems_StaticConfigCheck(t *testing.T) {
 	t.Parallel()
 
+	// DoctorProblems is config.Doctor(cfg) plus MCP state — it reads
+	// cfg.Problems as-is rather than recomputing them (that recomputation
+	// is validUserAgents' job, exercised end to end in
+	// internal/config/doctor_test.go), so a Problem the way SetupAgents
+	// would have added it is set directly here.
 	cfg := &config.Config{
 		Options:   &config.Options{},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Agents: map[string]config.Agent{
-			"reviewer": {Prompt: "review code", Model: "nope/nope"},
+		Problems: []config.Problem{
+			{
+				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
+				Message: "agent reviewer: model nope/nope not found — falls back to the main model",
+				Hint:    "run 'braid models' to see available provider/model pairs",
+			},
 		},
 	}
-	cfg.SetupAgents()
 
 	com := newDoctorTestCommon(t, cfg, nil)
 	problems := DoctorProblems(com)
@@ -93,11 +101,14 @@ func TestNewDoctor_ListsProblems(t *testing.T) {
 	cfg := &config.Config{
 		Options:   &config.Options{},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Agents: map[string]config.Agent{
-			"reviewer": {Prompt: "review code", Model: "nope/nope"},
+		Problems: []config.Problem{
+			{
+				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
+				Message: "agent reviewer: model nope/nope not found — falls back to the main model",
+				Hint:    "run 'braid models' to see available provider/model pairs",
+			},
 		},
 	}
-	cfg.SetupAgents()
 	com := newDoctorTestCommon(t, cfg, nil)
 
 	d := NewDoctor(com)

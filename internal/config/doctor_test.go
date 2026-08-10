@@ -1,12 +1,31 @@
 package config
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/stretchr/testify/require"
 )
+
+// setupUserAgentsForTest runs the validate-and-rebuild step SetupAgents
+// performs on whatever is already in cfg.Agents, without SetupAgents' own
+// unconditional overwrite of cfg.Agents from markdown discovery. Since
+// SetupAgents now discovers agents from .braid/agents/*.md only (see
+// config.go), a Config built by hand in these tests (no workingDir, no
+// files on disk) has nothing to discover; this lets the doctor tests below
+// still exercise validUserAgents' model-resolution fallback and Problem
+// bookkeeping against a hand-built Agent map, the same way SetupAgents
+// itself invokes it.
+func setupUserAgentsForTest(cfg *Config) {
+	cfg.Problems = slices.DeleteFunc(cfg.Problems, func(p Problem) bool { return p.Area == AreaAgent })
+	valid, _ := cfg.validUserAgents()
+	cfg.Agents = valid
+}
 
 // doctorTestConfig builds a Config with one provider ("openai") offering a
 // reasoning model ("o1") and a non-reasoning one ("gpt-4o-mini"), ready for
@@ -48,7 +67,7 @@ func TestDoctorAgentUnresolvedModel(t *testing.T) {
 	cfg.Agents = map[string]Agent{
 		"reviewer": {Prompt: "You review code.", Model: "x/y"},
 	}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 
 	problems := Doctor(cfg)
 	require.NotEmpty(t, problems)
@@ -78,11 +97,11 @@ func TestDoctorAgentUnresolvedModel_ClearedOnFix(t *testing.T) {
 	cfg.Agents = map[string]Agent{
 		"reviewer": {Prompt: "You review code.", Model: "x/y"},
 	}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 	require.NotEmpty(t, Doctor(cfg))
 
 	cfg.Agents["reviewer"] = Agent{Prompt: "You review code.", Model: "openai/o1"}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 	require.Empty(t, Doctor(cfg))
 }
 
@@ -91,7 +110,7 @@ func TestDoctorAgentReasoningEffortUnsupported(t *testing.T) {
 	cfg.Agents = map[string]Agent{
 		"reviewer": {Prompt: "You review code.", Model: "openai/gpt-4o-mini", ReasoningEffort: "high"},
 	}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 
 	problems := Doctor(cfg)
 	require.Len(t, problems, 1)
@@ -105,7 +124,7 @@ func TestDoctorAgentReasoningEffortSupported(t *testing.T) {
 	cfg.Agents = map[string]Agent{
 		"reviewer": {Prompt: "You review code.", Model: "openai/o1", ReasoningEffort: "high"},
 	}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 
 	require.Empty(t, Doctor(cfg))
 }
@@ -117,7 +136,7 @@ func TestDoctorAgentReasoningEffortInheritsMainModel(t *testing.T) {
 	cfg.Agents = map[string]Agent{
 		"reviewer": {Prompt: "You review code.", ReasoningEffort: "low"},
 	}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 
 	problems := Doctor(cfg)
 	require.Len(t, problems, 1)
@@ -140,7 +159,7 @@ func TestDoctorAllowedToolsUnknownName(t *testing.T) {
 	cfg.Agents = map[string]Agent{
 		"reviewer": {Prompt: "You review code.", AllowedTools: []string{"view", "not_a_real_tool"}},
 	}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 
 	problems := Doctor(cfg)
 	require.Len(t, problems, 1)
@@ -156,7 +175,7 @@ func TestDoctorAllowedToolsAgentPseudoToolKnown(t *testing.T) {
 		"reviewer": {Prompt: "You review code."},
 		"planner":  {Prompt: "You plan.", AllowedTools: []string{"view", "reviewer"}},
 	}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 
 	require.Empty(t, Doctor(cfg))
 }
@@ -169,7 +188,7 @@ func TestDoctorAllowedToolsMCPPrefixSkipped(t *testing.T) {
 	cfg.Agents = map[string]Agent{
 		"reviewer": {Prompt: "You review code.", AllowedTools: []string{"mcp_context7_query-docs"}},
 	}
-	cfg.SetupAgents()
+	setupUserAgentsForTest(cfg)
 
 	require.Empty(t, Doctor(cfg))
 }
@@ -214,6 +233,34 @@ func TestDoctorProviderMissingAPIKey(t *testing.T) {
 	require.Len(t, problems, 1)
 	require.Equal(t, AreaProvider, problems[0].Area)
 	require.Equal(t, "local", problems[0].Subject)
+}
+
+// TestDoctorReportsJSONAgentsBlock is the end-to-end version of
+// TestSetupAgentsIgnoresJSONAgentsBlock: it loads a real braid.json with an
+// "agents" block off disk through loadFromConfigPaths (not a hand-built
+// Config) and asserts the ignored block surfaces through Doctor, the same
+// list `braid doctor` and the TUI's /doctor dialog render.
+func TestDoctorReportsJSONAgentsBlock(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "braid.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"agents":{"reviewer":{"prompt":"You review code."}}}`), 0o644))
+
+	cfg, _, err := loadFromConfigPaths(context.Background(), []string{path})
+	require.NoError(t, err)
+	cfg.Options = &Options{}
+	cfg.workingDir = root
+	cfg.SetupAgents()
+
+	problems := Doctor(cfg)
+	found := false
+	for _, p := range problems {
+		if p.Area == AreaAgent && p.Severity == SeverityWarn && p.Subject == "agents" {
+			found = true
+			require.Contains(t, p.Message, "agents in braid.json are ignored — define agents as .braid/agents/*.md files")
+		}
+	}
+	require.True(t, found, "expected a Problem for the ignored JSON agents block")
+	require.NotContains(t, cfg.Agents, "reviewer", "the JSON agent must never be read")
 }
 
 // TestDoctorMainModelFallback exercises resolveSelectedModel's fallback

@@ -71,6 +71,11 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		if mergeErr == nil {
 			// Preserve defaults that setDefaults already applied.
 			dataDir := cfg.Options.DataDirectory
+			// merged is a fresh Config decoded only from cfg (already
+			// marshaled) plus wsData; OR the flag forward so a JSON
+			// "agents" block detected during the earlier loadFromConfigPaths
+			// phase is not lost by this second, unrelated loadFromBytes call.
+			merged.jsonAgentsBlockDetected = merged.jsonAgentsBlockDetected || cfg.jsonAgentsBlockDetected
 			*cfg = *merged
 			cfg.setDefaults(workingDir, dataDir)
 			store.config = cfg
@@ -1383,6 +1388,14 @@ func migrateDeprecatedKey(data []byte, oldKey, newKey, path string) []byte {
 	return out
 }
 
+// loadFromBytes is the single choke point every JSON config layer passes
+// through before landing in a Config. It strips a top-level "agents" key
+// rather than letting it decode into Config.Agents: unlike a normal
+// deprecated-key rename (see migrateDeprecatedKey), a JSON agents block has
+// no in-place replacement to migrate to — subagents are defined exclusively
+// as .braid/agents/*.md files now, so the block is simply discarded, with
+// jsonAgentsBlockDetected left behind for SetupAgents to turn into a doctor
+// Problem instead of silently ignoring it forever.
 func loadFromBytes(configs [][]byte) (*Config, error) {
 	if len(configs) == 0 {
 		return &Config{}, nil
@@ -1392,10 +1405,19 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	hadAgentsBlock := gjson.GetBytes(data, "agents").Exists()
+	if hadAgentsBlock {
+		if out, err := sjson.DeleteBytes(data, "agents"); err == nil {
+			data = out
+		}
+	}
+
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
+	config.jsonAgentsBlockDetected = hadAgentsBlock
 	return &config, nil
 }
 
