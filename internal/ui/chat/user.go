@@ -53,6 +53,13 @@ func (m *UserMessageItem) Finished() bool {
 	return true
 }
 
+// AlwaysSpaced implements list.AlwaysSpaced. User text keeps the list's
+// normal gap around it even on a short single-line message, so it never
+// blends into a dense run of one-line tool calls (see list.List.gapAt).
+func (m *UserMessageItem) AlwaysSpaced() bool {
+	return true
+}
+
 // RawRender implements [MessageItem].
 func (m *UserMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)

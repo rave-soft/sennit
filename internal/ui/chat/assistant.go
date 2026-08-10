@@ -703,6 +703,14 @@ func (a *AssistantMessageItem) Finished() bool {
 	return a.message.IsFinished() && !a.isSpinning()
 }
 
+// AlwaysSpaced implements list.AlwaysSpaced. Assistant text keeps the
+// list's normal gap around it even on a short single-line reply, so it
+// never blends into a dense run of one-line tool calls (see
+// list.List.gapAt).
+func (a *AssistantMessageItem) AlwaysSpaced() bool {
+	return true
+}
+
 // clearCache drops every cached render for this item, including the
 // per-section caches. Shadows the embedded cachedMessageItem.clearCache
 // so ClearItemCaches (style change) wipes the section caches too.

@@ -85,6 +85,15 @@ func NewAgentToolMessageItem(
 	return t
 }
 
+// AlwaysSpaced implements list.AlwaysSpaced. A delegation is a visually
+// significant boundary — even while it's rendering as a single running
+// "Agent ..." status line, it keeps the list's normal gap instead of
+// blending into a dense run of one-line tool calls (see
+// list.List.gapAt).
+func (a *AgentToolMessageItem) AlwaysSpaced() bool {
+	return true
+}
+
 // SetChildSessionTokens implements [ChildSessionTokenTracker].
 func (a *AgentToolMessageItem) SetChildSessionTokens(prompt, completion int64) {
 	if a.promptTokens == prompt && a.completionTokens == completion {
@@ -333,6 +342,13 @@ func NewAgenticFetchToolMessageItem(
 		return !state.HasResult() && !state.IsCanceled()
 	}
 	return t
+}
+
+// AlwaysSpaced implements list.AlwaysSpaced. Same rationale as
+// AgentToolMessageItem.AlwaysSpaced: a delegation is a visually
+// significant boundary regardless of its current rendered height.
+func (a *AgenticFetchToolMessageItem) AlwaysSpaced() bool {
+	return true
 }
 
 // SetChildSessionTokens implements [ChildSessionTokenTracker].

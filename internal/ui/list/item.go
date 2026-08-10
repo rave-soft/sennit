@@ -99,6 +99,19 @@ type MouseClickable interface {
 	HandleMouseClick(btn ansi.MouseButton, x, y int) bool
 }
 
+// AlwaysSpaced opts an item out of dense neighbor grouping regardless of
+// its rendered height. The list's inter-item gap normally collapses to
+// zero between two adjacent items that both render on a single line
+// (see List.gapAt), so a run of one-line tool calls reads as a tight
+// column instead of a wall of blank lines. Items that implement
+// AlwaysSpaced and return true keep the full gap on both sides even
+// when they happen to render as one line — e.g. chat/assistant and
+// chat/user text, and Agent/AgenticFetch delegation blocks, which are
+// meaningful visual boundaries regardless of their current height.
+type AlwaysSpaced interface {
+	AlwaysSpaced() bool
+}
+
 // SpacerItem is a spacer item that adds vertical space in the list.
 type SpacerItem struct {
 	*Versioned

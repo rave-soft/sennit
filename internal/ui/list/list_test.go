@@ -449,14 +449,22 @@ func expectedRender(items []*multiLineItem, height, offsetIdx, offsetLine, gap i
 		itemLines := strings.Split(body, "\n")
 		itemHeight := len(itemLines)
 
+		// Mirrors List.gapAt: two adjacent one-line items sit flush,
+		// collapsing the gap to zero. None of these mock items opt
+		// out via AlwaysSpaced.
+		g := gap
+		if idx+1 < len(items) && itemHeight == 1 && items[idx+1].height == 1 {
+			g = 0
+		}
+
 		if currentOffset >= 0 && currentOffset < itemHeight {
 			lines = append(lines, itemLines[currentOffset:]...)
-			for range gap {
+			for range g {
 				lines = append(lines, "")
 			}
 		} else {
 			gapOffset := currentOffset - itemHeight
-			gapRemaining := gap - gapOffset
+			gapRemaining := g - gapOffset
 			for range max(gapRemaining, 0) {
 				lines = append(lines, "")
 			}
@@ -829,4 +837,77 @@ func totalRenderHits(items []*trackedItem) int {
 		n += it.renderHits
 	}
 	return n
+}
+
+// alwaysSpacedItem wraps multiLineItem and opts out of dense-neighbor
+// gap collapsing regardless of its rendered height — the mock stand-in
+// for chat's assistant/user text and Agent/AgenticFetch delegations.
+type alwaysSpacedItem struct {
+	*multiLineItem
+}
+
+func newAlwaysSpacedItem(id string, height int) *alwaysSpacedItem {
+	return &alwaysSpacedItem{multiLineItem: newMultiLineItem(id, height)}
+}
+
+func (a *alwaysSpacedItem) AlwaysSpaced() bool { return true }
+
+var _ AlwaysSpaced = (*alwaysSpacedItem)(nil)
+
+// TestList_GapAt_DenseSingleLineNeighborsCollapse covers the chat
+// density fix: a run of one-line items (the mock stand-in for
+// consecutive one-line tool calls like Read/Grep/List) renders flush
+// against each other, with the list's configured gap collapsing to
+// zero between them, while a gap still appears elsewhere. Item "c" is
+// two lines, so the a/b run collapses but the b/c and c-tail gaps
+// (checked via TotalHeight) do not.
+func TestList_GapAt_DenseSingleLineNeighborsCollapse(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 1)
+	b := newMultiLineItem("b", 1)
+	c := newMultiLineItem("c", 2)
+	l := NewList(a, b, c)
+	l.SetGap(1)
+	l.SetSize(40, 5) // exactly a's 1 line + b's 1 line + the b/c gap + c's 2 lines
+
+	out := l.Render()
+	require.Equal(t, "a:0\nb:0\n\nc:0\nc:1", out,
+		"dense a/b run must render flush; b/c keeps the configured gap")
+
+	require.Equal(t, 1+1+1+2, l.TotalHeight(),
+		"TotalHeight must reflect the collapsed a/b gap and the surviving b/c gap")
+}
+
+// TestList_GapAt_MultiLineNeighborKeepsGap covers the case where one
+// side of a pair is not a one-liner: the gap must not collapse, even
+// though the neighbor on the dense side is itself a one-liner.
+func TestList_GapAt_MultiLineNeighborKeepsGap(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 1)
+	b := newMultiLineItem("b", 3)
+	l := NewList(a, b)
+	l.SetGap(1)
+	l.SetSize(40, 100)
+
+	require.Equal(t, 1+1+3, l.TotalHeight(), "a one-liner next to a multi-line item keeps the gap")
+}
+
+// TestList_GapAt_AlwaysSpacedKeepsGap covers the boundary exception:
+// two one-line items still get the full gap when either one opts out
+// via AlwaysSpaced — the mechanism chat uses to keep a blank line
+// between a tool-call column and assistant/user text or an Agent
+// delegation, even when that neighbor happens to render as one line.
+func TestList_GapAt_AlwaysSpacedKeepsGap(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 1)
+	spaced := newAlwaysSpacedItem("s", 1)
+	l := NewList(a, spaced)
+	l.SetGap(1)
+	l.SetSize(40, 3) // exactly a's 1 line + the gap + s's 1 line
+
+	out := l.Render()
+	require.Equal(t, "a:0\n\ns:0", out, "AlwaysSpaced neighbor must keep the gap despite both items being one line")
 }
