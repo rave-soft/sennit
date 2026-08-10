@@ -79,6 +79,49 @@ func TestBraidInfo_Providers(t *testing.T) {
 	require.Contains(t, output, "openai = enabled (8 models)")
 }
 
+func TestBuildModelsFor_ListsIDs(t *testing.T) {
+	t.Parallel()
+
+	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers.Set("anthropic", config.ProviderConfig{Models: []catwalk.Model{
+		{ID: "claude-opus-4"},
+		{ID: "claude-sonnet-4"},
+	}})
+
+	cfg := config.NewTestStore(&config.Config{Providers: providers})
+	output := buildModelsFor(cfg, "anthropic")
+	require.Contains(t, output, "[models_for.anthropic]")
+	require.Contains(t, output, "claude-opus-4")
+	require.Contains(t, output, "claude-sonnet-4")
+	require.NotContains(t, output, "more")
+}
+
+func TestBuildModelsFor_UnknownProvider(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
+	output := buildModelsFor(cfg, "does-not-exist")
+	require.Contains(t, output, "[models_for.does-not-exist]")
+	require.Contains(t, output, "error = provider not found or disabled")
+}
+
+func TestBuildModelsFor_CapsLargeRouterCatalog(t *testing.T) {
+	t.Parallel()
+
+	models := make([]catwalk.Model, 0, 1239)
+	for i := range 1239 {
+		models = append(models, catwalk.Model{ID: fmt.Sprintf("model-%04d", i)})
+	}
+	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers.Set("omniroute", config.ProviderConfig{Models: models})
+
+	cfg := config.NewTestStore(&config.Config{Providers: providers})
+	output := buildModelsFor(cfg, "omniroute")
+	require.Contains(t, output, "[models_for.omniroute]")
+	require.Contains(t, output, "...and 1189 more")
+	require.Equal(t, modelsForCap, strings.Count(output, "model-"))
+}
+
 func TestBraidInfo_DisabledProvidersOmitted(t *testing.T) {
 	t.Parallel()
 

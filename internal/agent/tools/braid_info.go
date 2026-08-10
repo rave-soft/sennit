@@ -19,7 +19,9 @@ const BraidInfoToolName = "braid_info"
 //go:embed braid_info.md
 var braidInfoDescription string
 
-type BraidInfoParams struct{}
+type BraidInfoParams struct {
+	ModelsFor string `json:"models_for,omitempty" description:"Provider ID (e.g. \"anthropic\", \"xl0.ru\") to list that provider's available model IDs instead of the full state dump. Use this to verify a model ID is real before writing it into an agent file or model config."`
+}
 
 func NewBraidInfoTool(
 	cfg *config.ConfigStore,
@@ -32,10 +34,60 @@ func NewBraidInfoTool(
 	return fantasy.NewAgentTool(
 		BraidInfoToolName,
 		braidInfoDescription,
-		func(ctx context.Context, _ BraidInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		func(ctx context.Context, params BraidInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			if params.ModelsFor != "" {
+				return fantasy.NewTextResponse(buildModelsFor(cfg, params.ModelsFor)), nil
+			}
 			return fantasy.NewTextResponse(buildBraidInfo(cfg, reg, lspManager, allSkills, activeSkills, skillTracker)), nil
 		},
 	)
+}
+
+// modelsForCap bounds how many model IDs buildModelsFor lists directly.
+// Router providers backed by the model-discovery cache (see
+// internal/config/modelcache.go) can carry thousands of models; dumping all
+// of them defeats the point of a quick "does this ID exist" check.
+const modelsForCap = 50
+
+// buildModelsFor renders just the model list for one provider so an agent
+// configuring subagents/skills can check a model ID is real — via
+// braid_info{"models_for": "..."} — before writing provider/model-id into
+// an agent file, instead of guessing. The full braid_info dump only reports
+// a per-provider count ([providers]), not the IDs themselves.
+func buildModelsFor(cfg *config.ConfigStore, providerID string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[models_for.%s]\n", providerID)
+
+	pc, ok := cfg.Config().Providers.Get(providerID)
+	if !ok || pc.Disable {
+		b.WriteString("error = provider not found or disabled\n")
+		return b.String()
+	}
+
+	ids := make([]string, 0, len(pc.Models))
+	for _, m := range pc.Models {
+		ids = append(ids, m.ID)
+	}
+	slices.Sort(ids)
+
+	if len(ids) == 0 {
+		b.WriteString("(no models configured)\n")
+		return b.String()
+	}
+
+	shown := ids
+	var truncated int
+	if len(ids) > modelsForCap {
+		shown = ids[:modelsForCap]
+		truncated = len(ids) - modelsForCap
+	}
+	for _, id := range shown {
+		b.WriteString(id + "\n")
+	}
+	if truncated > 0 {
+		fmt.Fprintf(&b, "...and %d more\n", truncated)
+	}
+	return b.String()
 }
 
 func buildBraidInfo(cfg *config.ConfigStore, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {

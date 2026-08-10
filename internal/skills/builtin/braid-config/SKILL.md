@@ -125,6 +125,12 @@ braid models refresh              # every custom provider
 braid models refresh my-local-llm # one provider
 ```
 
+> [!IMPORTANT] Never guess a model ID. Before writing `provider/model-id`
+> anywhere (agent frontmatter, `model add`, `braid.json`), check it's real:
+> `braid_info` with `{"models_for": "<provider-id>"}`, or `braid models
+> <filter>` in bash. Router providers can carry thousands of models — a
+> plausible-looking ID is not the same as a listed one.
+
 ### models
 
 ```bash
@@ -148,6 +154,10 @@ model [<provider>/<id>] [flags]    # set the model; no arg prints the current on
 There is a single configured model — Braid picks a smaller/cheaper model
 automatically for internal work like titles and summarization, and that
 choice is not user-configurable.
+
+Same rule as above: verify with `braid_info {"models_for": "<provider>"}` or
+`braid models` before running `model <provider>/<id>` — an unresolvable
+selection falls back silently to the default model.
 
 `model add` flags cover the common `catwalk.Model` fields. Two fields have no
 flag and are `braid.json`-only: `reasoning_levels` (list of efforts the model
@@ -391,6 +401,14 @@ unchanged:
 Subagents are named roles the main agent can delegate to as a tool call. Two
 ways to define one; both can coexist and a JSON `agents` entry overrides a
 markdown file of the same id.
+
+> [!IMPORTANT] Before writing a `model:` field into an agent file or JSON
+> `agents` block, confirm the ID exists — `braid_info {"models_for":
+> "<provider>"}` or `braid models <filter>`. Don't invent one from memory;
+> an unresolvable `model:` is dropped with a warning and the subagent
+> silently falls back to the main model, which is easy to miss. After
+> writing/editing agent files, run `braid doctor` — it flags exactly this
+> (an agent pinned to a model that doesn't exist).
 
 ### Markdown files
 
