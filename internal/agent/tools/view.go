@@ -47,7 +47,7 @@ func viewDescription() string {
 type ViewParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
 	Offset   int    `json:"offset,omitempty" description:"The line number to start reading from (0-based)"`
-	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 200)"`
+	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 2000)"`
 }
 
 type ViewPermissionsParams struct {
@@ -72,9 +72,12 @@ type ViewResponseMetadata struct {
 }
 
 const (
-	ViewToolName     = "view"
-	MaxViewSize      = 200 * 1024 // 200KB
-	DefaultReadLimit = 200
+	ViewToolName = "view"
+	MaxViewSize  = 200 * 1024 // 200KB
+	// DefaultReadLimit matches Claude Code's Read default; 200 (inherited
+	// from Crush) made models page through files in tiny chunks, wasting
+	// steps. MaxViewSize and MaxLineLength still bound the worst case.
+	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
 )
 
