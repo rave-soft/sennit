@@ -2,7 +2,6 @@ package dialog
 
 import (
 	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/ui/common"
@@ -14,20 +13,18 @@ import (
 // ModelGroup represents a group of model items.
 type ModelGroup struct {
 	*list.Versioned
-	Title      string
-	Items      []*ModelItem
-	configured bool
-	t          *styles.Styles
+	Title string
+	Items []*ModelItem
+	t     *styles.Styles
 }
 
 // NewModelGroup creates a new ModelGroup.
-func NewModelGroup(t *styles.Styles, title string, configured bool, items ...*ModelItem) ModelGroup {
+func NewModelGroup(t *styles.Styles, title string, items ...*ModelItem) ModelGroup {
 	return ModelGroup{
-		Versioned:  list.NewVersioned(),
-		Title:      title,
-		Items:      items,
-		configured: configured,
-		t:          t,
+		Versioned: list.NewVersioned(),
+		Title:     title,
+		Items:     items,
+		t:         t,
 	}
 }
 
@@ -43,35 +40,21 @@ func (m *ModelGroup) AppendItems(items ...*ModelItem) {
 
 // Render implements [list.Item].
 func (m *ModelGroup) Render(width int) string {
-	var configured string
-	if m.configured {
-		configuredIcon := m.t.ToolCallSuccess.Render()
-		configuredText := m.t.Dialog.Models.ConfiguredText.Render("Configured")
-		configured = configuredIcon + " " + configuredText
-	}
-
+	// This dialog now only ever lists configured providers, so there is no
+	// "Configured" badge to render here anymore (see providers.go's
+	// ProviderItem for that concern in the provider-setup dialog).
 	title := " " + m.Title + " "
-	// Keep the "Configured" badge only when the full title fits beside it
-	// (plus a separator). Otherwise drop it and let the title use the whole
-	// width, rather than truncating the title to reserve room for a badge
-	// that common.Section would then drop anyway, leaving dead space.
-	if configured != "" && lipgloss.Width(title)+lipgloss.Width(configured)+3 > width {
-		configured = ""
-	}
-	if configured == "" {
-		title = ansi.Truncate(title, max(0, width-1), "…")
-	}
+	title = ansi.Truncate(title, max(0, width-1), "…")
 
-	return common.Section(m.t, title, width, configured)
+	return common.Section(m.t, title, width, "")
 }
 
 // ModelItem represents a list item for a model type.
 type ModelItem struct {
 	*list.Versioned
 
-	prov      catwalk.Provider
-	model     catwalk.Model
-	modelType ModelType
+	prov  catwalk.Provider
+	model catwalk.Model
 
 	cache        map[int]string
 	t            *styles.Styles
@@ -97,19 +80,21 @@ func (m *ModelItem) SelectedModel() config.SelectedModel {
 }
 
 // SelectedModelType returns the type of model represented by this item.
+// The models dialog only ever picks the large model slot now — the small
+// slot is config-driven only (see ui.go's handleSelectModel auto-fill) —
+// so this is always [config.SelectedModelTypeLarge].
 func (m *ModelItem) SelectedModelType() config.SelectedModelType {
-	return m.modelType.Config()
+	return config.SelectedModelTypeLarge
 }
 
 var _ ListItem = &ModelItem{}
 
 // NewModelItem creates a new ModelItem.
-func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool) *ModelItem {
+func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, showProvider bool) *ModelItem {
 	return &ModelItem{
 		Versioned:    list.NewVersioned(),
 		prov:         prov,
 		model:        model,
-		modelType:    typ,
 		t:            t,
 		cache:        make(map[int]string),
 		showProvider: showProvider,

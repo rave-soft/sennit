@@ -928,9 +928,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
-	// Dialog.Models
-	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-
 	// Dialog.Permissions
 	s.Dialog.Permissions.KeyText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Dialog.Permissions.ValueText = lipgloss.NewStyle().Foreground(o.fgBase)

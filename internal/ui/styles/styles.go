@@ -475,10 +475,6 @@ type Styles struct {
 			InfoFocused lipgloss.Style
 		}
 
-		Models struct {
-			ConfiguredText lipgloss.Style // "Configured" badge shown on the ModelGroup header
-		}
-
 		Permissions struct {
 			KeyText   lipgloss.Style // Left key cell of a key/value row
 			ValueText lipgloss.Style // Right value cell of a key/value row

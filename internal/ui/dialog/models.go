@@ -14,58 +14,13 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/util"
 )
 
-// ModelType represents the type of model to select.
-type ModelType int
-
-const (
-	ModelTypeLarge ModelType = iota
-	ModelTypeSmall
-)
-
-// String returns the string representation of the [ModelType].
-func (mt ModelType) String() string {
-	switch mt {
-	case ModelTypeLarge:
-		return "Large Task"
-	case ModelTypeSmall:
-		return "Small Task"
-	default:
-		return "Unknown"
-	}
-}
-
-// Config returns the corresponding config model type.
-func (mt ModelType) Config() config.SelectedModelType {
-	switch mt {
-	case ModelTypeLarge:
-		return config.SelectedModelTypeLarge
-	case ModelTypeSmall:
-		return config.SelectedModelTypeSmall
-	default:
-		return ""
-	}
-}
-
-// Placeholder returns the input placeholder for the model type.
-func (mt ModelType) Placeholder() string {
-	switch mt {
-	case ModelTypeLarge:
-		return largeModelInputPlaceholder
-	case ModelTypeSmall:
-		return smallModelInputPlaceholder
-	default:
-		return ""
-	}
-}
-
-const (
-	onboardingModelInputPlaceholder = "Find your fave"
-	largeModelInputPlaceholder      = "Choose a model for large, complex tasks"
-	smallModelInputPlaceholder      = "Choose a model for small, simple tasks"
-)
+// modelInputPlaceholder is shown in the filter input. This dialog only ever
+// picks the large model slot now; the small slot is config-driven only (see
+// the auto-fill in ui.go's handleSelectModel), so there is no per-type
+// placeholder to switch between anymore.
+const modelInputPlaceholder = "Choose a model for large, complex tasks"
 
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID = "models"
@@ -76,11 +31,9 @@ const defaultModelsDialogMaxWidth = 73
 type Models struct {
 	com *common.Common
 
-	modelType ModelType
 	providers []catwalk.Provider
 
 	keyMap struct {
-		Tab      key.Binding
 		UpDown   key.Binding
 		Select   key.Binding
 		Edit     key.Binding
@@ -111,14 +64,10 @@ func NewModels(com *common.Common) (*Models, error) {
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Placeholder = onboardingModelInputPlaceholder
+	m.input.Placeholder = modelInputPlaceholder
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 
-	m.keyMap.Tab = key.NewBinding(
-		key.WithKeys("tab", "shift+tab"),
-		key.WithHelp("tab", "toggle type"),
-	)
 	m.keyMap.Select = key.NewBinding(
 		key.WithKeys("enter", "ctrl+y"),
 		key.WithHelp("enter", "confirm"),
@@ -206,15 +155,6 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ModelType:      modelItem.SelectedModelType(),
 				ReAuthenticate: isEdit,
 			}
-		case key.Matches(msg, m.keyMap.Tab):
-			if m.modelType == ModelTypeLarge {
-				m.modelType = ModelTypeSmall
-			} else {
-				m.modelType = ModelTypeLarge
-			}
-			if err := m.setProviderItems(); err != nil {
-				return util.ReportError(err)
-			}
 		default:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
@@ -234,26 +174,6 @@ func (m *Models) Cursor() *tea.Cursor {
 	return InputCursor(m.com.Styles, m.input.Cursor())
 }
 
-// modelTypeRadioView returns the radio view for model type selection.
-func (m *Models) modelTypeRadioView() string {
-	t := m.com.Styles
-	textStyle := t.Radio.Label
-	largeRadioStyle := t.Radio.Off
-	smallRadioStyle := t.Radio.Off
-	if m.modelType == ModelTypeLarge {
-		largeRadioStyle = t.Radio.On
-	} else {
-		smallRadioStyle = t.Radio.On
-	}
-
-	largeRadio := largeRadioStyle.Padding(0, 1).Render()
-	smallRadio := smallRadioStyle.Padding(0, 1).Render()
-
-	return fmt.Sprintf("%s%s  %s%s",
-		largeRadio, textStyle.Render(ModelTypeLarge.String()),
-		smallRadio, textStyle.Render(ModelTypeSmall.String()))
-}
-
 // Draw implements [Dialog].
 func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
@@ -266,7 +186,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"
-	rc.TitleInfo = m.modelTypeRadioView()
 
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
@@ -287,7 +206,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *Models) ShortHelp() []key.Binding {
 	h := []key.Binding{
 		m.keyMap.UpDown,
-		m.keyMap.Tab,
 		m.keyMap.Select,
 	}
 	if m.isSelectedConfigured() {
@@ -322,7 +240,10 @@ func (m *Models) setProviderItems() error {
 	cfg := m.com.Config()
 
 	var selectedItemID string
-	selectedType := m.modelType.Config()
+	// This dialog only ever operates on the large model slot now; the small
+	// slot is filled in automatically (see ui.go's handleSelectModel) and is
+	// not user-selectable here.
+	selectedType := config.SelectedModelTypeLarge
 	currentModel := cfg.Models[selectedType]
 	recentItems := cfg.RecentModels[selectedType]
 
@@ -359,9 +280,9 @@ func (m *Models) setProviderItems() error {
 
 			addedProviders[id] = true
 
-			group := NewModelGroup(t, name, true)
+			group := NewModelGroup(t, name)
 			for _, model := range p.Models {
-				item := NewModelItem(t, provider, model, m.modelType, false)
+				item := NewModelItem(t, provider, model, false)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item
 				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -381,39 +302,41 @@ func (m *Models) setProviderItems() error {
 			continue
 		}
 
+		// The "Configure Providers" dialog now owns provider setup; this
+		// dialog only ever lists models for providers the user already
+		// configured, so an unconfigured or disabled catalog provider is
+		// skipped entirely rather than shown as a dead end into auth.
 		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
-		if providerConfigured && providerConfig.Disable {
+		if !providerConfigured || providerConfig.Disable {
 			continue
 		}
 
 		displayProvider := provider
-		if providerConfigured {
-			displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
-			modelIndex := make(map[string]int, len(displayProvider.Models))
-			for i, model := range displayProvider.Models {
-				modelIndex[model.ID] = i
+		displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
+		modelIndex := make(map[string]int, len(displayProvider.Models))
+		for i, model := range displayProvider.Models {
+			modelIndex[model.ID] = i
+		}
+		for _, model := range providerConfig.Models {
+			if model.ID == "" {
+				continue
 			}
-			for _, model := range providerConfig.Models {
-				if model.ID == "" {
-					continue
+			if idx, ok := modelIndex[model.ID]; ok {
+				if model.Name != "" {
+					displayProvider.Models[idx].Name = model.Name
 				}
-				if idx, ok := modelIndex[model.ID]; ok {
-					if model.Name != "" {
-						displayProvider.Models[idx].Name = model.Name
-					}
-					continue
-				}
-				model.Name = cmp.Or(model.Name, model.ID)
-				displayProvider.Models = append(displayProvider.Models, model)
-				modelIndex[model.ID] = len(displayProvider.Models) - 1
+				continue
 			}
+			model.Name = cmp.Or(model.Name, model.ID)
+			displayProvider.Models = append(displayProvider.Models, model)
+			modelIndex[model.ID] = len(displayProvider.Models) - 1
 		}
 
 		name := cmp.Or(displayProvider.Name, providerID)
 
-		group := NewModelGroup(t, name, providerConfigured)
+		group := NewModelGroup(t, name)
 		for _, model := range displayProvider.Models {
-			item := NewModelItem(t, provider, model, m.modelType, false)
+			item := NewModelItem(t, provider, model, false)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item
 			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
@@ -424,8 +347,20 @@ func (m *Models) setProviderItems() error {
 		groups = append(groups, group)
 	}
 
+	if len(groups) == 0 {
+		// No configured providers at all (e.g. a bare config): show a
+		// header-only, non-selectable group pointing the user at the
+		// dialog that now owns provider setup. It has no *ModelItem
+		// children, so the list's SelectFirst/SelectNext helpers (which
+		// only ever land on *ModelItem) simply skip over it.
+		groups = append(groups, NewModelGroup(t, `No providers configured — open "Configure Providers" to add one`))
+	}
+
+	// Providers that were removed or disabled after a model was last picked
+	// simply never make it into itemsMap above, so the lookup below already
+	// drops their recent entries — no extra filtering needed here.
 	if len(recentItems) > 0 {
-		recentGroup := NewModelGroup(t, "Recently used", false)
+		recentGroup := NewModelGroup(t, "Recently used")
 
 		var validRecentItems []config.SelectedModel
 		for _, recent := range recentItems {
@@ -436,7 +371,7 @@ func (m *Models) setProviderItems() error {
 			}
 
 			// Show provider for recent items
-			item = NewModelItem(t, item.prov, item.model, m.modelType, true)
+			item = NewModelItem(t, item.prov, item.model, true)
 			item.showProvider = true
 
 			validRecentItems = append(validRecentItems, recent)
@@ -466,9 +401,6 @@ func (m *Models) setProviderItems() error {
 	} else {
 		m.list.ScrollToTop()
 	}
-
-	// Update placeholder based on model type
-	m.input.Placeholder = m.modelType.Placeholder()
 
 	return nil
 }
