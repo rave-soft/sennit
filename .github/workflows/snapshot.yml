@@ -1,9 +1,12 @@
 name: snapshot
 
+# Manual-only: .goreleaser.yml uses goreleaser-pro features (nightly,
+# aur_sources, remote includes), so this needs the GORELEASER_KEY secret;
+# the upstream also ran it on Charm's own "releasers" runner group, which
+# this fork does not have. Re-enable the push trigger once the secret is
+# configured.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,9 +17,7 @@ concurrency:
 
 jobs:
   snapshot:
-    runs-on:
-      # Use our own large runners with more CPU and RAM for faster builds
-      group: releasers
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
