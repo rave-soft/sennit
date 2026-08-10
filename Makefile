@@ -19,6 +19,12 @@ build:
 install:
 	$(GO) install .
 
+## link: symlink ~/.local/bin/braid to the project build — after this,
+## `make build` in the repo instantly updates the system-wide command
+link: build
+	ln -sf $(CURDIR)/$(BINARY) $(HOME)/.local/bin/braid
+	@echo "braid -> $(CURDIR)/$(BINARY)"
+
 ## run: run from source
 run dev:
 	$(GO) run .
