@@ -39,6 +39,51 @@ func TestDiscoverModels(t *testing.T) {
 	require.Equal(t, "model-b", models[1].ID)
 }
 
+// TestDiscoverModels_FiltersGGUFPaths guards against the llama.cpp
+// incident: llama-server's /v1/models (ollama-shaped response) puts the
+// loaded --model path verbatim into "id" instead of a real model name.
+// Treating that path as a discovered model is how a provider ends up with
+// a single junk entry like "/models/Qwen3.6-...gguf" replacing a real
+// model list.
+func TestDiscoverModels_FiltersGGUFPaths(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": [
+				{"id": "/models/Qwen3.6-30B-A3B-Instruct-2507-Q4_K_M.gguf", "object": "model"},
+				{"id": "real-model", "object": "model"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := Config{ID: "qwen36-local", BaseURL: server.URL + "/v1", APIKey: "test-key"}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	require.Equal(t, "real-model", models[0].ID)
+}
+
+// TestDiscoverModels_AllJunkIsAnError checks the case that actually broke
+// qwen36-local: an endpoint whose entire /v1/models response is junk paths
+// must fail loudly rather than "successfully" returning a single garbage
+// model that then overwrites a real, hand-configured list.
+func TestDiscoverModels_AllJunkIsAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "/models/Qwen3.6-30B-A3B-Instruct-2507-Q4_K_M.gguf", "object": "model"}]}`))
+	}))
+	defer server.Close()
+
+	cfg := Config{ID: "qwen36-local", BaseURL: server.URL + "/v1", APIKey: "test-key"}
+
+	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
+	require.Error(t, err)
+	require.Nil(t, models)
+	require.Contains(t, err.Error(), "endpoint does not expose a usable model list")
+}
+
 func TestDiscoverModels_ExistingModelsWin(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

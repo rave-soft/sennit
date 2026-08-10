@@ -233,6 +233,25 @@ braid models refresh my-local-llm`,
 		for _, id := range targets {
 			pc, _ := cfg.Config().Providers.Get(id)
 
+			// discover_models: false is a hard stop, matching the guard
+			// discoverCustomProviderModels applies at load time (see
+			// load.go) — refresh must not second-guess an explicit opt-out.
+			if pc.AutoDiscoverModels != nil && !*pc.AutoDiscoverModels {
+				hadFailure = true
+				cmd.PrintErrf("discovery disabled for %s (discover_models: false); define models in the config\n", id)
+				continue
+			}
+
+			// A hand-written models list must never be silently clobbered
+			// by a refresh. discover_models: true is the explicit escape
+			// hatch — it already means "always refresh, my models win on
+			// ID conflicts" at load time, so it overrides this guard too.
+			wantsDiscovery := pc.AutoDiscoverModels != nil && *pc.AutoDiscoverModels
+			if pc.ModelsSource == config.ModelsSourceConfig && !wantsDiscovery {
+				cmd.Printf("%s: models are explicitly defined in config; refresh skipped\n", id)
+				continue
+			}
+
 			discoverCtx, cancel := context.WithTimeout(baseCtx, 3*time.Second)
 			dcfg := discover.Config{
 				ID:             id,

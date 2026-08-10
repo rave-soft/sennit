@@ -69,7 +69,12 @@ func TestModelsRefreshCmd_SingleProvider(t *testing.T) {
 	server := httptest.NewServer(modelsHandler("model-a", "model-b"))
 	defer server.Close()
 
-	seed := fmt.Sprintf(`{"providers": {"custom": {"api_key": "key", "base_url": %q, "models": [{"id": "old-model", "name": "old-model"}]}}}`, server.URL+"/v1")
+	// No seeded "models" — an empty list at load time makes this a
+	// cache-sourced provider (auto-discovered against the same server),
+	// which `refresh` is allowed to overwrite. A hand-written models list
+	// would instead be ModelsSourceConfig and refresh would skip it (see
+	// TestModelsRefreshCmd_ExplicitConfigModelsSkipped).
+	seed := fmt.Sprintf(`{"providers": {"custom": {"api_key": "key", "base_url": %q}}}`, server.URL+"/v1")
 	dataConfigPath := setupHermeticConfigEnv(t, seed)
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
@@ -106,9 +111,10 @@ func TestModelsRefreshCmd_AllProviders(t *testing.T) {
 	serverB := httptest.NewServer(modelsHandler("b-model-1", "b-model-2"))
 	defer serverB.Close()
 
+	// No seeded "models" — see TestModelsRefreshCmd_SingleProvider for why.
 	seed := fmt.Sprintf(`{"providers": {
-		"custom-a": {"api_key": "key", "base_url": %q, "models": [{"id": "seed", "name": "seed"}]},
-		"custom-b": {"api_key": "key", "base_url": %q, "models": [{"id": "seed", "name": "seed"}]}
+		"custom-a": {"api_key": "key", "base_url": %q},
+		"custom-b": {"api_key": "key", "base_url": %q}
 	}}`, serverA.URL+"/v1", serverB.URL+"/v1")
 	dataConfigPath := setupHermeticConfigEnv(t, seed)
 
@@ -136,13 +142,21 @@ func TestModelsRefreshCmd_AllProviders(t *testing.T) {
 }
 
 func TestModelsRefreshCmd_UnreachableEndpointLeavesDiskUntouched(t *testing.T) {
-	seed := `{"providers": {"custom": {"api_key": "key", "base_url": "http://127.0.0.1:1/v1", "models": [{"id": "seed", "name": "seed"}]}}}`
+	// discover_models: true is required here: the seeded "models" entry
+	// makes this provider ModelsSourceConfig (explicit), and refresh
+	// otherwise skips explicit-config providers without ever reaching the
+	// network (see TestModelsRefreshCmd_ExplicitConfigModelsSkipped) —
+	// true is the documented escape hatch that still lets a forced refresh
+	// run, and fail, against the unreachable endpoint this test wants to
+	// exercise. A 3-entry-or-fewer "models" array is also below
+	// modelCacheMigrationThreshold, so migrateBloatedModelCache leaves it
+	// in place on disk either way.
+	seed := `{"providers": {"custom": {"api_key": "key", "base_url": "http://127.0.0.1:1/v1", "discover_models": true, "models": [{"id": "seed", "name": "seed"}]}}}`
 	dataConfigPath := setupHermeticConfigEnv(t, seed)
 
-	// A plain load migrates the seeded models out of the data-dir JSON and
-	// into the cache (see migrateBloatedModelCache); do that once up front
-	// so "before" reflects the steady state a failed refresh must preserve,
-	// rather than incidentally asserting migration never ran.
+	// A plain load leaves the seeded models in place (see the threshold
+	// note above); do it once up front so "before" reflects the steady
+	// state a failed refresh must preserve.
 	_, err := config.Init(t.TempDir(), "", false)
 	require.NoError(t, err)
 	before, err := os.ReadFile(dataConfigPath)
@@ -187,4 +201,59 @@ func TestModelsRefreshCmd_KnownCatalogProviderRejected(t *testing.T) {
 	err := refreshCmd.RunE(testCmd, []string{"openai"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "known catalog provider")
+}
+
+// TestModelsRefreshCmd_ExplicitConfigModelsSkipped guards against the
+// omniroute/qwen36-local incident: a hand-written models list must never be
+// silently replaced by whatever a refresh discovers, cache included.
+func TestModelsRefreshCmd_ExplicitConfigModelsSkipped(t *testing.T) {
+	server := httptest.NewServer(modelsHandler("should-never-be-fetched"))
+	defer server.Close()
+
+	seed := fmt.Sprintf(`{"providers": {"custom": {"api_key": "key", "base_url": %q, "models": [
+		{"id": "manual-model-a", "name": "manual-model-a"},
+		{"id": "manual-model-b", "name": "manual-model-b"}
+	]}}}`, server.URL+"/v1")
+	dataConfigPath := setupHermeticConfigEnv(t, seed)
+	before, err := os.ReadFile(dataConfigPath)
+	require.NoError(t, err)
+
+	testCmd, stdout, _ := newRefreshTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+
+	err = refreshCmd.RunE(testCmd, []string{"custom"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "models are explicitly defined in config; refresh skipped")
+
+	after, err := os.ReadFile(dataConfigPath)
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after), "explicit config models must not be touched on disk")
+
+	cfg, err := config.Init(t.TempDir(), "", false)
+	require.NoError(t, err)
+	pc, ok := cfg.Config().Providers.Get("custom")
+	require.True(t, ok)
+	var ids []string
+	for _, m := range pc.Models {
+		ids = append(ids, m.ID)
+	}
+	require.ElementsMatch(t, []string{"manual-model-a", "manual-model-b"}, ids,
+		"manual models must survive untouched, never replaced by the server's response")
+}
+
+// TestModelsRefreshCmd_DiscoveryDisabledRejected checks the other half of
+// the same incident: llama.cpp-style endpoints that echo a gguf path as
+// the model "id" are exactly what discover_models: false exists to opt
+// out of, and refresh must respect that rather than overwriting the cache
+// with junk.
+func TestModelsRefreshCmd_DiscoveryDisabledRejected(t *testing.T) {
+	seed := `{"providers": {"custom": {"api_key": "key", "base_url": "http://127.0.0.1:1/v1", "discover_models": false, "models": [{"id": "manual-model", "name": "manual-model"}]}}}`
+	setupHermeticConfigEnv(t, seed)
+
+	testCmd, _, stderr := newRefreshTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+
+	err := refreshCmd.RunE(testCmd, []string{"custom"})
+	require.Error(t, err)
+	require.Contains(t, stderr.String(), "discovery disabled for custom (discover_models: false)")
 }

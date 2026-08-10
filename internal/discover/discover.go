@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -194,11 +195,30 @@ func DiscoverModels(ctx context.Context, cfg Config, resolver Resolver) ([]catwa
 		if _, ok := existing[e.ID]; ok {
 			continue
 		}
+		if junkModelID(e.ID) {
+			// llama.cpp's /v1/models puts the loaded --model path
+			// verbatim into "id" instead of a real model name (e.g.
+			// "/models/Qwen3.6-...gguf"); a real OpenAI-compatible
+			// endpoint never does this. Persisting it would silently
+			// clobber a manually configured model list on refresh.
+			slog.Warn("Discovery returned a filesystem path instead of a model ID, skipping", "provider", cfg.ID, "id", e.ID)
+			continue
+		}
 		result = append(result, catwalk.Model{
 			ID:   e.ID,
 			Name: e.ID,
 		})
 	}
 
+	if len(result) == 0 {
+		return nil, fmt.Errorf("discover models for provider %s: endpoint does not expose a usable model list; define models explicitly in the config", cfg.ID)
+	}
+
 	return result, nil
+}
+
+// junkModelID reports whether id looks like a filesystem path or a GGUF
+// file name rather than a real model identifier.
+func junkModelID(id string) bool {
+	return strings.HasPrefix(id, "/") || strings.HasSuffix(strings.ToLower(id), ".gguf")
 }

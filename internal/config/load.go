@@ -257,11 +257,11 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		return err
 	}
 
-	// Fill in Models for custom providers from the cache before discovery
-	// runs, so a restart doesn't re-trigger an HTTP round trip just because
-	// the JSON config no longer carries the discovered list (see
-	// applyCachedModelsForCustomProviders).
-	applyCachedModelsForCustomProviders(c.Providers, knownProviderNames, store.globalDataPath)
+	// Mark ModelsSource and fill in Models for custom providers from the
+	// cache before discovery runs, so a restart doesn't re-trigger an HTTP
+	// round trip just because the JSON config no longer carries the
+	// discovered list (see resolveCustomProviderModels).
+	resolveCustomProviderModels(c.Providers, knownProviderNames, store.globalDataPath)
 
 	discoveryResults := discoverCustomProviderModels(ctx, c.Providers, knownProviderNames, resolver)
 
@@ -550,21 +550,41 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 	return knownProviderNames, actions, nil
 }
 
-// applyCachedModelsForCustomProviders fills in Models for custom providers
-// whose config has none, from the global model-discovery cache (see
-// saveCachedModels). This lets a restart skip discoverCustomProviderModels'
-// HTTP round trip for an empty models list — the cache, not
-// providers.<id>.models in braid.json, is where auto-discovered models
-// live now. A provider with discover_models: true explicitly still
-// refreshes over HTTP regardless (discoverCustomProviderModels's
-// wantsDiscovery branch doesn't check Models length).
-func applyCachedModelsForCustomProviders(providers *csync.Map[string, ProviderConfig], knownProviderNames map[string]bool, globalDataPath string) {
+// resolveCustomProviderModels does two things for every custom provider,
+// before discovery runs:
+//
+//  1. Marks ModelsSource — ModelsSourceConfig for a provider that already
+//     has a non-empty, hand-written Models list, so later code (`braid
+//     models refresh`'s explicit-config guard, in internal/cmd/models.go)
+//     can tell "the user wrote these" apart from "these came from
+//     discovery" without re-deriving it. This must run before the cache
+//     fill below, since that fill only ever touches providers with an
+//     empty list.
+//  2. Fills in Models for a provider whose config has none, from the
+//     global model-discovery cache (see saveCachedModels), marking it
+//     ModelsSourceCache. This lets a restart skip
+//     discoverCustomProviderModels' HTTP round trip for an empty models
+//     list — the cache, not providers.<id>.models in braid.json, is where
+//     auto-discovered models live now. A provider with discover_models:
+//     true explicitly still refreshes over HTTP regardless
+//     (discoverCustomProviderModels's wantsDiscovery branch doesn't check
+//     Models length).
+func resolveCustomProviderModels(providers *csync.Map[string, ProviderConfig], knownProviderNames map[string]bool, globalDataPath string) {
 	for id, pc := range providers.Seq2() {
-		if knownProviderNames[id] || pc.Disable || pc.BaseURL == "" || len(pc.Models) > 0 {
+		if knownProviderNames[id] {
+			continue
+		}
+		if len(pc.Models) > 0 {
+			pc.ModelsSource = ModelsSourceConfig
+			providers.Set(id, pc)
+			continue
+		}
+		if pc.Disable || pc.BaseURL == "" {
 			continue
 		}
 		if models, ok := loadCachedModels(globalDataPath, id); ok {
 			pc.Models = models
+			pc.ModelsSource = ModelsSourceCache
 			providers.Set(id, pc)
 		}
 	}
@@ -598,6 +618,14 @@ func discoverCustomProviderModels(ctx context.Context, providers *csync.Map[stri
 			continue
 		}
 		if pc.Disable || pc.BaseURL == "" {
+			continue
+		}
+		if pc.AutoDiscoverModels != nil && !*pc.AutoDiscoverModels {
+			// Explicit discover_models: false is a hard stop — never
+			// discover, even with an empty Models list (e.g. a broken or
+			// path-echoing /models endpoint the user is deliberately
+			// working around by hand; see junkModelID in
+			// internal/discover).
 			continue
 		}
 		wantsDiscovery := pc.AutoDiscoverModels != nil && *pc.AutoDiscoverModels
@@ -694,13 +722,14 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 				}
 			} else if len(result.models) > 0 {
 				providerConfig.Models = result.models
+				providerConfig.ModelsSource = ModelsSourceCache
 				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
 				// Persist to the model cache (not braid.json) so the next
 				// load finds a non-empty models list via
-				// applyCachedModelsForCustomProviders and skips this HTTP
-				// round trip entirely. A failed discovery (the branch
-				// above) must never reach here, so a down endpoint never
-				// touches the cache.
+				// resolveCustomProviderModels and skips this HTTP round
+				// trip entirely. A failed discovery (the branch above)
+				// must never reach here, so a down endpoint never touches
+				// the cache.
 				saveCachedModels(globalDataPath, id, result.models)
 			}
 		}
@@ -1248,19 +1277,32 @@ func dropIncompatibleRecentModels(data []byte, path string) []byte {
 	return out
 }
 
+// modelCacheMigrationThreshold is the minimum array length migrateBloated-
+// ModelCache treats as "probably an old discovery dump" rather than a
+// hand-written list. A user typing out models by hand rarely lists more
+// than a handful; the incident that prompted this threshold (see
+// migrateBloatedModelCache) was a 3-entry manual list on a llama.cpp
+// provider getting swept up as if it were bloat and handed to a refresh
+// that then replaced it with junk. Erring on the side of leaving a small
+// list alone is cheap: it just means the data-dir file keeps a few extra
+// lines, not that a real router provider's thousands of models stay in
+// braid.json.
+const modelCacheMigrationThreshold = 50
+
 // migrateBloatedModelCache is a one-time, idempotent migration that moves
 // auto-discovered models still sitting in the data-dir config file (from
 // before the model-discovery cache existed) into the cache, and strips
 // them out of the JSON. It operates on the raw bytes of globalDataPath
 // directly, never on the in-memory cfg and never on ~/.config/braid.json:
 // only the data-dir file (machine-owned, writable state) is a candidate,
-// and only for provider IDs outside the known catalog — a catalog
-// provider's models field is a legitimate user override, not a discovery
-// dump, and must be left alone.
+// only for provider IDs outside the known catalog (a catalog provider's
+// models field is a legitimate user override, not a discovery dump), and
+// only for arrays bigger than modelCacheMigrationThreshold — a short list
+// is assumed hand-written and is left exactly where the user put it.
 //
 // This process's already-parsed in-memory cfg keeps whatever models it
 // unmarshaled before this runs; that's fine; only the next Load() benefits,
-// via applyCachedModelsForCustomProviders reading the now-populated cache.
+// via resolveCustomProviderModels reading the now-populated cache.
 func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Provider) {
 	if globalDataPath == "" {
 		return
@@ -1283,7 +1325,7 @@ func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Pr
 			return true
 		}
 		models := provider.Get("models")
-		if !models.Exists() || !models.IsArray() || len(models.Array()) == 0 {
+		if !models.Exists() || !models.IsArray() || len(models.Array()) <= modelCacheMigrationThreshold {
 			return true
 		}
 

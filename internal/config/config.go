@@ -154,7 +154,28 @@ type ProviderConfig struct {
 
 	// The provider models
 	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+
+	// ModelsSource records where Models came from for this load: the
+	// user's own config, or the global model-discovery cache (see
+	// internal/config/modelcache.go). It is in-memory bookkeeping only,
+	// never serialized — set by resolveCustomProviderModels/
+	// validateCustomProviders in load.go, and read by `braid models
+	// refresh` (internal/cmd/models.go) to refuse silently overwriting a
+	// manually curated list with (possibly junk) discovery output.
+	ModelsSource ModelsSource `json:"-"`
 }
+
+// ModelsSource identifies where a custom provider's Models list came from.
+type ModelsSource string
+
+const (
+	// ModelsSourceConfig means Models was written by hand in braidrc/
+	// braid.json — refresh must never overwrite it silently.
+	ModelsSourceConfig ModelsSource = "config"
+	// ModelsSourceCache means Models came from discovery, either just now
+	// or from a previous load via the global model-discovery cache.
+	ModelsSourceCache ModelsSource = "cache"
+)
 
 // ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
 func (c *ProviderConfig) ToProvider() catwalk.Provider {

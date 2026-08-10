@@ -70,6 +70,33 @@ func Doctor(cfg *Config) []Problem {
 	problems = append(problems, doctorAgentReasoning(cfg)...)
 	problems = append(problems, doctorToolNames(cfg)...)
 	problems = append(problems, doctorPermissionsBypass(cfg)...)
+	problems = append(problems, doctorJunkModelIDs(cfg)...)
+	return problems
+}
+
+// doctorJunkModelIDs flags a provider whose model list contains a
+// filesystem path or a .gguf filename as a model ID — a llama.cpp
+// /v1/models response echoing its --model flag verbatim (see
+// discover.junkModelID), most likely copy-pasted by hand into
+// providers.<id>.models before discovery started filtering it out. Purely
+// a string check on the already-loaded config: no network, so it is cheap
+// enough to run on every Doctor call.
+func doctorJunkModelIDs(cfg *Config) []Problem {
+	var problems []Problem
+	for id, pc := range cfg.providersOrEmpty() {
+		for _, m := range pc.Models {
+			if strings.HasPrefix(m.ID, "/") || strings.HasSuffix(strings.ToLower(m.ID), ".gguf") {
+				problems = append(problems, Problem{
+					Severity: SeverityWarn,
+					Area:     AreaProvider,
+					Subject:  id,
+					Message:  fmt.Sprintf("provider %s has a model ID that looks like a file path (%q), not a model name", id, m.ID),
+					Hint:     "likely a llama.cpp /v1/models response echoing --model; define models explicitly or run `braid models refresh`",
+				})
+				break
+			}
+		}
+	}
 	return problems
 }
 
