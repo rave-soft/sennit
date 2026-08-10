@@ -6,11 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
-	"os/user"
-	"path/filepath"
 	"sort"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -18,7 +14,6 @@ import (
 	"github.com/rave-soft/braid/internal/config"
 	braiddb "github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/event"
-	"github.com/rave-soft/braid/internal/projects"
 	"github.com/spf13/cobra"
 )
 
@@ -165,28 +160,37 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	allProjects, _ := cmd.Flags().GetBool("all-projects")
 
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	cfg, err := config.Init("", dataDir, false)
+	// Resolve the actual cwd via ResolveCwd (the --cwd flag, or
+	// os.Getwd()), the same way doctor.go/models.go do — not
+	// cfg.WorkingDir() off an empty-string config.Init(), which never
+	// matches the absolute paths real sessions record as project_path.
+	cwd, err := ResolveCwd(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to initialize config: %w", err)
+		return err
 	}
-	if dataDir == "" {
-		dataDir = cfg.Config().Options.DataDirectory
+
+	dataDir, _ := cmd.Flags().GetString("data-dir")
+	if _, err := config.Init(cwd, dataDir, false); err != nil {
+		return fmt.Errorf("failed to initialize config: %w", err)
 	}
 	event.StatsViewed()
 
-	conn, err := braiddb.Connect(ctx, dataDir)
+	conn, err := braiddb.Connect(ctx, config.GlobalDBDir())
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer braiddb.Release(dataDir) //nolint:errcheck // best-effort refcount release on exit
+	defer braiddb.Release(config.GlobalDBDir()) //nolint:errcheck // best-effort refcount release on exit
 	queries := braiddb.New(conn)
 
-	sessions, err := queries.ListSessionsSince(ctx, since)
+	// projectPath scopes the default (non --all-projects) view to the
+	// current project, now that every project shares one DB file.
+	projectPath := cwd
+
+	sessions, err := queries.ListSessionsSince(ctx, braiddb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: projectPath})
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
-	messages, err := queries.ListAssistantMessagesSince(ctx, since)
+	messages, err := queries.ListAssistantMessagesSince(ctx, braiddb.ListAssistantMessagesSinceParams{CreatedAt: since, ProjectPath: projectPath})
 	if err != nil {
 		return fmt.Errorf("failed to list assistant messages: %w", err)
 	}
@@ -201,7 +205,7 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	}
 	if by == "" || by == "projects" {
 		if by == "projects" && allProjects {
-			out.Projects, err = gatherAllProjectStats(ctx, since)
+			out.Projects, err = gatherAllProjectStats(ctx, queries, since)
 			if err != nil {
 				return fmt.Errorf("failed to gather stats from projects: %w", err)
 			}
@@ -210,7 +214,7 @@ func runStat(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if by == "" || by == "skills" {
-		skillRows, err := queries.ListSkillLoadsSince(ctx, since)
+		skillRows, err := queries.ListSkillLoadsSince(ctx, braiddb.ListSkillLoadsSinceParams{CreatedAt: since, ProjectPath: projectPath})
 		if err != nil {
 			return fmt.Errorf("failed to list skill loads: %w", err)
 		}
@@ -381,45 +385,34 @@ func currentProjectStat(sessions []braiddb.ListSessionsSinceRow) statProject {
 	return p
 }
 
-// gatherAllProjectStats aggregates one row per project known to
-// projects.json (like `braid stats --all`), plus a trailing totals row.
-func gatherAllProjectStats(ctx context.Context, since int64) ([]statProject, error) {
-	projectList, err := projects.Load()
+// gatherAllProjectStats aggregates one row per project known to the shared
+// DB (like `braid stats --all`), plus a trailing totals row. Now that every
+// project shares one DB file, this is a single GROUP BY query rather than a
+// walk over each project's own (no longer existing) database file.
+func gatherAllProjectStats(ctx context.Context, queries *braiddb.Queries, since int64) ([]statProject, error) {
+	dbRows, err := queries.ProjectStatsSince(ctx, since)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load projects: %w", err)
+		return nil, fmt.Errorf("failed to gather project stats: %w", err)
 	}
 
-	currentUser, err := user.Current()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current user: %w", err)
-	}
-
-	var rows []statProject
+	rows := make([]statProject, 0, len(dbRows))
 	var totals statProject
 	totals.Path = "TOTAL"
 
-	for _, p := range projectList.Projects {
-		dbPath := filepath.Join(p.DataDir, "braid.db")
-		if _, err := os.Stat(dbPath); err != nil {
-			continue
-		}
+	for _, r := range dbRows {
+		promptTokens, _ := statCoerceInt64(r.PromptTokens)
+		completionTokens, _ := statCoerceInt64(r.CompletionTokens)
+		timeSeconds, _ := statCoerceInt64(r.TimeSeconds)
+		cost, _ := statCoerceFloat64(r.Cost)
 
-		conn, err := braiddb.ConnectReadOnly(ctx, dbPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: skipping %s: %v\n", dbPath, err)
-			continue
+		row := statProject{
+			Path:             r.ProjectPath,
+			Sessions:         r.Sessions,
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			Cost:             cost,
+			TimeSeconds:      timeSeconds,
 		}
-
-		queries := braiddb.New(conn)
-		sessions, err := queries.ListSessionsSince(ctx, since)
-		conn.Close()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: failed to read %s: %v\n", dbPath, err)
-			continue
-		}
-
-		row := currentProjectStat(sessions)
-		row.Path = strings.Replace(p.Path, currentUser.HomeDir, "~", 1)
 		rows = append(rows, row)
 
 		totals.Sessions += row.Sessions
@@ -429,6 +422,10 @@ func gatherAllProjectStats(ctx context.Context, since int64) ([]statProject, err
 		totals.TimeSeconds += row.TimeSeconds
 	}
 
+	// ProjectStatsSince already orders by (prompt_tokens +
+	// completion_tokens) DESC; sort again in Go to match the sibling
+	// gathering functions in this file and stay correct regardless of the
+	// SQL ORDER BY.
 	sort.Slice(rows, func(i, j int) bool {
 		ti := rows[i].PromptTokens + rows[i].CompletionTokens
 		tj := rows[j].PromptTokens + rows[j].CompletionTokens
@@ -482,6 +479,22 @@ func statCoerceInt64(v any) (int64, bool) {
 		return int64(n), true
 	case float64:
 		return int64(n), true
+	default:
+		return 0, false
+	}
+}
+
+// statCoerceFloat64 coerces a database/sql/driver scan result to float64,
+// for aggregate columns (like ProjectStatsSince's SUM(cost)) that arrive as
+// interface{} because sqlc can't infer a static type through COALESCE.
+func statCoerceFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int64:
+		return float64(n), true
+	case int:
+		return float64(n), true
 	default:
 		return 0, false
 	}

@@ -16,19 +16,22 @@ SELECT
     updated_at
 FROM sessions
 WHERE created_at >= ?
+  AND project_path = ?
 ORDER BY created_at ASC;
 
 -- name: ListAssistantMessagesSince :many
 SELECT
-    session_id,
-    COALESCE(model, 'unknown') as model,
-    COALESCE(provider, 'unknown') as provider,
-    created_at,
-    COALESCE(finished_at, created_at) as finished_at
+    messages.session_id,
+    COALESCE(messages.model, 'unknown') as model,
+    COALESCE(messages.provider, 'unknown') as provider,
+    messages.created_at,
+    COALESCE(messages.finished_at, messages.created_at) as finished_at
 FROM messages
-WHERE role = 'assistant'
-  AND created_at >= ?
-ORDER BY created_at ASC;
+JOIN sessions ON sessions.id = messages.session_id
+WHERE messages.role = 'assistant'
+  AND messages.created_at >= ?
+  AND sessions.project_path = ?
+ORDER BY messages.created_at ASC;
 
 -- name: ListSkillLoadsSince :many
 SELECT
@@ -37,11 +40,26 @@ SELECT
     COUNT(DISTINCT messages.session_id) as session_count,
     MIN(messages.created_at) as first_used_at,
     MAX(messages.created_at) as last_used_at
-FROM messages, json_each(messages.parts)
+FROM messages
+JOIN sessions ON sessions.id = messages.session_id, json_each(messages.parts)
 WHERE messages.role = 'tool'
   AND messages.created_at >= ?
+  AND sessions.project_path = ?
   AND json_extract(value, '$.type') = 'tool_result'
   AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_type') = 'skill'
   AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_name') IS NOT NULL
 GROUP BY skill_name
 ORDER BY load_count DESC;
+
+-- name: ProjectStatsSince :many
+SELECT
+    project_path,
+    COUNT(*) as sessions,
+    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+    COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+    COALESCE(SUM(cost), 0) as cost,
+    COALESCE(SUM(updated_at - created_at), 0) as time_seconds
+FROM sessions
+WHERE created_at >= ? AND parent_session_id IS NULL
+GROUP BY project_path
+ORDER BY (prompt_tokens + completion_tokens) DESC;

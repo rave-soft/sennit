@@ -45,12 +45,16 @@ type Store interface {
 }
 
 type store struct {
-	q db.Querier
+	q           db.Querier
+	projectPath string
 }
 
-// NewStore returns a Store backed by the given sqlc queries.
-func NewStore(q db.Querier) Store {
-	return &store{q: q}
+// NewStore returns a Store backed by the given sqlc queries, scoped to
+// projectPath: threads now live in a single shared database, so names
+// and listings are scoped per project to keep each project's threads
+// isolated from every other project's.
+func NewStore(q db.Querier, projectPath string) Store {
+	return &store{q: q, projectPath: projectPath}
 }
 
 func (s *store) Create(ctx context.Context, params CreateParams) (Thread, error) {
@@ -62,6 +66,7 @@ func (s *store) Create(ctx context.Context, params CreateParams) (Thread, error)
 	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
 		ID:           uuid.New().String(),
 		Name:         params.Name,
+		ProjectPath:  s.projectPath,
 		Goal:         params.Goal,
 		BaseBranch:   params.BaseBranch,
 		Branch:       params.Branch,
@@ -85,7 +90,10 @@ func (s *store) Get(ctx context.Context, id string) (Thread, error) {
 }
 
 func (s *store) GetByName(ctx context.Context, name string) (Thread, error) {
-	dbThread, err := s.q.GetThreadByName(ctx, name)
+	dbThread, err := s.q.GetThreadByName(ctx, db.GetThreadByNameParams{
+		Name:        name,
+		ProjectPath: s.projectPath,
+	})
 	if err != nil {
 		return Thread{}, err
 	}
@@ -93,7 +101,7 @@ func (s *store) GetByName(ctx context.Context, name string) (Thread, error) {
 }
 
 func (s *store) List(ctx context.Context) ([]Thread, error) {
-	dbThreads, err := s.q.ListThreads(ctx)
+	dbThreads, err := s.q.ListThreads(ctx, s.projectPath)
 	if err != nil {
 		return nil, err
 	}

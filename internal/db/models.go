@@ -49,11 +49,13 @@ type Session struct {
 	CreatedAt        int64          `json:"created_at"`
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
+	ProjectPath      string         `json:"project_path"`
 }
 
 type Thread struct {
 	ID            string        `json:"id"`
 	Name          string        `json:"name"`
+	ProjectPath   string        `json:"project_path"`
 	Goal          string        `json:"goal"`
 	BaseBranch    string        `json:"base_branch"`
 	Branch        string        `json:"branch"`

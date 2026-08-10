@@ -21,7 +21,7 @@ func TestRunShellCommand_SkipsPersistenceForMissingSession(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn)
+	sessions := session.NewService(q, conn, "/test/project")
 	messages := message.NewService(q)
 
 	b, _ := newTestBackend(t)

@@ -8,19 +8,22 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/rave-soft/braid/internal/lock"
 	"github.com/rave-soft/braid/internal/version"
 )
 
-// ErrDataDirLocked is returned by Connect when the data directory is
-// already in use by another braid process.
-var ErrDataDirLocked = errors.New("data directory already in use by another braid process")
+// ErrWorkspaceLocked is returned by AcquireWorkspaceLock when a
+// project's workspace directory is already in use by another braid
+// process.
+var ErrWorkspaceLocked = errors.New("workspace already in use by another braid process")
 
-// dataDirLockFile is the name of the lock file inside the data
-// directory. It lives next to braid.db so users can `ls` and find it.
-const dataDirLockFile = "braid.lock"
+// workspaceLockFile is the name of the lock file inside a project's
+// .braid directory. It lives next to braid.db so users can `ls` and
+// find it.
+const workspaceLockFile = "braid.lock"
 
 // dataDirOwnerInfo is the JSON payload written into the lock file by
 // the process that currently owns it. It is purely informational; the
@@ -32,34 +35,92 @@ type dataDirOwnerInfo struct {
 	StartedAt string `json:"started_at,omitempty"`
 }
 
-// dataDirLock represents an acquired exclusive lock on a data
-// directory. release closes the underlying file descriptor which the
-// kernel uses to drop the OS-level lock.
-type dataDirLock struct {
-	release func()
+// WorkspaceLock represents an acquired exclusive lock on a project's
+// workspace directory (its .braid directory). Calling Release on a nil
+// *WorkspaceLock is a no-op, so callers that skip locking can hold a
+// nil lock and release it unconditionally.
+type WorkspaceLock struct {
+	dir string
 }
 
-// acquireDataDirLock takes an exclusive non-blocking lock on
-// {dataDir}/braid.lock. If the lock is already held by another
-// process, it returns ErrDataDirLocked wrapped with a diagnostic that
-// includes whatever owner info that process wrote.
+// workspaceLockEntry is the process-local, refcounted OS lock backing
+// every in-process WorkspaceLock for a given directory. Refcounting
+// mirrors the DB connection pool in connect.go: the same process may
+// legitimately want the same workspace directory locked from more than
+// one place at once (e.g. two concurrent CreateWorkspace calls for the
+// same path racing each other before either registers), and only the
+// first acquirer should take the actual OS-level flock; the rest just
+// bump the refcount. The OS lock is released once the last in-process
+// holder releases.
+type workspaceLockEntry struct {
+	release  func()
+	refCount int
+}
+
+var (
+	workspaceLockPool   = make(map[string]*workspaceLockEntry)
+	workspaceLockPoolMu sync.Mutex
+)
+
+// Release drops the lock. Safe to call on a nil *WorkspaceLock.
+func (l *WorkspaceLock) Release() {
+	if l == nil {
+		return
+	}
+
+	workspaceLockPoolMu.Lock()
+	defer workspaceLockPoolMu.Unlock()
+
+	entry, ok := workspaceLockPool[l.dir]
+	if !ok {
+		return
+	}
+	entry.refCount--
+	if entry.refCount > 0 {
+		return
+	}
+	delete(workspaceLockPool, l.dir)
+	entry.release()
+}
+
+// AcquireWorkspaceLock takes an exclusive non-blocking lock on
+// {dir}/braid.lock, guarding against two braid processes racing the
+// same project's workspace. If the lock is already held by another
+// process, it returns ErrWorkspaceLocked wrapped with a diagnostic
+// that includes whatever owner info that process wrote. Concurrent
+// acquisitions for the same directory within this process share one
+// underlying OS lock via refcounting; see [workspaceLockEntry].
 //
 // Acquisition is skipped (returning a no-op lock) when
 // BRAID_SKIP_DATADIR_LOCK is set to a truthy value. This is intended
 // as an escape hatch for hostile filesystems that do not implement
 // advisory locking; it should not be used in normal operation.
-func acquireDataDirLock(dataDir string) (*dataDirLock, error) {
-	if skipDataDirLock() {
-		return &dataDirLock{release: func() {}}, nil
+func AcquireWorkspaceLock(dir string) (*WorkspaceLock, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		absDir = dir
 	}
 
-	path := filepath.Join(dataDir, dataDirLockFile)
+	workspaceLockPoolMu.Lock()
+	defer workspaceLockPoolMu.Unlock()
+
+	if entry, ok := workspaceLockPool[absDir]; ok {
+		entry.refCount++
+		return &WorkspaceLock{dir: absDir}, nil
+	}
+
+	if skipWorkspaceLock() {
+		workspaceLockPool[absDir] = &workspaceLockEntry{release: func() {}, refCount: 1}
+		return &WorkspaceLock{dir: absDir}, nil
+	}
+
+	path := filepath.Join(dir, workspaceLockFile)
 	release, err := lock.TryFile(path)
 	if err != nil {
 		if errors.Is(err, lock.ErrContended) {
-			return nil, contendedLockError(dataDir, path)
+			return nil, contendedLockError(dir, path)
 		}
-		return nil, fmt.Errorf("failed to lock data directory %q: %w", dataDir, err)
+		return nil, fmt.Errorf("failed to lock workspace directory %q: %w", dir, err)
 	}
 
 	// Record ownership metadata so a contending process can identify
@@ -67,7 +128,7 @@ func acquireDataDirLock(dataDir string) (*dataDirLock, error) {
 	// actually guarantees mutual exclusion, and a missing/partial JSON
 	// payload only degrades the diagnostic a contender prints.
 	if err := writeOwnerInfo(path); err != nil {
-		slog.Debug("Failed to write data-dir owner info", "path", path, "error", err)
+		slog.Debug("Failed to write workspace lock owner info", "path", path, "error", err)
 	}
 
 	// The lock file itself is intentionally never unlinked. flock is
@@ -76,11 +137,13 @@ func acquireDataDirLock(dataDir string) (*dataDirLock, error) {
 	// can each hold a flock on a different inode that lives at the
 	// same path. Leaving the file in place lets every acquirer see
 	// the same inode and lets the kernel arbitrate correctly.
-	return &dataDirLock{release: release}, nil
+	workspaceLockPool[absDir] = &workspaceLockEntry{release: release, refCount: 1}
+	return &WorkspaceLock{dir: absDir}, nil
 }
 
-// skipDataDirLock reports whether the data-dir lock should be bypassed.
-func skipDataDirLock() bool {
+// skipWorkspaceLock reports whether the workspace lock should be
+// bypassed.
+func skipWorkspaceLock() bool {
 	v, _ := strconv.ParseBool(os.Getenv("BRAID_SKIP_DATADIR_LOCK"))
 	return v
 }
@@ -115,9 +178,9 @@ func readOwnerInfo(path string) dataDirOwnerInfo {
 	return info
 }
 
-// contendedLockError builds a wrapped ErrDataDirLocked annotated with
+// contendedLockError builds a wrapped ErrWorkspaceLocked annotated with
 // whatever owner metadata is currently in the lock file.
-func contendedLockError(dataDir, lockPath string) error {
+func contendedLockError(dir, lockPath string) error {
 	info := readOwnerInfo(lockPath)
 	details := ""
 	switch {
@@ -127,5 +190,5 @@ func contendedLockError(dataDir, lockPath string) error {
 	case info.PID != 0:
 		details = fmt.Sprintf(" (owner pid=%d)", info.PID)
 	}
-	return fmt.Errorf("%w: %s%s", ErrDataDirLocked, dataDir, details)
+	return fmt.Errorf("%w: %s%s", ErrWorkspaceLocked, dir, details)
 }

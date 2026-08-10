@@ -1530,6 +1530,21 @@ func GlobalConfig() string {
 	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
 }
 
+// GlobalDBDir returns the directory holding the single SQLite database
+// shared by every project, ~/.config/braid by default (or
+// BRAID_GLOBAL_CONFIG's directory when set). Every workspace connects to
+// the same braid.db; rows are scoped by project_path.
+func GlobalDBDir() string {
+	return filepath.Dir(GlobalConfig())
+}
+
+// GlobalLogFile returns the path to the single log file shared by every
+// project, ~/.config/braid/logs/braid.log by default (alongside the
+// shared database — see GlobalDBDir).
+func GlobalLogFile() string {
+	return filepath.Join(GlobalDBDir(), "logs", "braid.log")
+}
+
 // shellConfigSibling returns the braidrc path that sits alongside a given
 // braid.json path (same directory). Used so global config locations pick up a
 // shell config, not just JSON.

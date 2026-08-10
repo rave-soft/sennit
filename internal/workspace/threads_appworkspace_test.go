@@ -61,7 +61,7 @@ func newTestThreadStoreDB(t *testing.T) thread.Store {
 	})
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	return thread.NewStore(db.New(conn))
+	return thread.NewStore(db.New(conn), dataDir)
 }
 
 // -- fakes: mirror internal/thread/manager_test.go's fakeSessions,

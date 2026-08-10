@@ -8,11 +8,19 @@ import (
 	"time"
 
 	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/config"
 	braiddb "github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
+
+// testProjectPath is the project_path statFixture seeds its "current
+// project" sessions under, for tests that query braiddb.Queries directly
+// rather than going through runStat (so no --cwd resolution is involved —
+// any fixed placeholder path works, it just has to match what's passed to
+// the Since queries in the same test).
+const testProjectPath = "/fake/project"
 
 // newStatTestCmd builds a minimal cobra.Command carrying the flags
 // statCmd.RunE reads, mirroring newRefreshTestCmd in models_test.go.
@@ -21,6 +29,7 @@ import (
 func newStatTestCmd(t *testing.T) (*cobra.Command, *bytes.Buffer) {
 	t.Helper()
 	testCmd := &cobra.Command{Use: "stat"}
+	testCmd.Flags().StringP("cwd", "c", "", "")
 	testCmd.Flags().StringP("data-dir", "D", "", "")
 	testCmd.Flags().String("by", "", "")
 	testCmd.Flags().String("since", "30d", "")
@@ -33,15 +42,25 @@ func newStatTestCmd(t *testing.T) (*cobra.Command, *bytes.Buffer) {
 	return testCmd, &stdout
 }
 
-// statFixture opens a fresh migrated DB in a temp dir and seeds it with
+// statFixture opens a fresh migrated DB and seeds it with
 // sessions/messages exercising: multiple distinct (model, provider)
 // pairs, a mixed-model session (to exercise the proportional-split
 // approximate path), a generic-task subagent session, a custom-agent
 // subagent session, a skill load, and a row that predates the --since
-// cutoff (to verify period filtering).
-func statFixture(t *testing.T) string {
+// cutoff (to verify period filtering). dir is the directory to open the
+// database in; an empty dir gets a fresh temp dir of its own. Tests that
+// exercise runStat (which now reads from the shared global DB directory,
+// not --data-dir) must pass config.GlobalDBDir() so the fixture lands
+// where runStat will actually look. projectPath is the project_path every
+// seeded session is stamped with; callers that exercise runStat must pass
+// whatever ResolveCwd will actually resolve to (see the --cwd flag set on
+// the test command) so the scoping filter matches.
+func statFixture(t *testing.T, dir, projectPath string) string {
 	t.Helper()
-	dataDir := t.TempDir()
+	dataDir := dir
+	if dataDir == "" {
+		dataDir = t.TempDir()
+	}
 	t.Cleanup(func() {
 		require.NoError(t, braiddb.Release(dataDir))
 		braiddb.ResetPool()
@@ -71,7 +90,7 @@ func statFixture(t *testing.T) string {
 	// Session A: single model throughout (anthropic/claude), exact
 	// attribution expected.
 	sessA, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
-		ID: "sess-a", Title: "session A",
+		ID: "sess-a", Title: "session A", ProjectPath: projectPath,
 		PromptTokens: 1000, CompletionTokens: 500, Cost: 1.5,
 	})
 	require.NoError(t, err)
@@ -87,7 +106,7 @@ func statFixture(t *testing.T) string {
 	// Session B: a different single model (openai/gpt), exact
 	// attribution, distinct (model, provider) pair from session A.
 	sessB, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
-		ID: "sess-b", Title: "session B",
+		ID: "sess-b", Title: "session B", ProjectPath: projectPath,
 		PromptTokens: 2000, CompletionTokens: 800, Cost: 2.0,
 	})
 	require.NoError(t, err)
@@ -103,7 +122,7 @@ func statFixture(t *testing.T) string {
 	// Session C: mixed models (2x claude-sonnet, 1x gpt-5 assistant
 	// messages) -- exercises the proportional-split/approximate path.
 	sessC, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
-		ID: "sess-c", Title: "session C",
+		ID: "sess-c", Title: "session C", ProjectPath: projectPath,
 		PromptTokens: 900, CompletionTokens: 300, Cost: 3.0,
 	})
 	require.NoError(t, err)
@@ -133,7 +152,7 @@ func statFixture(t *testing.T) string {
 	// Subagent session delegated via the generic "task" tool: title is
 	// always "New Agent Session".
 	sessTask, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
-		ID: "sess-task", ParentSessionID: sql.NullString{String: sessA.ID, Valid: true},
+		ID: "sess-task", ParentSessionID: sql.NullString{String: sessA.ID, Valid: true}, ProjectPath: projectPath,
 		Title: "New Agent Session", PromptTokens: 300, CompletionTokens: 100, Cost: 0.4,
 	})
 	require.NoError(t, err)
@@ -142,7 +161,7 @@ func statFixture(t *testing.T) string {
 	// Subagent session delegated via a custom agent: title is the
 	// configured agent name.
 	sessCustom, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
-		ID: "sess-custom", ParentSessionID: sql.NullString{String: sessA.ID, Valid: true},
+		ID: "sess-custom", ParentSessionID: sql.NullString{String: sessA.ID, Valid: true}, ProjectPath: projectPath,
 		Title: "reviewer", PromptTokens: 500, CompletionTokens: 200, Cost: 0.6,
 	})
 	require.NoError(t, err)
@@ -169,7 +188,7 @@ func statFixture(t *testing.T) string {
 	// A session entirely outside the --since window: must be excluded
 	// once filtering is applied.
 	sessOld, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
-		ID: "sess-old", Title: "ancient session",
+		ID: "sess-old", Title: "ancient session", ProjectPath: projectPath,
 		PromptTokens: 9999, CompletionTokens: 9999, Cost: 99,
 	})
 	require.NoError(t, err)
@@ -185,17 +204,44 @@ func statFixture(t *testing.T) string {
 	return dataDir
 }
 
+// otherProjectPath is a second project_path, distinct from testProjectPath,
+// used by tests that must prove project scoping doesn't leak sessions
+// across projects sharing the one DB.
+const otherProjectPath = "/other/project"
+
+// seedOtherProjectSession adds a single top-level session under
+// otherProjectPath to the shared DB at dataDir, alongside whatever
+// statFixture already seeded there. Used by tests asserting that
+// project-scoped queries and gatherAllProjectStats keep this project's
+// totals separate from the fixture's own.
+func seedOtherProjectSession(t *testing.T, dataDir string) {
+	t.Helper()
+	conn, err := braiddb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := braiddb.New(conn)
+	ctx := t.Context()
+
+	recent := time.Now().Add(-1 * time.Hour).Unix()
+	sess, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
+		ID: "sess-other", Title: "other project session", ProjectPath: otherProjectPath,
+		PromptTokens: 400, CompletionTokens: 150, Cost: 0.75,
+	})
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, `UPDATE sessions SET created_at = ?, updated_at = ? WHERE id = ?`, recent, recent+70, sess.ID)
+	require.NoError(t, err)
+}
+
 func TestComputeModelStats_ExactAndApproximateAttribution(t *testing.T) {
-	dataDir := statFixture(t)
+	dataDir := statFixture(t, "", testProjectPath)
 	conn, err := braiddb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 	q := braiddb.New(conn)
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	sessions, err := q.ListSessionsSince(t.Context(), since)
+	sessions, err := q.ListSessionsSince(t.Context(), braiddb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
 	require.NoError(t, err)
-	messages, err := q.ListAssistantMessagesSince(t.Context(), since)
+	messages, err := q.ListAssistantMessagesSince(t.Context(), braiddb.ListAssistantMessagesSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 
 	models := computeModelStats(sessions, messages)
@@ -232,14 +278,14 @@ func TestComputeModelStats_ExactAndApproximateAttribution(t *testing.T) {
 }
 
 func TestComputeAgentStats_GroupsByTitle(t *testing.T) {
-	dataDir := statFixture(t)
+	dataDir := statFixture(t, "", testProjectPath)
 	conn, err := braiddb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 	q := braiddb.New(conn)
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	sessions, err := q.ListSessionsSince(t.Context(), since)
+	sessions, err := q.ListSessionsSince(t.Context(), braiddb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 
 	agents := computeAgentStats(sessions)
@@ -264,14 +310,14 @@ func TestComputeAgentStats_GroupsByTitle(t *testing.T) {
 }
 
 func TestComputeSkillStats_MatchesDoubleJSONExtract(t *testing.T) {
-	dataDir := statFixture(t)
+	dataDir := statFixture(t, "", testProjectPath)
 	conn, err := braiddb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 	q := braiddb.New(conn)
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	rows, err := q.ListSkillLoadsSince(t.Context(), since)
+	rows, err := q.ListSkillLoadsSince(t.Context(), braiddb.ListSkillLoadsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "the skill-loading tool_result message must be matched by the double json_extract query")
 
@@ -284,20 +330,20 @@ func TestComputeSkillStats_MatchesDoubleJSONExtract(t *testing.T) {
 }
 
 func TestComputeSessionStats_SinceFiltersOutOldSessions(t *testing.T) {
-	dataDir := statFixture(t)
+	dataDir := statFixture(t, "", testProjectPath)
 	conn, err := braiddb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 	q := braiddb.New(conn)
 
 	sinceAll, err := statSince("all")
 	require.NoError(t, err)
-	allSessions, err := q.ListSessionsSince(t.Context(), sinceAll)
+	allSessions, err := q.ListSessionsSince(t.Context(), braiddb.ListSessionsSinceParams{CreatedAt: sinceAll, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 	require.Contains(t, titlesOf(allSessions), "ancient session")
 
 	since7d, err := statSince("7d")
 	require.NoError(t, err)
-	recentSessions, err := q.ListSessionsSince(t.Context(), since7d)
+	recentSessions, err := q.ListSessionsSince(t.Context(), braiddb.ListSessionsSinceParams{CreatedAt: since7d, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 	require.NotContains(t, titlesOf(recentSessions), "ancient session")
 }
@@ -312,9 +358,16 @@ func titlesOf(sessions []braiddb.ListSessionsSinceRow) []string {
 
 func TestStatCmd_JSONOutput(t *testing.T) {
 	setupHermeticConfigEnv(t, `{}`)
-	dataDir := statFixture(t)
+	// runStat now reads the shared global DB, not --data-dir, so the
+	// fixture must be seeded there for the command to see it. runStat
+	// scopes to the project resolved by ResolveCwd (the --cwd flag set
+	// below), so the fixture's sessions must be seeded under that same
+	// path.
+	cwd := t.TempDir()
+	dataDir := statFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, stdout := newStatTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
 	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, testCmd.Flags().Set("since", "7d"))
 	require.NoError(t, testCmd.Flags().Set("json", "true"))
@@ -338,9 +391,13 @@ func TestStatCmd_JSONOutput(t *testing.T) {
 
 func TestStatCmd_InvalidByIsUsageError(t *testing.T) {
 	setupHermeticConfigEnv(t, `{}`)
-	dataDir := statFixture(t)
+	// runStat now reads the shared global DB, not --data-dir, so the
+	// fixture must be seeded there for the command to see it.
+	cwd := t.TempDir()
+	dataDir := statFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, _ := newStatTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
 	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, testCmd.Flags().Set("by", "bogus"))
 
@@ -351,13 +408,98 @@ func TestStatCmd_InvalidByIsUsageError(t *testing.T) {
 
 func TestStatCmd_InvalidSinceIsUsageError(t *testing.T) {
 	setupHermeticConfigEnv(t, `{}`)
-	dataDir := statFixture(t)
+	// runStat now reads the shared global DB, not --data-dir, so the
+	// fixture must be seeded there for the command to see it.
+	cwd := t.TempDir()
+	dataDir := statFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, _ := newStatTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
 	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, testCmd.Flags().Set("since", "bogus"))
 
 	err := runStat(testCmd, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid --since value")
+}
+
+// TestGatherAllProjectStats_GroupsByProjectWithoutLeaking is the acceptance
+// test for step 3 of the shared-DB migration: with two projects' sessions
+// in the one shared DB, gatherAllProjectStats must report one row per
+// project_path with correct per-project totals, via a single GROUP BY
+// query rather than the old per-file walk.
+func TestGatherAllProjectStats_GroupsByProjectWithoutLeaking(t *testing.T) {
+	dataDir := statFixture(t, "", testProjectPath)
+	seedOtherProjectSession(t, dataDir)
+
+	conn, err := braiddb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := braiddb.New(conn)
+
+	since, err := statSince("7d")
+	require.NoError(t, err)
+
+	rows, err := gatherAllProjectStats(t.Context(), q, since)
+	require.NoError(t, err)
+	require.Len(t, rows, 3, "testProjectPath row, otherProjectPath row, and a trailing TOTAL row")
+
+	byPath := make(map[string]statProject)
+	for _, r := range rows {
+		byPath[r.Path] = r
+	}
+
+	current, ok := byPath[testProjectPath]
+	require.True(t, ok)
+	// Top-level sessions only (sessA + sessB + sessC): sessTask/sessCustom
+	// are subagent sessions (parent_session_id set) and excluded, sessOld
+	// is outside the 7d window and excluded.
+	require.Equal(t, int64(3), current.Sessions)
+	require.Equal(t, int64(1000+2000+900), current.PromptTokens)
+	require.Equal(t, int64(500+800+300), current.CompletionTokens)
+	require.InDelta(t, 1.5+2.0+3.0, current.Cost, 0.0001)
+
+	other, ok := byPath[otherProjectPath]
+	require.True(t, ok)
+	require.Equal(t, int64(1), other.Sessions)
+	require.Equal(t, int64(400), other.PromptTokens)
+	require.Equal(t, int64(150), other.CompletionTokens)
+	require.InDelta(t, 0.75, other.Cost, 0.0001)
+
+	total := rows[len(rows)-1]
+	require.Equal(t, "TOTAL", total.Path)
+	require.Equal(t, current.Sessions+other.Sessions, total.Sessions)
+	require.Equal(t, current.PromptTokens+other.PromptTokens, total.PromptTokens)
+	require.Equal(t, current.CompletionTokens+other.CompletionTokens, total.CompletionTokens)
+}
+
+// TestRunStat_DefaultProjectsViewScopedToCurrentProject is the acceptance
+// test for the regression fix: the default (non --all-projects) `--by
+// projects` view must only report the current project's own sessions, even
+// when the shared DB holds another project's sessions too.
+func TestRunStat_DefaultProjectsViewScopedToCurrentProject(t *testing.T) {
+	setupHermeticConfigEnv(t, `{}`)
+	// runStat resolves "current project" via ResolveCwd (the --cwd flag set
+	// below), so statFixture's sessions must be seeded under that same
+	// path for runStat to report them; seedOtherProjectSession's session
+	// (under the distinct otherProjectPath) must not leak in.
+	cwd := t.TempDir()
+	dataDir := statFixture(t, config.GlobalDBDir(), cwd)
+	seedOtherProjectSession(t, config.GlobalDBDir())
+
+	testCmd, stdout := newStatTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
+	require.NoError(t, testCmd.Flags().Set("since", "7d"))
+	require.NoError(t, testCmd.Flags().Set("by", "projects"))
+	require.NoError(t, testCmd.Flags().Set("json", "true"))
+
+	require.NoError(t, runStat(testCmd, nil))
+
+	var out statOutput
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &out))
+
+	require.Len(t, out.Projects, 1)
+	require.Equal(t, int64(3), out.Projects[0].Sessions)
+	require.Equal(t, int64(1000+2000+900), out.Projects[0].PromptTokens)
+	require.Equal(t, int64(500+800+300), out.Projects[0].CompletionTokens)
 }

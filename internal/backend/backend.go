@@ -421,17 +421,18 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool) (*Wo
 	}()
 
 	id := uuid.New().String()
-	// The backend hosts multiple workspaces concurrently, so it locks the
-	// data directory during connect and builds the skills manager WITHOUT
+	// The backend hosts multiple workspaces concurrently, so it locks each
+	// workspace's data directory (guarding against a second braid process
+	// racing the same project) and builds the skills manager WITHOUT
 	// WithGlobalMirror, to prevent last-writer-wins cross-talk between
 	// workspaces. It also leaves the DB connection open on an app.New
 	// failure, matching this function's prior behavior.
 	boot, err := app.Bootstrap(b.ctx, args.Path, app.BootstrapOptions{
-		DataDir:     args.DataDir,
-		Debug:       args.Debug,
-		YOLO:        args.YOLO,
-		Channels:    args.Channels,
-		DataDirLock: true,
+		DataDir:       args.DataDir,
+		Debug:         args.Debug,
+		YOLO:          args.YOLO,
+		Channels:      args.Channels,
+		WorkspaceLock: true,
 	})
 	if err != nil {
 		return nil, proto.Workspace{}, err

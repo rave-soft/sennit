@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"time"
 
@@ -51,14 +50,13 @@ var logsCmd = &cobra.Command{
 			log.SetColorProfile(colorprofile.NoTTY)
 		}
 
-		cfg, err := config.Load(cwd, dataDir, false)
-		if err != nil {
+		if _, err := config.Load(cwd, dataDir, false); err != nil {
 			return fmt.Errorf("failed to load configuration: %v", err)
 		}
-		logsFile := filepath.Join(cfg.Config().Options.DataDirectory, "logs", "braid.log")
+		logsFile := config.GlobalLogFile()
 		_, err = os.Stat(logsFile)
 		if os.IsNotExist(err) {
-			log.Warn("Looks like you are not in a braid project. No logs found.")
+			log.Warn("No logs found yet; braid.log is created on first run.")
 			return nil
 		}
 

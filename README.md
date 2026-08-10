@@ -96,6 +96,18 @@ to force a re-discovery on demand (all custom providers if no ID is given);
 explicit `models` entries in a project or global `braid.json` always take
 precedence over the persisted list.
 
+## Data Storage
+
+Sessions, messages, and history for every project are kept in a single
+SQLite database at `~/.config/braid/braid.db` (or `$BRAID_GLOBAL_CONFIG`'s
+directory, when set), with each row tagged by the project's absolute path —
+there is no more one database per project. Logs are similarly unified at
+`~/.config/braid/logs/braid.log`. A project's own `.braid/` directory now
+only holds its config overrides, a single-instance lock file, and (until
+migrated) a pre-upgrade project's old `.braid/braid.db`, which is imported
+into the shared database automatically the first time that project is
+opened and then kept around as `braid.db.imported`.
+
 ## Building
 
 ```bash

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -619,7 +618,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
-	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "braid.log")
+	logFile := config.GlobalLogFile()
 
 	// Build hook runner if PreToolUse hooks are configured.
 	var hookRunner *hooks.Runner

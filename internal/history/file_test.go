@@ -24,7 +24,7 @@ func newTestService(t *testing.T) (Service, string) {
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 
-	sessions := session.NewService(db.New(conn), conn)
+	sessions := session.NewService(db.New(conn), conn, dataDir)
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 

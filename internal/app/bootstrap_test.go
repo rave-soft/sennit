@@ -3,9 +3,12 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/skills"
 	"github.com/stretchr/testify/require"
 )
@@ -97,16 +100,98 @@ func TestBootstrap_PostDataDirError(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 }
 
-// TestBootstrap_DataDirLockOptionApplies is a smoke test for the
-// DataDirLock option: db.Connect must accept it without error along the
-// full Bootstrap sequence, matching how the backend calls Bootstrap.
-func TestBootstrap_DataDirLockOptionApplies(t *testing.T) {
+// TestBootstrap_WorkspaceLockOptionApplies is a smoke test for the
+// WorkspaceLock option: Bootstrap must acquire the workspace lock and
+// still complete successfully, matching how the backend calls
+// Bootstrap.
+func TestBootstrap_WorkspaceLockOptionApplies(t *testing.T) {
 	setBootstrapTestEnv(t)
 
 	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
-		DataDir:     t.TempDir(),
-		DataDirLock: true,
+		DataDir:       t.TempDir(),
+		WorkspaceLock: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(result.App.Shutdown)
+}
+
+// TestBootstrap_WorkspaceLockReleasedOnShutdown confirms the workspace
+// lock acquired by WorkspaceLock is released once the resulting App is
+// shut down, so a second Bootstrap of the same data directory can
+// proceed afterward.
+func TestBootstrap_WorkspaceLockReleasedOnShutdown(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	dataDir := t.TempDir()
+	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
+		DataDir:       dataDir,
+		WorkspaceLock: true,
+	})
+	require.NoError(t, err)
+	result.App.Shutdown()
+
+	lock, err := db.AcquireWorkspaceLock(dataDir)
+	require.NoError(t, err, "workspace lock should be released after Shutdown")
+	lock.Release()
+}
+
+// TestBootstrap_TwoProjectsConcurrentWrites simulates the scenario the
+// shared-database migration exists to support: two independent braid
+// "instances" (distinct working directories, distinct project-local
+// .braid data directories, each with its own WorkspaceLock like the
+// backend takes) bootstrapped in the same process against the SAME
+// global database (HOME/XDG are shared across both goroutines here,
+// unlike setBootstrapTestEnv's usual one-dir-per-test isolation). Both
+// then write sessions concurrently. Nothing here should dead-lock or
+// error: WAL + busy_timeout must serialize the shared connection's
+// single underlying conn (SetMaxOpenConns(1)) without either workspace
+// blocking the other's *process-level* startup, and each workspace's
+// WorkspaceLock only guards its own project directory, not the shared
+// database.
+func TestBootstrap_TwoProjectsConcurrentWrites(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	bootOne := func(cwd string) *App {
+		result, err := Bootstrap(context.Background(), cwd, BootstrapOptions{
+			DataDir:       t.TempDir(),
+			WorkspaceLock: true,
+		})
+		require.NoError(t, err)
+		return result.App
+	}
+
+	appA := bootOne(t.TempDir())
+	t.Cleanup(appA.Shutdown)
+	appB := bootOne(t.TempDir())
+	t.Cleanup(appB.Shutdown)
+
+	const writesPerApp = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, writesPerApp*2)
+	write := func(a *App, label string) {
+		defer wg.Done()
+		for i := range writesPerApp {
+			if _, err := a.Sessions.Create(context.Background(), fmt.Sprintf("%s-%d", label, i)); err != nil {
+				errs <- err
+			}
+		}
+	}
+
+	wg.Add(2)
+	go write(appA, "a")
+	go write(appB, "b")
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	sessionsA, err := appA.Sessions.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, sessionsA, writesPerApp, "project A must see only its own sessions")
+
+	sessionsB, err := appB.Sessions.List(context.Background())
+	require.NoError(t, err)
+	require.Len(t, sessionsB, writesPerApp, "project B must see only its own sessions")
 }

@@ -12,16 +12,23 @@ import (
 
 const listAssistantMessagesSince = `-- name: ListAssistantMessagesSince :many
 SELECT
-    session_id,
-    COALESCE(model, 'unknown') as model,
-    COALESCE(provider, 'unknown') as provider,
-    created_at,
-    COALESCE(finished_at, created_at) as finished_at
+    messages.session_id,
+    COALESCE(messages.model, 'unknown') as model,
+    COALESCE(messages.provider, 'unknown') as provider,
+    messages.created_at,
+    COALESCE(messages.finished_at, messages.created_at) as finished_at
 FROM messages
-WHERE role = 'assistant'
-  AND created_at >= ?
-ORDER BY created_at ASC
+JOIN sessions ON sessions.id = messages.session_id
+WHERE messages.role = 'assistant'
+  AND messages.created_at >= ?
+  AND sessions.project_path = ?
+ORDER BY messages.created_at ASC
 `
+
+type ListAssistantMessagesSinceParams struct {
+	CreatedAt   int64  `json:"created_at"`
+	ProjectPath string `json:"project_path"`
+}
 
 type ListAssistantMessagesSinceRow struct {
 	SessionID  string `json:"session_id"`
@@ -31,8 +38,8 @@ type ListAssistantMessagesSinceRow struct {
 	FinishedAt int64  `json:"finished_at"`
 }
 
-func (q *Queries) ListAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAssistantMessagesSinceRow, error) {
-	rows, err := q.query(ctx, q.listAssistantMessagesSinceStmt, listAssistantMessagesSince, createdAt)
+func (q *Queries) ListAssistantMessagesSince(ctx context.Context, arg ListAssistantMessagesSinceParams) ([]ListAssistantMessagesSinceRow, error) {
+	rows, err := q.query(ctx, q.listAssistantMessagesSinceStmt, listAssistantMessagesSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -73,8 +80,14 @@ SELECT
     updated_at
 FROM sessions
 WHERE created_at >= ?
+  AND project_path = ?
 ORDER BY created_at ASC
 `
+
+type ListSessionsSinceParams struct {
+	CreatedAt   int64  `json:"created_at"`
+	ProjectPath string `json:"project_path"`
+}
 
 type ListSessionsSinceRow struct {
 	ID               string         `json:"id"`
@@ -92,8 +105,8 @@ type ListSessionsSinceRow struct {
 // rows for a time window rather than pre-aggregating, since the
 // model/agent grouping requires Go-side logic (proportional token
 // attribution for multi-model sessions, see internal/cmd/stat.go).
-func (q *Queries) ListSessionsSince(ctx context.Context, createdAt int64) ([]ListSessionsSinceRow, error) {
-	rows, err := q.query(ctx, q.listSessionsSinceStmt, listSessionsSince, createdAt)
+func (q *Queries) ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error) {
+	rows, err := q.query(ctx, q.listSessionsSinceStmt, listSessionsSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -131,15 +144,22 @@ SELECT
     COUNT(DISTINCT messages.session_id) as session_count,
     MIN(messages.created_at) as first_used_at,
     MAX(messages.created_at) as last_used_at
-FROM messages, json_each(messages.parts)
+FROM messages
+JOIN sessions ON sessions.id = messages.session_id, json_each(messages.parts)
 WHERE messages.role = 'tool'
   AND messages.created_at >= ?
+  AND sessions.project_path = ?
   AND json_extract(value, '$.type') = 'tool_result'
   AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_type') = 'skill'
   AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_name') IS NOT NULL
 GROUP BY skill_name
 ORDER BY load_count DESC
 `
+
+type ListSkillLoadsSinceParams struct {
+	CreatedAt   int64  `json:"created_at"`
+	ProjectPath string `json:"project_path"`
+}
 
 type ListSkillLoadsSinceRow struct {
 	SkillName    interface{} `json:"skill_name"`
@@ -149,8 +169,8 @@ type ListSkillLoadsSinceRow struct {
 	LastUsedAt   interface{} `json:"last_used_at"`
 }
 
-func (q *Queries) ListSkillLoadsSince(ctx context.Context, createdAt int64) ([]ListSkillLoadsSinceRow, error) {
-	rows, err := q.query(ctx, q.listSkillLoadsSinceStmt, listSkillLoadsSince, createdAt)
+func (q *Queries) ListSkillLoadsSince(ctx context.Context, arg ListSkillLoadsSinceParams) ([]ListSkillLoadsSinceRow, error) {
+	rows, err := q.query(ctx, q.listSkillLoadsSinceStmt, listSkillLoadsSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -164,6 +184,59 @@ func (q *Queries) ListSkillLoadsSince(ctx context.Context, createdAt int64) ([]L
 			&i.SessionCount,
 			&i.FirstUsedAt,
 			&i.LastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const projectStatsSince = `-- name: ProjectStatsSince :many
+SELECT
+    project_path,
+    COUNT(*) as sessions,
+    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+    COALESCE(SUM(completion_tokens), 0) as completion_tokens,
+    COALESCE(SUM(cost), 0) as cost,
+    COALESCE(SUM(updated_at - created_at), 0) as time_seconds
+FROM sessions
+WHERE created_at >= ? AND parent_session_id IS NULL
+GROUP BY project_path
+ORDER BY (prompt_tokens + completion_tokens) DESC
+`
+
+type ProjectStatsSinceRow struct {
+	ProjectPath      string      `json:"project_path"`
+	Sessions         int64       `json:"sessions"`
+	PromptTokens     interface{} `json:"prompt_tokens"`
+	CompletionTokens interface{} `json:"completion_tokens"`
+	Cost             interface{} `json:"cost"`
+	TimeSeconds      interface{} `json:"time_seconds"`
+}
+
+func (q *Queries) ProjectStatsSince(ctx context.Context, createdAt int64) ([]ProjectStatsSinceRow, error) {
+	rows, err := q.query(ctx, q.projectStatsSinceStmt, projectStatsSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProjectStatsSinceRow{}
+	for rows.Next() {
+		var i ProjectStatsSinceRow
+		if err := rows.Scan(
+			&i.ProjectPath,
+			&i.Sessions,
+			&i.PromptTokens,
+			&i.CompletionTokens,
+			&i.Cost,
+			&i.TimeSeconds,
 		); err != nil {
 			return nil, err
 		}

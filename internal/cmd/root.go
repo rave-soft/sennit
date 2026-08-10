@@ -272,8 +272,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 			return nil
 		},
 		PostConnect: func(cfg *config.ConfigStore) error {
-			logFile := filepath.Join(cfg.Config().Options.DataDirectory, "logs", "braid.log")
-			braidlog.Setup(logFile, debug)
+			braidlog.Setup(config.GlobalLogFile(), debug)
 			return nil
 		},
 		OnAppInitFailure: func(err error) {
@@ -358,8 +357,7 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	}
 
 	if ws.Config != nil {
-		logFile := filepath.Join(ws.Config.Options.DataDirectory, "logs", "braid.log")
-		braidlog.Setup(logFile, debug)
+		braidlog.Setup(config.GlobalLogFile(), debug)
 	}
 
 	// Retiring the client releases every claim it holds, so it covers

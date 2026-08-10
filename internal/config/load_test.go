@@ -2532,3 +2532,16 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
 }
+
+// TestGlobalLogFile verifies the log file lives alongside the shared
+// database (both under GlobalDBDir), under BRAID_GLOBAL_CONFIG so tests
+// stay hermetic and never touch the real ~/.config/braid.
+func TestGlobalLogFile(t *testing.T) {
+	globalDir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+
+	got := GlobalLogFile()
+
+	require.Equal(t, filepath.Join(GlobalDBDir(), "logs", "braid.log"), got)
+	require.Equal(t, filepath.Join(globalDir, "logs", "braid.log"), got)
+}

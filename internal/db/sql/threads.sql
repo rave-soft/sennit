@@ -2,6 +2,7 @@
 INSERT INTO threads (
     id,
     name,
+    project_path,
     goal,
     base_branch,
     branch,
@@ -12,6 +13,7 @@ INSERT INTO threads (
     updated_at,
     created_at
 ) VALUES (
+    ?,
     ?,
     ?,
     ?,
@@ -33,11 +35,12 @@ WHERE id = ? LIMIT 1;
 -- name: GetThreadByName :one
 SELECT *
 FROM threads
-WHERE name = ? LIMIT 1;
+WHERE name = ? AND project_path = ? LIMIT 1;
 
 -- name: ListThreads :many
 SELECT *
 FROM threads
+WHERE project_path = ?
 ORDER BY created_at;
 
 -- name: UpdateThreadStatus :one

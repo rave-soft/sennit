@@ -142,7 +142,7 @@ type App struct {
 // skills.NewManager + skills.DiscoverFromConfig).
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
 	q := db.New(conn)
-	sessions := session.NewService(q, conn)
+	sessions := session.NewService(q, conn, store.WorkingDir())
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	cfg := store.Config()
@@ -208,10 +208,13 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 	// Release the shared database connection on shutdown. The pool
 	// closes the underlying *sql.DB when the last reference is released.
-	dataDir := cfg.Options.DataDirectory
+	// This is the shared global database directory, not the project's own
+	// .braid directory (cfg.Options.DataDirectory), which is still used
+	// elsewhere in this function for project-local state.
+	dbDir := config.GlobalDBDir()
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
-		func(context.Context) error { return db.Release(dataDir) },
+		func(context.Context) error { return db.Release(dbDir) },
 		func(ctx context.Context) error { return app.MCP.Close(ctx) },
 	)
 

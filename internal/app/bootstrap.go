@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -23,10 +24,12 @@ type BootstrapOptions struct {
 	YOLO     bool
 	Channels []string
 
-	// DataDirLock enables db.WithDataDirLock. The backend sets this
-	// (it hosts multiple concurrent workspaces and must guard the data
-	// directory against concurrent access); local mode leaves it off.
-	DataDirLock bool
+	// WorkspaceLock enables db.AcquireWorkspaceLock on the workspace's
+	// .braid data directory. The backend sets this (it hosts multiple
+	// concurrent workspaces and must guard each one's data directory
+	// against a second braid process racing it); local mode leaves it
+	// off.
+	WorkspaceLock bool
 
 	// GlobalSkillsMirror enables skills.WithGlobalMirror. Local mode
 	// hosts a single workspace per process and sets this so the
@@ -90,13 +93,30 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		}
 	}
 
-	var connOpts []db.ConnectOption
-	if opts.DataDirLock {
-		connOpts = append(connOpts, db.WithDataDirLock(true))
+	// The workspace lock guards a project's .braid directory against a
+	// second braid process racing it; it is unrelated to which database
+	// file Connect opens (that's now always the shared global one), so
+	// it is acquired independently, before Connect.
+	var wsLock *db.WorkspaceLock
+	if opts.WorkspaceLock {
+		wsLock, err = db.AcquireWorkspaceLock(cfg.Config().Options.DataDirectory)
+		if err != nil {
+			return nil, err
+		}
 	}
-	conn, err := db.Connect(ctx, cfg.Config().Options.DataDirectory, connOpts...)
+
+	conn, err := db.Connect(ctx, config.GlobalDBDir())
 	if err != nil {
+		wsLock.Release()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// One-time, best-effort import of this project's legacy per-project
+	// database (from before every project moved to one shared database).
+	// Never blocks Bootstrap: a failure here just means the project's old
+	// history isn't visible yet, not that the workspace can't start.
+	if err := db.ImportLegacyProjectDB(ctx, cfg.Config().Options.DataDirectory, cfg.WorkingDir(), conn); err != nil {
+		slog.Warn("Failed to import legacy project database", "error", err)
 	}
 
 	if opts.PostConnect != nil {
@@ -119,6 +139,7 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 
 	appInstance, err := New(ctx, conn, cfg, skillsMgr)
 	if err != nil {
+		wsLock.Release()
 		if opts.CloseDBOnAppFailure {
 			_ = conn.Close()
 		}
@@ -127,6 +148,13 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		}
 		return nil, fmt.Errorf("failed to create app workspace: %w", err)
 	}
+
+	// Release the workspace lock (if any) on the same schedule as the
+	// rest of the workspace's resources.
+	appInstance.AddCleanup(func(context.Context) error {
+		wsLock.Release()
+		return nil
+	})
 
 	return &BootstrapResult{App: appInstance, Config: cfg, Skills: skillsMgr}, nil
 }

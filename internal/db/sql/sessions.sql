@@ -8,6 +8,7 @@ INSERT INTO sessions (
     completion_tokens,
     cost,
     summary_message_id,
+    project_path,
     updated_at,
     created_at
 ) VALUES (
@@ -19,6 +20,7 @@ INSERT INTO sessions (
     ?,
     ?,
     null,
+    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
 ) RETURNING *;
@@ -31,13 +33,14 @@ WHERE id = ? LIMIT 1;
 -- name: GetLastSession :one
 SELECT *
 FROM sessions
+WHERE project_path = ?
 ORDER BY updated_at DESC
 LIMIT 1;
 
 -- name: ListSessions :many
 SELECT *
 FROM sessions
-WHERE parent_session_id is NULL
+WHERE parent_session_id is NULL AND project_path = ?
 ORDER BY updated_at DESC;
 
 -- name: UpdateSession :one

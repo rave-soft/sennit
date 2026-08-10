@@ -20,7 +20,7 @@ func newTestStore(t *testing.T) Store {
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 
-	return NewStore(db.New(conn))
+	return NewStore(db.New(conn), dataDir)
 }
 
 func testCreateParams(name string) CreateParams {

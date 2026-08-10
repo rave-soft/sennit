@@ -28,7 +28,7 @@ func BenchmarkResizeSession(b *testing.B) {
 	}
 
 	ctx := context.Background()
-	conn, err := db.Connect(ctx, dataDir, db.WithDataDirLock(false))
+	conn, err := db.Connect(ctx, dataDir)
 	if err != nil {
 		b.Fatalf("connect: %v", err)
 	}

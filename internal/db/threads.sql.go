@@ -14,6 +14,7 @@ const createThread = `-- name: CreateThread :one
 INSERT INTO threads (
     id,
     name,
+    project_path,
     goal,
     base_branch,
     branch,
@@ -33,14 +34,16 @@ INSERT INTO threads (
     ?,
     ?,
     ?,
+    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, name, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
 `
 
 type CreateThreadParams struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
+	ProjectPath  string `json:"project_path"`
 	Goal         string `json:"goal"`
 	BaseBranch   string `json:"base_branch"`
 	Branch       string `json:"branch"`
@@ -54,6 +57,7 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 	row := q.queryRow(ctx, q.createThreadStmt, createThread,
 		arg.ID,
 		arg.Name,
+		arg.ProjectPath,
 		arg.Goal,
 		arg.BaseBranch,
 		arg.Branch,
@@ -66,6 +70,7 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
+		&i.ProjectPath,
 		&i.Goal,
 		&i.BaseBranch,
 		&i.Branch,
@@ -93,7 +98,7 @@ func (q *Queries) DeleteThread(ctx context.Context, id string) error {
 }
 
 const getThread = `-- name: GetThread :one
-SELECT id, name, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
 FROM threads
 WHERE id = ? LIMIT 1
 `
@@ -104,6 +109,7 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
+		&i.ProjectPath,
 		&i.Goal,
 		&i.BaseBranch,
 		&i.Branch,
@@ -121,17 +127,23 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 }
 
 const getThreadByName = `-- name: GetThreadByName :one
-SELECT id, name, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
 FROM threads
-WHERE name = ? LIMIT 1
+WHERE name = ? AND project_path = ? LIMIT 1
 `
 
-func (q *Queries) GetThreadByName(ctx context.Context, name string) (Thread, error) {
-	row := q.queryRow(ctx, q.getThreadByNameStmt, getThreadByName, name)
+type GetThreadByNameParams struct {
+	Name        string `json:"name"`
+	ProjectPath string `json:"project_path"`
+}
+
+func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error) {
+	row := q.queryRow(ctx, q.getThreadByNameStmt, getThreadByName, arg.Name, arg.ProjectPath)
 	var i Thread
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
+		&i.ProjectPath,
 		&i.Goal,
 		&i.BaseBranch,
 		&i.Branch,
@@ -149,13 +161,14 @@ func (q *Queries) GetThreadByName(ctx context.Context, name string) (Thread, err
 }
 
 const listThreads = `-- name: ListThreads :many
-SELECT id, name, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
 FROM threads
+WHERE project_path = ?
 ORDER BY created_at
 `
 
-func (q *Queries) ListThreads(ctx context.Context) ([]Thread, error) {
-	rows, err := q.query(ctx, q.listThreadsStmt, listThreads)
+func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread, error) {
+	rows, err := q.query(ctx, q.listThreadsStmt, listThreads, projectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +179,7 @@ func (q *Queries) ListThreads(ctx context.Context) ([]Thread, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
+			&i.ProjectPath,
 			&i.Goal,
 			&i.BaseBranch,
 			&i.Branch,
@@ -197,7 +211,7 @@ UPDATE threads
 SET
     session_id = ?
 WHERE id = ?
-RETURNING id, name, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
 `
 
 type UpdateThreadSessionParams struct {
@@ -211,6 +225,7 @@ func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessi
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
+		&i.ProjectPath,
 		&i.Goal,
 		&i.BaseBranch,
 		&i.Branch,
@@ -235,7 +250,7 @@ SET
     result_summary = ?,
     completed_at = ?
 WHERE id = ?
-RETURNING id, name, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
 `
 
 type UpdateThreadStatusParams struct {
@@ -258,6 +273,7 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
+		&i.ProjectPath,
 		&i.Goal,
 		&i.BaseBranch,
 		&i.Branch,

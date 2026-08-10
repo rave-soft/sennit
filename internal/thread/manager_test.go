@@ -71,7 +71,7 @@ func newTestStoreDB(t *testing.T) Store {
 	})
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	return NewStore(db.New(conn))
+	return NewStore(db.New(conn), dataDir)
 }
 
 // newTestManager wires a Manager over a real store, a real git repo (repo),

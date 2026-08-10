@@ -17,7 +17,7 @@ func TestEstimatedUsageStateSurvivesFetchModifySave(t *testing.T) {
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 
-	sessions := NewService(db.New(conn), conn)
+	sessions := NewService(db.New(conn), conn, dataDir)
 
 	created, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
@@ -58,7 +58,7 @@ func TestEstimatedUsageStateCanBeClearedByExplicitSave(t *testing.T) {
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 
-	sessions := NewService(db.New(conn), conn)
+	sessions := NewService(db.New(conn), conn, dataDir)
 
 	created, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestListExcludesAgentToolChildSessions(t *testing.T) {
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
 
-	sessions := NewService(db.New(conn), conn)
+	sessions := NewService(db.New(conn), conn, dataDir)
 
 	parent, err := sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)

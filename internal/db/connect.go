@@ -40,16 +40,12 @@ func init() {
 	}
 }
 
-// connEntry holds a shared database connection, its reference count,
-// and the data-directory lock that gates access to this entry. The
-// lock is acquired exactly once when the entry is created and released
-// when the last reference is dropped, which lets the same process open
-// the same data directory concurrently while still blocking a second
-// braid process from racing the storage.
+// connEntry holds a shared database connection and its reference
+// count, which lets the same process open the same data directory
+// concurrently from multiple callers.
 type connEntry struct {
 	db       *sql.DB
 	refCount int
-	lock     *dataDirLock
 }
 
 var (
@@ -57,37 +53,14 @@ var (
 	poolMu sync.Mutex
 )
 
-// ConnectOption configures a Connect call. Options are applied in
-// order; later options override earlier ones for the same field.
-type ConnectOption func(*connectOptions)
-
-// connectOptions holds the resolved configuration for a Connect call.
-type connectOptions struct {
-	lockDataDir bool
-}
-
-// WithDataDirLock toggles acquisition of the per-data-directory lock
-// for this Connect call. The lock is off by default so local-mode
-// invocations do not regress today's behavior; the server's
-// workspace-bootstrap path opts in. BRAID_SKIP_DATADIR_LOCK still
-// bypasses acquisition even when this option is set.
-func WithDataDirLock(enable bool) ConnectOption {
-	return func(o *connectOptions) { o.lockDataDir = enable }
-}
-
 // Connect opens a SQLite database connection for the given data
 // directory and runs migrations. If a connection to the same database
 // file already exists, the existing connection is returned with its
 // reference count incremented. Callers must pair each Connect with a
 // [Release] when they no longer need the connection.
-func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.DB, error) {
+func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
-	}
-
-	var cfg connectOptions
-	for _, opt := range opts {
-		opt(&cfg)
 	}
 
 	dbPath := filepath.Join(dataDir, "braid.db")
@@ -107,30 +80,14 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		return entry.db, nil
 	}
 
-	// Take the per-data-directory lock before opening the database so
-	// we fail fast and with a clear error rather than racing another
-	// braid process on the same SQLite file. The lock is released when
-	// the matching Release call drops the refcount to zero. Ensuring
-	// the data directory exists is required because the lock file
-	// lives inside it. Locking is opt-in via WithDataDirLock so that
-	// local-mode invocations do not refuse a second braid against the
-	// same data dir until client/server becomes the default.
+	// Ensuring the data directory exists is required before SQLite can
+	// create the database file inside it.
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create data directory %q: %w", dataDir, err)
-	}
-	var lock *dataDirLock
-	if cfg.lockDataDir && !skipDataDirLock() {
-		lock, err = acquireDataDirLock(dataDir)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	conn, err := openDB(dbPath)
 	if err != nil {
-		if lock != nil {
-			lock.release()
-		}
 		return nil, err
 	}
 
@@ -141,33 +98,24 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 	// resulting in SQLITE_NOTADB (26) on the next open.
 	conn.SetMaxOpenConns(1)
 
-	releaseLock := func() {
-		if lock != nil {
-			lock.release()
-		}
-	}
-
 	if err = conn.PingContext(ctx); err != nil {
 		conn.Close()
-		releaseLock()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	if err := initGoose(); err != nil {
 		conn.Close()
-		releaseLock()
 		slog.Error("Failed to initialize goose", "error", err)
 		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
 	if err := goose.Up(conn, "migrations"); err != nil {
 		conn.Close()
-		releaseLock()
 		slog.Error("Failed to apply migrations", "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
-	pool[absPath] = &connEntry{db: conn, refCount: 1, lock: lock}
+	pool[absPath] = &connEntry{db: conn, refCount: 1}
 	return conn, nil
 }
 
@@ -195,11 +143,7 @@ func Release(dataDir string) error {
 	}
 
 	delete(pool, absPath)
-	closeErr := entry.db.Close()
-	if entry.lock != nil {
-		entry.lock.release()
-	}
-	return closeErr
+	return entry.db.Close()
 }
 
 // ResetPool closes all pooled connections and clears the pool. This is
@@ -209,9 +153,6 @@ func ResetPool() {
 	defer poolMu.Unlock()
 	for path, entry := range pool {
 		entry.db.Close()
-		if entry.lock != nil {
-			entry.lock.release()
-		}
 		delete(pool, path)
 	}
 }

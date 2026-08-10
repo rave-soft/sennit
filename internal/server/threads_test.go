@@ -127,7 +127,7 @@ func newTestThreadStore(t *testing.T) thread.Store {
 	})
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	return thread.NewStore(db.New(conn))
+	return thread.NewStore(db.New(conn), dataDir)
 }
 
 // threadTestHarness wires a controllerV1 + httptest.Server around a

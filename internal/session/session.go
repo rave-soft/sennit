@@ -83,8 +83,9 @@ type Service interface {
 
 type service struct {
 	*pubsub.Broker[Session]
-	db *sql.DB
-	q  *db.Queries
+	db          *sql.DB
+	q           *db.Queries
+	projectPath string
 
 	// Estimated usage stays in memory so fetch-modify-save paths (e.g.,
 	// updating todos or parent-session cost) do not rebuild a session from
@@ -95,8 +96,9 @@ type service struct {
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
-		ID:    uuid.New().String(),
-		Title: title,
+		ID:          uuid.New().String(),
+		Title:       title,
+		ProjectPath: s.projectPath,
 	})
 	if err != nil {
 		return Session{}, err
@@ -112,6 +114,7 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 		ID:              toolCallID,
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           title,
+		ProjectPath:     s.projectPath,
 	})
 	if err != nil {
 		return Session{}, err
@@ -126,6 +129,7 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 		ID:              "title-" + parentSessionID,
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           "Generate a title",
+		ProjectPath:     s.projectPath,
 	})
 	if err != nil {
 		return Session{}, err
@@ -179,7 +183,7 @@ func (s *service) Get(ctx context.Context, id string) (Session, error) {
 }
 
 func (s *service) GetLast(ctx context.Context) (Session, error) {
-	dbSession, err := s.q.GetLastSession(ctx)
+	dbSession, err := s.q.GetLastSession(ctx, s.projectPath)
 	if err != nil {
 		return Session{}, err
 	}
@@ -250,7 +254,7 @@ func (s *service) Rename(ctx context.Context, id string, title string) error {
 }
 
 func (s *service) List(ctx context.Context) ([]Session, error) {
-	dbSessions, err := s.q.ListSessions(ctx)
+	dbSessions, err := s.q.ListSessions(ctx, s.projectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -337,12 +341,16 @@ func unmarshalTodos(data string) ([]Todo, error) {
 	return todos, nil
 }
 
-func NewService(q *db.Queries, conn *sql.DB) Service {
+// NewService returns a Service backed by the given sqlc queries, scoped
+// to projectPath: sessions now live in a single shared database, so
+// "last session" and listings are scoped per project.
+func NewService(q *db.Queries, conn *sql.DB, projectPath string) Service {
 	broker := pubsub.NewBroker[Session]()
 	return &service{
 		Broker:         broker,
 		db:             conn,
 		q:              q,
+		projectPath:    projectPath,
 		estimatedUsage: make(map[string]bool),
 	}
 }

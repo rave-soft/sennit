@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/thread"
@@ -24,20 +25,23 @@ func (b *Backend) attachServerThreads(ctx context.Context, a *app.App, path stri
 		return
 	}
 
-	dataDir := a.Config().Options.DataDirectory
-	conn, err := db.Connect(ctx, dataDir, db.WithDataDirLock(true))
+	// This opens a second connection to the shared global database the
+	// main workspace already connected via app.Bootstrap, so it does not
+	// need its own lock acquisition here.
+	dbDir := config.GlobalDBDir()
+	conn, err := db.Connect(ctx, dbDir)
 	if err != nil {
 		slog.Warn("Failed to open thread store, threads unavailable", "error", err)
 		return
 	}
-	a.AddCleanup(func(context.Context) error { return db.Release(dataDir) })
+	a.AddCleanup(func(context.Context) error { return db.Release(dbDir) })
 
 	worktreeDir := ""
 	if opts := a.Config().Options.Threads; opts != nil {
 		worktreeDir = opts.WorktreeDir
 	}
 	mgr := thread.NewManager(thread.ManagerOptions{
-		Store:       thread.NewStore(db.New(conn)),
+		Store:       thread.NewStore(db.New(conn), a.Store().WorkingDir()),
 		Spawner:     b.ThreadSpawner(),
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,

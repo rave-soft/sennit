@@ -48,7 +48,7 @@ func TestPersistOutput_PersistsForExistingSession(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn)
+	sessions := session.NewService(q, conn, "/test/project")
 	messages := message.NewService(q)
 
 	sess, err := sessions.Create(t.Context(), "shell test")

@@ -22,33 +22,34 @@ type Querier interface {
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
-	GetLastSession(ctx context.Context) (Session, error)
+	GetLastSession(ctx context.Context, projectPath string) (Session, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetThread(ctx context.Context, id string) (Thread, error)
-	GetThreadByName(ctx context.Context, name string) (Thread, error)
+	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error)
 	// Prompt-history source: only messages a human typed. Sub-agent and thread
 	// child sessions carry machine-generated delegation prompts as user-role
 	// messages, so anything below a parent session is excluded.
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
-	ListAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAssistantMessagesSinceRow, error)
+	ListAssistantMessagesSince(ctx context.Context, arg ListAssistantMessagesSinceParams) ([]ListAssistantMessagesSinceRow, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
-	ListSessions(ctx context.Context) ([]Session, error)
+	ListSessions(ctx context.Context, projectPath string) ([]Session, error)
 	// The queries below back `braid stat`, a terminal-table
 	// breakdown by model/agent/project/skill. They intentionally return raw
 	// rows for a time window rather than pre-aggregating, since the
 	// model/agent grouping requires Go-side logic (proportional token
 	// attribution for multi-model sessions, see internal/cmd/stat.go).
-	ListSessionsSince(ctx context.Context, createdAt int64) ([]ListSessionsSinceRow, error)
-	ListSkillLoadsSince(ctx context.Context, createdAt int64) ([]ListSkillLoadsSinceRow, error)
-	ListThreads(ctx context.Context) ([]Thread, error)
+	ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error)
+	ListSkillLoadsSince(ctx context.Context, arg ListSkillLoadsSinceParams) ([]ListSkillLoadsSinceRow, error)
+	ListThreads(ctx context.Context, projectPath string) ([]Thread, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	NextFileVersion(ctx context.Context, path string) (int64, error)
+	ProjectStatsSince(ctx context.Context, createdAt int64) ([]ProjectStatsSinceRow, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error

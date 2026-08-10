@@ -112,21 +112,21 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
-	if dataDir == "" {
-		dataDir = cfg.Config().Options.DataDirectory
-	}
-	conn, err := db.Connect(ctx, dataDir)
+	conn, err := db.Connect(ctx, config.GlobalDBDir())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	queries := db.New(conn)
 	svc := &sessionServices{
-		sessions: session.NewService(queries, conn),
+		sessions: session.NewService(queries, conn, cfg.WorkingDir()),
 		messages: message.NewService(queries),
 		cfg:      cfg,
 	}
-	return ctx, svc, func() { conn.Close() }, nil
+	// Release, not conn.Close: Connect pools by absolute path, and another
+	// caller in this process may hold the same shared global DB open, so
+	// closing it directly would corrupt the pool's refcount for them.
+	return ctx, svc, func() { _ = db.Release(config.GlobalDBDir()) }, nil
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {

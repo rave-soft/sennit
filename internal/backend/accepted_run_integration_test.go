@@ -49,7 +49,7 @@ func newRealCoordinator(t *testing.T) (*gatedCoordinator, session.Service, messa
 	t.Cleanup(func() { conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn)
+	sessions := session.NewService(q, conn, "/test/project")
 	messages := message.NewService(q)
 
 	coord, err := agenttest.NewCoordinator(t.Context(), t.TempDir(), sessions, messages)
