@@ -49,6 +49,10 @@ WHERE id = ?;
 DELETE FROM files
 WHERE session_id = ?;
 
+-- name: CountSessionFiles :one
+SELECT COUNT(*) FROM files
+WHERE session_id = ?;
+
 -- name: ListLatestSessionFiles :many
 SELECT f.*
 FROM files f

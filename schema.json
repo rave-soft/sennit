@@ -571,6 +571,15 @@
         "threads": {
           "$ref": "#/$defs/ThreadsOptions",
           "description": "Threads (parallel agent work stream) configuration."
+        },
+        "history_retention_days": {
+          "type": "integer",
+          "description": "Age in days after which \"braid gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"braid gc\" (e.g. from cron) to apply it.",
+          "default": 90,
+          "examples": [
+            30,
+            180
+          ]
         }
       },
       "additionalProperties": false,

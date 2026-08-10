@@ -121,6 +121,18 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		slog.Info("Option set in shell config", "key", key, "value", val)
 		return nil
 
+	case optInt:
+		if val == "" {
+			return usage(stderr, fmt.Sprintf("option: %s requires a value", key))
+		}
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("option: %s expects an integer, got %q", key, val))
+		}
+		o[spec.jsonKey] = n
+		slog.Info("Option set in shell config", "key", key, "value", n)
+		return nil
+
 	case optBool:
 		// If no value, default to true. Inverted keys store the negation,
 		// so a positive key like "metrics" maps onto "disable_metrics".
@@ -156,6 +168,7 @@ const (
 	optString optionKind = iota
 	optBool
 	optList
+	optInt
 )
 
 // optionSpec describes one user-facing option key: the JSON field it writes,
@@ -193,6 +206,9 @@ var optionSpecs = map[string]optionSpec{
 	"notifications":  {jsonKey: "notifications", kind: optString},
 	"data-directory": {jsonKey: "data_directory", kind: optString},
 	"initialize-as":  {jsonKey: "initialize_as", kind: optString},
+
+	// Integer fields.
+	"history-retention-days": {jsonKey: "history_retention_days", kind: optInt},
 
 	// List fields. Keys are singular because each call appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},

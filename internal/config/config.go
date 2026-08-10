@@ -382,6 +382,10 @@ type Options struct {
 	DisabledSkills          []string          `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=braid-config"`
 	WebSearch               *WebSearchOptions `json:"web_search,omitempty" jsonschema:"description=Web search backend configuration. Defaults to the keyless DuckDuckGo scraper when omitted."`
 	Threads                 *ThreadsOptions   `json:"threads,omitempty" jsonschema:"description=Threads (parallel agent work stream) configuration."`
+	// HistoryRetentionDays is read by `braid gc`, not enforced automatically:
+	// nothing purges history on its own. A pointer distinguishes "unset"
+	// (defaults to 90) from an explicit 0, which means keep history forever.
+	HistoryRetentionDays *int `json:"history_retention_days,omitempty" jsonschema:"description=Age in days after which \"braid gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"braid gc\" (e.g. from cron) to apply it.,default=90,example=30,example=180"`
 }
 
 // ThreadsOptions configures the threads feature (parallel agent work

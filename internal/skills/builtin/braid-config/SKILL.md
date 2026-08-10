@@ -257,6 +257,9 @@ option reset <list-key>    # clear a list option back to empty
   `auto-summarize`, `default-providers`. Example: `option metrics false`
   disables metrics.
 - **String keys**: `data-directory`, `initialize-as`, `notifications`.
+- **Integer keys**: `history-retention-days` (age, in days, after which `braid
+  gc` deletes old sessions/threads; default 90, 0 keeps history forever — see
+  [Maintenance](#maintenance)).
 - **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
   `assisted-by`) and `attribution-generated-with` (boolean).
 - **UI settings**: `option ui compact BOOL`, `option ui diff unified|split`,
@@ -517,6 +520,37 @@ user-invocable: true
 - Add `disable-model-invocation: true` to keep a skill user-only (hidden from
   the model's available-skills list but still manually invocable).
 
+## Maintenance
+
+The shared database (`~/.config/braid/braid.db`) is not pruned
+automatically — `braid gc` is a CLI command a human (or a cron job) runs, not
+something the agent does for itself, and there is no `/gc` slash command.
+
+```sh
+braid gc [--days N] [--dry-run] [--project] [--json]
+```
+
+- Deletes sessions (and their messages/files/read-file records) whose last
+  activity (`updated_at`) is older than `options.history_retention_days`
+  (default 90; set via `option history-retention-days N`). `0` disables
+  retention entirely and turns `braid gc` into a no-op.
+- Deleting a session also deletes any agent-tool/title sub-session parented
+  to it, regardless of the sub-session's own age; old sub-sessions under a
+  kept parent are deleted independently, on their own age.
+- Also deletes finished threads (`completed`, `merged`, `conflict`,
+  `merge_blocked`, `failed`, `interrupted`) past the same window —
+  `pending`/`running`/`merging` threads are never touched, regardless of age.
+- Runs `VACUUM` and a WAL checkpoint afterward to actually shrink
+  `braid.db` on disk.
+- Defaults to the entire shared database (every project); pass `--project`
+  to scope to the current working directory's project only.
+- `--days N` overrides `options.history_retention_days` for one run;
+  `--dry-run` reports counts and current database size without deleting
+  anything.
+- Rotated log files (`~/.config/braid/logs/*.log.gz`) are unrelated: they
+  are pruned by lumberjack's own `MaxAge` (30 days) independently of
+  `braid gc`.
+
 ## Environment variables
 
 - `BRAID_VERSION` — exported into `braidrc` at load; the running version (or
@@ -559,6 +593,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `permissions bypass on`              | `permissions.bypass = true`                            |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
+| `option history-retention-days 30`   | `options.history_retention_days = 30`                  |
 | *(no braidrc equivalent)*            | `providers.<id>.proxy_url = "http://host:8080"`        |
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |

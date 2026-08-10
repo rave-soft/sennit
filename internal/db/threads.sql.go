@@ -206,6 +206,50 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 	return items, nil
 }
 
+const listThreadsForGC = `-- name: ListThreadsForGC :many
+SELECT id, project_path, status, updated_at
+FROM threads
+`
+
+type ListThreadsForGCRow struct {
+	ID          string `json:"id"`
+	ProjectPath string `json:"project_path"`
+	Status      string `json:"status"`
+	UpdatedAt   int64  `json:"updated_at"`
+}
+
+// Every thread across every project, trimmed to the columns `braid gc`
+// needs to pick finished threads older than the retention cutoff.
+// Unscoped by project_path; the caller filters by project in Go for
+// --project.
+func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error) {
+	rows, err := q.query(ctx, q.listThreadsForGCStmt, listThreadsForGC)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListThreadsForGCRow{}
+	for rows.Next() {
+		var i ListThreadsForGCRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectPath,
+			&i.Status,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateThreadSession = `-- name: UpdateThreadSession :one
 UPDATE threads
 SET

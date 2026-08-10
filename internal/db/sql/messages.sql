@@ -42,6 +42,10 @@ WHERE id = ?;
 DELETE FROM messages
 WHERE session_id = ?;
 
+-- name: CountSessionMessages :one
+SELECT COUNT(*) FROM messages
+WHERE session_id = ?;
+
 -- name: ListUserMessagesBySession :many
 SELECT *
 FROM messages

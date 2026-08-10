@@ -63,3 +63,11 @@ RETURNING *;
 -- name: DeleteThread :exec
 DELETE FROM threads
 WHERE id = ?;
+
+-- name: ListThreadsForGC :many
+-- Every thread across every project, trimmed to the columns `braid gc`
+-- needs to pick finished threads older than the retention cutoff.
+-- Unscoped by project_path; the caller filters by project in Go for
+-- --project.
+SELECT id, project_path, status, updated_at
+FROM threads;

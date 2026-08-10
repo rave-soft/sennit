@@ -9,6 +9,9 @@ import (
 )
 
 type Querier interface {
+	CountSessionFiles(ctx context.Context, sessionID string) (int64, error)
+	CountSessionMessages(ctx context.Context, sessionID string) (int64, error)
+	CountSessionReadFiles(ctx context.Context, sessionID string) (int64, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
@@ -18,6 +21,7 @@ type Querier interface {
 	DeleteSession(ctx context.Context, id string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
+	DeleteSessionReadFiles(ctx context.Context, sessionID string) error
 	DeleteThread(ctx context.Context, id string) error
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
@@ -39,6 +43,11 @@ type Querier interface {
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context, projectPath string) ([]Session, error)
+	// Every session across every project, trimmed to the columns `braid gc`
+	// needs to compute its retention set (age filter + parent/child
+	// expansion) without pulling message/file bodies into memory. Unscoped by
+	// project_path; the caller filters by project in Go for --project.
+	ListSessionsForGC(ctx context.Context) ([]ListSessionsForGCRow, error)
 	// The queries below back `braid stat`, a terminal-table
 	// breakdown by model/agent/project/skill. They intentionally return raw
 	// rows for a time window rather than pre-aggregating, since the
@@ -47,6 +56,11 @@ type Querier interface {
 	ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error)
 	ListSkillLoadsSince(ctx context.Context, arg ListSkillLoadsSinceParams) ([]ListSkillLoadsSinceRow, error)
 	ListThreads(ctx context.Context, projectPath string) ([]Thread, error)
+	// Every thread across every project, trimmed to the columns `braid gc`
+	// needs to pick finished threads older than the retention cutoff.
+	// Unscoped by project_path; the caller filters by project in Go for
+	// --project.
+	ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	NextFileVersion(ctx context.Context, path string) (int64, error)
 	ProjectStatsSince(ctx context.Context, createdAt int64) ([]ProjectStatsSinceRow, error)

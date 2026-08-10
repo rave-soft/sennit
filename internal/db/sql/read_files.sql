@@ -18,3 +18,11 @@ WHERE session_id = ? AND path = ? LIMIT 1;
 SELECT * FROM read_files
 WHERE session_id = ?
 ORDER BY read_at DESC;
+
+-- name: CountSessionReadFiles :one
+SELECT COUNT(*) FROM read_files
+WHERE session_id = ?;
+
+-- name: DeleteSessionReadFiles :exec
+DELETE FROM read_files
+WHERE session_id = ?;

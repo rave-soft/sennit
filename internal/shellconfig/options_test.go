@@ -198,6 +198,52 @@ func TestOption_InvertedBool(t *testing.T) {
 	require.Equal(t, true, opts["disable_metrics"])
 }
 
+func TestOption_Int(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option history-retention-days 30`
+	path := filepath.Join(dir, "braidrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Equal(t, float64(30), opts["history_retention_days"])
+}
+
+func TestOption_IntZero(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option history-retention-days 0`
+	path := filepath.Join(dir, "braidrc")
+
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+
+	opts := result["options"].(map[string]any)
+	require.Equal(t, float64(0), opts["history_retention_days"])
+}
+
+func TestOption_IntInvalid(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := `option history-retention-days abc`
+	path := filepath.Join(dir, "braidrc")
+
+	_, err := LoadShellConfig(t.Context(), path, []byte(script))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects an integer")
+}
+
 func TestOption_UnknownKey(t *testing.T) {
 	t.Parallel()
 

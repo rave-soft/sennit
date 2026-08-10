@@ -9,6 +9,28 @@ import (
 	"context"
 )
 
+const countSessionReadFiles = `-- name: CountSessionReadFiles :one
+SELECT COUNT(*) FROM read_files
+WHERE session_id = ?
+`
+
+func (q *Queries) CountSessionReadFiles(ctx context.Context, sessionID string) (int64, error) {
+	row := q.queryRow(ctx, q.countSessionReadFilesStmt, countSessionReadFiles, sessionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteSessionReadFiles = `-- name: DeleteSessionReadFiles :exec
+DELETE FROM read_files
+WHERE session_id = ?
+`
+
+func (q *Queries) DeleteSessionReadFiles(ctx context.Context, sessionID string) error {
+	_, err := q.exec(ctx, q.deleteSessionReadFilesStmt, deleteSessionReadFiles, sessionID)
+	return err
+}
+
 const getFileRead = `-- name: GetFileRead :one
 SELECT session_id, path, read_at FROM read_files
 WHERE session_id = ? AND path = ? LIMIT 1

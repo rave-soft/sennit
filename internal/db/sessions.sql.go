@@ -185,6 +185,50 @@ func (q *Queries) ListSessions(ctx context.Context, projectPath string) ([]Sessi
 	return items, nil
 }
 
+const listSessionsForGC = `-- name: ListSessionsForGC :many
+SELECT id, parent_session_id, project_path, updated_at
+FROM sessions
+`
+
+type ListSessionsForGCRow struct {
+	ID              string         `json:"id"`
+	ParentSessionID sql.NullString `json:"parent_session_id"`
+	ProjectPath     string         `json:"project_path"`
+	UpdatedAt       int64          `json:"updated_at"`
+}
+
+// Every session across every project, trimmed to the columns `braid gc`
+// needs to compute its retention set (age filter + parent/child
+// expansion) without pulling message/file bodies into memory. Unscoped by
+// project_path; the caller filters by project in Go for --project.
+func (q *Queries) ListSessionsForGC(ctx context.Context) ([]ListSessionsForGCRow, error) {
+	rows, err := q.query(ctx, q.listSessionsForGCStmt, listSessionsForGC)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSessionsForGCRow{}
+	for rows.Next() {
+		var i ListSessionsForGCRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentSessionID,
+			&i.ProjectPath,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renameSession = `-- name: RenameSession :exec
 UPDATE sessions
 SET

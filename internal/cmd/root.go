@@ -64,6 +64,7 @@ func init() {
 		loginCmd,
 		statCmd,
 		sessionCmd,
+		gcCmd,
 	)
 }
 

@@ -24,6 +24,15 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.countSessionFilesStmt, err = db.PrepareContext(ctx, countSessionFiles); err != nil {
+		return nil, fmt.Errorf("error preparing query CountSessionFiles: %w", err)
+	}
+	if q.countSessionMessagesStmt, err = db.PrepareContext(ctx, countSessionMessages); err != nil {
+		return nil, fmt.Errorf("error preparing query CountSessionMessages: %w", err)
+	}
+	if q.countSessionReadFilesStmt, err = db.PrepareContext(ctx, countSessionReadFiles); err != nil {
+		return nil, fmt.Errorf("error preparing query CountSessionReadFiles: %w", err)
+	}
 	if q.createFileStmt, err = db.PrepareContext(ctx, createFile); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateFile: %w", err)
 	}
@@ -50,6 +59,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.deleteSessionMessagesStmt, err = db.PrepareContext(ctx, deleteSessionMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteSessionMessages: %w", err)
+	}
+	if q.deleteSessionReadFilesStmt, err = db.PrepareContext(ctx, deleteSessionReadFiles); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteSessionReadFiles: %w", err)
 	}
 	if q.deleteThreadStmt, err = db.PrepareContext(ctx, deleteThread); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteThread: %w", err)
@@ -105,6 +117,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listSessionsStmt, err = db.PrepareContext(ctx, listSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessions: %w", err)
 	}
+	if q.listSessionsForGCStmt, err = db.PrepareContext(ctx, listSessionsForGC); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSessionsForGC: %w", err)
+	}
 	if q.listSessionsSinceStmt, err = db.PrepareContext(ctx, listSessionsSince); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessionsSince: %w", err)
 	}
@@ -113,6 +128,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listThreadsStmt, err = db.PrepareContext(ctx, listThreads); err != nil {
 		return nil, fmt.Errorf("error preparing query ListThreads: %w", err)
+	}
+	if q.listThreadsForGCStmt, err = db.PrepareContext(ctx, listThreadsForGC); err != nil {
+		return nil, fmt.Errorf("error preparing query ListThreadsForGC: %w", err)
 	}
 	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
@@ -149,6 +167,21 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.countSessionFilesStmt != nil {
+		if cerr := q.countSessionFilesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countSessionFilesStmt: %w", cerr)
+		}
+	}
+	if q.countSessionMessagesStmt != nil {
+		if cerr := q.countSessionMessagesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countSessionMessagesStmt: %w", cerr)
+		}
+	}
+	if q.countSessionReadFilesStmt != nil {
+		if cerr := q.countSessionReadFilesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countSessionReadFilesStmt: %w", cerr)
+		}
+	}
 	if q.createFileStmt != nil {
 		if cerr := q.createFileStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createFileStmt: %w", cerr)
@@ -192,6 +225,11 @@ func (q *Queries) Close() error {
 	if q.deleteSessionMessagesStmt != nil {
 		if cerr := q.deleteSessionMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteSessionMessagesStmt: %w", cerr)
+		}
+	}
+	if q.deleteSessionReadFilesStmt != nil {
+		if cerr := q.deleteSessionReadFilesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteSessionReadFilesStmt: %w", cerr)
 		}
 	}
 	if q.deleteThreadStmt != nil {
@@ -284,6 +322,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listSessionsStmt: %w", cerr)
 		}
 	}
+	if q.listSessionsForGCStmt != nil {
+		if cerr := q.listSessionsForGCStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSessionsForGCStmt: %w", cerr)
+		}
+	}
 	if q.listSessionsSinceStmt != nil {
 		if cerr := q.listSessionsSinceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSessionsSinceStmt: %w", cerr)
@@ -297,6 +340,11 @@ func (q *Queries) Close() error {
 	if q.listThreadsStmt != nil {
 		if cerr := q.listThreadsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listThreadsStmt: %w", cerr)
+		}
+	}
+	if q.listThreadsForGCStmt != nil {
+		if cerr := q.listThreadsForGCStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listThreadsForGCStmt: %w", cerr)
 		}
 	}
 	if q.listUserMessagesBySessionStmt != nil {
@@ -388,6 +436,9 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 type Queries struct {
 	db                             DBTX
 	tx                             *sql.Tx
+	countSessionFilesStmt          *sql.Stmt
+	countSessionMessagesStmt       *sql.Stmt
+	countSessionReadFilesStmt      *sql.Stmt
 	createFileStmt                 *sql.Stmt
 	createMessageStmt              *sql.Stmt
 	createSessionStmt              *sql.Stmt
@@ -397,6 +448,7 @@ type Queries struct {
 	deleteSessionStmt              *sql.Stmt
 	deleteSessionFilesStmt         *sql.Stmt
 	deleteSessionMessagesStmt      *sql.Stmt
+	deleteSessionReadFilesStmt     *sql.Stmt
 	deleteThreadStmt               *sql.Stmt
 	getFileStmt                    *sql.Stmt
 	getFileByPathAndSessionStmt    *sql.Stmt
@@ -415,9 +467,11 @@ type Queries struct {
 	listNewFilesStmt               *sql.Stmt
 	listSessionReadFilesStmt       *sql.Stmt
 	listSessionsStmt               *sql.Stmt
+	listSessionsForGCStmt          *sql.Stmt
 	listSessionsSinceStmt          *sql.Stmt
 	listSkillLoadsSinceStmt        *sql.Stmt
 	listThreadsStmt                *sql.Stmt
+	listThreadsForGCStmt           *sql.Stmt
 	listUserMessagesBySessionStmt  *sql.Stmt
 	nextFileVersionStmt            *sql.Stmt
 	projectStatsSinceStmt          *sql.Stmt
@@ -434,6 +488,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
 		db:                             tx,
 		tx:                             tx,
+		countSessionFilesStmt:          q.countSessionFilesStmt,
+		countSessionMessagesStmt:       q.countSessionMessagesStmt,
+		countSessionReadFilesStmt:      q.countSessionReadFilesStmt,
 		createFileStmt:                 q.createFileStmt,
 		createMessageStmt:              q.createMessageStmt,
 		createSessionStmt:              q.createSessionStmt,
@@ -443,6 +500,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteSessionStmt:              q.deleteSessionStmt,
 		deleteSessionFilesStmt:         q.deleteSessionFilesStmt,
 		deleteSessionMessagesStmt:      q.deleteSessionMessagesStmt,
+		deleteSessionReadFilesStmt:     q.deleteSessionReadFilesStmt,
 		deleteThreadStmt:               q.deleteThreadStmt,
 		getFileStmt:                    q.getFileStmt,
 		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
@@ -461,9 +519,11 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listNewFilesStmt:               q.listNewFilesStmt,
 		listSessionReadFilesStmt:       q.listSessionReadFilesStmt,
 		listSessionsStmt:               q.listSessionsStmt,
+		listSessionsForGCStmt:          q.listSessionsForGCStmt,
 		listSessionsSinceStmt:          q.listSessionsSinceStmt,
 		listSkillLoadsSinceStmt:        q.listSkillLoadsSinceStmt,
 		listThreadsStmt:                q.listThreadsStmt,
+		listThreadsForGCStmt:           q.listThreadsForGCStmt,
 		listUserMessagesBySessionStmt:  q.listUserMessagesBySessionStmt,
 		nextFileVersionStmt:            q.nextFileVersionStmt,
 		projectStatsSinceStmt:          q.projectStatsSinceStmt,

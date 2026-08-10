@@ -9,6 +9,18 @@ import (
 	"context"
 )
 
+const countSessionFiles = `-- name: CountSessionFiles :one
+SELECT COUNT(*) FROM files
+WHERE session_id = ?
+`
+
+func (q *Queries) CountSessionFiles(ctx context.Context, sessionID string) (int64, error) {
+	row := q.queryRow(ctx, q.countSessionFilesStmt, countSessionFiles, sessionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createFile = `-- name: CreateFile :one
 INSERT INTO files (
     id,
