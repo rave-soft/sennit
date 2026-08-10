@@ -197,6 +197,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		func(ctx context.Context) error { return app.MCP.Close(ctx) },
 	)
 
+	// Hot-reload config and skills on external edits, in both local mode
+	// and client/server mode (see startExternalChangeWatchers' doc).
+	// Started regardless of cfg.IsConfigured(): an unconfigured project's
+	// config or an empty skills dir can still change externally.
+	app.startExternalChangeWatchers(ctx)
+
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
 		slog.Warn("No agent configuration found")

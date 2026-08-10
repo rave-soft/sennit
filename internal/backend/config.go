@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/oauth"
@@ -46,6 +47,29 @@ func publishWorkspaceChanged(ws *Workspace) {
 		Type:    pubsub.UpdatedEvent,
 		Payload: proto.ConfigChanged{WorkspaceID: ws.ID},
 	})
+}
+
+// forwardWorkspaceChanged subscribes to ws's own event stream and
+// translates every app.WorkspaceChanged marker — published by the
+// config/skills external-change watchers app.New starts for every App,
+// local mode included — into a workspace-scoped proto.ConfigChanged, the
+// event remote/SSE clients key their workspaceToProto cache-refetch on.
+//
+// MCP re-init and the skills coordinator refresh already happened at the
+// app level before the marker was published (see
+// app.startExternalChangeWatchers), so this only forwards the
+// notification; it must not call publishConfigChanged, which would
+// re-trigger MCP.Reinitialize redundantly.
+//
+// Runs until ctx is done (ws.Events closes its channel then, same as
+// every other pubsub.Broker subscriber); callers should run it in its own
+// goroutine, one per workspace.
+func forwardWorkspaceChanged(ctx context.Context, ws *Workspace) {
+	for ev := range ws.Events(ctx) {
+		if _, ok := ev.Payload.(pubsub.Event[app.WorkspaceChanged]); ok {
+			publishWorkspaceChanged(ws)
+		}
+	}
 }
 
 // MCPResourceContents holds the contents of an MCP resource returned

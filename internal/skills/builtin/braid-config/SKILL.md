@@ -31,6 +31,11 @@ upward walk, same as the root-level names; `.braid/braid.json` is the highest
 priority among the JSON variants, and `.braid/braidrc` the highest among the
 `braidrc` variants.
 
+Config, skills, and agent definitions are picked up automatically (a 2s
+background poll) — no restart needed after editing `braid.json`/`braidrc`,
+adding or removing a `SKILL.md`, or adding/editing an agent markdown file,
+whether the edit comes from you, the agent's own file tools, or a human.
+
 Data directories (`~/.local/share/braid` and `%LOCALAPPDATA%\braid`) contain
 machine-owned JSON state only; Braid does not discover or execute a `braidrc`
 from those locations.

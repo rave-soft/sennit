@@ -451,30 +451,18 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool) (*Wo
 		clients:      make(map[string]*clientState),
 	}
 
-	// Reload config on external changes to this workspace's config files
-	// (e.g. an agent's Edit/Write tool touching .braid/braid.json
-	// directly, bypassing SetConfigFields) and route the result through
-	// the same publishConfigChanged path SetConfigField et al. use, so
-	// MCP servers re-init and clients see the change without a restart.
-	ws.Cfg.OnExternalChange(func() { publishConfigChanged(ws) })
-	go ws.Cfg.WatchForExternalChanges(wsCtx)
-
-	// Same hot-reload story for skills: a SKILL.md added, edited, or
-	// removed outside this process (agent tool or human edit) should take
-	// effect without a restart, mirroring the config watcher above. Unlike
-	// config, skill discovery is not re-run by anything else, so the
-	// watcher itself must also refresh the coordinator's cached skill
-	// snapshot (see agent.Coordinator.RefreshSkills) — ReplaceDiscovery
-	// alone only updates ws.Skills, which buildTools does not read from
-	// directly.
-	if ws.Skills != nil {
-		go skills.WatchForChanges(wsCtx, app.SkillsDiscoveryConfig(ws.Cfg), ws.Skills, 0, func() {
-			if ws.App != nil && ws.AgentCoordinator != nil {
-				ws.AgentCoordinator.RefreshSkills(ws.Skills.AllSkills(), ws.Skills.ActiveSkills())
-			}
-			publishWorkspaceChanged(ws)
-		})
-	}
+	// Config and skills external-change watchers now start in app.New
+	// itself (see app.startExternalChangeWatchers), so both local mode and
+	// client/server mode get hot-reload from one place — this used to
+	// start them here only, which meant local mode (the default) never
+	// picked up an externally-edited config or skill file without a
+	// restart. What's left here is translating the app-level
+	// WorkspaceChanged marker those watchers publish into the
+	// workspace-scoped proto.ConfigChanged remote/SSE clients key their
+	// cache-refetch on; local-mode UI doesn't need this translation since
+	// it already reacts to the underlying MCP/skills events those same
+	// reloads publish.
+	go forwardWorkspaceChanged(wsCtx, ws)
 
 	if attachThreads {
 		b.attachServerThreads(wsCtx, ws.App, args.Path)
