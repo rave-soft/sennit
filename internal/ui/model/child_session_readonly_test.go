@@ -117,8 +117,11 @@ func TestHandleDelayedClickOnNestedContainer(t *testing.T) {
 }
 
 // TestHandleDelayedClickOnPlainToolItem is the control case: a plain
-// (non-nested-container) tool item's click behavior is unchanged — handled
-// but openContainer is false, and expansion still toggles as before.
+// (non-nested-container) tool item no longer has anything to expand — file
+// content is not something this chat lets you page through (see
+// tools.go's appendResultSummary). A click is inert: reported handled with
+// openContainer false, and the item does not implement chat.Expandable at
+// all, so there's no toggle to fire.
 func TestHandleDelayedClickOnPlainToolItem(t *testing.T) {
 	t.Parallel()
 
@@ -128,7 +131,8 @@ func TestHandleDelayedClickOnPlainToolItem(t *testing.T) {
 	u.chat.AppendMessages(item)
 	u.chat.SetSelected(0)
 
-	require.False(t, currentExpanded(t, item), "fresh item starts collapsed")
+	_, ok := item.(chat.Expandable)
+	require.False(t, ok, "a plain tool item must not implement chat.Expandable — there's nothing to expand")
 
 	handled, openContainer := u.chat.HandleDelayedClick(DelayedClickMsg{
 		ClickID: u.chat.pendingClickID,
@@ -138,5 +142,4 @@ func TestHandleDelayedClickOnPlainToolItem(t *testing.T) {
 	})
 	require.True(t, handled)
 	require.False(t, openContainer)
-	require.True(t, currentExpanded(t, item), "expansion must still toggle for a plain tool item")
 }

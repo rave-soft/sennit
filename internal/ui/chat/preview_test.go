@@ -73,10 +73,11 @@ func TestToolMessageItem_CollapsedByDefaultIsOneLine(t *testing.T) {
 	}
 }
 
-// TestToolMessageItem_ExpandShowsBoundedPreview covers the second half of
-// the fix: clicking to expand must show a bounded preview (never the full
-// file/output), and a second toggle collapses back to one line.
-func TestToolMessageItem_ExpandShowsBoundedPreview(t *testing.T) {
+// TestToolMessageItem_NoExpand covers the removal of click-to-expand: a
+// plain (non-delegation) tool item must not implement chat.Expandable at
+// all, and rendering at any width stays one line regardless — there is no
+// state to toggle into that would ever show file/command content in chat.
+func TestToolMessageItem_NoExpand(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -86,23 +87,12 @@ func TestToolMessageItem_ExpandShowsBoundedPreview(t *testing.T) {
 	result := &message.ToolResult{ToolCallID: "1", Metadata: `{"content":` + toJSONString(longFile) + `}`}
 	item := NewToolMessageItem(&sty, "m1", tc, result, false, nil)
 
-	expandable, ok := item.(Expandable)
-	require.True(t, ok, "view tool item must be Expandable")
-
-	expanded := expandable.ToggleExpanded()
-	require.True(t, expanded)
+	_, ok := item.(Expandable)
+	require.False(t, ok, "a plain tool item must not implement Expandable — there is nothing to expand")
 
 	out := item.Render(120)
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	// Bounded: nowhere near the 300 lines of content, but more than 1.
-	require.Greater(t, len(lines), 1)
-	require.Lessf(t, len(lines), 30, "expanding must not dump the full file, got %d lines", len(lines))
-
-	collapsedAgain := expandable.ToggleExpanded()
-	require.False(t, collapsedAgain)
-	out = item.Render(120)
-	lines = strings.Split(strings.TrimRight(out, "\n"), "\n")
-	require.Len(t, lines, 1, "toggling again must collapse back to one line")
+	require.Len(t, lines, 1, "a plain tool item always renders as one line")
 }
 
 // TestToolMessageItem_ErrorShowsStderrTail covers the error case: a failed

@@ -1652,7 +1652,12 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		}
 		m.sidebar.hideScrollbar()
 		m.chat.Blur()
-	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
+	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main) &&
+		!m.chat.PlainToolItemAt(msg.X-m.layout.main.Min.X, msg.Y-m.layout.main.Min.Y):
+		// A click that lands on a plain tool call (see PlainToolItemAt)
+		// must not steal focus from the editor — there's nothing to
+		// interact with there anymore (no expand/preview), so the cursor
+		// should stay put instead of visibly jumping out of the editor.
 		m.focus = uiFocusMain
 		m.sidebar.hideScrollbar()
 		m.editor.textarea.Blur()

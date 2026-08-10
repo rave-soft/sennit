@@ -157,11 +157,9 @@ func TestBaseToolMessageItem_MutatorsBumpVersion(t *testing.T) {
 	requireBump(t, "SetStatus", v, func() {
 		item.SetStatus(ToolStatusSuccess)
 	})
-	requireBump(t, "ToggleExpanded", v, func() {
-		if e, ok := item.(Expandable); ok {
-			e.ToggleExpanded()
-		}
-	})
+	// A plain tool item no longer implements Expandable at all — see
+	// TestHandleDelayedClickOnPlainToolItem in internal/ui/model — so
+	// there is no ToggleExpanded mutator to cover here anymore.
 	requireBump(t, "SetCompact", v, func() {
 		if c, ok := item.(Compactable); ok {
 			c.SetCompact(true)

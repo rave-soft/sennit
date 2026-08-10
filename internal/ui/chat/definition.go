@@ -51,21 +51,12 @@ func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 		return header
 	}
 
-	// Try to render code with syntax highlighting using metadata.
+	// Try to summarize from metadata (syntax-highlighted code metadata),
+	// falling back to the raw result content.
 	var meta tools.DefinitionResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.Content != "" {
-		if !opts.ExpandedContent {
-			return appendResultSummary(sty, header, lineCountSummary(meta.Content))
-		}
-		body := toolOutputCodeContent(sty, meta.FilePath, meta.Content, 0, cappedWidth, opts.ExpandedContent)
-		return joinToolParts(header, body)
+		return appendResultSummary(sty, header, lineCountSummary(meta.Content))
 	}
 
-	// Fallback to plain text.
-	if !opts.ExpandedContent {
-		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
-	}
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-	return joinToolParts(header, body)
+	return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
 }

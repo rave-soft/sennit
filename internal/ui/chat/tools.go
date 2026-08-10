@@ -26,26 +26,16 @@ import (
 )
 
 // responseContextHeight limits the number of lines displayed in tool output.
+// Regular tool calls (view/write/edit/bash/grep/...) never show a body at
+// all — see appendResultSummary — so in practice this only still bounds the
+// still-alive running-delegation preview in agent.go (toolOutputMarkdownContent).
 const responseContextHeight = 10
 
-// previewMaxLines caps how many lines a tool body shows even after the user
-// clicks to expand it. Expanding used to dump the entire file/output inline
-// ("портянка" — a click on `view` rendered the whole file); the chat is not
-// a pager, so expansion now yields a bounded preview and the truncation
-// note always says how much more there is. Full content belongs in an
-// editor or terminal, reached by drilling into the actual file/command.
-const previewMaxLines = 16
-
-// previewMaxDiffLines caps expanded diff bodies. Diffs are denser and more
-// load-bearing per line than plain text, so they get a bit more room than
-// previewMaxLines.
-const previewMaxDiffLines = 24
-
-// previewTruncateFormat is shown when an already-expanded tool body still
-// doesn't fit the bounded preview cap. Unlike assistantMessageTruncateFormat
-// (used for the assistant's own message text), there's nothing further to
-// click into here — previewMaxLines/previewMaxDiffLines is the ceiling, and
-// the rest lives in the actual file/output, not the chat.
+// previewTruncateFormat notes how much of a body was cut off. There is no
+// click-to-see-more for tool output — file/command content is not
+// something this chat lets you page through — so, unlike
+// assistantMessageTruncateFormat (used for the assistant's own message
+// text), this never invites a click.
 const previewTruncateFormat = "… (%d more lines not shown)"
 
 // toolBodyLeftPaddingTotal represents the padding that should be applied to each tool body
@@ -112,13 +102,12 @@ func (d *DefaultToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 
 // ToolRenderOpts contains the data needed to render a tool call.
 type ToolRenderOpts struct {
-	ToolCall        message.ToolCall
-	Result          *message.ToolResult
-	Anim            *anim.Anim
-	ExpandedContent bool
-	Compact         bool
-	IsSpinning      bool
-	Status          ToolStatus
+	ToolCall   message.ToolCall
+	Result     *message.ToolResult
+	Anim       *anim.Anim
+	Compact    bool
+	IsSpinning bool
+	Status     ToolStatus
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -176,12 +165,9 @@ type baseToolMessageItem struct {
 	// If nil, uses the default: !toolCall.Finished && !canceled.
 	spinningFunc SpinningFunc
 
-	sty             *styles.Styles
-	anim            *anim.Anim
-	expandedContent bool
+	sty  *styles.Styles
+	anim *anim.Anim
 }
-
-var _ Expandable = (*baseToolMessageItem)(nil)
 
 // newBaseToolMessageItem is the internal constructor for base tool message items.
 func newBaseToolMessageItem(
@@ -368,13 +354,12 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	// if we are spinning or there is no cache rerender
 	if !ok || t.isSpinning() {
 		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
-			ToolCall:        t.toolCall,
-			Result:          t.result,
-			Anim:            t.anim,
-			ExpandedContent: t.expandedContent,
-			Compact:         t.isCompact,
-			IsSpinning:      t.isSpinning(),
-			Status:          t.computeStatus(),
+			ToolCall:   t.toolCall,
+			Result:     t.result,
+			Anim:       t.anim,
+			Compact:    t.isCompact,
+			IsSpinning: t.isSpinning(),
+			Status:     t.computeStatus(),
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.
@@ -505,14 +490,6 @@ func (t *baseToolMessageItem) SetSpinningFunc(fn SpinningFunc) {
 	t.spinningFunc = fn
 }
 
-// ToggleExpanded toggles the expanded state of the thinking box.
-func (t *baseToolMessageItem) ToggleExpanded() bool {
-	t.expandedContent = !t.expandedContent
-	t.clearCache()
-	t.Bump()
-	return t.expandedContent
-}
-
 // Finished implements list.Item. A tool call is freezable once the
 // tool call itself is marked finished AND a result has been recorded
 // (or it has been canceled). Tools that override the spinning logic
@@ -528,7 +505,12 @@ func (t *baseToolMessageItem) Finished() bool {
 	return t.toolCall.Finished && t.result != nil
 }
 
-// HandleMouseClick implements MouseClickable.
+// HandleMouseClick implements MouseClickable. A left click is reported as
+// handled so a click on an agent/agentic_fetch delegation still drills into
+// its child session (see NestedToolContainer in model/chat.go's
+// HandleDelayedClick) — plain tool items no longer implement Expandable, so
+// for them this is otherwise inert: no preview, no toggle. File/command
+// content is not something this chat lets you page through.
 func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 	return btn == ansi.MouseLeft
 }
@@ -612,9 +594,10 @@ func toolIcon(sty *styles.Styles, status ToolStatus) string {
 	}
 }
 
-// toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
-// When opts.ExpandedContent is true, the output wraps instead of truncating.
-func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
+// toolParamList formats tool parameters as "main (key=value, ...)",
+// truncated to width — a tool header is always a single line, so params
+// never wrap.
+func toolParamList(sty *styles.Styles, params []string, width int) string {
 	// minSpaceForMainParam is the min space required for the main param
 	// if this is less that the value set we will only show the main param nothing else
 	const minSpaceForMainParam = 30
@@ -641,16 +624,14 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 		}
 	}
 
-	if width >= 0 && (opts == nil || !opts.ExpandedContent) {
+	if width >= 0 {
 		output = ansi.Truncate(output, width, "…")
-	} else if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
-		output = ansi.Hardwrap(output, width, false)
 	}
 	return sty.Tool.ParamMain.Render(output)
 }
 
-// toolHeader builds the tool header line: "● ToolName params..."
-// When opts.ExpandedContent is true, long parameters wrap instead of truncating.
+// toolHeader builds the tool header line: "● ToolName params...". Always a
+// single line — long parameters truncate, never wrap.
 func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
 	nested := opts != nil && opts.Compact
 	icon := toolIcon(sty, status)
@@ -660,21 +641,8 @@ func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, o
 	}
 	toolName := nameStyle.Render(name)
 	prefix := fmt.Sprintf("%s %s ", icon, toolName)
-	prefixWidth := lipgloss.Width(prefix)
-	remainingWidth := width - prefixWidth
-	paramsStr := toolParamList(sty, params, remainingWidth, opts)
-
-	// When expanded, toolParamList may return multiple lines. Indent
-	// continuation lines to align with the first line's param text.
-	if strings.Contains(paramsStr, "\n") {
-		lines := strings.Split(paramsStr, "\n")
-		indent := strings.Repeat(" ", prefixWidth)
-		for i := 1; i < len(lines); i++ {
-			lines[i] = indent + lines[i]
-		}
-		return prefix + strings.Join(lines, "\n")
-	}
-	return prefix + paramsStr
+	remainingWidth := width - lipgloss.Width(prefix)
+	return prefix + toolParamList(sty, params, remainingWidth)
 }
 
 // appendResultSummary appends a short " · outcome" suffix to a collapsed
@@ -722,49 +690,18 @@ func countSummary(n int, singular, plural string) string {
 	return fmt.Sprintf("%d %s", n, plural)
 }
 
-// toolOutputTailContent renders plain text output previewing the *tail*
-// rather than the head. Only called once a body is already being shown
-// (i.e. the user expanded a collapsed tool call) — for commands like
-// `bash`, the load-bearing part of output (the final error, a test
-// summary) is almost always the last lines, not the first, so the bash
-// renderer uses this instead of the head-preview toolOutputPlainContent.
-func toolOutputTailContent(sty *styles.Styles, content string, width int) string {
+// toolOutputPlainContent renders plain text, capped to responseContextHeight
+// lines. There is no click-to-expand for tool bodies (see
+// appendResultSummary) — the only remaining caller of this is
+// toolOutputMarkdownContent's parse-error fallback, itself only reachable
+// from the still-alive running-delegation preview in agent.go.
+func toolOutputPlainContent(sty *styles.Styles, content string, width int) string {
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
 	content = common.RemapANSI16(content, sty.ANSI)
 	lines := strings.Split(content, "\n")
 
-	start := max(0, len(lines)-previewMaxLines)
-
-	var out []string
-	if start > 0 {
-		out = append(out, sty.Tool.ContentTruncation.
-			Width(width).
-			Render(fmt.Sprintf(previewTruncateFormat, start)))
-	}
-	for _, ln := range lines[start:] {
-		ln = " " + ln
-		if lipgloss.Width(ln) > width {
-			ln = ansi.Truncate(ln, width, "…")
-		}
-		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
-	}
-
-	return strings.Join(out, "\n")
-}
-
-// toolOutputPlainContent renders plain text with optional expansion support.
-func toolOutputPlainContent(sty *styles.Styles, content string, width int, expanded bool) string {
-	content = stringext.NormalizeSpace(content)
-	content = common.StripCursorControl(content)
-	content = common.RemapANSI16(content, sty.ANSI)
-	lines := strings.Split(content, "\n")
-
-	maxLines := responseContextHeight
-	if expanded {
-		maxLines = previewMaxLines // Bounded preview, never the full dump.
-	}
-	maxLines = min(maxLines, len(lines))
+	maxLines := min(responseContextHeight, len(lines))
 
 	var out []string
 	for i, ln := range lines {
@@ -785,61 +722,6 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 	}
 
 	return strings.Join(out, "\n")
-}
-
-// toolOutputCodeContent renders code with syntax highlighting and line numbers.
-func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, width int, expanded bool) string {
-	content = stringext.NormalizeSpace(content)
-
-	lines := strings.Split(content, "\n")
-	maxLines := responseContextHeight
-	if expanded {
-		maxLines = previewMaxLines // Bounded preview, never the full dump.
-	}
-	maxLines = min(maxLines, len(lines))
-
-	// Truncate if needed.
-	displayLines := lines
-	if len(lines) > maxLines {
-		displayLines = lines[:maxLines]
-	}
-
-	bg := sty.Tool.ContentCodeBg
-	highlighted, _ := common.SyntaxHighlight(sty, strings.Join(displayLines, "\n"), path, bg)
-	highlightedLines := strings.Split(highlighted, "\n")
-
-	// Calculate line number width.
-	maxLineNumber := len(displayLines) + offset
-	maxDigits := getDigits(maxLineNumber)
-	numFmt := fmt.Sprintf("%%%dd", maxDigits)
-
-	bodyWidth := width - toolBodyLeftPaddingTotal
-	codeWidth := bodyWidth - maxDigits
-
-	var out []string
-	for i, ln := range highlightedLines {
-		lineNum := sty.Tool.ContentLineNumber.Render(fmt.Sprintf(numFmt, i+1+offset))
-
-		// Truncate accounting for padding that will be added.
-		ln = ansi.Truncate(ln, codeWidth-sty.Tool.ContentCodeLine.GetHorizontalPadding(), "…")
-
-		codeLine := sty.Tool.ContentCodeLine.
-			Width(codeWidth).
-			Render(ln)
-
-		out = append(out, lipgloss.JoinHorizontal(lipgloss.Left, lineNum, codeLine))
-	}
-
-	// Add truncation message if needed.
-	if len(lines) > maxLines {
-		out = append(
-			out, sty.Tool.ContentCodeTruncation.
-				Width(width).
-				Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines)),
-		)
-	}
-
-	return sty.Tool.Body.Render(strings.Join(out, "\n"))
 }
 
 // toolOutputImageContent renders image data with size info.
@@ -1065,40 +947,6 @@ func formatSize(bytes int) string {
 	}
 }
 
-// toolOutputDiffContent renders a diff between old and new content.
-func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent string, width int, expanded bool) string {
-	bodyWidth := width - toolBodyLeftPaddingTotal
-
-	formatter := common.DiffFormatter(sty).
-		Before(file, oldContent).
-		After(file, newContent).
-		Width(bodyWidth)
-
-	// Use split view for wide terminals.
-	if width > maxTextWidth {
-		formatter = formatter.Split()
-	}
-
-	formatted := formatter.String()
-	lines := strings.Split(formatted, "\n")
-
-	// Truncate if needed.
-	maxLines := responseContextHeight
-	if expanded {
-		maxLines = previewMaxDiffLines // Bounded preview, never the full dump.
-	}
-	maxLines = min(maxLines, len(lines))
-
-	if len(lines) > maxLines {
-		truncMsg := sty.Tool.DiffTruncation.
-			Width(bodyWidth).
-			Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines))
-		formatted = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
-	}
-
-	return sty.Tool.Body.Render(formatted)
-}
-
 // formatTimeout converts timeout seconds to a duration string (e.g., "30s").
 // Returns empty string if timeout is 0.
 func formatTimeout(timeout int) string {
@@ -1114,48 +962,6 @@ func formatNonZero(value int) string {
 		return ""
 	}
 	return fmt.Sprintf("%d", value)
-}
-
-// toolOutputMultiEditDiffContent renders a diff with optional failed edits note.
-func toolOutputMultiEditDiffContent(sty *styles.Styles, file string, meta tools.MultiEditResponseMetadata, totalEdits, width int, expanded bool) string {
-	bodyWidth := width - toolBodyLeftPaddingTotal
-
-	formatter := common.DiffFormatter(sty).
-		Before(file, meta.OldContent).
-		After(file, meta.NewContent).
-		Width(bodyWidth)
-
-	// Use split view for wide terminals.
-	if width > maxTextWidth {
-		formatter = formatter.Split()
-	}
-
-	formatted := formatter.String()
-	lines := strings.Split(formatted, "\n")
-
-	// Truncate if needed.
-	maxLines := responseContextHeight
-	if expanded {
-		maxLines = previewMaxDiffLines // Bounded preview, never the full dump.
-	}
-	maxLines = min(maxLines, len(lines))
-
-	if len(lines) > maxLines {
-		truncMsg := sty.Tool.DiffTruncation.
-			Width(bodyWidth).
-			Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines))
-		formatted = truncMsg + "\n" + strings.Join(lines[:maxLines], "\n")
-	}
-
-	// Add failed edits note if any exist.
-	if len(meta.EditsFailed) > 0 {
-		noteTag := sty.Tool.NoteTag.Render("Note")
-		noteMsg := fmt.Sprintf("%d of %d edits succeeded", meta.EditsApplied, totalEdits)
-		note := fmt.Sprintf("%s %s", noteTag, sty.Tool.NoteMessage.Render(noteMsg))
-		formatted = formatted + "\n\n" + note
-	}
-
-	return sty.Tool.Body.Render(formatted)
 }
 
 // roundedEnumerator creates a tree enumerator with rounded corners.
@@ -1176,8 +982,11 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 	}
 }
 
-// toolOutputMarkdownContent renders markdown content with optional truncation.
-func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, expanded bool) string {
+// toolOutputMarkdownContent renders markdown content, capped to
+// responseContextHeight lines. Used only by agent.go for the still-alive
+// running-delegation preview — no per-tool result body renders through
+// this anymore (see appendResultSummary).
+func toolOutputMarkdownContent(sty *styles.Styles, content string, width int) string {
 	content = stringext.NormalizeSpace(content)
 
 	// Cap width for readability.
@@ -1191,15 +1000,11 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 	rendered, err := renderer.Render(content)
 	mu.Unlock()
 	if err != nil {
-		return toolOutputPlainContent(sty, content, width, expanded)
+		return toolOutputPlainContent(sty, content, width)
 	}
 
 	lines := strings.Split(rendered, "\n")
-	maxLines := responseContextHeight
-	if expanded {
-		maxLines = previewMaxLines // Bounded preview, never the full dump.
-	}
-	maxLines = min(maxLines, len(lines))
+	maxLines := min(responseContextHeight, len(lines))
 
 	var out []string
 	for i, ln := range lines {

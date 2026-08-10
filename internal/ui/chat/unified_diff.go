@@ -1,12 +1,9 @@
 package chat
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/rave-soft/braid/internal/diffdetect"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
 type parsedDiffFile struct {
@@ -128,44 +125,4 @@ func parseUnifiedDiff(content string) []parsedDiffFile {
 		})
 	}
 	return result
-}
-
-func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width int, expanded bool) string {
-	files := parseUnifiedDiff(content)
-	if len(files) == 0 {
-		bodyWidth := width - toolBodyLeftPaddingTotal
-		return sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.diff", content, 0, bodyWidth, expanded))
-	}
-	bodyWidth := width - toolBodyLeftPaddingTotal
-	var blocks []string
-	for i, f := range files {
-		formatter := common.DiffFormatter(sty).
-			Before(f.path, f.before).
-			After(f.path, f.after).
-			Width(bodyWidth)
-		if len(files) > 1 {
-			formatter = formatter.FileName(f.path)
-		}
-		if width > maxTextWidth {
-			formatter = formatter.Split()
-		}
-		formatted := formatter.String()
-		if i < len(files)-1 {
-			formatted += "\n"
-		}
-		blocks = append(blocks, formatted)
-	}
-	combined := strings.Join(blocks, "\n")
-	lines := strings.Split(combined, "\n")
-	maxLines := responseContextHeight
-	if expanded {
-		maxLines = len(lines)
-	}
-	if len(lines) > maxLines && !expanded {
-		truncMsg := sty.Tool.DiffTruncation.
-			Width(bodyWidth).
-			Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines))
-		combined = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
-	}
-	return sty.Tool.Body.Render(combined)
 }

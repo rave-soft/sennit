@@ -63,10 +63,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	// Regular bash command.
-	cmd := params.Command
-	if !opts.ExpandedContent {
-		cmd = strings.ReplaceAll(cmd, "\n", " ")
-	}
+	cmd := strings.ReplaceAll(params.Command, "\n", " ")
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	toolParams := []string{cmd}
 	if params.RunInBackground {
@@ -94,16 +91,9 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	// Collapsed by default: one line, plus how long the command ran.
-	if !opts.ExpandedContent {
-		return appendResultSummary(sty, header, bashDurationSummary(meta))
-	}
-
-	// Expanding previews the *tail* of the output — the load-bearing part
-	// (final error, test summary) is almost always at the end.
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputTailContent(sty, output, bodyWidth))
-	return joinToolParts(header, body)
+	// Always one line: command output is not paged through in chat — see
+	// appendResultSummary. How long the command ran is the useful bit.
+	return appendResultSummary(sty, header, bashDurationSummary(meta))
 }
 
 // bashDurationSummary renders a short "2.1s" style summary for a finished
@@ -233,13 +223,7 @@ func renderJobTool(sty *styles.Styles, opts *ToolRenderOpts, width int, action, 
 		return header
 	}
 
-	if !opts.ExpandedContent {
-		return appendResultSummary(sty, header, lineCountSummary(content))
-	}
-
-	bodyWidth := width - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputTailContent(sty, content, bodyWidth))
-	return joinToolParts(header, body)
+	return appendResultSummary(sty, header, lineCountSummary(content))
 }
 
 // jobHeader builds a header for job-related tools.

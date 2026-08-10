@@ -133,29 +133,14 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return header
 	}
 
-	if !opts.ExpandedContent && opts.Result.Data == "" {
-		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
-	}
-
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	var parts []string
-
-	// Handle text content.
-	if opts.Result.Content != "" && opts.ExpandedContent {
-		body := renderToolResultTextContent(sty, opts.Result.Content, toolResultContentWidths{Body: bodyWidth, Diff: cappedWidth}, opts.ExpandedContent)
-		parts = append(parts, body)
-	}
-
-	// Handle image content.
+	// Image results still get their (already one-line) summary; text
+	// results collapse to the same "N lines" summary as every other tool.
 	if opts.Result.Data != "" && strings.HasPrefix(opts.Result.MIMEType, "image/") {
-		parts = append(parts, "", toolOutputImageContent(sty, opts.Result.Data, opts.Result.MIMEType))
+		body := sty.Tool.Body.Render(toolOutputImageContent(sty, opts.Result.Data, opts.Result.MIMEType))
+		return joinToolParts(header, body)
 	}
 
-	if len(parts) == 0 {
-		return header
-	}
-
-	return joinToolParts(header, strings.Join(parts, "\n"))
+	return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
 }
 
 // FindMCPResponse represents the response from mcp-find.
@@ -173,7 +158,7 @@ func (d *DockerMCPToolRenderContext) renderMCPServers(sty *styles.Styles, opts *
 
 	var result FindMCPResponse
 	if err := json.Unmarshal([]byte(opts.Result.Content), &result); err != nil {
-		return toolOutputPlainContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal, opts.ExpandedContent)
+		return toolOutputPlainContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal)
 	}
 
 	if len(result.Servers) == 0 {
@@ -224,7 +209,7 @@ func (d *DockerMCPToolRenderContext) makeHeader(sty *styles.Styles, tool string,
 		icon = sty.Tool.IconPending.Render()
 	}
 	prefix := fmt.Sprintf("%s %s ", icon, d.formatToolName(sty, tool))
-	return prefix + toolParamList(sty, params, width-lipgloss.Width(prefix), opts)
+	return prefix + toolParamList(sty, params, width-lipgloss.Width(prefix))
 }
 
 func (d *DockerMCPToolRenderContext) formatToolName(sty *styles.Styles, tool string) string {

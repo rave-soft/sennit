@@ -9,8 +9,10 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/attachments"
+	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
@@ -200,4 +202,66 @@ func TestFocusSidebarGuard_StillClaimsRightWhenEligible(t *testing.T) {
 
 	require.Equal(t, uiFocusSidebar, u.focus, "an eligible FocusSidebar must still claim right arrow")
 	require.Equal(t, pillSectionTodos, u.pills.focusedSection, "pill section must not change here")
+}
+
+// TestClickOnPlainToolItem_DoesNotMoveFocus is the regression test for the
+// "фокус/курсор уходит туда" complaint: clicking a plain tool call (view,
+// bash, grep, ...) used to both expand it AND steal focus from the editor
+// (any click inside the chat pane focuses uiFocusMain, which hides the
+// terminal cursor — see TestDrawCursor_VisibleOnlyWhenEditorFocused).
+// Click-to-expand is gone entirely now (see PlainToolItemAt), and a click
+// on such a row must leave focus — and so the cursor — right where it was.
+func TestClickOnPlainToolItem_DoesNotMoveFocus(t *testing.T) {
+	t.Parallel()
+
+	u := newCursorTestUI(t)
+	u.focus = uiFocusEditor
+	u.chat.Blur()
+	u.editor.textarea.Focus()
+
+	item := chat.NewToolMessageItem(u.com.Styles, "msg1",
+		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: true}, nil, false, nil)
+	u.chat.AppendMessages(item)
+	u.updateLayoutAndSize()
+
+	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
+		X:      u.layout.main.Min.X,
+		Y:      u.layout.main.Min.Y,
+		Button: uv.MouseLeft,
+	}))
+
+	require.Equal(t, uiFocusEditor, u.focus, "clicking a plain tool item must not move focus off the editor")
+	require.True(t, u.editor.textarea.Focused(), "the editor must stay focused (and so keep the terminal cursor)")
+}
+
+// TestClickOnAssistantText_StillFocusesChat is the control case for
+// PlainToolItemAt: clicking ordinary chat content (not a plain tool call)
+// keeps its existing behavior of moving focus into the chat pane. Only
+// plain tool rows are special-cased — delegations, todos, and the
+// assistant's own text are unaffected.
+func TestClickOnAssistantText_StillFocusesChat(t *testing.T) {
+	t.Parallel()
+
+	u := newCursorTestUI(t)
+	u.focus = uiFocusEditor
+	u.chat.Blur()
+	u.editor.textarea.Focus()
+
+	item := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID:   "m1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "hello there"},
+		},
+	})
+	u.chat.AppendMessages(item)
+	u.updateLayoutAndSize()
+
+	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
+		X:      u.layout.main.Min.X,
+		Y:      u.layout.main.Min.Y,
+		Button: uv.MouseLeft,
+	}))
+
+	require.Equal(t, uiFocusMain, u.focus, "clicking ordinary chat content must still focus the chat pane")
 }

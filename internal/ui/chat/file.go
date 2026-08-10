@@ -92,16 +92,9 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	// Collapsed by default: one line, "N lines" instead of a code dump.
-	// Full content is viewed by expanding (bounded preview) — see
-	// toolOutputCodeContent — never by scrolling a wall of text in chat.
-	if !opts.ExpandedContent {
-		return appendResultSummary(sty, header, lineCountSummary(content))
-	}
-
-	// Render code content with syntax highlighting.
-	body := toolOutputCodeContent(sty, params.FilePath, content, params.Offset, cappedWidth, opts.ExpandedContent)
-	return joinToolParts(header, body)
+	// Always one line: file content is not something this chat lets you
+	// page through — open it in an editor to actually read it.
+	return appendResultSummary(sty, header, lineCountSummary(content))
 }
 
 // -----------------------------------------------------------------------------
@@ -153,28 +146,18 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return header
 	}
 
-	// On error with diff metadata (e.g. denied permission), show error + diff.
+	// On error (e.g. denied permission), the inline error tail is the one
+	// exception to "no body" — it's a short, non-click-driven summary of
+	// what went wrong, not a content preview.
 	if opts.Result.IsError {
-		var meta tools.WriteResponseMetadata
-		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.Diff != "" {
-			errLine := toolErrorContent(sty, opts.Result, cappedWidth)
-			if !opts.ExpandedContent {
-				return strings.Join([]string{header, "", errLine}, "\n")
-			}
-			diff := toolOutputDiffContentFromUnified(sty, meta.Diff, cappedWidth, opts.ExpandedContent)
-			return strings.Join([]string{header, "", errLine, "", diff}, "\n")
-		}
-		return joinToolParts(header, toolErrorContent(sty, opts.Result, cappedWidth))
+		errLine := toolErrorContent(sty, opts.Result, cappedWidth)
+		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
-	// Collapsed by default: one line, "N lines" instead of the whole file.
+	// Always one line: file content is not something this chat lets you
+	// page through — open it in an editor to actually read it.
 	if params.Content != "" {
-		if !opts.ExpandedContent {
-			return appendResultSummary(sty, header, lineCountSummary(params.Content))
-		}
-		// Render code content with syntax highlighting.
-		body := toolOutputCodeContent(sty, params.FilePath, params.Content, 0, cappedWidth, opts.ExpandedContent)
-		return joinToolParts(header, body)
+		return appendResultSummary(sty, header, lineCountSummary(params.Content))
 	}
 
 	return header
@@ -229,36 +212,23 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	// Get diff content from metadata.
+	// Get diff stats from metadata; fall back to a line count if metadata
+	// is missing/malformed. Always one line — no diff preview in chat.
 	var meta tools.EditResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err != nil {
-		if !opts.ExpandedContent {
-			return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
-		}
-		bodyWidth := width - toolBodyLeftPaddingTotal
-		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-		return joinToolParts(header, body)
-	}
-
-	// Collapsed by default: one line, "+A −R" instead of the diff.
-	if !opts.ExpandedContent {
+		header = appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+	} else {
 		header = appendResultSummary(sty, header, diffSummary(meta.Additions, meta.Removals))
-		if opts.Result.IsError {
-			errLine := toolErrorContent(sty, opts.Result, width)
-			return strings.Join([]string{header, "", errLine}, "\n")
-		}
-		return header
 	}
 
-	diff := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
-
-	// On error (e.g. denied permission), show error above the diff.
+	// On error (e.g. denied permission), the inline error tail is the one
+	// exception to "no body" — see the Write tool above.
 	if opts.Result.IsError {
 		errLine := toolErrorContent(sty, opts.Result, width)
-		return strings.Join([]string{header, "", errLine, "", diff}, "\n")
+		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
-	return joinToolParts(header, diff)
+	return header
 }
 
 // -----------------------------------------------------------------------------
@@ -315,37 +285,27 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return header
 	}
 
-	// Get diff content from metadata.
+	// Get diff stats from metadata; fall back to a line count if metadata
+	// is missing/malformed. Always one line — no diff preview in chat.
 	var meta tools.MultiEditResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err != nil {
-		if !opts.ExpandedContent {
-			return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+		header = appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+	} else {
+		summary := diffSummary(meta.Additions, meta.Removals)
+		if len(meta.EditsFailed) > 0 {
+			summary = fmt.Sprintf("%s · %d/%d edits applied", summary, meta.EditsApplied, len(params.Edits))
 		}
-		bodyWidth := width - toolBodyLeftPaddingTotal
-		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-		return joinToolParts(header, body)
+		header = appendResultSummary(sty, header, summary)
 	}
 
-	// Collapsed by default: one line, "+A −R" instead of the diff.
-	if !opts.ExpandedContent {
-		header = appendResultSummary(sty, header, diffSummary(meta.Additions, meta.Removals))
-		if opts.Result.IsError {
-			errLine := toolErrorContent(sty, opts.Result, width)
-			return strings.Join([]string{header, "", errLine}, "\n")
-		}
-		return header
-	}
-
-	// Render diff with optional failed edits note.
-	diff := toolOutputMultiEditDiffContent(sty, file, meta, len(params.Edits), width, opts.ExpandedContent)
-
-	// On error (e.g. denied permission), show error above the diff.
+	// On error (e.g. denied permission), the inline error tail is the one
+	// exception to "no body" — see the Write tool above.
 	if opts.Result.IsError {
 		errLine := toolErrorContent(sty, opts.Result, width)
-		return strings.Join([]string{header, "", errLine, "", diff}, "\n")
+		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
-	return joinToolParts(header, diff)
+	return header
 }
 
 // -----------------------------------------------------------------------------
@@ -405,11 +365,5 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return header
 	}
 
-	if !opts.ExpandedContent {
-		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
-	}
-
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-	return joinToolParts(header, body)
+	return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
 }

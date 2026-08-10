@@ -234,9 +234,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return renderCollapsedDelegation(sty, cappedWidth, "Agent", opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens)
 	}
 
-	if !opts.ExpandedContent {
-		prompt = strings.ReplaceAll(prompt, "\n", " ")
-	}
+	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
 	if opts.Compact {
@@ -298,7 +296,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	// Add body content when completed.
 	if opts.HasResult() && opts.Result.Content != "" {
-		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal, opts.ExpandedContent)
+		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal)
 		return joinToolParts(result, body)
 	}
 
@@ -475,9 +473,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		return renderCollapsedDelegation(sty, cappedWidth, "Agentic Fetch", opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens)
 	}
 
-	if !opts.ExpandedContent {
-		prompt = strings.ReplaceAll(prompt, "\n", " ")
-	}
+	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
 	// Build header with optional URL param.
 	var toolParams []string
@@ -544,7 +540,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 
 	// Add body content when completed.
 	if opts.HasResult() && opts.Result.Content != "" {
-		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal, opts.ExpandedContent)
+		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal)
 		return joinToolParts(result, body)
 	}
 

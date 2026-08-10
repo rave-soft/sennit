@@ -51,11 +51,5 @@ func (r *SymbolsToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 		return header
 	}
 
-	if !opts.ExpandedContent {
-		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
-	}
-
-	// Render as code to preserve tree indentation.
-	body := toolOutputCodeContent(sty, params.FilePath, opts.Result.Content, 0, cappedWidth, opts.ExpandedContent)
-	return joinToolParts(header, body)
+	return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
 }

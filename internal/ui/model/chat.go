@@ -827,6 +827,28 @@ func (m *Chat) SelectedNestedToolContainer() (messageID, toolCallID string, ok b
 	return toolItem.MessageID(), toolItem.ToolCall().ID, true
 }
 
+// PlainToolItemAt reports whether the chat item at viewport-relative
+// position (x, y) is a tool call with no click behavior left — a
+// ToolMessageItem that is not a NestedToolContainer (agent/agentic_fetch,
+// which still drills into the child session on click). Used by
+// handleClickFocus to keep a click on such a row from stealing focus away
+// from the editor: since inline expand/preview was removed, there is
+// nothing left to interact with there. Returns false for anything else
+// (assistant text, todos, delegations, no item at that position, ...),
+// which still focuses the chat pane as before.
+func (m *Chat) PlainToolItemAt(x, y int) bool {
+	itemIdx, _ := m.list.ItemIndexAtPosition(x, y)
+	if itemIdx < 0 {
+		return false
+	}
+	item := m.list.ItemAt(itemIdx)
+	if _, isTool := item.(chat.ToolMessageItem); !isTool {
+		return false
+	}
+	_, isContainer := item.(chat.NestedToolContainer)
+	return !isContainer
+}
+
 // NestedToolContainerRefs returns, in list order, the message ID and
 // tool-call ID of every top-level chat item that is a nested-tool
 // container (agent / agentic_fetch delegation). Used to build the

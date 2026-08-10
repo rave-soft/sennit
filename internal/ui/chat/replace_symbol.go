@@ -55,35 +55,21 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 		return header
 	}
 
-	// Try to render as a diff using metadata.
+	// Summarize from diff metadata when available; always one line — no
+	// diff preview in chat.
 	var meta tools.ReplaceSymbolResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.OldContent != "" || meta.NewContent != "" {
-		if !opts.ExpandedContent {
-			_, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, file)
-			header = appendResultSummary(sty, header, diffSummary(additions, removals))
-			if opts.Result.IsError {
-				errLine := toolErrorContent(sty, opts.Result, width)
-				return strings.Join([]string{header, "", errLine}, "\n")
-			}
-			return header
-		}
-
-		diff := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
-
-		// On error, show error above the diff.
-		if opts.Result.IsError {
-			errLine := toolErrorContent(sty, opts.Result, width)
-			return joinToolParts(header, errLine+"\n"+diff)
-		}
-
-		return joinToolParts(header, diff)
+		_, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, file)
+		header = appendResultSummary(sty, header, diffSummary(additions, removals))
+	} else {
+		header = appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
 	}
 
-	// Fallback to plain text if no metadata.
-	if !opts.ExpandedContent {
-		return appendResultSummary(sty, header, lineCountSummary(opts.Result.Content))
+	// On error, the inline error tail is the one exception to "no body".
+	if opts.Result.IsError {
+		errLine := toolErrorContent(sty, opts.Result, width)
+		return strings.Join([]string{header, "", errLine}, "\n")
 	}
-	bodyWidth := width - toolBodyLeftPaddingTotal
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-	return joinToolParts(header, body)
+
+	return header
 }
