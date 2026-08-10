@@ -1135,7 +1135,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
 			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
-				if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
+				if handled, cmd := m.chat.HandleScrollbarMouseDown(x, y); handled {
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				} else if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
 					m.lastClickTime = time.Now()
 					if cmd != nil {
 						cmds = append(cmds, cmd)
@@ -1175,6 +1179,23 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeInline != nil && m.focus == uiFocusEditor {
 				break
 			}
+
+			x, y := msg.X, msg.Y
+			// Adjust for chat area position
+			x -= m.layout.main.Min.X
+			y -= m.layout.main.Min.Y
+
+			// An active scrollbar drag takes over the whole gesture: it
+			// tracks the cursor directly and must not also trigger the
+			// text-selection edge-scroll below (the two would fight over
+			// the offset).
+			if handled, cmd := m.chat.HandleScrollbarMouseDrag(x, y); handled {
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				break
+			}
+
 			if msg.Y <= 0 {
 				if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -1197,11 +1218,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			x, y := msg.X, msg.Y
-			// Adjust for chat area position
-			x -= m.layout.main.Min.X
-			y -= m.layout.main.Min.Y
 			m.chat.HandleMouseDrag(x, y)
+			m.chat.ScrollbarHoverAt(x, y)
 		}
 
 	case tea.MouseReleaseMsg:
@@ -1217,7 +1235,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if m.chat.HandleMouseUp(x, y) && m.chat.HasHighlight() {
+			if m.chat.HandleScrollbarMouseUp() {
+				// Scrollbar drag ended; nothing else to do.
+			} else if m.chat.HandleMouseUp(x, y) && m.chat.HasHighlight() {
 				cmds = append(cmds, tea.Tick(doubleClickThreshold, func(t time.Time) tea.Msg {
 					if time.Since(m.lastClickTime) >= doubleClickThreshold {
 						return copyChatHighlightMsg{}

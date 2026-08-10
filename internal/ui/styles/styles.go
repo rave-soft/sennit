@@ -469,8 +469,9 @@ type Styles struct {
 		ContentPanel lipgloss.Style
 
 		// Scrollbar styles for scrollable content.
-		ScrollbarThumb lipgloss.Style
-		ScrollbarTrack lipgloss.Style
+		ScrollbarThumb      lipgloss.Style
+		ScrollbarTrack      lipgloss.Style
+		ScrollbarThumbHover lipgloss.Style
 
 		// Arguments
 		Arguments struct {

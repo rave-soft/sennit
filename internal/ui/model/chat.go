@@ -105,6 +105,20 @@ type Chat struct {
 	mouseDragX    int // Current X in item content
 	mouseDragY    int // Current Y in item
 
+	// Scrollbar drag state. Independent of the text-selection mouseDown*
+	// fields above — a click on the scrollbar column takes priority over
+	// text selection and never sets mouseDown.
+	scrollbarShown        bool // whether the scrollbar was drawn on the last Draw
+	scrollbarDragging     bool
+	scrollbarHover        bool
+	scrollbarColX         int // relative x of the scrollbar's single column (from Draw's area origin)
+	scrollbarTrackHeight  int // track height used for the last Draw's thumb geometry
+	scrollbarThumbStart   int
+	scrollbarThumbSize    int
+	scrollbarContentSize  int
+	scrollbarViewportSize int
+	scrollbarDragAnchor   int // y offset within the thumb where the drag grabbed it
+
 	// Click tracking for double/triple clicks
 	lastClickTime time.Time
 	lastClickX    int
@@ -247,14 +261,34 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	// (showScrollbar requires it), so TotalHeight is already computed and
 	// cached above.
 	if scrollbarWidth > 0 {
-		scrollbar := common.Scrollbar(m.com.Styles, listHeight, m.list.TotalHeight()-1, listHeight, m.list.Offset())
+		contentSize := m.list.TotalHeight() - 1
+		offset := m.list.Offset()
+		hovered := m.scrollbarHover || m.scrollbarDragging
+		scrollbar := common.ScrollbarStyled(m.com.Styles, listHeight, contentSize, listHeight, offset, hovered)
 		if scrollbar != "" {
 			scrollbarArea := image.Rectangle{
 				Min: image.Point{X: area.Max.X - scrollbarWidth, Y: area.Min.Y},
 				Max: image.Point{X: area.Max.X, Y: area.Max.Y},
 			}
 			uv.NewStyledString(scrollbar).Draw(scr, scrollbarArea)
+
+			// Cache the thumb geometry (in coordinates relative to area's
+			// origin, matching the mouse handlers' x/y) for hit-testing in
+			// HandleScrollbarMouseDown/Drag.
+			m.scrollbarShown = true
+			m.scrollbarColX = area.Dx() - scrollbarWidth
+			m.scrollbarTrackHeight = listHeight
+			m.scrollbarContentSize = contentSize
+			m.scrollbarViewportSize = listHeight
+			m.scrollbarThumbStart, m.scrollbarThumbSize, _ = common.ScrollbarThumbBounds(listHeight, contentSize, listHeight, offset)
+		} else {
+			m.scrollbarShown = false
 		}
+	} else {
+		// Not shown this frame. Leave scrollbarDragging alone — a drag that's
+		// mid-flight should be allowed to finish even if a frame briefly
+		// reports not-shown; only an explicit mouse-up ends it.
+		m.scrollbarShown = false
 	}
 }
 
@@ -1063,6 +1097,66 @@ func (m *Chat) HandleMouseDrag(x, y int) bool {
 	return true
 }
 
+// HandleScrollbarMouseDown starts a scrollbar drag if (x, y) lands on the
+// scrollbar's column, as computed by the last Draw. It takes priority over
+// text selection — callers should try this before HandleMouseDown and only
+// fall through to it when this returns false.
+func (m *Chat) HandleScrollbarMouseDown(x, y int) (bool, tea.Cmd) {
+	if !m.scrollbarShown || x != m.scrollbarColX || y < 0 || y >= m.scrollbarTrackHeight {
+		return false, nil
+	}
+
+	if y >= m.scrollbarThumbStart && y < m.scrollbarThumbStart+m.scrollbarThumbSize {
+		// Grabbed inside the thumb: keep the same offset within it so the
+		// thumb doesn't jump under the cursor.
+		m.scrollbarDragAnchor = y - m.scrollbarThumbStart
+	} else {
+		// Clicked on empty track: center the thumb under the cursor.
+		m.scrollbarDragAnchor = m.scrollbarThumbSize / 2
+	}
+	m.scrollbarDragging = true
+
+	return true, m.dragScrollbarTo(y)
+}
+
+// HandleScrollbarMouseDrag continues an in-progress scrollbar drag, scrolling
+// the chat so the thumb tracks the cursor's Y position. x is ignored — the
+// scrollbar only drags vertically.
+func (m *Chat) HandleScrollbarMouseDrag(x, y int) (bool, tea.Cmd) {
+	if !m.scrollbarDragging {
+		return false, nil
+	}
+	return true, m.dragScrollbarTo(y)
+}
+
+// HandleScrollbarMouseUp ends an in-progress scrollbar drag.
+func (m *Chat) HandleScrollbarMouseUp() bool {
+	if !m.scrollbarDragging {
+		return false
+	}
+	m.scrollbarDragging = false
+	return true
+}
+
+// ScrollbarHoverAt updates and returns whether (x, y) is hovering the
+// scrollbar's column, for hover-highlight rendering from mouse-motion events
+// that aren't part of a drag.
+func (m *Chat) ScrollbarHoverAt(x, y int) bool {
+	m.scrollbarHover = m.scrollbarShown && x == m.scrollbarColX && y >= 0 && y < m.scrollbarTrackHeight
+	return m.scrollbarHover
+}
+
+// dragScrollbarTo scrolls the chat so the thumb's top sits at
+// y-scrollbarDragAnchor, converting that target thumb position back to a
+// content offset via common.ScrollbarOffsetForThumbStart and reaching it
+// with ScrollBy (which also maintains the follow flag and scrollbar-
+// visibility timer, same as wheel scrolling).
+func (m *Chat) dragScrollbarTo(y int) tea.Cmd {
+	thumbStart := y - m.scrollbarDragAnchor
+	target := common.ScrollbarOffsetForThumbStart(thumbStart, m.scrollbarThumbSize, m.scrollbarTrackHeight, m.scrollbarContentSize, m.scrollbarViewportSize)
+	return m.ScrollBy(target - m.list.Offset())
+}
+
 // HasHighlight returns whether there is currently highlighted content.
 func (m *Chat) HasHighlight() bool {
 	startItemIdx, startLine, startCol, endItemIdx, endLine, endCol := m.getHighlightRange()
@@ -1114,6 +1208,7 @@ func (m *Chat) ClearMouse() {
 	m.lastClickY = 0
 	m.clickCount = 0
 	m.pendingClickID++ // Invalidate any pending delayed click
+	m.scrollbarDragging = false
 }
 
 // applyHighlightRange applies the current highlight range to the chat items.
