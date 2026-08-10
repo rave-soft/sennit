@@ -19,27 +19,19 @@ type Querier interface {
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	DeleteThread(ctx context.Context, id string) error
-	GetAverageResponseTime(ctx context.Context) (int64, error)
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
-	GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error)
 	GetLastSession(ctx context.Context) (Session, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
-	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetThread(ctx context.Context, id string) (Thread, error)
 	GetThreadByName(ctx context.Context, name string) (Thread, error)
-	GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error)
-	GetTotalStats(ctx context.Context) (GetTotalStatsRow, error)
-	GetUsageByDay(ctx context.Context) ([]GetUsageByDayRow, error)
-	GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error)
-	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
-	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
 	// Prompt-history source: only messages a human typed. Sub-agent and thread
 	// child sessions carry machine-generated delegation prompts as user-role
 	// messages, so anything below a parent session is excluded.
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	ListAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAssistantMessagesSinceRow, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
@@ -47,6 +39,13 @@ type Querier interface {
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
+	// The queries below back `braid stat`, a terminal-table
+	// breakdown by model/agent/project/skill. They intentionally return raw
+	// rows for a time window rather than pre-aggregating, since the
+	// model/agent grouping requires Go-side logic (proportional token
+	// attribution for multi-model sessions, see internal/cmd/stat.go).
+	ListSessionsSince(ctx context.Context, createdAt int64) ([]ListSessionsSinceRow, error)
+	ListSkillLoadsSince(ctx context.Context, createdAt int64) ([]ListSkillLoadsSinceRow, error)
 	ListThreads(ctx context.Context) ([]Thread, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	NextFileVersion(ctx context.Context, path string) (int64, error)

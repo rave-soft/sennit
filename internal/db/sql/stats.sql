@@ -1,93 +1,47 @@
--- name: GetUsageByDay :many
-SELECT
-    date(created_at, 'unixepoch') as day,
-    SUM(prompt_tokens) as prompt_tokens,
-    SUM(completion_tokens) as completion_tokens,
-    SUM(cost) as cost,
-    COUNT(*) as session_count
-FROM sessions
-WHERE parent_session_id IS NULL
-GROUP BY date(created_at, 'unixepoch')
-ORDER BY day DESC;
+-- The queries below back `braid stat`, a terminal-table
+-- breakdown by model/agent/project/skill. They intentionally return raw
+-- rows for a time window rather than pre-aggregating, since the
+-- model/agent grouping requires Go-side logic (proportional token
+-- attribution for multi-model sessions, see internal/cmd/stat.go).
 
--- name: GetUsageByModel :many
+-- name: ListSessionsSince :many
 SELECT
+    id,
+    parent_session_id,
+    title,
+    prompt_tokens,
+    completion_tokens,
+    cost,
+    created_at,
+    updated_at
+FROM sessions
+WHERE created_at >= ?
+ORDER BY created_at ASC;
+
+-- name: ListAssistantMessagesSince :many
+SELECT
+    session_id,
     COALESCE(model, 'unknown') as model,
     COALESCE(provider, 'unknown') as provider,
-    COUNT(*) as message_count
+    created_at,
+    COALESCE(finished_at, created_at) as finished_at
 FROM messages
 WHERE role = 'assistant'
-GROUP BY model, provider
-ORDER BY message_count DESC;
+  AND created_at >= ?
+ORDER BY created_at ASC;
 
--- name: GetUsageByHour :many
+-- name: ListSkillLoadsSince :many
 SELECT
-    CAST(strftime('%H', created_at, 'unixepoch') AS INTEGER) as hour,
-    COUNT(*) as session_count
-FROM sessions
-WHERE parent_session_id IS NULL
-GROUP BY hour
-ORDER BY hour;
-
--- name: GetUsageByDayOfWeek :many
-SELECT
-    CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) as day_of_week,
-    COUNT(*) as session_count,
-    SUM(prompt_tokens) as prompt_tokens,
-    SUM(completion_tokens) as completion_tokens
-FROM sessions
-WHERE parent_session_id IS NULL
-GROUP BY day_of_week
-ORDER BY day_of_week;
-
--- name: GetTotalStats :one
-SELECT
-    COUNT(*) as total_sessions,
-    COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
-    COALESCE(SUM(completion_tokens), 0) as total_completion_tokens,
-    COALESCE(SUM(cost), 0) as total_cost,
-    COALESCE(SUM(message_count), 0) as total_messages,
-    COALESCE(AVG(prompt_tokens + completion_tokens), 0) as avg_tokens_per_session,
-    COALESCE(AVG(message_count), 0) as avg_messages_per_session
-FROM sessions
-WHERE parent_session_id IS NULL;
-
--- name: GetRecentActivity :many
-SELECT
-    date(created_at, 'unixepoch') as day,
-    COUNT(*) as session_count,
-    SUM(prompt_tokens + completion_tokens) as total_tokens,
-    SUM(cost) as cost
-FROM sessions
-WHERE parent_session_id IS NULL
-  AND created_at >= strftime('%s', 'now', '-30 days')
-GROUP BY date(created_at, 'unixepoch')
-ORDER BY day ASC;
-
--- name: GetAverageResponseTime :one
-SELECT
-    CAST(COALESCE(AVG(finished_at - created_at), 0) AS INTEGER) as avg_response_seconds
-FROM messages
-WHERE role = 'assistant'
-  AND finished_at IS NOT NULL
-  AND finished_at > created_at;
-
--- name: GetToolUsage :many
-SELECT
-    json_extract(value, '$.data.name') as tool_name,
-    COUNT(*) as call_count
-FROM messages, json_each(parts)
-WHERE json_extract(value, '$.type') = 'tool_call'
-  AND json_extract(value, '$.data.name') IS NOT NULL
-GROUP BY tool_name
-ORDER BY call_count DESC;
-
--- name: GetHourDayHeatmap :many
-SELECT
-    CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) as day_of_week,
-    CAST(strftime('%H', created_at, 'unixepoch') AS INTEGER) as hour,
-    COUNT(*) as session_count
-FROM sessions
-WHERE parent_session_id IS NULL
-GROUP BY day_of_week, hour
-ORDER BY day_of_week, hour;
+    json_extract(json_extract(value, '$.data.metadata'), '$.resource_name') as skill_name,
+    COUNT(*) as load_count,
+    COUNT(DISTINCT messages.session_id) as session_count,
+    MIN(messages.created_at) as first_used_at,
+    MAX(messages.created_at) as last_used_at
+FROM messages, json_each(messages.parts)
+WHERE messages.role = 'tool'
+  AND messages.created_at >= ?
+  AND json_extract(value, '$.type') = 'tool_result'
+  AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_type') = 'skill'
+  AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_name') IS NOT NULL
+GROUP BY skill_name
+ORDER BY load_count DESC;

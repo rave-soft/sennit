@@ -10,349 +10,161 @@ import (
 	"database/sql"
 )
 
-const getAverageResponseTime = `-- name: GetAverageResponseTime :one
+const listAssistantMessagesSince = `-- name: ListAssistantMessagesSince :many
 SELECT
-    CAST(COALESCE(AVG(finished_at - created_at), 0) AS INTEGER) as avg_response_seconds
-FROM messages
-WHERE role = 'assistant'
-  AND finished_at IS NOT NULL
-  AND finished_at > created_at
-`
-
-func (q *Queries) GetAverageResponseTime(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.getAverageResponseTimeStmt, getAverageResponseTime)
-	var avg_response_seconds int64
-	err := row.Scan(&avg_response_seconds)
-	return avg_response_seconds, err
-}
-
-const getHourDayHeatmap = `-- name: GetHourDayHeatmap :many
-SELECT
-    CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) as day_of_week,
-    CAST(strftime('%H', created_at, 'unixepoch') AS INTEGER) as hour,
-    COUNT(*) as session_count
-FROM sessions
-WHERE parent_session_id IS NULL
-GROUP BY day_of_week, hour
-ORDER BY day_of_week, hour
-`
-
-type GetHourDayHeatmapRow struct {
-	DayOfWeek    int64 `json:"day_of_week"`
-	Hour         int64 `json:"hour"`
-	SessionCount int64 `json:"session_count"`
-}
-
-func (q *Queries) GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error) {
-	rows, err := q.query(ctx, q.getHourDayHeatmapStmt, getHourDayHeatmap)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetHourDayHeatmapRow{}
-	for rows.Next() {
-		var i GetHourDayHeatmapRow
-		if err := rows.Scan(&i.DayOfWeek, &i.Hour, &i.SessionCount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getRecentActivity = `-- name: GetRecentActivity :many
-SELECT
-    date(created_at, 'unixepoch') as day,
-    COUNT(*) as session_count,
-    SUM(prompt_tokens + completion_tokens) as total_tokens,
-    SUM(cost) as cost
-FROM sessions
-WHERE parent_session_id IS NULL
-  AND created_at >= strftime('%s', 'now', '-30 days')
-GROUP BY date(created_at, 'unixepoch')
-ORDER BY day ASC
-`
-
-type GetRecentActivityRow struct {
-	Day          interface{}     `json:"day"`
-	SessionCount int64           `json:"session_count"`
-	TotalTokens  sql.NullFloat64 `json:"total_tokens"`
-	Cost         sql.NullFloat64 `json:"cost"`
-}
-
-func (q *Queries) GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error) {
-	rows, err := q.query(ctx, q.getRecentActivityStmt, getRecentActivity)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetRecentActivityRow{}
-	for rows.Next() {
-		var i GetRecentActivityRow
-		if err := rows.Scan(
-			&i.Day,
-			&i.SessionCount,
-			&i.TotalTokens,
-			&i.Cost,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getToolUsage = `-- name: GetToolUsage :many
-SELECT
-    json_extract(value, '$.data.name') as tool_name,
-    COUNT(*) as call_count
-FROM messages, json_each(parts)
-WHERE json_extract(value, '$.type') = 'tool_call'
-  AND json_extract(value, '$.data.name') IS NOT NULL
-GROUP BY tool_name
-ORDER BY call_count DESC
-`
-
-type GetToolUsageRow struct {
-	ToolName  interface{} `json:"tool_name"`
-	CallCount int64       `json:"call_count"`
-}
-
-func (q *Queries) GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error) {
-	rows, err := q.query(ctx, q.getToolUsageStmt, getToolUsage)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetToolUsageRow{}
-	for rows.Next() {
-		var i GetToolUsageRow
-		if err := rows.Scan(&i.ToolName, &i.CallCount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getTotalStats = `-- name: GetTotalStats :one
-SELECT
-    COUNT(*) as total_sessions,
-    COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens,
-    COALESCE(SUM(completion_tokens), 0) as total_completion_tokens,
-    COALESCE(SUM(cost), 0) as total_cost,
-    COALESCE(SUM(message_count), 0) as total_messages,
-    COALESCE(AVG(prompt_tokens + completion_tokens), 0) as avg_tokens_per_session,
-    COALESCE(AVG(message_count), 0) as avg_messages_per_session
-FROM sessions
-WHERE parent_session_id IS NULL
-`
-
-type GetTotalStatsRow struct {
-	TotalSessions         int64       `json:"total_sessions"`
-	TotalPromptTokens     interface{} `json:"total_prompt_tokens"`
-	TotalCompletionTokens interface{} `json:"total_completion_tokens"`
-	TotalCost             interface{} `json:"total_cost"`
-	TotalMessages         interface{} `json:"total_messages"`
-	AvgTokensPerSession   interface{} `json:"avg_tokens_per_session"`
-	AvgMessagesPerSession interface{} `json:"avg_messages_per_session"`
-}
-
-func (q *Queries) GetTotalStats(ctx context.Context) (GetTotalStatsRow, error) {
-	row := q.queryRow(ctx, q.getTotalStatsStmt, getTotalStats)
-	var i GetTotalStatsRow
-	err := row.Scan(
-		&i.TotalSessions,
-		&i.TotalPromptTokens,
-		&i.TotalCompletionTokens,
-		&i.TotalCost,
-		&i.TotalMessages,
-		&i.AvgTokensPerSession,
-		&i.AvgMessagesPerSession,
-	)
-	return i, err
-}
-
-const getUsageByDay = `-- name: GetUsageByDay :many
-SELECT
-    date(created_at, 'unixepoch') as day,
-    SUM(prompt_tokens) as prompt_tokens,
-    SUM(completion_tokens) as completion_tokens,
-    SUM(cost) as cost,
-    COUNT(*) as session_count
-FROM sessions
-WHERE parent_session_id IS NULL
-GROUP BY date(created_at, 'unixepoch')
-ORDER BY day DESC
-`
-
-type GetUsageByDayRow struct {
-	Day              interface{}     `json:"day"`
-	PromptTokens     sql.NullFloat64 `json:"prompt_tokens"`
-	CompletionTokens sql.NullFloat64 `json:"completion_tokens"`
-	Cost             sql.NullFloat64 `json:"cost"`
-	SessionCount     int64           `json:"session_count"`
-}
-
-func (q *Queries) GetUsageByDay(ctx context.Context) ([]GetUsageByDayRow, error) {
-	rows, err := q.query(ctx, q.getUsageByDayStmt, getUsageByDay)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetUsageByDayRow{}
-	for rows.Next() {
-		var i GetUsageByDayRow
-		if err := rows.Scan(
-			&i.Day,
-			&i.PromptTokens,
-			&i.CompletionTokens,
-			&i.Cost,
-			&i.SessionCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getUsageByDayOfWeek = `-- name: GetUsageByDayOfWeek :many
-SELECT
-    CAST(strftime('%w', created_at, 'unixepoch') AS INTEGER) as day_of_week,
-    COUNT(*) as session_count,
-    SUM(prompt_tokens) as prompt_tokens,
-    SUM(completion_tokens) as completion_tokens
-FROM sessions
-WHERE parent_session_id IS NULL
-GROUP BY day_of_week
-ORDER BY day_of_week
-`
-
-type GetUsageByDayOfWeekRow struct {
-	DayOfWeek        int64           `json:"day_of_week"`
-	SessionCount     int64           `json:"session_count"`
-	PromptTokens     sql.NullFloat64 `json:"prompt_tokens"`
-	CompletionTokens sql.NullFloat64 `json:"completion_tokens"`
-}
-
-func (q *Queries) GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error) {
-	rows, err := q.query(ctx, q.getUsageByDayOfWeekStmt, getUsageByDayOfWeek)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetUsageByDayOfWeekRow{}
-	for rows.Next() {
-		var i GetUsageByDayOfWeekRow
-		if err := rows.Scan(
-			&i.DayOfWeek,
-			&i.SessionCount,
-			&i.PromptTokens,
-			&i.CompletionTokens,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getUsageByHour = `-- name: GetUsageByHour :many
-SELECT
-    CAST(strftime('%H', created_at, 'unixepoch') AS INTEGER) as hour,
-    COUNT(*) as session_count
-FROM sessions
-WHERE parent_session_id IS NULL
-GROUP BY hour
-ORDER BY hour
-`
-
-type GetUsageByHourRow struct {
-	Hour         int64 `json:"hour"`
-	SessionCount int64 `json:"session_count"`
-}
-
-func (q *Queries) GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error) {
-	rows, err := q.query(ctx, q.getUsageByHourStmt, getUsageByHour)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GetUsageByHourRow{}
-	for rows.Next() {
-		var i GetUsageByHourRow
-		if err := rows.Scan(&i.Hour, &i.SessionCount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getUsageByModel = `-- name: GetUsageByModel :many
-SELECT
+    session_id,
     COALESCE(model, 'unknown') as model,
     COALESCE(provider, 'unknown') as provider,
-    COUNT(*) as message_count
+    created_at,
+    COALESCE(finished_at, created_at) as finished_at
 FROM messages
 WHERE role = 'assistant'
-GROUP BY model, provider
-ORDER BY message_count DESC
+  AND created_at >= ?
+ORDER BY created_at ASC
 `
 
-type GetUsageByModelRow struct {
-	Model        string `json:"model"`
-	Provider     string `json:"provider"`
-	MessageCount int64  `json:"message_count"`
+type ListAssistantMessagesSinceRow struct {
+	SessionID  string `json:"session_id"`
+	Model      string `json:"model"`
+	Provider   string `json:"provider"`
+	CreatedAt  int64  `json:"created_at"`
+	FinishedAt int64  `json:"finished_at"`
 }
 
-func (q *Queries) GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error) {
-	rows, err := q.query(ctx, q.getUsageByModelStmt, getUsageByModel)
+func (q *Queries) ListAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAssistantMessagesSinceRow, error) {
+	rows, err := q.query(ctx, q.listAssistantMessagesSinceStmt, listAssistantMessagesSince, createdAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []GetUsageByModelRow{}
+	items := []ListAssistantMessagesSinceRow{}
 	for rows.Next() {
-		var i GetUsageByModelRow
-		if err := rows.Scan(&i.Model, &i.Provider, &i.MessageCount); err != nil {
+		var i ListAssistantMessagesSinceRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.Model,
+			&i.Provider,
+			&i.CreatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionsSince = `-- name: ListSessionsSince :many
+
+SELECT
+    id,
+    parent_session_id,
+    title,
+    prompt_tokens,
+    completion_tokens,
+    cost,
+    created_at,
+    updated_at
+FROM sessions
+WHERE created_at >= ?
+ORDER BY created_at ASC
+`
+
+type ListSessionsSinceRow struct {
+	ID               string         `json:"id"`
+	ParentSessionID  sql.NullString `json:"parent_session_id"`
+	Title            string         `json:"title"`
+	PromptTokens     int64          `json:"prompt_tokens"`
+	CompletionTokens int64          `json:"completion_tokens"`
+	Cost             float64        `json:"cost"`
+	CreatedAt        int64          `json:"created_at"`
+	UpdatedAt        int64          `json:"updated_at"`
+}
+
+// The queries below back `braid stat`, a terminal-table
+// breakdown by model/agent/project/skill. They intentionally return raw
+// rows for a time window rather than pre-aggregating, since the
+// model/agent grouping requires Go-side logic (proportional token
+// attribution for multi-model sessions, see internal/cmd/stat.go).
+func (q *Queries) ListSessionsSince(ctx context.Context, createdAt int64) ([]ListSessionsSinceRow, error) {
+	rows, err := q.query(ctx, q.listSessionsSinceStmt, listSessionsSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSessionsSinceRow{}
+	for rows.Next() {
+		var i ListSessionsSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentSessionID,
+			&i.Title,
+			&i.PromptTokens,
+			&i.CompletionTokens,
+			&i.Cost,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSkillLoadsSince = `-- name: ListSkillLoadsSince :many
+SELECT
+    json_extract(json_extract(value, '$.data.metadata'), '$.resource_name') as skill_name,
+    COUNT(*) as load_count,
+    COUNT(DISTINCT messages.session_id) as session_count,
+    MIN(messages.created_at) as first_used_at,
+    MAX(messages.created_at) as last_used_at
+FROM messages, json_each(messages.parts)
+WHERE messages.role = 'tool'
+  AND messages.created_at >= ?
+  AND json_extract(value, '$.type') = 'tool_result'
+  AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_type') = 'skill'
+  AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_name') IS NOT NULL
+GROUP BY skill_name
+ORDER BY load_count DESC
+`
+
+type ListSkillLoadsSinceRow struct {
+	SkillName    interface{} `json:"skill_name"`
+	LoadCount    int64       `json:"load_count"`
+	SessionCount int64       `json:"session_count"`
+	FirstUsedAt  interface{} `json:"first_used_at"`
+	LastUsedAt   interface{} `json:"last_used_at"`
+}
+
+func (q *Queries) ListSkillLoadsSince(ctx context.Context, createdAt int64) ([]ListSkillLoadsSinceRow, error) {
+	rows, err := q.query(ctx, q.listSkillLoadsSinceStmt, listSkillLoadsSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSkillLoadsSinceRow{}
+	for rows.Next() {
+		var i ListSkillLoadsSinceRow
+		if err := rows.Scan(
+			&i.SkillName,
+			&i.LoadCount,
+			&i.SessionCount,
+			&i.FirstUsedAt,
+			&i.LastUsedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
