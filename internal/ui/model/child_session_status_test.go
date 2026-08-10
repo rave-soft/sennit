@@ -65,7 +65,7 @@ func TestFindNestedToolContainer(t *testing.T) {
 
 	u := newChildSessionTestUI(t)
 	agentItem := chat.NewAgentToolMessageItem(u.com.Styles,
-		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{}`, Finished: false}, nil, false)
+		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
 	plainItem := chat.NewToolMessageItem(u.com.Styles, "msg1",
 		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false, nil)
 	u.chat.AppendMessages(agentItem, plainItem)
@@ -86,7 +86,7 @@ func TestHandleChildSessionUpdate(t *testing.T) {
 
 	u := newChildSessionTestUI(t)
 	item := chat.NewAgentToolMessageItem(u.com.Styles,
-		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{}`, Finished: false}, nil, false)
+		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
 	u.chat.AppendMessages(item)
 
 	childID := u.com.Workspace.CreateAgentToolSessionID("parent-msg", "tc-agent")
@@ -101,4 +101,30 @@ func TestHandleChildSessionUpdate(t *testing.T) {
 	require.NotPanics(t, func() {
 		u.handleChildSessionUpdate(session.Session{ID: "top-level-session", PromptTokens: 1})
 	})
+}
+
+// TestHandleChildSessionUpdate_Todos is the todos counterpart of
+// TestHandleChildSessionUpdate: a session.Session update for a child
+// agent-tool session must reach the parent AgentToolMessageItem's todo
+// list and show up on re-render — the todos tool (internal/agent/tools/todos.go)
+// saves the child session with Todos set, publishing the same
+// pubsub.Event[session.Session] this handler already consumes for tokens.
+func TestHandleChildSessionUpdate_Todos(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionTestUI(t)
+	item := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
+	u.chat.AppendMessages(item)
+
+	childID := u.com.Workspace.CreateAgentToolSessionID("parent-msg", "tc-agent")
+	u.handleChildSessionUpdate(session.Session{
+		ID: childID,
+		Todos: []session.Todo{
+			{Content: "Fix the bug", Status: session.TodoStatusInProgress, ActiveForm: "Fixing the bug"},
+		},
+	})
+
+	out := ansi.Strip(item.Render(120))
+	require.Contains(t, out, "Fixing the bug", "child session todos must surface on the parent's running block")
 }

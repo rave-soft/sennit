@@ -20,7 +20,7 @@ import (
 func newAgentItem(sty *styles.Styles, toolCallID string) *chat.AgentToolMessageItem {
 	// All nav tests share one parent message; the helper hardcodes its ID.
 	item := chat.NewAgentToolMessageItem(sty,
-		message.ToolCall{ID: toolCallID, Name: "agent", Input: `{}`, Finished: false}, nil, false)
+		message.ToolCall{ID: toolCallID, Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
 	item.SetMessageID("msg1")
 	return item
 }

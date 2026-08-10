@@ -1943,10 +1943,10 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 
 // findNestedToolContainer looks up the top-level tool item in the chat
 // whose tool call ID matches toolCallID and that can hold nested
-// child-session tool calls (agent / agentic_fetch). Returns nil if the
-// item is missing or isn't a nested-tool container — e.g. a custom-agent
-// delegation, which currently falls back to the generic renderer and has
-// no live-update path yet.
+// child-session tool calls (agent / agentic_fetch / custom-agent
+// delegations — all three construct an AgentToolMessageItem, see
+// chat.NewToolMessageItem). Returns nil if the item is missing or isn't a
+// nested-tool container, e.g. a plain (non-delegating) tool call.
 func (m *UI) findNestedToolContainer(toolCallID string) chat.NestedToolContainer {
 	item := m.chat.MessageItem(toolCallID)
 	if item == nil {
@@ -1964,11 +1964,10 @@ func (m *UI) findNestedToolContainer(toolCallID string) chat.NestedToolContainer
 }
 
 // handleChildSessionUpdate propagates a child agent-tool session's running
-// token count up to the parent delegation's status line. Best-effort: it's
-// a no-op when the session isn't an agent-tool child session, the parent
-// item can't be found (e.g. scrolled out of the loaded window), or the
-// parent has no dedicated status line to update (custom-agent delegations
-// currently fall back to the generic renderer).
+// token count and todo list up to the parent delegation's block. Best-
+// effort: it's a no-op when the session isn't an agent-tool child session,
+// or the parent item can't be found (e.g. scrolled out of the loaded
+// window).
 func (m *UI) handleChildSessionUpdate(payload session.Session) {
 	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(payload.ID)
 	if !ok {
@@ -1980,6 +1979,9 @@ func (m *UI) handleChildSessionUpdate(payload session.Session) {
 	}
 	if tracker, ok := container.(chat.ChildSessionTokenTracker); ok {
 		tracker.SetChildSessionTokens(payload.PromptTokens, payload.CompletionTokens)
+	}
+	if tracker, ok := container.(chat.ChildSessionTodoTracker); ok {
+		tracker.SetChildSessionTodos(payload.Todos)
 	}
 }
 

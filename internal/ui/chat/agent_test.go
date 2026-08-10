@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
@@ -165,7 +167,7 @@ func TestAgentToolMessageItem_PendingStatusLine(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false)
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 	item.startTime = time.Now().Add(-9 * time.Second)
 
 	out := ansi.Strip(item.Render(120))
@@ -188,7 +190,7 @@ func TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false)
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
 	requireBump(t, "SetChildSessionTokens[first update]", item, func() {
 		item.SetChildSessionTokens(100, 50)
@@ -216,7 +218,7 @@ func TestAgentToolRenderCapsNestedTools(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false)
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
 	for i := 1; i <= 6; i++ {
 		id := "tool-" + string(rune('0'+i))
@@ -246,7 +248,7 @@ func TestAgentToolRenderNoCapBelowThreshold(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false)
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-1", "bash", `{"command":"echo tool-1"}`))
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-2", "bash", `{"command":"echo tool-2"}`))
@@ -271,7 +273,7 @@ func TestAgentToolRenderFinishedCollapses(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase for bug X"}`, Finished: true}
 	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "Found the bug in foo.go.\nMore detail below."}
-	item := NewAgentToolMessageItem(&sty, parent, result, false)
+	item := NewAgentToolMessageItem(&sty, parent, result, false, nil)
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"Provider"}`))
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "c2", "view", `{"file_path":"foo.go"}`))
 
@@ -279,7 +281,7 @@ func TestAgentToolRenderFinishedCollapses(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(out, " \n"), "\n")
 
 	require.LessOrEqual(t, len(lines), 3, "finished delegation must collapse to at most 3 lines, got: %q", out)
-	require.Contains(t, out, "Agent")
+	require.Contains(t, out, "task", "the built-in agent tool always dispatches to config.AgentTask")
 	require.Contains(t, out, "inspect codebase for bug X")
 	require.Contains(t, out, "step 2")
 	require.Contains(t, out, "Found the bug in foo.go.")
@@ -296,7 +298,7 @@ func TestAgentToolRenderCanceledCollapses(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
-	item := NewAgentToolMessageItem(&sty, parent, nil, true)
+	item := NewAgentToolMessageItem(&sty, parent, nil, true, nil)
 
 	out := ansi.Strip(item.Render(120))
 	require.Contains(t, out, "canceled")
@@ -312,7 +314,7 @@ func TestAgentToolToggleExpandedIsNoOp(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
 	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "done"}
-	item := NewAgentToolMessageItem(&sty, parent, result, false)
+	item := NewAgentToolMessageItem(&sty, parent, result, false, nil)
 
 	require.False(t, item.ToggleExpanded())
 	require.False(t, item.ToggleExpanded(), "must stay false regardless of how many times it's toggled")
@@ -334,4 +336,256 @@ func TestAgenticFetchToolMessageItem_SetChildSessionTokensBumpsVersion(t *testin
 	before := item.Version()
 	item.SetChildSessionTokens(100, 50)
 	require.Equal(t, before, item.Version(), "identical token counts must not bump the version")
+}
+
+// -----------------------------------------------------------------------------
+// Delegation block naming, model/effort subtitle, and child-session todos
+// -----------------------------------------------------------------------------
+
+// TestAgentDisplayName_BuiltInTask covers the built-in "agent" tool: since
+// AgentParams carries no field identifying a target sub-agent (it always
+// dispatches to the fixed config.AgentTask role), the block must render
+// "task", not the old hardcoded "Agent".
+func TestAgentDisplayName_BuiltInTask(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+
+	out := ansi.Strip(item.Render(120))
+	require.Contains(t, out, "task")
+	require.NotContains(t, out, "Agent")
+}
+
+// TestAgentDisplayName_CustomAgentTool covers a user-defined agent tool
+// (custom_agent_tool.go registers one per cfg.Agents entry, named after
+// the map key): the block must show that name, e.g. "developer", exactly
+// as NewToolMessageItem routes it (isCustomAgentTool).
+func TestAgentDisplayName_CustomAgentTool(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	cfg := &config.Config{Agents: map[string]config.Agent{"developer": {ID: "developer"}}}
+	parent := message.ToolCall{ID: "dev-parent", Name: "developer", Input: `{"prompt":"fix the bug"}`, Finished: false}
+	item := NewToolMessageItem(&sty, "msg", parent, nil, false, cfg)
+
+	require.IsType(t, &AgentToolMessageItem{}, item)
+	out := ansi.Strip(item.Render(120))
+	require.Contains(t, out, "developer")
+	require.NotContains(t, out, "Agent")
+}
+
+// TestAgenticFetchDisplayName_ShowsFetch covers requirement 1's third
+// case: agentic_fetch renders as "fetch", not its longer prettified name
+// ("Agentic Fetch", still used elsewhere e.g. clipboard copy).
+func TestAgenticFetchDisplayName_ShowsFetch(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{"prompt":"summarize"}`, Finished: false}
+	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
+
+	out := ansi.Strip(item.Render(120))
+	require.Contains(t, out, "fetch")
+	require.NotContains(t, out, "Agentic Fetch")
+}
+
+// TestRenderAgentSubtitle_Content covers the model/effort subtitle line:
+// both fields render, joined by " · ", in "model · effort X" order.
+func TestRenderAgentSubtitle_Content(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	line := ansi.Strip(renderAgentSubtitle(&sty, 200, "qwen36-local/Qwen3-Coder-Next", "high"))
+	require.Contains(t, line, "qwen36-local/Qwen3-Coder-Next")
+	require.Contains(t, line, "effort high")
+	require.Less(t, strings.Index(line, "qwen36-local"), strings.Index(line, "effort high"))
+}
+
+// TestRenderAgentSubtitle_Empty covers the "inherits the parent's
+// model/effort" case: an agent with neither field configured must render
+// no subtitle at all, not an empty styled line.
+func TestRenderAgentSubtitle_Empty(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	require.Equal(t, "", renderAgentSubtitle(&sty, 200, "", ""))
+}
+
+// TestRenderAgentSubtitle_NarrowWidthDropsProvider covers the fallback for
+// a width too narrow for the full "provider/model-id" string: it retries
+// with just the model id.
+func TestRenderAgentSubtitle_NarrowWidthDropsProvider(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	line := ansi.Strip(renderAgentSubtitle(&sty, 20, "qwen36-local/Qwen3-Coder-Next", ""))
+	require.Contains(t, line, "Qwen3-Coder-Next")
+	require.NotContains(t, line, "qwen36-local")
+}
+
+// TestRenderAgentSubtitle_Truncation guards the same width-bounded
+// contract as TestRenderAgentStatusLine_Truncation: the rendered line
+// (stripped of ANSI styling) must never exceed the requested width.
+func TestRenderAgentSubtitle_Truncation(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	for _, width := range []int{0, 1, 10, 20, 40} {
+		line := renderAgentSubtitle(&sty, width, "a-very-long-provider-name/a-very-long-model-id", "high")
+		require.LessOrEqualf(t, ansi.StringWidth(ansi.Strip(line)), width,
+			"width %d: rendered line exceeds requested width: %q", width, line)
+	}
+}
+
+// TestAgentToolRender_CustomAgentShowsModelAndEffort is the end-to-end
+// render-path test for requirement 2: a custom agent tool configured with
+// a model/effort override must show it in the rendered block; one with
+// neither field set must show nothing extra.
+func TestAgentToolRender_CustomAgentShowsModelAndEffort(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	cfg := &config.Config{Agents: map[string]config.Agent{
+		"developer": {ID: "developer", Model: "qwen36-local/Qwen3-Coder-Next", ReasoningEffort: "high"},
+	}}
+	parent := message.ToolCall{ID: "dev-parent", Name: "developer", Input: `{"prompt":"fix the bug"}`, Finished: false}
+	item := NewToolMessageItem(&sty, "msg", parent, nil, false, cfg)
+
+	out := ansi.Strip(item.Render(120))
+	require.Contains(t, out, "qwen36-local/Qwen3-Coder-Next")
+	require.Contains(t, out, "effort high")
+}
+
+// TestAgentToolRender_NoConfigOverrideShowsNoSubtitle covers the built-in
+// "agent" tool (no cfg.Agents entry configures its model/effort in this
+// test) and a custom agent left at its defaults: neither must show a
+// subtitle line, matching "empty → inherits, no clutter".
+func TestAgentToolRender_NoConfigOverrideShowsNoSubtitle(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+
+	out := ansi.Strip(item.Render(120))
+	require.NotContains(t, out, "effort")
+}
+
+// TestAgentToolMessageItem_SetChildSessionTodosBumpsVersion is the todos
+// counterpart of TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion:
+// pushing a new todo list must invalidate the cached render, and a
+// repeated identical update must not bump.
+func TestAgentToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+
+	todos := []session.Todo{{Content: "Do X", Status: session.TodoStatusInProgress, ActiveForm: "Doing X"}}
+
+	requireBump(t, "SetChildSessionTodos[first update]", item, func() {
+		item.SetChildSessionTodos(todos)
+	})
+
+	before := item.Version()
+	item.SetChildSessionTodos(todos)
+	require.Equal(t, before, item.Version(), "identical todo list must not bump the version")
+
+	requireBump(t, "SetChildSessionTodos[changed]", item, func() {
+		item.SetChildSessionTodos([]session.Todo{{Content: "Do Y", Status: session.TodoStatusPending}})
+	})
+}
+
+// TestAgenticFetchToolMessageItem_SetChildSessionTodosBumpsVersion is the
+// agentic-fetch counterpart of the todos bump test above.
+func TestAgenticFetchToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{}`, Finished: false}
+	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
+
+	todos := []session.Todo{{Content: "Do X", Status: session.TodoStatusInProgress}}
+	requireBump(t, "SetChildSessionTodos[first update]", item, func() {
+		item.SetChildSessionTodos(todos)
+	})
+}
+
+// TestAgentToolRender_RunningShowsTodos covers requirement 4: a running
+// delegation's child-session todos must render, with the in-progress
+// item's ActiveForm preferred over its Content.
+func TestAgentToolRender_RunningShowsTodos(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+	item.SetChildSessionTodos([]session.Todo{
+		{Content: "Read the file", Status: session.TodoStatusCompleted},
+		{Content: "Fix the bug", Status: session.TodoStatusInProgress, ActiveForm: "Fixing the bug"},
+		{Content: "Write a test", Status: session.TodoStatusPending},
+	})
+
+	out := ansi.Strip(item.Render(120))
+	require.Contains(t, out, "Fixing the bug", "in-progress todo must show its ActiveForm")
+	require.Contains(t, out, "Write a test")
+	require.Contains(t, out, "Read the file")
+}
+
+// TestAgentToolRender_FinishedHidesTodos covers requirement 5: once a
+// delegation finishes and collapses to its compact summary, its todos
+// must not render — only reachable by drilling into the child session.
+func TestAgentToolRender_FinishedHidesTodos(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+	item.SetChildSessionTodos([]session.Todo{
+		{Content: "Fix the bug", Status: session.TodoStatusInProgress, ActiveForm: "Fixing the bug"},
+	})
+
+	// Finish the delegation the same way the live update path does:
+	// SetToolCall(Finished: true) then SetResult.
+	finishedTC := parent
+	finishedTC.Finished = true
+	item.SetToolCall(finishedTC)
+	item.SetResult(&message.ToolResult{ToolCallID: parent.ID, Content: "done"})
+
+	out := ansi.Strip(item.Render(120))
+	require.NotContains(t, out, "Fixing the bug", "a finished delegation must not render its child-session todos")
+}
+
+// TestCapTodosForDelegation covers the compact pane's selection priority:
+// every in-progress item is kept, then pending items fill the remaining
+// budget, then completed items — dropping completed first since they're
+// already done and least useful to a user checking in on progress.
+func TestCapTodosForDelegation(t *testing.T) {
+	t.Parallel()
+
+	todos := []session.Todo{
+		{Content: "done 1", Status: session.TodoStatusCompleted},
+		{Content: "done 2", Status: session.TodoStatusCompleted},
+		{Content: "active", Status: session.TodoStatusInProgress},
+		{Content: "next 1", Status: session.TodoStatusPending},
+		{Content: "next 2", Status: session.TodoStatusPending},
+		{Content: "next 3", Status: session.TodoStatusPending},
+	}
+
+	capped := capTodosForDelegation(todos, 3)
+	require.Len(t, capped, 3)
+
+	var contents []string
+	for _, td := range capped {
+		contents = append(contents, td.Content)
+	}
+	require.Contains(t, contents, "active", "the in-progress item must always be kept")
+	require.NotContains(t, contents, "done 1", "completed items are dropped first")
+	require.NotContains(t, contents, "done 2", "completed items are dropped first")
+
+	// Below the cap, nothing is dropped.
+	require.Equal(t, todos, capTodosForDelegation(todos, len(todos)))
 }

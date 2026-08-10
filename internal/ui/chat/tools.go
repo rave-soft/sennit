@@ -230,9 +230,11 @@ var toolMessageItemFactories = map[string]toolMessageItemFactory{
 	tools.DownloadToolName:    NewDownloadToolMessageItem,
 	tools.FetchToolName:       NewFetchToolMessageItem,
 	tools.DiagnosticsToolName: NewDiagnosticsToolMessageItem,
-	agent.AgentToolName: func(sty *styles.Styles, toolCall message.ToolCall, result *message.ToolResult, canceled bool) ToolMessageItem {
-		return NewAgentToolMessageItem(sty, toolCall, result, canceled)
-	},
+	// agent.AgentToolName is deliberately absent here: NewAgentToolMessageItem
+	// now takes a cfg argument (to resolve the delegation's display name and
+	// any model/effort override, see agentDisplayName), which this factory
+	// signature has no room for — NewToolMessageItem special-cases it below
+	// instead, alongside the isCustomAgentTool branch that needs the same cfg.
 	tools.AgenticFetchToolName: func(sty *styles.Styles, toolCall message.ToolCall, result *message.ToolResult, canceled bool) ToolMessageItem {
 		return NewAgenticFetchToolMessageItem(sty, toolCall, result, canceled)
 	},
@@ -267,6 +269,8 @@ func NewToolMessageItem(
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch {
+	case toolCall.Name == agent.AgentToolName:
+		item = NewAgentToolMessageItem(sty, toolCall, result, canceled, cfg)
 	case toolMessageItemFactories[toolCall.Name] != nil:
 		item = toolMessageItemFactories[toolCall.Name](sty, toolCall, result, canceled)
 	case IsDockerMCPTool(toolCall.Name):
@@ -280,7 +284,7 @@ func NewToolMessageItem(
 		// so they get the identical renderer: running status line,
 		// collapse-to-summary once finished, click-to-drill into the
 		// child session.
-		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+		item = NewAgentToolMessageItem(sty, toolCall, result, canceled, cfg)
 	default:
 		item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
 	}

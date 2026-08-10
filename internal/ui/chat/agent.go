@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -12,7 +13,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
@@ -37,11 +40,31 @@ type ChildSessionTokenTracker interface {
 	SetChildSessionTokens(prompt, completion int64)
 }
 
+// ChildSessionTodoTracker mirrors [ChildSessionTokenTracker] for a running
+// delegation's todo list: it lets handleChildSessionUpdate push the child
+// session's current todos onto the block without this package depending on
+// session.Session's storage details. Implemented by [AgentToolMessageItem]
+// and [AgenticFetchToolMessageItem].
+type ChildSessionTodoTracker interface {
+	SetChildSessionTodos(todos []session.Todo)
+}
+
 // AgentToolMessageItem is a message item that represents an agent tool call.
 type AgentToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
+
+	// displayName is the block's title: the built-in agent tool always
+	// dispatches to config.AgentTask, so it renders as "task"; a
+	// user-defined agent tool's name is already the delegation's identity
+	// (toolCall.Name == its cfg.Agents key), so it renders as-is (e.g.
+	// "developer"). See agentDisplayName.
+	displayName string
+	// model and effort are this delegation's configured overrides (empty
+	// when the agent inherits the app's defaults — see config.Agent.Model
+	// / ReasoningEffort), rendered as a subtitle by renderAgentSubtitle.
+	model, effort string
 
 	// startTime and the token counters back the running status line (see
 	// renderAgentStatusLine): a long delegation used to render as a bare
@@ -53,6 +76,12 @@ type AgentToolMessageItem struct {
 	startTime        time.Time
 	promptTokens     int64
 	completionTokens int64
+
+	// todos mirrors the child session's current todo list (see
+	// ChildSessionTodoTracker) — rendered under a still-running
+	// delegation only; a finished delegation collapses to a summary and
+	// never shows todos (see ToggleExpanded).
+	todos []session.Todo
 
 	// duration is frozen the first time SetResult observes a non-nil
 	// result (see SetResult below) — i.e. only for a delegation that
@@ -67,22 +96,47 @@ var (
 	_ ToolMessageItem          = (*AgentToolMessageItem)(nil)
 	_ NestedToolContainer      = (*AgentToolMessageItem)(nil)
 	_ ChildSessionTokenTracker = (*AgentToolMessageItem)(nil)
+	_ ChildSessionTodoTracker  = (*AgentToolMessageItem)(nil)
 )
 
-// NewAgentToolMessageItem creates a new [AgentToolMessageItem].
+// NewAgentToolMessageItem creates a new [AgentToolMessageItem]. cfg resolves
+// the delegation's display name and any per-agent model/effort override
+// (see agentDisplayName); it may be nil, in which case the block falls back
+// to the built-in "task" name with no model/effort subtitle.
 func NewAgentToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	cfg *config.Config,
 ) *AgentToolMessageItem {
-	t := &AgentToolMessageItem{startTime: time.Now()}
+	t := &AgentToolMessageItem{startTime: time.Now(), displayName: agentDisplayName(toolCall.Name)}
+	if cfg != nil {
+		if a, ok := cfg.Agents[t.displayName]; ok {
+			t.model = a.Model
+			t.effort = a.ReasoningEffort
+		}
+	}
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
 	// For the agent tool we keep spinning until the tool call is finished.
 	t.spinningFunc = func(state SpinningState) bool {
 		return !state.HasResult() && !state.IsCanceled()
 	}
 	return t
+}
+
+// agentDisplayName resolves a delegation block's title from its tool name.
+// The built-in agent tool (agent.AgentToolName) always dispatches to the
+// fixed config.AgentTask sub-agent — AgentParams carries no field
+// identifying a specific target — so it always renders as "task". A
+// user-defined agent tool's own name already is its identity: custom_agent_tool.go
+// registers one tool per cfg.Agents entry, named after the map key, so
+// toolCall.Name is already the right display name (e.g. "developer").
+func agentDisplayName(toolName string) string {
+	if toolName == agent.AgentToolName {
+		return config.AgentTask
+	}
+	return toolName
 }
 
 // AlwaysSpaced implements list.AlwaysSpaced. A delegation is a visually
@@ -101,6 +155,18 @@ func (a *AgentToolMessageItem) SetChildSessionTokens(prompt, completion int64) {
 	}
 	a.promptTokens = prompt
 	a.completionTokens = completion
+	a.clearCache()
+	a.Bump()
+}
+
+// SetChildSessionTodos implements [ChildSessionTodoTracker]. Dedupes like
+// SetChildSessionTokens: the live-update path re-delivers the full todo
+// list on every session save, not just on real changes.
+func (a *AgentToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
+	if slices.Equal(a.todos, todos) {
+		return
+	}
+	a.todos = todos
 	a.clearCache()
 	a.Bump()
 }
@@ -209,16 +275,26 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	cappedWidth := cappedMessageWidth(width)
 	pending := opts.IsPending()
 	if pending && len(r.agent.nestedTools) == 0 {
-		header := pendingTool(sty, "Agent", opts.Anim, opts.Compact)
+		header := pendingTool(sty, r.agent.displayName, opts.Anim, opts.Compact)
 		if opts.Compact {
 			return header
+		}
+		lines := []string{header}
+		if subtitle := renderAgentSubtitle(sty, cappedWidth, r.agent.model, r.agent.effort); subtitle != "" {
+			lines = append(lines, subtitle)
 		}
 		// No child tool call has arrived yet — still show elapsed time so
 		// the very first seconds of a delegation don't read as frozen.
 		if status := renderAgentStatusLine(sty, cappedWidth, r.agent.startTime, nil, r.agent.promptTokens, r.agent.completionTokens); status != "" {
-			return lipgloss.JoinVertical(lipgloss.Left, header, status)
+			lines = append(lines, status)
 		}
-		return header
+		if todos := renderChildTodos(sty, cappedWidth, r.agent.todos); todos != "" {
+			lines = append(lines, todos)
+		}
+		if len(lines) == 1 {
+			return header
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
 	var params agent.AgentParams
@@ -229,16 +305,23 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// A finished (or canceled) top-level delegation collapses to a compact
 	// summary — the full result and nested-tool tree are only reachable by
 	// drilling into the child session (click, or alt+down), never by
-	// expanding this block inline. See ToggleExpanded above.
+	// expanding this block inline. See ToggleExpanded above. Todos are
+	// deliberately dropped here (see the todos field doc) — only the
+	// model/effort subtitle carries over, since it describes the
+	// delegation's configuration rather than its runtime progress.
 	if !pending && !opts.Compact {
-		return renderCollapsedDelegation(sty, cappedWidth, "Agent", opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens)
+		return renderCollapsedDelegation(sty, cappedWidth, r.agent.displayName, opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
 	}
 
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
-	header := toolHeader(sty, opts.Status, "Agent", cappedWidth, opts)
+	header := toolHeader(sty, opts.Status, r.agent.displayName, cappedWidth, opts)
 	if opts.Compact {
 		return header
+	}
+
+	if subtitle := renderAgentSubtitle(sty, cappedWidth, r.agent.model, r.agent.effort); subtitle != "" {
+		header = lipgloss.JoinVertical(lipgloss.Left, header, subtitle)
 	}
 
 	// Build the task tag and prompt.
@@ -262,12 +345,16 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		),
 	)
 
-	// While still running, surface elapsed time, step count, and the most
-	// recent child tool call so a long delegation stays legible even
-	// before its nested-tool tree grows tall enough to scroll off screen.
+	// While still running, surface elapsed time, step count, the most
+	// recent child tool call, and the child session's todo list so a long
+	// delegation stays legible even before its nested-tool tree grows tall
+	// enough to scroll off screen.
 	if pending {
 		if status := renderAgentStatusLine(sty, cappedWidth, r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens); status != "" {
 			header = lipgloss.JoinVertical(lipgloss.Left, header, status)
+		}
+		if todos := renderChildTodos(sty, cappedWidth, r.agent.todos); todos != "" {
+			header = lipgloss.JoinVertical(lipgloss.Left, header, todos)
 		}
 	}
 
@@ -314,9 +401,14 @@ type AgenticFetchToolMessageItem struct {
 	nestedTools []ToolMessageItem
 
 	// See [AgentToolMessageItem] for the rationale behind these fields.
+	// agenticFetchDisplayName is fixed — unlike the agent tool,
+	// agentic_fetch has no cfg.Agents entry to name or configure a
+	// model/effort override for, so there's no displayName/model/effort
+	// trio here.
 	startTime        time.Time
 	promptTokens     int64
 	completionTokens int64
+	todos            []session.Todo
 	duration         time.Duration
 }
 
@@ -324,7 +416,15 @@ var (
 	_ ToolMessageItem          = (*AgenticFetchToolMessageItem)(nil)
 	_ NestedToolContainer      = (*AgenticFetchToolMessageItem)(nil)
 	_ ChildSessionTokenTracker = (*AgenticFetchToolMessageItem)(nil)
+	_ ChildSessionTodoTracker  = (*AgenticFetchToolMessageItem)(nil)
 )
+
+// agenticFetchDisplayName is the delegation block's title for the
+// agentic_fetch tool — shorter than the tool's own prettified name
+// ("Agentic Fetch", used elsewhere e.g. in clipboard copy) to match the
+// other delegation blocks' lowercase, single-word titles ("task",
+// "developer").
+const agenticFetchDisplayName = "fetch"
 
 // NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].
 func NewAgenticFetchToolMessageItem(
@@ -356,6 +456,17 @@ func (a *AgenticFetchToolMessageItem) SetChildSessionTokens(prompt, completion i
 	}
 	a.promptTokens = prompt
 	a.completionTokens = completion
+	a.clearCache()
+	a.Bump()
+}
+
+// SetChildSessionTodos implements [ChildSessionTodoTracker]. See
+// [AgentToolMessageItem.SetChildSessionTodos] for the dedupe rationale.
+func (a *AgenticFetchToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
+	if slices.Equal(a.todos, todos) {
+		return
+	}
+	a.todos = todos
 	a.clearCache()
 	a.Bump()
 }
@@ -447,14 +558,21 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	cappedWidth := cappedMessageWidth(width)
 	pending := opts.IsPending()
 	if pending && len(r.fetch.nestedTools) == 0 {
-		header := pendingTool(sty, "Agentic Fetch", opts.Anim, opts.Compact)
+		header := pendingTool(sty, agenticFetchDisplayName, opts.Anim, opts.Compact)
 		if opts.Compact {
 			return header
 		}
+		lines := []string{header}
 		if status := renderAgentStatusLine(sty, cappedWidth, r.fetch.startTime, nil, r.fetch.promptTokens, r.fetch.completionTokens); status != "" {
-			return lipgloss.JoinVertical(lipgloss.Left, header, status)
+			lines = append(lines, status)
 		}
-		return header
+		if todos := renderChildTodos(sty, cappedWidth, r.fetch.todos); todos != "" {
+			lines = append(lines, todos)
+		}
+		if len(lines) == 1 {
+			return header
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
 	var params agenticFetchParams
@@ -470,7 +588,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		if headerParam == "" {
 			headerParam = prompt
 		}
-		return renderCollapsedDelegation(sty, cappedWidth, "Agentic Fetch", opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens)
+		return renderCollapsedDelegation(sty, cappedWidth, agenticFetchDisplayName, opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens, "", "")
 	}
 
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
@@ -481,7 +599,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		toolParams = append(toolParams, params.URL)
 	}
 
-	header := toolHeader(sty, opts.Status, "Agentic Fetch", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, agenticFetchDisplayName, cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -507,11 +625,15 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		),
 	)
 
-	// While still running, surface elapsed time, step count, and the most
-	// recent child tool call — see the "Agent" tool's RenderTool above.
+	// While still running, surface elapsed time, step count, the most
+	// recent child tool call, and the child session's todo list — see the
+	// "Agent" tool's RenderTool above.
 	if pending {
 		if status := renderAgentStatusLine(sty, cappedWidth, r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens); status != "" {
 			header = lipgloss.JoinVertical(lipgloss.Left, header, status)
+		}
+		if todos := renderChildTodos(sty, cappedWidth, r.fetch.todos); todos != "" {
+			header = lipgloss.JoinVertical(lipgloss.Left, header, todos)
 		}
 	}
 
@@ -588,9 +710,11 @@ func visibleNestedTools(sty *styles.Styles, width int, nested []ToolMessageItem)
 
 // renderCollapsedDelegation renders a finished (or canceled) delegation as
 // a compact block: a header line (status icon, tool name, first line of
-// the prompt/URL), an outcome line (step count, duration when known, token
-// usage), and — only when the delegation produced output — one line
-// previewing the start of the result.
+// the prompt/URL), an optional model/effort subtitle, an outcome line
+// (step count, duration when known, token usage), and — only when the
+// delegation produced output — one line previewing the start of the
+// result. model/effort are "" for agentic_fetch, which has no per-agent
+// config to report.
 func renderCollapsedDelegation(
 	sty *styles.Styles,
 	width int,
@@ -600,8 +724,13 @@ func renderCollapsedDelegation(
 	nestedTools []ToolMessageItem,
 	duration time.Duration,
 	promptTokens, completionTokens int64,
+	model, effort string,
 ) string {
 	lines := []string{toolHeader(sty, opts.Status, name, width, opts, firstLine(headerParam))}
+
+	if subtitle := renderAgentSubtitle(sty, width, model, effort); subtitle != "" {
+		lines = append(lines, subtitle)
+	}
 
 	if line := renderDelegationOutcomeLine(sty, width, opts.Status, len(nestedTools), duration, promptTokens, completionTokens); line != "" {
 		lines = append(lines, line)
@@ -712,6 +841,104 @@ func formatTokenCount(n int64) string {
 		return fmt.Sprintf("%d", n)
 	}
 	return fmt.Sprintf("%.1fk", float64(n)/1000)
+}
+
+// -----------------------------------------------------------------------------
+// Model/effort subtitle
+// -----------------------------------------------------------------------------
+//
+// A delegation configured with config.Agent.Model or ReasoningEffort runs on
+// a different model/effort than the conversation it's called from — worth
+// calling out, since otherwise nothing in the block distinguishes "this
+// sub-agent thinks with a cheaper/different model" from the common case of
+// just inheriting the app's default. An agent with neither field set is
+// exactly that common case, so renderAgentSubtitle renders nothing rather
+// than a subtitle that just repeats the parent's own model.
+
+// renderAgentSubtitle renders the delegation's configured model/effort
+// override, e.g. "qwen36-local/Qwen3-Coder-Next · effort high". Returns ""
+// when both are unset (inherits the app's defaults) or width leaves no
+// room. If the full "provider/model-id" string doesn't fit, it retries
+// with just the model id (the part after the last "/").
+func renderAgentSubtitle(sty *styles.Styles, width int, model, effort string) string {
+	if width <= 0 || (model == "" && effort == "") {
+		return ""
+	}
+	var parts []string
+	if model != "" {
+		parts = append(parts, model)
+	}
+	if effort != "" {
+		parts = append(parts, "effort "+effort)
+	}
+	line := strings.Join(parts, " · ")
+	if model != "" && ansi.StringWidth(line) > width {
+		if i := strings.LastIndex(model, "/"); i >= 0 {
+			parts[0] = model[i+1:]
+			line = strings.Join(parts, " · ")
+		}
+	}
+	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(line, width, "…"))
+}
+
+// -----------------------------------------------------------------------------
+// Child session todo pane
+// -----------------------------------------------------------------------------
+//
+// A running delegation's todo list is the clearest signal of what it's
+// actually doing, beyond "some tool ran recently" (renderAgentStatusLine)
+// — so it's surfaced directly under the status line. Only shown while
+// running: a finished delegation collapses to a summary (see
+// renderCollapsedDelegation / AgentToolMessageItem.ToggleExpanded) and its
+// todos, like its nested-tool tree, are only reachable by drilling into the
+// child session.
+
+// maxDelegationTodoLines caps how many todo lines the compact per-
+// delegation pane renders — mirrors maxVisibleNestedTools's rationale for
+// the nested-tool tree.
+const maxDelegationTodoLines = 5
+
+// renderChildTodos renders a running child session's todo list, capped to
+// maxDelegationTodoLines lines via capTodosForDelegation. Returns "" for an
+// empty list or non-positive width.
+func renderChildTodos(sty *styles.Styles, width int, todos []session.Todo) string {
+	if width <= 0 || len(todos) == 0 {
+		return ""
+	}
+	return FormatTodosList(sty, capTodosForDelegation(todos, maxDelegationTodoLines), styles.ArrowRightIcon, width)
+}
+
+// capTodosForDelegation trims todos to at most maxLines entries, keeping
+// every in-progress item (there's normally just one — highlighted by
+// FormatTodosList) plus the earliest pending items: that's what a glance at
+// a running delegation wants to see next. Completed items are dropped
+// first since they're already done and least useful to a user checking in
+// on progress.
+func capTodosForDelegation(todos []session.Todo, maxLines int) []session.Todo {
+	if len(todos) <= maxLines {
+		return todos
+	}
+	var inProgress, pending, completed []session.Todo
+	for _, t := range todos {
+		switch t.Status {
+		case session.TodoStatusInProgress:
+			inProgress = append(inProgress, t)
+		case session.TodoStatusCompleted:
+			completed = append(completed, t)
+		default:
+			pending = append(pending, t)
+		}
+	}
+	out := append([]session.Todo{}, inProgress...)
+	for _, groups := range [][]session.Todo{pending, completed} {
+		for _, t := range groups {
+			if len(out) >= maxLines {
+				return out
+			}
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // lastToolSummary describes a single child tool call as "name key-arg" for

@@ -279,7 +279,7 @@ func TestAgentToolMessageItem_NestedToolMutatorsBumpVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false)
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
 	mkChild := func(id string) ToolMessageItem {
 		tc := message.ToolCall{ID: id, Name: "bash", Input: `{}`, Finished: false}
@@ -354,7 +354,7 @@ func TestAgentToolMessageItem_NestedChildInPlaceMutationBumpsParent(t *testing.T
 
 	sty := styles.CharmtonePantera()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false)
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
 	childTC := message.ToolCall{ID: "c1", Name: "bash", Input: `{}`, Finished: false}
 	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, nil)
@@ -472,7 +472,7 @@ func TestAgentToolMessageItem_AnimateBumpsVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	parentTC := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
-	parent := NewAgentToolMessageItem(&sty, parentTC, nil, false)
+	parent := NewAgentToolMessageItem(&sty, parentTC, nil, false, nil)
 
 	childTC := message.ToolCall{ID: "agent-child", Name: "bash", Input: `{}`, Finished: false}
 	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, nil)

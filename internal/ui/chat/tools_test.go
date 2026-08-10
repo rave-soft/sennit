@@ -3,6 +3,7 @@ package chat
 import (
 	"testing"
 
+	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
@@ -10,11 +11,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// toolsHandledOutsideFactoryMap lists built-in tools with a dedicated
+// renderer that NewToolMessageItem special-cases before consulting
+// toolMessageItemFactories, instead of registering a map entry — because
+// their constructor needs an argument (cfg, to resolve a delegation's
+// display name and model/effort override) that toolMessageItemFactory's
+// signature has no room for. See the map's comment on agent.AgentToolName.
+var toolsHandledOutsideFactoryMap = []string{
+	agent.AgentToolName,
+}
+
 // toolsWithoutDedicatedRenderer lists the built-in tools (from
 // config.AllToolNames, the actual source of truth for what tools exist)
 // that intentionally have no entry in toolMessageItemFactories and fall
-// back to the generic renderer. Anything not on this list must have a
-// dedicated factory.
+// back to the generic renderer. Anything not on this list (and not in
+// toolsHandledOutsideFactoryMap) must have a dedicated factory.
 var toolsWithoutDedicatedRenderer = []string{
 	tools.BraidInfoToolName,
 	tools.BraidLogsToolName,
@@ -46,8 +57,17 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	for _, name := range toolsWithoutDedicatedRenderer {
 		noRenderer[name] = true
 	}
+	specialCased := make(map[string]bool, len(toolsHandledOutsideFactoryMap))
+	for _, name := range toolsHandledOutsideFactoryMap {
+		specialCased[name] = true
+	}
 
 	for _, name := range config.AllToolNames() {
+		if specialCased[name] {
+			require.NotContainsf(t, toolMessageItemFactories, name,
+				"tool %q is listed in toolsHandledOutsideFactoryMap but also has a map entry; the map entry is unreachable dead code, remove one or the other", name)
+			continue
+		}
 		if noRenderer[name] {
 			require.NotContainsf(t, toolMessageItemFactories, name,
 				"tool %q is listed as having no dedicated renderer, but one is registered; remove it from toolsWithoutDedicatedRenderer", name)
@@ -56,6 +76,16 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 		require.Containsf(t, toolMessageItemFactories, name,
 			"tool %q has no registered factory and will fall back to the generic renderer", name)
 	}
+
+	// toolsHandledOutsideFactoryMap's whole premise is that
+	// NewToolMessageItem special-cases these tools before the map lookup —
+	// verify that dispatch actually happens, not just that the map omits
+	// them (which noRenderer-listed tools also do, for the opposite
+	// reason).
+	sty := styles.CharmtonePantera()
+	item := NewToolMessageItem(&sty, "msg", message.ToolCall{ID: "tc-agent", Name: agent.AgentToolName, Input: "{}"}, nil, false, nil)
+	require.IsType(t, &AgentToolMessageItem{}, item,
+		"the built-in agent tool must dispatch to AgentToolMessageItem, not fall back to the generic renderer")
 
 	// Every registered factory must correspond to a real, known tool —
 	// this catches dead renderer registrations for tools that no longer
