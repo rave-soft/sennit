@@ -40,6 +40,10 @@ func (s *Status) SetInfoMsg(msg util.InfoMsg) {
 	s.msg = msg
 }
 
+// InfoMsg returns the current status info message (for tests and callers
+// that need to inspect what's currently shown).
+func (s *Status) InfoMsg() util.InfoMsg { return s.msg }
+
 // ClearInfoMsg clears the status info message.
 func (s *Status) ClearInfoMsg() {
 	s.msg = util.InfoMsg{}

@@ -203,6 +203,57 @@ func TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {
 	})
 }
 
+// TestAgentToolRenderCapsNestedTools covers the display density cap: a
+// delegation with more than maxVisibleNestedTools child tool calls must
+// only render the last few, with a summary line accounting for the rest,
+// while the underlying nestedTools slice itself stays intact.
+func TestAgentToolRenderCapsNestedTools(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
+	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "done"}
+	item := NewAgentToolMessageItem(&sty, parent, result, false)
+
+	for i := 1; i <= 6; i++ {
+		id := "tool-" + string(rune('0'+i))
+		item.AddNestedTool(mkNestedToolCall(t, &sty, id, "bash", `{"command":"echo `+id+`"}`))
+	}
+	require.Len(t, item.NestedTools(), 6, "capping display must not truncate the underlying slice")
+
+	out := ansi.Strip(item.Render(120))
+
+	require.Contains(t, out, "+3 earlier steps")
+	for i := 4; i <= 6; i++ {
+		id := "echo tool-" + string(rune('0'+i))
+		require.Contains(t, out, id, "last 3 nested tools must be rendered")
+	}
+	for i := 1; i <= 3; i++ {
+		id := "echo tool-" + string(rune('0'+i))
+		require.NotContains(t, out, id, "dropped earlier nested tools must not be rendered")
+	}
+}
+
+// TestAgentToolRenderNoCapBelowThreshold is the regression guard for the
+// cap: with maxVisibleNestedTools or fewer nested tools, no "+N earlier"
+// summary line should appear at all (e.g. never "+0 earlier steps").
+func TestAgentToolRenderNoCapBelowThreshold(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
+	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "done"}
+	item := NewAgentToolMessageItem(&sty, parent, result, false)
+
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-1", "bash", `{"command":"echo tool-1"}`))
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-2", "bash", `{"command":"echo tool-2"}`))
+
+	out := ansi.Strip(item.Render(120))
+	require.NotContains(t, out, "earlier steps")
+	require.Contains(t, out, "echo tool-1")
+	require.Contains(t, out, "echo tool-2")
+}
+
 // TestAgenticFetchToolMessageItem_SetChildSessionTokensBumpsVersion is
 // the agentic-fetch counterpart of the token-update bump test above.
 func TestAgenticFetchToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {

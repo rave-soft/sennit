@@ -222,7 +222,11 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.agent.nestedTools {
+	leading, shown := visibleNestedTools(sty, remainingWidth, r.agent.nestedTools)
+	if leading != "" {
+		childTools.Child(leading)
+	}
+	for _, nestedTool := range shown {
 		childView := nestedTool.Render(remainingWidth)
 		childTools.Child(childView)
 	}
@@ -424,7 +428,11 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	// Build tree with nested tool calls.
 	childTools := tree.Root(header)
 
-	for _, nestedTool := range r.fetch.nestedTools {
+	leading, shown := visibleNestedTools(sty, remainingWidth, r.fetch.nestedTools)
+	if leading != "" {
+		childTools.Child(leading)
+	}
+	for _, nestedTool := range shown {
 		childView := nestedTool.Render(remainingWidth)
 		childTools.Child(childView)
 	}
@@ -447,6 +455,31 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	}
 
 	return result
+}
+
+// maxVisibleNestedTools caps how many nested tool calls a delegation
+// renders inline. A long-running agent/agentic_fetch can accumulate
+// dozens of child tool calls; rendering all of them makes the tree grow
+// unboundedly tall, so only the most recent ones are shown.
+const maxVisibleNestedTools = 3
+
+// visibleNestedTools trims nested to the last maxVisibleNestedTools
+// entries for display. When entries are dropped, leading is a single
+// "…+N earlier steps" summary line (styled and width-truncated like
+// renderAgentStatusLine's status note) meant to be added as the first
+// child before shown; it's "" when nothing was dropped. The underlying
+// nested slice is never modified — this only affects what gets rendered.
+func visibleNestedTools(sty *styles.Styles, width int, nested []ToolMessageItem) (leading string, shown []ToolMessageItem) {
+	if len(nested) <= maxVisibleNestedTools {
+		return "", nested
+	}
+	dropped := len(nested) - maxVisibleNestedTools
+	note := fmt.Sprintf("…+%d earlier steps", dropped)
+	if width > 0 {
+		note = ansi.Truncate(note, width, "…")
+	}
+	leading = sty.Tool.TodoStatusNote.Render(note)
+	return leading, nested[len(nested)-maxVisibleNestedTools:]
 }
 
 // -----------------------------------------------------------------------------

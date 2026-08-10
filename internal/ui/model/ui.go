@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -238,6 +239,12 @@ type UI struct {
 
 	// Chat components
 	chat *Chat
+
+	// navStack tracks sub-agent session navigation: each frame records
+	// where alt+up should return to and the sibling delegations
+	// alt+left/alt+right can cycle through, without re-scanning the
+	// (possibly no-longer-loaded) parent chat. See enterChildSession.
+	navStack []sessionNavFrame
 
 	// onboarding state
 	onboarding struct {
@@ -958,8 +965,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
 	case DelayedClickMsg:
-		// Handle delayed single-click action (e.g., expansion).
-		m.chat.HandleDelayedClick(msg)
+		// Handle delayed single-click action (e.g., expansion, or
+		// navigating into a clicked child-session delegation).
+		if _, openContainer := m.chat.HandleDelayedClick(msg); openContainer {
+			if messageID, toolCallID, ok := m.chat.SelectedNestedToolContainer(); ok {
+				cmds = append(cmds, m.enterChildSession(messageID, toolCallID))
+			}
+		}
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
@@ -1333,7 +1345,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusMain:
 	case uiFocusEditor:
 		// Textarea placeholder logic
-		if m.editor.bangMode {
+		if m.viewingChildSession() {
+			m.editor.textarea.Placeholder = "viewing subagent session · alt+up to return"
+		} else if m.editor.bangMode {
 			m.editor.textarea.Placeholder = "Run a shell command"
 		} else if m.isAgentBusy() {
 			m.editor.textarea.Placeholder = m.workingPlaceholder
@@ -1612,7 +1626,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		m.editor.textarea.Blur()
 		m.chat.Blur()
 		return nil
-	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
+	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor) && !m.viewingChildSession():
 		m.focus = uiFocusEditor
 		if m.activeInline != nil {
 			m.activeInline.SetFocused(true)
@@ -1705,6 +1719,183 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	return tea.Sequence(cmds...)
+}
+
+// childSessionRef identifies a sub-agent delegation (agent / agentic_fetch
+// tool call) that can be entered as its own child session, via
+// workspace.Workspace.CreateAgentToolSessionID(messageID, toolCallID).
+type childSessionRef struct {
+	messageID  string
+	toolCallID string
+}
+
+// sessionNavFrame is one level of the sub-agent session-navigation stack
+// (m.navStack): where alt+up should return to, and the sibling
+// delegations in that parent chat that alt+left/alt+right cycle through.
+type sessionNavFrame struct {
+	parentSessionID string
+	// parentTitle is the parent session's title, captured at
+	// enterChildSession time. m.session is repointed to the child as soon
+	// as navigation starts, so this is the only cheap way to recover the
+	// parent's title later (e.g. for the breadcrumb) without extra IO.
+	parentTitle  string
+	siblings     []childSessionRef
+	siblingIndex int
+}
+
+// viewingChildSession reports whether the UI is currently navigated into a
+// sub-agent's session (i.e. the nav stack is non-empty). Used to make child
+// sessions read-only and to keep the editor from stealing focus while one
+// is being viewed.
+func (m *UI) viewingChildSession() bool {
+	return len(m.navStack) > 0
+}
+
+// childSessionSiblingCount returns the number of sibling delegations in the
+// top nav-stack frame, i.e. how many sub-agents alt+left/alt+right can cycle
+// through. Zero when not viewing a child session.
+func (m *UI) childSessionSiblingCount() int {
+	if len(m.navStack) == 0 {
+		return 0
+	}
+	return len(m.navStack[len(m.navStack)-1].siblings)
+}
+
+// childSessionBreadcrumbMaxLen is the approximate max length of the prompt
+// snippet shown in the child-session breadcrumb before it's truncated.
+const childSessionBreadcrumbMaxLen = 40
+
+// childSessionLabel builds a short label for a nested-tool-container item
+// (agent / agentic_fetch delegation), taken from the first line of its
+// running prompt. Falls back to "subagent" if the item's input can't be
+// parsed or carries no prompt.
+func childSessionLabel(item chat.ToolMessageItem) string {
+	var p struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal([]byte(item.ToolCall().Input), &p); err != nil {
+		return "subagent"
+	}
+	prompt := strings.TrimSpace(p.Prompt)
+	if prompt == "" {
+		return "subagent"
+	}
+	if i := strings.IndexByte(prompt, '\n'); i >= 0 {
+		prompt = prompt[:i]
+	}
+	if r := []rune(prompt); len(r) > childSessionBreadcrumbMaxLen {
+		prompt = string(r[:childSessionBreadcrumbMaxLen]) + "…"
+	}
+	return prompt
+}
+
+// childSessionBreadcrumb formats the status-bar breadcrumb shown while
+// viewing a child session: "<parentTitle> › <label>" plus a "(N/M)" sibling
+// counter when there's more than one sibling delegation to cycle through.
+func childSessionBreadcrumb(parentTitle, label string, siblingIndex, siblingCount int) string {
+	breadcrumb := parentTitle + " › " + label
+	if siblingCount > 1 {
+		breadcrumb += fmt.Sprintf(" (%d/%d)", siblingIndex+1, siblingCount)
+	}
+	return breadcrumb + " · alt+up to return"
+}
+
+// enterChildSession pushes a navigation frame for the currently loaded
+// session and returns a tea.Cmd that loads the child (sub-agent) session
+// identified by messageID/toolCallID. The sibling list is built from the
+// nested-tool-container items already loaded in the chat, so cycling with
+// alt+left/alt+right doesn't require re-fetching the parent.
+//
+// Restoring the parent's exact scroll position on the way back is
+// deliberately not attempted — loadSession's normal load path already
+// leaves a freshly loaded session in a reasonable default scroll state,
+// and reconstructing the old viewport would be fragile and not worth the
+// complexity for this step.
+func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
+	childID := m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID)
+
+	// m.session still refers to the parent here — loadSession is async and
+	// doesn't repoint it synchronously — so this is the last cheap chance
+	// to capture the parent's title for the breadcrumb.
+	parentTitle := m.session.Title
+
+	siblings := m.chat.NestedToolContainerRefs()
+	siblingIndex := 0
+	for i, s := range siblings {
+		if s.messageID == messageID && s.toolCallID == toolCallID {
+			siblingIndex = i
+			break
+		}
+	}
+
+	m.navStack = append(m.navStack, sessionNavFrame{
+		parentSessionID: m.session.ID,
+		parentTitle:     parentTitle,
+		siblings:        siblings,
+		siblingIndex:    siblingIndex,
+	})
+
+	// Child sessions are read-only: keep focus/keys on the chat list and
+	// don't let the editor hold focus while viewing one.
+	m.focus = uiFocusMain
+	m.editor.textarea.Blur()
+
+	label := "subagent"
+	if item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem); ok {
+		label = childSessionLabel(item)
+	}
+	breadcrumb := childSessionBreadcrumb(parentTitle, label, siblingIndex, len(siblings))
+	m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: breadcrumb})
+
+	return m.loadSession(childID)
+}
+
+// exitChildSession pops the top navigation frame and returns a tea.Cmd
+// that loads the session it points back to. No-op if the stack is empty
+// (e.g. alt+up pressed on a top-level session).
+func (m *UI) exitChildSession() tea.Cmd {
+	if len(m.navStack) == 0 {
+		return nil
+	}
+	frame := m.navStack[len(m.navStack)-1]
+	m.navStack = m.navStack[:len(m.navStack)-1]
+	if len(m.navStack) == 0 {
+		m.status.ClearInfoMsg()
+	}
+	return m.loadSession(frame.parentSessionID)
+}
+
+// cycleChildSession moves the sibling index of the current navigation
+// frame by delta (wrapping) and returns a tea.Cmd that loads the newly
+// selected sibling's child session. It updates the existing top frame in
+// place rather than pushing a new one — the delegations are still
+// siblings under the same parent. No-op if there's no active frame or
+// fewer than two siblings to cycle through.
+func (m *UI) cycleChildSession(delta int) tea.Cmd {
+	if len(m.navStack) == 0 {
+		return nil
+	}
+	frame := &m.navStack[len(m.navStack)-1]
+	n := len(frame.siblings)
+	if n < 2 {
+		return nil
+	}
+	frame.siblingIndex = ((frame.siblingIndex+delta)%n + n) % n
+	sibling := frame.siblings[frame.siblingIndex]
+
+	// The sibling's own tool-call item generally isn't in m.chat here —
+	// m.chat currently holds the child session we're navigating away from,
+	// not the parent — so this lookup routinely misses and falls back to
+	// the generic "subagent" label. frame.parentTitle was captured at
+	// enterChildSession time and doesn't have that problem.
+	label := "subagent"
+	if item, ok := m.chat.MessageItem(sibling.toolCallID).(chat.ToolMessageItem); ok {
+		label = childSessionLabel(item)
+	}
+	breadcrumb := childSessionBreadcrumb(frame.parentTitle, label, frame.siblingIndex, n)
+	m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: breadcrumb})
+
+	return m.loadSession(m.com.Workspace.CreateAgentToolSessionID(sibling.messageID, sibling.toolCallID))
 }
 
 // findNestedToolContainer looks up the top-level tool item in the chat
@@ -2676,7 +2867,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case uiFocusMain:
 			switch {
-			case key.Matches(msg, m.keyMap.Tab):
+			case key.Matches(msg, m.keyMap.Tab) && !m.viewingChildSession():
 				m.focus = uiFocusEditor
 				m.sidebar.hideScrollbar()
 				cmds = append(cmds, m.editor.textarea.Focus())
@@ -2705,6 +2896,24 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
+			case key.Matches(msg, m.keyMap.Chat.EnterChildSession) && m.state == uiChat && m.hasSession():
+				if messageID, toolCallID, ok := m.chat.SelectedNestedToolContainer(); ok {
+					if cmd := m.enterChildSession(messageID, toolCallID); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+			case key.Matches(msg, m.keyMap.Chat.ExitChildSession) && m.state == uiChat && m.hasSession():
+				if cmd := m.exitChildSession(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case key.Matches(msg, m.keyMap.Chat.PrevChildSession) && m.state == uiChat && m.hasSession():
+				if cmd := m.cycleChildSession(-1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case key.Matches(msg, m.keyMap.Chat.NextChildSession) && m.state == uiChat && m.hasSession():
+				if cmd := m.cycleChildSession(1); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Chat.Up):
 				if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -3056,6 +3265,15 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds = append(binds, cancelBinding)
 		}
 
+		// Show child-session navigation regardless of focus: the point is
+		// discoverability of how to get back to the parent.
+		if m.viewingChildSession() {
+			binds = append(binds, k.Chat.ExitChildSession)
+			if m.childSessionSiblingCount() > 1 {
+				binds = append(binds, k.Chat.PrevChildSession, k.Chat.NextChildSession)
+			}
+		}
+
 		switch m.focus {
 		case uiFocusEditor:
 			tab.SetHelp("tab", "focus chat")
@@ -3091,6 +3309,9 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.PageDown,
 				k.Chat.Copy,
 			)
+			if _, _, ok := m.chat.SelectedNestedToolContainer(); ok {
+				binds = append(binds, k.Chat.EnterChildSession)
+			}
 			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.wsCache.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
 			}
@@ -3175,6 +3396,16 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 		binds = append(binds, mainBinds)
 
+		// Show child-session navigation regardless of focus: the point is
+		// discoverability of how to get back to the parent.
+		if m.viewingChildSession() {
+			childBinds := []key.Binding{k.Chat.ExitChildSession}
+			if m.childSessionSiblingCount() > 1 {
+				childBinds = append(childBinds, k.Chat.PrevChildSession, k.Chat.NextChildSession)
+			}
+			binds = append(binds, childBinds)
+		}
+
 		switch m.focus {
 		case uiFocusEditor:
 			editorBinds := []key.Binding{
@@ -3231,6 +3462,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.ClearHighlight,
 				},
 			)
+			if _, _, ok := m.chat.SelectedNestedToolContainer(); ok {
+				binds = append(binds, []key.Binding{k.Chat.EnterChildSession})
+			}
 			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.wsCache.promptQueue > 0 {
 				binds = append(binds, []key.Binding{k.Chat.PillLeft})
 			}
@@ -3932,6 +4166,9 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
+	if m.viewingChildSession() {
+		return util.ReportWarn("viewing subagent session · alt+up to return")
+	}
 	if err := m.com.Workspace.AgentReadyErr(); err != nil {
 		return util.ReportError(err)
 	}

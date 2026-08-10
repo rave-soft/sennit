@@ -50,6 +50,12 @@ type KeyMap struct {
 		ScrollRight    key.Binding
 		FocusSidebar   key.Binding
 		FocusChat      key.Binding
+
+		// Sub-agent session navigation.
+		EnterChildSession key.Binding
+		ExitChildSession  key.Binding
+		PrevChildSession  key.Binding
+		NextChildSession  key.Binding
 	}
 
 	Initialize struct {
@@ -270,6 +276,23 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("h", "left"),
 		key.WithHelp("h/←", "focus chat"),
 	)
+	km.Chat.EnterChildSession = key.NewBinding(
+		key.WithKeys("alt+down"),
+		key.WithHelp("alt+↓", "enter subagent"),
+	)
+	km.Chat.ExitChildSession = key.NewBinding(
+		key.WithKeys("alt+up"),
+		key.WithHelp("alt+↑", "exit subagent"),
+	)
+	km.Chat.PrevChildSession = key.NewBinding(
+		key.WithKeys("alt+left"),
+		key.WithHelp("alt+←", "prev subagent"),
+	)
+	km.Chat.NextChildSession = key.NewBinding(
+		key.WithKeys("alt+right"),
+		key.WithHelp("alt+→", "next subagent"),
+	)
+
 	km.Initialize.Yes = key.NewBinding(
 		key.WithKeys("y", "Y"),
 		key.WithHelp("y", "yes"),

@@ -811,6 +811,42 @@ func (m *Chat) ToggleExpandedSelectedItem() {
 	}
 }
 
+// SelectedNestedToolContainer returns the message ID and tool-call ID of
+// the currently selected chat item, if it's a nested-tool container
+// (agent / agentic_fetch delegation) — used by alt+down to start
+// child-session navigation. ok is false for any other selection.
+func (m *Chat) SelectedNestedToolContainer() (messageID, toolCallID string, ok bool) {
+	item := m.list.SelectedItem()
+	toolItem, isTool := item.(chat.ToolMessageItem)
+	if !isTool {
+		return "", "", false
+	}
+	if _, isContainer := item.(chat.NestedToolContainer); !isContainer {
+		return "", "", false
+	}
+	return toolItem.MessageID(), toolItem.ToolCall().ID, true
+}
+
+// NestedToolContainerRefs returns, in list order, the message ID and
+// tool-call ID of every top-level chat item that is a nested-tool
+// container (agent / agentic_fetch delegation). Used to build the
+// sibling list for alt+left/alt+right session-navigation cycling.
+func (m *Chat) NestedToolContainerRefs() []childSessionRef {
+	refs := make([]childSessionRef, 0)
+	for i := range m.list.Len() {
+		item := m.list.ItemAt(i)
+		toolItem, isTool := item.(chat.ToolMessageItem)
+		if !isTool {
+			continue
+		}
+		if _, isContainer := item.(chat.NestedToolContainer); !isContainer {
+			continue
+		}
+		refs = append(refs, childSessionRef{messageID: toolItem.MessageID(), toolCallID: toolItem.ToolCall().ID})
+	}
+	return refs
+}
+
 // IsSelectedShellItem returns true if the currently selected item is a
 // ShellItem (bang-mode result).
 func (m *Chat) IsSelectedShellItem() bool {
@@ -908,43 +944,53 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 	return true, cmd
 }
 
-// HandleDelayedClick handles a delayed single-click action (like expansion).
-// It only executes if the click ID matches (i.e., no double-click occurred)
-// and no text selection was made (drag to select).
-func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
+// HandleDelayedClick handles a delayed single-click action (like expansion
+// or entering a child session). It only executes if the click ID matches
+// (i.e., no double-click occurred) and no text selection was made (drag to
+// select). openContainer is true when the click landed on a nested-tool
+// container (agent / agentic_fetch delegation) — callers should navigate
+// into the child session instead of toggling expansion.
+func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (handled bool, openContainer bool) {
 	// Ignore if this click was superseded by a newer click (double/triple).
 	if msg.ClickID != m.pendingClickID {
-		return false
+		return false, false
 	}
 
 	// Don't expand if user dragged to select text.
 	if m.HasHighlight() {
-		return false
+		return false, false
 	}
 
 	// Execute the click action (e.g., expansion).
 	selectedItem := m.list.SelectedItem()
 	if clickable, ok := selectedItem.(list.MouseClickable); ok {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
+		if !handled {
+			return false, false
+		}
+		// A click on a nested-tool container navigates into the child
+		// session rather than expanding — skip the Expandable branch
+		// entirely.
+		if _, isContainer := selectedItem.(chat.NestedToolContainer); isContainer {
+			return true, true
+		}
 		// Toggle expansion only when the item signalled it handled the
 		// click. Items like AssistantMessageItem only report handled when
 		// the click is on their expandable region, so this avoids
 		// toggling expansion for clicks outside the clickable area.
-		if handled {
-			if expandable, ok := selectedItem.(chat.Expandable); ok {
-				wasFollowing := m.follow
-				if !expandable.ToggleExpanded() {
-					m.ScrollToIndex(m.list.Selected())
-				}
-				if wasFollowing {
-					m.ScrollToBottom()
-				}
+		if expandable, ok := selectedItem.(chat.Expandable); ok {
+			wasFollowing := m.follow
+			if !expandable.ToggleExpanded() {
+				m.ScrollToIndex(m.list.Selected())
+			}
+			if wasFollowing {
+				m.ScrollToBottom()
 			}
 		}
-		return handled
+		return true, false
 	}
 
-	return false
+	return false, false
 }
 
 // HandleMouseUp handles mouse up events for the chat component.
