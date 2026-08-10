@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -80,15 +79,6 @@ const (
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
 )
-
-type contentTooLargeError struct {
-	Size int
-	Max  int
-}
-
-func (e contentTooLargeError) Error() string {
-	return fmt.Sprintf("content section is too large (%d bytes). Maximum size is %d bytes", e.Size, e.Max)
-}
 
 func NewViewTool(
 	lspManager *lsp.Manager,
@@ -225,11 +215,6 @@ func NewViewTool(
 			}
 			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit, maxContentSize)
 			if err != nil {
-				var tooLarge contentTooLargeError
-				if errors.As(err, &tooLarge) {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
-						tooLarge.Size, tooLarge.Max)), nil
-				}
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
 			if !utf8.ValidString(content) {
@@ -335,7 +320,10 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 			projectedSize++
 		}
 		if maxContentSize > 0 && projectedSize > maxContentSize {
-			return "", false, contentTooLargeError{Size: projectedSize, Max: maxContentSize}
+			// Stop at the size cap instead of failing the whole read:
+			// everything gathered so far is returned, and hasMore=true
+			// tells the caller to advertise offset-based continuation.
+			return strings.Join(lines, "\n"), true, nil
 		}
 		contentSize = projectedSize
 		lines = append(lines, lineText)
