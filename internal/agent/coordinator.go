@@ -120,10 +120,29 @@ type coordinator struct {
 	lifecycleCtx    context.Context
 	lifecycleCancel context.CancelFunc
 
+	// readyMu guards readyGroup.Add against Close's readyGroup.Wait:
+	// sync.WaitGroup forbids a Wait racing an Add that could hand the
+	// counter a positive value after Wait has already observed (or is
+	// about to observe) zero. Every readyGroup.Add(2) in buildAgent, and
+	// the closing flag it's conditioned on, happen under this lock; Close
+	// takes the lock only to flip closing, then calls Wait unlocked (Wait
+	// itself must not run under the lock, or a concurrent buildAgent call
+	// would deadlock on the lock instead of just skipping its Add).
+	readyMu sync.Mutex
+	closing bool
+
 	// readyGroup counts every outstanding readiness goroutine buildAgent
 	// has started (main agent and every sub-agent rebuild), regardless of
 	// which errgroup they report through. Close waits on it.
 	readyGroup sync.WaitGroup
+
+	// closeOnce/closeDone make Close idempotent: readyGroup.Wait must run
+	// at most once ever (a second concurrent Wait call is itself the
+	// "WaitGroup reused before previous Wait returned" panic, independent
+	// of the readyMu protection above), so only the first Close call
+	// starts it; every call, including the first, waits on closeDone.
+	closeOnce sync.Once
+	closeDone chan struct{}
 }
 
 // ensureLifecycle lazily creates the coordinator's lifecycle context on
@@ -143,19 +162,33 @@ func (c *coordinator) ensureLifecycle() context.Context {
 // callers wire it into App.Shutdown; tests that build a coordinator
 // directly should call it in their own teardown for the same reason.
 // Safe to call even if buildAgent was never invoked, and safe to call
-// more than once.
+// concurrently or more than once: every call waits on the same
+// closeDone, but only the first ever starts readyGroup.Wait.
 func (c *coordinator) Close(ctx context.Context) error {
 	c.ensureLifecycle()
-	c.lifecycleCancel()
 
-	done := make(chan struct{})
-	go func() {
-		c.readyGroup.Wait()
-		close(done)
-	}()
+	c.closeOnce.Do(func() {
+		c.closeDone = make(chan struct{})
+
+		// closing must be set, and observed by every future buildAgent
+		// call, before readyGroup.Wait starts: once Wait is running, no
+		// further Add is allowed, so no further readiness goroutine may
+		// start either. Cancel lifecycleCtx after releasing readyMu —
+		// it only unblocks already-running goroutines (which reduce
+		// readyGroup, not add to it), so it doesn't need the lock.
+		c.readyMu.Lock()
+		c.closing = true
+		c.readyMu.Unlock()
+		c.lifecycleCancel()
+
+		go func() {
+			c.readyGroup.Wait()
+			close(c.closeDone)
+		}()
+	})
 
 	select {
-	case <-done:
+	case <-c.closeDone:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -471,7 +504,24 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// bounded by the ctx it's given — so it can hand back control once
 	// this work has actually stopped touching the filesystem/network,
 	// rather than merely having asked it to via lifecycleCtx.
+	//
+	// The Add must happen under readyMu, gated on !closing: once Close
+	// has flipped closing and started readyGroup.Wait, an Add from here
+	// racing that Wait is exactly the "WaitGroup reused before previous
+	// Wait returned" panic — Wait can observe the counter at zero between
+	// two already-running goroutines' Done calls, at which point a new
+	// Add must not be allowed to resurrect it. When closing, the
+	// coordinator is shutting down and nothing will use this agent's
+	// system prompt/tools again, so skip the readiness work entirely
+	// rather than starting goroutines Close can never safely wait for.
+	c.readyMu.Lock()
+	if c.closing {
+		c.readyMu.Unlock()
+		return result, nil
+	}
 	c.readyGroup.Add(2)
+	c.readyMu.Unlock()
+
 	ready.Go(func() error {
 		defer c.readyGroup.Done()
 		systemPrompt, err := prompt.Build(initCtx, primary.Model.Provider(), primary.Model.Model(), c.cfg)
