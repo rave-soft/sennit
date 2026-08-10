@@ -85,3 +85,67 @@ func TestBashRenderTool_AwaitingPermissionStillShowsStatus(t *testing.T) {
 	out := item.Render(80)
 	require.Contains(t, out, "Requesting permission")
 }
+
+// TestBashRenderTool_MultilineCommandIsOneLine is the regression test for
+// a multi-line command (e.g. `python3 -c "<multi-line script>"`) breaking
+// the one-line collapsed guarantee: the embedded "\n"s must never survive
+// into the rendered header as real line breaks — the truncation ellipsis
+// must land inline, not stranded alone on a second line.
+func TestBashRenderTool_MultilineCommandIsOneLine(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	script := "import json\nwith open('/tmp/x.json') as f:\n    data = json.load(f)\nprint(data)\n"
+	input, err := json.Marshal(tools.BashParams{Command: `python3 -c "` + script + `"`})
+	require.NoError(t, err)
+	tc := message.ToolCall{ID: "tc-bash", Name: tools.BashToolName, Input: string(input), Finished: true}
+
+	for _, width := range []int{20, 40, 80, 120} {
+		item := NewBashToolMessageItem(&sty, tc, nil, false)
+		out := item.Render(width)
+		require.Equal(t, 1, strings.Count(out, "\n")+1,
+			"width %d: multi-line command must still render as one line, got: %q", width, out)
+	}
+}
+
+// TestBashRenderTool_NoMetadataNoJunkSuffix covers the "None" regression:
+// a result with no/unparsable metadata (so bashDurationSummary has nothing
+// to report) must render with no outcome suffix at all — never a
+// placeholder value like "None" standing in for missing data.
+func TestBashRenderTool_NoMetadataNoJunkSuffix(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	result := &message.ToolResult{ToolCallID: "tc-bash", Content: "some output"}
+
+	item := NewBashToolMessageItem(&sty, bashToolCall(t), result, false)
+	out := item.Render(80)
+
+	require.Equal(t, 1, strings.Count(out, "\n")+1, "expected a single rendered line, got: %q", out)
+	require.NotContains(t, out, "·", "no timing data means no outcome suffix at all")
+	require.NotContains(t, strings.ToLower(out), "none")
+}
+
+// TestBashRenderTool_BackgroundJunkDescriptionFallsBackToCommand covers a
+// model filling the optional "description" field with a literal
+// placeholder like "None" instead of leaving it empty: the background job
+// header must fall back to the command text, never display "None" as if
+// it were a real description.
+func TestBashRenderTool_BackgroundJunkDescriptionFallsBackToCommand(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	input, err := json.Marshal(tools.BashParams{Command: "long_running_script.sh", RunInBackground: true})
+	require.NoError(t, err)
+	tc := message.ToolCall{ID: "tc-bash", Name: tools.BashToolName, Input: string(input), Finished: true}
+
+	meta, err := json.Marshal(tools.BashResponseMetadata{Background: true, ShellID: "sh-1", Description: "None"})
+	require.NoError(t, err)
+	result := &message.ToolResult{ToolCallID: "tc-bash", Content: "started", Metadata: string(meta)}
+
+	item := NewBashToolMessageItem(&sty, tc, result, false)
+	out := item.Render(80)
+
+	require.Contains(t, out, "long_running_script.sh", "must fall back to the command text")
+	require.NotContains(t, strings.ToLower(out), "none")
+}

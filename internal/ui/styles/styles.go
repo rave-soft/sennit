@@ -202,17 +202,17 @@ type Styles struct {
 	WorkingTimerColor    color.Color // Elapsed timer suffix color
 
 	// ChildBanner styles the info panel that replaces the editor while
-	// viewing a sub-agent's session (see UI.drawChildSessionPanel).
-	// Deliberately not muted — its top row is the primary "where am I"
-	// orientation cue, so it uses the same background/foreground pairing as
-	// a primary button rather than blending into the chat.
+	// viewing a sub-agent's session (see UI.drawChildSessionPanel): a
+	// muted ancestor breadcrumb leading into a bold, accented subagent
+	// name, and a solid-fill "back" button styled like a real button
+	// (matching s.Button.Focused/Hovered) rather than a text link.
 	ChildBanner struct {
-		Base        lipgloss.Style // panel row background
-		Path        lipgloss.Style // ancestor breadcrumb segments ("main › agent1")
+		Base        lipgloss.Style // panel note lines (model/effort, tokens/elapsed)
+		Path        lipgloss.Style // ancestor breadcrumb segments ("main › agent1 ›")
 		Sep         lipgloss.Style // "›" separators between segments
-		Current     lipgloss.Style // current (last) breadcrumb segment
+		Current     lipgloss.Style // the subagent's own name, emphasized
 		Button      lipgloss.Style // "↑ back (alt+up)" button, idle
-		ButtonHover lipgloss.Style // button, hovered
+		ButtonHover lipgloss.Style // button, hovered — brighter fill
 	}
 
 	// Section Title

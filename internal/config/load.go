@@ -1536,6 +1536,11 @@ func projectBoundary(dir string) string {
 // GlobalSkillsDirs returns the default directories for Agent Skills.
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
+//
+// Only Braid's own catalog is scanned here. Skills authored for other tools
+// (Claude Code, opencode, ...) are not auto-discovered — see `braid import`,
+// which copies them into .braid/skills with validation instead of trusting a
+// foreign directory implicitly.
 func GlobalSkillsDirs() []string {
 	if braidSkills := os.Getenv("BRAID_SKILLS_DIR"); braidSkills != "" {
 		return []string{braidSkills}
@@ -1543,10 +1548,6 @@ func GlobalSkillsDirs() []string {
 
 	paths := []string{
 		filepath.Join(home.Config(), appName, "skills"),
-		filepath.Join(home.Config(), "agents", "skills"),
-		// Per the Agent Skills spec, scan ~/.agents/skills
-		filepath.Join(home.Dir(), ".agents", "skills"),
-		filepath.Join(home.Dir(), ".claude", "skills"),
 	}
 
 	// On Windows, also load from app data on top of `$HOME/.config/braid`.
@@ -1556,11 +1557,7 @@ func GlobalSkillsDirs() []string {
 			os.Getenv("LOCALAPPDATA"),
 			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
 		)
-		paths = append(
-			paths,
-			filepath.Join(appData, appName, "skills"),
-			filepath.Join(appData, "agents", "skills"),
-		)
+		paths = append(paths, filepath.Join(appData, appName, "skills"))
 	}
 
 	return paths
@@ -1569,16 +1566,12 @@ func GlobalSkillsDirs() []string {
 // projectSkillSubdirs lists the conventional subdirectories where
 // project-level skills are discovered. Shared across working-dir and
 // git-root lookups to prevent drift when a new convention is added.
+//
+// Only .braid/skills is scanned: skills written for other tools are brought
+// in explicitly via `braid import`, not auto-discovered from their native
+// directories.
 var projectSkillSubdirs = []string{
-	".agents/skills",
 	".braid/skills",
-	".braid/skills",
-	".claude/skills",
-	".cursor/skills",
-	// opencode keeps skills here. Its SKILL.md files follow the same Agent
-	// Skills layout, so a project that already has them needs no duplication —
-	// the same reasoning as for the agent directories.
-	".opencode/skills",
 }
 
 // ProjectSkillsDir returns the default project directories for which Braid

@@ -58,33 +58,15 @@ You review Go code.`)
 	require.Empty(t, agent.Model)
 }
 
-// opencode files carry no name, so the filename identifies the agent.
-func TestDiscoverOpencodeAgentUsesFilename(t *testing.T) {
-	root := t.TempDir()
-	writeAgent(t, root, ".opencode/agent", "reviewer-dba.md", `---
-description: Reviews SQL
-mode: subagent
-model: some-provider/some-model
----
-You review databases.`)
-
-	got := discoverMarkdownAgents(root, nil)
-
-	agent, ok := got["reviewer-dba"]
-	require.True(t, ok)
-	require.Equal(t, "You review databases.", agent.Prompt)
-	// A provider-specific model name means nothing here and must not leak
-	// into the model slot, which only accepts large/small.
-	require.Empty(t, agent.Model)
-}
-
 // A foreign provider/model reference that resolves against a configured
-// provider is honoured, normalized to "provider/model-id".
+// provider is honoured, normalized to "provider/model-id", when it appears
+// in Braid's own agent directory (e.g. a hand-authored file, or one dropped
+// there by `braid import`).
 func TestDiscoverAgentResolvesForeignProviderModel(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".opencode/agent", "reviewer-dba.md", `---
+	writeAgent(t, root, ".braid/agents", "reviewer-dba.md", `---
+name: reviewer-dba
 description: Reviews SQL
-mode: subagent
 model: fakeprovider/FAKE-MODEL
 ---
 You review databases.`)
@@ -103,22 +85,19 @@ You review databases.`)
 	require.Equal(t, "fakeprovider/fake-model", agent.Model)
 }
 
-// Claude Code writes tools as a comma-separated string using its own names.
-func TestDiscoverClaudeAgentMapsToolNames(t *testing.T) {
+// Only .braid/agents is auto-discovered. Agent files written for other
+// tools are not picked up on their own — they need `braid import` to bring
+// them in (see TECHDEBT.md and cmd/import.go).
+func TestDiscoverIgnoresForeignDirs(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".claude/agents", "reviewer.md", `---
-name: reviewer
-description: Reviews code
-tools: Read, Grep, Glob, Bash
-model: opus
----
-You review.`)
+	writeAgent(t, root, ".opencode/agent", "reviewer.md", "---\ndescription: from opencode\n---\nopencode body")
+	writeAgent(t, root, ".claude/agents", "reviewer.md", "---\nname: reviewer\ndescription: from claude\n---\nclaude body")
 
 	got := discoverMarkdownAgents(root, nil)
-	require.Equal(t, []string{"view", "grep", "glob", "bash"}, got["reviewer"].AllowedTools)
+	require.NotContains(t, got, "reviewer")
 }
 
-func TestDiscoverPrefersBraidOverForeignDirs(t *testing.T) {
+func TestDiscoverPrefersBraidAgentsOverForeignDirs(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".opencode/agent", "reviewer.md", "---\ndescription: from opencode\n---\nopencode body")
 	writeAgent(t, root, ".claude/agents", "reviewer.md", "---\nname: reviewer\ndescription: from claude\n---\nclaude body")
@@ -129,12 +108,30 @@ func TestDiscoverPrefersBraidOverForeignDirs(t *testing.T) {
 	require.Equal(t, "braid body", got["reviewer"].Prompt)
 }
 
-// opencode's primary agents are meant to be driven directly, not delegated to.
+// mode: primary is still respected for files that live in .braid/agents
+// itself (e.g. an imported opencode file that kept the field).
 func TestDiscoverSkipsPrimaryMode(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".opencode/agent", "build.md", "---\nmode: primary\ndescription: x\n---\nbody")
+	writeAgent(t, root, ".braid/agents", "build.md", "---\nname: build\nmode: primary\ndescription: x\n---\nbody")
 
 	require.NotContains(t, discoverMarkdownAgents(root, nil), "build")
+}
+
+// Tool names are no longer translated during regular discovery — that only
+// happens in `braid import` now. A .braid/agents file naming Claude Code's
+// tools verbatim keeps those names as-is, which grants nothing useful, but
+// that's the user's file to fix (or re-run the importer).
+func TestDiscoverBraidAgentDoesNotTranslateToolNames(t *testing.T) {
+	root := t.TempDir()
+	writeAgent(t, root, ".braid/agents", "reviewer.md", `---
+name: reviewer
+description: Reviews code
+tools: Read, Grep, Glob, Bash
+---
+You review.`)
+
+	got := discoverMarkdownAgents(root, nil)
+	require.Equal(t, []string{"Read", "Grep", "Glob", "Bash"}, got["reviewer"].AllowedTools)
 }
 
 func TestDiscoverSkipsDisabledAndBrokenFiles(t *testing.T) {

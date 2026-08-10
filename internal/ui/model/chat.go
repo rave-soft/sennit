@@ -978,16 +978,20 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 // (i.e., no double-click occurred) and no text selection was made (drag to
 // select). openContainer is true when the click landed on a nested-tool
 // container (agent / agentic_fetch delegation) — callers should navigate
-// into the child session instead of toggling expansion.
-func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (handled bool, openContainer bool) {
+// into the child session instead of toggling expansion, using the returned
+// messageID/toolCallID. These are resolved from the clicked item directly
+// (not m.chat.SelectedNestedToolContainer, which reads the keyboard-driven
+// selection) because a mouse click no longer moves that selection — see
+// HandleMouseDown.
+func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (handled, openContainer bool, messageID, toolCallID string) {
 	// Ignore if this click was superseded by a newer click (double/triple).
 	if msg.ClickID != m.pendingClickID {
-		return false, false
+		return false, false, "", ""
 	}
 
 	// Don't expand if user dragged to select text.
 	if m.HasHighlight() {
-		return false, false
+		return false, false, "", ""
 	}
 
 	// Execute the click action (e.g., expansion). Look the item up by the
@@ -997,13 +1001,16 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (handled bool, openContai
 	if clickable, ok := clickedItem.(list.MouseClickable); ok {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
 		if !handled {
-			return false, false
+			return false, false, "", ""
 		}
 		// A click on a nested-tool container navigates into the child
 		// session rather than expanding — skip the Expandable branch
 		// entirely.
 		if _, isContainer := clickedItem.(chat.NestedToolContainer); isContainer {
-			return true, true
+			if toolItem, ok := clickedItem.(chat.ToolMessageItem); ok {
+				return true, true, toolItem.MessageID(), toolItem.ToolCall().ID
+			}
+			return true, false, "", ""
 		}
 		// Toggle expansion only when the item signalled it handled the
 		// click. Items like AssistantMessageItem only report handled when
@@ -1018,10 +1025,10 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (handled bool, openContai
 				m.ScrollToBottom()
 			}
 		}
-		return true, false
+		return true, false, "", ""
 	}
 
-	return false, false
+	return false, false, "", ""
 }
 
 // HandleMouseUp handles mouse up events for the chat component.

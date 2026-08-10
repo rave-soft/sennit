@@ -57,7 +57,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	if meta.Background {
-		description := cmp.Or(meta.Description, params.Command)
+		description := cmp.Or(cleanDescription(meta.Description), params.Command)
 		content := "Command: " + params.Command + "\n" + opts.Result.Content
 		return renderJobTool(sty, opts, cappedWidth, "Start", meta.ShellID, description, content)
 	}
@@ -158,7 +158,7 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	if opts.HasResult() && opts.Result.Metadata != "" {
 		var meta tools.JobOutputResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
-			description = cmp.Or(meta.Description, meta.Command)
+			description = cmp.Or(cleanDescription(meta.Description), meta.Command)
 		}
 	}
 
@@ -209,7 +209,7 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	if opts.HasResult() && opts.Result.Metadata != "" {
 		var meta tools.JobKillResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil {
-			description = cmp.Or(meta.Description, meta.Command)
+			description = cmp.Or(cleanDescription(meta.Description), meta.Command)
 		}
 	}
 

@@ -258,9 +258,11 @@ option ui compact true
 option ui diff unified
 ```
 
-> [!IMPORTANT] These skill paths are loaded by default and do NOT need
-> `skill-path`: `.agents/skills`, `.braid/skills`, `.claude/skills`,
-> `.cursor/skills`.
+> [!IMPORTANT] `.braid/skills` is loaded by default and does NOT need
+> `skill-path`. Skills written for other tools (`.claude/skills`,
+> `.opencode/skills`, ...) are **not** auto-discovered — bring them in with
+> `braid import claude --skills` / `braid import opencode --skills`, which
+> copies and validates them into `.braid/skills` instead.
 
 ### options.web_search
 
@@ -384,9 +386,11 @@ markdown file of the same id.
 
 ### Markdown files
 
-Drop a file in `.braid/agents/*.md` (also read: `.claude/agents/`,
-`.opencode/agent/`, and an `agents/` directory next to the global config —
-lowest to highest priority):
+Drop a file in `.braid/agents/*.md` (also read: an `agents/` directory next
+to the global config, lower priority). Files written for another tool
+(`.claude/agents/`, `.opencode/agent/`) are **not** auto-discovered — run
+`braid import claude --agents` or `braid import opencode --agents` to copy
+and validate them into `.braid/agents` first.
 
 ```markdown
 ---
@@ -405,10 +409,13 @@ You are a Go code reviewer. Report real defects, not style opinions.
 - `model` is optional and, when set, must resolve to a `provider/model-id`
   among configured providers; an unresolvable value is dropped with a
   warning and the agent falls back to the app's main model.
-- Tool names from Claude Code (`Read`, `Grep`, `Bash`, `WebFetch`, …) are
-  translated to Braid's; unknown names are dropped silently.
-- opencode's `permission:` blocks are **not enforced** — restrict an agent via
-  `tools` or the config's `permissions` section instead.
+- `.braid/agents` files are expected to already name Braid's own tools
+  (`view`, `grep`, `bash`, ...) — regular discovery does not translate
+  Claude Code names anymore. `braid import` does that translation once, at
+  import time, and reports any tool name it couldn't map.
+- opencode's `permission:` blocks are **not enforced**, imported or not —
+  restrict an agent via `tools` or the config's `permissions` section
+  instead.
 
 ### braid.json `agents` block
 
@@ -433,6 +440,49 @@ body instead). `allowed_tools`/`context_paths` omitted (`null`) inherit the
 coder's; an empty list is a deliberate "no tools". `allowed_mcp` maps an MCP
 server name to its allowed tool names, or `null` for all of that server's
 tools; omitted entirely means all configured MCPs are available.
+
+## Importing from Claude Code or opencode
+
+```sh
+braid import claude|opencode [--skills] [--agents] [--dry-run] [--global] [--force]
+```
+
+Braid does not auto-discover another tool's config directories (see
+[Ограничения перенесённых определений агентов](../../../../TECHDEBT.md) in
+TECHDEBT.md for why). `braid import` is the supported way to bring files in:
+
+- `--skills` copies `<tool>/skills/<name>/SKILL.md` (and any other files in
+  that skill's directory) into `.braid/skills/<name>/`, after parsing and
+  validating it against the same Agent Skills spec Braid's own skills follow.
+  A skill that fails validation (bad name, oversized description, ...) is
+  skipped with a reason, not partially imported.
+- `--agents` copies `<tool>/agents/*.md` (or opencode's `.opencode/agent/`)
+  into `.braid/agents/*.md`, translating:
+  - `model` — resolved against your configured providers the same way a
+    hand-written `model:` is; an unresolvable value is dropped with a
+    warning and left as a `# original model: ... — not available` comment in
+    the written frontmatter, instead of silently vanishing.
+  - `reasoning_effort` (or opencode's `effort`) — mapped onto
+    `low`/`medium`/`high`; a value like `max` is mapped to the closest one
+    (`high`) with a warning, and anything unrecognized is dropped with a
+    warning.
+  - `tools` — Claude Code names (`Read`, `Grep`, `Bash`, ...) are translated
+    to Braid's; a name that maps to neither a known Claude Code name nor a
+    Braid tool is dropped and reported, not kept as-is.
+  - `temperature`/`top_p` — Braid agents have no such field; the original
+    value is kept as a frontmatter comment and reported as a warning.
+  - opencode's `permission:` block — dropped with a warning; it was never
+    enforced even when opencode's directory was auto-discovered. Restrict an
+    imported agent via its `tools` list instead.
+- `--global` reads/writes the user-level directories (`~/.claude/...`,
+  `~/.config/opencode/...` → the global `.braid` directories) instead of the
+  project ones.
+- `--dry-run` prints the report without writing anything.
+- Without `--force`, a destination file that already exists is left alone
+  and reported as skipped — re-running an import is safe.
+
+The command prints one row per skill/agent: name, `imported` / `adjusted` /
+`skipped`, and the reason or warnings behind that status.
 
 ## User-invocable skills
 

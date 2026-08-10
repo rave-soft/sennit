@@ -147,3 +147,62 @@ func TestNewToolMessageItem_CustomAgentDispatch(t *testing.T) {
 	_, isAgentItem = genericItem.(*AgentToolMessageItem)
 	require.False(t, isAgentItem)
 }
+
+// TestOneLine covers the general multi-line-param normalization every
+// toolParamList caller gets for free: embedded newlines, tabs, CRLF, and
+// repeated whitespace all collapse to single spaces, with ends trimmed.
+func TestOneLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "hello world", "hello world"},
+		{"newlines", "line1\nline2\nline3", "line1 line2 line3"},
+		{"crlf", "line1\r\nline2", "line1 line2"},
+		{"tabs and repeats", "a\t\tb   c", "a b c"},
+		{"leading/trailing whitespace", "\n  hello  \n", "hello"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, oneLine(tt.in))
+		})
+	}
+}
+
+// TestToolParamList_MultilineMainParamStaysOneLine covers a generic tool
+// (not just Bash) with a multi-line main param: the rendered header must
+// never contain a literal newline, regardless of how the caller built
+// params — toolParamList normalizes centrally.
+func TestToolParamList_MultilineMainParamStaysOneLine(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	out := toolParamList(&sty, []string{"line one\nline two\nline three"}, 80)
+	require.NotContains(t, out, "\n")
+	require.Contains(t, out, "line one line two line three")
+}
+
+// TestAppendResultSummary_NeverPrintsJunkPlaceholder covers the "None"
+// regression directly at the shared helper every one-line tool renderer
+// funnels its outcome suffix through: a junk placeholder value (whatever
+// its source) must be treated exactly like "" — omitted, not printed.
+func TestAppendResultSummary_NeverPrintsJunkPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	header := "header"
+
+	for _, junk := range []string{"", "None", "none", "  NULL  ", "n/a", "N/A", "nil", "-", "undefined"} {
+		out := appendResultSummary(&sty, header, junk)
+		require.Equal(t, header, out, "junk summary %q must be omitted entirely", junk)
+	}
+
+	out := appendResultSummary(&sty, header, "2.1s")
+	require.NotEqual(t, header, out, "a real summary must still be appended")
+	require.Contains(t, out, "2.1s")
+}

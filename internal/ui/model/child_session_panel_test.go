@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -25,7 +26,10 @@ func newChildSessionPanelTestUI(t *testing.T) *UI {
 	u.session = &session.Session{ID: "grandchild-session", PromptTokens: 800, CompletionTokens: 200}
 	u.navStack = []sessionNavFrame{
 		{parentSessionID: "main-session", parentTitle: "main", label: "agent1"},
-		{parentSessionID: "child-session", parentTitle: "agent1", label: "agent2", model: "claude-sonnet-5", effort: "medium"},
+		{
+			parentSessionID: "child-session", parentTitle: "agent1",
+			label: "agent2", agentName: "developer", model: "claude-sonnet-5", effort: "medium",
+		},
 	}
 	u.updateLayoutAndSize()
 	return u
@@ -98,11 +102,12 @@ func TestChildSessionPanelButtonHover(t *testing.T) {
 	require.False(t, u.childPanelHover, "moving off the button must clear childPanelHover")
 }
 
-// TestDrawChildSessionPanel_ShowsBreadcrumbModelEffortTokensState covers
-// the panel's content: the breadcrumb chain with a sibling counter, the
-// delegation's model/effort, the running/done state, and the child
-// session's own token usage.
-func TestDrawChildSessionPanel_ShowsBreadcrumbModelEffortTokensState(t *testing.T) {
+// TestDrawChildSessionPanel_ShowsBreadcrumbNameModelEffortTokens covers the
+// panel's content: the muted ancestor breadcrumb leading into the
+// subagent's own name (not the prompt-snippet label) with a sibling
+// counter, the delegation's model/effort, and the child session's own
+// split token usage.
+func TestDrawChildSessionPanel_ShowsBreadcrumbNameModelEffortTokens(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
@@ -115,21 +120,117 @@ func TestDrawChildSessionPanel_ShowsBreadcrumbModelEffortTokensState(t *testing.
 
 	require.Contains(t, out, "main")
 	require.Contains(t, out, "agent1")
-	require.Contains(t, out, "agent2 (2/3)", "current breadcrumb segment must carry the sibling counter")
+	require.Contains(t, out, "developer (2/3)",
+		"the emphasized name must be the delegation's agentName, not the prompt-snippet label, with the sibling counter")
+	require.NotContains(t, out, "agent2 (2/3)", "the raw label must not be shown once agentName is known")
 	// The trailing ")" can land exactly on the drawn area's last column
 	// depending on how the arrow glyph's display width is accounted for,
 	// so check the stable prefix rather than the full label.
 	require.Contains(t, out, "back (alt+up")
 	require.Contains(t, out, "claude-sonnet-5")
 	require.Contains(t, out, "effort medium")
-	require.Contains(t, out, "done", "agent is idle by default in the test harness")
 	require.Contains(t, out, "800", "prompt token count must be shown")
 	require.Contains(t, out, "200", "completion token count must be shown")
 }
 
+// TestDrawChildSessionPanel_FallsBackToLabelWithoutAgentName covers the
+// degraded case (e.g. a cycled-to sibling whose item never rendered in
+// this chat, see cycleChildSession): with no agentName resolved, the panel
+// falls back to the prompt-snippet label instead of showing nothing.
+func TestDrawChildSessionPanel_FallsBackToLabelWithoutAgentName(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	u.navStack[len(u.navStack)-1].agentName = ""
+
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawChildSessionPanel(scr, u.layout.editor)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "agent2", "must fall back to label when agentName is unresolved")
+}
+
+// TestDrawChildSessionPanel_NoModelEffortShowsDefaultModel covers the
+// "inherits the app's default" case (agentic_fetch, or an agent tool with
+// no override): row 2 must say something rather than render blank.
+func TestDrawChildSessionPanel_NoModelEffortShowsDefaultModel(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	u.navStack[len(u.navStack)-1].model = ""
+	u.navStack[len(u.navStack)-1].effort = ""
+
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawChildSessionPanel(scr, u.layout.editor)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "default model")
+}
+
+// TestDrawChildSessionPanel_RunningShowsTickingElapsed covers the "still
+// running" case: with no frozen duration but the child session busy, row 3
+// must show a live elapsed time computed from delegationStart, not a
+// static/frozen value.
+func TestDrawChildSessionPanel_RunningShowsTickingElapsed(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	u.navStack[len(u.navStack)-1].delegationStart = time.Now().Add(-45 * time.Second)
+	u.navStack[len(u.navStack)-1].delegationDuration = 0
+	u.wsCache.agentBusyCache.set(true)
+
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawChildSessionPanel(scr, u.layout.editor)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "45s elapsed")
+}
+
+// TestDrawChildSessionPanel_DoneShowsFrozenDuration covers the finished
+// case: a non-zero delegationDuration must win over any live elapsed
+// computation, and render without the "elapsed" suffix (it's a final
+// total, not a ticking value).
+func TestDrawChildSessionPanel_DoneShowsFrozenDuration(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	u.navStack[len(u.navStack)-1].delegationStart = time.Now().Add(-10 * time.Minute)
+	u.navStack[len(u.navStack)-1].delegationDuration = 83 * time.Second
+	u.wsCache.agentBusyCache.set(false)
+
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawChildSessionPanel(scr, u.layout.editor)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "1m23s")
+	require.NotContains(t, out, "elapsed", "a finished delegation's duration is a final total, not a ticking value")
+}
+
+// TestDrawChildSessionPanel_UnknownDurationOmitsTime covers a delegation
+// reconstructed from history with a genuinely unknown runtime (see
+// AgentToolMessageItem's duration field doc): neither a frozen duration
+// nor a busy child session, so no time is shown at all — never a
+// misleading "0s".
+func TestDrawChildSessionPanel_UnknownDurationOmitsTime(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	u.navStack[len(u.navStack)-1].delegationStart = time.Time{}
+	u.navStack[len(u.navStack)-1].delegationDuration = 0
+	u.wsCache.agentBusyCache.set(false)
+
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawChildSessionPanel(scr, u.layout.editor)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "800", "tokens must still render")
+	require.NotContains(t, out, "elapsed")
+	require.NotContains(t, out, "0s")
+}
+
 // TestChildSessionPanelHeight_TwoRowAreaOmitsTokens: with only two rows
-// available the panel must still render the breadcrumb and state/model
-// line without panicking, and must not draw the (missing) third row.
+// available the panel must still render the breadcrumb and model line
+// without panicking, and must not draw the (missing) third row.
 func TestChildSessionPanelHeight_TwoRowAreaOmitsTokens(t *testing.T) {
 	t.Parallel()
 
@@ -143,5 +244,5 @@ func TestChildSessionPanelHeight_TwoRowAreaOmitsTokens(t *testing.T) {
 	})
 	out := ansi.Strip(scr.Render())
 	require.Contains(t, out, "claude-sonnet-5")
-	require.NotContains(t, out, "prompt", "the token row is out of bounds and must not render")
+	require.NotContains(t, out, "800", "the token row is out of bounds and must not render")
 }

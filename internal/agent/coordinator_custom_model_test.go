@@ -29,8 +29,7 @@ func buildCustomModelCoordinator(t *testing.T) (*coordinator, *prompt.Prompt) {
       {"id": "mock-model", "name": "Mock", "context_window": 8192, "default_max_tokens": 128},
       {"id": "custom-model", "name": "Custom", "context_window": 8192, "default_max_tokens": 128}
     ]}},
-  "models": {"large": {"provider": "mock", "model": "mock-model"},
-             "small": {"provider": "mock", "model": "mock-model"}}
+  "model": {"provider": "mock", "model": "mock-model"}
 }`
 	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "braid.json"), []byte(braidJSON), 0o644))
 

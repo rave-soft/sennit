@@ -598,6 +598,17 @@ func toolIcon(sty *styles.Styles, status ToolStatus) string {
 	}
 }
 
+// oneLine collapses any run of whitespace — embedded newlines, tabs, CRLF,
+// repeated spaces — into a single space, and trims the ends. Tool params
+// routinely carry multi-line values (a bash command built from a
+// heredoc/multi-line script, a description, an MCP argument) that a caller
+// didn't already flatten; toolParamList applies this to every param before
+// truncating so a header stays provably one line — ansi.Truncate only
+// prevents *horizontal* overflow, it has no idea embedded "\n"s exist.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // toolParamList formats tool parameters as "main (key=value, ...)",
 // truncated to width — a tool header is always a single line, so params
 // never wrap.
@@ -609,13 +620,13 @@ func toolParamList(sty *styles.Styles, params []string, width int) string {
 		return ""
 	}
 
-	mainParam := params[0]
+	mainParam := oneLine(params[0])
 
 	// Build key=value pairs from remaining params (consecutive key, value pairs).
 	var kvPairs []string
 	for i := 1; i+1 < len(params); i += 2 {
 		if params[i+1] != "" {
-			kvPairs = append(kvPairs, fmt.Sprintf("%s=%s", params[i], params[i+1]))
+			kvPairs = append(kvPairs, fmt.Sprintf("%s=%s", params[i], oneLine(params[i+1])))
 		}
 	}
 
@@ -649,12 +660,42 @@ func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, o
 	return prefix + toolParamList(sty, params, remainingWidth)
 }
 
+// junkPlaceholders lists values that mean "nothing" in a model's own
+// vocabulary rather than this codebase's — a model filling an optional
+// field (most commonly a "description" param) with the literal text
+// "None"/"null"/"n/a" instead of leaving it empty is a well-known
+// artifact. isJunkText/cleanDescription treat these exactly like "": a
+// summary/description this hollow is worse than no summary at all, since
+// it reads as real data.
+var junkPlaceholders = map[string]bool{
+	"none": true, "null": true, "nil": true, "n/a": true, "na": true,
+	"undefined": true, "-": true,
+}
+
+// isJunkText reports whether s is empty or one of junkPlaceholders
+// (case-insensitively, ignoring surrounding whitespace).
+func isJunkText(s string) bool {
+	return junkPlaceholders[strings.ToLower(strings.TrimSpace(s))]
+}
+
+// cleanDescription returns s, or "" if s is a junk placeholder (see
+// isJunkText) — for use with cmp.Or(cleanDescription(modelSupplied),
+// fallback) so a placeholder value falls through to the fallback instead
+// of being displayed as if it were a real description.
+func cleanDescription(s string) string {
+	if isJunkText(s) {
+		return ""
+	}
+	return s
+}
+
 // appendResultSummary appends a short " · outcome" suffix to a collapsed
 // tool's header line — e.g. "342 lines", "+12 −3", "27 matches" — so the
 // single default line still says what happened without showing any
-// content. Returns header unchanged when summary is "".
+// content. Returns header unchanged when summary is "" or a junk
+// placeholder (see isJunkText) — never prints a value that means nothing.
 func appendResultSummary(sty *styles.Styles, header, summary string) string {
-	if summary == "" {
+	if summary == "" || isJunkText(summary) {
 		return header
 	}
 	return header + " " + sty.Tool.TodoStatusNote.Render("· "+summary)

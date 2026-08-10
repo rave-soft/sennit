@@ -150,24 +150,29 @@ func (a *AgentToolMessageItem) AlwaysSpaced() bool {
 
 // DelegationInfoProvider is implemented by tool items that represent a
 // delegation into a sub-agent's own session ([AgentToolMessageItem],
-// [AgenticFetchToolMessageItem]). It exposes the same identity/model/effort
-// data as the collapsed delegation block's subtitle (see
-// renderAgentSubtitle), for the child-session panel in internal/ui/model
-// that replaces the editor while the delegation's child session is being
-// viewed.
+// [AgenticFetchToolMessageItem]). It exposes the same identity/model/effort/
+// timing data as the collapsed delegation block's subtitle and status line
+// (see renderAgentSubtitle, renderDelegationOutcomeLine), for the
+// child-session panel in internal/ui/model that replaces the editor while
+// the delegation's child session is being viewed.
 type DelegationInfoProvider interface {
 	// DelegationInfo returns the delegation's display name (e.g. "task",
-	// "fetch", or a custom agent's id) and its resolved model/effort
-	// override. model and effort are "" when the delegation has none
-	// (agentic_fetch, or an agent tool using the app's default model).
-	DelegationInfo() (displayName, model, effort string)
+	// "fetch", or a custom agent's id), its resolved model/effort override
+	// (both "" when the delegation has none — agentic_fetch, or an agent
+	// tool using the app's default model), when it started, and how long
+	// it ran. duration is zero while still running (or, for an item
+	// reconstructed from history, if the runtime is genuinely unknown —
+	// see AgentToolMessageItem's duration field doc); callers wanting a
+	// running delegation's live elapsed time should compute
+	// time.Since(startTime) themselves rather than trust duration.
+	DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration)
 }
 
 var _ DelegationInfoProvider = (*AgentToolMessageItem)(nil)
 
 // DelegationInfo implements [DelegationInfoProvider].
-func (a *AgentToolMessageItem) DelegationInfo() (displayName, model, effort string) {
-	return a.displayName, a.model, a.effort
+func (a *AgentToolMessageItem) DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration) {
+	return a.displayName, a.model, a.effort, a.startTime, a.duration
 }
 
 // SetChildSessionTokens implements [ChildSessionTokenTracker].
@@ -451,8 +456,8 @@ const agenticFetchDisplayName = "fetch"
 
 // DelegationInfo implements [DelegationInfoProvider]. agentic_fetch has no
 // cfg.Agents entry, so it never has a model/effort override to report.
-func (r *AgenticFetchToolMessageItem) DelegationInfo() (displayName, model, effort string) {
-	return agenticFetchDisplayName, "", ""
+func (r *AgenticFetchToolMessageItem) DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration) {
+	return agenticFetchDisplayName, "", "", r.startTime, r.duration
 }
 
 // NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].

@@ -791,16 +791,18 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Section.Title = subtle
 	s.Section.Line = base.Foreground(o.separator)
 
-	// ChildBanner: high-contrast, same treatment as a primary button
-	// (background fill + onPrimary text) so it reads as the main "where
-	// am I" orientation cue rather than blending in like a muted hint.
-	bannerBase := lipgloss.NewStyle().Background(o.primary).Foreground(o.onPrimary).Padding(0, 1)
-	s.ChildBanner.Base = bannerBase
-	s.ChildBanner.Path = bannerBase.Foreground(o.onPrimary)
-	s.ChildBanner.Sep = bannerBase.Foreground(o.onPrimary).Faint(true)
-	s.ChildBanner.Current = bannerBase.Bold(true)
-	s.ChildBanner.Button = bannerBase.Underline(true)
-	s.ChildBanner.ButtonHover = bannerBase.Bold(true).Reverse(true)
+	// ChildBanner styles the child-session panel (see
+	// UI.drawChildSessionPanel): a muted breadcrumb trail leading up to a
+	// bold, accent-colored subagent name — the "where am I" cue — plus a
+	// solid-fill button styled like a real dialog button (see s.Button.
+	// Focused/Hovered above) rather than an underlined text link, so
+	// "back" reads as clickable at a glance.
+	s.ChildBanner.Base = muted
+	s.ChildBanner.Path = muted
+	s.ChildBanner.Sep = muted.Faint(true)
+	s.ChildBanner.Current = base.Foreground(o.primary).Bold(true)
+	s.ChildBanner.Button = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary).Bold(true).Padding(0, 1)
+	s.ChildBanner.ButtonHover = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.primary).Bold(true).Padding(0, 1)
 
 	// Initialize
 	s.Initialize.Header = base

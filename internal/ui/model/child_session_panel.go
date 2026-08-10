@@ -3,32 +3,35 @@ package model
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/chat"
 )
 
 // childSessionPanelHeight is the fixed height of the child-session info
 // panel that replaces the editor while a sub-agent session is being
-// viewed (see drawChildSessionPanel): breadcrumb + back button, model/
-// effort + running/done state, token usage.
+// viewed (see drawChildSessionPanel): breadcrumb + name + back button,
+// model/effort, token usage + elapsed/duration.
 const childSessionPanelHeight = 3
 
 // childPanelButtonLabel is the explicit, clickable "go back up" affordance
 // on the child-session panel (see drawChildSessionPanel).
 const childPanelButtonLabel = "↑ back (alt+up)"
 
-// delegationInfo resolves a delegation tool item's display name and
-// model/effort override (see chat.DelegationInfoProvider) for capture into
-// a sessionNavFrame. All-empty if item doesn't implement the interface —
-// shouldn't happen in practice, since only delegation items ever feed
-// enterChildSession/cycleChildSession, but keeps those callers simple.
-func delegationInfo(item chat.ToolMessageItem) (displayName, model, effort string) {
+// delegationInfo resolves a delegation tool item's display name,
+// model/effort override, and timing (see chat.DelegationInfoProvider) for
+// capture into a sessionNavFrame. All-zero if item doesn't implement the
+// interface — shouldn't happen in practice, since only delegation items
+// ever feed enterChildSession/cycleChildSession, but keeps those callers
+// simple.
+func delegationInfo(item chat.ToolMessageItem) (displayName, model, effort string, startTime time.Time, duration time.Duration) {
 	if di, ok := item.(chat.DelegationInfoProvider); ok {
 		return di.DelegationInfo()
 	}
-	return "", "", ""
+	return "", "", "", time.Time{}, 0
 }
 
 // childSessionBreadcrumbChain returns the ordered list of session labels
@@ -52,10 +55,13 @@ func (m *UI) childSessionBreadcrumbChain() []string {
 // drawChildSessionPanel draws the info panel that replaces the editor while
 // a sub-agent session is being viewed, in three compact rows:
 //
-//  1. the full nesting chain with a sibling counter on the current level
-//     ("main › agent1 › developer (2/3)") and the "back" button;
-//  2. the delegation's model/effort override and its running/done state;
-//  3. the child session's own cumulative token usage.
+//  1. the ancestor breadcrumb (muted) leading into the subagent's own name
+//     (bold/accented) with a sibling counter when relevant
+//     ("main › agent1 › developer (2/3)"), and the "back" button, styled
+//     as a real accent-filled button rather than a text link;
+//  2. the delegation's model/effort override;
+//  3. the child session's own cumulative token usage and either a live
+//     ticking elapsed time (still running) or the final duration (done).
 //
 // A click anywhere in area exits the child session (see the MouseClickMsg
 // handling in Update); the button itself gets hover feedback tracked via
@@ -71,8 +77,9 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
 	frame := m.navStack[len(m.navStack)-1]
 
-	// Row 1: breadcrumb chain (with a sibling counter on the current
-	// level) and the back button.
+	// Row 1: muted ancestor breadcrumb, the subagent's own name in bold
+	// (with a sibling counter when there's more than one to cycle
+	// through), and the back button.
 	buttonSty := sty.Button
 	if m.childPanelHover {
 		buttonSty = sty.ButtonHover
@@ -84,27 +91,27 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	row1 := area
 	row1.Max.Y = row1.Min.Y + 1
 	if avail := width - buttonWidth - gap; avail < 0 {
-		// Terminal too narrow for both path and button; drop the path.
+		// Terminal too narrow for both name and button; drop the name.
 		uv.NewStyledString(ansi.Truncate(button, width, "")).Draw(scr, row1)
 	} else {
-		var b strings.Builder
-		chain := m.childSessionBreadcrumbChain()
-		for i, label := range chain {
-			if i > 0 {
-				b.WriteString(sty.Sep.Render(" › "))
-			}
-			if i == len(chain)-1 {
-				if len(frame.siblings) > 1 {
-					label = fmt.Sprintf("%s (%d/%d)", label, frame.siblingIndex+1, len(frame.siblings))
-				}
-				b.WriteString(sty.Current.Render(label))
-			} else {
-				b.WriteString(sty.Path.Render(label))
-			}
+		name := frame.agentName
+		if name == "" {
+			name = frame.label
 		}
+		if len(frame.siblings) > 1 {
+			name = fmt.Sprintf("%s (%d/%d)", name, frame.siblingIndex+1, len(frame.siblings))
+		}
+
+		var b strings.Builder
+		if chain := m.childSessionBreadcrumbChain(); len(chain) > 1 {
+			b.WriteString(sty.Path.Render(strings.Join(chain[:len(chain)-1], " › ")))
+			b.WriteString(sty.Sep.Render(" › "))
+		}
+		b.WriteString(sty.Current.Render(name))
+
 		path := ansi.Truncate(b.String(), avail, "…")
 		pad := max(0, avail-ansi.StringWidth(path))
-		row := path + sty.Base.Render(strings.Repeat(" ", pad+gap)) + button
+		row := path + strings.Repeat(" ", pad+gap) + button
 		uv.NewStyledString(row).Draw(scr, row1)
 
 		m.childPanelButtonRect = uv.Rectangle{
@@ -114,39 +121,31 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		m.childPanelButtonRect.Max.Y = area.Min.Y + 1
 	}
 
-	noteSty := m.com.Styles.Tool.TodoStatusNote
-
-	// Row 2: model/effort override and running/done state.
+	// Row 2: model/effort override — "default model" when the delegation
+	// has none (agentic_fetch, or an agent tool inheriting the app's
+	// default), so the row is never blank.
 	if area.Dy() >= 2 {
-		state := "done"
-		if m.isAgentBusy() {
-			state = "running"
-		}
-		line := state
-		if sub := childPanelModelSubtitle(frame.model, frame.effort); sub != "" {
-			line += " · " + sub
+		line := childPanelModelSubtitle(frame.model, frame.effort)
+		if line == "" {
+			line = "default model"
 		}
 		row2 := area
 		row2.Min.Y = area.Min.Y + 1
 		row2.Max.Y = row2.Min.Y + 1
-		uv.NewStyledString(noteSty.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row2)
+		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row2)
 	}
 
-	// Row 3: the child session's own cumulative token usage.
+	// Row 3: the child session's own cumulative token usage, plus a live
+	// elapsed time while still running or the frozen total once done.
 	if area.Dy() >= 3 {
-		line := "0 tok"
-		if m.session != nil {
-			if total := m.session.PromptTokens + m.session.CompletionTokens; total > 0 {
-				line = fmt.Sprintf("%s tok (%s prompt / %s completion)",
-					childPanelTokenCount(total),
-					childPanelTokenCount(m.session.PromptTokens),
-					childPanelTokenCount(m.session.CompletionTokens))
-			}
+		line := childPanelTokensLine(m.session)
+		if e := m.childPanelElapsedText(frame); e != "" {
+			line += " · " + e
 		}
 		row3 := area
 		row3.Min.Y = area.Min.Y + 2
 		row3.Max.Y = row3.Min.Y + 1
-		uv.NewStyledString(noteSty.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row3)
+		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row3)
 	}
 }
 
@@ -165,6 +164,60 @@ func childPanelModelSubtitle(model, effort string) string {
 		return "effort " + effort
 	default:
 		return ""
+	}
+}
+
+// childPanelTokensLine renders the child session's own cumulative token
+// usage, split into prompt/completion, e.g. "1.0k tok (800 in / 200 out)".
+// session may be nil (not yet loaded).
+func childPanelTokensLine(session *session.Session) string {
+	if session == nil {
+		return "0 tok"
+	}
+	total := session.PromptTokens + session.CompletionTokens
+	if total <= 0 {
+		return "0 tok"
+	}
+	return fmt.Sprintf("%s tok (%s in / %s out)",
+		childPanelTokenCount(total),
+		childPanelTokenCount(session.PromptTokens),
+		childPanelTokenCount(session.CompletionTokens))
+}
+
+// childPanelElapsedText reports how long the delegation has been running,
+// for row 3. A frozen delegationDuration (see sessionNavFrame's doc) wins
+// when present — the delegation is done. Otherwise, if the child session
+// is still busy, it computes a live elapsed time from delegationStart on
+// every draw (there's no dedicated ticker for this — the panel redraws
+// often enough while an agent is active that this reads as ticking).
+// Returns "" when neither is available, matching renderDelegationOutcomeLine's
+// policy of omitting a misleading/unknown duration rather than guessing.
+func (m *UI) childPanelElapsedText(frame sessionNavFrame) string {
+	if frame.delegationDuration > 0 {
+		return childPanelFormatElapsed(frame.delegationDuration)
+	}
+	if m.isAgentBusy() && !frame.delegationStart.IsZero() {
+		return childPanelFormatElapsed(time.Since(frame.delegationStart)) + " elapsed"
+	}
+	return ""
+}
+
+// childPanelFormatElapsed renders a duration the way the panel wants it —
+// "45s", "4m12s", "1h02m" — mirroring formatElapsed in chat/agent.go.
+func childPanelFormatElapsed(d time.Duration) string {
+	d = d.Round(time.Second)
+	h := d / time.Hour
+	d -= h * time.Hour
+	m := d / time.Minute
+	d -= m * time.Minute
+	s := d / time.Second
+	switch {
+	case h > 0:
+		return fmt.Sprintf("%dh%02dm", h, m)
+	case m > 0:
+		return fmt.Sprintf("%dm%02ds", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
 	}
 }
 

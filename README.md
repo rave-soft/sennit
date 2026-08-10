@@ -36,14 +36,19 @@ model's effort for this agent alone, and applies the same way regardless of
 whether `model` is set or omitted; an effort the model doesn't offer is
 ignored at call time in favor of the model's own default.
 
-Braid also reads agents from `.claude/agents/` and `.opencode/agent/`, and from
-an `agents/` directory next to the global config. Tool names from Claude Code
-(`Read`, `Grep`, `Bash`, …) are translated automatically, so existing role
-files work without being rewritten. Entries under `agents` in the JSON config
-still work and take precedence over files of the same name. Those foreign
-files' `model:` values are honored the same way — a `provider/model-id`
-string that resolves against your configured providers is used; a tool-name
-like `opus` that isn't one of your models still falls back to the main model.
+Braid only auto-discovers `.braid/agents/` and an `agents/` directory next to
+the global config — not `.claude/agents/` or `.opencode/agent/`. Those are a
+different tool's files; trusting them implicitly means trusting whatever a
+project happened to drop there. Bring them in explicitly instead:
+
+```sh
+braid import claude --agents      # or: braid import opencode --agents
+```
+
+This copies each file into `.braid/agents/`, translating what it can (tool
+names, `model:`, `reasoning_effort:`) and reporting what it can't (see
+`braid import --help`). Entries under `agents` in the JSON config still work
+and take precedence over files of the same name.
 
 Fields Braid does not understand are ignored rather than rejected — including
 opencode's `permission:` blocks, which are **not** enforced. Restrict an agent
@@ -51,9 +56,16 @@ through its `tools` list or the `permissions` section of the config instead.
 
 ## Skills
 
-Agent Skills are discovered from `.braid/skills/`, `.agents/skills/`,
-`.claude/skills/`, `.cursor/skills/` and `.opencode/skills/`, plus the usual
-global locations.
+Agent Skills are discovered from `.braid/skills/` and the usual global
+`braid` locations only. As with agents, a skill written for Claude Code or
+opencode (`.claude/skills/`, `.opencode/skills/`, ...) needs an explicit
+import rather than being auto-discovered:
+
+```sh
+braid import claude --skills      # or: braid import opencode --skills
+```
+
+See `braid import --help` for `--dry-run`, `--global`, and `--force`.
 
 ## Configuration
 

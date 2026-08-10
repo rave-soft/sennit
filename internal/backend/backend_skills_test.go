@@ -24,7 +24,7 @@ import (
 // PublishStates events).
 func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 	// Isolate all of config.Init's filesystem reads from the host. The
-	// project-local .agents/skills/<name>/SKILL.md per working dir is
+	// project-local .braid/skills/<name>/SKILL.md per working dir is
 	// what we actually want each workspace to see; everything else
 	// (global skills, XDG dirs, etc.) must be empty/deterministic.
 	hostHome := t.TempDir()
@@ -181,7 +181,7 @@ func TestBackend_SkillsWatcher_HotReload(t *testing.T) {
 
 func writeSkill(t *testing.T, workingDir, name, desc string) {
 	t.Helper()
-	skillDir := filepath.Join(workingDir, ".agents", "skills", name)
+	skillDir := filepath.Join(workingDir, ".braid", "skills", name)
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	content := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n%s\n", name, desc, desc)
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644))

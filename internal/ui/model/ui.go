@@ -1072,11 +1072,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.copyChatHighlight())
 	case DelayedClickMsg:
 		// Handle delayed single-click action (e.g., expansion, or
-		// navigating into a clicked child-session delegation).
-		if _, openContainer := m.chat.HandleDelayedClick(msg); openContainer {
-			if messageID, toolCallID, ok := m.chat.SelectedNestedToolContainer(); ok {
-				cmds = append(cmds, m.enterChildSession(messageID, toolCallID))
-			}
+		// navigating into a clicked child-session delegation). messageID
+		// and toolCallID come from the clicked item directly, not
+		// m.chat.SelectedNestedToolContainer — a mouse click doesn't move
+		// the keyboard-driven selection that reads (see HandleMouseDown).
+		if _, openContainer, messageID, toolCallID := m.chat.HandleDelayedClick(msg); openContainer {
+			cmds = append(cmds, m.enterChildSession(messageID, toolCallID))
 		}
 	case tea.MouseClickMsg:
 		// Pass mouse events to dialogs first if any are open. Route through
@@ -1106,13 +1107,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// A click anywhere on the child-session panel (see
 		// drawChildSessionPanel, which occupies the editor area in place of
-		// the textarea while a child session is being viewed) or the status
-		// bar's back-breadcrumb exits the child session. Mouse clicks never
-		// change m.focus (see uiFocusState) — this is the one dedicated,
-		// deliberate transition a click is allowed to trigger.
-		if msg.Button == tea.MouseLeft && m.viewingChildSession() &&
-			(image.Pt(msg.X, msg.Y).In(m.layout.editor) ||
-				(m.status.IsChildSessionBack() && image.Pt(msg.X, msg.Y).In(m.layout.status))) {
+		// the textarea while a child session is being viewed) exits the
+		// child session. Mouse clicks never change m.focus (see
+		// uiFocusState) — this is the one dedicated, deliberate transition
+		// a click is allowed to trigger.
+		if msg.Button == tea.MouseLeft && m.viewingChildSession() && image.Pt(msg.X, msg.Y).In(m.layout.editor) {
 			if cmd := m.exitChildSession(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1150,11 +1149,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
-		}
-
-		// Hover feedback for the status bar's child-session back banner.
-		if m.status.IsChildSessionBack() {
-			m.status.SetBackHover(image.Pt(msg.X, msg.Y).In(m.layout.status))
 		}
 
 		// Hover feedback for the child-session panel's "back" button.
@@ -1855,16 +1849,22 @@ type sessionNavFrame struct {
 	siblings     []childSessionRef
 	siblingIndex int
 
-	// agentName, model, and effort mirror the delegation tool item's
-	// resolved chat.DelegationInfoProvider data (the same values shown in
-	// the collapsed delegation block's subtitle), captured alongside label
-	// for the same reason: the parent chat holding that item usually isn't
-	// loaded once navigation has moved on. Used by the child-session
-	// panel's model/effort line. All empty when the item couldn't be
-	// resolved (e.g. a cycled-to sibling never rendered in this chat) or
-	// the delegation has no override (agentic_fetch, or an agent tool
-	// using the app's default model).
+	// agentName, model, effort, delegationStart, and delegationDuration
+	// mirror the delegation tool item's resolved chat.DelegationInfoProvider
+	// data (the same values shown in the collapsed delegation block's
+	// subtitle and status line), captured alongside label for the same
+	// reason: the parent chat holding that item usually isn't loaded once
+	// navigation has moved on. Used by the child-session panel's name/
+	// model/effort/elapsed line. agentName/model/effort are "" and
+	// delegationStart is the zero time when the item couldn't be resolved
+	// (e.g. a cycled-to sibling never rendered in this chat); model/effort
+	// are also "" when the delegation has no override (agentic_fetch, or
+	// an agent tool using the app's default model). delegationDuration is
+	// zero while the delegation is still running (see drawChildSessionPanel,
+	// which then computes a live elapsed time from delegationStart instead).
 	agentName, model, effort string
+	delegationStart          time.Time
+	delegationDuration       time.Duration
 }
 
 // viewingChildSession reports whether the UI is currently navigated into a
@@ -1913,21 +1913,6 @@ func childSessionLabel(item chat.ToolMessageItem) string {
 	return prompt
 }
 
-// childSessionBreadcrumb formats the status-bar breadcrumb shown while
-// viewing a child session: "← back to <parentTitle> · <label>" plus a
-// "(N/M)" sibling counter when there's more than one sibling delegation to
-// cycle through. Rendered as a clickable back button (see
-// Status.SetChildSessionBack) — the leading arrow and trailing "click or
-// alt+up to return" are the two visible affordances telling the user this
-// line does something.
-func childSessionBreadcrumb(parentTitle, label string, siblingIndex, siblingCount int) string {
-	breadcrumb := "← back to " + parentTitle + " › " + label
-	if siblingCount > 1 {
-		breadcrumb += fmt.Sprintf(" (%d/%d)", siblingIndex+1, siblingCount)
-	}
-	return breadcrumb + " · click or alt+up to return"
-}
-
 // enterChildSession pushes a navigation frame for the currently loaded
 // session and returns a tea.Cmd that loads the child (sub-agent) session
 // identified by messageID/toolCallID. The sibling list is built from the
@@ -1958,20 +1943,24 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 
 	label := "subagent"
 	var agentName, model, effort string
+	var delegationStart time.Time
+	var delegationDuration time.Duration
 	if item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem); ok {
 		label = childSessionLabel(item)
-		agentName, model, effort = delegationInfo(item)
+		agentName, model, effort, delegationStart, delegationDuration = delegationInfo(item)
 	}
 
 	m.navStack = append(m.navStack, sessionNavFrame{
-		parentSessionID: m.session.ID,
-		parentTitle:     parentTitle,
-		label:           label,
-		siblings:        siblings,
-		siblingIndex:    siblingIndex,
-		agentName:       agentName,
-		model:           model,
-		effort:          effort,
+		parentSessionID:    m.session.ID,
+		parentTitle:        parentTitle,
+		label:              label,
+		siblings:           siblings,
+		siblingIndex:       siblingIndex,
+		agentName:          agentName,
+		model:              model,
+		effort:             effort,
+		delegationStart:    delegationStart,
+		delegationDuration: delegationDuration,
 	})
 
 	// Child sessions are read-only: keep focus/keys on the chat list and
@@ -1979,9 +1968,12 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	m.focus = uiFocusMain
 	m.editor.textarea.Blur()
 
-	breadcrumb := childSessionBreadcrumb(parentTitle, label, siblingIndex, len(siblings))
-	m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: breadcrumb})
-	m.status.SetChildSessionBack(true)
+	// Orientation ("main › agent1 (2/3)", model/effort, tokens, state) now
+	// lives entirely in drawChildSessionPanel, which replaces the editor —
+	// this used to also post a status-bar breadcrumb, but InfoTypeInfo is
+	// styled identically to InfoTypeSuccess (see quickstyle.go), so it
+	// rendered as a full-width green bar under the panel. Redundant with
+	// the panel and visually loud for what's just a location cue.
 
 	return m.loadSession(childID)
 }
@@ -1996,7 +1988,6 @@ func (m *UI) exitChildSession() tea.Cmd {
 	frame := m.navStack[len(m.navStack)-1]
 	m.navStack = m.navStack[:len(m.navStack)-1]
 	if len(m.navStack) == 0 {
-		m.status.ClearInfoMsg()
 		// Back at a top-level session: restore normal editor focus, since
 		// Tab no longer offers a manual way back in.
 		m.focus = uiFocusEditor
@@ -2031,14 +2022,15 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 	// enterChildSession time and doesn't have that problem.
 	label := "subagent"
 	var agentName, model, effort string
+	var delegationStart time.Time
+	var delegationDuration time.Duration
 	if item, ok := m.chat.MessageItem(sibling.toolCallID).(chat.ToolMessageItem); ok {
 		label = childSessionLabel(item)
-		agentName, model, effort = delegationInfo(item)
+		agentName, model, effort, delegationStart, delegationDuration = delegationInfo(item)
 	}
 	frame.label = label
 	frame.agentName, frame.model, frame.effort = agentName, model, effort
-	breadcrumb := childSessionBreadcrumb(frame.parentTitle, label, frame.siblingIndex, n)
-	m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: breadcrumb})
+	frame.delegationStart, frame.delegationDuration = delegationStart, delegationDuration
 
 	return m.loadSession(m.com.Workspace.CreateAgentToolSessionID(sibling.messageID, sibling.toolCallID))
 }

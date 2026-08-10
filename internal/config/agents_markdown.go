@@ -14,12 +14,11 @@ import (
 // agentDirs are scanned for `*.md` agent definitions, lowest priority first,
 // so a later directory overrides an agent of the same name from an earlier one.
 //
-// The Claude and opencode directories are read on purpose: their agent files
-// use the same frontmatter-plus-body shape, and a project that already defines
-// roles for those tools should not have to restate them here.
+// Only Braid's own directory is scanned. Agent files written for other tools
+// (Claude Code's .claude/agents, opencode's .opencode/agent) are not
+// auto-discovered — `braid import` copies and validates them into
+// .braid/agents instead of trusting a foreign directory implicitly.
 var agentDirs = []string{
-	filepath.Join(".opencode", "agent"),
-	filepath.Join(".claude", "agents"),
 	filepath.Join(".braid", "agents"),
 }
 
@@ -44,7 +43,9 @@ type markdownAgent struct {
 	Disabled bool   `yaml:"disabled"`
 }
 
-// stringList accepts both `tools: [a, b]` and `tools: a, b`.
+// stringList accepts `tools: [a, b]`, the comma-separated string Claude Code
+// uses (`tools: a, b`), and the enabled-map form opencode uses
+// (`tools: {a: true, b: false}`) — only keys mapped to true are kept.
 type stringList []string
 
 func (s *stringList) UnmarshalYAML(value *yaml.Node) error {
@@ -54,9 +55,22 @@ func (s *stringList) UnmarshalYAML(value *yaml.Node) error {
 		return nil
 	}
 
+	var enabled map[string]bool
+	if err := value.Decode(&enabled); err == nil {
+		keys := make([]string, 0, len(enabled))
+		for name, on := range enabled {
+			if on {
+				keys = append(keys, name)
+			}
+		}
+		slices.Sort(keys) // map iteration order is random; keep output stable.
+		*s = keys
+		return nil
+	}
+
 	var joined string
 	if err := value.Decode(&joined); err != nil {
-		return errors.New("tools must be a list or a comma-separated string")
+		return errors.New("tools must be a list, a comma-separated string, or a name-to-bool map")
 	}
 	for _, part := range strings.Split(joined, ",") {
 		if part = strings.TrimSpace(part); part != "" {
@@ -66,10 +80,11 @@ func (s *stringList) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// claudeToolNames maps Claude Code's tool names onto Braid's. Without this a
-// `tools: Read, Grep` line would grant nothing at all, since the allow-list is
-// matched against Braid's own tool names.
-var claudeToolNames = map[string]string{
+// ClaudeToolNames maps Claude Code's tool names onto Braid's. It is exported
+// for `braid import` (see import.go), which is now the only place that
+// translates foreign tool names — regular discovery only reads
+// .braid/agents, whose files are expected to already name Braid's own tools.
+var ClaudeToolNames = map[string]string{
 	"read":      "view",
 	"write":     "write",
 	"edit":      "edit",
@@ -191,18 +206,16 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 	return id, agent, nil
 }
 
-// normalizeToolNames maps foreign tool names onto Braid's and drops duplicates.
-// Names it does not know are kept as-is so a Braid-native file can list Braid
-// tools directly.
+// normalizeToolNames trims and drops duplicate tool names. Unlike the
+// importer (see import.go), it does not translate foreign tool names:
+// .braid/agents is Braid's own directory, so its files are expected to
+// already name Braid's tools directly.
 func normalizeToolNames(names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
-		}
-		if mapped, ok := claudeToolNames[strings.ToLower(name)]; ok {
-			name = mapped
 		}
 		if !slices.Contains(out, name) {
 			out = append(out, name)

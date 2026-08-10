@@ -27,7 +27,19 @@ import (
 
 func TestMain(m *testing.M) {
 	slog.SetLogLoggerLevel(slog.LevelError)
-	m.Run()
+
+	// Hermetic global config/data for the whole package: many tests load
+	// config through the real discovery paths, and t.Setenv is off-limits
+	// because the package uses t.Parallel liberally.
+	tmp, err := os.MkdirTemp("", "braid-agent-test-*")
+	if err != nil {
+		panic(err)
+	}
+	_ = os.Setenv("BRAID_GLOBAL_CONFIG", filepath.Join(tmp, "cfg", "braid.json"))
+	_ = os.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmp, "data", "braid.json"))
+	code := m.Run()
+	_ = os.RemoveAll(tmp)
+	os.Exit(code)
 }
 
 var modelPairs = []modelPair{
