@@ -108,6 +108,58 @@ type coordinator struct {
 	skillTracker *skills.Tracker
 
 	readyWg errgroup.Group
+
+	// lifecycleOnce/lifecycleCtx/lifecycleCancel bound buildAgent's
+	// background readiness work (see buildAgent) to the coordinator's own
+	// lifetime rather than to whichever caller context triggered the
+	// build. Lazily created via ensureLifecycle rather than in
+	// NewCoordinator alone, since some tests build a coordinator as a bare
+	// struct literal (bypassing NewCoordinator) and still call buildAgent
+	// directly.
+	lifecycleOnce   sync.Once
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+
+	// readyGroup counts every outstanding readiness goroutine buildAgent
+	// has started (main agent and every sub-agent rebuild), regardless of
+	// which errgroup they report through. Close waits on it.
+	readyGroup sync.WaitGroup
+}
+
+// ensureLifecycle lazily creates the coordinator's lifecycle context on
+// first use and returns it. Safe for concurrent callers.
+func (c *coordinator) ensureLifecycle() context.Context {
+	c.lifecycleOnce.Do(func() {
+		c.lifecycleCtx, c.lifecycleCancel = context.WithCancel(context.Background())
+	})
+	return c.lifecycleCtx
+}
+
+// Close cancels the coordinator's background readiness work (buildAgent's
+// async system-prompt/tool-list setup, including sub-agent rebuilds on
+// every run) and waits for it to actually stop, bounded by ctx. This is
+// what keeps the git/MCP subprocesses that work may spawn (see
+// internal/agent/prompt) from outliving the coordinator — production
+// callers wire it into App.Shutdown; tests that build a coordinator
+// directly should call it in their own teardown for the same reason.
+// Safe to call even if buildAgent was never invoked, and safe to call
+// more than once.
+func (c *coordinator) Close(ctx context.Context) error {
+	c.ensureLifecycle()
+	c.lifecycleCancel()
+
+	done := make(chan struct{})
+	go func() {
+		c.readyGroup.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // CoordinatorOptions holds the dependencies for NewCoordinator. Using a
@@ -380,15 +432,18 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// InitAgent/UpdateAgent handlers, and UpdateModels -> buildTools ->
 	// agentTool -> buildAgent for the sub-agent. Because mcp.WaitForInit
 	// blocks until MCP initialization finishes, a slow MCP server keeps one
-	// of these goroutines parked past the request; when the handler returns
-	// and cancels its context, WaitForInit would observe the cancellation,
-	// the errgroup would record context.Canceled, and every later run would
-	// fail at readyWg.Wait() before emitting anything — the client/server
-	// session hangs with no visible response. WithoutCancel drops
-	// cancellation while keeping context values; the work is bounded
-	// (WaitForInit by MCP init timeouts, the rest is local) so it always
-	// completes.
-	initCtx := context.WithoutCancel(ctx)
+	// of these goroutines parked past the request; if it inherited the
+	// caller's cancellation, that request context going away (or, for the
+	// sub-agent rebuilt on every run, the *next* run's context replacing
+	// this one) would abort the work before emitting anything — the
+	// client/server session hangs with no visible response. c.lifecycleCtx
+	// (see ensureLifecycle) is scoped to the coordinator itself instead: it
+	// only cancels when the coordinator is Close()d, so the work keeps
+	// running until it either finishes or the coordinator shuts down —
+	// bounding the git/MCP subprocesses it may spawn (see
+	// internal/agent/prompt) to the coordinator's lifetime instead of
+	// leaking them past it (e.g. past a test's t.TempDir cleanup).
+	initCtx := c.ensureLifecycle()
 
 	// ready is the errgroup these two goroutines report through.
 	// c.readyWg is reserved for the coordinator's own top-level agent,
@@ -410,7 +465,15 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		ready = &errgroup.Group{}
 	}
 
+	// c.readyGroup tracks every readiness goroutine buildAgent ever
+	// starts (main agent and every sub-agent rebuild alike), independent
+	// of which errgroup above they report through. Close waits on it —
+	// bounded by the ctx it's given — so it can hand back control once
+	// this work has actually stopped touching the filesystem/network,
+	// rather than merely having asked it to via lifecycleCtx.
+	c.readyGroup.Add(2)
 	ready.Go(func() error {
+		defer c.readyGroup.Done()
 		systemPrompt, err := prompt.Build(initCtx, primary.Model.Provider(), primary.Model.Model(), c.cfg)
 		if err != nil {
 			return err
@@ -420,6 +483,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	ready.Go(func() error {
+		defer c.readyGroup.Done()
 		// Wait for MCP servers to finish registering their tools before
 		// building the initial tool list. This ensures the first tool set
 		// (used if anything reads it before run() rebuilds) includes all
@@ -441,7 +505,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		// which point this has long finished), so just surface failures
 		// instead of silently dropping them.
 		go func() {
-			if err := ready.Wait(); err != nil {
+			if err := ready.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 				slog.Error("Failed to prepare sub-agent", "agent", agent.Name, "error", err)
 			}
 		}()

@@ -40,6 +40,13 @@ type UpdateAvailableMsg struct {
 	IsDevelopment  bool
 }
 
+// coordinatorCloser is implemented by the production agent.Coordinator
+// (*agent's unexported coordinator type) to bound its background
+// readiness goroutines to the App's lifetime. See its use in Shutdown.
+type coordinatorCloser interface {
+	Close(ctx context.Context) error
+}
+
 type App struct {
 	Sessions    session.Service
 	Messages    message.Service
@@ -579,6 +586,23 @@ func (app *App) Shutdown() {
 	wg.Go(func() {
 		app.LSPManager.KillAll(shutdownCtx)
 	})
+
+	// Cancel and join the agent coordinator's own background readiness
+	// work (buildAgent's async system-prompt/tool-list setup — see
+	// internal/agent/coordinator.go). Without this, those goroutines (and
+	// the git/MCP subprocesses they may spawn) can outlive App.Shutdown
+	// entirely, which in tests races a t.TempDir cleanup removing the
+	// workspace's repo out from under a still-running `git status`.
+	// coordinatorCloser is checked via a type assertion instead of being
+	// added to the agent.Coordinator interface itself, so the many
+	// test-only Coordinator stubs elsewhere don't all need a no-op Close.
+	if closer, ok := app.AgentCoordinator.(coordinatorCloser); ok {
+		wg.Go(func() {
+			if err := closer.Close(shutdownCtx); err != nil {
+				slog.Error("Failed to close agent coordinator readiness work", "error", err)
+			}
+		})
+	}
 
 	// Call all cleanup functions.
 	for _, cleanup := range app.cleanupFuncs {

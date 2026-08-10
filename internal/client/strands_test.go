@@ -109,8 +109,16 @@ func initStrandRepo(t *testing.T) string {
 }
 
 func TestStrands_CreateListGetSendMergeRemove(t *testing.T) {
-	c := newStrandsTestServer(t)
+	// initStrandRepo before newStrandsTestServer: t.Cleanup runs LIFO, so
+	// registering the repo's t.TempDir cleanup first means it fires last —
+	// after newStrandsTestServer's RetireClient/hs.Close have torn the
+	// workspace's App down (including its agent coordinator's background
+	// readiness work, see coordinator.Close). Reversed, the repo directory
+	// would be removed while that work might still be touching it (e.g. a
+	// `git status` subprocess), which is exactly the flake this ordering
+	// avoids.
 	repo := initStrandRepo(t)
+	c := newStrandsTestServer(t)
 	ctx := context.Background()
 
 	ws, err := c.CreateWorkspace(ctx, proto.Workspace{Path: repo, DataDir: t.TempDir()})
@@ -154,8 +162,11 @@ func TestStrands_CreateListGetSendMergeRemove(t *testing.T) {
 }
 
 func TestStrands_GetUnknownStrandReturnsNotFound(t *testing.T) {
-	c := newStrandsTestServer(t)
+	// See the ordering comment in TestStrands_CreateListGetSendMergeRemove:
+	// the repo's t.TempDir cleanup must be registered before
+	// newStrandsTestServer's, so it runs after workspace teardown.
 	repo := initStrandRepo(t)
+	c := newStrandsTestServer(t)
 	ctx := context.Background()
 
 	ws, err := c.CreateWorkspace(ctx, proto.Workspace{Path: repo, DataDir: t.TempDir()})
