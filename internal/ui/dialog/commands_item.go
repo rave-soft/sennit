@@ -105,6 +105,22 @@ func (c *CommandItem) Action() Action {
 	return c.action
 }
 
+// Title returns the command's display/typed name (what follows "/").
+func (c *CommandItem) Title() string {
+	return c.title
+}
+
+// Aliases returns the alternate names the command can be filtered by, in
+// addition to its title.
+func (c *CommandItem) Aliases() []string {
+	return c.aliases
+}
+
+// Description returns the command's description, if any.
+func (c *CommandItem) Description() string {
+	return c.description
+}
+
 // Shortcut returns the shortcut associated with the command item.
 func (c *CommandItem) Shortcut() string {
 	return c.shortcut

@@ -25,13 +25,15 @@ type editorState struct {
 	// attachments is the file/text attachment list shown above the editor.
 	attachments *attachments.Attachments
 
-	// completions is the @-mention completions popup; the fields below
-	// track its open/query/anchor state as the user types.
+	// completions is the @-mention / "/"-command completions popup; the
+	// fields below track its open/mode/query/anchor state as the user
+	// types.
 	completions              *completions.Completions
 	completionsOpen          bool
+	completionsMode          completionsMode
 	completionsStartIndex    int
 	completionsQuery         string
-	completionsPositionStart image.Point // x,y where user typed '@'
+	completionsPositionStart image.Point // x,y where user typed '@' or '/'
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
 	bangMode     bool
@@ -64,9 +66,19 @@ type editorState struct {
 	lastKeyWasEsc bool
 }
 
+// completionsMode selects what the completions popup is currently offering:
+// "@" file/resource mentions, or "/" commands.
+type completionsMode int
+
+const (
+	completionsModeFile completionsMode = iota
+	completionsModeCommand
+)
+
 // closeCompletions closes the completions popup and resets state.
 func (e *editorState) closeCompletions() {
 	e.completionsOpen = false
+	e.completionsMode = completionsModeFile
 	e.completionsQuery = ""
 	e.completionsStartIndex = 0
 	e.completions.Close()

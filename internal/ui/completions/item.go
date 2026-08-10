@@ -2,6 +2,7 @@ package completions
 
 import (
 	"slices"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -23,11 +24,27 @@ type ResourceCompletionValue struct {
 	MIMEType string
 }
 
+// CommandCompletionValue represents a "/"-command completion value, sourced
+// from the same commands (built-in, custom, and MCP prompts) shown in the
+// Commands palette dialog. Action carries the dialog.Action to run when the
+// command is picked; it's typed as `any` here so this package doesn't need
+// to import internal/ui/dialog — the caller (internal/ui/model) does the
+// type assertion back to dialog.Action.
+type CommandCompletionValue struct {
+	ID          string
+	Title       string
+	Aliases     []string
+	Description string
+	Shortcut    string
+	Action      any
+}
+
 // CompletionItem represents an item in the completions list.
 type CompletionItem struct {
 	*list.Versioned
 
 	text    string
+	filter  string // what Filter() matches against; defaults to text
 	value   any
 	match   fuzzy.Match
 	focused bool
@@ -51,6 +68,22 @@ func NewCompletionItem(text string, value any, normalStyle, focusedStyle, matchS
 	}
 }
 
+// NewCommandCompletionItem creates a completion item for a "/" command. It
+// displays the command's title but filters against the title plus its
+// aliases and description, so e.g. "clear" still surfaces "new".
+func NewCommandCompletionItem(v CommandCompletionValue, normalStyle, focusedStyle, matchStyle lipgloss.Style) *CompletionItem {
+	item := NewCompletionItem(v.Title, v, normalStyle, focusedStyle, matchStyle)
+	filter := v.Title
+	if len(v.Aliases) > 0 {
+		filter += " " + strings.Join(v.Aliases, " ")
+	}
+	if v.Description != "" {
+		filter += " " + v.Description
+	}
+	item.filter = filter
+	return item
+}
+
 // Finished implements list.Item. Completion items render purely from
 // (text, match, focus); any mutation (SetMatch / SetFocused) bumps
 // Version() so the frozen cache entry invalidates on the next
@@ -72,6 +105,9 @@ func (c *CompletionItem) Value() any {
 
 // Filter implements [list.FilterableItem].
 func (c *CompletionItem) Filter() string {
+	if c.filter != "" {
+		return c.filter
+	}
 	return c.text
 }
 

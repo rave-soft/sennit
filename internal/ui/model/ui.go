@@ -2055,12 +2055,21 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 }
 
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
-	var cmds []tea.Cmd
 	action := m.dialog.Update(msg)
 	if action == nil {
-		return tea.Batch(cmds...)
+		return tea.Batch()
 	}
+	return m.applyDialogAction(action)
+}
 
+// applyDialogAction executes a [dialog.Action] regardless of where it came
+// from: a dialog's HandleMsg (the usual path, via handleDialogMsg) or a
+// command selected directly from the editor's "/" completion popup, which
+// has no dialog on the stack at all. CloseDialog/CloseFrontDialog are no-ops
+// when their target isn't open, so callers never need to special-case the
+// no-dialog path.
+func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
+	var cmds []tea.Cmd
 	isOnboarding := m.state == uiOnboarding
 
 	switch msg := action.(type) {
@@ -2697,8 +2706,23 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						if !msg.KeepOpen {
 							m.editor.closeCompletions()
 						}
+					case completions.SelectionMsg[completions.CommandCompletionValue]:
+						if msg.InsertOnly {
+							// Tab: fill in the command name so the user can
+							// type arguments, without running it.
+							m.editor.insertCompletionText("/" + msg.Value.Title)
+						} else {
+							// Enter: run the command immediately and clear
+							// the editor, same as picking it from the
+							// Commands palette.
+							m.editor.textarea.Reset()
+							if action, ok := msg.Value.Action.(dialog.Action); ok {
+								cmds = append(cmds, m.applyDialogAction(action))
+							}
+						}
+						m.editor.closeCompletions()
 					case completions.ClosedMsg:
-						m.editor.completionsOpen = false
+						m.editor.closeCompletions()
 					}
 					return tea.Batch(cmds...)
 				}
@@ -2830,10 +2854,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						cmds = append(cmds, cmd)
 					}
 				}
-			case key.Matches(msg, m.keyMap.Editor.Commands) && m.editor.textarea.Value() == "":
-				if cmd := m.openCommandsDialog(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
 			default:
 				if handleGlobalKeys(msg) {
 					// Handle global keys first before passing to textarea.
@@ -2857,12 +2877,25 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 						m.editor.completionsOpen = true
+						m.editor.completionsMode = completionsModeFile
 						m.editor.completionsQuery = ""
 						m.editor.completionsStartIndex = curIdx
 						m.editor.completionsPositionStart = m.completionsPosition()
 						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
 						cmds = append(cmds, m.editor.completions.Open(depth, limit, m.loadMCPResourceCompletions))
 					}
+				}
+
+				// Trigger command completions on "/" at the very start of an
+				// otherwise-empty editor, mirroring opencode/Claude Code: a
+				// "/" mid-message is just a character.
+				if msg.String() == "/" && !m.editor.completionsOpen && curValue == "" {
+					m.editor.completionsOpen = true
+					m.editor.completionsMode = completionsModeCommand
+					m.editor.completionsQuery = ""
+					m.editor.completionsStartIndex = curIdx
+					m.editor.completionsPositionStart = m.completionsPosition()
+					m.editor.completions.OpenCommands(m.commandCompletionItems())
 				}
 
 				// remove the details if they are open when user starts typing
@@ -2905,8 +2938,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.editor.updateHistoryDraft(curValue)
 
 				// After updating textarea, check if we need to filter completions.
-				// Skip filtering on the initial @ keystroke since items are loading async.
-				if m.editor.completionsOpen && msg.String() != "@" {
+				// Skip filtering on the initial @ or / keystroke: for @ the
+				// items are still loading async, and for / the query is
+				// empty anyway (OpenCommands already populated the list).
+				if m.editor.completionsOpen && msg.String() != "@" && msg.String() != "/" {
 					newValue := m.editor.textarea.Value()
 					newIdx := len(newValue)
 
@@ -2918,8 +2953,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 						m.editor.closeCompletions()
 					} else {
 						// Extract current word and filter.
+						triggerChar := "@"
+						if m.editor.completionsMode == completionsModeCommand {
+							triggerChar = "/"
+						}
 						word := m.editor.textareaWord()
-						if strings.HasPrefix(word, "@") {
+						if strings.HasPrefix(word, triggerChar) {
 							m.editor.completionsQuery = word[1:]
 							m.editor.completions.Filter(m.editor.completionsQuery)
 						} else if m.editor.completionsOpen {
@@ -3436,6 +3475,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			editorBinds := []key.Binding{
 				k.Editor.Newline,
 				k.Editor.MentionFile,
+				k.Editor.Commands,
 				k.Editor.OpenEditor,
 			}
 			if m.currentModelSupportsImages() {
@@ -3494,6 +3534,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			editorBinds := []key.Binding{
 				k.Editor.Newline,
 				k.Editor.MentionFile,
+				k.Editor.Commands,
 				k.Editor.OpenEditor,
 			}
 			if m.currentModelSupportsImages() {
@@ -4495,7 +4536,10 @@ func (m *UI) openModelsDialog() tea.Cmd {
 	return nil
 }
 
-// openCommandsDialog opens the commands dialog.
+// openCommandsDialog opens the commands palette dialog (ctrl+p): the
+// mouse-friendly fallback for browsing commands. The editor's "/" trigger no
+// longer opens this — see commandCompletionItems for that path — but both
+// draw from the same command list via dialog.BuildCommandItems.
 func (m *UI) openCommandsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.CommandsID) {
 		// Bring to front
@@ -4519,6 +4563,38 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	m.dialog.OpenDialog(commands)
 
 	return commands.InitialCmd()
+}
+
+// commandCompletionItems builds the flat command list for the editor's "/"
+// completion popup, from the same dialog.BuildCommandItems provider the
+// Commands palette dialog uses, so the two never list different commands.
+func (m *UI) commandCompletionItems() []completions.CommandCompletionValue {
+	var sessionID string
+	hasSession := m.session != nil
+	if hasSession {
+		sessionID = m.session.ID
+	}
+	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
+	hasQueue := m.wsCache.promptQueue > 0
+
+	var dockerMCPAvailable *bool
+	if available, known := config.DockerMCPAvailabilityCached(); known {
+		dockerMCPAvailable = &available
+	}
+
+	items := dialog.BuildCommandItems(m.com, sessionID, hasSession, hasTodos, hasQueue, m.width, dockerMCPAvailable, m.customCommands, m.mcpPrompts)
+	values := make([]completions.CommandCompletionValue, 0, len(items))
+	for _, item := range items {
+		values = append(values, completions.CommandCompletionValue{
+			ID:          item.ID(),
+			Title:       item.Title(),
+			Aliases:     item.Aliases(),
+			Description: item.Description(),
+			Shortcut:    item.Shortcut(),
+			Action:      item.Action(),
+		})
+	}
+	return values
 }
 
 // openReasoningDialog opens the reasoning effort dialog.

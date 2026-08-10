@@ -32,6 +32,11 @@ const (
 type SelectionMsg[T any] struct {
 	Value    T
 	KeepOpen bool // If true, insert without closing.
+
+	// InsertOnly is set for command completions picked with Tab: the
+	// caller should insert the command's name into the editor rather than
+	// running it (Enter runs it). Unused by file/resource completions.
+	InsertOnly bool
 }
 
 // ClosedMsg is sent when the completions are closed.
@@ -185,6 +190,24 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 		items = append(items, item)
 	}
 
+	c.setAllItems(items)
+}
+
+// OpenCommands opens the popup with "/" command items. Unlike file/resource
+// completions, the command list is already in memory (built from the same
+// source as the Commands palette dialog), so this is synchronous — no
+// loading command needed.
+func (c *Completions) OpenCommands(values []CommandCompletionValue) {
+	items := make([]list.FilterableItem, 0, len(values))
+	for _, v := range values {
+		items = append(items, NewCommandCompletionItem(v, c.normalStyle, c.focusedStyle, c.matchStyle))
+	}
+	c.setAllItems(items)
+}
+
+// setAllItems opens the popup with the given items, replacing whatever it
+// held before, and resets query/selection/size state.
+func (c *Completions) setAllItems(items []list.FilterableItem) {
 	c.open = true
 	c.query = ""
 	c.allItems = items
@@ -320,6 +343,15 @@ func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
 		return c.selectCurrent(true), true
 
 	case key.Matches(msg, c.keyMap.Select):
+		// Tab on a command inserts its name into the editor instead of
+		// running it, so commands that take arguments can be finished by
+		// hand before Enter runs them.
+		if msg.String() == "tab" {
+			if v, ok := c.selectedCommand(); ok {
+				c.open = false
+				return SelectionMsg[CommandCompletionValue]{Value: v, InsertOnly: true}, true
+			}
+		}
 		return c.selectCurrent(false), true
 
 	case key.Matches(msg, c.keyMap.Cancel):
@@ -386,9 +418,32 @@ func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
 			Value:    item,
 			KeepOpen: keepOpen,
 		}
+	case CommandCompletionValue:
+		return SelectionMsg[CommandCompletionValue]{
+			Value:    item,
+			KeepOpen: keepOpen,
+		}
 	default:
 		return nil
 	}
+}
+
+// selectedCommand returns the currently selected item's command value, if
+// the popup is showing commands.
+func (c *Completions) selectedCommand() (CommandCompletionValue, bool) {
+	items := c.filtered
+	selected := c.list.Selected()
+	if selected < 0 || selected >= len(items) {
+		return CommandCompletionValue{}, false
+	}
+
+	item, ok := items[selected].(*CompletionItem)
+	if !ok {
+		return CommandCompletionValue{}, false
+	}
+
+	v, ok := item.Value().(CommandCompletionValue)
+	return v, ok
 }
 
 // Render renders the completions popup.

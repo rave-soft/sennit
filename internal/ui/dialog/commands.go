@@ -406,32 +406,11 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 		}
 	case UserCommands:
 		for _, cmd := range c.customCommands {
-			var action Action
-			if cmd.Skill != nil {
-				action = ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
-			} else {
-				action = ActionRunCustomCommand{
-					Content:   cmd.Content,
-					Arguments: cmd.Arguments,
-					Skill:     cmd.Skill,
-				}
-			}
-			item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
-			if cmd.Skill != nil {
-				item = item.WithDescription(cmd.Skill.Description)
-			}
-			commandItems = append(commandItems, item)
+			commandItems = append(commandItems, customCommandItem(c.com.Styles, cmd))
 		}
 	case MCPPrompts:
 		for _, cmd := range c.mcpPrompts {
-			action := ActionRunMCPPrompt{
-				Title:       cmd.Title,
-				Description: cmd.Description,
-				PromptID:    cmd.PromptID,
-				ClientID:    cmd.ClientID,
-				Arguments:   cmd.Arguments,
-			}
-			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
+			commandItems = append(commandItems, mcpPromptItem(c.com.Styles, cmd))
 		}
 	}
 
@@ -442,22 +421,86 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	c.input.SetValue("")
 }
 
+// customCommandItem builds a CommandItem for a user-defined (file-backed)
+// custom command or skill.
+func customCommandItem(sty *styles.Styles, cmd commands.CustomCommand) *CommandItem {
+	var action Action
+	if cmd.Skill != nil {
+		action = ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
+	} else {
+		action = ActionRunCustomCommand{
+			Content:   cmd.Content,
+			Arguments: cmd.Arguments,
+			Skill:     cmd.Skill,
+		}
+	}
+	item := NewCommandItem(sty, "custom_"+cmd.ID, cmd.Name, "", action)
+	if cmd.Skill != nil {
+		item = item.WithDescription(cmd.Skill.Description)
+	}
+	return item
+}
+
+// mcpPromptItem builds a CommandItem for a prompt exposed by an MCP server.
+func mcpPromptItem(sty *styles.Styles, cmd commands.MCPPrompt) *CommandItem {
+	action := ActionRunMCPPrompt{
+		Title:       cmd.Title,
+		Description: cmd.Description,
+		PromptID:    cmd.PromptID,
+		ClientID:    cmd.ClientID,
+		Arguments:   cmd.Arguments,
+	}
+	return NewCommandItem(sty, "mcp_"+cmd.ID, cmd.PromptID, "", action)
+}
+
+// BuildCommandItems returns the flat list of every command available right
+// now — built-in system commands, user-defined custom commands, and MCP
+// prompts — combined into one slice. It is the single source of truth
+// shared by the Commands palette dialog and the editor's "/" completion
+// popup, so the two never drift out of sync.
+func BuildCommandItems(
+	com *common.Common,
+	sessionID string,
+	hasSession, hasTodos, hasQueue bool,
+	windowWidth int,
+	dockerMCPAvailable *bool,
+	customCommands []commands.CustomCommand,
+	mcpPrompts []commands.MCPPrompt,
+) []*CommandItem {
+	items := systemCommandItems(com, sessionID, hasSession, hasTodos, hasQueue, windowWidth, dockerMCPAvailable)
+	for _, cmd := range customCommands {
+		items = append(items, customCommandItem(com.Styles, cmd))
+	}
+	for _, cmd := range mcpPrompts {
+		items = append(items, mcpPromptItem(com.Styles, cmd))
+	}
+	return items
+}
+
 // defaultCommands returns the list of default system commands.
 func (c *Commands) defaultCommands() []*CommandItem {
+	return systemCommandItems(c.com, c.sessionID, c.hasSession, c.hasTodos, c.hasQueue, c.windowWidth, c.dockerMCPAvailable)
+}
+
+// systemCommandItems builds the built-in (non-custom, non-MCP) commands.
+// Titles are short, typed-after-"/" names (Claude Code / opencode style);
+// long-form aliases are kept via WithAliases so they still match filtering.
+func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, windowWidth int, dockerMCPAvailable *bool) []*CommandItem {
+	sty := com.Styles
 	commands := []*CommandItem{
-		NewCommandItem(c.com.Styles, "new_session", "new session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
-		NewCommandItem(c.com.Styles, "switch_session", "sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
-		NewCommandItem(c.com.Styles, "switch_model", "switch model", "ctrl+l", ActionOpenDialog{ModelsID}),
-		NewCommandItem(c.com.Styles, "configure_providers", "configure providers", "", ActionOpenDialog{ProvidersID}),
+		NewCommandItem(sty, "new_session", "new", "ctrl+n", ActionNewSession{}).WithAliases("new session", "clear"),
+		NewCommandItem(sty, "switch_session", "sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
+		NewCommandItem(sty, "switch_model", "models", "ctrl+l", ActionOpenDialog{ModelsID}).WithAliases("switch model", "model"),
+		NewCommandItem(sty, "configure_providers", "providers", "", ActionOpenDialog{ProvidersID}).WithAliases("configure providers"),
 	}
 
 	// Only show compact command if there's an active session
-	if c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "summarize session", "", ActionSummarize{SessionID: c.sessionID}))
+	if hasSession {
+		commands = append(commands, NewCommandItem(sty, "summarize", "compact", "", ActionSummarize{SessionID: sessionID}).WithAliases("summarize", "summarize session"))
 	}
 
 	// Add reasoning toggle for models that support it
-	cfg := c.com.Config()
+	cfg := com.Config()
 	// The coder agent leaves Model unset (it inherits the app's main model),
 	// so the model it actually runs on always lives in the large slot.
 	if _, ok := cfg.Agents[config.AgentCoder]; ok {
@@ -472,30 +515,31 @@ func (c *Commands) defaultCommands() []*CommandItem {
 				if selectedModel.Think {
 					status = "disable"
 				}
-				commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking", status+" thinking mode", "", ActionToggleThinking{}))
+				commands = append(commands, NewCommandItem(sty, "toggle_thinking", "thinking", "", ActionToggleThinking{}).
+					WithAliases(status+" thinking mode", "toggle thinking").
+					WithDescription(status+" thinking mode"))
 			}
 
 			// OpenAI models: reasoning effort dialog
 			if len(model.ReasoningLevels) > 0 {
-				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "select reasoning effort", "", ActionOpenDialog{
+				commands = append(commands, NewCommandItem(sty, "select_reasoning_effort", "effort", "", ActionOpenDialog{
 					DialogID: ReasoningID,
-				}))
+				}).WithAliases("select reasoning effort", "reasoning effort"))
 			}
 		}
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
-	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "toggle sidebar", "", ActionToggleCompactMode{}))
+	if windowWidth >= sidebarCompactModeBreakpoint && hasSession {
+		commands = append(commands, NewCommandItem(sty, "toggle_sidebar", "sidebar", "", ActionToggleCompactMode{}).WithAliases("toggle sidebar"))
 	}
-	if c.hasSession {
-		cfgPrime := c.com.Config()
+	if hasSession {
 		// See the reasoning-toggle block above: the coder inherits the main
 		// (large) model.
-		model := cfgPrime.GetModelByType(config.SelectedModelTypeLarge)
+		model := cfg.GetModelByType(config.SelectedModelTypeLarge)
 		if model != nil && model.SupportsImages {
-			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "open file picker", "ctrl+f", ActionOpenDialog{
+			commands = append(commands, NewCommandItem(sty, "file_picker", "files", "ctrl+f", ActionOpenDialog{
 				DialogID: FilePickerID,
-			}))
+			}).WithAliases("open file picker", "file picker"))
 		}
 	}
 
@@ -505,53 +549,54 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
 	// antipattern.
 	if os.Getenv("EDITOR") != "" {
-		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "open external editor", "ctrl+o", ActionExternalEditor{}))
+		commands = append(commands, NewCommandItem(sty, "open_external_editor", "editor", "ctrl+o", ActionExternalEditor{}).WithAliases("open external editor", "external editor"))
 	}
 
 	// Add Docker MCP command if available and not already enabled.
-	if !cfg.IsDockerMCPEnabled() && c.dockerMCPAvailable != nil && *c.dockerMCPAvailable {
-		commands = append(commands, NewCommandItem(c.com.Styles, "enable_docker_mcp", "enable docker mcp catalog", "", ActionEnableDockerMCP{}))
+	if !cfg.IsDockerMCPEnabled() && dockerMCPAvailable != nil && *dockerMCPAvailable {
+		commands = append(commands, NewCommandItem(sty, "enable_docker_mcp", "enable docker mcp", "", ActionEnableDockerMCP{}).WithAliases("enable docker mcp catalog"))
 	}
 
 	// Add disable Docker MCP command if it's currently enabled
 	if cfg.IsDockerMCPEnabled() {
-		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "disable docker mcp catalog", "", ActionDisableDockerMCP{}))
+		commands = append(commands, NewCommandItem(sty, "disable_docker_mcp", "disable docker mcp", "", ActionDisableDockerMCP{}).WithAliases("disable docker mcp catalog"))
 	}
 
-	if c.hasTodos || c.hasQueue {
+	if hasTodos || hasQueue {
 		var label string
 		switch {
-		case c.hasTodos && c.hasQueue:
+		case hasTodos && hasQueue:
 			label = "toggle to-dos/queue"
-		case c.hasQueue:
+		case hasQueue:
 			label = "toggle queue"
 		default:
 			label = "toggle to-dos"
 		}
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
+		commands = append(commands, NewCommandItem(sty, "toggle_pills", "todos", "ctrl+t", ActionTogglePills{}).WithAliases(label, "todos/queue"))
 	}
 
 	// Add a command for selecting notification style via picker dialog.
-	notificationLabel := "notification style"
-	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
+	commands = append(commands, NewCommandItem(sty, "select_notifications", "notifications", "", ActionOpenDialog{DialogID: NotificationsID}).WithAliases("notification style"))
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "toggle_yolo", "toggle yolo mode", "ctrl+y", ActionToggleYoloMode{}),
-		NewCommandItem(c.com.Styles, "toggle_help", "toggle help", "ctrl+g", ActionToggleHelp{}),
-		NewCommandItem(c.com.Styles, "init", "initialize project", "", ActionInitializeProject{}),
+		NewCommandItem(sty, "toggle_yolo", "yolo", "ctrl+y", ActionToggleYoloMode{}).WithAliases("toggle yolo mode"),
+		NewCommandItem(sty, "toggle_help", "help", "ctrl+g", ActionToggleHelp{}).WithAliases("toggle help"),
+		NewCommandItem(sty, "init", "init", "", ActionInitializeProject{}).WithAliases("initialize project"),
 	)
 
 	// Add transparent background toggle.
-	transparentLabel := "disable background color"
+	transparentAlias := "disable background color"
 	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent {
-		transparentLabel = "enable background color"
+		transparentAlias = "enable background color"
 	}
-	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
+	commands = append(commands, NewCommandItem(sty, "toggle_transparent", "transparency", "", ActionToggleTransparentBackground{}).
+		WithAliases(transparentAlias, "background color").
+		WithDescription(transparentAlias))
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "quit", "exit", "ctrl+c", tea.QuitMsg{}).WithAliases("quit"),
+		NewCommandItem(sty, "quit", "exit", "ctrl+c", tea.QuitMsg{}).WithAliases("quit"),
 	)
 
 	return commands
