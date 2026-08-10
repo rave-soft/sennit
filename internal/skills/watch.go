@@ -1,0 +1,110 @@
+package skills
+
+import (
+	"context"
+	"os"
+	"time"
+
+	"github.com/charlievieth/fastwalk"
+)
+
+// ChangePollInterval is how often WatchForChanges checks discovery paths
+// for SKILL.md files changed outside this process. Mirrors
+// internal/config's externalChangePollInterval: skill edits are rare and
+// not latency-sensitive, so a cheap poll beats fsnotify's trouble with
+// directories that don't exist yet (a project's first .braid/skills) and
+// editors' atomic rename-replace saves. A var, not a const, so tests can
+// shorten it.
+var ChangePollInterval = 2 * time.Second
+
+// skillFileSnapshot is the size+mtime pair WatchForChanges diffs between
+// polls, at the same granularity config.fileSnapshot uses for config files.
+type skillFileSnapshot struct {
+	size    int64
+	modTime int64
+}
+
+// scanSkillFiles walks every discovery path — the same traversal
+// DiscoverWithStates uses — and snapshots each SKILL.md file's size and
+// mtime. A path that doesn't exist yet is not an error: a project's first
+// skills directory is typically created mid-session, same as agentDirs in
+// internal/config.
+func scanSkillFiles(paths []string) map[string]skillFileSnapshot {
+	snapshot := make(map[string]skillFileSnapshot)
+	for _, base := range paths {
+		conf := fastwalk.Config{
+			Follow:  true,
+			ToSlash: fastwalk.DefaultToSlash(),
+		}
+		_ = fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || d.Name() != SkillFileName {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			snapshot[path] = skillFileSnapshot{size: info.Size(), modTime: info.ModTime().UnixNano()}
+			return nil
+		})
+	}
+	return snapshot
+}
+
+// skillSnapshotsDiffer reports whether any SKILL.md file was added,
+// removed, or edited between two scans.
+func skillSnapshotsDiffer(prev, current map[string]skillFileSnapshot) bool {
+	if len(prev) != len(current) {
+		return true
+	}
+	for path, snap := range current {
+		if prevSnap, ok := prev[path]; !ok || prevSnap != snap {
+			return true
+		}
+	}
+	return false
+}
+
+// WatchForChanges polls cfg's discovery paths for SKILL.md files added,
+// edited, or removed outside this process (an agent's Edit/Write tool, or
+// a human editing one directly) and, on a detected change, re-runs
+// DiscoverFromConfig and swaps the result into mgr via
+// Manager.ReplaceDiscovery, then invokes onChange. It returns once ctx is
+// done; callers should run it in its own goroutine, one per workspace —
+// the same shape as config.ConfigStore.WatchForExternalChanges, which this
+// mirrors so the two hot-reload mechanisms behave consistently.
+//
+// interval overrides ChangePollInterval when positive; tests use this to
+// avoid a real multi-second wait.
+func WatchForChanges(ctx context.Context, cfg DiscoveryConfig, mgr *Manager, interval time.Duration, onChange func()) {
+	if mgr == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = ChangePollInterval
+	}
+
+	last := scanSkillFiles(cfg.ResolvePaths())
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			current := scanSkillFiles(cfg.ResolvePaths())
+			if !skillSnapshotsDiffer(last, current) {
+				continue
+			}
+			last = current
+
+			allSkills, activeSkills, states := DiscoverFromConfig(cfg)
+			mgr.ReplaceDiscovery(allSkills, activeSkills, states)
+			if onChange != nil {
+				onChange()
+			}
+		}
+	}
+}

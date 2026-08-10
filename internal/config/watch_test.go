@@ -110,6 +110,109 @@ func TestExternalChangeDetected_NewCandidateFile(t *testing.T) {
 		"a freshly-created .braid/braid.json should be detected even though it wasn't a tracked candidate before")
 }
 
+// TestWatchForExternalChanges_DetectsAgentFileChanges verifies that adding,
+// editing, and removing a markdown subagent file (e.g. an agent's Write tool
+// touching .braid/agents/dev.md, or a human editing it directly) is picked
+// up by the same poll loop that watches config files, and that cfg.Agents
+// reflects the change after each reload.
+func TestWatchForExternalChanges_DetectsAgentFileChanges(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key") // needed for cfg.IsConfigured(), which gates SetupAgents on reload.
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "braid.json"), []byte(`{}`), 0o600))
+
+	store, err := Load(dir, "", false)
+	require.NoError(t, err)
+	require.NotContains(t, store.Config().Agents, "dev")
+
+	notified := make(chan struct{}, 8)
+	store.OnExternalChange(func() {
+		select {
+		case notified <- struct{}{}:
+		default:
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go store.WatchForExternalChanges(ctx)
+
+	agentsDir := filepath.Join(dir, ".braid", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	agentPath := filepath.Join(agentsDir, "dev.md")
+
+	writeAgent := func(description string) {
+		content := "---\nname: dev\ndescription: " + description + "\n---\nYou are a helpful dev agent.\n"
+		require.NoError(t, os.WriteFile(agentPath, []byte(content), 0o600))
+	}
+
+	waitNotified := func(msg string) {
+		t.Helper()
+		select {
+		case <-notified:
+		case <-time.After(5 * time.Second):
+			t.Fatal(msg)
+		}
+	}
+
+	// Creating a brand new agent file.
+	writeAgent("a dev agent")
+	waitNotified("OnExternalChange was not invoked after a new agent file was added")
+	require.Contains(t, store.Config().Agents, "dev")
+
+	// Editing an existing agent file's frontmatter.
+	time.Sleep(10 * time.Millisecond) // ensure a distinct mtime
+	writeAgent("an updated dev agent")
+	waitNotified("OnExternalChange was not invoked after the agent file was edited")
+	require.Equal(t, "an updated dev agent", store.Config().Agents["dev"].Description)
+
+	// Removing the agent file.
+	require.NoError(t, os.Remove(agentPath))
+	waitNotified("OnExternalChange was not invoked after the agent file was removed")
+	require.NotContains(t, store.Config().Agents, "dev")
+}
+
+// TestWatchForExternalChanges_DetectsAgentDirCreatedLater verifies that an
+// agent directory that does not exist when the watcher starts (a project's
+// first .braid/agents) is still picked up once it is created mid-session.
+func TestWatchForExternalChanges_DetectsAgentDirCreatedLater(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("ANTHROPIC_API_KEY", "test-key") // needed for cfg.IsConfigured(), which gates SetupAgents on reload.
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "braid.json"), []byte(`{}`), 0o600))
+
+	store, err := Load(dir, "", false)
+	require.NoError(t, err)
+
+	notified := make(chan struct{}, 1)
+	store.OnExternalChange(func() {
+		select {
+		case notified <- struct{}{}:
+		default:
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go store.WatchForExternalChanges(ctx)
+
+	agentsDir := filepath.Join(dir, ".braid", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	content := "---\nname: dev\ndescription: a dev agent\n---\nYou are a helpful dev agent.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "dev.md"), []byte(content), 0o600))
+
+	select {
+	case <-notified:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnExternalChange was not invoked after the agents directory was created and populated")
+	}
+	require.Contains(t, store.Config().Agents, "dev")
+}
+
 // TestWatchForExternalChanges_NoWorkingDirNoops verifies the guard that
 // keeps WatchForExternalChanges from spinning a poll loop on a bare
 // ConfigStore with no working directory (e.g. in tests).

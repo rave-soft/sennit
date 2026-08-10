@@ -156,6 +156,14 @@ type ConfigStore struct {
 	// watch.go.
 	onExternalChangeMu sync.Mutex
 	onExternalChange   func()
+
+	// agentSnapshotMu guards agentFileSnapshot, the last-seen state of
+	// every *.md file under agentDirs (agents_markdown.go) plus the global
+	// agents directory. Unlike trackedConfigPaths, this tracks directory
+	// membership rather than a fixed path list, so agent files can be
+	// added or removed, not just edited, between polls. See watch.go.
+	agentSnapshotMu   sync.Mutex
+	agentFileSnapshot map[string]fileSnapshot
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -1372,6 +1380,7 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// just the ones that loaded, so a config file created after this reload
 	// is detected as a change on the next staleness check.
 	s.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
+	s.captureAgentFileSnapshot()
 
 	return nil
 }

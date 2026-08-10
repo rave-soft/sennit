@@ -55,6 +55,31 @@ func (t *Tracker) IsLoaded(name string) bool {
 	return t.loaded[name]
 }
 
+// UpdateActiveSkills replaces the set of trackable skill names after a
+// rescan (see Manager.ReplaceDiscovery), pruning loaded entries for
+// skills that are no longer active. It deliberately does not clear
+// loaded state wholesale: a skill that stays active across the rescan
+// must stay "loaded" if it was read earlier this session, or the
+// braid_info tool would misreport it as never having been read.
+func (t *Tracker) UpdateActiveSkills(activeSkills []*Skill) {
+	if t == nil {
+		return
+	}
+	activeNames := make(map[string]bool, len(activeSkills))
+	for _, s := range activeSkills {
+		activeNames[s.Name] = true
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.activeNames = activeNames
+	for name := range t.loaded {
+		if !activeNames[name] {
+			delete(t.loaded, name)
+		}
+	}
+}
+
 // LoadedNames returns the names of all skills that have been loaded, sorted
 // alphabetically. Safe to call on a nil Tracker (returns nil).
 func (t *Tracker) LoadedNames() []string {

@@ -106,7 +106,7 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	}
 
 	// Discover skills once per workspace, before New.
-	discoveryCfg := skillsDiscoveryConfig(cfg)
+	discoveryCfg := SkillsDiscoveryConfig(cfg)
 	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
 	skillOpts := []skills.ManagerOption{
 		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
@@ -149,9 +149,11 @@ func ensureDotBraidDir(dir string) error {
 	return nil
 }
 
-// skillsDiscoveryConfig adapts a *config.ConfigStore to the inputs
-// skills.DiscoverFromConfig expects.
-func skillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
+// SkillsDiscoveryConfig adapts a *config.ConfigStore to the inputs
+// skills.DiscoverFromConfig expects. Exported so internal/backend can
+// build the same DiscoveryConfig for its skills-directory watcher
+// (see backend.createWorkspace) without duplicating the field mapping.
+func SkillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
 	opts := cfg.Config().Options
 	var paths, disabled []string
 	if opts != nil {

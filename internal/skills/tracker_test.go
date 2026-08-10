@@ -80,6 +80,51 @@ func TestTracker_BuiltinSkillTracking(t *testing.T) {
 	require.True(t, tracker.IsLoaded("go-doc"))
 }
 
+// TestTracker_UpdateActiveSkills_KeepsLoadedWhenStillActive verifies that
+// a rescan (e.g. after WatchForChanges detects an edited SKILL.md) does
+// not forget a skill that was already read this session and remains
+// active after the rescan.
+func TestTracker_UpdateActiveSkills_KeepsLoadedWhenStillActive(t *testing.T) {
+	t.Parallel()
+
+	activeSkills := []*Skill{{Name: "go-doc"}, {Name: "bash"}}
+	tracker := NewTracker(activeSkills)
+
+	tracker.MarkLoaded("go-doc")
+	require.True(t, tracker.IsLoaded("go-doc"))
+
+	// Rescan: "go-doc" is still active, "bash" dropped, "new-skill" added.
+	tracker.UpdateActiveSkills([]*Skill{{Name: "go-doc"}, {Name: "new-skill"}})
+
+	require.True(t, tracker.IsLoaded("go-doc"), "still-active skill should keep its loaded state")
+
+	// The newly active skill can now be tracked.
+	tracker.MarkLoaded("new-skill")
+	require.True(t, tracker.IsLoaded("new-skill"))
+}
+
+// TestTracker_UpdateActiveSkills_DropsLoadedWhenNoLongerActive verifies
+// that a skill removed by a rescan (its SKILL.md deleted, or the skill
+// disabled) is no longer trackable, and its stale loaded state is pruned.
+func TestTracker_UpdateActiveSkills_DropsLoadedWhenNoLongerActive(t *testing.T) {
+	t.Parallel()
+
+	activeSkills := []*Skill{{Name: "go-doc"}}
+	tracker := NewTracker(activeSkills)
+
+	tracker.MarkLoaded("go-doc")
+	require.True(t, tracker.IsLoaded("go-doc"))
+
+	// Rescan: "go-doc" is gone.
+	tracker.UpdateActiveSkills([]*Skill{{Name: "bash"}})
+
+	require.False(t, tracker.IsLoaded("go-doc"), "removed skill should no longer be loaded")
+
+	// It also can't be re-marked as loaded until it's active again.
+	tracker.MarkLoaded("go-doc")
+	require.False(t, tracker.IsLoaded("go-doc"))
+}
+
 func TestTracker_OverriddenBuiltinNotTracked(t *testing.T) {
 	t.Parallel()
 

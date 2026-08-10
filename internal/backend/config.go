@@ -29,6 +29,19 @@ func publishConfigChanged(ws *Workspace) {
 	// teardown cancels any in-flight init.
 	go ws.MCP.Reinitialize(ws.ctx, ws.Cfg)
 
+	publishWorkspaceChanged(ws)
+}
+
+// publishWorkspaceChanged publishes a ConfigChanged event on the
+// workspace's event broker so subscribers refetch their workspace
+// snapshot (workspaceToProto), which includes skill states — used both
+// by publishConfigChanged and by the skills-directory watcher (see
+// backend.createWorkspace), since a skills-only change has no MCP
+// servers to re-init.
+func publishWorkspaceChanged(ws *Workspace) {
+	if ws == nil {
+		return
+	}
 	ws.SendEvent(pubsub.Event[proto.ConfigChanged]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: proto.ConfigChanged{WorkspaceID: ws.ID},

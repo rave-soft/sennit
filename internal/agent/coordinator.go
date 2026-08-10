@@ -76,6 +76,14 @@ type Coordinator interface {
 	// tools are only ever offered to the top-level agent of the
 	// workspace the manager belongs to, never to sub-agents.
 	SetThreads(threads tools.ThreadManager)
+	// RefreshSkills replaces the coordinator's cached skill discovery
+	// results — called by the backend after its skills-directory watcher
+	// detects a SKILL.md added, edited, or removed outside this process,
+	// so a hot-reload takes effect on the next Run without a restart. It
+	// preserves the skill tracker's loaded-state for names that are still
+	// active rather than resetting it, so a skill already read earlier in
+	// the session does not appear to forget itself.
+	RefreshSkills(allSkills, activeSkills []*skills.Skill)
 }
 
 type coordinator struct {
@@ -102,7 +110,15 @@ type coordinator struct {
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
 
-	// Skills discovery results (session-start snapshot).
+	// skillsMu guards allSkills/activeSkills/skillTracker. They start as a
+	// session-start snapshot, but RefreshSkills (called from the backend's
+	// skills-directory watcher goroutine) can replace them mid-session
+	// while a Run is concurrently reading them via buildTools/
+	// logTurnSkillUsage — a plain field would race those reads. The
+	// skillTracker pointer itself is not replaced (see RefreshSkills), so
+	// its own internal lock is what protects loaded/activeNames; this
+	// mutex only protects which *slices*/tracker the coordinator hands out.
+	skillsMu     sync.RWMutex
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
@@ -375,9 +391,10 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
 		})
 	}
-	beforeLoaded := c.skillTracker.LoadedNames()
+	_, activeSkillsSnapshot, skillTrackerSnapshot := c.skillsSnapshot()
+	beforeLoaded := skillTrackerSnapshot.LoadedNames()
 	result, originalErr := run()
-	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
+	logTurnSkillUsage(sessionID, prompt, activeSkillsSnapshot, skillTrackerSnapshot, beforeLoaded)
 
 	// Notify only if still unauthorized after retry — a successful
 	// retry means the user doesn't need to re-authenticate. AWS SSO is
@@ -615,10 +632,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		return nil, fmt.Errorf("web_search: %w", err)
 	}
 
+	allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot := c.skillsSnapshot()
+
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
-		tools.NewBraidInfoTool(c.cfg, c.mcp, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
+		tools.NewBraidInfoTool(c.cfg, c.mcp, c.lspManager, allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot),
 		tools.NewBraidLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
@@ -632,7 +651,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
+		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, skillTrackerSnapshot, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
@@ -955,6 +974,28 @@ func (c *coordinator) SetThreads(threads tools.ThreadManager) {
 	c.threadsMu.Lock()
 	c.threads = threads
 	c.threadsMu.Unlock()
+}
+
+// RefreshSkills implements Coordinator.RefreshSkills.
+func (c *coordinator) RefreshSkills(allSkills, activeSkills []*skills.Skill) {
+	c.skillsMu.Lock()
+	c.allSkills = allSkills
+	c.activeSkills = activeSkills
+	// The tracker itself is not replaced: UpdateActiveSkills mutates it
+	// in place under its own lock, keeping loaded state for names still
+	// active rather than wiping it (see UpdateActiveSkills).
+	tracker := c.skillTracker
+	c.skillsMu.Unlock()
+	tracker.UpdateActiveSkills(activeSkills)
+}
+
+// skillsSnapshot returns the coordinator's current skill discovery
+// results under skillsMu, for callers (buildTools, Run) that need a
+// consistent read while RefreshSkills may be running concurrently.
+func (c *coordinator) skillsSnapshot() (allSkills, activeSkills []*skills.Skill, tracker *skills.Tracker) {
+	c.skillsMu.RLock()
+	defer c.skillsMu.RUnlock()
+	return c.allSkills, c.activeSkills, c.skillTracker
 }
 
 // threadsManager returns the currently wired thread manager, or nil.

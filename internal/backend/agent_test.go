@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,6 +61,7 @@ func (c *blockingCoordinator) Model() agent.Model                               
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
 func (c *blockingCoordinator) SetThreads(tools.ThreadManager)                    {}
+func (c *blockingCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)    {}
 
 // insertAgentWorkspace installs a synthetic workspace with the given
 // coordinator (or none) and a workspace run context, mirroring the

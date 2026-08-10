@@ -149,6 +149,20 @@ func (m *Manager) PublishStates(states []*SkillState) {
 	}
 }
 
+// ReplaceDiscovery atomically swaps in a freshly discovered skill set —
+// used by the external-change watcher (see WatchForChanges) to hot-reload
+// skills after a SKILL.md file is added, edited, or removed outside this
+// process, without a restart. It updates AllSkills/ActiveSkills and
+// publishes a discovery event via PublishStates, so subscribers see the
+// same notification shape a normal discovery pass produces.
+func (m *Manager) ReplaceDiscovery(allSkills, activeSkills []*Skill, states []*SkillState) {
+	m.mu.Lock()
+	m.allSkills = allSkills
+	m.activeSkills = activeSkills
+	m.mu.Unlock()
+	m.PublishStates(states)
+}
+
 // SubscribeEvents returns a channel of discovery events for the
 // manager's workspace.
 func (m *Manager) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {

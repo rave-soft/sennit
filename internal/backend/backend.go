@@ -459,6 +459,23 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool) (*Wo
 	ws.Cfg.OnExternalChange(func() { publishConfigChanged(ws) })
 	go ws.Cfg.WatchForExternalChanges(wsCtx)
 
+	// Same hot-reload story for skills: a SKILL.md added, edited, or
+	// removed outside this process (agent tool or human edit) should take
+	// effect without a restart, mirroring the config watcher above. Unlike
+	// config, skill discovery is not re-run by anything else, so the
+	// watcher itself must also refresh the coordinator's cached skill
+	// snapshot (see agent.Coordinator.RefreshSkills) — ReplaceDiscovery
+	// alone only updates ws.Skills, which buildTools does not read from
+	// directly.
+	if ws.Skills != nil {
+		go skills.WatchForChanges(wsCtx, app.SkillsDiscoveryConfig(ws.Cfg), ws.Skills, 0, func() {
+			if ws.App != nil && ws.AgentCoordinator != nil {
+				ws.AgentCoordinator.RefreshSkills(ws.Skills.AllSkills(), ws.Skills.ActiveSkills())
+			}
+			publishWorkspaceChanged(ws)
+		})
+	}
+
 	if attachThreads {
 		b.attachServerThreads(wsCtx, ws.App, args.Path)
 	}

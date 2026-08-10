@@ -121,6 +121,64 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 		"workspace B's Manager.States() leaked workspace A's republish")
 }
 
+// TestBackend_SkillsWatcher_HotReload verifies that createWorkspace's
+// skills-directory watcher (see backend.createWorkspace, alongside the
+// config watcher) picks up a SKILL.md written directly to disk after the
+// workspace was created — e.g. by an agent's Write tool, or a human
+// editing it — without a restart, and that the workspace's event stream
+// is notified so UI clients refetch.
+func TestBackend_SkillsWatcher_HotReload(t *testing.T) {
+	hostHome := t.TempDir()
+	t.Setenv("HOME", hostHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(hostHome, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(hostHome, ".local", "share"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(hostHome, ".cache"))
+	t.Setenv("BRAID_SKILLS_DIR", t.TempDir())
+
+	// Deliberately does not shorten skills.ChangePollInterval: it's a
+	// package-level var, and other tests in this package (e.g.
+	// TestBackend_WorkspaceSkillsIsolation) may still have a watcher
+	// goroutine winding down asynchronously after their own workspace
+	// teardown, racing a mutation here. Waiting out the real interval
+	// below keeps this test race-free at the cost of a few extra seconds.
+	wd := t.TempDir()
+	srvCfg, err := config.Init(wd, "", false)
+	require.NoError(t, err)
+	b := backend.New(t.Context(), srvCfg, nil)
+
+	cid := uuid.New().String()
+	ws, _, err := b.CreateWorkspace(proto.Workspace{
+		ClientID: cid,
+		Path:     wd,
+		DataDir:  filepath.Join(wd, ".braid"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = b.DeleteWorkspace(ws.ID, cid) })
+
+	require.False(t, containsSkillName(ws.Skills.States(), "hot-reloaded-skill"))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	ch, err := b.SubscribeEvents(ctx, ws.ID)
+	require.NoError(t, err)
+
+	writeSkill(t, wd, "hot-reloaded-skill", "Added after workspace creation.")
+
+	require.True(t, waitForSkillsEvent(t, ch, "hot-reloaded-skill", 10*time.Second),
+		"workspace never received a skills event after SKILL.md was added externally")
+
+	require.True(t, containsSkillName(ws.Skills.States(), "hot-reloaded-skill"),
+		"Manager.States() did not pick up the externally-added skill")
+
+	var found bool
+	for _, s := range ws.Skills.ActiveSkills() {
+		if s.Name == "hot-reloaded-skill" {
+			found = true
+		}
+	}
+	require.True(t, found, "ActiveSkills() did not pick up the externally-added skill")
+}
+
 func writeSkill(t *testing.T, workingDir, name, desc string) {
 	t.Helper()
 	skillDir := filepath.Join(workingDir, ".agents", "skills", name)

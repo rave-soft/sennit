@@ -19,6 +19,7 @@ import (
 	"github.com/rave-soft/braid/internal/backend"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,10 +81,11 @@ func (s *runCoordinator) ClearQueue(string)                 {}
 func (s *runCoordinator) Summarize(context.Context, string) error {
 	return nil
 }
-func (s *runCoordinator) Model() agent.Model                            { return agent.Model{} }
-func (s *runCoordinator) UpdateModels(context.Context) error            { return nil }
-func (s *runCoordinator) GenerateTitle(context.Context, string, string) {}
-func (s *runCoordinator) SetThreads(tools.ThreadManager)                {}
+func (s *runCoordinator) Model() agent.Model                             { return agent.Model{} }
+func (s *runCoordinator) UpdateModels(context.Context) error             { return nil }
+func (s *runCoordinator) GenerateTitle(context.Context, string, string)  {}
+func (s *runCoordinator) SetThreads(tools.ThreadManager)                 {}
+func (s *runCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
 
 func (s *runCoordinator) capturedCtx() context.Context {
 	s.mu.Lock()

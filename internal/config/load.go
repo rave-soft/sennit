@@ -127,6 +127,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		// config path as "new" on every poll, reloading in a busy loop
 		// until a provider gets configured.
 		store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
+		store.captureAgentFileSnapshot()
 		return store, nil
 	}
 
@@ -153,6 +154,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// not just the ones that loaded, so a config file created after startup
 	// (e.g. a braidrc added mid-session) is detected as a change.
 	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
+	store.captureAgentFileSnapshot()
 
 	return store, nil
 }
