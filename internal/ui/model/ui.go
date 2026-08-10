@@ -999,9 +999,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseClickMsg:
-		// Pass mouse events to dialogs first if any are open.
+		// Pass mouse events to dialogs first if any are open. Route through
+		// handleDialogMsg (not a bare dialog.Update) so a click's resulting
+		// Action — e.g. clicking a permissions dialog button — is actually
+		// processed the same way a keyboard-driven selection is.
 		if m.dialog.HasDialogs() {
-			m.dialog.Update(msg)
+			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return m, tea.Batch(cmds...)
 		}
 

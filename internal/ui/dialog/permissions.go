@@ -3,6 +3,7 @@ package dialog
 import (
 	"encoding/json"
 	"fmt"
+	"image"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -76,6 +77,16 @@ type Permissions struct {
 
 	help   help.Model
 	keyMap permissionsKeyMap
+
+	// buttonRects holds the absolute screen rectangles of the Allow /
+	// Allow for Session / Deny buttons from the most recent Draw, used
+	// to hit-test mouse clicks and hover (mirrors the childBannerButtonRect
+	// pattern in model/child_banner.go: geometry is captured at draw time
+	// and read back on the next mouse event).
+	buttonRects [3]image.Rectangle
+	// hoverIndex is the index of the button currently under the pointer,
+	// or -1 when the pointer isn't over any button.
+	hoverIndex int
 }
 
 type permissionsKeyMap struct {
@@ -203,6 +214,7 @@ func NewPermissions(com *common.Common, perm permission.PermissionRequest, opts 
 		viewport:       vp,
 		help:           h,
 		keyMap:         km,
+		hoverIndex:     -1,
 	}
 
 	for _, opt := range opts {
@@ -290,6 +302,25 @@ func (p *Permissions) HandleMsg(msg tea.Msg) Action {
 		} else {
 			p.viewport, _ = p.viewport.Update(tea.MouseWheelMsg(msg.Mouse))
 		}
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			return nil
+		}
+		if idx, ok := p.hitButton(msg.X, msg.Y); ok {
+			p.selectedOption = idx
+			p.hoverIndex = idx
+			return p.selectCurrentOption()
+		}
+	case tea.MouseMotionMsg:
+		// Hover moves the keyboard selection too, so the highlighted
+		// button always matches what a subsequent click or enter would
+		// pick.
+		if idx, ok := p.hitButton(msg.X, msg.Y); ok {
+			p.hoverIndex = idx
+			p.selectedOption = idx
+		} else {
+			p.hoverIndex = -1
+		}
 	default:
 		// Pass unhandled keys to viewport for non-diff content scrolling.
 		if !p.hasDiffView() {
@@ -317,6 +348,18 @@ func (p *Permissions) respond(action PermissionAction) tea.Msg {
 		Permission: p.permission,
 		Action:     action,
 	}
+}
+
+// hitButton returns the index of the button whose rect (from the most
+// recent Draw) contains the given absolute screen coordinates.
+func (p *Permissions) hitButton(x, y int) (int, bool) {
+	pt := image.Pt(x, y)
+	for i, r := range p.buttonRects {
+		if pt.In(r) {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func (p *Permissions) hasDiffView() bool {
@@ -441,7 +484,27 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	parts = append(parts, "", buttons, "", helpView)
 
 	innerContent := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	DrawCenterCursor(scr, area, dialogStyle.Render(innerContent), nil)
+	view := dialogStyle.Render(innerContent)
+	DrawCenterCursor(scr, area, view, nil)
+
+	// Recompute the same centered placement DrawCenterCursor just used, so
+	// the button row's position within innerContent can be translated into
+	// absolute screen coordinates matching incoming mouse messages (see
+	// buttonRects/hitButton).
+	outerW, outerH := lipgloss.Size(view)
+	outerW = min(outerW, area.Dx())
+	outerH = min(outerH, area.Dy())
+	center := common.CenterRect(area, outerW, outerH)
+
+	buttonsLine := lipgloss.Height(header)
+	if content != "" {
+		buttonsLine += 1 + lipgloss.Height(content)
+	}
+	buttonsLine++ // blank line separating content (or header) from buttons
+	originX := center.Min.X + dialogStyle.GetBorderLeftSize() + dialogStyle.GetPaddingLeft()
+	originY := center.Min.Y + dialogStyle.GetBorderTopSize() + dialogStyle.GetPaddingTop() + buttonsLine
+	p.buttonRects = p.computeButtonRects(p.buttonOptsList(), contentWidth, fullscreen, originX, originY)
+
 	return nil
 }
 
@@ -755,31 +818,98 @@ func (p *Permissions) renderContentPanel(content string, width int) string {
 	return panelStyle.Width(width).Render(content)
 }
 
-func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
-	buttons := []common.ButtonOpts{
-		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
-		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
-		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2},
+// buttonOptsList builds the Allow / Allow for Session / Deny button specs
+// from current selection and hover state. Shared by renderButtons (drawing)
+// and buttonRects (click/hover hit-testing) so their button order and text
+// never drift apart.
+func (p *Permissions) buttonOptsList() []common.ButtonOpts {
+	return []common.ButtonOpts{
+		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0, Hovered: p.hoverIndex == 0},
+		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1, Hovered: p.hoverIndex == 1},
+		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2, Hovered: p.hoverIndex == 2},
 	}
+}
 
-	content := common.ButtonGroup(p.com.Styles, buttons, "  ")
-
+// buttonLayout decides whether the buttons render as a single horizontal
+// row or, when they don't fit contentWidth, stack vertically, and which
+// alignment to use. Shared between renderButtons and buttonRects so the
+// rendered layout and the hit-test geometry always agree.
+func (p *Permissions) buttonLayout(opts []common.ButtonOpts, contentWidth int, fullscreen bool) (vertical bool, align lipgloss.Position) {
 	// Center when stacked or when the dialog fills the screen; otherwise
 	// hug the right edge next to the content. Right-aligning across a
 	// full-screen width leaves the buttons threaded in the corner.
-	align := lipgloss.Right
+	align = lipgloss.Right
 	if fullscreen {
 		align = lipgloss.Center
 	}
-	if lipgloss.Width(content) > contentWidth {
-		content = common.ButtonGroup(p.com.Styles, buttons, "\n")
-		align = lipgloss.Center
+	if lipgloss.Width(common.ButtonGroup(p.com.Styles, opts, "  ")) > contentWidth {
+		return true, lipgloss.Center
+	}
+	return false, align
+}
+
+func (p *Permissions) renderButtons(contentWidth int, fullscreen bool) string {
+	opts := p.buttonOptsList()
+	vertical, align := p.buttonLayout(opts, contentWidth, fullscreen)
+
+	spacing := "  "
+	if vertical {
+		spacing = "\n"
 	}
 
 	return lipgloss.NewStyle().
 		Width(contentWidth).
 		Align(align).
-		Render(content)
+		Render(common.ButtonGroup(p.com.Styles, opts, spacing))
+}
+
+// computeButtonRects computes the absolute on-screen rectangle of each
+// button (Allow, Allow for Session, Deny), given the row's origin
+// (top-left of its content-width slot, in absolute screen coordinates)
+// and the same layout decision renderButtons made. Button style
+// (selected/hovered) doesn't affect width, so opts here need not match
+// hover state exactly.
+func (p *Permissions) computeButtonRects(opts []common.ButtonOpts, contentWidth int, fullscreen bool, originX, originY int) [3]image.Rectangle {
+	var rects [3]image.Rectangle
+	vertical, align := p.buttonLayout(opts, contentWidth, fullscreen)
+
+	widths := make([]int, len(opts))
+	for i, o := range opts {
+		widths[i] = lipgloss.Width(common.Button(p.com.Styles, o))
+	}
+
+	if vertical {
+		y := originY
+		for i, w := range widths {
+			x := originX + max(0, contentWidth-w)/2
+			rects[i] = image.Rect(x, y, x+w, y+1)
+			y++
+		}
+		return rects
+	}
+
+	const sepWidth = 2 // matches the "  " spacing passed to ButtonGroup.
+	total := 0
+	for i, w := range widths {
+		total += w
+		if i > 0 {
+			total += sepWidth
+		}
+	}
+	var pad int
+	switch align {
+	case lipgloss.Right:
+		pad = max(0, contentWidth-total)
+	case lipgloss.Center:
+		pad = max(0, contentWidth-total) / 2
+	}
+
+	x := originX + pad
+	for i, w := range widths {
+		rects[i] = image.Rect(x, originY, x+w, originY+1)
+		x += w + sepWidth
+	}
+	return rects
 }
 
 func (p *Permissions) canScroll() bool {
