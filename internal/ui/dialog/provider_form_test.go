@@ -2,9 +2,12 @@ package dialog
 
 import (
 	"errors"
+	"image"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -77,6 +80,67 @@ func TestProviderForm_SubmitIncludesAPIKeyAndType(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "secret", submit.APIKey)
 	require.NotEqual(t, "openai-compat", submit.Type, "cycling right once should move off the default")
+}
+
+// TestProviderForm_CursorTracksFocusedField draws the dialog with each text
+// field focused in turn and checks the returned cursor actually lands on
+// that field's rendered input line, not on a neighboring label or a
+// different field entirely. This guards against the row offsets drifting
+// out of sync with what Draw() actually renders (see Cursor()).
+func TestProviderForm_CursorTracksFocusedField(t *testing.T) {
+	t.Parallel()
+
+	m := newTestProviderForm(t)
+	area := image.Rect(0, 0, 80, 30)
+
+	draw := func(want string) int {
+		t.Helper()
+		scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+		cur := m.Draw(scr, area)
+		require.NotNil(t, cur, "focused field should have a visible cursor")
+
+		lines := strings.Split(scr.String(), "\n")
+		require.Less(t, cur.Y, len(lines))
+
+		line := lines[cur.Y]
+		require.Contains(t, line, want,
+			"cursor row %d should be the %q input's line, got %q", cur.Y, want, line)
+		require.LessOrEqual(t, cur.X, len(strings.TrimRight(line, " ")),
+			"cursor X should fall within the rendered line's content")
+		return cur.Y
+	}
+
+	// ID is focused from the start; type into it and check the cursor sits
+	// on its line before tabbing away.
+	typeIntoProviderForm(t, m, "zzidzz")
+	idRow := draw("zzidzz")
+
+	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}) // -> base URL
+	typeIntoProviderForm(t, m, "zzurlzz")
+	urlRow := draw("zzurlzz")
+
+	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}) // -> type
+	m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab}) // -> api key
+	typeIntoProviderForm(t, m, "zzkeyzz")
+	keyRow := draw("zzkeyzz")
+
+	require.Less(t, idRow, urlRow, "id row should precede base URL row")
+	require.Less(t, urlRow, keyRow, "base URL row should precede API key row")
+}
+
+// TestProviderForm_CursorHiddenOnTypeField verifies the type selector (no
+// text input) hides the cursor entirely rather than drawing it somewhere
+// meaningless.
+func TestProviderForm_CursorHiddenOnTypeField(t *testing.T) {
+	t.Parallel()
+
+	m := newTestProviderForm(t)
+	m.focus = providerFormFieldType
+
+	area := image.Rect(0, 0, 80, 30)
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	cur := m.Draw(scr, area)
+	require.Nil(t, cur)
 }
 
 func TestProviderForm_ResultRoundTrip(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/discover"
 	"github.com/rave-soft/braid/internal/ui/common"
@@ -31,15 +32,6 @@ const (
 	providerFormFieldCount
 )
 
-// providerFormRow is the rendered line each field's input sits on (a label
-// line precedes each text input), used to keep the cursor lined up with the
-// field under edit — see Cursor().
-var providerFormRow = map[providerFormField]int{
-	providerFormFieldID:      1,
-	providerFormFieldBaseURL: 3,
-	providerFormFieldAPIKey:  6,
-}
-
 // ProviderForm is a dialog for creating a custom (non-catalog) provider: ID,
 // base URL, provider type, and an optional API key. It does no IO itself —
 // submitting returns [ActionSubmitCustomProvider] and the caller (ui.go)
@@ -58,6 +50,11 @@ type ProviderForm struct {
 	focus      providerFormField
 	submitting bool
 	errMsg     string
+
+	// fieldRow holds each text field's row offset (relative to the shared
+	// InputCursor baseline), recomputed every Draw() from the actual
+	// rendered heights of the parts above it — see Draw() and Cursor().
+	fieldRow map[providerFormField]int
 
 	width int
 	help  help.Model
@@ -251,9 +248,9 @@ func (m *ProviderForm) submit() Action {
 }
 
 // Cursor returns the cursor position relative to the dialog. Each field's
-// text input sits one label line below the previous field's input (see
-// providerFormRow), so the shared InputCursor helper's title-relative
-// baseline needs an extra per-field row offset added on top.
+// text input sits some number of rendered lines below the title — Draw()
+// fills in m.fieldRow with that offset each frame, computed from what's
+// actually drawn above the field rather than a hand-maintained constant.
 func (m *ProviderForm) Cursor() *tea.Cursor {
 	var cur *tea.Cursor
 	switch m.focus {
@@ -267,7 +264,7 @@ func (m *ProviderForm) Cursor() *tea.Cursor {
 		return nil
 	}
 	if cur != nil {
-		cur.Y += providerFormRow[m.focus]
+		cur.Y += m.fieldRow[m.focus]
 	}
 	return cur
 }
@@ -289,13 +286,27 @@ func (m *ProviderForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, m.width)
 	rc.Title = "Custom Provider"
 
-	rc.AddPart(labelStyle.Render("Provider ID"))
-	rc.AddPart(inputStyle.Render(m.id.View()))
-	rc.AddPart(labelStyle.Render("Base URL"))
-	rc.AddPart(inputStyle.Render(m.baseURL.View()))
-	rc.AddPart(labelStyle.Render("Type") + "  " + m.typeView())
-	rc.AddPart(labelStyle.Render("API Key (optional)"))
-	rc.AddPart(inputStyle.Render(m.apiKey.View()))
+	// lines tracks the rendered height of the parts added so far (they all
+	// sit on their own lines below the title, per rc.Gap==0). inputStyle
+	// adds its own blank margin lines above and below each input, so a
+	// field's row can't be a fixed per-field constant — it has to be
+	// derived from what was actually drawn above it.
+	lines := 0
+	addPart := func(part string) {
+		rc.AddPart(part)
+		lines += lipgloss.Height(part)
+	}
+	addField := func(field providerFormField, label string, input textinput.Model) {
+		addPart(labelStyle.Render(label))
+		m.fieldRow[field] = lines
+		addPart(inputStyle.Render(input.View()))
+	}
+
+	m.fieldRow = make(map[providerFormField]int, 3)
+	addField(providerFormFieldID, "Provider ID", m.id)
+	addField(providerFormFieldBaseURL, "Base URL", m.baseURL)
+	addPart(labelStyle.Render("Type") + "  " + m.typeView())
+	addField(providerFormFieldAPIKey, "API Key (optional)", m.apiKey)
 
 	switch {
 	case m.submitting:
