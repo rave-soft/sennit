@@ -45,11 +45,18 @@ type CompletionItem struct {
 
 	text    string
 	filter  string // what Filter() matches against; defaults to text
-	desc    string // shown as a muted "(desc)" suffix after text; never matched
+	desc    string // shown muted in the description column; never matched
 	value   any
 	match   fuzzy.Match
 	focused bool
 	cache   map[int]string
+
+	// titleColumn is the column (from the start of the row) where the
+	// description column begins, shared across every item currently visible
+	// in the popup so descriptions line up — see Completions.alignColumns.
+	// Zero disables the description column entirely (e.g. plain file/path
+	// items, which have no description to show).
+	titleColumn int
 
 	// Styles
 	normalStyle  lipgloss.Style
@@ -71,9 +78,9 @@ func NewCompletionItem(text string, value any, normalStyle, focusedStyle, matchS
 }
 
 // NewCommandCompletionItem creates a completion item for a "/" command. It
-// displays the command's title, followed by its description in muted
-// "(description)" text, but filters against the title plus its aliases and
-// description, so e.g. "clear" still surfaces "new".
+// displays the command's title, followed by its description in a muted,
+// right-aligned column (see titleColumn), but filters against the title
+// plus its aliases and description, so e.g. "clear" still surfaces "new".
 func NewCommandCompletionItem(v CommandCompletionValue, normalStyle, focusedStyle, matchStyle, mutedStyle lipgloss.Style) *CompletionItem {
 	item := NewCompletionItem(v.Title, v, normalStyle, focusedStyle, matchStyle)
 	item.mutedStyle = mutedStyle
@@ -101,18 +108,6 @@ func (c *CompletionItem) Finished() bool {
 // Text returns the display text of the item.
 func (c *CompletionItem) Text() string {
 	return c.text
-}
-
-// popupWidth returns the width used to size the completions popup: the
-// title plus, for command items, its untruncated "(description)" suffix.
-// This is only for sizing the popup — Render still fits/truncates the
-// description into whatever width that produces, via fitDescriptionSuffix.
-func (c *CompletionItem) popupWidth() int {
-	width := ansi.StringWidth(c.text)
-	if c.desc != "" {
-		width += ansi.StringWidth(" (" + c.desc + ")")
-	}
-	return width
 }
 
 // Value returns the value of the item.
@@ -160,6 +155,18 @@ func (c *CompletionItem) SetFocused(focused bool) {
 	c.Bump()
 }
 
+// SetTitleColumn sets the column at which the description column starts.
+// Called by Completions.alignColumns whenever the visible item set changes,
+// so all items line up on the widest title currently shown.
+func (c *CompletionItem) SetTitleColumn(col int) {
+	if c.titleColumn == col {
+		return
+	}
+	c.cache = nil
+	c.titleColumn = col
+	c.Bump()
+}
+
 // Render implements [list.Item].
 func (c *CompletionItem) Render(width int) string {
 	return renderItem(
@@ -169,6 +176,7 @@ func (c *CompletionItem) Render(width int) string {
 		c.mutedStyle,
 		c.text,
 		c.desc,
+		c.titleColumn,
 		c.focused,
 		width,
 		c.cache,
@@ -179,6 +187,7 @@ func (c *CompletionItem) Render(width int) string {
 func renderItem(
 	normalStyle, focusedStyle, matchStyle, mutedStyle lipgloss.Style,
 	text, desc string,
+	titleColumn int,
 	focused bool,
 	width int,
 	cache map[int]string,
@@ -212,20 +221,21 @@ func renderItem(
 		mutedStyle = mutedStyle.Background(style.GetBackground())
 	}
 
-	// Fit a "(description)" suffix into whatever width the title left
-	// behind. It's a separate rendered segment — appended after the title
-	// is finalized — so match highlighting (computed against the title's
-	// own byte offsets, below) never bleeds into it.
-	suffix := fitDescriptionSuffix(desc, innerWidth-titleWidth)
+	// Pad the title out to the shared description column, then fit the
+	// description into whatever's left. This is a separate rendered
+	// segment — appended after the title is finalized — so match
+	// highlighting (computed against the title's own byte offsets, below)
+	// never bleeds into it.
+	pad, fitted := fitColumnDescription(desc, titleWidth, titleColumn, innerWidth)
 
 	// Render full-width text with background.
-	content := style.Padding(0, 1).Width(width).Render(text + suffix)
+	content := style.Padding(0, 1).Width(width).Render(text + pad + fitted)
 
 	// Apply match highlighting using StyleRanges. Filter() (what produced
 	// match.MatchedIndexes) may include aliases/description text after the
 	// title, which isn't part of what's displayed here — drop any index
-	// past the title so highlighting never lands on the "(description)"
-	// suffix or garbage past it.
+	// past the title so highlighting never lands on the description column
+	// or garbage past it.
 	if len(match.MatchedIndexes) > 0 {
 		var ranges []lipgloss.Range
 		for _, rng := range matchedRanges(match.MatchedIndexes) {
@@ -244,10 +254,10 @@ func renderItem(
 		}
 	}
 
-	// Mute the "(description)" suffix, if any.
-	if suffix != "" {
-		start := titleWidth + 1 // +1 for the left padding column
-		end := start + ansi.StringWidth(suffix)
+	// Mute the description column, if any.
+	if fitted != "" {
+		start := titleColumn + 1 // +1 for the left padding column
+		end := start + ansi.StringWidth(fitted)
 		content = lipgloss.StyleRanges(content, lipgloss.NewRange(start, end, mutedStyle))
 	}
 
@@ -255,31 +265,33 @@ func renderItem(
 	return content
 }
 
-// fitDescriptionSuffix returns " (desc)" truncated to fit within budget
-// visible columns (the title's leftover width), or "" if there's no room
-// for at least "(…)" — 3 columns plus the leading space. The description is
-// what gets truncated; callers must never touch the title.
-func fitDescriptionSuffix(desc string, budget int) string {
-	if desc == "" {
-		return ""
-	}
-	const minSuffixWidth = 4 // " (…)"
-	if budget < minSuffixWidth {
-		return ""
-	}
-
-	wrapped := " (" + desc + ")"
-	if ansi.StringWidth(wrapped) <= budget {
-		return wrapped
+// fitColumnDescription returns the left-padding needed to push desc out to
+// titleColumn (measured from the start of the — possibly already
+// truncated — title), plus desc itself truncated to whatever width remains
+// inside innerWidth. Both are "", "" when there's no description, no
+// column alignment is active (titleColumn <= 0), or there's no room left
+// for even a single truncated character. The title is never touched here;
+// only the description gives way.
+func fitColumnDescription(desc string, titleWidth, titleColumn, innerWidth int) (pad, fitted string) {
+	if desc == "" || titleColumn <= 0 {
+		return "", ""
 	}
 
-	// Truncate the description itself to leave room for " (", "…", ")".
-	descBudget := budget - 4
-	if descBudget <= 0 {
-		return ""
+	budget := innerWidth - titleColumn
+	if budget < 1 {
+		return "", ""
 	}
-	truncated := ansi.Truncate(desc, descBudget, "…")
-	return " (" + truncated + ")"
+
+	fitted = desc
+	if ansi.StringWidth(fitted) > budget {
+		fitted = ansi.Truncate(fitted, budget, "…")
+	}
+	if fitted == "" {
+		return "", ""
+	}
+
+	padWidth := max(0, titleColumn-titleWidth)
+	return strings.Repeat(" ", padWidth), fitted
 }
 
 // matchedRanges converts a list of match indexes into contiguous ranges.

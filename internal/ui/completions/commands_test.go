@@ -4,14 +4,13 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 )
 
 func TestOpenCommandsAndFilter(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "new_session", Title: "new", Aliases: []string{"new session", "clear"}},
 		{ID: "summarize", Title: "compact", Aliases: []string{"summarize", "summarize session"}},
@@ -33,7 +32,7 @@ func TestOpenCommandsAndFilter(t *testing.T) {
 func TestCommandsEnterExecutesSelection(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "summarize", Title: "compact", Action: "summarize-action"},
 	})
@@ -52,7 +51,7 @@ func TestCommandsEnterExecutesSelection(t *testing.T) {
 func TestCommandsTabInsertsNameOnly(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "summarize", Title: "compact", Action: "summarize-action"},
 	})
@@ -66,30 +65,35 @@ func TestCommandsTabInsertsNameOnly(t *testing.T) {
 	require.Equal(t, "compact", sel.Value.Title)
 }
 
-func TestOpenCommandsSizesWidthToLongestTitleAndDescription(t *testing.T) {
+func TestOpenCommandsSizesWidthToTitleColumnPlusLongestDescription(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "new_session", Title: "new", Description: "start a new session"},
 		{ID: "compact", Title: "compact", Description: "x"},
 	})
 
-	// Width must fit the longest "title (description)" pair (the "new"
-	// item, whose description is the longest), not just the longest bare
-	// title — a plain Text()-based measurement would pick "compact"
-	// (7 cols) and clip "new"'s description entirely.
-	want := len("new (start a new session)") + 2 // padding
+	// The description column starts after the widest title ("compact", 7
+	// cols) plus a 2-column gap, and must be wide enough for the longest
+	// description ("start a new session", 20 cols) — not just the longest
+	// bare title, which would clip "new"'s description entirely.
+	titleColumn := len("compact") + 2
+	longestDesc := len("start a new session")
+	want := titleColumn + longestDesc + 2 // + row padding
 	require.Equal(t, want, c.width)
 
-	w, _ := c.Size()
-	require.Equal(t, want, w)
+	// Size() reports the popup's total on-screen footprint: content width
+	// plus the border frame (no scrollbar here — only 2 items).
+	w, h := c.Size()
+	require.Equal(t, want+borderFrameWidth, w)
+	require.Equal(t, 2+borderFrameHeight, h)
 }
 
 func TestSetMaxWidthCapsPopup(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.SetMaxWidth(15)
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "new_session", Title: "new", Description: "start a brand new session with a very long description"},
@@ -102,7 +106,7 @@ func TestSetMaxWidthCapsPopup(t *testing.T) {
 func TestFilterDoesNotShrinkWidth(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "new_session", Title: "new", Description: "start a new session"},
 		{ID: "compact", Title: "compact", Description: "x"},
@@ -120,7 +124,7 @@ func TestFilterDoesNotShrinkWidth(t *testing.T) {
 func TestCommandsEscClosesWithoutSelecting(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "new_session", Title: "new"},
 	})

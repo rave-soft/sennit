@@ -3,14 +3,13 @@ package completions
 import (
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 )
 
 func TestFilterPrefersExactBasenameStem(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.SetItems([]FileCompletionValue{
 		{Path: "internal/ui/chat/search.go"},
 		{Path: "internal/ui/chat/user.go"},
@@ -29,7 +28,7 @@ func TestFilterPrefersExactBasenameStem(t *testing.T) {
 func TestFilterPrefersBasenamePrefix(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.SetItems([]FileCompletionValue{
 		{Path: "internal/ui/chat/mcp.go"},
 		{Path: "internal/ui/model/chat.go"},
@@ -92,7 +91,7 @@ func TestNamePriorityTier(t *testing.T) {
 func TestFilterPrefersPathSegmentExact(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(testStyles())
 	c.SetItems([]FileCompletionValue{
 		{Path: "internal/ui/model/xychat.go"},
 		{Path: "internal/ui/chat/mcp.go"},

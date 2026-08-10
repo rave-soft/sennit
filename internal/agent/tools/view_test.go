@@ -184,10 +184,12 @@ func TestReadTextFileEnforcesMaxContentSize(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644))
 
+	// The size cap truncates at a line boundary and advertises
+	// continuation instead of failing the read.
 	content, hasMore, err := readTextFile(filePath, 0, len(lines), MaxLineLength)
-	require.ErrorAs(t, err, &contentTooLargeError{})
-	require.Empty(t, content)
-	require.False(t, hasMore)
+	require.NoError(t, err)
+	require.Equal(t, strings.Repeat("a", MaxLineLength), content)
+	require.True(t, hasMore)
 
 	content, hasMore, err = readTextFile(filePath, 2, 1, MaxLineLength)
 	require.NoError(t, err)

@@ -377,12 +377,15 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	keyMap := DefaultKeyMap()
 
 	// Completions component
-	comp := completions.New(
-		com.Styles.Completions.Normal,
-		com.Styles.Completions.Focused,
-		com.Styles.Completions.Match,
-		com.Styles.Completions.Muted,
-	)
+	comp := completions.New(completions.PopupStyles{
+		Normal:         com.Styles.Completions.Normal,
+		Focused:        com.Styles.Completions.Focused,
+		Match:          com.Styles.Completions.Match,
+		Muted:          com.Styles.Completions.Muted,
+		Border:         com.Styles.Completions.Border,
+		ScrollbarThumb: com.Styles.Dialog.ScrollbarThumb,
+		ScrollbarTrack: com.Styles.Dialog.ScrollbarTrack,
+	})
 
 	todoSpinner := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),

@@ -562,14 +562,20 @@ type Styles struct {
 		SuccessMessage lipgloss.Style
 	}
 
-	// Completions popup styles
+	// Completions popup styles (the "@"-file and "/"-command autocomplete
+	// popups shown above the editor).
 	Completions struct {
+		// Normal/Focused style each row; Focused is the selected row's
+		// full-width highlight (background fill, not just colored text).
 		Normal  lipgloss.Style
 		Focused lipgloss.Style
 		Match   lipgloss.Style
-		// Muted styles the "(description)" suffix shown after a command's
+		// Muted styles the description column shown after a command's
 		// name in the "/" completion popup.
 		Muted lipgloss.Style
+		// Border frames the popup (background + rounded border), toned
+		// like Dialog.View so the popup reads as a solid panel.
+		Border lipgloss.Style
 	}
 
 	// Attachments styles

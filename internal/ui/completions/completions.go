@@ -28,6 +28,24 @@ const (
 	tierFallback
 )
 
+// borderFrameWidth/borderFrameHeight are the extra columns/rows the popup's
+// border adds around the list content — 1 border cell on each side.
+// Size() and Render() must agree on these so the popup is positioned for
+// exactly what gets drawn.
+const (
+	borderFrameWidth  = 2
+	borderFrameHeight = 2
+)
+
+// Scrollbar glyphs, mirroring styles.ScrollbarThumb/ScrollbarTrack. Kept as
+// local literals rather than importing the styles package solely for two
+// characters — this package otherwise only takes pre-built lipgloss.Style
+// values from its caller.
+const (
+	scrollbarThumbGlyph = "┃"
+	scrollbarTrackGlyph = "│"
+)
+
 // SelectionMsg is sent when a completion is selected.
 type SelectionMsg[T any] struct {
 	Value    T
@@ -48,6 +66,27 @@ type CompletionItemsLoadedMsg struct {
 	Resources []ResourceCompletionValue
 }
 
+// PopupStyles bundles every style the completions popup needs to draw
+// itself: item rows, the description column, the frame, and the scrollbar.
+// Passed as one value (rather than a growing list of positional
+// lipgloss.Style args) to New and SetStyles.
+type PopupStyles struct {
+	// Normal/Focused style each row's background+foreground (focused =
+	// the selected row, filled edge-to-edge — not just colored text).
+	Normal, Focused lipgloss.Style
+	// Match highlights the matched substring within a row's title.
+	Match lipgloss.Style
+	// Muted styles the description column.
+	Muted lipgloss.Style
+	// Border frames the whole popup (background + rounded border), toned
+	// like a dialog so the popup reads as a solid panel rather than a
+	// bare list floating over the chat.
+	Border lipgloss.Style
+	// ScrollbarThumb/ScrollbarTrack style the scroll indicator shown to
+	// the right of the list when there are more items than fit on screen.
+	ScrollbarThumb, ScrollbarTrack lipgloss.Style
+}
+
 // Completions represents the completions popup component.
 type Completions struct {
 	// Popup dimensions
@@ -65,11 +104,7 @@ type Completions struct {
 	list *list.FilterableList
 
 	// Styling
-	normalStyle  lipgloss.Style
-	focusedStyle lipgloss.Style
-	matchStyle   lipgloss.Style
-	// mutedStyle styles the "(description)" suffix on command items.
-	mutedStyle lipgloss.Style
+	styles PopupStyles
 
 	allItems []list.FilterableItem
 	filtered []list.FilterableItem
@@ -107,29 +142,23 @@ var namePriorityRules = []namePriorityRule{
 }
 
 // New creates a new completions component.
-func New(normalStyle, focusedStyle, matchStyle, mutedStyle lipgloss.Style) *Completions {
+func New(styles PopupStyles) *Completions {
 	l := list.NewFilterableList()
 	l.SetGap(0)
 	l.SetReverse(true)
 
 	return &Completions{
-		keyMap:       DefaultKeyMap(),
-		list:         l,
-		normalStyle:  normalStyle,
-		focusedStyle: focusedStyle,
-		matchStyle:   matchStyle,
-		mutedStyle:   mutedStyle,
+		keyMap: DefaultKeyMap(),
+		list:   l,
+		styles: styles,
 	}
 }
 
 // SetStyles updates the styles used when rendering completion items.
 // Existing items are not restyled; subsequent SetItems calls pick up the
 // new styles.
-func (c *Completions) SetStyles(normalStyle, focusedStyle, matchStyle, mutedStyle lipgloss.Style) {
-	c.normalStyle = normalStyle
-	c.focusedStyle = focusedStyle
-	c.matchStyle = matchStyle
-	c.mutedStyle = mutedStyle
+func (c *Completions) SetStyles(styles PopupStyles) {
+	c.styles = styles
 }
 
 // IsOpen returns whether the completions popup is open.
@@ -142,10 +171,20 @@ func (c *Completions) Query() string {
 	return c.query
 }
 
-// Size returns the visible size of the popup.
+// Size returns the popup's total on-screen footprint — list rows plus the
+// scrollbar column (if shown) plus the border frame — so callers can
+// position/clamp it without knowing the frame's exact size themselves.
 func (c *Completions) Size() (width, height int) {
 	visible := len(c.filtered)
-	return c.width, min(visible, c.height)
+	rows := min(visible, c.height)
+
+	width = c.width
+	if c.hasScrollbar() {
+		width++
+	}
+	width += borderFrameWidth
+	height = rows + borderFrameHeight
+	return width, height
 }
 
 // KeyMap returns the key bindings.
@@ -188,9 +227,9 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 		item := NewCompletionItem(
 			file.Path,
 			file,
-			c.normalStyle,
-			c.focusedStyle,
-			c.matchStyle,
+			c.styles.Normal,
+			c.styles.Focused,
+			c.styles.Match,
 		)
 		items = append(items, item)
 	}
@@ -200,9 +239,9 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 		item := NewCompletionItem(
 			resource.MCPName+"/"+cmp.Or(resource.Title, resource.URI),
 			resource,
-			c.normalStyle,
-			c.focusedStyle,
-			c.matchStyle,
+			c.styles.Normal,
+			c.styles.Focused,
+			c.styles.Match,
 		)
 		items = append(items, item)
 	}
@@ -217,7 +256,7 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 func (c *Completions) OpenCommands(values []CommandCompletionValue) {
 	items := make([]list.FilterableItem, 0, len(values))
 	for _, v := range values {
-		items = append(items, NewCommandCompletionItem(v, c.normalStyle, c.focusedStyle, c.matchStyle, c.mutedStyle))
+		items = append(items, NewCommandCompletionItem(v, c.styles.Normal, c.styles.Focused, c.styles.Match, c.styles.Muted))
 	}
 	c.setAllItems(items)
 }
@@ -311,32 +350,80 @@ func hasPathSegment(pathLower, queryLower string) bool {
 }
 
 // updateSize recomputes the popup height for the current filtered set and
-// re-selects/scrolls. Width is intentionally not touched here: it's fixed
-// once at open time (see setAllItems) so the popup doesn't shrink as
-// filtering narrows the set.
+// re-selects/scrolls. The box width (c.width) is intentionally not touched
+// here: it's fixed once at open time (see setAllItems) so the popup doesn't
+// shrink as filtering narrows the set. The per-row width handed to the list
+// does flex by one column whenever a scrollbar is showing, so rows never
+// render underneath it.
 func (c *Completions) updateSize() {
 	items := c.filtered
 	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
-	c.list.SetSize(c.width, c.height)
+	c.alignColumns(items)
+
+	rowWidth := c.width
+	if c.hasScrollbar() {
+		rowWidth = max(0, c.width-1)
+	}
+	c.list.SetSize(rowWidth, c.height)
 	c.list.SelectFirst()
 	c.list.ScrollToSelected()
 }
 
-// computeWidth measures the widest "title (description)" item in items and
-// clamps it to [minWidth, effective max], where the effective max is the
-// package ceiling (maxWidth) further capped by capWidth if the caller set
-// one via SetMaxWidth.
-func (c *Completions) computeWidth(items []list.FilterableItem) int {
-	width := 0
+// hasScrollbar reports whether the current filtered set overflows the
+// popup's viewport height, i.e. whether a scroll indicator is needed.
+func (c *Completions) hasScrollbar() bool {
+	return len(c.filtered) > c.height
+}
+
+// columnLayout scans items for the description column layout: the widest
+// title (the column description text starts at, plus a 2-column gap) and
+// the widest description. hasDesc is false when no item carries a
+// description at all (e.g. the @-file popup), in which case titleColumn
+// stays 0 and items fall back to single-column, title-only rendering.
+func columnLayout(items []list.FilterableItem) (titleColumn, maxDesc int, hasDesc bool) {
 	for _, item := range items {
-		if w, ok := item.(interface{ popupWidth() int }); ok {
-			width = max(width, w.popupWidth())
+		ci, ok := item.(*CompletionItem)
+		if !ok {
+			if t, ok := item.(interface{ Text() string }); ok {
+				titleColumn = max(titleColumn, ansi.StringWidth(t.Text()))
+			}
 			continue
 		}
-		if t, ok := item.(interface{ Text() string }); ok {
-			width = max(width, ansi.StringWidth(t.Text()))
+		titleColumn = max(titleColumn, ansi.StringWidth(ci.text))
+		if ci.desc != "" {
+			hasDesc = true
+			maxDesc = max(maxDesc, ansi.StringWidth(ci.desc))
 		}
 	}
+	if hasDesc {
+		titleColumn += 2
+	}
+	return titleColumn, maxDesc, hasDesc
+}
+
+// alignColumns recomputes the shared description column from the currently
+// visible items and pushes it to each one, so titles/descriptions line up
+// across whatever subset filtering has left on screen.
+func (c *Completions) alignColumns(items []list.FilterableItem) {
+	titleColumn, _, _ := columnLayout(items)
+	for _, item := range items {
+		if ci, ok := item.(*CompletionItem); ok {
+			ci.SetTitleColumn(titleColumn)
+		}
+	}
+}
+
+// computeWidth measures the widest title/description column pair across
+// items (see columnLayout) and clamps it to [minWidth, effective max],
+// where the effective max is the package ceiling (maxWidth) further capped
+// by capWidth if the caller set one via SetMaxWidth.
+func (c *Completions) computeWidth(items []list.FilterableItem) int {
+	titleColumn, maxDesc, hasDesc := columnLayout(items)
+	width := titleColumn
+	if hasDesc {
+		width = titleColumn + maxDesc
+	}
+
 	upperBound := maxWidth
 	if c.capWidth > 0 {
 		upperBound = min(upperBound, c.capWidth)
@@ -488,7 +575,71 @@ func (c *Completions) Render() string {
 		return ""
 	}
 
-	return c.list.List.Render()
+	inner := c.list.List.Render()
+	rows := min(len(items), c.height)
+
+	// Width of the content area: list rows, plus one column for the
+	// scrollbar when it's showing.
+	contentWidth := c.width
+	if sb := c.renderScrollbar(rows); sb != "" {
+		inner = lipgloss.JoinHorizontal(lipgloss.Top, inner, sb)
+		contentWidth++
+	}
+
+	// Frame the list in a solid, dialog-toned box (background + rounded
+	// border) instead of a bare list floating over the chat. Width is the
+	// box's *total* width (border included) — content is already sized to
+	// exactly what's left over, so the border wraps it without reflowing.
+	return c.styles.Border.Width(contentWidth + borderFrameWidth).Render(inner)
+}
+
+// renderScrollbar draws a thin vertical scroll indicator height rows tall,
+// or "" if the current filtered set fits without scrolling.
+func (c *Completions) renderScrollbar(height int) string {
+	thumbPos, thumbSize, ok := scrollbarThumbBounds(height, len(c.filtered), height, c.list.Offset())
+	if !ok {
+		return ""
+	}
+
+	var sb strings.Builder
+	for i := range height {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		if i >= thumbPos && i < thumbPos+thumbSize {
+			sb.WriteString(c.styles.ScrollbarThumb.Render(scrollbarThumbGlyph))
+		} else {
+			sb.WriteString(c.styles.ScrollbarTrack.Render(scrollbarTrackGlyph))
+		}
+	}
+	return sb.String()
+}
+
+// scrollbarThumbBounds returns the thumb's start row and size (in track
+// cells) for a scrollbar representing contentSize rows of content in a
+// viewportSize-row viewport scrolled to offset, within a track of the
+// given height. ok is false when no thumb is needed (content fits).
+//
+// This mirrors common.ScrollbarThumbBounds; duplicated rather than
+// imported so this package keeps taking only pre-built lipgloss.Style
+// values from its caller instead of a dependency on internal/ui/common.
+func scrollbarThumbBounds(height, contentSize, viewportSize, offset int) (start, size int, ok bool) {
+	if height <= 0 || contentSize <= viewportSize {
+		return 0, 0, false
+	}
+
+	thumbSize := max(1, height*viewportSize/contentSize)
+	maxOffset := contentSize - viewportSize
+	if maxOffset <= 0 {
+		return 0, 0, false
+	}
+
+	trackSpace := height - thumbSize
+	thumbPos := 0
+	if trackSpace > 0 {
+		thumbPos = min(trackSpace, offset*trackSpace/maxOffset)
+	}
+	return thumbPos, thumbSize, true
 }
 
 func loadFiles(depth, limit int) []FileCompletionValue {
