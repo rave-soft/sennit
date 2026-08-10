@@ -23,6 +23,18 @@ type Status struct {
 	help     help.Model
 	helpKm   help.KeyMap
 	msg      util.InfoMsg
+
+	// childSessionBack marks the current msg as the child-session "back"
+	// banner (see enterChildSession/exitChildSession in model/ui.go). While
+	// true, the status bar renders the message as a clickable back button
+	// and Draw's caller (UI.Update) routes clicks anywhere on the status
+	// bar to exitChildSession — the status bar otherwise has no mouse
+	// handling at all, so this flag is what tells a click apart from a
+	// stray click on an inert help line.
+	childSessionBack bool
+	// backHover is set while the pointer is over the status bar and
+	// childSessionBack is true, to give the back button hover feedback.
+	backHover bool
 }
 
 // NewStatus creates a new status bar and help model.
@@ -47,6 +59,29 @@ func (s *Status) InfoMsg() util.InfoMsg { return s.msg }
 // ClearInfoMsg clears the status info message.
 func (s *Status) ClearInfoMsg() {
 	s.msg = util.InfoMsg{}
+	s.childSessionBack = false
+	s.backHover = false
+}
+
+// SetChildSessionBack marks (or unmarks) the current info message as the
+// child-session back banner — see the childSessionBack field doc.
+func (s *Status) SetChildSessionBack(active bool) {
+	s.childSessionBack = active
+	if !active {
+		s.backHover = false
+	}
+}
+
+// IsChildSessionBack reports whether the status bar currently shows the
+// clickable child-session back banner.
+func (s *Status) IsChildSessionBack() bool {
+	return s.childSessionBack
+}
+
+// SetBackHover sets whether the pointer is currently over the back banner,
+// for hover feedback. No-op when the banner isn't showing.
+func (s *Status) SetBackHover(hover bool) {
+	s.backHover = hover
 }
 
 // SetWidth sets the width of the status bar and help view.
@@ -101,6 +136,16 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	case util.InfoTypeSuccess:
 		indStyle = s.com.Styles.Status.SuccessIndicator
 		msgStyle = s.com.Styles.Status.SuccessMessage
+	}
+
+	if s.childSessionBack {
+		// Underline marks the whole line as clickable; bold on top of that
+		// is the hover cue (there's no dedicated hover style token, and this
+		// is the one spot in the status bar that's interactive).
+		msgStyle = msgStyle.Underline(true)
+		if s.backHover {
+			msgStyle = msgStyle.Bold(true)
+		}
 	}
 
 	ind := indStyle.String()

@@ -69,7 +69,7 @@ func TestShortFullHelpHideEnterChildSessionOnPlainItem(t *testing.T) {
 
 	u := newHelpTestUI(t)
 	u.chat.AppendMessages(chat.NewToolMessageItem(u.com.Styles, "msg1",
-		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false))
+		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false, nil))
 	u.chat.SetSelected(0)
 
 	require.False(t, helpKeyByHelpText(u.ShortHelp(), "alt+↓"))

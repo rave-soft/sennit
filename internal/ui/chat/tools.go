@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/diff"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/hooks"
@@ -246,26 +247,51 @@ var toolMessageItemFactories = map[string]toolMessageItemFactory{
 //
 // It returns a specific tool message item type if implemented, otherwise it
 // returns a generic tool message item. The messageID is the ID of the assistant
-// message containing this tool call.
+// message containing this tool call. cfg is used to recognize user-defined
+// agent tools (see isCustomAgentTool) so they get the same renderer as the
+// built-in "agent" tool; it may be nil, in which case no tool name is
+// treated as a custom agent.
 func NewToolMessageItem(
 	sty *styles.Styles,
 	messageID string,
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	cfg *config.Config,
 ) ToolMessageItem {
 	var item ToolMessageItem
-	if factory, ok := toolMessageItemFactories[toolCall.Name]; ok {
-		item = factory(sty, toolCall, result, canceled)
-	} else if IsDockerMCPTool(toolCall.Name) {
+	switch {
+	case toolMessageItemFactories[toolCall.Name] != nil:
+		item = toolMessageItemFactories[toolCall.Name](sty, toolCall, result, canceled)
+	case IsDockerMCPTool(toolCall.Name):
 		item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled)
-	} else if strings.HasPrefix(toolCall.Name, "mcp_") {
+	case strings.HasPrefix(toolCall.Name, "mcp_"):
 		item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
-	} else {
+	case isCustomAgentTool(cfg, toolCall.Name):
+		// User-defined agents (.braid/agents, config.Agents) are
+		// delegations of the same shape as the built-in "agent" tool —
+		// CustomAgentParams mirrors AgentParams, just a "prompt" field —
+		// so they get the identical renderer: running status line,
+		// collapse-to-summary once finished, click-to-drill into the
+		// child session.
+		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
+	default:
 		item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
 	}
 	item.SetMessageID(messageID)
 	return item
+}
+
+// isCustomAgentTool reports whether name is a user-defined agent tool.
+// internal/agent/custom_agent_tool.go registers one delegation tool per
+// entry in cfg.Agents, named after the agent's id — excluding "coder" and
+// "task", which are the built-in roles rather than tools a model can call.
+func isCustomAgentTool(cfg *config.Config, name string) bool {
+	if cfg == nil || name == config.AgentCoder || name == config.AgentTask {
+		return false
+	}
+	_, ok := cfg.Agents[name]
+	return ok
 }
 
 // SetCompact implements the Compactable interface.

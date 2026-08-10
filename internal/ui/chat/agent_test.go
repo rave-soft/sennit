@@ -17,7 +17,7 @@ import (
 func mkNestedToolCall(t *testing.T, sty *styles.Styles, id, name, input string) ToolMessageItem {
 	t.Helper()
 	tc := message.ToolCall{ID: id, Name: name, Input: input, Finished: true}
-	return NewToolMessageItem(sty, "child-msg", tc, nil, false)
+	return NewToolMessageItem(sty, "child-msg", tc, nil, false, nil)
 }
 
 // TestFormatElapsed covers the elapsed-time formatting used by the
@@ -203,17 +203,20 @@ func TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {
 	})
 }
 
-// TestAgentToolRenderCapsNestedTools covers the display density cap: a
-// delegation with more than maxVisibleNestedTools child tool calls must
-// only render the last few, with a summary line accounting for the rest,
-// while the underlying nestedTools slice itself stays intact.
+// TestAgentToolRenderCapsNestedTools covered the display density cap for a
+// *running* delegation's nested-tool tree (last few visible, "+N earlier
+// steps" summary for the rest). Now that a finished delegation collapses
+// to a compact summary (see TestAgentToolRenderFinishedCollapses below),
+// the cap only matters while still running — see
+// TestRenderAgentStatusLine_* in this file for that coverage. This test is
+// kept as the still-running counterpart: caps apply, full nested tree
+// still renders.
 func TestAgentToolRenderCapsNestedTools(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
-	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "done"}
-	item := NewAgentToolMessageItem(&sty, parent, result, false)
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false)
 
 	for i := 1; i <= 6; i++ {
 		id := "tool-" + string(rune('0'+i))
@@ -235,15 +238,15 @@ func TestAgentToolRenderCapsNestedTools(t *testing.T) {
 }
 
 // TestAgentToolRenderNoCapBelowThreshold is the regression guard for the
-// cap: with maxVisibleNestedTools or fewer nested tools, no "+N earlier"
-// summary line should appear at all (e.g. never "+0 earlier steps").
+// cap: with maxVisibleNestedTools or fewer nested tools on a still-running
+// delegation, no "+N earlier" summary line should appear at all (e.g.
+// never "+0 earlier steps").
 func TestAgentToolRenderNoCapBelowThreshold(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
-	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "done"}
-	item := NewAgentToolMessageItem(&sty, parent, result, false)
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false)
 
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-1", "bash", `{"command":"echo tool-1"}`))
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-2", "bash", `{"command":"echo tool-2"}`))
@@ -252,6 +255,67 @@ func TestAgentToolRenderNoCapBelowThreshold(t *testing.T) {
 	require.NotContains(t, out, "earlier steps")
 	require.Contains(t, out, "echo tool-1")
 	require.Contains(t, out, "echo tool-2")
+}
+
+// TestAgentToolRenderFinishedCollapses is the render-path regression test
+// for the "still looks the same as a running one" bug report: a finished
+// top-level agent delegation must render as a compact 2-3 line block, not
+// the full nested-tool tree plus body content it used to. It must show the
+// prompt, an outcome line (steps + tokens), a preview of the result's
+// first line, and it must NOT show the nested tool calls or the raw
+// "Task" tag/tree formatting that a running (or still-nested) delegation
+// uses.
+func TestAgentToolRenderFinishedCollapses(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase for bug X"}`, Finished: true}
+	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "Found the bug in foo.go.\nMore detail below."}
+	item := NewAgentToolMessageItem(&sty, parent, result, false)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"Provider"}`))
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "c2", "view", `{"file_path":"foo.go"}`))
+
+	out := ansi.Strip(item.Render(120))
+	lines := strings.Split(strings.TrimRight(out, " \n"), "\n")
+
+	require.LessOrEqual(t, len(lines), 3, "finished delegation must collapse to at most 3 lines, got: %q", out)
+	require.Contains(t, out, "Agent")
+	require.Contains(t, out, "inspect codebase for bug X")
+	require.Contains(t, out, "step 2")
+	require.Contains(t, out, "Found the bug in foo.go.")
+	require.NotContains(t, out, "More detail below.", "only the first line of the result should preview")
+	require.NotContains(t, out, "grep", "nested tool calls must not render inline once finished")
+	require.NotContains(t, out, "Task", "the running-state Task tag must not render once finished")
+}
+
+// TestAgentToolRenderCanceledCollapses covers the canceled variant: same
+// compact shape, with "canceled" surfaced in the outcome line instead of a
+// result preview (a canceled delegation has no result).
+func TestAgentToolRenderCanceledCollapses(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
+	item := NewAgentToolMessageItem(&sty, parent, nil, true)
+
+	out := ansi.Strip(item.Render(120))
+	require.Contains(t, out, "canceled")
+	require.NotContains(t, out, "Task")
+}
+
+// TestAgentToolToggleExpandedIsNoOp covers the removal of inline
+// expansion for agent tools: the full result is only reachable by
+// drilling into the child session, not by toggling Expandable.
+func TestAgentToolToggleExpandedIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
+	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "done"}
+	item := NewAgentToolMessageItem(&sty, parent, result, false)
+
+	require.False(t, item.ToggleExpanded())
+	require.False(t, item.ToggleExpanded(), "must stay false regardless of how many times it's toggled")
 }
 
 // TestAgenticFetchToolMessageItem_SetChildSessionTokensBumpsVersion is

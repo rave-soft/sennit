@@ -124,7 +124,7 @@ func TestHandleDelayedClickOnPlainToolItem(t *testing.T) {
 
 	u := newChildSessionTestUI(t)
 	item := chat.NewToolMessageItem(u.com.Styles, "msg1",
-		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false)
+		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false, nil)
 	u.chat.AppendMessages(item)
 	u.chat.SetSelected(0)
 

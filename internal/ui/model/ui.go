@@ -993,6 +993,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// A click anywhere on the status bar while it's showing the
+		// child-session back banner (see enterChildSession) exits the
+		// child session — the only mouse-clickable spot the status bar
+		// has. Must come before handleClickFocus, which would otherwise
+		// treat this as a click on the main pane.
+		if msg.Button == tea.MouseLeft && m.status.IsChildSessionBack() && image.Pt(msg.X, msg.Y).In(m.layout.status) {
+			if cmd := m.exitChildSession(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		if cmd := m.handleClickFocus(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1028,6 +1040,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.dialog.HasDialogs() {
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
+		}
+
+		// Hover feedback for the status bar's child-session back banner.
+		if m.status.IsChildSessionBack() {
+			m.status.SetBackHover(image.Pt(msg.X, msg.Y).In(m.layout.status))
 		}
 
 		// Track hover position for inline editors.
@@ -1402,15 +1419,15 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		switch msg.Role {
 		case message.User:
 			m.lastUserMessageTime = msg.CreatedAt
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Config())...)
 		case message.Assistant:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Config())...)
 			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Config())...)
 		}
 	}
 
@@ -1511,7 +1528,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		// Extract nested tool items.
 		var nestedTools []chat.ToolMessageItem
 		for _, nestedMsg := range nestedMsgPtrs {
-			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap)
+			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.com.Config())
 			for _, nestedItem := range nestedItems {
 				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
 					// Mark nested tools as simple (compact) rendering.
@@ -1561,7 +1578,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			return nil
 		}
 		m.lastUserMessageTime = msg.CreatedAt
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Config())
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1574,7 +1591,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case message.Assistant:
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Config())
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {
@@ -1698,7 +1715,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if existingToolItem == nil {
-			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false))
+			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false, m.com.Config()))
 		}
 	}
 
@@ -1790,14 +1807,18 @@ func childSessionLabel(item chat.ToolMessageItem) string {
 }
 
 // childSessionBreadcrumb formats the status-bar breadcrumb shown while
-// viewing a child session: "<parentTitle> › <label>" plus a "(N/M)" sibling
-// counter when there's more than one sibling delegation to cycle through.
+// viewing a child session: "← back to <parentTitle> · <label>" plus a
+// "(N/M)" sibling counter when there's more than one sibling delegation to
+// cycle through. Rendered as a clickable back button (see
+// Status.SetChildSessionBack) — the leading arrow and trailing "click or
+// alt+up to return" are the two visible affordances telling the user this
+// line does something.
 func childSessionBreadcrumb(parentTitle, label string, siblingIndex, siblingCount int) string {
-	breadcrumb := parentTitle + " › " + label
+	breadcrumb := "← back to " + parentTitle + " › " + label
 	if siblingCount > 1 {
 		breadcrumb += fmt.Sprintf(" (%d/%d)", siblingIndex+1, siblingCount)
 	}
-	return breadcrumb + " · alt+up to return"
+	return breadcrumb + " · click or alt+up to return"
 }
 
 // enterChildSession pushes a navigation frame for the currently loaded
@@ -1846,6 +1867,7 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	}
 	breadcrumb := childSessionBreadcrumb(parentTitle, label, siblingIndex, len(siblings))
 	m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: breadcrumb})
+	m.status.SetChildSessionBack(true)
 
 	return m.loadSession(childID)
 }
@@ -1976,7 +1998,7 @@ func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.
 		}
 		if !found {
 			// Create a new nested tool item.
-			nestedItem := chat.NewToolMessageItem(m.com.Styles, event.Payload.ID, tc, nil, false)
+			nestedItem := chat.NewToolMessageItem(m.com.Styles, event.Payload.ID, tc, nil, false, m.com.Config())
 			if simplifiable, ok := nestedItem.(chat.Compactable); ok {
 				simplifiable.SetCompact(true)
 			}

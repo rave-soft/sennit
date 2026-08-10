@@ -142,7 +142,7 @@ func TestEnterChildSessionKeyNoOpOnNonNestedItem(t *testing.T) {
 	u.dialog = dialog.NewOverlay()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
 	u.chat.AppendMessages(chat.NewToolMessageItem(u.com.Styles, "msg1",
-		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false))
+		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false, nil))
 	u.chat.SetSelected(0)
 
 	_, cmd := u.Update(tea.KeyPressMsg{Mod: tea.ModAlt, Code: tea.KeyDown})

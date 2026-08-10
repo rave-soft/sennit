@@ -364,7 +364,9 @@ func cappedMessageWidth(availableWidth int) int {
 //
 // For assistant messages with tool calls, pass a toolResults map to link results.
 // Use BuildToolResultMap to create this map from all messages in a session.
-func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult) []MessageItem {
+// cfg is forwarded to NewToolMessageItem to recognize user-defined agent
+// tools; it may be nil.
+func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, cfg *config.Config) []MessageItem {
 	switch msg.Role {
 	case message.User:
 		// Reconstruct shell command items from ShellCommand parts.
@@ -402,6 +404,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 				tc,
 				result,
 				msg.FinishReason() == message.FinishReasonCanceled,
+				cfg,
 			))
 		}
 		return items

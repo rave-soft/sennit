@@ -5,6 +5,8 @@ import (
 
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,4 +68,52 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	for name := range toolMessageItemFactories {
 		require.Truef(t, known[name], "tool %q has a registered factory but is not in config.AllToolNames()", name)
 	}
+}
+
+// TestNewToolMessageItem_CustomAgentDispatch covers the documented gap
+// closed here: a user-defined agent tool (internal/agent/custom_agent_tool.go
+// registers one per entry in cfg.Agents, named after the agent's id) must
+// get the same AgentToolMessageItem renderer as the built-in "agent" tool —
+// status line, collapse-on-finish, click-to-drill — not the generic
+// fallback. "coder" and "task" are config.Agents entries too, but they're
+// roles, not tools a model can call, so they must never dispatch here.
+func TestNewToolMessageItem_CustomAgentDispatch(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	cfg := &config.Config{
+		Agents: map[string]config.Agent{
+			config.AgentCoder: {ID: config.AgentCoder},
+			config.AgentTask:  {ID: config.AgentTask},
+			"reviewer":        {ID: "reviewer", Name: "Reviewer"},
+		},
+	}
+
+	item := NewToolMessageItem(&sty, "msg1",
+		message.ToolCall{ID: "tc-1", Name: "reviewer", Input: `{"prompt":"review the diff"}`, Finished: false}, nil, false, cfg)
+	require.IsType(t, &AgentToolMessageItem{}, item,
+		"a tool call named after a config.Agents entry must dispatch to the agent renderer")
+
+	// "coder"/"task" are agent roles, not callable tool names — a stray
+	// tool call with that name (shouldn't happen, but mustn't be
+	// misrendered as a delegation) falls back to the generic renderer.
+	roleItem := NewToolMessageItem(&sty, "msg1",
+		message.ToolCall{ID: "tc-2", Name: config.AgentCoder, Input: `{}`, Finished: false}, nil, false, cfg)
+	require.NotEqual(t, &AgentToolMessageItem{}, roleItem, "coder/task must not dispatch to the agent renderer")
+	_, isAgentItem := roleItem.(*AgentToolMessageItem)
+	require.False(t, isAgentItem, "coder/task must not dispatch to the agent renderer")
+
+	// A nil cfg (e.g. some call sites that don't have config handy) must
+	// never dispatch to the agent renderer, only fall back to generic.
+	nilCfgItem := NewToolMessageItem(&sty, "msg1",
+		message.ToolCall{ID: "tc-3", Name: "reviewer", Input: `{}`, Finished: false}, nil, false, nil)
+	_, isAgentItem = nilCfgItem.(*AgentToolMessageItem)
+	require.False(t, isAgentItem, "nil cfg must never dispatch a tool name to the agent renderer")
+
+	// An unrelated tool name that happens to not match any config.Agents
+	// entry keeps falling back to the generic renderer, unaffected.
+	genericItem := NewToolMessageItem(&sty, "msg1",
+		message.ToolCall{ID: "tc-4", Name: "some_random_tool", Input: `{}`, Finished: false}, nil, false, cfg)
+	_, isAgentItem = genericItem.(*AgentToolMessageItem)
+	require.False(t, isAgentItem)
 }

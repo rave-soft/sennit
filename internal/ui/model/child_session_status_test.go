@@ -67,7 +67,7 @@ func TestFindNestedToolContainer(t *testing.T) {
 	agentItem := chat.NewAgentToolMessageItem(u.com.Styles,
 		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{}`, Finished: false}, nil, false)
 	plainItem := chat.NewToolMessageItem(u.com.Styles, "msg1",
-		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false)
+		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false, nil)
 	u.chat.AppendMessages(agentItem, plainItem)
 
 	require.Same(t, agentItem, u.findNestedToolContainer("tc-agent"))

@@ -53,6 +53,14 @@ type AgentToolMessageItem struct {
 	startTime        time.Time
 	promptTokens     int64
 	completionTokens int64
+
+	// duration is frozen the first time SetResult observes a non-nil
+	// result (see SetResult below) — i.e. only for a delegation that
+	// finishes while this item is live in the UI. An item reconstructed
+	// from history gets its result at construction time instead, so
+	// duration stays zero ("unknown") rather than reporting the time
+	// since page load as if it were the delegation's real runtime.
+	duration time.Duration
 }
 
 var (
@@ -86,6 +94,34 @@ func (a *AgentToolMessageItem) SetChildSessionTokens(prompt, completion int64) {
 	a.completionTokens = completion
 	a.clearCache()
 	a.Bump()
+}
+
+// SetResult freezes the delegation's duration (see the duration field doc)
+// the first time a result arrives, then delegates to the embedded setter.
+func (a *AgentToolMessageItem) SetResult(res *message.ToolResult) {
+	if res != nil && a.duration == 0 {
+		a.duration = time.Since(a.startTime)
+	}
+	a.baseToolMessageItem.SetResult(res)
+}
+
+// SetStatus freezes duration on cancellation too — a canceled delegation
+// never gets a SetResult call. See the duration field doc.
+func (a *AgentToolMessageItem) SetStatus(status ToolStatus) {
+	if status == ToolStatusCanceled && a.duration == 0 {
+		a.duration = time.Since(a.startTime)
+	}
+	a.baseToolMessageItem.SetStatus(status)
+}
+
+// ToggleExpanded is a no-op: a finished delegation renders as a compact
+// summary, and its full result is only reachable by drilling into the
+// child session (click, or alt+down) — not by expanding inline. Overriding
+// (rather than removing) keeps AgentToolMessageItem satisfying Expandable,
+// which HandleDelayedClick and ToggleExpandedSelectedItem both type-assert
+// against; a no-op here just means neither ever has anything to do.
+func (a *AgentToolMessageItem) ToggleExpanded() bool {
+	return false
 }
 
 // Animate progresses the message animation if it should be spinning.
@@ -180,6 +216,15 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
+
+	// A finished (or canceled) top-level delegation collapses to a compact
+	// summary — the full result and nested-tool tree are only reachable by
+	// drilling into the child session (click, or alt+down), never by
+	// expanding this block inline. See ToggleExpanded above.
+	if !pending && !opts.Compact {
+		return renderCollapsedDelegation(sty, cappedWidth, "Agent", opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens)
+	}
+
 	if !opts.ExpandedContent {
 		prompt = strings.ReplaceAll(prompt, "\n", " ")
 	}
@@ -265,6 +310,7 @@ type AgenticFetchToolMessageItem struct {
 	startTime        time.Time
 	promptTokens     int64
 	completionTokens int64
+	duration         time.Duration
 }
 
 var (
@@ -298,6 +344,26 @@ func (a *AgenticFetchToolMessageItem) SetChildSessionTokens(prompt, completion i
 	a.completionTokens = completion
 	a.clearCache()
 	a.Bump()
+}
+
+// SetResult / SetStatus / ToggleExpanded mirror AgentToolMessageItem's
+// overrides — see the doc comments there for the rationale.
+func (a *AgenticFetchToolMessageItem) SetResult(res *message.ToolResult) {
+	if res != nil && a.duration == 0 {
+		a.duration = time.Since(a.startTime)
+	}
+	a.baseToolMessageItem.SetResult(res)
+}
+
+func (a *AgenticFetchToolMessageItem) SetStatus(status ToolStatus) {
+	if status == ToolStatusCanceled && a.duration == 0 {
+		a.duration = time.Since(a.startTime)
+	}
+	a.baseToolMessageItem.SetStatus(status)
+}
+
+func (a *AgenticFetchToolMessageItem) ToggleExpanded() bool {
+	return false
 }
 
 // Animate progresses the message animation if it should be spinning.
@@ -381,6 +447,18 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
+
+	// A finished (or canceled) top-level delegation collapses to a compact
+	// summary — see AgentToolRenderContext.RenderTool above for the
+	// rationale.
+	if !pending && !opts.Compact {
+		headerParam := params.URL
+		if headerParam == "" {
+			headerParam = prompt
+		}
+		return renderCollapsedDelegation(sty, cappedWidth, "Agentic Fetch", opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens)
+	}
+
 	if !opts.ExpandedContent {
 		prompt = strings.ReplaceAll(prompt, "\n", " ")
 	}
@@ -480,6 +558,85 @@ func visibleNestedTools(sty *styles.Styles, width int, nested []ToolMessageItem)
 	}
 	leading = sty.Tool.TodoStatusNote.Render(note)
 	return leading, nested[len(nested)-maxVisibleNestedTools:]
+}
+
+// -----------------------------------------------------------------------------
+// Collapsed (finished) delegation block
+// -----------------------------------------------------------------------------
+//
+// Before this existed, a finished agent/agentic_fetch tool call rendered
+// exactly like a running one: full nested-tool tree plus the delegation's
+// entire result inline. In a long session that's a wall of text for every
+// completed delegation — the user asked to drill into the sub-agent's own
+// session to inspect it, not to have it permanently expanded in the parent
+// chat. renderCollapsedDelegation replaces that with a 2-3 line summary;
+// full detail is reached by clicking the block (see enterChildSession in
+// internal/ui/model/ui.go), never by expanding it inline — see
+// AgentToolMessageItem.ToggleExpanded.
+
+// renderCollapsedDelegation renders a finished (or canceled) delegation as
+// a compact block: a header line (status icon, tool name, first line of
+// the prompt/URL), an outcome line (step count, duration when known, token
+// usage), and — only when the delegation produced output — one line
+// previewing the start of the result.
+func renderCollapsedDelegation(
+	sty *styles.Styles,
+	width int,
+	name string,
+	opts *ToolRenderOpts,
+	headerParam string,
+	nestedTools []ToolMessageItem,
+	duration time.Duration,
+	promptTokens, completionTokens int64,
+) string {
+	lines := []string{toolHeader(sty, opts.Status, name, width, opts, firstLine(headerParam))}
+
+	if line := renderDelegationOutcomeLine(sty, width, opts.Status, len(nestedTools), duration, promptTokens, completionTokens); line != "" {
+		lines = append(lines, line)
+	}
+
+	if opts.HasResult() && opts.Result.Content != "" {
+		if line := renderResultPreviewLine(sty, width, opts.Result.Content); line != "" {
+			lines = append(lines, line)
+		}
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// renderDelegationOutcomeLine renders the collapsed block's second line,
+// e.g. `step 12 · 45s · 3.2k tok`. Duration is omitted when unknown (see
+// the duration field doc on AgentToolMessageItem) rather than showing a
+// misleading value. Returns "" if width leaves no room.
+func renderDelegationOutcomeLine(sty *styles.Styles, width int, status ToolStatus, steps int, duration time.Duration, promptTokens, completionTokens int64) string {
+	if width <= 0 {
+		return ""
+	}
+	parts := []string{fmt.Sprintf("step %d", steps)}
+	if duration > 0 {
+		parts = append(parts, formatElapsed(duration))
+	}
+	if total := promptTokens + completionTokens; total > 0 {
+		parts = append(parts, formatTokenCount(total)+" tok")
+	}
+	if status == ToolStatusCanceled {
+		parts = append(parts, "canceled")
+	}
+	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(strings.Join(parts, " · "), width, "…"))
+}
+
+// renderResultPreviewLine renders the collapsed block's third line: the
+// first line of the delegation's result, truncated to width. Returns ""
+// for empty/whitespace-only content or non-positive width.
+func renderResultPreviewLine(sty *styles.Styles, width int, content string) string {
+	if width <= 0 {
+		return ""
+	}
+	preview := firstLine(strings.TrimSpace(content))
+	if preview == "" {
+		return ""
+	}
+	return sty.Tool.ContentText.Render(ansi.Truncate(preview, width, "…"))
 }
 
 // -----------------------------------------------------------------------------
