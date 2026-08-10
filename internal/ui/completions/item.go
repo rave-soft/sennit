@@ -45,6 +45,7 @@ type CompletionItem struct {
 
 	text    string
 	filter  string // what Filter() matches against; defaults to text
+	desc    string // shown as a muted "(desc)" suffix after text; never matched
 	value   any
 	match   fuzzy.Match
 	focused bool
@@ -54,6 +55,7 @@ type CompletionItem struct {
 	normalStyle  lipgloss.Style
 	focusedStyle lipgloss.Style
 	matchStyle   lipgloss.Style
+	mutedStyle   lipgloss.Style
 }
 
 // NewCompletionItem creates a new completion item.
@@ -69,10 +71,13 @@ func NewCompletionItem(text string, value any, normalStyle, focusedStyle, matchS
 }
 
 // NewCommandCompletionItem creates a completion item for a "/" command. It
-// displays the command's title but filters against the title plus its
-// aliases and description, so e.g. "clear" still surfaces "new".
-func NewCommandCompletionItem(v CommandCompletionValue, normalStyle, focusedStyle, matchStyle lipgloss.Style) *CompletionItem {
+// displays the command's title, followed by its description in muted
+// "(description)" text, but filters against the title plus its aliases and
+// description, so e.g. "clear" still surfaces "new".
+func NewCommandCompletionItem(v CommandCompletionValue, normalStyle, focusedStyle, matchStyle, mutedStyle lipgloss.Style) *CompletionItem {
 	item := NewCompletionItem(v.Title, v, normalStyle, focusedStyle, matchStyle)
+	item.mutedStyle = mutedStyle
+	item.desc = v.Description
 	filter := v.Title
 	if len(v.Aliases) > 0 {
 		filter += " " + strings.Join(v.Aliases, " ")
@@ -149,7 +154,9 @@ func (c *CompletionItem) Render(width int) string {
 		c.normalStyle,
 		c.focusedStyle,
 		c.matchStyle,
+		c.mutedStyle,
 		c.text,
+		c.desc,
 		c.focused,
 		width,
 		c.cache,
@@ -158,8 +165,8 @@ func (c *CompletionItem) Render(width int) string {
 }
 
 func renderItem(
-	normalStyle, focusedStyle, matchStyle lipgloss.Style,
-	text string,
+	normalStyle, focusedStyle, matchStyle, mutedStyle lipgloss.Style,
+	text, desc string,
 	focused bool,
 	width int,
 	cache map[int]string,
@@ -175,35 +182,92 @@ func renderItem(
 	}
 
 	innerWidth := width - 2 // Account for padding
-	// Truncate if needed.
+	// Truncate the title if needed. The title always wins the width budget;
+	// the description (below) only gets what's left over, and is truncated
+	// (or dropped) first.
 	if ansi.StringWidth(text) > innerWidth {
 		text = ansi.Truncate(text, innerWidth, "…")
 	}
+	titleWidth := ansi.StringWidth(text)
 
 	// Select base style.
 	style := normalStyle
 	matchStyle = matchStyle.Background(style.GetBackground())
+	mutedStyle = mutedStyle.Background(style.GetBackground())
 	if focused {
 		style = focusedStyle
 		matchStyle = matchStyle.Background(style.GetBackground())
+		mutedStyle = mutedStyle.Background(style.GetBackground())
 	}
 
-	// Render full-width text with background.
-	content := style.Padding(0, 1).Width(width).Render(text)
+	// Fit a "(description)" suffix into whatever width the title left
+	// behind. It's a separate rendered segment — appended after the title
+	// is finalized — so match highlighting (computed against the title's
+	// own byte offsets, below) never bleeds into it.
+	suffix := fitDescriptionSuffix(desc, innerWidth-titleWidth)
 
-	// Apply match highlighting using StyleRanges.
+	// Render full-width text with background.
+	content := style.Padding(0, 1).Width(width).Render(text + suffix)
+
+	// Apply match highlighting using StyleRanges. Filter() (what produced
+	// match.MatchedIndexes) may include aliases/description text after the
+	// title, which isn't part of what's displayed here — drop any index
+	// past the title so highlighting never lands on the "(description)"
+	// suffix or garbage past it.
 	if len(match.MatchedIndexes) > 0 {
 		var ranges []lipgloss.Range
 		for _, rng := range matchedRanges(match.MatchedIndexes) {
+			if len(text) == 0 || rng[0] >= len(text) {
+				continue
+			}
+			if rng[1] >= len(text) {
+				rng[1] = len(text) - 1
+			}
 			start, stop := bytePosToVisibleCharPos(text, rng)
 			// Offset by 1 for the padding space.
 			ranges = append(ranges, lipgloss.NewRange(start+1, stop+2, matchStyle))
 		}
-		content = lipgloss.StyleRanges(content, ranges...)
+		if len(ranges) > 0 {
+			content = lipgloss.StyleRanges(content, ranges...)
+		}
+	}
+
+	// Mute the "(description)" suffix, if any.
+	if suffix != "" {
+		start := titleWidth + 1 // +1 for the left padding column
+		end := start + ansi.StringWidth(suffix)
+		content = lipgloss.StyleRanges(content, lipgloss.NewRange(start, end, mutedStyle))
 	}
 
 	cache[width] = content
 	return content
+}
+
+// fitDescriptionSuffix returns " (desc)" truncated to fit within budget
+// visible columns (the title's leftover width), or "" if there's no room
+// for at least "(…)" — 3 columns plus the leading space. The description is
+// what gets truncated; callers must never touch the title.
+func fitDescriptionSuffix(desc string, budget int) string {
+	if desc == "" {
+		return ""
+	}
+	const minSuffixWidth = 4 // " (…)"
+	if budget < minSuffixWidth {
+		return ""
+	}
+
+	wrapped := " (" + desc + ")"
+	if ansi.StringWidth(wrapped) <= budget {
+		return wrapped
+	}
+
+	// Truncate the description itself to leave room for " (", "…", ")".
+	descBudget := budget - 4
+	if descBudget <= 0 {
+		return ""
+	}
+	truncated := ansi.Truncate(desc, descBudget, "…")
+	return " (" + truncated + ")"
 }
 
 // matchedRanges converts a list of match indexes into contiguous ranges.

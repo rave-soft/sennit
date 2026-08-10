@@ -68,6 +68,8 @@ type Completions struct {
 	normalStyle  lipgloss.Style
 	focusedStyle lipgloss.Style
 	matchStyle   lipgloss.Style
+	// mutedStyle styles the "(description)" suffix on command items.
+	mutedStyle lipgloss.Style
 
 	allItems []list.FilterableItem
 	filtered []list.FilterableItem
@@ -100,7 +102,7 @@ var namePriorityRules = []namePriorityRule{
 }
 
 // New creates a new completions component.
-func New(normalStyle, focusedStyle, matchStyle lipgloss.Style) *Completions {
+func New(normalStyle, focusedStyle, matchStyle, mutedStyle lipgloss.Style) *Completions {
 	l := list.NewFilterableList()
 	l.SetGap(0)
 	l.SetReverse(true)
@@ -111,16 +113,18 @@ func New(normalStyle, focusedStyle, matchStyle lipgloss.Style) *Completions {
 		normalStyle:  normalStyle,
 		focusedStyle: focusedStyle,
 		matchStyle:   matchStyle,
+		mutedStyle:   mutedStyle,
 	}
 }
 
 // SetStyles updates the styles used when rendering completion items.
 // Existing items are not restyled; subsequent SetItems calls pick up the
 // new styles.
-func (c *Completions) SetStyles(normalStyle, focusedStyle, matchStyle lipgloss.Style) {
+func (c *Completions) SetStyles(normalStyle, focusedStyle, matchStyle, mutedStyle lipgloss.Style) {
 	c.normalStyle = normalStyle
 	c.focusedStyle = focusedStyle
 	c.matchStyle = matchStyle
+	c.mutedStyle = mutedStyle
 }
 
 // IsOpen returns whether the completions popup is open.
@@ -200,7 +204,7 @@ func (c *Completions) SetItems(files []FileCompletionValue, resources []Resource
 func (c *Completions) OpenCommands(values []CommandCompletionValue) {
 	items := make([]list.FilterableItem, 0, len(values))
 	for _, v := range values {
-		items = append(items, NewCommandCompletionItem(v, c.normalStyle, c.focusedStyle, c.matchStyle))
+		items = append(items, NewCommandCompletionItem(v, c.normalStyle, c.focusedStyle, c.matchStyle, c.mutedStyle))
 	}
 	c.setAllItems(items)
 }

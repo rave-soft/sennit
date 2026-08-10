@@ -47,7 +47,7 @@ func newSlashTestUI(t *testing.T) *UI {
 	u.keyMap = DefaultKeyMap()
 	u.dialog = dialog.NewOverlay()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
-	u.editor.completions = completions.New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	u.editor.completions = completions.New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
 	return u
 }
 

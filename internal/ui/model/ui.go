@@ -378,6 +378,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		com.Styles.Completions.Normal,
 		com.Styles.Completions.Focused,
 		com.Styles.Completions.Match,
+		com.Styles.Completions.Muted,
 	)
 
 	todoSpinner := spinner.New(

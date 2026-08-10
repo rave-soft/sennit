@@ -566,6 +566,9 @@ type Styles struct {
 		Normal  lipgloss.Style
 		Focused lipgloss.Style
 		Match   lipgloss.Style
+		// Muted styles the "(description)" suffix shown after a command's
+		// name in the "/" completion popup.
+		Muted lipgloss.Style
 	}
 
 	// Attachments styles

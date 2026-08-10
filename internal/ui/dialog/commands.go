@@ -450,7 +450,11 @@ func mcpPromptItem(sty *styles.Styles, cmd commands.MCPPrompt) *CommandItem {
 		ClientID:    cmd.ClientID,
 		Arguments:   cmd.Arguments,
 	}
-	return NewCommandItem(sty, "mcp_"+cmd.ID, cmd.PromptID, "", action)
+	item := NewCommandItem(sty, "mcp_"+cmd.ID, cmd.PromptID, "", action)
+	if cmd.Description != "" {
+		item = item.WithDescription(cmd.Description)
+	}
+	return item
 }
 
 // BuildCommandItems returns the flat list of every command available right
@@ -488,15 +492,17 @@ func (c *Commands) defaultCommands() []*CommandItem {
 func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, windowWidth int, dockerMCPAvailable *bool) []*CommandItem {
 	sty := com.Styles
 	commands := []*CommandItem{
-		NewCommandItem(sty, "new_session", "new", "ctrl+n", ActionNewSession{}).WithAliases("new session", "clear"),
-		NewCommandItem(sty, "switch_session", "sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
-		NewCommandItem(sty, "switch_model", "models", "ctrl+l", ActionOpenDialog{ModelsID}).WithAliases("switch model", "model"),
-		NewCommandItem(sty, "configure_providers", "providers", "", ActionOpenDialog{ProvidersID}).WithAliases("configure providers"),
+		NewCommandItem(sty, "new_session", "new", "ctrl+n", ActionNewSession{}).WithAliases("new session", "clear").WithDescription("start a new session"),
+		NewCommandItem(sty, "switch_session", "sessions", "ctrl+s", ActionOpenDialog{SessionsID}).WithDescription("switch session"),
+		NewCommandItem(sty, "switch_model", "models", "ctrl+l", ActionOpenDialog{ModelsID}).WithAliases("switch model", "model").WithDescription("switch model"),
+		NewCommandItem(sty, "configure_providers", "providers", "", ActionOpenDialog{ProvidersID}).WithAliases("configure providers").WithDescription("configure providers"),
 	}
 
 	// Only show compact command if there's an active session
 	if hasSession {
-		commands = append(commands, NewCommandItem(sty, "summarize", "compact", "", ActionSummarize{SessionID: sessionID}).WithAliases("summarize", "summarize session"))
+		commands = append(commands, NewCommandItem(sty, "summarize", "compact", "", ActionSummarize{SessionID: sessionID}).
+			WithAliases("summarize", "summarize session").
+			WithDescription("summarize the session"))
 	}
 
 	// Add reasoning toggle for models that support it
@@ -517,20 +523,20 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 				}
 				commands = append(commands, NewCommandItem(sty, "toggle_thinking", "thinking", "", ActionToggleThinking{}).
 					WithAliases(status+" thinking mode", "toggle thinking").
-					WithDescription(status+" thinking mode"))
+					WithDescription("toggle thinking mode"))
 			}
 
 			// OpenAI models: reasoning effort dialog
 			if len(model.ReasoningLevels) > 0 {
 				commands = append(commands, NewCommandItem(sty, "select_reasoning_effort", "effort", "", ActionOpenDialog{
 					DialogID: ReasoningID,
-				}).WithAliases("select reasoning effort", "reasoning effort"))
+				}).WithAliases("select reasoning effort", "reasoning effort").WithDescription("reasoning effort"))
 			}
 		}
 	}
 	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
 	if windowWidth >= sidebarCompactModeBreakpoint && hasSession {
-		commands = append(commands, NewCommandItem(sty, "toggle_sidebar", "sidebar", "", ActionToggleCompactMode{}).WithAliases("toggle sidebar"))
+		commands = append(commands, NewCommandItem(sty, "toggle_sidebar", "sidebar", "", ActionToggleCompactMode{}).WithAliases("toggle sidebar").WithDescription("toggle sidebar"))
 	}
 	if hasSession {
 		// See the reasoning-toggle block above: the coder inherits the main
@@ -539,7 +545,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(sty, "file_picker", "files", "ctrl+f", ActionOpenDialog{
 				DialogID: FilePickerID,
-			}).WithAliases("open file picker", "file picker"))
+			}).WithAliases("open file picker", "file picker").WithDescription("attach a file"))
 		}
 	}
 
@@ -549,17 +555,23 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
 	// antipattern.
 	if os.Getenv("EDITOR") != "" {
-		commands = append(commands, NewCommandItem(sty, "open_external_editor", "editor", "ctrl+o", ActionExternalEditor{}).WithAliases("open external editor", "external editor"))
+		commands = append(commands, NewCommandItem(sty, "open_external_editor", "editor", "ctrl+o", ActionExternalEditor{}).
+			WithAliases("open external editor", "external editor").
+			WithDescription("open external editor"))
 	}
 
 	// Add Docker MCP command if available and not already enabled.
 	if !cfg.IsDockerMCPEnabled() && dockerMCPAvailable != nil && *dockerMCPAvailable {
-		commands = append(commands, NewCommandItem(sty, "enable_docker_mcp", "enable docker mcp", "", ActionEnableDockerMCP{}).WithAliases("enable docker mcp catalog"))
+		commands = append(commands, NewCommandItem(sty, "enable_docker_mcp", "enable docker mcp", "", ActionEnableDockerMCP{}).
+			WithAliases("enable docker mcp catalog").
+			WithDescription("enable docker mcp catalog"))
 	}
 
 	// Add disable Docker MCP command if it's currently enabled
 	if cfg.IsDockerMCPEnabled() {
-		commands = append(commands, NewCommandItem(sty, "disable_docker_mcp", "disable docker mcp", "", ActionDisableDockerMCP{}).WithAliases("disable docker mcp catalog"))
+		commands = append(commands, NewCommandItem(sty, "disable_docker_mcp", "disable docker mcp", "", ActionDisableDockerMCP{}).
+			WithAliases("disable docker mcp catalog").
+			WithDescription("disable docker mcp catalog"))
 	}
 
 	if hasTodos || hasQueue {
@@ -572,17 +584,19 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 		default:
 			label = "toggle to-dos"
 		}
-		commands = append(commands, NewCommandItem(sty, "toggle_pills", "todos", "ctrl+t", ActionTogglePills{}).WithAliases(label, "todos/queue"))
+		commands = append(commands, NewCommandItem(sty, "toggle_pills", "todos", "ctrl+t", ActionTogglePills{}).WithAliases(label, "todos/queue").WithDescription("toggle to-dos"))
 	}
 
 	// Add a command for selecting notification style via picker dialog.
-	commands = append(commands, NewCommandItem(sty, "select_notifications", "notifications", "", ActionOpenDialog{DialogID: NotificationsID}).WithAliases("notification style"))
+	commands = append(commands, NewCommandItem(sty, "select_notifications", "notifications", "", ActionOpenDialog{DialogID: NotificationsID}).
+		WithAliases("notification style").
+		WithDescription("notification style"))
 
 	commands = append(
 		commands,
-		NewCommandItem(sty, "toggle_yolo", "yolo", "ctrl+y", ActionToggleYoloMode{}).WithAliases("toggle yolo mode"),
-		NewCommandItem(sty, "toggle_help", "help", "ctrl+g", ActionToggleHelp{}).WithAliases("toggle help"),
-		NewCommandItem(sty, "init", "init", "", ActionInitializeProject{}).WithAliases("initialize project"),
+		NewCommandItem(sty, "toggle_yolo", "yolo", "ctrl+y", ActionToggleYoloMode{}).WithAliases("toggle yolo mode").WithDescription("skip permission prompts"),
+		NewCommandItem(sty, "toggle_help", "help", "ctrl+g", ActionToggleHelp{}).WithAliases("toggle help").WithDescription("toggle help"),
+		NewCommandItem(sty, "init", "init", "", ActionInitializeProject{}).WithAliases("initialize project").WithDescription("initialize project"),
 	)
 
 	// Add transparent background toggle.
@@ -592,11 +606,11 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 	}
 	commands = append(commands, NewCommandItem(sty, "toggle_transparent", "transparency", "", ActionToggleTransparentBackground{}).
 		WithAliases(transparentAlias, "background color").
-		WithDescription(transparentAlias))
+		WithDescription("toggle background"))
 
 	commands = append(
 		commands,
-		NewCommandItem(sty, "quit", "exit", "ctrl+c", tea.QuitMsg{}).WithAliases("quit"),
+		NewCommandItem(sty, "quit", "exit", "ctrl+c", tea.QuitMsg{}).WithAliases("quit").WithDescription("quit braid"),
 	)
 
 	return commands

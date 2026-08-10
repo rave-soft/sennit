@@ -11,7 +11,7 @@ import (
 func TestOpenCommandsAndFilter(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "new_session", Title: "new", Aliases: []string{"new session", "clear"}},
 		{ID: "summarize", Title: "compact", Aliases: []string{"summarize", "summarize session"}},
@@ -33,7 +33,7 @@ func TestOpenCommandsAndFilter(t *testing.T) {
 func TestCommandsEnterExecutesSelection(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "summarize", Title: "compact", Action: "summarize-action"},
 	})
@@ -52,7 +52,7 @@ func TestCommandsEnterExecutesSelection(t *testing.T) {
 func TestCommandsTabInsertsNameOnly(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "summarize", Title: "compact", Action: "summarize-action"},
 	})
@@ -69,7 +69,7 @@ func TestCommandsTabInsertsNameOnly(t *testing.T) {
 func TestCommandsEscClosesWithoutSelecting(t *testing.T) {
 	t.Parallel()
 
-	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
+	c := New(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle())
 	c.OpenCommands([]CommandCompletionValue{
 		{ID: "new_session", Title: "new"},
 	})
