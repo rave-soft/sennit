@@ -2681,11 +2681,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.sidebar.hideScrollbar()
 				cmds = append(cmds, m.editor.textarea.Focus())
 				m.chat.Blur()
-			case key.Matches(msg, m.keyMap.Chat.FocusSidebar):
-				if m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebar.scrollable {
-					m.focus = uiFocusSidebar
-					m.chat.Blur()
-				}
+			case key.Matches(msg, m.keyMap.Chat.FocusSidebar) &&
+				m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebar.scrollable:
+				// FocusSidebar shares its keys ("l"/"right") with PillRight.
+				// The eligibility guard must live in the case predicate, not
+				// the body: with the guard in the body, this case still
+				// claims the keypress whenever the guard fails, swallowing
+				// "right" before it can reach the PillRight handling in
+				// handleGlobalKeys below (right arrow, pills expanded).
+				m.focus = uiFocusSidebar
+				m.chat.Blur()
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
