@@ -75,8 +75,21 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
-		return joinToolParts(header, earlyState)
+	// opts.IsPending() (and the spinner) only cover the window while the
+	// model is still streaming the command's input. tc.Finished flips true
+	// as soon as that JSON is complete — for anything that takes real time
+	// to run (npm install, a build, ...) there is then a second window,
+	// often much longer, where the command is still executing and no
+	// result has arrived yet. toolEarlyStateContent's Running case exists
+	// for other tools that legitimately show a status line there, but for
+	// Bash it appended a dangling "Waiting for tool response..." line
+	// below the header, breaking the always-one-line collapsed guarantee
+	// this function documents below. Treat that window the same as the
+	// header-only pending state instead.
+	if opts.Status != ToolStatusRunning {
+		if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+			return joinToolParts(header, earlyState)
+		}
 	}
 
 	if !opts.HasResult() {

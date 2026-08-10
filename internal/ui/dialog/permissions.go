@@ -80,9 +80,9 @@ type Permissions struct {
 
 	// buttonRects holds the absolute screen rectangles of the Allow /
 	// Allow for Session / Deny buttons from the most recent Draw, used
-	// to hit-test mouse clicks and hover (mirrors the childBannerButtonRect
-	// pattern in model/child_banner.go: geometry is captured at draw time
-	// and read back on the next mouse event).
+	// to hit-test mouse clicks and hover (mirrors the childPanelButtonRect
+	// pattern in model/child_session_panel.go: geometry is captured at
+	// draw time and read back on the next mouse event).
 	buttonRects [3]image.Rectangle
 	// hoverIndex is the index of the button currently under the pointer,
 	// or -1 when the pointer isn't over any button.

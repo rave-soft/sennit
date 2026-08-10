@@ -148,6 +148,28 @@ func (a *AgentToolMessageItem) AlwaysSpaced() bool {
 	return true
 }
 
+// DelegationInfoProvider is implemented by tool items that represent a
+// delegation into a sub-agent's own session ([AgentToolMessageItem],
+// [AgenticFetchToolMessageItem]). It exposes the same identity/model/effort
+// data as the collapsed delegation block's subtitle (see
+// renderAgentSubtitle), for the child-session panel in internal/ui/model
+// that replaces the editor while the delegation's child session is being
+// viewed.
+type DelegationInfoProvider interface {
+	// DelegationInfo returns the delegation's display name (e.g. "task",
+	// "fetch", or a custom agent's id) and its resolved model/effort
+	// override. model and effort are "" when the delegation has none
+	// (agentic_fetch, or an agent tool using the app's default model).
+	DelegationInfo() (displayName, model, effort string)
+}
+
+var _ DelegationInfoProvider = (*AgentToolMessageItem)(nil)
+
+// DelegationInfo implements [DelegationInfoProvider].
+func (a *AgentToolMessageItem) DelegationInfo() (displayName, model, effort string) {
+	return a.displayName, a.model, a.effort
+}
+
 // SetChildSessionTokens implements [ChildSessionTokenTracker].
 func (a *AgentToolMessageItem) SetChildSessionTokens(prompt, completion int64) {
 	if a.promptTokens == prompt && a.completionTokens == completion {
@@ -417,6 +439,7 @@ var (
 	_ NestedToolContainer      = (*AgenticFetchToolMessageItem)(nil)
 	_ ChildSessionTokenTracker = (*AgenticFetchToolMessageItem)(nil)
 	_ ChildSessionTodoTracker  = (*AgenticFetchToolMessageItem)(nil)
+	_ DelegationInfoProvider   = (*AgenticFetchToolMessageItem)(nil)
 )
 
 // agenticFetchDisplayName is the delegation block's title for the
@@ -425,6 +448,12 @@ var (
 // other delegation blocks' lowercase, single-word titles ("task",
 // "developer").
 const agenticFetchDisplayName = "fetch"
+
+// DelegationInfo implements [DelegationInfoProvider]. agentic_fetch has no
+// cfg.Agents entry, so it never has a model/effort override to report.
+func (r *AgenticFetchToolMessageItem) DelegationInfo() (displayName, model, effort string) {
+	return agenticFetchDisplayName, "", ""
+}
 
 // NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].
 func NewAgenticFetchToolMessageItem(

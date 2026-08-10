@@ -1,5 +1,12 @@
 {
   "$schema": "https://charm.land/braid.json",
+  "mcp": {
+    "sequential-thinking": {
+      "type": "stdio",
+      "command": "mcp-server-sequential-thinking",
+      "timeout": 30
+    }
+  },
   "lsp": {
     "gopls": {
       "options": {

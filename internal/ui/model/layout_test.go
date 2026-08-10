@@ -8,9 +8,12 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/ui/attachments"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/stretchr/testify/require"
 )
 
 // testMessageItem is a minimal chat item used to populate the chat list
@@ -82,6 +85,86 @@ func TestUpdateLayoutAndSize_EditorGrowthShrinksChat(t *testing.T) {
 	if got := u.layout.main.Dy(); got >= initialChatHeight {
 		t.Fatalf("expected chat to shrink: got %d, want < %d", got, initialChatHeight)
 	}
+}
+
+// TestEditorHeight_EmptyIsOneRowNoAttachments: an empty editor with no
+// attachments must be exactly one row tall — no reserved blank line above
+// (attachments strip) or below it. This is the "two extra lines" the
+// editor used to always reserve (TextareaMinHeight=3, editorHeightMargin=2).
+func TestEditorHeight_EmptyIsOneRowNoAttachments(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+	u.updateLayoutAndSize()
+
+	require.Equal(t, 1, u.layout.editor.Dy())
+	require.Equal(t, "", u.editor.textarea.Value())
+}
+
+// TestEditorHeight_GrowsWithLineCountUpToCap: adding lines of text must
+// grow the editor's rendered height by one row per line, up to
+// TextareaMaxHeight, after which the textarea scrolls internally instead
+// of growing the layout further.
+func TestEditorHeight_GrowsWithLineCountUpToCap(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+	u.updateLayoutAndSize()
+	require.Equal(t, 1, u.layout.editor.Dy(), "baseline: empty editor is one row")
+
+	prevHeight := u.editor.textarea.Height()
+	u.editor.textarea.SetValue("line1\nline2\nline3")
+	u.editor.textarea.MoveToEnd()
+	_ = u.handleTextareaHeightChange(prevHeight)
+	require.Equal(t, 3, u.layout.editor.Dy(), "three lines of text must grow the editor to three rows")
+
+	prevHeight = u.editor.textarea.Height()
+	u.editor.textarea.SetValue(strings.Repeat("line\n", 30))
+	u.editor.textarea.MoveToEnd()
+	_ = u.handleTextareaHeightChange(prevHeight)
+	require.Equal(t, TextareaMaxHeight, u.layout.editor.Dy(),
+		"growth must cap at TextareaMaxHeight; beyond that the textarea scrolls internally")
+}
+
+// TestEditorHeight_AttachmentsRowOnlyWhenPresent: the attachments strip
+// must only take up a row when there's actually an attachment to show —
+// adding one grows the editor by exactly one row, and clearing it shrinks
+// back down.
+func TestEditorHeight_AttachmentsRowOnlyWhenPresent(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+	u.updateLayoutAndSize()
+	require.Equal(t, 0, u.editorAttachmentsRowOffset(), "no attachments: no reserved row")
+	heightNoAttachments := u.layout.editor.Dy()
+
+	u.editor.attachments.Update(message.Attachment{FileName: "a.txt", MimeType: "text/plain"})
+	u.updateLayoutAndSize()
+	require.Equal(t, 1, u.editorAttachmentsRowOffset())
+	require.Equal(t, heightNoAttachments+1, u.layout.editor.Dy(),
+		"one attachment must add exactly one row")
+
+	u.editor.attachments.Reset()
+	u.updateLayoutAndSize()
+	require.Equal(t, heightNoAttachments, u.layout.editor.Dy(),
+		"clearing attachments must give the row back to chat")
+}
+
+// TestRenderEditorView_NoAttachmentsRowWhenEmpty: renderEditorView must not
+// prepend a blank attachments line (or a trailing blank margin line) when
+// there are no attachments — the rendered view is exactly the textarea's
+// own lines.
+func TestRenderEditorView_NoAttachmentsRowWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+
+	out := u.renderEditorView(80)
+	require.Equal(t, u.editor.textarea.View(), out)
 }
 
 func TestHandleTextareaHeightChange_FollowModeStaysAtBottom(t *testing.T) {

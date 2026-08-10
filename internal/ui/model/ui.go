@@ -83,15 +83,19 @@ const pasteColsThreshold = 1000
 // Session details panel max height.
 const sessionDetailsMaxHeight = 20
 
-// TextareaMaxHeight is the maximum height of the prompt textarea.
-const TextareaMaxHeight = 15
+// TextareaMaxHeight is the maximum height of the prompt textarea before it
+// scrolls internally instead of growing further.
+const TextareaMaxHeight = 10
 
-// editorHeightMargin is the vertical margin added to the textarea height to
-// account for the attachments row (top) and bottom margin.
-const editorHeightMargin = 2
+// TextareaMinHeight is the minimum height of the prompt textarea: one row,
+// so an empty or single-line editor takes exactly one row (plus the prompt
+// prefix rendered inline by the textarea itself) — no reserved blank lines.
+const TextareaMinHeight = 1
 
-// TextareaMinHeight is the minimum height of the prompt textarea.
-const TextareaMinHeight = 3
+// editorAttachmentsRowHeight is the extra row the editor reserves above the
+// textarea for the attachments strip. It only counts when there's something
+// to show there — see (*UI).editorAttachmentsRowOffset.
+const editorAttachmentsRowHeight = 1
 
 // uiFocusState represents the current focus state of the UI.
 //
@@ -261,14 +265,14 @@ type UI struct {
 	// (possibly no-longer-loaded) parent chat. See enterChildSession.
 	navStack []sessionNavFrame
 
-	// childBannerHover is set while the pointer is over the "exit up" button
-	// in the child-session banner (see drawChildSessionBanner), for hover
+	// childPanelHover is set while the pointer is over the "back" button in
+	// the child-session panel (see drawChildSessionPanel), for hover
 	// feedback matching the status bar's back-button pattern.
-	childBannerHover bool
-	// childBannerButtonRect is the screen area of the banner's "exit up"
-	// button, recomputed on every drawChildSessionBanner call. Used to
-	// scope hover feedback to the button itself rather than the whole row.
-	childBannerButtonRect image.Rectangle
+	childPanelHover bool
+	// childPanelButtonRect is the screen area of the panel's "back" button,
+	// recomputed on every drawChildSessionPanel call. Used to scope hover
+	// feedback to the button itself rather than the whole panel.
+	childPanelButtonRect image.Rectangle
 
 	// onboarding state
 	onboarding struct {
@@ -1048,12 +1052,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// A click anywhere on the child-session banner (see drawChildSessionBanner)
-		// or the status bar's back-breadcrumb exits the child session. Mouse
-		// clicks never change m.focus (see uiFocusState) — this is the one
-		// dedicated, deliberate transition a click is allowed to trigger.
+		// A click anywhere on the child-session panel (see
+		// drawChildSessionPanel, which occupies the editor area in place of
+		// the textarea while a child session is being viewed) or the status
+		// bar's back-breadcrumb exits the child session. Mouse clicks never
+		// change m.focus (see uiFocusState) — this is the one dedicated,
+		// deliberate transition a click is allowed to trigger.
 		if msg.Button == tea.MouseLeft && m.viewingChildSession() &&
-			(image.Pt(msg.X, msg.Y).In(m.layout.childBanner) ||
+			(image.Pt(msg.X, msg.Y).In(m.layout.editor) ||
 				(m.status.IsChildSessionBack() && image.Pt(msg.X, msg.Y).In(m.layout.status))) {
 			if cmd := m.exitChildSession(); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -1099,9 +1105,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status.SetBackHover(image.Pt(msg.X, msg.Y).In(m.layout.status))
 		}
 
-		// Hover feedback for the child-session banner's "exit up" button.
+		// Hover feedback for the child-session panel's "back" button.
 		if m.viewingChildSession() {
-			m.childBannerHover = image.Pt(msg.X, msg.Y).In(m.childBannerButtonRect)
+			m.childPanelHover = image.Pt(msg.X, msg.Y).In(m.childPanelButtonRect)
 		}
 
 		// Track hover position for inline editors.
@@ -1791,11 +1797,22 @@ type sessionNavFrame struct {
 	// label is the short name of the child session this frame descends
 	// into (see childSessionLabel), captured whenever the frame is pushed
 	// or its sibling index changes. Used to render the full breadcrumb
-	// chain in drawChildSessionBanner without needing the parent's chat
+	// chain in drawChildSessionPanel without needing the parent's chat
 	// items, which usually aren't loaded once navigation has moved on.
 	label        string
 	siblings     []childSessionRef
 	siblingIndex int
+
+	// agentName, model, and effort mirror the delegation tool item's
+	// resolved chat.DelegationInfoProvider data (the same values shown in
+	// the collapsed delegation block's subtitle), captured alongside label
+	// for the same reason: the parent chat holding that item usually isn't
+	// loaded once navigation has moved on. Used by the child-session
+	// panel's model/effort line. All empty when the item couldn't be
+	// resolved (e.g. a cycled-to sibling never rendered in this chat) or
+	// the delegation has no override (agentic_fetch, or an agent tool
+	// using the app's default model).
+	agentName, model, effort string
 }
 
 // viewingChildSession reports whether the UI is currently navigated into a
@@ -1888,8 +1905,10 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	}
 
 	label := "subagent"
+	var agentName, model, effort string
 	if item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem); ok {
 		label = childSessionLabel(item)
+		agentName, model, effort = delegationInfo(item)
 	}
 
 	m.navStack = append(m.navStack, sessionNavFrame{
@@ -1898,6 +1917,9 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 		label:           label,
 		siblings:        siblings,
 		siblingIndex:    siblingIndex,
+		agentName:       agentName,
+		model:           model,
+		effort:          effort,
 	})
 
 	// Child sessions are read-only: keep focus/keys on the chat list and
@@ -1956,10 +1978,13 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 	// the generic "subagent" label. frame.parentTitle was captured at
 	// enterChildSession time and doesn't have that problem.
 	label := "subagent"
+	var agentName, model, effort string
 	if item, ok := m.chat.MessageItem(sibling.toolCallID).(chat.ToolMessageItem); ok {
 		label = childSessionLabel(item)
+		agentName, model, effort = delegationInfo(item)
 	}
 	frame.label = label
+	frame.agentName, frame.model, frame.effort = agentName, model, effort
 	breadcrumb := childSessionBreadcrumb(frame.parentTitle, label, frame.siblingIndex, n)
 	m.status.SetInfoMsg(util.InfoMsg{Type: util.InfoTypeInfo, Msg: breadcrumb})
 
@@ -3171,14 +3196,18 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		m.chat.Draw(scr, layout.main)
-		if m.viewingChildSession() {
-			m.drawChildSessionBanner(scr, layout.childBanner)
-		}
 		if layout.pills.Dy() > 0 && m.pills.view != "" {
 			uv.NewStyledString(m.pills.view).Draw(scr, layout.pills)
 		}
 
-		if m.activeInline != nil {
+		if m.viewingChildSession() {
+			// The child-session info panel replaces the editor entirely
+			// while a sub-agent session is being viewed — no textarea, no
+			// ghost text, no cursor (see uiFocusState: focus is forced to
+			// uiFocusMain for the duration).
+			m.drawChildSessionPanel(scr, layout.editor)
+			m.inlineCursor = nil
+		} else if m.activeInline != nil {
 			m.activeInline.SetFocused(m.focus == uiFocusEditor)
 			if m.focus == uiFocusEditor {
 				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
@@ -3222,7 +3251,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			x = screenW - w
 		}
 		x = max(0, x)
-		y = max(0, y+1) // Offset for attachments row
+		y = max(0, y+m.editorAttachmentsRowOffset())
 
 		completionsView := uv.NewStyledString(m.editor.completions.Render())
 		completionsView.Draw(scr, image.Rectangle{
@@ -3270,8 +3299,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.editor.textarea.Focused() {
 			cur := m.editor.textarea.Cursor()
-			cur.X++                            // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
+			cur.X++ // Adjust for app margins
+			cur.Y += m.layout.editor.Min.Y + m.editorAttachmentsRowOffset()
 			return cur
 		}
 	}
@@ -3674,9 +3703,11 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// The help height
 	helpHeight := 1
-	// The editor height: textarea height + margin for attachments and bottom spacing.
+	// The editor height: textarea height, plus one row for the attachments
+	// strip when there are attachments to show. No fixed bottom margin — a
+	// one-line, no-attachments editor is exactly one row.
 	// When an inline editor is active, use its height instead.
-	editorHeight := m.editor.textarea.Height() + editorHeightMargin
+	editorHeight := m.editor.textarea.Height() + m.editorAttachmentsRowOffset()
 	if m.activeInline != nil {
 		// The editor content width depends only on terminal width
 		// and layout (not on editor height), so passing the current
@@ -3690,6 +3721,11 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		} else {
 			editorHeight = m.activeInline.Height(editorWidth)
 		}
+	} else if m.viewingChildSession() {
+		// The child-session info panel (drawChildSessionPanel) replaces the
+		// textarea entirely while viewing a sub-agent session — it has its
+		// own fixed, compact height instead of the textarea's.
+		editorHeight = childSessionPanelHeight
 	}
 	// The sidebar width
 	sidebarWidth := 32
@@ -3865,19 +3901,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		}
 	}
 
-	// Reserve the top row of main for the child-session banner. Carved out
-	// here (after main/editor/pills are settled) so chat sizing, scroll
-	// math, and every existing m.layout.main consumer automatically account
-	// for it without special-casing child-view everywhere.
-	if m.state == uiChat && m.viewingChildSession() && uiLayout.main.Dy() > 0 {
-		var bannerRect image.Rectangle
-		layout.Vertical(
-			layout.Len(1),
-			layout.Fill(1),
-		).Split(uiLayout.main).Assign(&bannerRect, &uiLayout.main)
-		uiLayout.childBanner = bannerRect
-	}
-
 	return uiLayout
 }
 
@@ -3909,11 +3932,6 @@ type uiLayout struct {
 
 	// session details is the area for the session details overlay in compact mode.
 	sessionDetails uv.Rectangle
-
-	// childBanner is the persistent "main › agent1 › agent2" banner drawn
-	// at the top of main while a sub-agent session is being viewed. Empty
-	// (zero Rectangle) unless viewingChildSession() — see generateLayout.
-	childBanner uv.Rectangle
 }
 
 func (m *UI) openEditor(value string) tea.Cmd {
@@ -4152,12 +4170,11 @@ func (m *UI) drawGhostText(scr uv.Screen) {
 	}
 	// Same cursor-to-screen mapping as completionsPosition(): textarea
 	// cursor coordinates offset by the editor layout rect's origin, plus
-	// one row for the attachments line that renderEditorView always
-	// prepends above the textarea (mirrors the y+1 "offset for
-	// attachments row" applied where the completions popup position is
-	// used, above).
+	// editorAttachmentsRowOffset() for the attachments line renderEditorView
+	// conditionally prepends above the textarea (mirrors the offset applied
+	// where the completions popup position is used, above).
 	x := m.layout.editor.Min.X + cur.X
-	y := m.layout.editor.Min.Y + cur.Y + 1
+	y := m.layout.editor.Min.Y + cur.Y + m.editorAttachmentsRowOffset()
 	if x >= m.layout.editor.Max.X || y >= m.layout.editor.Max.Y {
 		return
 	}
@@ -4244,17 +4261,37 @@ func (m *UI) randomizePlaceholders() {
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
-// renderEditorView renders the editor view with attachments if any.
+// renderEditorView renders the editor view with attachments if any. The
+// attachments strip only takes a row when there's something to show — an
+// empty editor with a single line of text is exactly one row tall, with no
+// reserved blank lines above or below (see editorAttachmentsRowOffset and
+// TextareaMinHeight).
 func (m *UI) renderEditorView(width int) string {
-	var attachmentsView string
-	if len(m.editor.attachments.List()) > 0 {
-		attachmentsView = m.editor.attachments.Render(width)
+	if len(m.editor.attachments.List()) == 0 {
+		return m.editor.textarea.View()
 	}
 	return strings.Join([]string{
-		attachmentsView,
+		m.editor.attachments.Render(width),
 		m.editor.textarea.View(),
-		"", // margin at bottom of editor
 	}, "\n")
+}
+
+// editorAttachmentsRowOffset returns the number of rows renderEditorView
+// prepends above the textarea for the attachments strip: 1 when there are
+// attachments to show, 0 otherwise. Every consumer that maps a textarea-
+// relative coordinate (cursor, ghost text, completions popup) onto the
+// editor's screen rect must add this, since renderEditorView's attachments
+// row is conditional rather than a fixed margin.
+func (m *UI) editorAttachmentsRowOffset() int {
+	// generateLayout (via updateLayoutAndSize) can run before
+	// editor.attachments is wired up in some construction paths (notably
+	// test harnesses that only need layout, not the full editor), so this
+	// stays nil-safe unlike the Draw-time attachments call sites below,
+	// which only ever run once the editor is fully set up.
+	if m.editor.attachments != nil && len(m.editor.attachments.List()) > 0 {
+		return editorAttachmentsRowHeight
+	}
+	return 0
 }
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
