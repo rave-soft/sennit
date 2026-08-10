@@ -3,9 +3,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -40,8 +43,9 @@ func TestNewSearchBackendUnknownProvider(t *testing.T) {
 func TestTavilyBackendSearch(t *testing.T) {
 	var gotAuth, gotMethod, gotContentType string
 	var gotBody struct {
-		Query      string `json:"query"`
-		MaxResults int    `json:"max_results"`
+		Query             string `json:"query"`
+		MaxResults        int    `json:"max_results"`
+		IncludeRawContent string `json:"include_raw_content"`
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -52,7 +56,7 @@ func TestTavilyBackendSearch(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"results": []map[string]string{
-				{"title": "Braid", "url": "https://example.com/braid", "content": "A terminal AI agent."},
+				{"title": "Braid", "url": "https://example.com/braid", "content": "A terminal AI agent.", "raw_content": "# Braid\n\nFull page text."},
 				{"title": "Other", "url": "https://example.com/other", "content": "Something else."},
 			},
 		})
@@ -74,12 +78,72 @@ func TestTavilyBackendSearch(t *testing.T) {
 	require.Equal(t, "Bearer test-key", gotAuth)
 	require.Equal(t, "braid coding agent", gotBody.Query)
 	require.Equal(t, 5, gotBody.MaxResults)
+	require.Equal(t, "markdown", gotBody.IncludeRawContent)
 
 	require.Len(t, results, 2)
 	require.Equal(t, "Braid", results[0].Title)
 	require.Equal(t, "https://example.com/braid", results[0].Link)
 	require.Equal(t, "A terminal AI agent.", results[0].Snippet)
+	require.Equal(t, "# Braid\n\nFull page text.", results[0].Content)
 	require.Equal(t, 1, results[0].Position)
+	require.Empty(t, results[1].Content)
+}
+
+// TestTavilyBackendContentBudget verifies raw_content is truncated per
+// result and stops entirely once the total budget across the response is
+// spent, so a page-heavy search can't flood the model's context.
+func TestTavilyBackendContentBudget(t *testing.T) {
+	big := strings.Repeat("x", tavilyMaxContentPerResult+1000)
+	nResults := tavilyMaxContentTotal/tavilyMaxContentPerResult + 2
+	pages := make([]map[string]string, 0, nResults)
+	for i := range nResults {
+		pages = append(pages, map[string]string{
+			"title":       fmt.Sprintf("Page %d", i),
+			"url":         fmt.Sprintf("https://example.com/%d", i),
+			"content":     "snippet",
+			"raw_content": big,
+		})
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": pages})
+	}))
+	defer srv.Close()
+
+	backend, err := NewSearchBackend(config.WebSearchOptions{
+		Provider: "tavily",
+		APIKey:   "test-key",
+		BaseURL:  srv.URL,
+	}, nil, nil)
+	require.NoError(t, err)
+
+	results, err := backend.Search(context.Background(), "query", nResults)
+	require.NoError(t, err)
+	require.Len(t, results, nResults)
+
+	total := 0
+	for _, r := range results {
+		require.LessOrEqual(t, len(r.Content), tavilyMaxContentPerResult+len("\n… [content truncated]"))
+		total += len(r.Content)
+	}
+	require.LessOrEqual(t, total, tavilyMaxContentTotal+len("\n… [content truncated]"))
+
+	require.Contains(t, results[0].Content, "[content truncated]")
+	require.Empty(t, results[len(results)-1].Content)
+	for _, r := range results {
+		require.Equal(t, "snippet", r.Snippet)
+	}
+}
+
+// TestTruncateUTF8 verifies truncation never splits a multi-byte rune.
+func TestTruncateUTF8(t *testing.T) {
+	require.Equal(t, "short", truncateUTF8("short", 10))
+	require.Equal(t, "", truncateUTF8("anything", 0))
+
+	s := strings.Repeat("я", 10) // 2 bytes per rune
+	cut := truncateUTF8(s, 5)
+	require.True(t, utf8.ValidString(cut))
+	require.Equal(t, strings.Repeat("я", 2)+"\n… [content truncated]", cut)
 }
 
 // TestTavilyBackendAuthError verifies a 401/403 from the API surfaces a

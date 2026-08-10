@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/rave-soft/braid/internal/config"
 )
@@ -14,6 +15,18 @@ import (
 // defaultTavilyBaseURL is Tavily's public search endpoint, used when
 // options.web_search.base_url is empty.
 const defaultTavilyBaseURL = "https://api.tavily.com/search"
+
+// Tavily can return full page content alongside snippets
+// (include_raw_content), which often saves the model a follow-up
+// web_fetch round per result. Uncapped, 20 results of raw markdown can
+// run to hundreds of KB, so content is budgeted: per result, and in
+// total across the response (results past the total budget keep only
+// their snippet).
+const (
+	tavilyRawContentFormat    = "markdown"
+	tavilyMaxContentPerResult = 4000
+	tavilyMaxContentTotal     = 20000
+)
 
 // tavilyBackend calls the Tavily Search API
 // (https://docs.tavily.com/documentation/api-reference/endpoint/search).
@@ -29,14 +42,16 @@ type tavilyBackend struct {
 }
 
 type tavilySearchRequest struct {
-	Query      string `json:"query"`
-	MaxResults int    `json:"max_results,omitempty"`
+	Query             string `json:"query"`
+	MaxResults        int    `json:"max_results,omitempty"`
+	IncludeRawContent string `json:"include_raw_content,omitempty"`
 }
 
 type tavilySearchResult struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Content string `json:"content"`
+	Title      string `json:"title"`
+	URL        string `json:"url"`
+	Content    string `json:"content"`
+	RawContent string `json:"raw_content"`
 }
 
 type tavilySearchResponse struct {
@@ -53,7 +68,11 @@ func (b *tavilyBackend) Search(ctx context.Context, query string, maxResults int
 		baseURL = defaultTavilyBaseURL
 	}
 
-	body, err := json.Marshal(tavilySearchRequest{Query: query, MaxResults: maxResults})
+	body, err := json.Marshal(tavilySearchRequest{
+		Query:             query,
+		MaxResults:        maxResults,
+		IncludeRawContent: tavilyRawContentFormat,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("tavily search: encoding request: %w", err)
 	}
@@ -95,15 +114,36 @@ func (b *tavilyBackend) Search(ctx context.Context, query string, maxResults int
 		parsed.Results = parsed.Results[:maxResults]
 	}
 	results := make([]SearchResult, 0, len(parsed.Results))
+	contentBudget := tavilyMaxContentTotal
 	for i, r := range parsed.Results {
+		content := truncateUTF8(r.RawContent, min(tavilyMaxContentPerResult, contentBudget))
+		contentBudget -= len(content)
 		results = append(results, SearchResult{
 			Title:    r.Title,
 			Link:     r.URL,
 			Snippet:  r.Content,
 			Position: i + 1,
+			Content:  content,
 		})
 	}
 	return results, nil
+}
+
+// truncateUTF8 cuts s to at most limit bytes without splitting a UTF-8
+// sequence, appending a truncation marker when anything was dropped. A
+// limit of zero (exhausted budget) drops the content entirely.
+func truncateUTF8(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	if limit <= 0 {
+		return ""
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "\n… [content truncated]"
 }
 
 // NewSearchBackend builds the SearchBackend selected by opts. A zero-value

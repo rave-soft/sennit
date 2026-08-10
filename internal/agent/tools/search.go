@@ -22,6 +22,10 @@ type SearchResult struct {
 	Link     string
 	Snippet  string
 	Position int
+	// Content is the page content for backends that return it (Tavily
+	// with include_raw_content); empty for snippet-only backends like
+	// DuckDuckGo.
+	Content string
 }
 
 // SearchBackend performs a web search. The DuckDuckGo Lite scraper is the
@@ -248,7 +252,11 @@ func formatSearchResults(results []SearchResult) string {
 	for _, result := range results {
 		fmt.Fprintf(&sb, "%d. %s\n", result.Position, result.Title)
 		fmt.Fprintf(&sb, "   URL: %s\n", result.Link)
-		fmt.Fprintf(&sb, "   Summary: %s\n\n", result.Snippet)
+		fmt.Fprintf(&sb, "   Summary: %s\n", result.Snippet)
+		if result.Content != "" {
+			fmt.Fprintf(&sb, "   Content:\n%s\n", result.Content)
+		}
+		sb.WriteString("\n")
 	}
 	return sb.String()
 }
