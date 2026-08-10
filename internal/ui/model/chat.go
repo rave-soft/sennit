@@ -928,9 +928,16 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 	m.lastClickX = x
 	m.lastClickY = y
 
-	// Select the item that was clicked
-	m.list.SetSelected(itemIdx)
-
+	// Note: this deliberately does not call m.list.SetSelected(itemIdx).
+	// selectedIdx drives the keyboard "browse mode" focus indicator (the
+	// bordered highlight painted by list.FocusedRenderCallback) as well as
+	// arrow-key/alt+down navigation; it used to also move here so that
+	// click-to-expand could act on "the selected item". Click-to-expand is
+	// gone (see PlainToolItemAt), and mouse clicks must never move keyboard
+	// focus (see uiFocusState's doc comment) — so moving selectedIdx on
+	// every click just painted a stray focus stripe under the cursor with
+	// no keyboard-navigation meaning behind it. Click-driven behavior below
+	// uses itemIdx directly instead.
 	var cmd tea.Cmd
 
 	switch m.clickCount {
@@ -983,9 +990,11 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (handled bool, openContai
 		return false, false
 	}
 
-	// Execute the click action (e.g., expansion).
-	selectedItem := m.list.SelectedItem()
-	if clickable, ok := selectedItem.(list.MouseClickable); ok {
+	// Execute the click action (e.g., expansion). Look the item up by the
+	// clicked index directly rather than via m.list.SelectedItem() — mouse
+	// clicks don't move the keyboard-selected item (see HandleMouseDown).
+	clickedItem := m.list.ItemAt(msg.ItemIdx)
+	if clickable, ok := clickedItem.(list.MouseClickable); ok {
 		handled := clickable.HandleMouseClick(ansi.MouseButton1, msg.X, msg.Y)
 		if !handled {
 			return false, false
@@ -993,17 +1002,17 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) (handled bool, openContai
 		// A click on a nested-tool container navigates into the child
 		// session rather than expanding — skip the Expandable branch
 		// entirely.
-		if _, isContainer := selectedItem.(chat.NestedToolContainer); isContainer {
+		if _, isContainer := clickedItem.(chat.NestedToolContainer); isContainer {
 			return true, true
 		}
 		// Toggle expansion only when the item signalled it handled the
 		// click. Items like AssistantMessageItem only report handled when
 		// the click is on their expandable region, so this avoids
 		// toggling expansion for clicks outside the clickable area.
-		if expandable, ok := selectedItem.(chat.Expandable); ok {
+		if expandable, ok := clickedItem.(chat.Expandable); ok {
 			wasFollowing := m.follow
 			if !expandable.ToggleExpanded() {
-				m.ScrollToIndex(m.list.Selected())
+				m.ScrollToIndex(msg.ItemIdx)
 			}
 			if wasFollowing {
 				m.ScrollToBottom()

@@ -236,3 +236,48 @@ func TestClickOnAssistantText_DoesNotMoveFocus(t *testing.T) {
 	require.Equal(t, uiFocusEditor, u.focus, "clicking chat content must not move focus off the editor")
 	require.True(t, u.editor.textarea.Focused(), "the editor must stay focused")
 }
+
+// TestClickWhileBrowsingChat_DoesNotMoveFocusStripe covers a leftover from
+// the old click-to-expand/click-to-focus behavior: Tab still enters a
+// legitimate keyboard "browse mode" (uiFocusMain) that highlights the
+// keyboard-selected message with a bordered stripe (see
+// styles.Messages.AssistantFocused/UserFocused, painted via
+// list.FocusedRenderCallback keyed on the list's selectedIdx). Before this
+// fix, Chat.HandleMouseDown also called list.SetSelected on every click, so
+// once a user had pressed Tab at some point, later mouse clicks anywhere in
+// the chat — pure text-selection clicks with no keyboard-navigation intent —
+// dragged that stripe along with the cursor to whatever row was clicked.
+// Clicks must still resolve click-driven behavior (delayed-click
+// expand/drill-in, word/line selection) by item index directly, without
+// touching the keyboard selection.
+func TestClickWhileBrowsingChat_DoesNotMoveFocusStripe(t *testing.T) {
+	t.Parallel()
+
+	u := newCursorTestUI(t)
+	newMsg := func(id, text string) chat.MessageItem {
+		return chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+			ID:   id,
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: text},
+			},
+		})
+	}
+	u.chat.AppendMessages(newMsg("m1", "first message"), newMsg("m2", "second message"))
+	u.updateLayoutAndSize()
+
+	// Enter keyboard browse mode on the first item, as Tab does in normal
+	// use, then click on the second item — a plain text-selection click,
+	// not a keyboard navigation action.
+	u.chat.Focus()
+	u.chat.SetSelected(0)
+
+	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
+		X:      u.layout.main.Min.X,
+		Y:      u.layout.main.Min.Y + 2,
+		Button: uv.MouseLeft,
+	}))
+
+	require.Equal(t, 0, u.chat.list.Selected(),
+		"a mouse click must not move the keyboard-selected item")
+}
