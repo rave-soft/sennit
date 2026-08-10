@@ -229,3 +229,20 @@ func (s *stubSearchBackend) Search(_ context.Context, _ string, _ int) ([]Search
 	s.called = true
 	return s.results, s.err
 }
+
+// TestWebSearchDescriptionMatchesBackend verifies the tool description
+// names the selected backend and only tells the model to follow up with
+// web_fetch when results are snippet-only.
+func TestWebSearchDescriptionMatchesBackend(t *testing.T) {
+	ddg := NewWebSearchTool(nil, t.TempDir(), nil, &duckDuckGoBackend{})
+	require.Contains(t, ddg.Info().Description, "DuckDuckGo")
+	require.Contains(t, ddg.Info().Description, "Follow up with web_fetch")
+
+	tavily := NewWebSearchTool(nil, t.TempDir(), nil, &tavilyBackend{})
+	require.Contains(t, tavily.Info().Description, "Tavily")
+	require.Contains(t, tavily.Info().Description, "page content")
+	require.NotContains(t, tavily.Info().Description, "Follow up with web_fetch")
+
+	stub := NewWebSearchTool(nil, t.TempDir(), nil, &stubSearchBackend{})
+	require.Contains(t, stub.Info().Description, "the configured search provider")
+}

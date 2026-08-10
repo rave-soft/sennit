@@ -22,6 +22,35 @@ var webSearchDescriptionTpl = template.Must(
 		Parse(string(webSearchDescriptionTmpl)),
 )
 
+// webSearchDescriptionData feeds the web_search description template with
+// the selected backend, so the description matches what the tool actually
+// returns (snippets only vs. snippets plus page content).
+type webSearchDescriptionData struct {
+	toolDescriptionData
+	// Provider is the human-readable backend name ("DuckDuckGo",
+	// "Tavily").
+	Provider string
+	// IncludesContent reports whether results carry page content, making
+	// a follow-up web_fetch per result unnecessary.
+	IncludesContent bool
+}
+
+func renderWebSearchDescription(backend SearchBackend) string {
+	data := webSearchDescriptionData{
+		toolDescriptionData: toolDescriptionData{GhAvailable: ghAvailable},
+	}
+	switch backend.(type) {
+	case *duckDuckGoBackend:
+		data.Provider = "DuckDuckGo"
+	case *tavilyBackend:
+		data.Provider = "Tavily"
+		data.IncludesContent = true
+	default:
+		data.Provider = "the configured search provider"
+	}
+	return renderTemplate(webSearchDescriptionTpl, data)
+}
+
 // defaultSearchHTTPClient builds the HTTP client used when no client is
 // supplied to NewWebSearchTool/NewSearchBackend.
 func defaultSearchHTTPClient() *http.Client {
@@ -52,7 +81,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 
 	return fantasy.NewParallelAgentTool(
 		WebSearchToolName,
-		renderToolDescription(webSearchDescriptionTpl),
+		renderWebSearchDescription(backend),
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return fantasy.NewTextErrorResponse("query is required"), nil

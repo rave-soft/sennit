@@ -1,2 +1,2 @@
-Search the web via DuckDuckGo; returns titles, URLs, and snippets. Follow up with web_fetch to get full page content.
+Search the web via {{ .Provider }}; returns titles, URLs, and snippets{{ if .IncludesContent }}, plus page content for the most relevant results — a follow-up web_fetch is usually unnecessary{{ else }}. Follow up with web_fetch to get full page content{{ end }}.
 {{- if .GhAvailable }} For GitHub searches when an exact repo name, issue, or link is provided, use `gh search` in bash instead.{{- end }}
