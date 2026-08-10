@@ -47,7 +47,7 @@ type OAuth struct {
 	Base
 
 	provider      catwalk.Provider
-	model         config.SelectedModel
+	model         *config.SelectedModel
 	modelType     config.SelectedModelType
 	oAuthProvider OAuthProvider
 
@@ -78,7 +78,7 @@ func newOAuth(
 	com *common.Common,
 	isOnboarding bool,
 	provider catwalk.Provider,
-	model config.SelectedModel,
+	model *config.SelectedModel,
 	modelType config.SelectedModelType,
 	oAuthProvider OAuthProvider,
 ) (*OAuth, tea.Cmd) {
@@ -462,9 +462,12 @@ func (m *OAuth) saveCredential() tea.Cmd {
 // screen. The credential is already saved, so this only resumes model
 // selection, which closes the dialog.
 func (m *OAuth) confirmAndSelectModel() Action {
+	if m.model == nil {
+		return ActionProviderConfigured{ProviderID: string(m.provider.ID)}
+	}
 	return ActionSelectModel{
 		Provider:  m.provider,
-		Model:     m.model,
+		Model:     *m.model,
 		ModelType: m.modelType,
 	}
 }

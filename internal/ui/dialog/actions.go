@@ -148,6 +148,46 @@ type (
 	}
 )
 
+// Messages for the providers configuration dialog and custom provider form.
+type (
+	// ActionConfigureProvider is sent when a catalog provider is chosen from
+	// the providers list dialog, to start authenticating/configuring it.
+	ActionConfigureProvider struct {
+		ProviderID string
+	}
+	// ActionOpenCustomProviderForm is sent when "Custom provider…" is chosen
+	// from the providers list dialog.
+	ActionOpenCustomProviderForm struct{}
+	// ActionSubmitCustomProvider is sent when the custom provider form is
+	// submitted with valid input.
+	ActionSubmitCustomProvider struct {
+		ID      string
+		BaseURL string
+		Type    string
+		APIKey  string
+	}
+	// ActionProviderConfigured is sent once a provider (catalog or custom)
+	// has been successfully configured and verified. Portion 1 only closes
+	// the open dialogs; portion 2 will add auto-selecting a model for this
+	// provider and transitioning into chat.
+	ActionProviderConfigured struct {
+		ProviderID string
+	}
+	// ActionCustomProviderResult carries the outcome of the async
+	// save-config + model-discovery work kicked off by
+	// ActionSubmitCustomProvider. It is deliberately NOT handled by
+	// handleDialogMsg's own switch, so the generic "unhandled Action
+	// round-trips to the front dialog" mechanism (see
+	// ActionChangeAPIKeyState) delivers it straight back into the
+	// still-open ProviderForm dialog's HandleMsg, letting the form show a
+	// discovery error without closing, or hand back control to close on
+	// success.
+	ActionCustomProviderResult struct {
+		ProviderID string
+		Err        error
+	}
+)
+
 // ActionCmd represents an action that carries a [tea.Cmd] to be passed to the
 // Bubble Tea program loop.
 type ActionCmd struct {

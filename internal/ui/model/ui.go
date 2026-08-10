@@ -460,7 +460,7 @@ func (m *UI) KeyMap() *KeyMap {
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.state == uiOnboarding {
-		if cmd := m.openModelsDialog(); cmd != nil {
+		if cmd := m.openProvidersDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -1807,7 +1807,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	switch msg := action.(type) {
 	// Generic dialog messages
 	case dialog.ActionClose:
-		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
+		if isOnboarding && m.dialog.ContainsDialog(dialog.ProvidersID) {
 			break
 		}
 
@@ -1818,7 +1818,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseFrontDialog()
 
 		if isOnboarding {
-			if cmd := m.openModelsDialog(); cmd != nil {
+			if cmd := m.openProvidersDialog(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -2058,6 +2058,75 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionAttachSkill:
 		m.dialog.CloseFrontDialog()
 		cmds = append(cmds, m.attachSkill(msg.ID, msg.Name))
+	// Providers configuration dialog messages.
+	case dialog.ActionConfigureProvider:
+		if cmd := m.configureProvider(msg.ProviderID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionOpenCustomProviderForm:
+		if cmd := m.openProviderFormDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionSubmitCustomProvider:
+		ws := m.com.Workspace
+		ctx := m.com.Context()
+		params := workspace.ConfigureCustomProviderParams{
+			ID:      msg.ID,
+			BaseURL: msg.BaseURL,
+			Type:    msg.Type,
+			APIKey:  msg.APIKey,
+		}
+		cmds = append(cmds, func() tea.Msg {
+			_, err := workspace.ConfigureCustomProvider(ctx, ws, config.ScopeGlobal, params)
+			return dialog.ActionCustomProviderResult{ProviderID: msg.ID, Err: err}
+		})
+	case dialog.ActionProviderConfigured:
+		m.dialog.CloseDialog(dialog.ProviderFormID)
+		m.dialog.CloseDialog(dialog.APIKeyInputID)
+		m.dialog.CloseDialog(dialog.OAuthID)
+		m.dialog.CloseDialog(dialog.ProvidersID)
+
+		if m.state != uiOnboarding {
+			break
+		}
+
+		cfg := m.com.Config()
+		ws := m.com.Workspace
+
+		large := cfg.Models[config.SelectedModelTypeLarge]
+		if cfg.GetModel(large.Provider, large.Model) == nil {
+			// No valid model carried over (this is the normal first-run
+			// case, where no model has ever been selected) — fall back to
+			// this provider's own default rather than whatever
+			// defaultModelSelection would pick globally.
+			knownProviders, err := config.Providers(cfg)
+			if err != nil && len(knownProviders) == 0 {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+			def, err := cfg.DefaultModelForProvider(msg.ProviderID, knownProviders)
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+				break
+			}
+			large = def
+		}
+
+		if err := ws.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, large); err != nil {
+			cmds = append(cmds, util.ReportError(err))
+		}
+		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
+			small := ws.GetDefaultSmallModel(large.Provider)
+			if err := ws.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, small); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
+		}
+
+		m.setState(uiLanding, uiFocusEditor)
+		m.com.Config().SetupAgents()
+
+		cmds = append(cmds, m.initAgentAndReportModel(true, config.SelectedModelTypeLarge, large))
+
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
@@ -2145,9 +2214,21 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		m.com.Config().SetupAgents()
 	}
 
+	cmds = append(cmds, m.initAgentAndReportModel(isOnboarding, msg.ModelType, msg.Model))
+
+	return tea.Batch(cmds...)
+}
+
+// initAgentAndReportModel wires the coder agent up to model (InitCoderAgent
+// first when onboarding, since the agent doesn't exist yet) and reports
+// which model is now active. Shared by handleSelectModel and
+// ActionProviderConfigured's onboarding branch, which both land here right
+// after a model has been chosen.
+func (m *UI) initAgentAndReportModel(isOnboarding bool, modelType config.SelectedModelType, model config.SelectedModel) tea.Cmd {
+	cfg := m.com.Config()
 	ws := m.com.Workspace
 	ctx := m.com.Context()
-	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
+	return m.updateAgentModelCmd(func() tea.Msg {
 		// InitCoderAgent brings the coder agent up for the first time
 		// (onboarding); it must complete before UpdateAgentModel touches
 		// it, so both run in this single off-thread step rather than as
@@ -2162,18 +2243,14 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 
 		var (
-			modelType = stringext.Capitalize(string(msg.ModelType))
-			modelName = msg.Model.Model
+			modelTypeLabel = stringext.Capitalize(string(modelType))
+			modelName      = model.Model
 		)
-		if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
+		if catwalkModel := cfg.GetModel(model.Provider, model.Model); catwalkModel != nil && catwalkModel.Name != "" {
 			modelName = catwalkModel.Name
 		}
-		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
-
-		return util.NewInfoMsg(modelMsg)
-	}))
-
-	return tea.Batch(cmds...)
+		return util.NewInfoMsg(fmt.Sprintf("%s model changed to %s", modelTypeLabel, modelName))
+	})
 }
 
 func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
@@ -2186,9 +2263,9 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 
 	switch provider.ID {
 	case catwalk.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, &model, modelType)
 	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, &model, modelType)
 	}
 
 	if m.dialog.ContainsDialog(dlg.ID()) {
@@ -4067,6 +4144,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ProvidersID:
+		if cmd := m.openProvidersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4107,8 +4188,7 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return nil
 	}
 
-	isOnboarding := m.state == uiOnboarding
-	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
+	modelsDialog, err := dialog.NewModels(m.com)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -4158,6 +4238,78 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(reasoningDialog)
 	return nil
+}
+
+// openProvidersDialog opens the providers configuration dialog. It's the
+// onboarding entry point (see Init) as well as reachable from the command
+// palette — see the "configure_providers" entry in dialog/commands.go.
+func (m *UI) openProvidersDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ProvidersID) {
+		m.dialog.BringToFront(dialog.ProvidersID)
+		return nil
+	}
+
+	isOnboarding := m.state == uiOnboarding
+	providersDialog, err := dialog.NewProviders(m.com, isOnboarding)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(providersDialog)
+	return nil
+}
+
+// openProviderFormDialog opens the custom provider form dialog.
+func (m *UI) openProviderFormDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ProviderFormID) {
+		m.dialog.BringToFront(dialog.ProviderFormID)
+		return nil
+	}
+
+	formDialog := dialog.NewProviderForm(m.com)
+	m.dialog.OpenDialog(formDialog)
+	return nil
+}
+
+// configureProvider resolves providerID to its catalog entry and opens the
+// matching authentication dialog (OAuth for Copilot, API key input
+// otherwise), mirroring openAuthenticationDialog's dispatch. The API key
+// dialog is opened in its model-less mode (nil model) since this flow
+// isn't switching a model, just authenticating a provider.
+func (m *UI) configureProvider(providerID string) tea.Cmd {
+	providers, err := config.Providers(m.com.Config())
+	if err != nil && len(providers) == 0 {
+		return util.ReportError(err)
+	}
+
+	idx := slices.IndexFunc(providers, func(p catwalk.Provider) bool {
+		return string(p.ID) == providerID
+	})
+	if idx == -1 {
+		return util.ReportError(fmt.Errorf("unknown provider %q", providerID))
+	}
+	provider := providers[idx]
+
+	var (
+		dlg dialog.Dialog
+		cmd tea.Cmd
+
+		isOnboarding = m.state == uiOnboarding
+	)
+	switch provider.ID {
+	case catwalk.InferenceProviderCopilot:
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, nil, "")
+	default:
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, nil, "")
+	}
+
+	if m.dialog.ContainsDialog(dlg.ID()) {
+		m.dialog.BringToFront(dlg.ID())
+		return nil
+	}
+
+	m.dialog.OpenDialogWithGrace(dlg)
+	return cmd
 }
 
 // openNotificationsDialog opens the notification style picker dialog.
