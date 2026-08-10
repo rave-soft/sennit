@@ -743,6 +743,13 @@ type Config struct {
 	// receives one per workspace) leaves it empty and simply skips discovery —
 	// by then the agents it needs are already in Agents.
 	workingDir string
+
+	// Problems accumulates config problems noticed while loading and
+	// setting up agents (a provider dropped for a missing api key, an
+	// agent model that fell back, ...). It is populated by addProblem at
+	// the same sites that used to only slog.Warn, and read back by
+	// Doctor. Not persisted to disk.
+	Problems []Problem `json:"-"`
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators
@@ -972,6 +979,13 @@ func filterSlice(data []string, mask []string, include bool) []string {
 // ignores any built-in entry a previous run left there, so repeated calls
 // (config reload, workspace switch) converge on the same result.
 func (c *Config) SetupAgents() {
+	// SetupAgents fully recomputes c.Agents and can run more than once on
+	// the same live Config (e.g. after a markdown agent file changes), so
+	// drop any agent problems from a previous run before validUserAgents
+	// re-adds the current ones. Otherwise a problem sticks around forever
+	// even after the offending agent definition is fixed.
+	c.Problems = slices.DeleteFunc(c.Problems, func(p Problem) bool { return p.Area == AreaAgent })
+
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
 	providers := c.providersOrEmpty()
 
@@ -1069,6 +1083,13 @@ func (c *Config) validUserAgents() (valid map[string]Agent, invalid map[string]s
 				if _, err := ResolveModelString(providers, agent.Model); err != nil {
 					slog.Warn("Unrecognised model for agent, falling back to the app's main model",
 						"agent", id, "model", agent.Model, "error", err)
+					c.addProblem(Problem{
+						Severity: SeverityWarn,
+						Area:     AreaAgent,
+						Subject:  id,
+						Message:  fmt.Sprintf("agent %s: model %s not found — falls back to the main model", id, agent.Model),
+						Hint:     "run 'braid models' to see available provider/model pairs",
+					})
 					agent.Model = ""
 				}
 			}

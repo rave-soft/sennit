@@ -67,6 +67,7 @@ func TestSystemCommandItems_ShortNames(t *testing.T) {
 		{"switch_session", "sessions", nil},
 		{"switch_model", "models", []string{"switch model"}},
 		{"configure_providers", "providers", []string{"configure providers"}},
+		{"doctor", "doctor", nil},
 		{"summarize", "compact", []string{"summarize", "summarize session"}},
 		{"toggle_sidebar", "sidebar", []string{"toggle sidebar"}},
 		{"select_notifications", "notifications", []string{"notification style"}},
@@ -105,6 +106,21 @@ func TestSystemCommandItems_CompactRunsSummarize(t *testing.T) {
 	action, ok := compact.Action().(ActionSummarize)
 	require.True(t, ok, "expected ActionSummarize, got %T", compact.Action())
 	require.Equal(t, "sess-42", action.SessionID)
+}
+
+// TestSystemCommandItems_DoctorOpensDoctorDialog verifies "/doctor" fires
+// ActionOpenDialog{DoctorID}, matching how the other dialog-opening
+// commands (models, providers, ...) are wired.
+func TestSystemCommandItems_DoctorOpensDoctorDialog(t *testing.T) {
+	t.Parallel()
+
+	com := newCommandsNamesTestCommon(t)
+	items := systemCommandItems(com, "sess-1", true, false, false, 200, nil)
+
+	doctor := findByID(t, items, "doctor")
+	action, ok := doctor.Action().(ActionOpenDialog)
+	require.True(t, ok, "expected ActionOpenDialog, got %T", doctor.Action())
+	require.Equal(t, DoctorID, action.DialogID)
 }
 
 // TestBuildCommandItems_CombinesAllSources checks that BuildCommandItems -

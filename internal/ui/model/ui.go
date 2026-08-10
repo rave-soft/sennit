@@ -513,7 +513,32 @@ func (m *UI) Init() tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	cmds = append(cmds, m.checkPendingMCPAuth())
+	if cmd := m.checkConfigProblems(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
+}
+
+// checkConfigProblems surfaces config.Doctor's findings as a single
+// startup toast (e.g. "3 config problems — /doctor for details") so a
+// misconfiguration like a sub-agent pinned to a nonexistent model is
+// visible instead of only a log line the user never reads. It only counts
+// static problems available immediately after config load; MCP server
+// health (which needs a live connection attempt) is picked up by the
+// /doctor dialog itself once servers have connected.
+func (m *UI) checkConfigProblems() tea.Cmd {
+	if m.state == uiOnboarding {
+		return nil
+	}
+	n := len(config.Doctor(m.com.Config()))
+	if n == 0 {
+		return nil
+	}
+	noun := "problem"
+	if n != 1 {
+		noun = "problems"
+	}
+	return util.ReportWarn(fmt.Sprintf("%d config %s — /doctor for details", n, noun))
 }
 
 // loadInitialSession loads the initial session if one was specified on startup.
@@ -4526,6 +4551,8 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openQuitDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.DoctorID:
+		m.openDoctorDialog()
 	default:
 		// Unknown dialog
 		break
@@ -4724,6 +4751,16 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
 	return nil
+}
+
+// openDoctorDialog opens the /doctor config-problems dialog.
+func (m *UI) openDoctorDialog() {
+	if m.dialog.ContainsDialog(dialog.DoctorID) {
+		m.dialog.BringToFront(dialog.DoctorID)
+		return
+	}
+
+	m.dialog.OpenDialog(dialog.NewDoctor(m.com))
 }
 
 // sessionsLoadedMsg delivers the result of the off-thread ListSessions

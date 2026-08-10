@@ -9,6 +9,9 @@ Get Braid's current runtime state: active model, provider, LSP/MCP status, skill
 </usage>
 
 <tips>
+- Check [problems] for config issues found by the built-in doctor (e.g. an
+  agent pinned to a model that doesn't exist, silently falling back to the
+  main model)
 - Check [lsp] and [mcp] sections for service health
 - Check [providers] to see which providers are enabled and available
 - Check [skills] to see which skills are available and whether they have been

@@ -458,6 +458,13 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 			if project == "" || location == "" {
 				if configExists {
 					slog.Warn("Skipping Vertex AI provider due to missing credentials")
+					c.addProblem(Problem{
+						Severity: SeverityWarn,
+						Area:     AreaProvider,
+						Subject:  string(p.ID),
+						Message:  fmt.Sprintf("provider %s dropped: VERTEXAI_PROJECT/VERTEXAI_LOCATION not set", p.ID),
+						Hint:     "static check only; set both env vars and reload",
+					})
 					c.Providers.Del(string(p.ID))
 				}
 				continue
@@ -469,6 +476,13 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 			if err != nil || endpoint == "" {
 				if configExists {
 					slog.Warn("Skipping Azure provider due to missing API endpoint", "provider", p.ID, "error", err)
+					c.addProblem(Problem{
+						Severity: SeverityWarn,
+						Area:     AreaProvider,
+						Subject:  string(p.ID),
+						Message:  fmt.Sprintf("provider %s dropped: missing API endpoint", p.ID),
+						Hint:     "static check only; set base_url and reload",
+					})
 					c.Providers.Del(string(p.ID))
 				}
 				continue
@@ -479,6 +493,13 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 			if p.APIKey == "" && !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
+					c.addProblem(Problem{
+						Severity: SeverityWarn,
+						Area:     AreaProvider,
+						Subject:  string(p.ID),
+						Message:  fmt.Sprintf("provider %s dropped: no api_key and no AWS credentials found", p.ID),
+						Hint:     "static check only; set api_key or AWS credentials and reload",
+					})
 					c.Providers.Del(string(p.ID))
 				}
 				continue
@@ -489,6 +510,13 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 			if v == "" || err != nil {
 				if configExists {
 					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)
+					c.addProblem(Problem{
+						Severity: SeverityWarn,
+						Area:     AreaProvider,
+						Subject:  string(p.ID),
+						Message:  fmt.Sprintf("provider %s dropped: missing api_key", p.ID),
+						Hint:     "static check only; set api_key and reload",
+					})
 					c.Providers.Del(string(p.ID))
 				}
 				continue
@@ -584,6 +612,12 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
+			c.addProblem(Problem{
+				Severity: SeverityWarn,
+				Area:     AreaProvider,
+				Subject:  id,
+				Message:  fmt.Sprintf("provider %s dropped: unsupported type %q", id, providerConfig.Type),
+			})
 			c.Providers.Del(id)
 			continue
 		}
@@ -593,11 +627,14 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 			c.Providers.Del(id)
 			continue
 		}
-		if providerConfig.APIKey == "" {
-			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
-		}
 		if providerConfig.BaseURL == "" {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
+			c.addProblem(Problem{
+				Severity: SeverityWarn,
+				Area:     AreaProvider,
+				Subject:  id,
+				Message:  fmt.Sprintf("provider %s dropped: missing base_url", id),
+			})
 			c.Providers.Del(id)
 			continue
 		}
@@ -627,6 +664,12 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 
 		if len(providerConfig.Models) == 0 {
 			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
+			c.addProblem(Problem{
+				Severity: SeverityWarn,
+				Area:     AreaProvider,
+				Subject:  id,
+				Message:  fmt.Sprintf("provider %s dropped: no models configured or discovered", id),
+			})
 			c.Providers.Del(id)
 			continue
 		}
@@ -634,10 +677,23 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
+			c.addProblem(Problem{
+				Severity: SeverityWarn,
+				Area:     AreaProvider,
+				Subject:  id,
+				Message:  fmt.Sprintf("provider %s has no api_key", id),
+				Hint:     "this is expected for local providers (Ollama, LM Studio, ...); ignore if intentional",
+			})
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {
 			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
+			c.addProblem(Problem{
+				Severity: SeverityWarn,
+				Area:     AreaProvider,
+				Subject:  id,
+				Message:  fmt.Sprintf("provider %s dropped: missing base_url", id),
+			})
 			c.Providers.Del(id)
 			continue
 		}
@@ -936,6 +992,16 @@ func resolveSelectedModel(cfg *Config, knownProviders []catwalk.Provider) (resol
 		}
 		model := cfg.GetModel(selected.Provider, selected.Model)
 		if model == nil {
+			cfg.addProblem(Problem{
+				Severity: SeverityError,
+				Area:     AreaModel,
+				Subject:  modelSelected.Provider + "/" + modelSelected.Model,
+				Message: fmt.Sprintf(
+					"configured main model %s/%s not found — falling back to %s/%s",
+					modelSelected.Provider, modelSelected.Model, def.Provider, def.Model,
+				),
+				Hint: "run 'braid models' to see available provider/model pairs",
+			})
 			selected = def
 			result.Fallback = true
 		} else {

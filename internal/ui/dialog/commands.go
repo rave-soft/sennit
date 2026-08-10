@@ -496,6 +496,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 		NewCommandItem(sty, "switch_session", "sessions", "ctrl+s", ActionOpenDialog{SessionsID}).WithDescription("switch session"),
 		NewCommandItem(sty, "switch_model", "models", "ctrl+l", ActionOpenDialog{ModelsID}).WithAliases("switch model", "model").WithDescription("switch model"),
 		NewCommandItem(sty, "configure_providers", "providers", "", ActionOpenDialog{ProvidersID}).WithAliases("configure providers").WithDescription("configure providers"),
+		NewCommandItem(sty, "doctor", "doctor", "", ActionOpenDialog{DoctorID}).WithDescription("check config problems"),
 	}
 
 	// Only show compact command if there's an active session

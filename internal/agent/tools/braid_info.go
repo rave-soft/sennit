@@ -48,6 +48,7 @@ func buildBraidInfo(cfg *config.ConfigStore, reg *mcp.Registry, lspManager *lsp.
 
 	writeConfigFiles(&b, cfg)
 	writeConfigStaleness(&b, cfg)
+	writeProblems(&b, cfg, mcpStates)
 	writeModels(&b, cfg)
 	writeProviders(&b, cfg)
 	writeLSP(&b, lspManager, cfg)
@@ -98,6 +99,45 @@ func writeConfigStaleness(b *strings.Builder, cfg *config.ConfigStore) {
 		fmt.Fprintf(b, "errors = %s\n", strings.Join(paths, ", "))
 	}
 
+	b.WriteString("\n")
+}
+
+// writeProblems reports config.Doctor's static findings plus any MCP
+// server stuck in an error/needs-auth state, so an agent asked "why is my
+// sub-agent on the wrong model?" (or "why can't I use that MCP tool?") can
+// answer from its own braid_info output instead of a log file it never
+// sees.
+func writeProblems(b *strings.Builder, cfg *config.ConfigStore, mcpStates map[string]mcp.ClientInfo) {
+	problems := config.Doctor(cfg.Config())
+	for name, info := range mcpStates {
+		if info.State != mcp.StateError && info.State != mcp.StateNeedsAuth {
+			continue
+		}
+		msg := fmt.Sprintf("mcp server %s is in state %s", name, info.State)
+		if info.Error != nil {
+			msg += ": " + info.Error.Error()
+		}
+		problems = append(problems, config.Problem{
+			Severity: config.SeverityError,
+			Area:     config.AreaMCP,
+			Subject:  name,
+			Message:  msg,
+		})
+	}
+	if len(problems) == 0 {
+		return
+	}
+
+	slices.SortFunc(problems, func(a, b config.Problem) int {
+		if c := strings.Compare(string(a.Area), string(b.Area)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Subject, b.Subject)
+	})
+	b.WriteString("[problems]\n")
+	for _, p := range problems {
+		fmt.Fprintf(b, "%s.%s = %s: %s\n", p.Area, p.Subject, p.Severity, p.Message)
+	}
 	b.WriteString("\n")
 }
 

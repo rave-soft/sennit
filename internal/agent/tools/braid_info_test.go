@@ -499,3 +499,63 @@ func TestBraidInfo_Hooks_NoHooks(t *testing.T) {
 	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[hooks]")
 }
+
+// TestBraidInfo_Problems_None verifies the section is omitted for a clean
+// config, matching the other [section] omission tests above.
+func TestBraidInfo_Problems_None(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options:   &config.Options{},
+	})
+
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
+	require.NotContains(t, output, "[problems]")
+}
+
+// TestBraidInfo_Problems_UnresolvedAgentModel is the feature's motivating
+// case: a sub-agent pinned to a model that doesn't exist among the
+// providers used to be a silent log warning with a fallback the user never
+// saw. It must now show up in braid_info's [problems] section.
+func TestBraidInfo_Problems_UnresolvedAgentModel(t *testing.T) {
+	t.Parallel()
+
+	c := &config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options:   &config.Options{},
+		Agents: map[string]config.Agent{
+			"reviewer": {Prompt: "You review code.", Model: "nope/nope"},
+		},
+	}
+	c.SetupAgents()
+	cfg := config.NewTestStore(c)
+
+	output := buildBraidInfo(cfg, nil, nil, nil, nil, nil)
+	require.Contains(t, output, "[problems]")
+	require.Contains(t, output, "agent.reviewer")
+	require.Contains(t, output, "falls back to the main model")
+}
+
+// TestBraidInfo_Problems_MCPError verifies an MCP server stuck in an
+// error/needs-auth state is merged into the same [problems] section,
+// alongside the config.Doctor findings, even though internal/config cannot
+// see the MCP registry directly (import-cycle boundary).
+func TestBraidInfo_Problems_MCPError(t *testing.T) {
+	t.Parallel()
+
+	states := map[string]mcp.ClientInfo{
+		"filesystem": {Name: "filesystem", State: mcp.StateError, Error: errors.New("connection refused")},
+	}
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options:   &config.Options{},
+	})
+
+	var b strings.Builder
+	writeProblems(&b, cfg, states)
+	output := b.String()
+	require.Contains(t, output, "[problems]")
+	require.Contains(t, output, "mcp.filesystem")
+	require.Contains(t, output, "connection refused")
+}
