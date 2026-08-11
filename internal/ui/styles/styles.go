@@ -322,6 +322,10 @@ type Styles struct {
 		AssistantInfoProvider  lipgloss.Style
 		AssistantInfoDuration  lipgloss.Style
 		AssistantCanceled      lipgloss.Style // Italic "Canceled" footer
+		// MarkdownBlock carries the background color painted behind an
+		// assistant message's markdown body (see chat.cachedContent /
+		// common.BlockBackground).
+		MarkdownBlock lipgloss.Style
 	}
 
 	// Tool - styles for tool call rendering

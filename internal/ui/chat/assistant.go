@@ -527,13 +527,18 @@ func (a *AssistantMessageItem) cachedThinking(width int) string {
 	return out
 }
 
-// cachedContent returns the rendered content section.
+// cachedContent returns the rendered content section. The markdown body is
+// painted onto its own background block (see common.BlockBackground) so
+// the assistant's prose reads as a distinct panel in the transcript.
 func (a *AssistantMessageItem) cachedContent(width int) string {
 	srcHash, extra := a.contentKey()
 	if a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
 	}
 	out := a.renderMarkdown(a.message.Content().Text, width)
+	if bg := a.sty.Messages.MarkdownBlock.GetBackground(); bg != nil {
+		out = common.BlockBackground(out, width, bg)
+	}
 	a.contentSec.store(width, srcHash, extra, out, 0)
 	return out
 }

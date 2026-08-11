@@ -911,6 +911,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ShellTruncation = muted
 
 	s.Messages.SectionHeader = base.PaddingLeft(2)
+	s.Messages.MarkdownBlock = lipgloss.NewStyle().Background(o.bgLeastVisible)
 	s.Messages.AssistantInfoIcon = subtle
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle

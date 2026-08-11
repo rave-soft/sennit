@@ -1,6 +1,7 @@
 package styles
 
 import (
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -26,10 +27,14 @@ func CharmtonePantera() Styles {
 		accent:    charmtone.Hazy,
 		keyword:   charmtone.Blush,
 
-		fgBase:       charmtone.Sash,
-		fgMoreSubtle: charmtone.Squid,
-		fgSubtle:     charmtone.Smoke,
-		fgMostSubtle: charmtone.Oyster,
+		// Text neutrals are custom cool (blue-tinted) grays rather than
+		// the stock charmtone neutrals, which lean warm/purple — matched
+		// to the originals in brightness (Sash/Smoke/Squid/Oyster) but
+		// colder in hue.
+		fgBase:       lipgloss.Color("#E4EBF3"),
+		fgMoreSubtle: lipgloss.Color("#7E8B99"),
+		fgSubtle:     lipgloss.Color("#AEBDCC"),
+		fgMostSubtle: lipgloss.Color("#57626E"),
 
 		onPrimary: charmtone.Butter,
 

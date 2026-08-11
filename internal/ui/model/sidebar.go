@@ -1,7 +1,6 @@
 package model
 
 import (
-	"cmp"
 	"fmt"
 	"image"
 	"strings"
@@ -90,7 +89,10 @@ func (m *UI) modelInfo(width int) string {
 		if ok {
 			providerName = providerConfig.Name
 
-			// Only check reasoning if model can reason
+			// Only check reasoning if model can reason. The effort line
+			// shows only an explicitly configured effort — when unset, the
+			// model just runs on its default and the line is omitted
+			// entirely rather than echoing that default back.
 			if model.CatalogCfg.CanReason {
 				if len(model.CatalogCfg.ReasoningLevels) == 0 {
 					if model.ModelCfg.Think {
@@ -98,9 +100,8 @@ func (m *UI) modelInfo(width int) string {
 					} else {
 						reasoningInfo = "Thinking Off"
 					}
-				} else {
-					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatalogCfg.DefaultReasoningEffort)
-					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
+				} else if model.ModelCfg.ReasoningEffort != "" {
+					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(model.ModelCfg.ReasoningEffort))
 				}
 			}
 		}

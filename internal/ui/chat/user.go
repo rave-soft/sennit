@@ -60,6 +60,25 @@ func (m *UserMessageItem) AlwaysSpaced() bool {
 	return true
 }
 
+// turnSeparator renders the solid full-width rule that opens every user
+// turn — the chat's visual boundary between conversation turns.
+func turnSeparator(sty *styles.Styles, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	return sty.Section.Line.Render(strings.Repeat(styles.SectionSeparator, width))
+}
+
+// withTurnSeparator prepends the turn separator rule (plus a blank line)
+// to a user message's rendered body.
+func (m *UserMessageItem) withTurnSeparator(content string, width int) string {
+	sep := turnSeparator(m.sty, width)
+	if content == "" {
+		return sep
+	}
+	return sep + "\n\n" + content
+}
+
 // RawRender implements [MessageItem].
 func (m *UserMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)
@@ -74,7 +93,7 @@ func (m *UserMessageItem) RawRender(width int) string {
 
 	// Check if this is a skill invocation (loaded_skill XML)
 	if strings.HasPrefix(msgContent, "<loaded_skill>") {
-		content = m.renderSkillInvocation(msgContent, cappedWidth)
+		content = m.withTurnSeparator(m.renderSkillInvocation(msgContent, cappedWidth), cappedWidth)
 		height = lipgloss.Height(content)
 		m.setCachedRender(content, cappedWidth, height)
 		return m.renderHighlighted(content, cappedWidth, height)
@@ -102,6 +121,7 @@ func (m *UserMessageItem) RawRender(width int) string {
 		}
 	}
 
+	content = m.withTurnSeparator(content, cappedWidth)
 	height = lipgloss.Height(content)
 	m.setCachedRender(content, cappedWidth, height)
 	return m.renderHighlighted(content, cappedWidth, height)
@@ -150,8 +170,17 @@ func (m *UserMessageItem) Render(width int) string {
 	} else {
 		prefix = m.sty.Messages.UserBlurred.Render()
 	}
+	// RawRender opens every user turn with a separator rule and a blank
+	// line (see withTurnSeparator); those two lines get plain indentation
+	// instead of the user border prefix, so the bar hugs the message text
+	// only.
+	pad := strings.Repeat(" ", lipgloss.Width(prefix))
 	lines := strings.Split(m.RawRender(width), "\n")
 	for i, line := range lines {
+		if i <= 1 {
+			lines[i] = pad + line
+			continue
+		}
 		lines[i] = prefix + line
 	}
 	out := strings.Join(lines, "\n")
