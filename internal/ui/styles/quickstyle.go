@@ -1015,16 +1015,20 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
-	s.Status.SuccessIndicator = base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")
-	s.Status.InfoIndicator = s.Status.SuccessIndicator
-	s.Status.UpdateIndicator = s.Status.SuccessIndicator.SetString("HEY!")
-	s.Status.WarnIndicator = s.Status.SuccessIndicator.Foreground(o.bgMostVisible).Background(o.warning).SetString("WARNING")
-	s.Status.ErrorIndicator = s.Status.SuccessIndicator.Foreground(o.bgBase).Background(o.destructive).SetString("ERROR")
-	s.Status.SuccessMessage = base.Foreground(o.bgLessVisible).Background(o.successMostSubtle).Padding(0, 1)
+	// Notifications render as a quiet "icon message" line in place of the
+	// help view (see Status.Draw) — no filled full-width bar. Only the
+	// small leading icon carries the semantic color; the text itself
+	// stays neutral.
+	s.Status.SuccessIndicator = base.Foreground(o.successMostSubtle).PaddingLeft(1).SetString(ToolSuccess)
+	s.Status.InfoIndicator = base.Foreground(o.info).PaddingLeft(1).SetString(ToolPending)
+	s.Status.UpdateIndicator = s.Status.InfoIndicator
+	s.Status.WarnIndicator = base.Foreground(o.warning).PaddingLeft(1).Bold(true).SetString("!")
+	s.Status.ErrorIndicator = base.Foreground(o.error).PaddingLeft(1).Bold(true).SetString(RemoveIcon)
+	s.Status.SuccessMessage = base.Foreground(o.fgSubtle).Padding(0, 1)
 	s.Status.InfoMessage = s.Status.SuccessMessage
 	s.Status.UpdateMessage = s.Status.SuccessMessage
-	s.Status.WarnMessage = s.Status.SuccessMessage.Foreground(o.bgMostVisible).Background(o.warningSubtle)
-	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(o.onPrimary).Background(o.error)
+	s.Status.WarnMessage = s.Status.SuccessMessage
+	s.Status.ErrorMessage = base.Foreground(o.fgBase).Padding(0, 1)
 
 	// Completions styles
 	s.Completions.Normal = base.Background(o.bgLessVisible).Foreground(o.fgBase)

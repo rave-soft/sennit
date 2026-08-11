@@ -71,15 +71,15 @@ func (s *Status) SetHideHelp(hideHelp bool) {
 	s.hideHelp = hideHelp
 }
 
-// Draw draws the status bar onto the screen.
+// Draw draws the status bar onto the screen. While a notification is
+// visible it takes the help view's place as a quiet "icon message" line —
+// no full-width background stripe.
 func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
-	if !s.hideHelp {
-		helpView := s.com.Styles.Status.Help.Render(s.help.View(s.helpKm))
-		uv.NewStyledString(helpView).Draw(scr, area)
-	}
-
-	// Render notifications
 	if s.msg.IsEmpty() {
+		if !s.hideHelp {
+			helpView := s.com.Styles.Status.Help.Render(s.help.View(s.helpKm))
+			uv.NewStyledString(helpView).Draw(scr, area)
+		}
 		return
 	}
 
@@ -109,12 +109,8 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	avail := max(0, area.Dx()-indWidth-msgPad)
 	msg := strings.Join(strings.Split(s.msg.Msg, "\n"), " ")
 	msg = ansi.Truncate(msg, avail, "…")
-	if w := lipgloss.Width(msg); w < avail {
-		msg += strings.Repeat(" ", avail-w)
-	}
 	info := msgStyle.Render(msg)
 
-	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, area)
 }
 
