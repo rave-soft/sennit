@@ -150,24 +150,30 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Markdown = ansi.StyleConfig{
 		Document: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				// BlockPrefix: "\n",
-				// BlockSuffix: "\n",
 				Color: hex(o.fgSubtle),
 			},
-			// Margin: new(uint(defaultMargin)),
+			// One cell of breathing room on each side, so prose doesn't
+			// sit flush against the markdown panel's background edge.
+			Margin: new(uint(1)),
 		},
 		BlockQuote: ansi.StyleBlock{
-			StylePrimitive: ansi.StylePrimitive{},
-			Indent:         new(uint(1)),
-			IndentToken:    new("│ "),
+			StylePrimitive: ansi.StylePrimitive{
+				Color:  hex(o.fgMoreSubtle),
+				Italic: new(true),
+			},
+			Indent:      new(uint(1)),
+			IndentToken: new("│ "),
 		},
 		List: ansi.StyleList{
 			LevelIndent: defaultListIndent,
 		},
+		// Headings render brighter than body text (which uses fgSubtle),
+		// not dimmer — a heading in a muted accent color reads as weaker
+		// than the prose under it and the hierarchy disappears.
 		Heading: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
 				BlockSuffix: "\n",
-				Color:       hex(o.info),
+				Color:       hex(o.fgBase),
 				Bold:        new(true),
 			},
 		},

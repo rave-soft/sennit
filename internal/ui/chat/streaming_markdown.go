@@ -312,13 +312,30 @@ func glueRenders(prefix, trail string) string {
 	}
 }
 
-// trimGlamourMargins strips leading and trailing whitespace
-// (including newlines) from a glamour-rendered fragment.
+// trimGlamourMargins strips leading blank lines and trailing
+// whitespace (including newlines) from a glamour-rendered fragment.
 // Glamour adds a leading blank line for documents that open with
 // a heading or paragraph, plus a trailing newline; both must be
-// removed before concatenation.
+// removed before concatenation. Only whole blank lines are removed
+// at the front — the first content line's leading spaces are its
+// Document margin and must survive, or glued fragments lose their
+// left margin relative to a full render.
 func trimGlamourMargins(s string) string {
-	return strings.Trim(s, " \t\n")
+	s = strings.TrimRight(s, " \t\n")
+	for {
+		nl := strings.IndexByte(s, '\n')
+		line := s
+		if nl >= 0 {
+			line = s[:nl]
+		}
+		if strings.TrimSpace(line) != "" {
+			return s
+		}
+		if nl < 0 {
+			return ""
+		}
+		s = s[nl+1:]
+	}
 }
 
 // findSafeMarkdownBoundary returns the byte offset of the END of
