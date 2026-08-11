@@ -1066,6 +1066,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Pills.HelpKey = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Pills.HelpText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Pills.Area = base
+	s.Pills.HeaderHover = lipgloss.NewStyle().Background(o.bgMostVisible).Foreground(o.fgBase)
 
 	return s
 }

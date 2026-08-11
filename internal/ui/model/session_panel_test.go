@@ -1,0 +1,366 @@
+package model
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/ui/dialog"
+	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/stretchr/testify/require"
+)
+
+// mkDockThreads builds n synthetic "running" threads, old enough to have a
+// non-zero elapsed time, for exercising sessionPanelPlan/drawSessionPanel
+// without a real workspace.
+func mkDockThreads(n int) []proto.Thread {
+	threads := make([]proto.Thread, n)
+	now := time.Now()
+	for i := range threads {
+		threads[i] = proto.Thread{
+			ID:        string(rune('a' + i)),
+			Name:      "fix-auth",
+			Goal:      "Refactor login flow to OAuth2",
+			Status:    "running",
+			CreatedAt: now.Add(-time.Duration(i+1) * time.Minute).Unix(),
+		}
+	}
+	return threads
+}
+
+// TestThreadDockBlockLines covers the two-line block's plain text: the
+// number, name, em dash, truncated goal on line 1, and the arrow-prefixed
+// status on line 2 — plus that a narrow width truncates rather than
+// wrapping or panicking. threadDockBlockLines itself lives in
+// threads_dock_view.go's predecessor's file, threads_dock.go — untouched by
+// the panel merge — this just re-confirms the panel still gets the same
+// text out of it.
+func TestThreadDockBlockLines(t *testing.T) {
+	t.Parallel()
+
+	th := proto.Thread{
+		ID: "t1", Name: "fix-auth", Goal: "Refactor login flow to OAuth2",
+		Status: "running", CreatedAt: time.Now().Add(-4 * time.Minute).Unix(),
+	}
+	activity := threadDockActivity{MessageCount: 12}
+
+	line1, line2 := threadDockBlockLines(1, th, activity, 200)
+	require.Equal(t, "1 fix-auth — Refactor login flow to OAuth2", line1)
+	require.Contains(t, line2, "  → step 12 · ")
+
+	// A narrow width truncates each line independently instead of
+	// wrapping or panicking.
+	require.NotPanics(t, func() {
+		narrow1, narrow2 := threadDockBlockLines(1, th, activity, 10)
+		require.LessOrEqual(t, ansi.StringWidth(narrow1), 10)
+		require.LessOrEqual(t, ansi.StringWidth(narrow2), 10)
+	})
+}
+
+// sessionUI builds a uiChat UI with an active session, ready to exercise
+// the session panel without a real workspace.
+func sessionUI() *UI {
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1"}
+	return u
+}
+
+// TestSessionPanelPlan_ThreadsRows covers the threads section's natural row
+// budget: zero for no active threads, two rows per visible thread up to the
+// cap, and one extra "more" row once the active set overflows
+// threadsDockVisibleCap.
+func TestSessionPanelPlan_ThreadsRows(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	require.Zero(t, u.sessionPanelPlan(100).threadsRows, "no threads at all")
+
+	u.threadsDock.threads = []proto.Thread{{ID: "x", Status: "merged"}}
+	require.Zero(t, u.sessionPanelPlan(100).threadsRows, "no active threads")
+
+	for n := 1; n <= threadsDockVisibleCap; n++ {
+		u.threadsDock.threads = mkDockThreads(n)
+		require.Equal(t, n*2, u.sessionPanelPlan(100).threadsRows, "n=%d", n)
+	}
+
+	u.threadsDock.threads = mkDockThreads(threadsDockVisibleCap + 2)
+	plan := u.sessionPanelPlan(100)
+	require.Equal(t, threadsDockVisibleCap*2+1, plan.threadsRows,
+		"overflow must add exactly one footer row")
+	require.Len(t, plan.threads, threadsDockVisibleCap)
+	require.Equal(t, 2, plan.threadsMore)
+}
+
+// TestDrawSessionPanel_RendersThreadBlocksAndMoreFooter covers end-to-end
+// rendering: numbered blocks for the visible threads and the "…and N more
+// threads" footer when the active set overflows the cap.
+func TestDrawSessionPanel_RendersThreadBlocksAndMoreFooter(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.threadsDock.threads = mkDockThreads(threadsDockVisibleCap + 1)
+
+	height := u.sessionPanelPlan(100).totalRows
+	require.Equal(t, threadsDockVisibleCap*2+1, height)
+
+	scr := uv.NewScreenBuffer(u.width, height)
+	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: height}}
+	u.drawSessionPanel(scr, area)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "1 fix-auth — Refactor login flow to OAuth2")
+	require.Contains(t, out, "2 fix-auth — Refactor login flow to OAuth2")
+	require.Contains(t, out, "3 fix-auth — Refactor login flow to OAuth2")
+	require.Contains(t, out, "…and 1 more threads")
+	require.Len(t, u.panelThreadRects, threadsDockVisibleCap)
+	require.Len(t, u.panelThreads, threadsDockVisibleCap)
+}
+
+// TestDrawSessionPanel_NoOpOnZeroArea guards against a panic when the panel
+// is given a degenerate (zero-height or zero-width) area.
+func TestDrawSessionPanel_NoOpOnZeroArea(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.threadsDock.threads = mkDockThreads(1)
+
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	require.NotPanics(t, func() {
+		u.drawSessionPanel(scr, uv.Rectangle{})
+	})
+}
+
+// TestSessionPanelPlan_TodosOrderingActiveFirstThenCompleted covers the
+// expanded todos list ordering: in-progress, then pending, then completed
+// last — the opposite of chat.FormatTodosList's completed-first ordering.
+func TestSessionPanelPlan_TodosOrderingActiveFirstThenCompleted(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.panel.expanded = true
+	u.session.Todos = []session.Todo{
+		{Content: "done first", Status: session.TodoStatusCompleted},
+		{Content: "pending one", Status: session.TodoStatusPending},
+		{Content: "working now", Status: session.TodoStatusInProgress},
+		{Content: "done second", Status: session.TodoStatusCompleted},
+	}
+
+	plan := u.sessionPanelPlan(100)
+	require.True(t, plan.todosExpanded)
+	require.Len(t, plan.todosActive, 2)
+	require.Equal(t, "working now", plan.todosActive[0].Content, "in-progress must lead")
+	require.Equal(t, "pending one", plan.todosActive[1].Content, "pending follows in-progress")
+	require.Len(t, plan.todosDone, 2)
+	require.Equal(t, "done first", plan.todosDone[0].Content)
+	require.Equal(t, "done second", plan.todosDone[1].Content)
+}
+
+// TestRenderSessionTodoLine_CompletedIsMutedAndStrikethrough covers that a
+// completed todo's rendered line carries the strikethrough SGR code.
+func TestRenderSessionTodoLine_CompletedIsMutedAndStrikethrough(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	todo := session.Todo{Content: "done", Status: session.TodoStatusCompleted}
+	line := renderSessionTodoLine(todo, "→", u.com.Styles, 80)
+
+	require.Contains(t, line, ";9m", "expected a strikethrough SGR parameter in the rendered line")
+	require.Contains(t, ansi.Strip(line), "done")
+}
+
+// TestSessionPanelPlan_AllInProgressTodosGetMarker is the regression test
+// for the parallel-in-progress-todos bug: pills.go's old todoPill tracked
+// only the first in_progress todo via a single `currentTodo` variable, so
+// with parallel subagents/threads writing todos concurrently, any
+// additional in-progress todo silently lost its marker. The new renderer
+// iterates every todo independently, so each one gets its own icon.
+func TestSessionPanelPlan_AllInProgressTodosGetMarker(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.panel.expanded = true
+	u.session.Todos = []session.Todo{
+		{Content: "first task", Status: session.TodoStatusInProgress},
+		{Content: "second task", Status: session.TodoStatusInProgress},
+	}
+
+	plan := u.sessionPanelPlan(100)
+	require.Len(t, plan.todosActive, 2)
+
+	scr := uv.NewScreenBuffer(u.width, 10)
+	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: 10}}
+	u.drawSessionPanel(scr, area)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "first task")
+	require.Contains(t, out, "second task")
+	// Both rows must carry the in-progress marker (the spinner glyph while
+	// not actively spinning), not just the first.
+	require.Equal(t, 2, strings.Count(out, styles.SpinnerIcon), "every in-progress todo must get its own marker")
+}
+
+// TestSessionPanelPlan_HeaderTextCollapsedVsExpanded covers the header's
+// ratio text and disclosure glyph in both states, and that collapsing hides
+// the item rows (row count assertion).
+func TestSessionPanelPlan_HeaderTextCollapsedVsExpanded(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.session.Todos = []session.Todo{
+		{Status: session.TodoStatusCompleted, Content: "a"},
+		{Status: session.TodoStatusPending, Content: "b"},
+	}
+
+	collapsed := u.sessionPanelPlan(100)
+	require.True(t, collapsed.todosVisible)
+	require.False(t, collapsed.todosExpanded)
+	require.Equal(t, "todos 1/2 ▸", sessionPanelTodosHeaderText(collapsed.todosCompleted, collapsed.todosTotal, collapsed.todosExpanded))
+	require.Equal(t, 1, collapsed.totalRows, "collapsed: header row only")
+
+	u.panel.expanded = true
+	expanded := u.sessionPanelPlan(100)
+	require.True(t, expanded.todosExpanded)
+	require.Equal(t, "todos 1/2 ▾", sessionPanelTodosHeaderText(expanded.todosCompleted, expanded.todosTotal, expanded.todosExpanded))
+	require.Equal(t, 1, len(expanded.todosActive), "collapsing hides item rows, expanding shows them")
+	require.Equal(t, 1, len(expanded.todosDone))
+	require.Equal(t, 3, expanded.totalRows, "expanded with ample budget: header + active + completed rows")
+}
+
+// TestSessionPanelPlan_QueueAlwaysVisibleRegardlessOfTodosExpand covers that
+// the queue list renders whenever there are queued items, independent of
+// whether the todos section is expanded or even present.
+func TestSessionPanelPlan_QueueAlwaysVisibleRegardlessOfTodosExpand(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.wsCache.promptQueueItems = []string{"do this", "then that"}
+
+	collapsed := u.sessionPanelPlan(100)
+	require.Equal(t, []string{"do this", "then that"}, collapsed.queue)
+
+	u.session.Todos = []session.Todo{{Status: session.TodoStatusPending, Content: "x"}}
+	u.panel.expanded = true
+	withTodos := u.sessionPanelPlan(100)
+	require.Equal(t, []string{"do this", "then that"}, withTodos.queue)
+}
+
+// TestSessionPanelPlan_BudgetCapAndPriorityOrder covers the height budget:
+// the total never exceeds ~40% of terminal height, and when a scenario
+// (active threads + expanded todos + queue) exceeds that budget on a short
+// terminal, completed todos drop first, then the todos list collapses,
+// before the threads section shrinks.
+func TestSessionPanelPlan_BudgetCapAndPriorityOrder(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.threadsDock.threads = mkDockThreads(2) // 4 rows
+	u.panel.expanded = true
+	u.session.Todos = []session.Todo{
+		{Status: session.TodoStatusInProgress, Content: "active 1"},
+		{Status: session.TodoStatusPending, Content: "active 2"},
+		{Status: session.TodoStatusPending, Content: "active 3"},
+		{Status: session.TodoStatusCompleted, Content: "done 1"},
+		{Status: session.TodoStatusCompleted, Content: "done 2"},
+		{Status: session.TodoStatusCompleted, Content: "done 3"},
+	}
+	u.wsCache.promptQueueItems = []string{"q1", "q2", "q3", "q4"}
+
+	// Natural size: 4 (threads) + 1 (header) + 3 (active) + 3 (completed) + 4 (queue) = 15.
+	full := u.sessionPanelPlan(100)
+	require.Equal(t, 15, full.totalRows)
+
+	// Budget 12: exactly enough room to drop the three completed rows and
+	// nothing else.
+	p := u.sessionPanelPlan(12)
+	require.Equal(t, 4, p.threadsRows, "threads must not shrink yet")
+	require.True(t, p.todosExpanded, "todos list must still be expanded")
+	require.Empty(t, p.todosDone, "completed todos are dropped first")
+	require.Len(t, p.todosActive, 3)
+	require.Len(t, p.queue, 4, "queue must be untouched")
+	require.LessOrEqual(t, p.totalRows, 12)
+
+	// Budget 9: tight enough to also force todos to collapse, but the
+	// queue is still untouched.
+	p = u.sessionPanelPlan(9)
+	require.Equal(t, 4, p.threadsRows, "threads still must not shrink")
+	require.False(t, p.todosExpanded, "todos collapse before threads shrink")
+	require.Len(t, p.queue, 4, "queue still untouched")
+	require.LessOrEqual(t, p.totalRows, 9)
+
+	// Budget 7: tight enough to also truncate the queue, but threads still
+	// hold their full 4 rows.
+	p = u.sessionPanelPlan(7)
+	require.Equal(t, 4, p.threadsRows, "threads still must not shrink")
+	require.False(t, p.todosExpanded)
+	require.Len(t, p.queue, 2, "queue truncated to whatever fits before threads shrink")
+	require.LessOrEqual(t, p.totalRows, 7)
+
+	// Pathological budget: even threads must shrink.
+	p = u.sessionPanelPlan(3)
+	require.Equal(t, 2, p.threadsRows, "threads section is the last resort to shrink")
+	require.LessOrEqual(t, p.totalRows, 3)
+
+	// The overall cap: with a tall terminal but tiny budget passed
+	// directly, sessionPanelHeight itself must respect the 40% cap.
+	u.height = 20
+	require.LessOrEqual(t, u.sessionPanelHeight(), int(float64(u.height)*sessionPanelBudgetFraction))
+}
+
+// TestSessionPanelHeight_ZeroContentMatchesBaseline is the regression guard
+// for the merged panel: with no active threads, no incomplete todos, and no
+// queued prompts, the panel must occupy exactly zero rows, and every other
+// layout rectangle must be byte-identical to a UI that never touches
+// threads/todos/queue state at all.
+func TestSessionPanelHeight_ZeroContentMatchesBaseline(t *testing.T) {
+	t.Parallel()
+
+	baseline := newTestUI()
+	baseline.updateLayoutAndSize()
+
+	u := sessionUI()
+	u.session.Todos = nil
+	u.threadsDock.threads = nil
+	u.wsCache.promptQueueItems = nil
+	u.updateLayoutAndSize()
+
+	require.Zero(t, u.sessionPanelHeight())
+	require.Zero(t, u.layout.panel, "panel must occupy zero space with no threads/todos/queue")
+}
+
+// TestMouseClick_ThreadBlockEntersThread covers the click hit-test: a
+// tea.MouseClickMsg landing on a rendered thread block's rect must return a
+// tea.Cmd that yields enterThreadMsg with that thread's ID/session ID —
+// the same drill-in mechanism the threads dashboard uses (see
+// Root.attachThreadCmd), not enterChildSession/navStack.
+func TestMouseClick_ThreadBlockEntersThread(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.dialog = dialog.NewOverlay()
+	u.threadsDock.threads = []proto.Thread{
+		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
+	}
+	u.updateLayoutAndSize()
+
+	// Populate the hit-test state the same way Draw's uiChat case does,
+	// without going through the full Draw (newTestUI's minimal setup
+	// doesn't wire the sidebar machinery Draw also touches).
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawSessionPanel(scr, u.layout.panel)
+	require.Len(t, u.panelThreadRects, 1)
+
+	rect := u.panelThreadRects[0]
+	_, cmd := u.Update(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseLeft})
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	entered, ok := msg.(enterThreadMsg)
+	require.True(t, ok, "expected enterThreadMsg, got %T", msg)
+	require.Equal(t, "t1", entered.id)
+	require.Equal(t, "s-t1", entered.sessionID)
+}

@@ -297,6 +297,15 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			r.active = screenMain
 			r.dashboard.SetActive(false)
 			return r, nil
+		case r.active == screenThread && key.Matches(msg, r.main.KeyMap().Chat.ExitChildSession) && !r.thread.ui.viewingChildSession():
+			// alt+up at the top of a drilled-in thread (no child session of
+			// its own to step out of first) returns straight to the main
+			// screen, not the dashboard — mirrors leaveThread's teardown but
+			// skips the dashboard-refresh bits, since the dashboard may not
+			// even be open. Forwarding this key into the thread's embedded
+			// UI would otherwise be a no-op (its own navStack is empty), so
+			// alt+up did nothing here before this check existed.
+			return r, r.leaveThreadToMain()
 		}
 	}
 
@@ -392,12 +401,14 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	return r, tea.Batch(cmds...)
 }
 
-// leaveThread tears down the attached thread and returns to the dashboard.
-// detach may do IO (e.g. shutting down a client connection), so it runs
-// inside the returned tea.Cmd rather than synchronously here.
-func (r *Root) leaveThread() tea.Cmd {
+// detachThread stops the attached thread's event pump and releases its
+// workspace (detach may do IO, e.g. shutting down a client connection, so it
+// runs inside the returned tea.Cmd rather than synchronously here), leaving
+// r.active for the caller to set. Shared by leaveThread and
+// leaveThreadToMain, which differ only in where they land and whether the
+// dashboard needs a refresh.
+func (r *Root) detachThread() tea.Cmd {
 	if r.thread == nil {
-		r.active = screenDashboard
 		return nil
 	}
 	thread := r.thread
@@ -405,14 +416,24 @@ func (r *Root) leaveThread() tea.Cmd {
 		thread.stop()
 	}
 	r.thread = nil
+
+	if thread.detach == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		thread.detach()
+		return nil
+	}
+}
+
+// leaveThread tears down the attached thread and returns to the dashboard.
+func (r *Root) leaveThread() tea.Cmd {
+	cmd := r.detachThread()
 	r.active = screenDashboard
 
 	var cmds []tea.Cmd
-	if thread.detach != nil {
-		cmds = append(cmds, func() tea.Msg {
-			thread.detach()
-			return nil
-		})
+	if cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	if r.dashboard != nil {
 		// The thread may have changed status while attached (e.g.
@@ -422,6 +443,17 @@ func (r *Root) leaveThread() tea.Cmd {
 		cmds = append(cmds, r.dashboard.Refresh())
 	}
 	return tea.Batch(cmds...)
+}
+
+// leaveThreadToMain tears down the attached thread and returns straight to
+// the main screen (alt+up at the top of a drilled-in thread — see
+// handleKeyPress), rather than the threads dashboard leaveThread goes to.
+// Skips the dashboard-refresh bits: the dashboard may not even be open, and
+// if it is, its own TTL backstop reconciles the thread's status change.
+func (r *Root) leaveThreadToMain() tea.Cmd {
+	cmd := r.detachThread()
+	r.active = screenMain
+	return cmd
 }
 
 // mergeThreadCmd calls MergeThread off-thread.

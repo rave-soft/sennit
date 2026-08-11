@@ -144,35 +144,6 @@ func TestDrawCursor_VisibleOnlyWhenEditorFocused(t *testing.T) {
 	}
 }
 
-// TestPillNavigation_RightArrowSwitchesSection is a regression test for a
-// keybinding collision that used to exist between pills navigation
-// (PillLeft/PillRight, bound to left/right) and a since-removed
-// FocusSidebar binding that shared the same keys: FocusSidebar matched
-// first and swallowed the keypress whenever its eligibility guard failed,
-// so right arrow silently did nothing instead of switching the pill
-// section. The sidebar can no longer take keyboard focus at all (see
-// uiFocusState), so PillRight is now the only handler left for right
-// arrow in uiFocusMain.
-func TestPillNavigation_RightArrowSwitchesSection(t *testing.T) {
-	t.Parallel()
-
-	u := newCursorTestUI(t)
-	u.focus = uiFocusMain
-	u.session.Todos = []session.Todo{
-		{Status: session.TodoStatusInProgress, Content: "do work"},
-	}
-	u.wsCache.promptQueue = 2
-	u.pills.expanded = true
-	u.pills.focusedSection = pillSectionTodos
-	u.updateLayoutAndSize()
-
-	u.handleKeyPressMsg(tea.KeyPressMsg{Code: tea.KeyRight})
-
-	require.Equal(t, uiFocusMain, u.focus, "right arrow must never move focus off the chat pane")
-	require.Equal(t, pillSectionQueue, u.pills.focusedSection,
-		"right arrow must reach PillRight and switch the pill section")
-}
-
 // TestClickOnPlainToolItem_DoesNotMoveFocus is the regression test for the
 // "фокус/курсор уходит туда" complaint: clicking a plain tool call (view,
 // bash, grep, ...) used to both expand it AND steal focus from the editor

@@ -198,3 +198,55 @@ func TestThreadEventMsgReachesAttachedThread(t *testing.T) {
 	require.Equal(t, 80, threadUI.width)
 	require.Equal(t, 24, threadUI.height)
 }
+
+// TestAltUpAtThreadTopLevelReturnsToMain covers the new handleKeyPress
+// branch: alt+up while attached to a thread, with nothing pushed onto that
+// thread's own child-session nav stack, must return straight to
+// screenMain (via leaveThreadToMain) instead of being forwarded into the
+// thread's embedded UI, where it would otherwise be a no-op.
+func TestAltUpAtThreadTopLevelReturnsToMain(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
+	r.thread = &threadAttachment{threadID: "s1", ui: threadUI}
+	r.active = screenThread
+
+	model, cmd := r.Update(tea.KeyPressMsg{Mod: tea.ModAlt, Code: tea.KeyUp})
+	r = model.(*Root)
+	if cmd != nil {
+		cmd()
+	}
+
+	require.Equal(t, screenMain, r.active)
+	require.Nil(t, r.thread, "leaveThreadToMain must tear down the attachment")
+}
+
+// TestLeaveThreadToMain covers the method directly: it tears down the
+// attachment (stop/detach both run) and lands on screenMain, not
+// screenDashboard the way leaveThread does.
+func TestLeaveThreadToMain(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
+
+	stopped, detached := false, false
+	r.thread = &threadAttachment{
+		threadID: "s1",
+		ui:       threadUI,
+		stop:     func() { stopped = true },
+		detach:   func() { detached = true },
+	}
+	r.active = screenThread
+
+	cmd := r.leaveThreadToMain()
+	require.Equal(t, screenMain, r.active)
+	require.Nil(t, r.thread)
+	require.True(t, stopped, "stop must run synchronously")
+	require.False(t, detached, "detach must run inside the returned cmd, not synchronously")
+
+	require.NotNil(t, cmd)
+	cmd()
+	require.True(t, detached)
+}

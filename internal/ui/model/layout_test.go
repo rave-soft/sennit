@@ -48,14 +48,15 @@ func newTestUI() *UI {
 	ta.Focus()
 
 	u := &UI{
-		com:    com,
-		status: NewStatus(com, nil),
-		chat:   NewChat(com, config.ScrollbarDefault),
-		editor: editorState{textarea: ta},
-		state:  uiChat,
-		focus:  uiFocusEditor,
-		width:  140,
-		height: 45,
+		com:                com,
+		status:             NewStatus(com, nil),
+		chat:               NewChat(com, config.ScrollbarDefault),
+		editor:             editorState{textarea: ta},
+		state:              uiChat,
+		focus:              uiFocusEditor,
+		width:              140,
+		height:             45,
+		hoveredPanelThread: -1,
 	}
 
 	return u
@@ -205,7 +206,7 @@ func TestHandleTextareaHeightChange_FollowModeStaysAtBottom(t *testing.T) {
 	}
 }
 
-func TestAutoExpandPillsIfReasonable(t *testing.T) {
+func TestAutoExpandTodosIfReasonable(t *testing.T) {
 	t.Parallel()
 
 	t.Run("expands when terminal is tall enough and todos exist", func(t *testing.T) {
@@ -218,13 +219,10 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 			{Status: session.TodoStatusPending, Content: "do more"},
 		}}
 
-		u.autoExpandPillsIfReasonable()
+		u.autoExpandTodosIfReasonable()
 
-		if !u.pills.expanded {
-			t.Fatal("expected pillsExpanded to be true")
-		}
-		if u.pills.focusedSection != pillSectionTodos {
-			t.Fatalf("expected focusedPillSection to be pillSectionTodos, got %d", u.pills.focusedSection)
+		if !u.panel.expanded {
+			t.Fatal("expected todos to be expanded")
 		}
 	})
 
@@ -237,10 +235,10 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
 
-		u.autoExpandPillsIfReasonable()
+		u.autoExpandTodosIfReasonable()
 
-		if u.pills.expanded {
-			t.Fatal("expected pillsExpanded to be false when terminal height is below threshold")
+		if u.panel.expanded {
+			t.Fatal("expected todos to stay collapsed when terminal height is below threshold")
 		}
 	})
 
@@ -253,10 +251,10 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 			{Status: session.TodoStatusCompleted, Content: "done"},
 		}}
 
-		u.autoExpandPillsIfReasonable()
+		u.autoExpandTodosIfReasonable()
 
-		if u.pills.expanded {
-			t.Fatal("expected pillsExpanded to be false when all todos are completed")
+		if u.panel.expanded {
+			t.Fatal("expected todos to stay collapsed when all todos are completed")
 		}
 	})
 
@@ -265,20 +263,20 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.height = 50
-		u.pills.expanded = true
+		u.panel.expanded = true
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
 		u.updateLayoutAndSize()
 
-		u.autoExpandPillsIfReasonable()
+		u.autoExpandTodosIfReasonable()
 
-		if !u.pills.expanded {
-			t.Fatal("expected pillsExpanded to stay true")
+		if !u.panel.expanded {
+			t.Fatal("expected todos to stay expanded")
 		}
 	})
 
-	t.Run("expands for prompt queue when no todos", func(t *testing.T) {
+	t.Run("does not expand for prompt queue alone (queue is always visible now)", func(t *testing.T) {
 		t.Parallel()
 
 		u := newTestUI()
@@ -286,13 +284,10 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 		u.session = &session.Session{ID: "s1", Todos: []session.Todo{}}
 		u.wsCache.promptQueue = 2
 
-		u.autoExpandPillsIfReasonable()
+		u.autoExpandTodosIfReasonable()
 
-		if !u.pills.expanded {
-			t.Fatal("expected pillsExpanded to be true for prompt queue")
-		}
-		if u.pills.focusedSection != pillSectionQueue {
-			t.Fatalf("expected focusedPillSection to be pillSectionQueue, got %d", u.pills.focusedSection)
+		if u.panel.expanded {
+			t.Fatal("expected todos to stay collapsed: the queue no longer drives auto-expand")
 		}
 	})
 
@@ -303,10 +298,10 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 		u.height = 50
 		u.session = nil
 
-		u.autoExpandPillsIfReasonable()
+		u.autoExpandTodosIfReasonable()
 
-		if u.pills.expanded {
-			t.Fatal("expected pillsExpanded to be false when there is no session")
+		if u.panel.expanded {
+			t.Fatal("expected todos to stay collapsed when there is no session")
 		}
 	})
 }

@@ -588,7 +588,8 @@ type Styles struct {
 		Deleting lipgloss.Style
 	}
 
-	// Pills styles for todo/queue pills
+	// Pills styles, shared by the merged session panel (threads/todos/queue,
+	// see model/session_panel.go) for its todo ratio, chevron, and queue list.
 	Pills struct {
 		Base               lipgloss.Style // Base pill style with padding
 		Focused            lipgloss.Style // Pill with visible rounded border
@@ -598,13 +599,14 @@ type Styles struct {
 		QueueIconBase      lipgloss.Style // Base style for queue gradient triangles
 		QueueGradFromColor color.Color    // Start color for queue indicator gradient
 		QueueGradToColor   color.Color    // End color for queue indicator gradient
-		TodoLabel          lipgloss.Style // "To-Do" label
+		TodoLabel          lipgloss.Style // "todos" label / chevron glyph
 		TodoProgress       lipgloss.Style // Todo ratio (e.g. "2/5")
-		TodoCurrentTask    lipgloss.Style // Current in-progress task name
+		TodoCurrentTask    lipgloss.Style // Muted text; also composed with Strikethrough(true) for completed todo rows
 		TodoSpinner        lipgloss.Style // Todo spinner style
 		HelpKey            lipgloss.Style // Keystroke hint style
 		HelpText           lipgloss.Style // Help action text style
 		Area               lipgloss.Style // Pills area container
+		HeaderHover        lipgloss.Style // Todos header row, hovered — signals it's clickable
 	}
 }
 

@@ -25,7 +25,6 @@ package model
 // Update, no model mutation inside commands).
 
 import (
-	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -218,7 +217,6 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		}
 		return nil
 	}
-	prevBusy := m.isAgentBusy()
 	prevYolo := m.yoloModeCached()
 	m.wsCache.agentBusyCache.set(msg.agentBusy)
 	m.wsCache.yoloCache.set(msg.yolo)
@@ -240,9 +238,6 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 	if m.todoIsSpinning && !busy {
 		m.todoIsSpinning = false
-	}
-	if prevBusy != busy {
-		m.renderPills()
 	}
 	return cmds
 }
@@ -296,14 +291,14 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 		return nil
 	}
 	m.wsCache.promptQueueCheckedAt = time.Now()
-	itemsChanged := !slices.Equal(m.wsCache.promptQueueItems, msg.prompts)
 	countChanged := len(msg.prompts) != m.wsCache.promptQueue
 	m.wsCache.promptQueueItems = msg.prompts
 	m.wsCache.promptQueue = len(msg.prompts)
 	if countChanged {
+		// A row-count change moves the panel/chat split; anything else
+		// (item text edited in place) is picked up on the next draw, since
+		// drawSessionPanel always paints from live state.
 		m.updateLayoutAndSize()
-	} else if itemsChanged {
-		m.renderPills()
 	}
 	return nil
 }

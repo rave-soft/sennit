@@ -321,9 +321,26 @@ type UI struct {
 	// detailsOpen tracks whether the details panel is open (in compact mode)
 	detailsOpen bool
 
-	// pills holds the expand/focus/render state of the pills panel. See
-	// pills.go.
-	pills pillsPanelState
+	// panel holds the expand state of the merged session panel (threads +
+	// todos + queue, between chat and the editor). See session_panel.go.
+	panel sessionPanelState
+
+	// hoveredPanelThread is the index (into panelThreads/panelThreadRects)
+	// of the thread block currently under the pointer, -1 for none. Set
+	// from tea.MouseMotionMsg, read by drawSessionPanel for hover styling.
+	hoveredPanelThread int
+	// panelThreadRects/panelThreads are parallel slices — the on-screen
+	// rect and source thread for each currently visible thread block —
+	// rebuilt on every drawSessionPanel call. Used by the MouseClickMsg
+	// hit-test (drill into the clicked thread) and MouseMotionMsg hover
+	// tracking.
+	panelThreadRects []uv.Rectangle
+	panelThreads     []proto.Thread
+	// panelTodosHover / panelTodosHeaderRect mirror childPanelHover /
+	// childPanelButtonRect for the todos header row's click-to-toggle
+	// affordance.
+	panelTodosHover      bool
+	panelTodosHeaderRect uv.Rectangle
 
 	// wsCache holds the memoized workspace busy/yolo/ready/model/queue
 	// state and its TTL-cache bookkeeping. See workspace_cache.go.
@@ -332,6 +349,11 @@ type UI struct {
 	// threadIndicator holds the memoized active-thread count shown as a
 	// header badge. See thread_indicator.go.
 	threadIndicator threadIndicatorState
+
+	// threadsDock holds the memoized thread list and per-thread live
+	// activity shown by the session panel's threads section. See
+	// threads_dock.go / session_panel.go.
+	threadsDock threadsDockState
 
 	// sessionsDialogLoading / sessionsDialogGen track the off-thread
 	// ListSessions fetch dispatched by openSessionsDialog; see
@@ -434,6 +456,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		initialSessionID:    initialSessionID,
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
+		hoveredPanelThread:  -1,
 	}
 	for _, opt := range opts {
 		opt(ui)
@@ -840,7 +863,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.setSessionMessages(msgs); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		if cmd := m.autoExpandPillsIfReasonable(); cmd != nil {
+		if cmd := m.autoExpandTodosIfReasonable(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		// If a bang command was issued before the session finished
@@ -922,25 +945,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
-			prevPillsHeight := m.pillsAreaHeight()
+			prevPanelHeight := m.sessionPanelHeight()
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
 				cmds = append(cmds, m.todoSpinner.Tick)
 			}
-			// The pills panel reserves vertical space that the chat area
+			// The session panel reserves vertical space that the chat area
 			// must yield. Recompute the layout whenever that footprint
 			// changes (todos appearing, the list growing, etc.) so the
-			// box renders on first paint rather than waiting for a toggle.
-			// When the footprint is unchanged we still re-render the pill
-			// content so status changes (e.g. the in-progress spinner)
-			// show up.
-			if m.pillsAreaHeight() != prevPillsHeight {
+			// panel renders on first paint rather than waiting for a
+			// toggle. drawSessionPanel always paints from live state, so
+			// no extra re-render is needed when the footprint is
+			// unchanged (e.g. the in-progress spinner just ticks on the
+			// next frame).
+			if m.sessionPanelHeight() != prevPanelHeight {
 				m.updateLayoutAndSize()
-			} else {
-				m.renderPills()
 			}
-			m.autoExpandPillsIfReasonable()
+			m.autoExpandTodosIfReasonable()
 		} else {
 			// Not the current session — it may be a running delegation's
 			// child session, updated as its own turns complete. Surface
@@ -990,8 +1012,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.todoIsSpinning && !m.isAgentBusy() {
 			m.todoIsSpinning = false
 		}
-		// there is a number of things that could change the pills here so we want to re-render
-		m.renderPills()
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
@@ -1134,6 +1154,29 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		// A click on the session panel's todos header row toggles its
+		// expand state; a click on a rendered thread block drills into
+		// that thread's own session — the same transition Enter takes on
+		// the threads dashboard (see Root.attachThreadCmd), not
+		// enterChildSession/navStack, which point at the wrong workspace.
+		if msg.Button == tea.MouseLeft && m.state == uiChat {
+			pt := image.Pt(msg.X, msg.Y)
+			if pt.In(m.panelTodosHeaderRect) {
+				if cmd := m.toggleTodosExpanded(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return m, tea.Batch(cmds...)
+			}
+			for i, rect := range m.panelThreadRects {
+				if !pt.In(rect) {
+					continue
+				}
+				th := m.panelThreads[i]
+				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID}))
+				return m, tea.Batch(cmds...)
+			}
+		}
+
 		// Check if the click landed on an attachment's remove button.
 		// The attachment chips are rendered on the first row of the
 		// editor layout area, above the textarea.
@@ -1174,6 +1217,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Hover feedback for the child-session panel's "back" button.
 		if m.viewingChildSession() {
 			m.childPanelHover = image.Pt(msg.X, msg.Y).In(m.childPanelButtonRect)
+		}
+
+		// Hover feedback for the session panel's todos header and thread
+		// blocks, mirroring the child-session panel's hover pattern above.
+		if m.state == uiChat {
+			pt := image.Pt(msg.X, msg.Y)
+			m.panelTodosHover = pt.In(m.panelTodosHeaderRect)
+			m.hoveredPanelThread = -1
+			for i, rect := range m.panelThreadRects {
+				if pt.In(rect) {
+					m.hoveredPanelThread = i
+					break
+				}
+			}
 		}
 
 		// Track hover position for inline editors.
@@ -1362,7 +1419,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
 			if cmd != nil {
-				m.renderPills()
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -1469,10 +1525,22 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.threadIndicator.staleRefreshCmd(m.com); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		m.threadsDock.applyThreadEvent(msg)
+		if cmd := m.threadsDock.staleThreadsDockRefreshCmd(m.com, m.state == uiChat); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		visible, _ := visibleDockThreads(activeDockThreads(m.threadsDock.threads))
+		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
 	case threadIndicatorLoadedMsg:
 		if cmd := m.threadIndicator.applyLoaded(m.com, msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case threadsDockLoadedMsg:
+		if cmd := m.threadsDock.applyThreadsDockLoaded(m.com, msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case threadDockActivityLoadedMsg:
+		m.threadsDock.applyThreadActivityLoaded(msg)
 	case app.UpdateAvailableMsg:
 		text := fmt.Sprintf("Braid update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
@@ -2315,7 +2383,7 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionTogglePills:
-		if cmd := m.togglePillsExpanded(); cmd != nil {
+		if cmd := m.toggleTodosExpanded(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -2717,21 +2785,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			return true
 		case key.Matches(msg, m.keyMap.Chat.TogglePills):
 			if m.state == uiChat && m.hasSession() {
-				if cmd := m.togglePillsExpanded(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				return true
-			}
-		case key.Matches(msg, m.keyMap.Chat.PillLeft):
-			if m.state == uiChat && m.hasSession() && m.pills.expanded && m.focus != uiFocusEditor {
-				if cmd := m.switchPillSection(-1); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				return true
-			}
-		case key.Matches(msg, m.keyMap.Chat.PillRight):
-			if m.state == uiChat && m.hasSession() && m.pills.expanded && m.focus != uiFocusEditor {
-				if cmd := m.switchPillSection(1); cmd != nil {
+				if cmd := m.toggleTodosExpanded(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return true
@@ -3236,13 +3290,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if m.layout != layout {
 		m.layout = layout
 		m.updateSize()
-	} else if m.state == uiChat && m.hasSession() {
-		// Re-render pills on every draw so the box appears even when
-		// the layout footprint hasn't changed (e.g. todos arrived
-		// while the panel was collapsed). updateSize already calls
-		// renderPills, but only when the layout actually differs;
-		// this catches the steady-state case.
-		m.renderPills()
 	}
 
 	if m.state == uiChat && m.hasSession() && !m.isCompact {
@@ -3295,8 +3342,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		m.chat.Draw(scr, layout.main)
-		if layout.pills.Dy() > 0 && m.pills.view != "" {
-			uv.NewStyledString(m.pills.view).Draw(scr, layout.pills)
+		if layout.panel.Dy() > 0 {
+			m.drawSessionPanel(scr, layout.panel)
 		}
 
 		if m.viewingChildSession() {
@@ -3506,9 +3553,6 @@ func (m *UI) ShortHelp() []key.Binding {
 			if _, _, ok := m.chat.SelectedNestedToolContainer(); ok {
 				binds = append(binds, k.Chat.EnterChildSession)
 			}
-			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.wsCache.promptQueue > 0 {
-				binds = append(binds, k.Chat.PillLeft)
-			}
 		}
 	default:
 		// TODO: other states
@@ -3635,9 +3679,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 			)
 			if _, _, ok := m.chat.SelectedNestedToolContainer(); ok {
 				binds = append(binds, []key.Binding{k.Chat.EnterChildSession})
-			}
-			if m.pills.expanded && hasIncompleteTodos(m.session.Todos) && m.wsCache.promptQueue > 0 {
-				binds = append(binds, []key.Binding{k.Chat.PillLeft})
 			}
 		}
 	default:
@@ -3783,7 +3824,6 @@ func (m *UI) updateSize() {
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.editor.textarea.MaxHeight = TextareaMaxHeight
 	m.editor.textarea.SetWidth(m.layout.editor.Dx())
-	m.renderPills()
 
 	// Handle different app states
 	switch m.state {
@@ -3941,18 +3981,19 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.header = headerRect
-			pillsHeight := m.pillsAreaHeight()
-			if pillsHeight > 0 {
-				pillsHeight = min(pillsHeight, mainRect.Dy())
-				var chatRect, pillsRect image.Rectangle
+			panelHeight := m.sessionPanelHeight()
+			if panelHeight > 0 {
+				panelHeight = min(panelHeight, mainRect.Dy())
+				var chatRect, panelRect image.Rectangle
 				layout.Vertical(
-					layout.Len(mainRect.Dy()-pillsHeight),
+					layout.Len(mainRect.Dy()-panelHeight),
 					layout.Fill(1),
-				).Split(mainRect).Assign(&chatRect, &pillsRect)
+				).Split(mainRect).Assign(&chatRect, &panelRect)
 				uiLayout.main = chatRect
-				uiLayout.pills = pillsRect
+				uiLayout.panel = panelRect
 			} else {
 				uiLayout.main = mainRect
+				uiLayout.panel = image.Rectangle{}
 			}
 			// Add bottom margin to main
 			uiLayout.main.Max.Y -= 1
@@ -3981,18 +4022,19 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.sidebar = sideRect
-			pillsHeight := m.pillsAreaHeight()
-			if pillsHeight > 0 {
-				pillsHeight = min(pillsHeight, mainRect.Dy())
-				var chatRect, pillsRect image.Rectangle
+			panelHeight := m.sessionPanelHeight()
+			if panelHeight > 0 {
+				panelHeight = min(panelHeight, mainRect.Dy())
+				var chatRect, panelRect image.Rectangle
 				layout.Vertical(
-					layout.Len(mainRect.Dy()-pillsHeight),
+					layout.Len(mainRect.Dy()-panelHeight),
 					layout.Fill(1),
-				).Split(mainRect).Assign(&chatRect, &pillsRect)
+				).Split(mainRect).Assign(&chatRect, &panelRect)
 				uiLayout.main = chatRect
-				uiLayout.pills = pillsRect
+				uiLayout.panel = panelRect
 			} else {
 				uiLayout.main = mainRect
+				uiLayout.panel = image.Rectangle{}
 			}
 			// Add bottom margin to main
 			uiLayout.main.Max.Y -= 1
@@ -4017,8 +4059,9 @@ type uiLayout struct {
 	// main is the area for the main pane. (e.x chat, configure, landing)
 	main uv.Rectangle
 
-	// pills is the area for the pills panel.
-	pills uv.Rectangle
+	// panel is the area for the merged session panel (active threads +
+	// todos + queued prompts) between chat and the editor.
+	panel uv.Rectangle
 
 	// editor is the area for the editor pane.
 	editor uv.Rectangle
@@ -4623,12 +4666,11 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 		m.com.Workspace.AgentCancel(m.session.ID)
 		// Stop the spinning todo indicator and drop the memoized busy
-		// state the cancel just changed; the pill re-renders now from
-		// last-known state and again when the off-thread refresh (and
-		// the agent's own events) land.
+		// state the cancel just changed; the session panel reads
+		// m.todoIsSpinning fresh on every draw, and again once the
+		// off-thread refresh (and the agent's own events) land.
 		m.todoIsSpinning = false
 		m.invalidateBusyCaches()
-		m.renderPills()
 		return m.dispatchBusyRefresh()
 	}
 
@@ -5213,14 +5255,13 @@ func (m *UI) newSession() tea.Cmd {
 	m.editor.textarea.Focus()
 	m.chat.Blur()
 	m.chat.ClearMessages()
-	m.pills.expanded = false
-	m.pills.autoExpanded = false
+	m.panel.expanded = false
+	m.panel.autoExpanded = false
 	m.wsCache.promptQueue = 0
 	m.wsCache.promptQueueItems = nil
 	m.wsCache.promptQueueCheckedAt = time.Now()
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
-	m.pills.view = ""
 	m.editor.historyReset()
 	agenttools.ResetCache()
 	return tea.Batch(
