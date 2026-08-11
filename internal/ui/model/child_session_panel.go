@@ -215,10 +215,14 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row2)
 	}
 
-	// Row 3: the child session's own cumulative token usage, plus a live
-	// elapsed time while still running or the frozen total once done.
+	// Row 3: the child session's own cumulative token usage and context
+	// percentage, plus a live elapsed time while still running or the
+	// frozen total once done.
 	if area.Dy() >= 3 {
 		line := childPanelTokensLine(m.session)
+		if pct := m.childPanelContextPercent(frame); pct != "" {
+			line += " · " + pct
+		}
 		if e := m.childPanelElapsedText(frame); e != "" {
 			line += " · " + e
 		}
@@ -262,6 +266,48 @@ func childPanelTokensLine(session *session.Session) string {
 		childPanelTokenCount(total),
 		childPanelTokenCount(session.PromptTokens),
 		childPanelTokenCount(session.CompletionTokens))
+}
+
+// childPanelContextPercent reports how full the child session's context
+// window is, e.g. "34% ctx" — the same ContextUsed/ContextWindow
+// approximation the sidebar's ModelInfo uses for the main session.
+// Returns "" when nothing has been used yet or the delegation's model
+// (and thus its window size) can't be resolved.
+func (m *UI) childPanelContextPercent(frame sessionNavFrame) string {
+	if m.session == nil {
+		return ""
+	}
+	used := m.session.PromptTokens + m.session.CompletionTokens
+	if used <= 0 {
+		return ""
+	}
+	window := m.childPanelContextWindow(frame)
+	if window <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d%% ctx", int(float64(used)/float64(window)*100))
+}
+
+// childPanelContextWindow resolves the context window of the model the
+// delegation runs on: its own "provider/model-id" override when set (the
+// provider is the part before the FIRST slash — model ids may contain
+// slashes themselves), otherwise the app's main model, which is what a
+// delegation without an override inherits.
+func (m *UI) childPanelContextWindow(frame sessionNavFrame) int64 {
+	if frame.model != "" {
+		provider, modelID, ok := strings.Cut(frame.model, "/")
+		if !ok {
+			return 0
+		}
+		if mdl := m.com.Config().GetModel(provider, modelID); mdl != nil {
+			return mdl.ContextWindow
+		}
+		return 0
+	}
+	if sel := m.selectedModel(); sel != nil {
+		return sel.CatalogCfg.ContextWindow
+	}
+	return 0
 }
 
 // childPanelElapsedText reports how long the delegation has been running,
