@@ -188,17 +188,13 @@ func TestRenderAgentStatusLine_Truncation(t *testing.T) {
 	}
 }
 
-// TestAgentToolMessageItem_PendingStatusLine is the render-path
-// pending stub regression test: the session panel now owns all of a
-// running delegation's live detail (see PanelStatusLine and the panel's
-// delegations section in internal/ui/model/session_panel.go), so the chat
-// transcript itself must render just the one-line pending header — no
-// elapsed time, step count, or nested-tool detail leaking into the
-// transcript — regardless of whether any child tool calls have landed yet.
-// This used to only collapse to a bare stub while nestedTools was empty;
-// once any arrived it grew a status line inline. See PanelStatusLine's own
-// tests for coverage of that detail now living in the panel instead.
-func TestAgentToolMessageItem_PendingRendersBareStub(t *testing.T) {
+// TestAgentToolMessageItem_PendingShowsCurrentActivity covers the running
+// delegation's transcript render: a pending stub (name + spinner) with one
+// status line underneath showing elapsed time, step count, and the current
+// child tool call — so what the task is doing is visible without opening
+// the session panel. Deeper detail (todos, full nested-tool tree) still
+// belongs to the panel only.
+func TestAgentToolMessageItem_PendingShowsCurrentActivity(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -207,13 +203,15 @@ func TestAgentToolMessageItem_PendingRendersBareStub(t *testing.T) {
 	item.startTime = time.Now().Add(-9 * time.Second)
 
 	out := ansi.Strip(item.Render(120))
-	require.NotContains(t, out, "9s", "elapsed time now belongs to the panel, not the transcript")
-	require.NotContains(t, out, "step 0")
+	require.Contains(t, out, "9s", "elapsed time must show under the pending stub")
+	require.Contains(t, out, "step 0")
 
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"Provider","path":"internal/config"}`))
 	out = ansi.Strip(item.Render(120))
-	require.NotContains(t, out, "grep",
-		"a landed child tool call must not leak into the transcript stub either")
+	require.Contains(t, out, "grep",
+		"the current child tool call must show in the status line")
+	require.Len(t, strings.Split(strings.TrimRight(out, " \n"), "\n"), 2,
+		"pending render is exactly stub + one status line")
 }
 
 // TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion covers the
@@ -241,15 +239,12 @@ func TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {
 	})
 }
 
-// TestAgentToolRenderPending_ManyNestedToolsStillJustStub is the
-// replacement for the old display-density-cap tests (TestAgentToolRenderCapsNestedTools
-// / TestAgentToolRenderNoCapBelowThreshold): those tested a *running*
-// delegation's inline nested-tool tree ("+N earlier steps" cap), which no
-// longer renders in the transcript at all now that the panel owns live
-// delegation detail (see TestAgentToolMessageItem_PendingRendersBareStub).
-// This confirms the transcript stays a bare stub even with well past the
-// old cap's threshold worth of nested tool calls — no leak, capped or not.
-func TestAgentToolRenderPending_ManyNestedToolsStillJustStub(t *testing.T) {
+// TestAgentToolRenderPending_ManyNestedToolsStayOneStatusLine confirms the
+// transcript render stays compact no matter how many child tool calls have
+// landed: a stub line plus a single status line naming only the latest
+// call — never an inline nested-tool tree or "+N earlier steps" cap (that
+// detail lives in the session panel).
+func TestAgentToolRenderPending_ManyNestedToolsStayOneStatusLine(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -264,9 +259,11 @@ func TestAgentToolRenderPending_ManyNestedToolsStillJustStub(t *testing.T) {
 
 	out := ansi.Strip(item.Render(120))
 	require.NotContains(t, out, "earlier steps")
-	require.NotContains(t, out, "echo tool-")
+	require.Contains(t, out, "step 6")
+	require.Contains(t, out, "echo tool-6", "only the latest child call shows")
+	require.NotContains(t, out, "echo tool-5", "earlier calls must not accumulate")
 	lines := strings.Split(strings.TrimRight(out, " \n"), "\n")
-	require.Len(t, lines, 1, "pending transcript render must stay a single stub line")
+	require.Len(t, lines, 2, "pending transcript render is exactly stub + one status line")
 }
 
 // TestAgentToolRenderFinishedCollapses is the render-path regression test

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -62,12 +63,13 @@ func TestDrawSessionPanel_DelegationBlockRendersNameTaskAndStatus(t *testing.T) 
 	require.Contains(t, out, "fix the auth bug")
 }
 
-// TestChatRendersDelegationAsOneLineStubWhilePending covers the chat
+// TestChatRendersDelegationAsCompactStubWhilePending covers the chat
 // transcript side of the panel/chat split for delegations (mirroring the
-// todos split): while a delegation is running, its own chat render must be
-// just the one-line pending stub — no task tag, status line, or
-// nested-tool tree — since the panel now owns all of that live detail.
-func TestChatRendersDelegationAsOneLineStubWhilePending(t *testing.T) {
+// todos split): while a delegation is running, its own chat render is the
+// pending stub plus a single current-activity status line (elapsed, step,
+// latest tool) — no task tag, todos, or nested-tool tree; that deeper live
+// detail belongs to the panel.
+func TestChatRendersDelegationAsCompactStubWhilePending(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -77,8 +79,10 @@ func TestChatRendersDelegationAsOneLineStubWhilePending(t *testing.T) {
 		message.ToolCall{ID: "c1", Name: "bash", Input: `{"command":"go test"}`, Finished: true}, nil, false, nil))
 
 	out := ansi.Strip(item.Render(120))
-	require.NotContains(t, out, "fix the auth bug", "the task/prompt now belongs to the panel block, not the transcript")
-	require.NotContains(t, out, "go test", "nested tool detail must not leak into the pending transcript stub")
+	require.NotContains(t, out, "fix the auth bug", "the task/prompt belongs to the panel block, not the transcript")
+	require.Contains(t, out, "go test", "the current tool must show in the status line under the stub")
+	require.Len(t, strings.Split(strings.TrimRight(out, " \n"), "\n"), 2,
+		"pending transcript render is exactly stub + one status line")
 }
 
 // TestSessionPanelPlan_FinishedDelegationLeavesPanel covers the handoff:

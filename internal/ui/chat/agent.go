@@ -321,14 +321,15 @@ type AgentToolRenderContext struct {
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	pending := opts.IsPending()
 	if pending {
-		// The session panel now owns all of a running delegation's live
-		// detail (status line, todos, subtitle) — see the panel's
-		// delegations section in internal/ui/model/session_panel.go and
-		// PanelStatusLine below, which panel reuses. The chat transcript
-		// shows just the one-line pending stub while it's running,
-		// regardless of how many nested tool calls have landed —
-		// previously this only collapsed once len(nestedTools) == 0.
-		return pendingTool(sty, r.agent.displayName, opts.Anim, opts.Compact)
+		// The session panel owns a running delegation's full live detail
+		// (todos, subtitle — see internal/ui/model/session_panel.go and
+		// PanelStatusLine below). The chat transcript shows the pending
+		// stub (name + spinner) plus one status line underneath with the
+		// current activity — elapsed time, step count, last child tool
+		// call — so what the task is doing is visible without opening
+		// the panel.
+		return pendingDelegation(sty, r.agent.displayName, opts, cappedMessageWidth(width),
+			r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
 	}
 
 	cappedWidth := cappedMessageWidth(width)
@@ -607,9 +608,10 @@ type agenticFetchParams struct {
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	pending := opts.IsPending()
 	if pending {
-		// See AgentToolRenderContext.RenderTool's matching change: the
-		// panel now owns all of a running delegation's live detail.
-		return pendingTool(sty, agenticFetchDisplayName, opts.Anim, opts.Compact)
+		// See AgentToolRenderContext.RenderTool's matching change: pending
+		// stub plus a current-activity status line underneath.
+		return pendingDelegation(sty, agenticFetchDisplayName, opts, cappedMessageWidth(width),
+			r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens)
 	}
 
 	cappedWidth := cappedMessageWidth(width)
@@ -832,6 +834,33 @@ func renderResultPreviewLine(sty *styles.Styles, width int, content string) stri
 // single line that's cheap to keep fresh every animation tick — most
 // importantly, the elapsed-time component advances on wall clock alone, so
 // it never stalls even if every other signal does.
+
+// pendingDelegation renders a still-running delegation for the chat
+// transcript: the pending stub (status icon, name, spinner) with the
+// current-activity status line (elapsed · step N · → last tool · tokens)
+// directly underneath, indented to align with the name. Compact (nested)
+// renders stay a bare one-line stub.
+func pendingDelegation(
+	sty *styles.Styles,
+	name string,
+	opts *ToolRenderOpts,
+	width int,
+	startTime time.Time,
+	nestedTools []ToolMessageItem,
+	promptTokens, completionTokens int64,
+) string {
+	head := pendingTool(sty, name, opts.Anim, opts.Compact)
+	if opts.Compact {
+		return head
+	}
+	// The "● " icon prefix is 2 cells wide; indent the status line to sit
+	// under the name.
+	const indent = "  "
+	if status := renderAgentStatusLine(sty, max(0, width-len(indent)), startTime, nestedTools, promptTokens, completionTokens); status != "" {
+		head += "\n" + indent + status
+	}
+	return head
+}
 
 // renderAgentStatusLine renders the compact "still running" status line,
 // e.g. `4m12s · step 23 · → grep "Provider" internal/config`. Returns "" if
