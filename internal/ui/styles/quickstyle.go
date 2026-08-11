@@ -628,7 +628,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ParamKey = subtle
 
 	// Content rendering - prepared styles that accept width parameter
-	s.Tool.ContentLine = muted.Background(o.bgLeastVisible)
+	s.Tool.ContentLine = base.Background(o.bgLeastVisible)
 	s.Tool.ContentTruncation = muted.Background(o.bgLeastVisible)
 	s.Tool.ContentCodeLine = base.Background(o.bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeTruncation = muted.Background(o.bgBase).PaddingLeft(2)

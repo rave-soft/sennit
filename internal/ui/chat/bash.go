@@ -126,7 +126,10 @@ const bashCollapsedOutputLines = 4
 func bashOutputContent(sty *styles.Styles, content string, width int, expanded bool) string {
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
-	content = common.RemapANSI16(content, sty.ANSI)
+	// Drop the command's own ANSI colors (red test failures, linter
+	// output, ...) entirely so the body renders in the uniform
+	// ContentLine color instead of whatever the command printed.
+	content = ansi.Strip(content)
 	lines := strings.Split(content, "\n")
 
 	maxLines := len(lines)
