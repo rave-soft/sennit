@@ -14,7 +14,7 @@ import (
 )
 
 // helpKeyByHelpText reports whether any binding in binds has the given
-// [key.Help].Key text, e.g. "alt+↓".
+// [key.Help].Key text, e.g. "ctrl+↓".
 func helpKeyByHelpText(binds []key.Binding, helpKey string) bool {
 	return slices.ContainsFunc(binds, func(b key.Binding) bool {
 		return b.Help().Key == helpKey
@@ -56,9 +56,9 @@ func TestShortFullHelpShowEnterChildSessionOnNestedItem(t *testing.T) {
 	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
 	u.chat.SetSelected(0)
 
-	require.True(t, helpKeyByHelpText(u.ShortHelp(), "alt+↓"),
+	require.True(t, helpKeyByHelpText(u.ShortHelp(), "ctrl+↓"),
 		"ShortHelp must show enter-subagent when a nested-tool item is selected")
-	require.True(t, fullHelpKeyByHelpText(u.FullHelp(), "alt+↓"),
+	require.True(t, fullHelpKeyByHelpText(u.FullHelp(), "ctrl+↓"),
 		"FullHelp must show enter-subagent when a nested-tool item is selected")
 }
 
@@ -72,8 +72,8 @@ func TestShortFullHelpHideEnterChildSessionOnPlainItem(t *testing.T) {
 		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false, nil))
 	u.chat.SetSelected(0)
 
-	require.False(t, helpKeyByHelpText(u.ShortHelp(), "alt+↓"))
-	require.False(t, fullHelpKeyByHelpText(u.FullHelp(), "alt+↓"))
+	require.False(t, helpKeyByHelpText(u.ShortHelp(), "ctrl+↓"))
+	require.False(t, fullHelpKeyByHelpText(u.FullHelp(), "ctrl+↓"))
 }
 
 // TestShortFullHelpShowAllChildSessionNavWithMultipleSiblings: viewing a
@@ -93,7 +93,7 @@ func TestShortFullHelpShowAllChildSessionNavWithMultipleSiblings(t *testing.T) {
 		},
 	}
 
-	for _, helpKey := range []string{"alt+↑", "alt+←", "alt+→"} {
+	for _, helpKey := range []string{"ctrl+↑", "ctrl+←", "ctrl+→"} {
 		require.True(t, helpKeyByHelpText(u.ShortHelp(), helpKey), "ShortHelp missing %q", helpKey)
 		require.True(t, fullHelpKeyByHelpText(u.FullHelp(), helpKey), "FullHelp missing %q", helpKey)
 	}
@@ -116,9 +116,9 @@ func TestShortFullHelpHidePrevNextWithSingleSibling(t *testing.T) {
 		},
 	}
 
-	require.True(t, helpKeyByHelpText(u.ShortHelp(), "alt+↑"))
-	require.True(t, fullHelpKeyByHelpText(u.FullHelp(), "alt+↑"))
-	for _, helpKey := range []string{"alt+←", "alt+→"} {
+	require.True(t, helpKeyByHelpText(u.ShortHelp(), "ctrl+↑"))
+	require.True(t, fullHelpKeyByHelpText(u.FullHelp(), "ctrl+↑"))
+	for _, helpKey := range []string{"ctrl+←", "ctrl+→"} {
 		require.False(t, helpKeyByHelpText(u.ShortHelp(), helpKey), "ShortHelp must not show %q", helpKey)
 		require.False(t, fullHelpKeyByHelpText(u.FullHelp(), helpKey), "FullHelp must not show %q", helpKey)
 	}
@@ -131,7 +131,7 @@ func TestShortFullHelpBaselineNoChildSessionBindings(t *testing.T) {
 
 	u := newHelpTestUI(t)
 
-	for _, helpKey := range []string{"alt+↓", "alt+↑", "alt+←", "alt+→"} {
+	for _, helpKey := range []string{"ctrl+↓", "ctrl+↑", "ctrl+←", "ctrl+→"} {
 		require.False(t, helpKeyByHelpText(u.ShortHelp(), helpKey), "ShortHelp must not show %q", helpKey)
 		require.False(t, fullHelpKeyByHelpText(u.FullHelp(), helpKey), "FullHelp must not show %q", helpKey)
 	}

@@ -3,12 +3,14 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"strings"
 
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/diffview"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -170,7 +172,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// expandableBodyContent).
 	if params.Content != "" {
 		header = appendResultSummary(sty, header, lineCountSummary(params.Content))
-		return header + "\n" + expandableBodyContent(sty, params.Content, cappedWidth, opts.Expanded)
+		return header + "\n" + expandableBodyContent(sty, params.Content, cappedWidth, opts.Expanded, opts.Hovered)
 	}
 
 	return header
@@ -253,7 +255,7 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// The diff sits directly under the header, capped while collapsed
 	// with click-to-expand — same contract as bash/write bodies.
 	if meta.OldContent != "" || meta.NewContent != "" {
-		return header + "\n" + expandableDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.Expanded)
+		return header + "\n" + expandableDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.Expanded, opts.Hovered)
 	}
 
 	return header
@@ -344,7 +346,7 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	// The diff sits directly under the header, capped while collapsed
 	// with click-to-expand — same contract as bash/write bodies.
 	if meta.OldContent != "" || meta.NewContent != "" {
-		return header + "\n" + expandableDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.Expanded)
+		return header + "\n" + expandableDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.Expanded, opts.Hovered)
 	}
 
 	return header
@@ -414,7 +416,7 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 // same click-to-expand contract as expandableBodyContent: collapsedBodyLines
 // diff lines while collapsed (plus a "Click to expand" hint when more were
 // cut off), the full diff once expanded, with a "Click to collapse" hint.
-func expandableDiffContent(sty *styles.Styles, file, oldContent, newContent string, width int, expanded bool) string {
+func expandableDiffContent(sty *styles.Styles, file, oldContent, newContent string, width int, expanded, hovered bool) string {
 	bodyWidth := width - toolBodyLeftPaddingTotal
 	if bodyWidth <= 0 {
 		return ""
@@ -424,6 +426,10 @@ func expandableDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 		Before(file, oldContent).
 		After(file, newContent).
 		Width(bodyWidth)
+	if hovered {
+		hoverBackground := sty.Tool.DiffTruncationHover.GetBackground()
+		formatter = formatter.Style(diffStyleBackground(sty.Diff, hoverBackground))
+	}
 	// Use split view for wide terminals.
 	if width > maxTextWidth {
 		formatter = formatter.Split()
@@ -438,14 +444,39 @@ func expandableDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	out := lines[:maxLines]
 	switch {
 	case !expanded && len(lines) > maxLines:
-		out = append(out, sty.Tool.DiffTruncation.
+		truncationStyle := sty.Tool.DiffTruncation
+		if hovered {
+			truncationStyle = sty.Tool.DiffTruncationHover
+		}
+		out = append(out, truncationStyle.
 			Width(bodyWidth).
 			Render(fmt.Sprintf(" Click to expand (%d more lines)", len(lines)-maxLines)))
 	case expanded && len(lines) > collapsedBodyLines:
-		out = append(out, sty.Tool.DiffTruncation.
+		truncationStyle := sty.Tool.DiffTruncation
+		if hovered {
+			truncationStyle = sty.Tool.DiffTruncationHover
+		}
+		out = append(out, truncationStyle.
 			Width(bodyWidth).
 			Render(" Click to collapse"))
 	}
 
 	return sty.Tool.Body.Render(strings.Join(out, "\n"))
+}
+
+func diffStyleBackground(style diffview.Style, background color.Color) diffview.Style {
+	lines := []*diffview.LineStyle{
+		&style.DividerLine,
+		&style.MissingLine,
+		&style.EqualLine,
+		&style.InsertLine,
+		&style.DeleteLine,
+		&style.Filename,
+	}
+	for _, line := range lines {
+		line.LineNumber = line.LineNumber.Background(background)
+		line.Symbol = line.Symbol.Background(background)
+		line.Code = line.Code.Background(background)
+	}
+	return style
 }

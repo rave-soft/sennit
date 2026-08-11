@@ -83,7 +83,7 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 			continue
 		}
 		stateNames[name] = struct{}{}
-		icon := t.Resource.OnlineIcon.String()
+		icon := t.Resource.EnabledIcon.String()
 		if state.State == skills.StateError {
 			icon = t.Resource.ErrorIcon.String()
 		}
@@ -106,7 +106,7 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 			continue
 		}
 		items = append(items, skillStatusItem{
-			icon:  t.Resource.OnlineIcon.String(),
+			icon:  t.Resource.EnabledIcon.String(),
 			name:  skill.Name,
 			title: t.Resource.Name.Render(skill.Name),
 		})

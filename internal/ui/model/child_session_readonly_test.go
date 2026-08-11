@@ -34,7 +34,7 @@ func TestSendMessageBlockedWhileViewingChildSession(t *testing.T) {
 	info, ok := msg.(util.InfoMsg)
 	require.True(t, ok, "expected a util.InfoMsg, got %T", msg)
 	require.Equal(t, util.InfoTypeWarn, info.Type)
-	require.Contains(t, info.Msg, "alt+up to return")
+	require.Contains(t, info.Msg, "ctrl+up to return")
 }
 
 // TestEnterChildSessionForcesReadOnlyFocus: entering a child session must

@@ -53,7 +53,7 @@ func TestEnterChildSessionPushesFrame(t *testing.T) {
 }
 
 // TestCycleChildSessionWrapsAndReplacesTopFrame: with multiple sibling
-// delegations loaded, alt+left/alt+right must wrap the sibling index and
+// delegations loaded, ctrl+left/ctrl+right must wrap the sibling index and
 // update the existing top frame in place rather than pushing a new one.
 func TestCycleChildSessionWrapsAndReplacesTopFrame(t *testing.T) {
 	t.Parallel()
@@ -107,7 +107,7 @@ func TestCycleChildSessionNoOpWithoutFrameOrSiblings(t *testing.T) {
 	require.Equal(t, 0, u.navStack[0].siblingIndex)
 }
 
-// TestExitChildSessionPopsStack: alt+up pops the top frame and returns a
+// TestExitChildSessionPopsStack: ctrl+up pops the top frame and returns a
 // cmd to load its parentSessionID; on an empty stack it must no-op safely
 // rather than panicking.
 func TestExitChildSessionPopsStack(t *testing.T) {
@@ -130,7 +130,7 @@ func TestExitChildSessionPopsStack(t *testing.T) {
 	require.Len(t, u.navStack, 0)
 }
 
-// TestEnterChildSessionKeyNoOpOnNonNestedItem: alt+down must be a no-op
+// TestEnterChildSessionKeyNoOpOnNonNestedItem: ctrl+down must be a no-op
 // (no frame pushed) when the currently selected chat item isn't a
 // nested-tool container, e.g. a plain bash tool item.
 func TestEnterChildSessionKeyNoOpOnNonNestedItem(t *testing.T) {
@@ -153,7 +153,7 @@ func TestEnterChildSessionKeyNoOpOnNonNestedItem(t *testing.T) {
 }
 
 // TestAltUpExitsChildSessionThroughUpdate is a regression test for a
-// reported "alt+up does nothing while viewing a subagent session" bug:
+// reported "ctrl+up does nothing while viewing a subagent session" bug:
 // ExitChildSession is only matched in the uiFocusMain arm of
 // handleKeyPressMsg's focus switch, so the key only does anything if
 // entering a child session reliably forces m.focus there (see
@@ -180,6 +180,6 @@ func TestAltUpExitsChildSessionThroughUpdate(t *testing.T) {
 
 	_, cmd := u.Update(tea.KeyPressMsg{Mod: tea.ModAlt, Code: tea.KeyUp})
 
-	require.Empty(t, u.navStack, "alt+up must pop the nav stack through the normal key-routing path")
+	require.Empty(t, u.navStack, "ctrl+up must pop the nav stack through the normal key-routing path")
 	require.NotNil(t, cmd, "must return the loadSession cmd for the parent")
 }

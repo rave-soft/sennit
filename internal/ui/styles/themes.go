@@ -38,7 +38,9 @@ func CharmtonePantera() Styles {
 
 		onPrimary: charmtone.Butter,
 
-		bgBase:         charmtone.Pepper,
+		bgBase:         lipgloss.Color("#0F0E13"),
+		bgMarkdown:     lipgloss.Color("#201F27"),
+		bgHover:        lipgloss.Color("#272630"),
 		bgLeastVisible: charmtone.BBQ,
 		bgLessVisible:  charmtone.Char,
 		bgMostVisible:  charmtone.Iron,

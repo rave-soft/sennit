@@ -111,6 +111,8 @@ type ToolRenderOpts struct {
 	// Expanded reports the item's click-to-expand state for renderers
 	// that show a collapsible body (currently only Bash).
 	Expanded bool
+	// Hovered reports that the pointer is over the expandable tool item.
+	Hovered bool
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -168,6 +170,8 @@ type baseToolMessageItem struct {
 	// show a collapsible body (see ToolRenderOpts.Expanded). Toggled via
 	// Expandable on the concrete item types that opt in (e.g. Bash).
 	expanded bool
+	// hovered reports that the pointer is over the expand/collapse hint.
+	hovered bool
 	// spinningFunc allows tools to override the default spinning logic.
 	// If nil, uses the default: !toolCall.Finished && !canceled.
 	spinningFunc SpinningFunc
@@ -373,6 +377,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			IsSpinning: t.isSpinning(),
 			Status:     t.computeStatus(),
 			Expanded:   t.expanded,
+			Hovered:    t.hovered,
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.
@@ -536,6 +541,22 @@ func (t *baseToolMessageItem) toggleExpanded() bool {
 	t.clearCache()
 	t.Bump()
 	return t.expanded
+}
+
+// HoverableAt reports whether the pointer is over the expandable block below
+// the tool header.
+func (t *baseToolMessageItem) HoverableAt(x, y, width int) bool {
+	return x >= MessageLeftPaddingTotal && y > 0 && y < lipgloss.Height(t.Render(width))
+}
+
+// SetHovered updates hover feedback for expandable tool renderers.
+func (t *baseToolMessageItem) SetHovered(hovered bool) {
+	if t.hovered == hovered {
+		return
+	}
+	t.hovered = hovered
+	t.clearCache()
+	t.Bump()
 }
 
 // HandleKeyEvent implements KeyEventHandler.

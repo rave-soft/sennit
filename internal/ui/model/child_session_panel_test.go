@@ -150,7 +150,7 @@ func TestDrawChildSessionPanel_ShowsBreadcrumbActivityModelEffortTokens(t *testi
 	require.Contains(t, out, "Read the entire file", "current level's prompt snippet")
 	require.Contains(t, out, "step 3", "current level's step count, from the loaded child chat")
 	require.Contains(t, out, `grep "login"`, "current level's last tool call, while running")
-	require.Contains(t, out, "back (alt+up")
+	require.Contains(t, out, "back (ctrl+up")
 	require.Contains(t, out, "claude-sonnet-5")
 	require.Contains(t, out, "effort medium")
 	require.Contains(t, out, "800", "prompt token count must be shown")

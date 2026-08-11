@@ -1373,6 +1373,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.chat.HandleMouseDrag(x, y)
+			m.chat.HandleMouseHover(x, y)
 			m.chat.ScrollbarHoverAt(x, y)
 		}
 
@@ -3494,6 +3495,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			m.drawGhostText(scr)
 			m.inlineCursor = nil
 		}
+		// Draw the input separators after the editor so its content cannot
+		// cover the reserved boundary rows.
+		m.drawChatSeparators(scr, layout.editor)
 
 		// Draw details overlay in compact mode when open
 		if m.isCompact && m.detailsOpen {
@@ -3574,6 +3578,21 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return nil
 }
 
+func (m *UI) drawChatSeparators(scr uv.Screen, editorArea uv.Rectangle) {
+	if editorArea.Dx() <= 0 {
+		return
+	}
+	separator := m.com.Styles.Messages.ChatSeparator.Render(
+		strings.Repeat(styles.SectionSeparator, editorArea.Dx()),
+	)
+	for _, y := range []int{editorArea.Min.Y - 1, editorArea.Max.Y} {
+		if y < scr.Bounds().Min.Y || y >= scr.Bounds().Max.Y {
+			continue
+		}
+		uv.NewStyledString(separator).Draw(scr, image.Rect(editorArea.Min.X, y, editorArea.Max.X, y+1))
+	}
+}
+
 // View renders the UI model's view.
 func (m *UI) View() tea.View {
 	var v tea.View
@@ -3581,11 +3600,7 @@ func (m *UI) View() tea.View {
 	if !m.isTransparent {
 		v.BackgroundColor = m.com.Styles.Background
 	}
-	if m.activeInline != nil {
-		v.MouseMode = tea.MouseModeAllMotion
-	} else {
-		v.MouseMode = tea.MouseModeCellMotion
-	}
+	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = "braid " + home.Short(m.com.Workspace.WorkingDir())
 	if m.hasSession() && m.session.Title != "" {
@@ -4100,12 +4115,14 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			mainRect.Min.Y += 1
 			var editorRect image.Rectangle
 			layout.Vertical(
-				layout.Len(mainRect.Dy()-editorHeight),
-				layout.Fill(1),
-			).Split(mainRect).Assign(&mainRect, &editorRect)
+				layout.Len(max(0, mainRect.Dy()-editorHeight-2)),
+				layout.Len(1),
+				layout.Len(editorHeight),
+				layout.Len(1),
+			).Split(mainRect).Assign(&mainRect, new(image.Rectangle), &editorRect, new(image.Rectangle))
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.header = headerRect
-			panelHeight := m.sessionPanelHeight(mainRect.Dy())
+			panelHeight := m.sessionPanelHeight(mainRect.Dy() + 2)
 			if panelHeight > 0 {
 				var chatRect, panelRect image.Rectangle
 				layout.Vertical(
@@ -4118,8 +4135,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 				uiLayout.main = mainRect
 				uiLayout.panel = image.Rectangle{}
 			}
-			// Add bottom margin to main
-			uiLayout.main.Max.Y -= 1
 			uiLayout.editor = editorRect
 		} else {
 			// Layout
@@ -4140,12 +4155,14 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			sideRect.Min.X += 1
 			var editorRect image.Rectangle
 			layout.Vertical(
-				layout.Len(mainRect.Dy()-editorHeight),
-				layout.Fill(1),
-			).Split(mainRect).Assign(&mainRect, &editorRect)
+				layout.Len(max(0, mainRect.Dy()-editorHeight-2)),
+				layout.Len(1),
+				layout.Len(editorHeight),
+				layout.Len(1),
+			).Split(mainRect).Assign(&mainRect, new(image.Rectangle), &editorRect, new(image.Rectangle))
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.sidebar = sideRect
-			panelHeight := m.sessionPanelHeight(mainRect.Dy())
+			panelHeight := m.sessionPanelHeight(mainRect.Dy() + 2)
 			if panelHeight > 0 {
 				var chatRect, panelRect image.Rectangle
 				layout.Vertical(
@@ -4158,8 +4175,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 				uiLayout.main = mainRect
 				uiLayout.panel = image.Rectangle{}
 			}
-			// Add bottom margin to main
-			uiLayout.main.Max.Y -= 1
 			uiLayout.editor = editorRect
 		}
 	}
@@ -4251,23 +4266,13 @@ func (m *UI) setEditorPrompt(yolo bool) {
 		m.editor.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
 	}
-	m.editor.textarea.SetPromptFunc(4, m.normalPromptFunc)
+	m.editor.textarea.SetPromptFunc(2, m.normalPromptFunc)
 }
 
-// normalPromptFunc returns the normal editor prompt style ("  > " on first
-// line, "::: " on subsequent lines).
+// normalPromptFunc keeps the prompt width as whitespace so multiline text
+// stays aligned without visible prompt markers.
 func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
-	t := m.com.Styles
-	if info.LineNumber == 0 {
-		if info.Focused {
-			return "  > "
-		}
-		return "::: "
-	}
-	if info.Focused {
-		return t.Editor.PromptNormalFocused.Render()
-	}
-	return t.Editor.PromptNormalBlurred.Render()
+	return "  "
 }
 
 // yoloPromptFunc returns the yolo mode editor prompt style with warning icon
@@ -4281,10 +4286,7 @@ func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
 			return t.Editor.PromptYoloIconBlurred.Render()
 		}
 	}
-	if info.Focused {
-		return t.Editor.PromptYoloDotsFocused.Render()
-	}
-	return t.Editor.PromptYoloDotsBlurred.Render()
+	return "    "
 }
 
 // bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
@@ -4297,10 +4299,7 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 		}
 		return t.Editor.PromptBangIconBlurred.Render()
 	}
-	if info.Focused {
-		return t.Editor.PromptBangDotsFocused.Render()
-	}
-	return t.Editor.PromptBangDotsBlurred.Render()
+	return "    "
 }
 
 // insertFileCompletion inserts the selected file path into the textarea,

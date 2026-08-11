@@ -59,6 +59,13 @@ func ctrlE() tea.KeyPressMsg {
 	return tea.KeyPressMsg{Mod: tea.ModCtrl, Code: 'e', Text: ""}
 }
 
+func TestViewEnablesAllMouseMotionForHoverFeedback(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, false)
+	require.Equal(t, tea.MouseModeAllMotion, r.main.View().MouseMode)
+}
+
 // drainShowDashboard runs cmd the way the Bubble Tea runtime would (unwrapping
 // tea.BatchMsg) until it finds the showThreadsDashboardMsg that
 // UI.handleGlobalKeys produces for the threads key, feeding it back into

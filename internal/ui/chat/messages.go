@@ -43,6 +43,12 @@ type Expandable interface {
 	ToggleExpanded() bool
 }
 
+// Hoverable lets the chat provide mouse hover feedback for clickable items.
+type Hoverable interface {
+	HoverableAt(x, y, width int) bool
+	SetHovered(bool)
+}
+
 // KeyEventHandler is an interface for items that can handle key events.
 type KeyEventHandler interface {
 	HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd)

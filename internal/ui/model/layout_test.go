@@ -7,14 +7,47 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/attachments"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDrawChatSeparatorsAboveAndBelowChat(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+	u.updateLayoutAndSize()
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawChatSeparators(scr, u.layout.editor)
+
+	for _, y := range []int{u.layout.editor.Min.Y - 1, u.layout.editor.Max.Y} {
+		for x := u.layout.editor.Min.X; x < u.layout.editor.Max.X; x++ {
+			cell := scr.CellAt(x, y)
+			require.NotNil(t, cell)
+			require.Equal(t, styles.SectionSeparator, cell.Content, "missing chat separator at (%d,%d)", x, y)
+		}
+	}
+}
+
+func TestEditorHasReservedSeparatorRows(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+	area := u.generateLayout(u.width, u.height)
+
+	require.Equal(t, area.editor.Min.Y-1, area.main.Max.Y,
+		"content must leave exactly one separator row before the editor")
+	require.Equal(t, 1, area.status.Min.Y-area.editor.Max.Y,
+		"exactly one separator row must remain below the editor")
+}
 
 // testMessageItem is a minimal chat item used to populate the chat list
 // without pulling in full message rendering machinery.

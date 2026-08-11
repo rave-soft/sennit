@@ -266,6 +266,7 @@ type Styles struct {
 		BusyIcon        lipgloss.Style // Busy/starting status icon
 		ErrorIcon       lipgloss.Style // Error status icon
 		OnlineIcon      lipgloss.Style // Online/ready status icon
+		EnabledIcon     lipgloss.Style // Enabled MCP/skill status icon
 		NeedsAuthIcon   lipgloss.Style // Needs authentication status icon
 		AdditionalText  lipgloss.Style // "None" and "…and N more" text
 		CapabilityCount lipgloss.Style // "N tools" / "N prompts" / "N resources"
@@ -311,6 +312,7 @@ type Styles struct {
 		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
 		ShellTruncation    lipgloss.Style // "N more lines" hint.
 		SectionHeader      lipgloss.Style
+		ChatSeparator      lipgloss.Style // Horizontal rules above and below the chat viewport.
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
@@ -345,12 +347,14 @@ type Styles struct {
 		ParamKey  lipgloss.Style
 
 		// Content rendering styles
-		ContentLine           lipgloss.Style // Individual content line with background and width
-		ContentTruncation     lipgloss.Style // Truncation message "… (N lines)"
-		ContentCodeLine       lipgloss.Style // Code line with background and width
-		ContentCodeTruncation lipgloss.Style // Code truncation message with bgBase
-		ContentCodeBg         color.Color    // Background color for syntax highlighting
-		Body                  lipgloss.Style // Body content padding (PaddingLeft(2))
+		ContentLine            lipgloss.Style // Individual content line with background and width
+		ContentLineHover       lipgloss.Style // Content line while its expandable block is hovered
+		ContentTruncation      lipgloss.Style // Truncation message "… (N lines)"
+		ContentTruncationHover lipgloss.Style // Truncation message while its expandable area is hovered
+		ContentCodeLine        lipgloss.Style // Code line with background and width
+		ContentCodeTruncation  lipgloss.Style // Code truncation message with bgBase
+		ContentCodeBg          color.Color    // Background color for syntax highlighting
+		Body                   lipgloss.Style // Body content padding (PaddingLeft(2))
 
 		// Deprecated - kept for backward compatibility
 		ContentBg         lipgloss.Style // Content background
@@ -370,7 +374,8 @@ type Styles struct {
 		WarnMessage lipgloss.Style // Warning message text
 
 		// Diff styles
-		DiffTruncation lipgloss.Style // Diff truncation message with padding
+		DiffTruncation      lipgloss.Style // Diff truncation message with padding
+		DiffTruncationHover lipgloss.Style // Diff truncation message while its expandable area is hovered
 
 		// Multi-edit note styles
 		NoteTag     lipgloss.Style // NOTE tag (yellow background)

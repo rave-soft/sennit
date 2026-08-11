@@ -27,6 +27,9 @@ type quickStyleOpts struct {
 	// Default foreground and background colors.
 	fgBase color.Color
 	bgBase color.Color
+	// Markdown panel background, slightly raised above bgBase.
+	bgMarkdown color.Color
+	bgHover    color.Color
 
 	// Low-contrast dividers, separators, and rule lines.
 	separator color.Color
@@ -363,7 +366,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	}
 
 	// QuietMarkdown style - muted colors on subtle background for thinking content.
-	plainBg := hex(o.bgLeastVisible)
+	plainBg := hex(o.bgMarkdown)
 	plainFg := hex(o.fgMoreSubtle)
 	s.QuietMarkdown = ansi.StyleConfig{
 		Document: ansi.StyleBlock{
@@ -634,8 +637,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ParamKey = subtle
 
 	// Content rendering - prepared styles that accept width parameter
-	s.Tool.ContentLine = base.Background(o.bgLeastVisible)
-	s.Tool.ContentTruncation = muted.Background(o.bgLeastVisible)
+	s.Tool.ContentLine = base.Background(o.bgMarkdown)
+	s.Tool.ContentLineHover = base.Background(o.bgHover)
+	s.Tool.ContentTruncation = muted.Background(o.bgMarkdown)
+	s.Tool.ContentTruncationHover = muted.Background(o.bgHover)
 	s.Tool.ContentCodeLine = base.Background(o.bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeTruncation = muted.Background(o.bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeBg = o.bgBase
@@ -656,7 +661,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.WarnMessage = base.Foreground(o.fgSubtle)
 
 	// Diff and multi-edit styles
-	s.Tool.DiffTruncation = muted.Background(o.bgLeastVisible).PaddingLeft(2)
+	s.Tool.DiffTruncation = muted.Background(o.bgMarkdown).PaddingLeft(2)
+	s.Tool.DiffTruncationHover = muted.Background(o.bgHover).PaddingLeft(2)
 	s.Tool.NoteTag = base.Padding(0, 1).Background(o.info).Foreground(o.onPrimary)
 	s.Tool.NoteMessage = base.Foreground(o.fgSubtle)
 
@@ -823,6 +829,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Resource.BusyIcon = s.Resource.OfflineIcon.Foreground(o.busy)
 	s.Resource.ErrorIcon = s.Resource.OfflineIcon.Foreground(o.destructive)
 	s.Resource.OnlineIcon = s.Resource.OfflineIcon.Foreground(o.successMostSubtle)
+	s.Resource.EnabledIcon = s.Resource.OfflineIcon.Foreground(o.ansiGreen)
 	s.Resource.NeedsAuthIcon = s.Resource.OfflineIcon.Foreground(o.attention)
 	s.Resource.DisabledIcon = lipgloss.NewStyle().Foreground(o.fgMoreSubtle).SetString("●")
 	s.Resource.AdditionalText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
@@ -917,7 +924,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ShellTruncation = muted
 
 	s.Messages.SectionHeader = base.PaddingLeft(2)
-	s.Messages.MarkdownBlock = lipgloss.NewStyle().Background(o.bgLeastVisible)
+	s.Messages.ChatSeparator = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Messages.MarkdownBlock = lipgloss.NewStyle().Background(o.bgMarkdown)
 	s.Messages.AssistantInfoIcon = subtle
 	s.Messages.AssistantInfoModel = muted
 	s.Messages.AssistantInfoProvider = subtle

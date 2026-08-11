@@ -74,7 +74,7 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 			icon = t.Resource.BusyIcon.String()
 			description = t.Resource.StatusText.Render("starting...")
 		case mcp.StateConnected:
-			icon = t.Resource.OnlineIcon.String()
+			icon = t.Resource.EnabledIcon.String()
 			extraContent = mcpCounts(t, m.Counts)
 		case mcp.StateError:
 			icon = t.Resource.ErrorIcon.String()

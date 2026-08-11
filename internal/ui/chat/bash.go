@@ -112,7 +112,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// The body sits directly under the header (no blank separator line):
 	// up to collapsedBodyLines lines by default, the full output
 	// once the item is click-expanded (see BashToolMessageItem.ToggleExpanded).
-	return header + "\n" + expandableBodyContent(sty, output, cappedWidth, opts.Expanded)
+	return header + "\n" + expandableBodyContent(sty, output, cappedWidth, opts.Expanded, opts.Hovered)
 }
 
 // collapsedBodyLines is how many content lines a collapsed expandable tool
@@ -125,7 +125,7 @@ const collapsedBodyLines = 4
 // it shows at most collapsedBodyLines lines followed by a "Click to expand"
 // hint when more were cut off; expanded it shows the full content with a
 // "Click to collapse" hint at the end.
-func expandableBodyContent(sty *styles.Styles, content string, width int, expanded bool) string {
+func expandableBodyContent(sty *styles.Styles, content string, width int, expanded, hovered bool) string {
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
 	// Drop the command's own ANSI colors (red test failures, linter
@@ -140,21 +140,33 @@ func expandableBodyContent(sty *styles.Styles, content string, width int, expand
 	}
 
 	out := make([]string, 0, maxLines+1)
+	lineStyle := sty.Tool.ContentLine
+	if hovered {
+		lineStyle = sty.Tool.ContentLineHover
+	}
 	for _, ln := range lines[:maxLines] {
 		ln = " " + ln
 		if lipgloss.Width(ln) > width {
 			ln = ansi.Truncate(ln, width, "…")
 		}
-		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
+		out = append(out, lineStyle.Width(width).Render(ln))
 	}
 
 	switch {
 	case !expanded && len(lines) > maxLines:
-		out = append(out, sty.Tool.ContentTruncation.
+		truncationStyle := sty.Tool.ContentTruncation
+		if hovered {
+			truncationStyle = sty.Tool.ContentTruncationHover
+		}
+		out = append(out, truncationStyle.
 			Width(width).
 			Render(fmt.Sprintf(" Click to expand (%d more lines)", len(lines)-maxLines)))
 	case expanded && len(lines) > collapsedBodyLines:
-		out = append(out, sty.Tool.ContentTruncation.
+		truncationStyle := sty.Tool.ContentTruncation
+		if hovered {
+			truncationStyle = sty.Tool.ContentTruncationHover
+		}
+		out = append(out, truncationStyle.
 			Width(width).
 			Render(" Click to collapse"))
 	}

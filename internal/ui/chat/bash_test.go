@@ -5,11 +5,29 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
+
+func TestExpandableBodyHoverHighlightsWholeBlock(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	normal := expandableBodyContent(&sty, "l1\nl2\nl3\nl4\nl5", 40, false, false)
+	hovered := expandableBodyContent(&sty, "l1\nl2\nl3\nl4\nl5", 40, false, true)
+
+	require.Equal(t, 5, strings.Count(hovered, "\n")+1)
+	require.NotEqual(t, normal, hovered)
+	hoverSequence := lipgloss.NewStyle().Background(sty.Tool.ContentLineHover.GetBackground()).Render("x")
+	hoverPrefix, _, ok := strings.Cut(hoverSequence, "x")
+	require.True(t, ok)
+	for _, line := range strings.Split(hovered, "\n") {
+		require.Contains(t, line, hoverPrefix)
+	}
+}
 
 func bashToolCall(t *testing.T) message.ToolCall {
 	t.Helper()
