@@ -1,41 +1,46 @@
 ---
 name: threads
-description: Use when the user's request splits into multiple independent chunks of work you could parallelize — e.g. "do X and Y and Z" across disjoint files or subsystems — and you're deciding whether to fan work out to thread_create, how to write a thread's goal, or how to handle a thread's status (conflict, merge_blocked, failed, interrupted) once it settles. Also applies whenever the user asks for parallel/isolated work under other names — epic, track, workstream, worktree, "работай параллельно", "эпик", "трек", "ворктри" — these all map to threads.
+description: Use ONLY when threads are explicitly called for — the user asks for one in chat (thread, epic, track, workstream, worktree, "тред", "эпик", "трек", "ворктри", "работай параллельно/изолированно"), another skill or project instructions prescribe them, or you hit a concrete isolation problem — merge/edit conflicts from concurrent work, or someone else's changes appearing in git. Do NOT reach for threads just because a request splits into parallelizable chunks. Also covers writing a thread's goal and handling settled statuses (conflict, merge_blocked, failed, interrupted).
 ---
 
 # Threads
 
 A thread is a parallel agent work stream: its own git worktree, branch, and
 fully isolated agent session (separate data directory, database, everything).
-Use threads to fan independent work out to concurrent agents instead of doing
-it yourself serially.
+It exists to **isolate** work that would otherwise collide — not as a
+general-purpose way to speed up multi-part requests.
 
-Users describe this concept with many words — an *epic*, a *track*, a
-*workstream*, a *worktree*, "работай над этим параллельно/изолированно", or
-simply "do these in parallel". Whatever the label, if the user wants isolated
-parallel work streams, use the `thread_*` tools; there is no separate
-epic/track/worktree feature.
+## When to use threads
 
-## When to split work into threads
+Threads are opt-in. Use them only when one of these holds:
 
-Split when the sub-tasks are genuinely independent and touch **disjoint file
-sets**: separate packages, separate features, a batch of unrelated bug fixes.
-Each thread merges back with a real git merge, so overlapping edits mean
-conflicts you'll have to resolve later instead of coordination you could have
-done up front.
+1. **The user asked for one explicitly.** Any of the aliases counts — a
+   *thread*, an *epic*, a *track*, a *workstream*, a *worktree*, "тред",
+   "эпик", "трек", "ворктри", "работай над этим параллельно/изолированно".
+   Whatever the label, they all map to the `thread_*` tools; there is no
+   separate epic/track/worktree feature.
+2. **Another skill or project instructions prescribe them** for the current
+   task.
+3. **You hit a real isolation problem**: concurrent work is stepping on
+   itself (edit/merge conflicts between parallel efforts), or you notice in
+   git that someone else is changing the working tree or branch under you.
+   Moving the work into a thread's own worktree resolves the contention —
+   you may create one on your own initiative here.
 
-Do **not** reach for threads when:
+Do **not** reach for threads outside those cases. In particular:
 
-- The task is a handful of small, sequential edits — just do them yourself.
-- The sub-tasks touch the same files or depend on each other's output (e.g.
-  "add a field to this struct" then "use it in five call sites") — one
-  thread doing both, or you doing it directly, avoids a merge conflict.
-- The work is exploratory/read-only (research, locating code) — that's a
-  job for the `Explore`/general-purpose agent tools, not a thread, since
-  there's nothing to merge back.
+- A request that merely *splits into independent chunks* ("do X and Y and
+  Z") is not, by itself, a reason for threads — do the work yourself, or
+  use subagents. Threads carry real overhead: a worktree, a branch, a full
+  agent session, and a git merge on the way back.
+- Sub-tasks that touch the same files or depend on each other's output
+  belong in one place — splitting them manufactures the very merge
+  conflicts threads exist to avoid.
+- Exploratory/read-only work (research, locating code) is a job for the
+  `Explore`/general-purpose agent tools — there's nothing to merge back.
 
-When in doubt, prefer fewer, larger threads over many tiny ones — each thread
-carries the fixed overhead of a worktree, a branch, and its own agent session.
+When threads are warranted, prefer fewer, larger ones over many tiny ones,
+and split along **disjoint file sets** so the merges stay clean.
 
 ## Naming
 

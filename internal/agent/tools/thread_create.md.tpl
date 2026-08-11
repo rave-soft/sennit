@@ -1,16 +1,18 @@
 Create a thread: a parallel agent work stream that runs in its own git
 worktree and branch, fully isolated from your own workspace (separate data
-directory, database, and agent session). Reach for this whenever the user
-asks for parallel or isolated work under any name — "epic", "track",
-"workstream", "worktree", or just "do these in parallel" — they all mean
-threads.
+directory, database, and agent session).
 
-Use it to fan work out to an independent agent that runs concurrently with
-you — e.g. a large refactor, an exploratory spike, or a task you want off
-your own branch. The thread's agent starts on `goal` immediately in the
-background; use `thread_status`/`thread_wait` to check on it, `thread_send`
-for follow-up instructions, and `thread_merge` to fold its branch back in
-once done.
+Use this ONLY when threads are explicitly called for: the user asked for one
+under any name — "thread", "epic", "track", "workstream", "worktree", or
+"work on this in parallel/isolation" — a skill or project instructions
+prescribe one, or you need to isolate work that is colliding (edit/merge
+conflicts between concurrent efforts, or someone else's changes showing up
+in git). A request that merely splits into independent chunks is not a
+reason to create threads — do the work yourself or use subagents.
+
+The thread's agent starts on `goal` immediately in the background; use
+`thread_status`/`thread_wait` to check on it, `thread_send` for follow-up
+instructions, and `thread_merge` to fold its branch back in once done.
 
 Parameters:
 - `name` (required): a short slug (lowercase letters, digits, hyphens) that
