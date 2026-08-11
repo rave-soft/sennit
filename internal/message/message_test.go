@@ -64,6 +64,59 @@ func newTestService(t *testing.T, opts ...ServiceOption) (Service, string) {
 	return svc, sess.ID
 }
 
+func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	q := db.New(conn)
+	sessions := session.NewService(q, conn, "/test/project")
+	root, err := sessions.Create(t.Context(), "root")
+	require.NoError(t, err)
+	child, err := sessions.CreateTaskSession(t.Context(), "child", root.ID, "child")
+	require.NoError(t, err)
+	threadSession, err := sessions.Create(t.Context(), "thread")
+	require.NoError(t, err)
+
+	_, err = q.CreateThread(t.Context(), db.CreateThreadParams{
+		ID:           "thread-1",
+		Name:         "thread-1",
+		ProjectPath:  "/test/project",
+		Goal:         "delegated goal",
+		BaseBranch:   "main",
+		Branch:       "thread/thread-1",
+		WorktreePath: "/tmp/thread-1",
+		SessionID:    threadSession.ID,
+		Status:       "running",
+		MergePolicy:  "manual",
+	})
+	require.NoError(t, err)
+
+	svc := NewService(q)
+	for _, tc := range []struct {
+		sessionID string
+		text      string
+	}{
+		{sessionID: root.ID, text: "human prompt"},
+		{sessionID: child.ID, text: "sub-agent prompt"},
+		{sessionID: threadSession.ID, text: "thread prompt"},
+	} {
+		_, err = svc.Create(t.Context(), tc.sessionID, CreateMessageParams{
+			Role:  User,
+			Parts: []ContentPart{TextContent{Text: tc.text}},
+		})
+		require.NoError(t, err)
+	}
+
+	messages, err := svc.ListAllUserMessages(t.Context())
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, root.ID, messages[0].SessionID)
+	require.Equal(t, "human prompt", messages[0].Content().String())
+}
+
 // eventCollector consumes broker events into a slice in a goroutine
 // and exposes thread-safe Snapshot / Reset helpers for assertions.
 type eventCollector struct {

@@ -22,6 +22,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/session"
 )
 
 // nameRe restricts thread names to values safe to embed in a branch name
@@ -33,10 +34,11 @@ var nameRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
 // the repository's currently checked-out branch when empty; MergePolicy
 // defaults to [MergeAuto].
 type CreateArgs struct {
-	Name        string
-	Goal        string
-	BaseBranch  string
-	MergePolicy MergePolicy
+	Name            string
+	Goal            string
+	BaseBranch      string
+	MergePolicy     MergePolicy
+	ParentSessionID string
 }
 
 // ManagerOptions holds the dependencies and tunables for [NewManager].
@@ -282,7 +284,12 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return Thread{}, err
 	}
 
-	sess, err := handle.App().Sessions.Create(ctx, args.Goal)
+	var sess session.Session
+	if args.ParentSessionID == "" {
+		sess, err = handle.App().Sessions.Create(ctx, args.Goal)
+	} else {
+		sess, err = handle.App().Sessions.CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, args.Goal)
+	}
 	if err != nil {
 		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, m.failCreate(ctx, st, err)

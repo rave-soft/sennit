@@ -92,13 +92,12 @@ func newTestManager(t *testing.T, repo string) (*Manager, *fakeSpawner) {
 
 // -- fakes --
 
-// fakeSessions implements session.Service, delegating everything but
-// Create to the nil-embedded interface (unused by the manager and left to
-// panic loudly if a test accidentally exercises it).
+// fakeSessions implements the session creation methods used by the manager.
 type fakeSessions struct {
 	session.Service
-	mu sync.Mutex
-	n  int
+	mu             sync.Mutex
+	n              int
+	createdSession session.Session
 }
 
 func (f *fakeSessions) Create(_ context.Context, title string) (session.Session, error) {
@@ -106,6 +105,13 @@ func (f *fakeSessions) Create(_ context.Context, title string) (session.Session,
 	defer f.mu.Unlock()
 	f.n++
 	return session.Session{ID: fmt.Sprintf("sess-%d", f.n), Title: title}, nil
+}
+
+func (f *fakeSessions) CreateTaskSession(_ context.Context, id, parentSessionID, title string) (session.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.createdSession = session.Session{ID: id, ParentSessionID: parentSessionID, Title: title}
+	return f.createdSession, nil
 }
 
 // fakeCoordinator implements agent.Coordinator, recording Run calls and
@@ -336,6 +342,26 @@ func TestManager_CreateHappyPath(t *testing.T) {
 	}
 	require.True(t, gotCreated)
 	require.True(t, gotRunning)
+}
+
+func TestManager_CreateMarksAgentThreadSessionAsChild(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{
+		Name:            "child-session",
+		Goal:            "implement the thing",
+		MergePolicy:     MergeManual,
+		ParentSessionID: "parent-session",
+	})
+	require.NoError(t, err)
+
+	sessions := spawner.appFor(st.WorktreePath).Sessions.(*fakeSessions)
+	sessions.mu.Lock()
+	created := sessions.createdSession
+	sessions.mu.Unlock()
+	require.Equal(t, st.SessionID, created.ID)
+	require.Equal(t, "parent-session", created.ParentSessionID)
 }
 
 func TestManager_CreateRejectsDuplicateName(t *testing.T) {

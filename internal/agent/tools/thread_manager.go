@@ -13,10 +13,11 @@ import (
 // *thread.Manager to the [ThreadManager] interface below, converting
 // between the two packages' otherwise-identical types at the seam.
 type ThreadCreateArgs struct {
-	Name        string
-	Goal        string
-	BaseBranch  string
-	MergePolicy string
+	Name            string
+	Goal            string
+	BaseBranch      string
+	MergePolicy     string
+	ParentSessionID string
 }
 
 // ThreadInfo mirrors internal/thread.Thread, for the same reason.

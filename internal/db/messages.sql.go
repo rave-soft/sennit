@@ -125,12 +125,16 @@ FROM messages
 JOIN sessions ON sessions.id = messages.session_id
 WHERE messages.role = 'user'
   AND sessions.parent_session_id IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM threads
+      WHERE threads.session_id = sessions.id
+  )
 ORDER BY messages.created_at DESC
 `
 
-// Prompt-history source: only messages a human typed. Sub-agent and thread
-// child sessions carry machine-generated delegation prompts as user-role
-// messages, so anything below a parent session is excluded.
+// Prompt-history source: only messages a human typed. Sub-agent child sessions
+// and thread sessions carry machine-generated prompts as user-role messages.
 func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	rows, err := q.query(ctx, q.listAllUserMessagesStmt, listAllUserMessages)
 	if err != nil {

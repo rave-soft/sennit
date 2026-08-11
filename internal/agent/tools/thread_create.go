@@ -80,7 +80,13 @@ func NewThreadCreateTool(manager ThreadManager, permissions permission.Service) 
 				return resp, nil
 			}
 
-			st, err := manager.Create(ctx, ThreadCreateArgs(params))
+			st, err := manager.Create(ctx, ThreadCreateArgs{
+				Name:            params.Name,
+				Goal:            params.Goal,
+				BaseBranch:      params.BaseBranch,
+				MergePolicy:     params.MergePolicy,
+				ParentSessionID: sessionID,
+			})
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

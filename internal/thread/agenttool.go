@@ -25,10 +25,11 @@ func AsAgentToolManager(m *Manager) tools.ThreadManager {
 
 func (a *agentToolManager) Create(ctx context.Context, args tools.ThreadCreateArgs) (tools.ThreadInfo, error) {
 	st, err := a.m.Create(ctx, CreateArgs{
-		Name:        args.Name,
-		Goal:        args.Goal,
-		BaseBranch:  args.BaseBranch,
-		MergePolicy: MergePolicy(args.MergePolicy),
+		Name:            args.Name,
+		Goal:            args.Goal,
+		BaseBranch:      args.BaseBranch,
+		MergePolicy:     MergePolicy(args.MergePolicy),
+		ParentSessionID: args.ParentSessionID,
 	})
 	if err != nil {
 		return tools.ThreadInfo{}, err

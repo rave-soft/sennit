@@ -31,9 +31,8 @@ type Querier interface {
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetThread(ctx context.Context, id string) (Thread, error)
 	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error)
-	// Prompt-history source: only messages a human typed. Sub-agent and thread
-	// child sessions carry machine-generated delegation prompts as user-role
-	// messages, so anything below a parent session is excluded.
+	// Prompt-history source: only messages a human typed. Sub-agent child sessions
+	// and thread sessions carry machine-generated prompts as user-role messages.
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListAssistantMessagesSince(ctx context.Context, arg ListAssistantMessagesSinceParams) ([]ListAssistantMessagesSinceRow, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)

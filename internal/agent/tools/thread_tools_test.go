@@ -74,6 +74,10 @@ func (f *fakeSessions) Create(_ context.Context, title string) (session.Session,
 	return session.Session{ID: fmt.Sprintf("sess-%d", f.n), Title: title}, nil
 }
 
+func (f *fakeSessions) CreateTaskSession(_ context.Context, id, parentSessionID, title string) (session.Session, error) {
+	return session.Session{ID: id, ParentSessionID: parentSessionID, Title: title}, nil
+}
+
 // fakeCoordinator implements agent.Coordinator with no-op behavior beyond
 // Run, which just records the call — thread's own dispatch/RunComplete
 // wiring is exercised by internal/thread's tests, not here.
