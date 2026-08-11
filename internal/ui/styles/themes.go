@@ -14,10 +14,16 @@ func ThemeForProvider(_ string) Styles {
 // CharmtonePantera returns the Charmtone dark theme. It's the default style
 // for the UI.
 func CharmtonePantera() Styles {
+	// The scheme is deliberately restrained: everyday chrome (tool names,
+	// status icons, hooks, todos) renders in neutrals and the muted
+	// brand purple (Hazy) instead of saturated blue/green/yellow, so the
+	// chat reads as monochrome-with-one-accent. Saturated colors are
+	// reserved for rare, genuinely semantic states: errors, warnings,
+	// destructive dialogs.
 	s := quickStyle(quickStyleOpts{
 		primary:   charmtone.Charple,
 		secondary: charmtone.Dolly,
-		accent:    charmtone.Bok,
+		accent:    charmtone.Hazy,
 		keyword:   charmtone.Blush,
 
 		fgBase:       charmtone.Sash,
@@ -39,13 +45,13 @@ func CharmtonePantera() Styles {
 		warningSubtle:     charmtone.Zest,
 		warning:           charmtone.Mustard,
 		attention:         charmtone.Tang,
-		busy:              charmtone.Citron,
-		info:              charmtone.Malibu,
-		infoMoreSubtle:    charmtone.Sardine,
-		infoMostSubtle:    charmtone.Damson,
-		success:           charmtone.Julep,
-		successMoreSubtle: charmtone.Bok,
-		successMostSubtle: charmtone.Guac,
+		busy:              charmtone.Hazy,
+		info:              charmtone.Hazy,
+		infoMoreSubtle:    charmtone.Larple,
+		infoMostSubtle:    charmtone.Squid,
+		success:           charmtone.Smoke,
+		successMoreSubtle: charmtone.Squid,
+		successMostSubtle: charmtone.Squid,
 
 		// ANSI 16-color palette for remapping raw terminal output
 		// (e.g. bang-mode shell commands) onto legible Charmtone colors.
