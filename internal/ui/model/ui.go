@@ -348,6 +348,22 @@ type UI struct {
 	// affordance.
 	panelTodosHover      bool
 	panelTodosHeaderRect uv.Rectangle
+	// panelTodosListRect is the on-screen area of the (possibly scrollable)
+	// todo rows below the header, rebuilt on every drawSessionPanel call —
+	// the mouse-wheel handler in Update hit-tests against this to decide
+	// whether a wheel event scrolls the todos section instead of the chat.
+	panelTodosListRect uv.Rectangle
+	// panelTodosScrollOffset is the expanded todos section's own scroll
+	// position — an index into the concatenated in-progress+pending+done
+	// row list (see sessionPanelTodosContent), independent of chat/sidebar
+	// scrolling. sessionPanelPlan never drops todosDone/todosPending to fit
+	// the panel's row budget anymore (see session_panel.go); when the
+	// section's natural size exceeds what's granted, this offset is what
+	// reveals the rest instead. drawSessionPanel clamps it to
+	// [0, max(0, contentRows-viewportRows)] every frame, so a stale offset
+	// left over from a shorter list (todos completed/removed) never
+	// dangles out of range.
+	panelTodosScrollOffset int
 
 	// threadLastStatus tracks each thread's last-seen status, so
 	// notifyThreadCompletion (thread_completion.go) can detect the exact
@@ -1209,7 +1225,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseLeft && m.state == uiChat && m.hasSession() {
 			pt := image.Pt(msg.X, msg.Y)
 			plan := m.sessionPanelPlan(m.layout.panel.Dy())
-			threadBlockRects, delegationBlockRects, todosHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
+			threadBlockRects, delegationBlockRects, todosHeaderRect, _ := sessionPanelRowLayout(m.layout.panel, plan)
 			if pt.In(todosHeaderRect) {
 				if cmd := m.toggleTodosExpanded(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -1423,6 +1439,26 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, sidebarScrollbarHideCmd(seq))
 				}
 				break
+			}
+			// When the mouse is hovering the session panel's scrollable
+			// todos rows, the wheel scrolls that section's own offset
+			// instead of the chat — recomputed fresh from
+			// sessionPanelRowLayout (not the m.panelTodosListRect cache),
+			// same rationale as the click hit-test above: a wheel event
+			// can arrive before drawSessionPanel has painted the current
+			// layout.
+			if m.hasSession() {
+				plan := m.sessionPanelPlan(m.layout.panel.Dy())
+				if plan.todosScrollable {
+					_, _, _, todosListRect := sessionPanelRowLayout(m.layout.panel, plan)
+					if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(todosListRect) {
+						lines := int(msg.DeltaY)
+						if lines != 0 {
+							m.panelTodosScrollOffset = clampPanelTodosScrollOffset(m.panelTodosScrollOffset+lines, plan)
+						}
+						break
+					}
+				}
 			}
 			if msg.DeltaX != 0 {
 				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
@@ -5339,6 +5375,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.chat.ClearMessages()
 	m.panel.expanded = false
 	m.panel.autoExpanded = false
+	m.panelTodosScrollOffset = 0
 	m.wsCache.promptQueue = 0
 	m.wsCache.promptQueueItems = nil
 	m.wsCache.promptQueueCheckedAt = time.Now()

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -253,8 +254,12 @@ func TestSessionPanelPlan_QueueAlwaysVisibleRegardlessOfTodosExpand(t *testing.T
 // TestSessionPanelPlan_BudgetCapAndPriorityOrder covers the height budget:
 // the total never exceeds ~40% of terminal height, and when a scenario
 // (active threads + expanded todos + queue) exceeds that budget on a short
-// terminal, completed todos drop first, then the todos list collapses,
-// before the threads section shrinks.
+// terminal, the todos section's viewport shrinks (becoming scrollable)
+// before the queue tail is truncated, and both stay ahead of the
+// threads/delegations sections shrinking. Critically — this is the bug fix
+// — todosDone/todosPending are never dropped from the plan at any budget:
+// they always hold the full lists; only todosViewportRows (how many of
+// them get painted this frame) shrinks.
 func TestSessionPanelPlan_BudgetCapAndPriorityOrder(t *testing.T) {
 	t.Parallel()
 
@@ -274,43 +279,50 @@ func TestSessionPanelPlan_BudgetCapAndPriorityOrder(t *testing.T) {
 	// Natural size: 4 (threads) + 1 (header) + 3 (active) + 3 (completed) + 4 (queue) = 15.
 	full := u.sessionPanelPlan(100)
 	require.Equal(t, 15, full.totalRows)
+	require.False(t, full.todosScrollable, "ample budget: nothing hidden, nothing to scroll")
 
-	// Budget 12: exactly enough room to drop the three completed rows and
-	// nothing else.
+	// Budget 12: exactly enough room to shrink the todos viewport by 3 rows
+	// (hiding, not dropping, the three completed rows) and nothing else.
 	p := u.sessionPanelPlan(12)
 	require.Equal(t, 4, p.threadsRows, "threads must not shrink yet")
 	require.True(t, p.todosExpanded, "todos list must still be expanded")
-	require.Empty(t, p.todosDone, "completed todos are dropped first")
+	require.Len(t, p.todosDone, 3, "completed todos are never dropped from the plan")
 	require.Len(t, p.todosInProgress, 1)
 	require.Len(t, p.todosPending, 2)
+	require.Equal(t, 3, p.todosViewportRows, "viewport shrinks to in-progress+pending only")
+	require.True(t, p.todosScrollable, "the hidden completed rows must be reachable by scrolling")
 	require.Len(t, p.queue, 4, "queue must be untouched")
 	require.LessOrEqual(t, p.totalRows, 12)
 
-	// Budget 9: tight enough to also force todos to collapse. Collapsing is
-	// never total, though — the in-progress todo ("active 1") stays visible
-	// even collapsed, so it still costs one row, which eats one more row of
-	// queue than a fully-collapsed (header-only) section would.
+	// Budget 9: the todos viewport shrinks to its floor — the in-progress
+	// row only, never fewer — and the remaining one row of overage spills
+	// onto the queue tail. The data (todosPending/todosDone) still isn't
+	// dropped, only painted with 0 rows this frame.
 	p = u.sessionPanelPlan(9)
 	require.Equal(t, 4, p.threadsRows, "threads still must not shrink")
-	require.False(t, p.todosExpanded, "todos collapse before threads shrink")
-	require.Len(t, p.todosInProgress, 1, "collapsed but the in-progress todo stays visible")
-	require.Equal(t, session.TodoStatusInProgress, p.todosInProgress[0].Status)
-	require.Empty(t, p.todosPending, "pending todos hide while collapsed, unlike in-progress")
-	require.Len(t, p.queue, 3, "queue truncated by the one row the always-visible in-progress todo costs")
+	require.True(t, p.todosExpanded, "todos stays expanded — budget shedding no longer forces a collapse")
+	require.Len(t, p.todosInProgress, 1)
+	require.Len(t, p.todosPending, 2, "pending todos are never dropped from the plan")
+	require.Len(t, p.todosDone, 3, "completed todos are never dropped from the plan")
+	require.Equal(t, 1, p.todosViewportRows, "viewport shrinks to the in-progress row only")
+	require.True(t, p.todosScrollable)
+	require.Len(t, p.queue, 3, "the one row of overage the viewport floor can't absorb spills onto the queue")
 	require.LessOrEqual(t, p.totalRows, 9)
 
-	// Budget 7: tight enough to also truncate the queue further, but
-	// threads still hold their full 4 rows.
+	// Budget 7: todos viewport is already at its floor, so the queue tail
+	// keeps truncating, before threads shrink.
 	p = u.sessionPanelPlan(7)
 	require.Equal(t, 4, p.threadsRows, "threads still must not shrink")
-	require.False(t, p.todosExpanded)
-	require.Len(t, p.todosInProgress, 1, "in-progress todo still visible while collapsed")
+	require.True(t, p.todosExpanded)
+	require.Len(t, p.todosDone, 3, "completed todos still never dropped from the plan")
+	require.Equal(t, 1, p.todosViewportRows)
 	require.Len(t, p.queue, 1, "queue truncated to whatever fits before threads shrink")
 	require.LessOrEqual(t, p.totalRows, 7)
 
 	// Pathological budget: even threads must shrink.
 	p = u.sessionPanelPlan(3)
 	require.Equal(t, 1, p.threadsRows, "threads section is the last resort to shrink")
+	require.Len(t, p.todosDone, 3, "even at a pathological budget, completed todos stay in the plan's data")
 	require.LessOrEqual(t, p.totalRows, 3)
 
 	// The overall cap: sessionPanelHeight itself must respect the 40% cap
@@ -513,7 +525,7 @@ func TestMouseClick_TodosHeaderTogglesWithoutPriorDraw(t *testing.T) {
 	// Derive the header's expected coordinates the same way the fixed click
 	// handler does, independently of any cached Draw-time field.
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	_, _, headerRect := sessionPanelRowLayout(u.layout.panel, plan)
+	_, _, headerRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.NotZero(t, headerRect, "expected a non-empty todos header rect")
 
 	_, cmd := u.Update(tea.MouseClickMsg{X: headerRect.Min.X, Y: headerRect.Min.Y, Button: tea.MouseLeft})
@@ -537,7 +549,7 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	require.Empty(t, u.panelThreadRects, "must not have been populated by any Draw call yet")
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	threadRects, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	threadRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.Len(t, threadRects, 1)
 
 	rect := threadRects[0]
@@ -549,4 +561,156 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	require.True(t, ok, "expected enterThreadMsg, got %T", msg)
 	require.Equal(t, "t1", entered.id)
 	require.Equal(t, "s-t1", entered.sessionID)
+}
+
+// nineTodosThreeDone builds the 9-todo (2 in-progress, 4 pending, 3
+// completed) fixture used by the scroll tests below — enough rows that,
+// combined with a competing thread block, a small-but-common terminal
+// height genuinely can't paint all of them at once.
+func nineTodosThreeDone() []session.Todo {
+	return []session.Todo{
+		{Status: session.TodoStatusInProgress, Content: "in progress 1", ActiveForm: "Doing in progress 1"},
+		{Status: session.TodoStatusInProgress, Content: "in progress 2", ActiveForm: "Doing in progress 2"},
+		{Status: session.TodoStatusPending, Content: "pending 1"},
+		{Status: session.TodoStatusPending, Content: "pending 2"},
+		{Status: session.TodoStatusPending, Content: "pending 3"},
+		{Status: session.TodoStatusPending, Content: "pending 4"},
+		{Status: session.TodoStatusCompleted, Content: "done 1"},
+		{Status: session.TodoStatusCompleted, Content: "done 2"},
+		{Status: session.TodoStatusCompleted, Content: "done 3"},
+	}
+}
+
+// TestSessionPanelPlan_SmallTerminalNeverDropsTodosOnlyWindows is the bug
+// regression test: on a small-but-common terminal (80x24) with a
+// competing thread block, the expanded panel's natural size (header +
+// 2 in-progress + 4 pending + 3 done = 10 rows, plus the thread block)
+// doesn't fit the panel's budget — yet all three completed todos must
+// still be present in plan.todosDone (never dropped), and the section must
+// report itself scrollable rather than silently truncating them.
+func TestSessionPanelPlan_SmallTerminalNeverDropsTodosOnlyWindows(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.dialog = dialog.NewOverlay()
+	u.width, u.height = 80, 24
+	u.panel.expanded = true
+	u.threadsDock.threads = mkDockThreads(1)
+	u.session.Todos = nineTodosThreeDone()
+	u.updateLayoutAndSize()
+
+	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	require.True(t, plan.todosExpanded)
+	require.Equal(t, 2, plan.threadsRows, "the competing thread block must not be shed by this scenario")
+	require.Len(t, plan.todosInProgress, 2)
+	require.Len(t, plan.todosPending, 4)
+	require.Len(t, plan.todosDone, 3, "all three completed todos must still be in the plan, never dropped")
+	require.Less(t, plan.todosViewportRows, plan.todosContentRows,
+		"the natural size must not fit — otherwise this scenario isn't exercising the budget at all")
+	require.True(t, plan.todosScrollable, "the section must report itself scrollable rather than truncating")
+}
+
+// TestDrawSessionPanel_TodosScrollRevealsHiddenRows is the rendering-level
+// half of the regression test above: at the default (top) scroll offset the
+// completed rows are off-screen, but scrolling the todos section — via the
+// same CoalescedWheelMsg path a real mouse wheel produces, with the pointer
+// over the todos list area — brings them on screen. No todo is ever
+// silently unreachable: every one of the 9 is either painted at the current
+// offset or reachable by scrolling.
+func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.dialog = dialog.NewOverlay()
+	u.width, u.height = 80, 24
+	u.panel.expanded = true
+	u.threadsDock.threads = mkDockThreads(1)
+	u.session.Todos = nineTodosThreeDone()
+	u.updateLayoutAndSize()
+
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawSessionPanel(scr, u.layout.panel)
+	atTop := ansi.Strip(scr.Render())
+	require.Contains(t, atTop, "in progress 1", "the viewport floor always shows in-progress rows")
+	require.NotContains(t, atTop, "done 1", "completed rows start out scrolled off-screen on this small terminal")
+	require.NotContains(t, atTop, "done 2")
+	require.NotContains(t, atTop, "done 3")
+
+	// Locate the todos list area the same way a real mouse wheel event
+	// would hit-test it, then drive enough wheel-down events through
+	// Update to reach the bottom of the section.
+	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	_, _, _, todosListRect := sessionPanelRowLayout(u.layout.panel, plan)
+	require.NotZero(t, todosListRect, "expected a non-empty todos list rect to scroll")
+
+	maxOffset := plan.todosContentRows - plan.todosViewportRows
+	require.Positive(t, maxOffset, "fixture must actually need scrolling")
+	for range maxOffset {
+		u.Update(common.CoalescedWheelMsg{
+			Mouse:  tea.Mouse{X: todosListRect.Min.X, Y: todosListRect.Min.Y},
+			DeltaY: 1,
+		})
+	}
+	require.Equal(t, maxOffset, u.panelTodosScrollOffset, "wheel-down must reach the section's bottom")
+
+	scr = uv.NewScreenBuffer(u.width, u.height)
+	u.drawSessionPanel(scr, u.layout.panel)
+	scrolled := ansi.Strip(scr.Render())
+	require.Contains(t, scrolled, "done 1", "scrolling to the bottom must reveal every completed todo")
+	require.Contains(t, scrolled, "done 2")
+	require.Contains(t, scrolled, "done 3")
+
+	// Scrolling past the bottom must clamp, not run off the end of the
+	// underlying slice.
+	require.NotPanics(t, func() {
+		for range 5 {
+			u.Update(common.CoalescedWheelMsg{
+				Mouse:  tea.Mouse{X: todosListRect.Min.X, Y: todosListRect.Min.Y},
+				DeltaY: 1,
+			})
+		}
+	})
+	require.Equal(t, maxOffset, u.panelTodosScrollOffset, "offset must clamp at the bottom")
+}
+
+// TestRenderSessionTodoLine_CompletedStyleSurvivesBudgetConstrainedPlan
+// re-verifies the strikethrough/muted styling chain end to end through
+// sessionPanelPlan and drawSessionPanel — not just the low-level
+// renderSessionTodoLine unit test above — on the exact small-terminal,
+// budget-constrained scenario this bug was found in, so a future change to
+// the shedding/windowing mechanic can't silently reintroduce lost styling
+// the same way it silently reintroduced lost rows.
+func TestRenderSessionTodoLine_CompletedStyleSurvivesBudgetConstrainedPlan(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.dialog = dialog.NewOverlay()
+	u.width, u.height = 80, 24
+	u.panel.expanded = true
+	u.threadsDock.threads = mkDockThreads(1)
+	u.session.Todos = nineTodosThreeDone()
+	u.updateLayoutAndSize()
+
+	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	require.Len(t, plan.todosDone, 3)
+
+	maxOffset := plan.todosContentRows - plan.todosViewportRows
+	u.panelTodosScrollOffset = maxOffset
+	scr := uv.NewScreenBuffer(u.width, u.height)
+	u.drawSessionPanel(scr, u.layout.panel)
+	out := scr.Render()
+
+	require.Contains(t, ansi.Strip(out), "done 1")
+	// Find the raw (unstripped) line containing "done 1" and confirm it
+	// still carries the strikethrough SGR parameter renderSessionTodoLine
+	// applies for session.TodoStatusCompleted.
+	lines := strings.Split(out, "\n")
+	found := false
+	for _, line := range lines {
+		if strings.Contains(ansi.Strip(line), "done 1") {
+			found = true
+			require.Contains(t, line, ";9m", "completed todo row must carry a strikethrough SGR parameter even under budget constraints")
+		}
+	}
+	require.True(t, found, "expected to find the rendered \"done 1\" row")
 }

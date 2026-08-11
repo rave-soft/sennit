@@ -27,6 +27,7 @@ import (
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/chat"
+	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -280,15 +281,27 @@ type sessionPanelPlan struct {
 	delegationsRows int
 
 	todosVisible   bool // at least one incomplete todo exists
-	todosExpanded  bool // for *this* render; may be forced false to fit budget
+	todosExpanded  bool // m.panel.expanded, verbatim — budget shedding never forces this false anymore
 	todosCompleted int  // for the header ratio — independent of what's dropped below
 	todosTotal     int
 	// todosInProgress is always shown, expanded or not — collapsing the
 	// panel is never total: whatever is actively running right now stays
 	// visible so a user never has to expand the panel just to check.
 	todosInProgress []session.Todo
-	todosPending    []session.Todo // shown only when todosExpanded
-	todosDone       []session.Todo // shown when todosExpanded and budget allows
+	todosPending    []session.Todo // populated only when todosExpanded; never shed by budget
+	todosDone       []session.Todo // populated only when todosExpanded; never shed by budget
+
+	// todosContentRows is the expanded todos section's full row count
+	// (todosInProgress+todosPending+todosDone concatenated in that order,
+	// or just todosInProgress while collapsed — collapsed never scrolls).
+	// todosViewportRows is how many of those rows the budget actually
+	// grants for painting; when it's less than todosContentRows the
+	// section is scrollable (todosScrollable) and drawSessionPanel windows
+	// the list by m.panelTodosScrollOffset instead of truncating it — see
+	// the sessionPanelPlan doc comment.
+	todosContentRows  int
+	todosViewportRows int
+	todosScrollable   bool
 
 	queue []string
 
@@ -297,16 +310,28 @@ type sessionPanelPlan struct {
 
 // sessionPanelPlan computes what the panel shows for budget rows, shedding
 // content in priority order when the natural size doesn't fit: active
-// threads first (never shrink), then active (non-completed) todos, then the
-// queue, then completed todos are the first to go. Concretely: (1) drop
-// completed-todo rows from the expanded list — the header ratio already
-// conveys the count; (2) if still over, collapse the todos list entirely
-// for this render only, without touching m.panel.expanded; (3) if still
-// over, truncate the queue tail; (4) if still over (pathological tiny
-// terminal), shrink the threads section's row budget, mirroring the
-// pre-existing `dockHeight = min(dockHeight, uiLayout.main.Dy())` clamp;
-// (5) as a last-resort floor, drop the todos header too, so totalRows never
-// exceeds budget even when budget itself is smaller than one row.
+// threads and delegations are never shrunk except as an absolute last
+// resort, and — critically — completed/pending todo *data* is never
+// dropped once the section is expanded (m.panel.expanded). What used to be
+// "drop completed rows, then collapse the list" is now "hand the expanded
+// todos section a smaller viewport and let it scroll": todosInProgress,
+// todosPending, and todosDone always hold the full lists; todosViewportRows
+// is the (possibly smaller) number of those rows the budget actually grants
+// for painting this frame, and todosScrollable signals drawSessionPanel to
+// render a scrollbar and window the list by m.panelTodosScrollOffset
+// instead of truncating it. Concretely: (1) if the expanded todos section's
+// natural size doesn't fit, shrink its viewport (not its data); (2) if
+// still over, truncate the queue tail; (3) if still over, shrink the
+// delegations row budget; (4) if still over (pathological tiny terminal),
+// shrink the threads section's row budget, mirroring the pre-existing
+// `dockHeight = min(dockHeight, uiLayout.main.Dy())` clamp; (5) as a
+// last-resort floor, drop the todos header too, so totalRows never exceeds
+// budget even when budget itself is smaller than one row — this still
+// leaves the todo slices themselves populated, just undrawn this frame.
+//
+// Collapsed mode (todosExpanded == false) is unchanged: only the header and
+// the always-visible in-progress rows count toward its content, and it
+// never scrolls — see todosInProgress's doc comment.
 //
 // Row counts never depend on rendering width — only per-row text
 // truncation does, decided at draw time — matching threadsDockHeight's
@@ -342,12 +367,16 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		// Collapsing the panel is never total: whatever is actively in
 		// progress right now stays visible whether expanded or not, so a
 		// user never has to expand the panel just to see what's currently
-		// running. Only pending and completed rows are gated on expanded.
+		// running. Only pending and completed rows are gated on expanded,
+		// and — unlike threads/queue — budget shedding below never clears
+		// them; it only ever narrows the viewport that paints them.
 		plan.todosInProgress = inProgress
 		if plan.todosExpanded {
 			plan.todosPending = pending
 			plan.todosDone = completed
 		}
+		plan.todosContentRows = len(plan.todosInProgress) + len(plan.todosPending) + len(plan.todosDone)
+		plan.todosViewportRows = plan.todosContentRows
 	}
 
 	delegations, delegationsMore := m.runningDelegationBlocks()
@@ -360,27 +389,31 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 
 	plan.queue = m.wsCache.promptQueueItems
 
-	todosRows := func() int {
+	headerRows := func() int {
 		if !plan.todosVisible {
 			return 0
 		}
-		return 1 + len(plan.todosInProgress) + len(plan.todosPending) + len(plan.todosDone)
+		return 1
 	}
 	over := func() int {
-		return plan.threadsRows + plan.delegationsRows + todosRows() + len(plan.queue) - budget
+		return plan.threadsRows + plan.delegationsRows + headerRows() + plan.todosViewportRows + len(plan.queue) - budget
 	}
 
 	// Shedding priority, highest to lowest: threads > delegations >
-	// todos-in-progress (never dropped while visible at all) > queue >
-	// todos-done. todos-pending sheds together with the todos section
-	// collapsing (step 2 below), same as before the in-progress/pending
-	// split.
-	if over() > 0 {
-		plan.todosDone = nil
-	}
-	if over() > 0 {
-		plan.todosExpanded = false
-		plan.todosPending = nil
+	// todos-in-progress (never touched — see the floor below) > todos
+	// pending/done (display-windowed via todosViewportRows, but never
+	// dropped from the plan) > queue tail > delegations row budget >
+	// threads row budget. The viewport never shrinks below
+	// len(todosInProgress): the in-progress rows are what "collapsing is
+	// never total" always guaranteed, and that guarantee carries over here
+	// as "the default (unscrolled) viewport always shows every in-progress
+	// row" — only pending/done ever have to be reached by scrolling.
+	if plan.todosExpanded {
+		if o := over(); o > 0 {
+			floor := len(plan.todosInProgress)
+			reducible := max(0, plan.todosViewportRows-floor)
+			plan.todosViewportRows -= min(o, reducible)
+		}
 	}
 	if o := over(); o > 0 {
 		keep := max(0, len(plan.queue)-o)
@@ -393,11 +426,15 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.threadsRows = max(0, plan.threadsRows-o)
 	}
 	if over() > 0 {
-		// budget < 1: even the one-line todos header doesn't fit.
+		// budget < 1: even the one-line todos header doesn't fit. The todo
+		// slices stay populated (see doc comment) — only this frame's
+		// paint is skipped.
 		plan.todosVisible = false
+		plan.todosViewportRows = 0
 	}
 
-	plan.totalRows = plan.threadsRows + plan.delegationsRows + todosRows() + len(plan.queue)
+	plan.todosScrollable = plan.todosExpanded && plan.todosVisible && plan.todosViewportRows < plan.todosContentRows
+	plan.totalRows = plan.threadsRows + plan.delegationsRows + headerRows() + plan.todosViewportRows + len(plan.queue)
 	return plan
 }
 
@@ -456,13 +493,15 @@ func threadBlockGeometry(area uv.Rectangle, threads []proto.Thread) []uv.Rectang
 // sessionPanelRowLayout is the single source of truth for where each
 // hit-testable row of the session panel lands, given an area and a plan —
 // pure geometry, no drawing. Both drawSessionPanel (which paints from it)
-// and the tea.MouseClickMsg/tea.MouseMotionMsg handlers in ui.go (which
-// need it computed fresh, synchronously, at click/hover time — not lagged
-// behind whatever the last Draw call happened to cache) call this instead
-// of duplicating the row-advancing math.
-func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects, delegationBlockRects []uv.Rectangle, todosHeaderRect uv.Rectangle) {
+// and the tea.MouseClickMsg/tea.MouseMotionMsg/CoalescedWheelMsg handlers
+// in ui.go (which need it computed fresh, synchronously, at click/hover
+// time — not lagged behind whatever the last Draw call happened to cache)
+// call this instead of duplicating the row-advancing math. todosListRect is
+// the area of the (possibly scrollable) todo rows below the header, for the
+// mouse-wheel hit-test that adjusts m.panelTodosScrollOffset.
+func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects, delegationBlockRects []uv.Rectangle, todosHeaderRect, todosListRect uv.Rectangle) {
 	if area.Dy() <= 0 || area.Dx() <= 0 {
-		return nil, nil, uv.Rectangle{}
+		return nil, nil, uv.Rectangle{}, uv.Rectangle{}
 	}
 
 	row := area
@@ -488,9 +527,13 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 	if plan.todosVisible && row.Min.Y < area.Max.Y {
 		todosHeaderRect = row
 		todosHeaderRect.Max.Y = todosHeaderRect.Min.Y + 1
+
+		todosListRect = area
+		todosListRect.Min.Y = todosHeaderRect.Max.Y
+		todosListRect.Max.Y = min(todosListRect.Min.Y+plan.todosViewportRows, area.Max.Y)
 	}
 
-	return threadBlockRects, delegationBlockRects, todosHeaderRect
+	return threadBlockRects, delegationBlockRects, todosHeaderRect, todosListRect
 }
 
 // drawThreadBlocks paints plan.threads as the panel's top section — one
@@ -620,6 +663,32 @@ func (m *UI) drawDelegationBlocks(scr uv.Screen, area uv.Rectangle, plan session
 	return rects
 }
 
+// sessionPanelTodosContent concatenates plan.todosInProgress, todosPending,
+// and todosDone in that fixed order — the same ordering the panel has
+// always drawn them in (see splitTodosByStatus), just materialized as one
+// slice so drawSessionPanel and the scroll-offset math can window it
+// without re-deriving the concatenation in two places.
+func sessionPanelTodosContent(plan sessionPanelPlan) []session.Todo {
+	all := make([]session.Todo, 0, plan.todosContentRows)
+	all = append(all, plan.todosInProgress...)
+	all = append(all, plan.todosPending...)
+	all = append(all, plan.todosDone...)
+	return all
+}
+
+// clampPanelTodosScrollOffset clamps offset to [0, max(0,
+// contentRows-viewportRows)] — the range sessionPanelPlan's todosContentRows
+// and todosViewportRows report for the current render. Shared by
+// drawSessionPanel (which self-corrects m.panelTodosScrollOffset every
+// frame — the same "cosmetic state that tolerates staleness" pattern the
+// panel already uses for hover rects, so a stale offset left over from a
+// shorter list never dangles past the new bounds) and the mouse-wheel
+// handler in ui.go.
+func clampPanelTodosScrollOffset(offset int, plan sessionPanelPlan) int {
+	maxOffset := max(0, plan.todosContentRows-plan.todosViewportRows)
+	return max(0, min(offset, maxOffset))
+}
+
 // drawSessionPanel paints the merged panel: threads blocks, then the todos
 // header (plus list when expanded and budget allows), then the queue tail
 // — all from sessionPanelPlan(area.Dy()), so it never paints a different
@@ -637,6 +706,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	m.panelDelegationRects = nil
 	m.panelDelegations = nil
 	m.panelTodosHeaderRect = uv.Rectangle{}
+	m.panelTodosListRect = uv.Rectangle{}
 	if area.Dy() <= 0 || area.Dx() <= 0 {
 		return
 	}
@@ -644,7 +714,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	plan := m.sessionPanelPlan(area.Dy())
 	t := m.com.Styles
 	width := area.Dx()
-	_, _, todosHeaderRect := sessionPanelRowLayout(area, plan)
+	_, _, todosHeaderRect, todosListRect := sessionPanelRowLayout(area, plan)
 	row := area
 	row.Max.Y = row.Min.Y
 
@@ -676,27 +746,47 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		}
 		uv.NewStyledString(headerStyle.Render(ansi.Truncate(header, width, "…"))).Draw(scr, headerRow)
 		m.panelTodosHeaderRect = headerRow
+		m.panelTodosListRect = todosListRect
 		row.Min.Y++
 		row.Max.Y = row.Min.Y
 
-		// plan.todosInProgress/todosPending/todosDone are already the right
-		// rows for the current state — the full in-progress+pending+
-		// completed split when expanded, or just the always-visible
-		// in-progress subset when collapsed (sessionPanelPlan's
-		// "collapsing is never total" rule) — so draw them unconditionally
-		// rather than re-gating on todosExpanded here.
-		{
-			inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
-			if m.todoIsSpinning {
-				inProgressIcon = m.todoSpinner.View()
+		// The section's own row list — in-progress, then pending, then
+		// completed (sessionPanelTodosContent) — windowed by the scroll
+		// offset rather than truncated: no todo is ever silently
+		// unreachable, only scrolled out of the currently-painted rows.
+		// Collapsed mode is never scrollable (todosViewportRows ==
+		// todosContentRows == len(todosInProgress) there), so offset is
+		// always 0 and this paints exactly what it always has.
+		offset := clampPanelTodosScrollOffset(m.panelTodosScrollOffset, plan)
+		m.panelTodosScrollOffset = offset
+		all := sessionPanelTodosContent(plan)
+		end := min(len(all), offset+plan.todosViewportRows)
+
+		listWidth := width
+		if plan.todosScrollable {
+			listWidth = max(0, width-1) // reserve the right column for the scrollbar.
+		}
+
+		inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
+		if m.todoIsSpinning {
+			inProgressIcon = m.todoSpinner.View()
+		}
+		for _, todo := range all[offset:end] {
+			if row.Min.Y >= area.Max.Y {
+				break
 			}
-			for _, group := range [][]session.Todo{plan.todosInProgress, plan.todosPending, plan.todosDone} {
-				for _, todo := range group {
-					if row.Min.Y >= area.Max.Y {
-						break
-					}
-					row.Min.Y = drawPanelLine(scr, area, row.Min.Y, renderSessionTodoLine(todo, inProgressIcon, t, width))
+			listRow := uv.Rectangle{Min: area.Min, Max: uv.Position{X: area.Min.X + listWidth, Y: area.Max.Y}}
+			row.Min.Y = drawPanelLine(scr, listRow, row.Min.Y, renderSessionTodoLine(todo, inProgressIcon, t, listWidth))
+		}
+
+		if plan.todosScrollable {
+			sb := common.Scrollbar(t, plan.todosViewportRows, plan.todosContentRows, plan.todosViewportRows, offset)
+			if sb != "" {
+				scrollbarArea := uv.Rectangle{
+					Min: uv.Position{X: area.Max.X - 1, Y: todosListRect.Min.Y},
+					Max: uv.Position{X: area.Max.X, Y: todosListRect.Min.Y + plan.todosViewportRows},
 				}
+				uv.NewStyledString(sb).Draw(scr, scrollbarArea)
 			}
 		}
 	}
@@ -766,6 +856,10 @@ func (m *UI) toggleTodosExpanded() tea.Cmd {
 		return nil
 	}
 	m.panel.expanded = !m.panel.expanded
+	// A fresh expand always starts scrolled to the top (in-progress rows
+	// first) rather than resuming wherever a previous expand left off,
+	// which would be surprising after the list has likely changed shape.
+	m.panelTodosScrollOffset = 0
 	m.updateLayoutAndSize()
 
 	// Follow scroll if enabled, same as the old togglePillsExpanded — this

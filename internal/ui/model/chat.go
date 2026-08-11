@@ -93,6 +93,23 @@ type Chat struct {
 	list     *list.List
 	idInxMap map[string]int // Map of message IDs to their indices in the list
 
+	// delegationContainers caches the top-level nested-tool-container items
+	// (agent/agentic_fetch delegations) — the candidate set RunningDelegations
+	// filters by live Finished/Status. Container items are a small, bounded
+	// fraction of a long session's history, so re-scanning just this cached
+	// subset on every RunningDelegations call — instead of the full list —
+	// is what keeps the session panel's draw/tick path cheap even on
+	// thousand-message sessions. delegationContainersDirty is set whenever
+	// list membership changes (SetMessages/AppendMessages/RemoveMessage,
+	// the only three ways a container can appear or disappear); a
+	// delegation's own finish/cancel is deliberately NOT tracked here —
+	// RunningDelegations re-checks Finished/Status live against the cached
+	// candidates on every call, so the cache can never go stale on that
+	// axis, only ever mean "re-scan the whole list to find the candidates
+	// again."
+	delegationContainers      []chat.ToolMessageItem
+	delegationContainersDirty bool
+
 	// Animation visibility optimization: track animations paused due to items
 	// being scrolled out of view. When items become visible again, their
 	// animations are restarted.
@@ -464,6 +481,7 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 		items[i] = msg
 	}
 	m.list.SetItems(items...)
+	m.delegationContainersDirty = true
 	m.ScrollToBottom()
 	return nil
 }
@@ -483,6 +501,7 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 		items[i] = msg
 	}
 	m.list.AppendItems(items...)
+	m.delegationContainersDirty = true
 }
 
 // UpdateNestedToolIDs updates the ID map for nested tools within a container.
@@ -811,6 +830,7 @@ func (m *Chat) ClearMessages() {
 	m.pausedAnimations = make(map[string]struct{})
 	m.scrollbarVisible = false
 	m.list.SetItems()
+	m.delegationContainersDirty = true
 	m.ClearMouse()
 }
 
@@ -823,6 +843,7 @@ func (m *Chat) RemoveMessage(id string) {
 
 	// Remove from list
 	m.list.RemoveItem(idx)
+	m.delegationContainersDirty = true
 
 	// Remove from index map
 	delete(m.idInxMap, id)
@@ -932,7 +953,27 @@ func (m *Chat) NestedToolContainerRefs() []childSessionRef {
 // the existing ChildSessionTokenTracker/ChildSessionTodoTracker/
 // AddNestedTool live-update path.
 func (m *Chat) RunningDelegations() []chat.ToolMessageItem {
+	m.refreshDelegationContainers()
 	var running []chat.ToolMessageItem
+	for _, toolItem := range m.delegationContainers {
+		if toolItem.ToolCall().Finished || toolItem.Status() == chat.ToolStatusCanceled {
+			continue
+		}
+		running = append(running, toolItem)
+	}
+	return running
+}
+
+// refreshDelegationContainers rebuilds delegationContainers by scanning the
+// full list, but only when membership has actually changed since the last
+// call (delegationContainersDirty) — the O(list length) work RunningDelegations
+// used to redo on every call, now paid once per mutation instead of once
+// per draw/tick.
+func (m *Chat) refreshDelegationContainers() {
+	if !m.delegationContainersDirty {
+		return
+	}
+	m.delegationContainers = m.delegationContainers[:0]
 	for i := range m.list.Len() {
 		item := m.list.ItemAt(i)
 		toolItem, isTool := item.(chat.ToolMessageItem)
@@ -942,12 +983,9 @@ func (m *Chat) RunningDelegations() []chat.ToolMessageItem {
 		if _, isContainer := item.(chat.NestedToolContainer); !isContainer {
 			continue
 		}
-		if toolItem.ToolCall().Finished || toolItem.Status() == chat.ToolStatusCanceled {
-			continue
-		}
-		running = append(running, toolItem)
+		m.delegationContainers = append(m.delegationContainers, toolItem)
 	}
-	return running
+	m.delegationContainersDirty = false
 }
 
 // ToolStepCount returns the number of top-level tool-call items in the

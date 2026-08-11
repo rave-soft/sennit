@@ -110,11 +110,13 @@ func TestSessionPanelPlan_FinishedDelegationLeavesPanel(t *testing.T) {
 	require.Contains(t, out, "Fixed it.", "collapsed summary previews the result")
 }
 
-// TestSessionPanelPlan_ShedPriority_ThreadsThenDelegationsThenTodosActiveThenQueueThenTodosDone
+// TestSessionPanelPlan_ShedPriority_ThreadsThenDelegationsThenTodosViewportThenQueue
 // covers the full shedding priority order once delegations are in the mix:
-// threads > delegations > todos-in-progress (never dropped while the
-// section is visible at all) > queue > todos-done.
-func TestSessionPanelPlan_ShedPriority_ThreadsThenDelegationsThenTodosActiveThenQueueThenTodosDone(t *testing.T) {
+// threads > delegations > todos-in-progress (the viewport floor, never
+// shrunk below it) > todos pending/done (windowed via todosViewportRows,
+// never dropped from the plan) > queue > delegations row budget > threads
+// row budget.
+func TestSessionPanelPlan_ShedPriority_ThreadsThenDelegationsThenTodosViewportThenQueue(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
@@ -125,8 +127,8 @@ func TestSessionPanelPlan_ShedPriority_ThreadsThenDelegationsThenTodosActiveThen
 	u.chat.SetMessages(item) // 2 rows
 	u.panel.expanded = true
 	u.session.Todos = []session.Todo{
-		{Status: session.TodoStatusInProgress, Content: "in flight"}, // 1 row, always
-		{Status: session.TodoStatusCompleted, Content: "done"},       // 1 row, expanded-only, sheds first
+		{Status: session.TodoStatusInProgress, Content: "in flight"}, // 1 row, the viewport floor
+		{Status: session.TodoStatusCompleted, Content: "done"},       // 1 row, expanded-only, windows first
 	}
 	u.wsCache.promptQueueItems = []string{"q1"} // 1 row
 
@@ -135,21 +137,24 @@ func TestSessionPanelPlan_ShedPriority_ThreadsThenDelegationsThenTodosActiveThen
 	require.Equal(t, 8, full.totalRows)
 	require.Len(t, full.delegations, 1)
 
-	// Budget 7: exactly enough to drop the completed todo row and nothing else.
+	// Budget 7: exactly enough to shrink the todos viewport by one row
+	// (hiding, not dropping, the completed todo) and nothing else.
 	p := u.sessionPanelPlan(7)
 	require.Equal(t, 2, p.threadsRows, "threads must not shrink")
 	require.Len(t, p.delegations, 1, "delegations must not shrink yet")
-	require.Empty(t, p.todosDone, "completed todos are dropped first")
+	require.Len(t, p.todosDone, 1, "completed todos are never dropped from the plan")
 	require.Len(t, p.todosInProgress, 1)
+	require.Equal(t, 1, p.todosViewportRows, "viewport shrinks to the in-progress row only")
+	require.True(t, p.todosScrollable)
 	require.Len(t, p.queue, 1, "queue still untouched")
 
-	// Budget 5: tight enough to also truncate the queue, but threads and
-	// delegations still hold their full rows — todos-in-progress never
-	// drops while the section is visible.
+	// Budget 5: todos viewport is already at its in-progress floor, so the
+	// queue is truncated next, before delegations/threads shrink.
 	p = u.sessionPanelPlan(5)
 	require.Equal(t, 2, p.threadsRows)
 	require.Len(t, p.delegations, 1)
 	require.Len(t, p.todosInProgress, 1, "in-progress todos are never shed while the section stays visible")
+	require.Equal(t, 1, p.todosViewportRows)
 	require.Empty(t, p.queue, "queue truncated before delegations shrink")
 
 	// Budget 4: tight enough to also shrink delegations, but threads still
@@ -157,4 +162,5 @@ func TestSessionPanelPlan_ShedPriority_ThreadsThenDelegationsThenTodosActiveThen
 	p = u.sessionPanelPlan(4)
 	require.Equal(t, 2, p.threadsRows, "threads are the last resort to shrink")
 	require.Less(t, p.delegationsRows, 2, "delegations shrink before threads")
+	require.Len(t, p.todosDone, 1, "completed todos still never dropped from the plan")
 }
