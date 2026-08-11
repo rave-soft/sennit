@@ -108,7 +108,14 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	dataDir, _ := cmd.Flags().GetString("data-dir")
 	ctx := cmd.Context()
 
-	cfg, err := config.Init("", dataDir, false)
+	// Resolve the actual cwd (the --cwd flag, or os.Getwd()) the same way
+	// doctor.go/stat.go do — an empty-string workingDir would make the
+	// session service filter by project_path = "" and list nothing.
+	cwd, err := ResolveCwd(cmd)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cfg, err := config.Init(cwd, dataDir, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
