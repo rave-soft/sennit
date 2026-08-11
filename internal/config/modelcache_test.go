@@ -70,3 +70,32 @@ func TestModelCache_ConcurrentAccess(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Equal(t, "model", got[0].ID)
 }
+
+func TestModelCache_RefreshKeepsContextWindow(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	globalDataPath := filepath.Join(dir, "braid.json")
+
+	saveCachedModels(globalDataPath, "custom", []catwalk.Model{
+		{ID: "gpt-x", ContextWindow: 1050000, DefaultMaxTokens: 128000, CostPer1MIn: 2, CostPer1MOut: 8},
+		{ID: "gone", ContextWindow: 4096},
+	})
+
+	// A refresh from a plain /models endpoint carries no metadata: cached
+	// context window, token limits, and pricing must survive; a non-zero
+	// fresh value wins over the cached one.
+	saveCachedModels(globalDataPath, "custom", []catwalk.Model{
+		{ID: "gpt-x", CostPer1MIn: 3},
+		{ID: "gpt-y", ContextWindow: 8192},
+	})
+
+	got, ok := loadCachedModels(globalDataPath, "custom")
+	require.True(t, ok)
+	require.Len(t, got, 2)
+	require.Equal(t, "gpt-x", got[0].ID)
+	require.Equal(t, int64(1050000), got[0].ContextWindow)
+	require.Equal(t, int64(128000), got[0].DefaultMaxTokens)
+	require.Equal(t, float64(3), got[0].CostPer1MIn)
+	require.Equal(t, float64(8), got[0].CostPer1MOut)
+	require.Equal(t, int64(8192), got[1].ContextWindow)
+}

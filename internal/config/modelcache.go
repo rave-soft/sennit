@@ -95,6 +95,48 @@ func loadCachedModels(globalDataPath, providerID string) ([]catwalk.Model, bool)
 	return models, found
 }
 
+// mergeCachedModelMetadata fills metadata gaps in freshly discovered models
+// from a previously cached list. A plain OpenAI-compatible /models response
+// carries no context window, token limits, or pricing, so a refresh would
+// otherwise wipe values that were enriched earlier or set by hand in the
+// cache. For each fresh model whose numeric metadata is zero, the cached
+// entry with the same ID (when present) supplies the value; a non-zero
+// fresh value always wins.
+func mergeCachedModelMetadata(cached, fresh []catwalk.Model) []catwalk.Model {
+	if len(cached) == 0 {
+		return fresh
+	}
+	byID := make(map[string]catwalk.Model, len(cached))
+	for _, m := range cached {
+		byID[m.ID] = m
+	}
+	for i := range fresh {
+		old, ok := byID[fresh[i].ID]
+		if !ok {
+			continue
+		}
+		if fresh[i].ContextWindow == 0 {
+			fresh[i].ContextWindow = old.ContextWindow
+		}
+		if fresh[i].DefaultMaxTokens == 0 {
+			fresh[i].DefaultMaxTokens = old.DefaultMaxTokens
+		}
+		if fresh[i].CostPer1MIn == 0 {
+			fresh[i].CostPer1MIn = old.CostPer1MIn
+		}
+		if fresh[i].CostPer1MOut == 0 {
+			fresh[i].CostPer1MOut = old.CostPer1MOut
+		}
+		if fresh[i].CostPer1MInCached == 0 {
+			fresh[i].CostPer1MInCached = old.CostPer1MInCached
+		}
+		if fresh[i].CostPer1MOutCached == 0 {
+			fresh[i].CostPer1MOutCached = old.CostPer1MOutCached
+		}
+	}
+	return fresh
+}
+
 // saveCachedModels upserts the discovered models for providerID into the
 // global model-discovery cache. This is best-effort persistence, matching
 // how applyPendingDiskActions treats config writes: a failure is logged and
@@ -104,6 +146,9 @@ func saveCachedModels(globalDataPath, providerID string, models []catwalk.Model)
 	if globalDataPath == "" {
 		// See loadCachedModels: no anchor path means no cache.
 		return
+	}
+	if cached, ok := loadCachedModels(globalDataPath, providerID); ok {
+		models = mergeCachedModelMetadata(cached, models)
 	}
 	modelsJSON, err := json.Marshal(models)
 	if err != nil {
@@ -134,6 +179,9 @@ func saveCachedModels(globalDataPath, providerID string, models []catwalk.Model)
 func (s *ConfigStore) SaveCachedProviderModels(providerID string, models []catwalk.Model) error {
 	if s.globalDataPath == "" {
 		return errors.New("no global data path configured for this store")
+	}
+	if cached, ok := loadCachedModels(s.globalDataPath, providerID); ok {
+		models = mergeCachedModelMetadata(cached, models)
 	}
 	modelsJSON, err := json.Marshal(models)
 	if err != nil {
