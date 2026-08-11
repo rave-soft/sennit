@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 // seedLegacyProjectDB creates a per-project legacy database (as it would
 // have existed before every project moved to one shared database) with
-// one session, one message, one file, and one thread.
+// one session, one message, one file, one read file, and one thread.
 func seedLegacyProjectDB(t *testing.T, projectDir string) {
 	t.Helper()
 	ctx := context.Background()
@@ -44,6 +45,9 @@ func seedLegacyProjectDB(t *testing.T, projectDir string) {
 	})
 	require.NoError(t, err)
 
+	_, err = conn.ExecContext(ctx, `INSERT INTO read_files (session_id, path, read_at) VALUES (?, ?, ?)`, "legacy-session-1", "foo.go", 100)
+	require.NoError(t, err)
+
 	_, err = q.CreateThread(ctx, CreateThreadParams{
 		ID:           "legacy-thread-1",
 		Name:         "legacy-thread",
@@ -51,8 +55,12 @@ func seedLegacyProjectDB(t *testing.T, projectDir string) {
 		BaseBranch:   "main",
 		Branch:       "thread/legacy-thread",
 		WorktreePath: "/tmp/legacy-thread",
+		SessionID:    "legacy-session-1",
 		Status:       "running",
 	})
+	require.NoError(t, err)
+
+	_, err = conn.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, 100, "legacy-session-1")
 	require.NoError(t, err)
 }
 
@@ -86,6 +94,8 @@ func TestImportLegacyProjectDB(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, projectPath, sess.ProjectPath)
 	require.Equal(t, "legacy session", sess.Title)
+	require.EqualValues(t, 1, sess.MessageCount)
+	require.EqualValues(t, 100, sess.UpdatedAt)
 
 	msgs, err := destQ.ListMessagesBySession(ctx, "legacy-session-1")
 	require.NoError(t, err)
@@ -102,6 +112,12 @@ func TestImportLegacyProjectDB(t *testing.T) {
 	require.Equal(t, projectPath, thread.ProjectPath)
 	require.Equal(t, "legacy-thread", thread.Name)
 
+	_, err = dest.ExecContext(ctx, `UPDATE sessions SET title = ? WHERE id = ?`, "updated", "legacy-session-1")
+	require.NoError(t, err)
+	sess, err = destQ.GetSessionByID(ctx, "legacy-session-1")
+	require.NoError(t, err)
+	require.Greater(t, sess.UpdatedAt, int64(100))
+
 	// Second call must be a no-op: the legacy file is gone, so nothing to
 	// import, and no duplicate rows should appear.
 	err = ImportLegacyProjectDB(ctx, projectDir, projectPath, dest)
@@ -110,6 +126,149 @@ func TestImportLegacyProjectDB(t *testing.T) {
 	msgs, err = destQ.ListMessagesBySession(ctx, "legacy-session-1")
 	require.NoError(t, err)
 	require.Len(t, msgs, 1, "re-running the import must not duplicate rows")
+}
+
+func TestImportLegacyRows_SkipsDependentsOfConflictingSession(t *testing.T) {
+	t.Cleanup(ResetPool)
+	ctx := context.Background()
+	legacyDir := t.TempDir()
+	destDir := t.TempDir()
+	seedLegacyProjectDB(t, legacyDir)
+
+	legacy, err := Connect(ctx, legacyDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(legacyDir) })
+	dest, err := Connect(ctx, destDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(destDir) })
+
+	_, err = New(dest).CreateSession(ctx, CreateSessionParams{ID: "legacy-session-1", Title: "foreign session"})
+	require.NoError(t, err)
+
+	counts, err := importLegacyRows(ctx, legacy, dest, "/legacy-project")
+	require.NoError(t, err)
+	require.Equal(t, legacyImportCounts{
+		sessionsSkipped:  1,
+		messagesSkipped:  1,
+		filesSkipped:     1,
+		readFilesSkipped: 1,
+		threadsSkipped:   1,
+	}, counts)
+
+	q := New(dest)
+	session, err := q.GetSessionByID(ctx, "legacy-session-1")
+	require.NoError(t, err)
+	require.Equal(t, "foreign session", session.Title)
+	_, err = q.GetMessage(ctx, "legacy-message-1")
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	_, err = q.GetFile(ctx, "legacy-file-1")
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	_, err = q.GetThread(ctx, "legacy-thread-1")
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	var readFiles int
+	require.NoError(t, dest.QueryRowContext(ctx, `SELECT COUNT(*) FROM read_files WHERE session_id = ?`, "legacy-session-1").Scan(&readFiles))
+	require.Zero(t, readFiles)
+}
+
+// An orphaned child row (session_id referencing no session — e.g. left by
+// an old crash with foreign keys off) must be skipped like a conflict, not
+// abort the import: aborting would rename nothing, so every startup would
+// retry the import and fail identically forever, leaving the user's whole
+// legacy history invisible.
+func TestImportLegacyRows_SkipsOrphanedChildRows(t *testing.T) {
+	t.Cleanup(ResetPool)
+	ctx := context.Background()
+	legacyDir := t.TempDir()
+	destDir := t.TempDir()
+	seedLegacyProjectDB(t, legacyDir)
+
+	legacy, err := Connect(ctx, legacyDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(legacyDir) })
+	_, err = legacy.ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	_, err = legacy.ExecContext(ctx, `INSERT INTO messages (id, session_id, role, parts, created_at, updated_at, is_summary_message) VALUES (?, ?, ?, ?, ?, ?, ?)`, "bad-message", "missing-session", "user", "[]", 100, 100, 0)
+	require.NoError(t, err)
+	_, err = legacy.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+
+	dest, err := Connect(ctx, destDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(destDir) })
+
+	counts, err := importLegacyRows(ctx, legacy, dest, "/legacy-project")
+	require.NoError(t, err, "an orphan row must not abort the import")
+	require.Equal(t, 1, counts.messagesImported)
+	require.Equal(t, 1, counts.messagesSkipped, "the orphan message must be counted as skipped")
+
+	destQ := New(dest)
+	sess, err := destQ.GetSessionByID(ctx, "legacy-session-1")
+	require.NoError(t, err, "the healthy session must survive the orphan")
+	require.EqualValues(t, 1, sess.MessageCount)
+	_, err = destQ.GetMessage(ctx, "bad-message")
+	require.ErrorIs(t, err, sql.ErrNoRows)
+}
+
+// A session with no messages never has its updated_at bumped by the
+// message-count trigger cascade, so the restore pass sees an unchanged
+// value. It must skip such rows: an identity UPDATE matches the
+// updated_at trigger's WHEN NEW = OLD clause and would rewrite the
+// legacy timestamp to now — floating a years-old empty session to the
+// top of the session list and past gc retention.
+func TestImportLegacyRows_PreservesUpdatedAtOfEmptySession(t *testing.T) {
+	t.Cleanup(ResetPool)
+	ctx := context.Background()
+	legacyDir := t.TempDir()
+	destDir := t.TempDir()
+
+	legacy, err := Connect(ctx, legacyDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(legacyDir) })
+	q := New(legacy)
+	_, err = q.CreateSession(ctx, CreateSessionParams{ID: "empty-session", Title: "no messages"})
+	require.NoError(t, err)
+	_, err = legacy.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, 100, "empty-session")
+	require.NoError(t, err)
+
+	dest, err := Connect(ctx, destDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(destDir) })
+
+	_, err = importLegacyRows(ctx, legacy, dest, "/legacy-project")
+	require.NoError(t, err)
+
+	sess, err := New(dest).GetSessionByID(ctx, "empty-session")
+	require.NoError(t, err)
+	require.EqualValues(t, 0, sess.MessageCount)
+	require.EqualValues(t, 100, sess.UpdatedAt, "empty session must keep its legacy updated_at")
+}
+
+func TestImportLegacyRows_SkipsUniqueChildConflict(t *testing.T) {
+	t.Cleanup(ResetPool)
+	ctx := context.Background()
+	legacyDir := t.TempDir()
+	destDir := t.TempDir()
+	seedLegacyProjectDB(t, legacyDir)
+
+	legacy, err := Connect(ctx, legacyDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(legacyDir) })
+	dest, err := Connect(ctx, destDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(destDir) })
+	q := New(dest)
+	_, err = q.CreateSession(ctx, CreateSessionParams{ID: "other-session", Title: "other"})
+	require.NoError(t, err)
+	_, err = q.CreateMessage(ctx, CreateMessageParams{ID: "legacy-message-1", SessionID: "other-session", Role: "user", Parts: "[]"})
+	require.NoError(t, err)
+
+	counts, err := importLegacyRows(ctx, legacy, dest, "/legacy-project")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, counts.sessionsImported)
+	require.EqualValues(t, 1, counts.messagesSkipped)
+	session, err := q.GetSessionByID(ctx, "legacy-session-1")
+	require.NoError(t, err)
+	require.Zero(t, session.MessageCount)
 }
 
 func TestImportLegacyProjectDB_NoLegacyFile(t *testing.T) {

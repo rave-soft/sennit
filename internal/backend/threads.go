@@ -34,8 +34,6 @@ func (b *Backend) attachServerThreads(ctx context.Context, a *app.App, path stri
 		slog.Warn("Failed to open thread store, threads unavailable", "error", err)
 		return
 	}
-	a.AddCleanup(func(context.Context) error { return db.Release(dbDir) })
-
 	worktreeDir := ""
 	if opts := a.Config().Options.Threads; opts != nil {
 		worktreeDir = opts.WorktreeDir
@@ -46,6 +44,14 @@ func (b *Backend) attachServerThreads(ctx context.Context, a *app.App, path stri
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,
 		Context:     ctx,
+	})
+	a.AddCleanup(func(context.Context) error {
+		// App cleanup functions run concurrently. Do not close this DB
+		// connection until the manager has joined every DB-writing worker.
+		if err := mgr.Shutdown(context.Background()); err != nil {
+			return err
+		}
+		return db.Release(dbDir)
 	})
 	if err := mgr.Recover(ctx); err != nil {
 		slog.Warn("Failed to recover thread state", "error", err)

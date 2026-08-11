@@ -390,8 +390,8 @@ type UI struct {
 	sessionsDialogGen     uint64
 
 	// Todo spinner
-	todoSpinner    spinner.Model
-	todoIsSpinning bool
+	panelSpinner    spinner.Model
+	panelIsSpinning bool
 
 	// mouse highlighting related state
 	lastClickTime time.Time
@@ -441,7 +441,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		ScrollbarTrack: com.Styles.Dialog.ScrollbarTrack,
 	})
 
-	todoSpinner := spinner.New(
+	panelSpinner := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
 		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
 	)
@@ -476,7 +476,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		},
 		chat:                   ch,
 		header:                 header,
-		todoSpinner:            todoSpinner,
+		panelSpinner:           panelSpinner,
 		lspStates:              make(map[string]workspace.LSPClientInfo),
 		mcpStates:              make(map[string]mcp.ClientInfo),
 		notifyBackend:          notification.NoopBackend{},
@@ -901,12 +901,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.runShellCommandInternal(m.editor.pendingBangCommand, true))
 			m.editor.pendingBangCommand = ""
 		}
+		if cmd := m.syncPanelSpinner(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if hasInProgressTodo(m.session.Todos) {
-			// only start spinner if there is an in-progress todo
-			if m.isAgentBusy() {
-				m.todoIsSpinning = true
-				cmds = append(cmds, m.todoSpinner.Tick)
-			}
 			m.updateLayoutAndSize()
 		}
 		// Reload prompt history for the new session.
@@ -973,7 +971,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
-			prevHasInProgress := hasInProgressTodo(m.session.Todos)
 			prevTodosLen := len(m.session.Todos)
 			// mainRect.Dy() as of the last layout pass — main and panel
 			// together reconstruct it, since generateLayout splits mainRect
@@ -984,9 +981,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			available := m.layout.main.Dy() + m.layout.panel.Dy()
 			prevPanelHeight := m.sessionPanelHeight(available)
 			m.session = &msg.Payload
-			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
-				m.todoIsSpinning = true
-				cmds = append(cmds, m.todoSpinner.Tick)
+			// syncPanelSpinner is idempotent and self-guarding — no need
+			// to pre-compute the in-progress edge here.
+			if cmd := m.syncPanelSpinner(); cmd != nil {
+				cmds = append(cmds, cmd)
 			}
 			// The session panel reserves vertical space that the chat area
 			// must yield. Recompute the layout whenever that footprint
@@ -1056,14 +1054,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case pubsub.DeletedEvent:
 			m.chat.RemoveMessage(msg.Payload.ID)
 		}
-		// start the spinner if there is a new message
-		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
-			m.todoIsSpinning = true
-			cmds = append(cmds, m.todoSpinner.Tick)
-		}
-		// stop the spinner if the agent is not busy anymore
-		if m.todoIsSpinning && !m.isAgentBusy() {
-			m.todoIsSpinning = false
+		// Reconcile the spinner with the new message's implications
+		// (a turn starting or ending changes what's live).
+		if cmd := m.syncPanelSpinner(); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
@@ -1522,9 +1516,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
-		if m.state == uiChat && m.hasSession() && hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
+		// Stop the tick loop when nothing live is left (or the chat screen
+		// isn't showing); syncPanelSpinner re-arms it on the next relevant
+		// event. Letting the loop die and be restarted beats ticking
+		// forever behind an idle screen.
+		if m.panelIsSpinning && (m.state != uiChat || !m.panelSpinnerWanted()) {
+			m.panelIsSpinning = false
+		}
+		if m.panelIsSpinning {
 			var cmd tea.Cmd
-			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
+			m.panelSpinner, cmd = m.panelSpinner.Update(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -1629,19 +1630,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Root fans this to both screens (see root.go); the main screen
 		// only cares about keeping the header badge's count current.
 		m.threadIndicator.applyEvent(msg)
-		if cmd := m.threadIndicator.staleRefreshCmd(m.com); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 		m.threadsDock.applyThreadEvent(msg)
-		if cmd := m.threadsDock.staleThreadsDockRefreshCmd(m.com, m.state == uiChat); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		visible, _ := visibleDockThreads(activeDockThreads(m.threadsDock.threads))
-		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
+		cmds = append(cmds, m.threadViewsRefreshCmds()...)
 		// A thread's edge transition into a terminal status (merged,
 		// failed, ...) gets a toast — see thread_completion.go for why a
 		// toast rather than a persisted chat entry.
 		if cmd := m.notifyThreadCompletion(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		// A thread starting or finishing changes whether the panel has
+		// live work to animate.
+		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case threadIndicatorLoadedMsg:
@@ -1650,6 +1649,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case threadsDockLoadedMsg:
 		if cmd := m.threadsDock.applyThreadsDockLoaded(m.com, msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		// The freshly listed threads may introduce (or retire) live work.
+		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case threadDockActivityLoadedMsg:
@@ -2725,7 +2728,6 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 		}
 
 		m.setState(uiLanding, uiFocusEditor)
-		m.com.Config().SetupAgents()
 
 		cmds = append(cmds, m.initAgentAndReportModel(true, model))
 
@@ -2805,7 +2807,6 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	if isOnboarding {
 		m.setState(uiLanding, uiFocusEditor)
-		m.com.Config().SetupAgents()
 	}
 
 	cmds = append(cmds, m.initAgentAndReportModel(isOnboarding, msg.Model))
@@ -3587,6 +3588,9 @@ func (m *UI) View() tea.View {
 	}
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = "braid " + home.Short(m.com.Workspace.WorkingDir())
+	if m.hasSession() && m.session.Title != "" {
+		v.WindowTitle += " — " + m.session.Title
+	}
 
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
@@ -4785,9 +4789,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.com.Workspace.AgentCancel(m.session.ID)
 		// Stop the spinning todo indicator and drop the memoized busy
 		// state the cancel just changed; the session panel reads
-		// m.todoIsSpinning fresh on every draw, and again once the
+		// m.panelIsSpinning fresh on every draw, and again once the
 		// off-thread refresh (and the agent's own events) land.
-		m.todoIsSpinning = false
+		m.panelIsSpinning = false
 		m.invalidateBusyCaches()
 		return m.dispatchBusyRefresh()
 	}

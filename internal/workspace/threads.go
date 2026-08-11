@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/braid/internal/log"
 	"github.com/rave-soft/braid/internal/proto"
@@ -228,13 +230,13 @@ func (w *ClientWorkspace) RemoveThread(ctx context.Context, id string, opts prot
 }
 
 // AttachThread connects to a thread's own backend workspace using a
-// DERIVED client identity ("<parent-client-id>/thread/<thread-id>"),
+// separate client identity,
 // never the parent ClientWorkspace's own client ID. This matters
 // because the returned Workspace's detach func calls Shutdown, which
 // retires the client (or deletes the workspace on an older server) —
 // if it shared the parent's client ID, detaching an attached thread
 // view would tear down the PARENT workspace's own claim too. The
-// derived client shares the same underlying *http.Client/connection
+// client shares the same underlying *http.Client/connection
 // pool (see client.Client.WithClientID), so this costs nothing beyond
 // one extra small struct.
 func (w *ClientWorkspace) AttachThread(ctx context.Context, id string) (Workspace, func(), error) {
@@ -245,7 +247,7 @@ func (w *ClientWorkspace) AttachThread(ctx context.Context, id string) (Workspac
 	if st.WorkspaceID == "" {
 		return nil, nil, fmt.Errorf("thread %q is not currently running", id)
 	}
-	derived := w.client.WithClientID(w.client.ClientID() + "/thread/" + id)
+	derived := w.client.WithClientID(uuid.NewString())
 	ws, err := derived.GetWorkspace(ctx, st.WorkspaceID)
 	if err != nil {
 		return nil, nil, err

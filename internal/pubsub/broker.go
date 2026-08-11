@@ -138,6 +138,7 @@ type Broker[T any] struct {
 	subs                 map[*subscription[T]]struct{}
 	mu                   sync.RWMutex
 	done                 chan struct{}
+	shutdownOnce         sync.Once
 	subCount             int
 	channelBufferSize    int
 	mustDeliverTimeout   time.Duration
@@ -172,29 +173,27 @@ func (b *Broker[T]) SetMustDeliverTimeout(d time.Duration) {
 }
 
 func (b *Broker[T]) Shutdown() {
-	select {
-	case <-b.done: // Already closed
-		return
-	default:
+	b.shutdownOnce.Do(func() {
 		close(b.done)
-	}
 
-	b.mu.Lock()
-	subs := make([]*subscription[T], 0, len(b.subs))
-	for sub := range b.subs {
-		subs = append(subs, sub)
-	}
-	b.subs = make(map[*subscription[T]]struct{})
-	b.subCount = 0
-	b.mu.Unlock()
+		b.mu.Lock()
+		subs := make([]*subscription[T], 0, len(b.subs))
+		for sub := range b.subs {
+			subs = append(subs, sub)
+		}
+		b.subs = make(map[*subscription[T]]struct{})
+		b.subCount = 0
+		b.mu.Unlock()
 
-	// Close outside the map lock: close() may briefly wait for an
-	// in-flight send to that specific subscription to finish, and doing
-	// that under b.mu would once again let one slow subscriber stall
-	// everyone else — the exact problem this refactor removes.
-	for _, sub := range subs {
-		sub.close()
-	}
+		// Close outside the map lock: close() may briefly wait for an
+		// in-flight send to that specific subscription to finish, and
+		// doing that under b.mu would once again let one slow
+		// subscriber stall everyone else — the exact problem this
+		// refactor removes.
+		for _, sub := range subs {
+			sub.close()
+		}
+	})
 }
 
 func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {

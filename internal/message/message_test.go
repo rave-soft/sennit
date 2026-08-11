@@ -3,6 +3,7 @@ package message
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,18 @@ type slowUpdateQuerier struct {
 	release   chan struct{}
 	started   chan struct{}
 	startOnce sync.Once
+}
+
+type failingUpdateQuerier struct {
+	db.Querier
+	fail atomic.Bool
+}
+
+func (q *failingUpdateQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) error {
+	if q.fail.Load() {
+		return errors.New("update message failed")
+	}
+	return q.Querier.UpdateMessage(ctx, arg)
 }
 
 func (s *slowUpdateQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) error {
@@ -168,6 +181,134 @@ func TestUpdate_TerminalUpdatesFlushSynchronously(t *testing.T) {
 	got, err := svc.Get(t.Context(), msg.ID)
 	require.NoError(t, err)
 	require.True(t, got.IsFinished())
+}
+
+func TestUpdate_FinishedFlushEvictsPendingState(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t, WithDebounce(time.Hour))
+	impl := svc.(*service)
+	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AppendContent("done")
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+
+	require.NoError(t, svc.Update(t.Context(), msg))
+
+	impl.mu.Lock()
+	_, ok := impl.pending[msg.ID]
+	impl.mu.Unlock()
+	require.False(t, ok, "successful final flush must release its snapshots")
+	require.NoError(t, svc.Flush(t.Context(), msg.ID), "evicted entries are cheap no-ops")
+}
+
+func TestUpdate_StructuralFlushRetainsPendingUntilFinished(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t, WithDebounce(time.Hour))
+	impl := svc.(*service)
+	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AddToolCall(ToolCall{ID: "tc1", Name: "view"})
+
+	require.NoError(t, svc.Update(t.Context(), msg))
+	impl.mu.Lock()
+	_, ok := impl.pending[msg.ID]
+	impl.mu.Unlock()
+	require.True(t, ok, "tool-call structural flush is not a final message flush")
+
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	impl.mu.Lock()
+	_, ok = impl.pending[msg.ID]
+	impl.mu.Unlock()
+	require.False(t, ok)
+}
+
+func TestFlush_WriteErrorRetainsPendingStateForRetry(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := session.NewService(q, conn, "/test/project")
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+	failing := &failingUpdateQuerier{Querier: q}
+	failing.fail.Store(true)
+	svc := NewService(failing, WithDebounce(time.Hour))
+	impl := svc.(*service)
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	require.Error(t, svc.Update(t.Context(), msg))
+	impl.mu.Lock()
+	p := impl.pending[msg.ID]
+	dirty := p != nil && p.dirty
+	impl.mu.Unlock()
+	require.NotNil(t, p)
+	require.True(t, dirty)
+
+	failing.fail.Store(false)
+	require.NoError(t, svc.Flush(t.Context(), msg.ID))
+	impl.mu.Lock()
+	_, ok := impl.pending[msg.ID]
+	impl.mu.Unlock()
+	require.False(t, ok)
+}
+
+func TestUpdate_ConcurrentFinalDeltaIsNotLostDuringFinalWrite(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := session.NewService(q, conn, "/test/project")
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	svc := NewService(slow, WithDebounce(time.Hour))
+	impl := svc.(*service)
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AppendContent("first")
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- svc.Update(t.Context(), msg) }()
+	select {
+	case <-slow.started:
+	case <-time.After(time.Second):
+		t.Fatal("final write never reached UpdateMessage")
+	}
+
+	msg.AppendContent(" second")
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- svc.Update(t.Context(), msg) }()
+	require.Eventually(t, func() bool {
+		impl.mu.Lock()
+		defer impl.mu.Unlock()
+		p := impl.pending[msg.ID]
+		return p != nil && p.dirty
+	}, time.Second, time.Millisecond)
+
+	close(slow.release)
+	require.NoError(t, <-firstDone)
+	require.NoError(t, <-secondDone)
+	got, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, "first second", got.Content().Text)
+	impl.mu.Lock()
+	_, ok := impl.pending[msg.ID]
+	impl.mu.Unlock()
+	require.False(t, ok, "latest final delta should flush before eviction")
 }
 
 func TestUpdate_ToolCallStructuralChangeFlushes(t *testing.T) {

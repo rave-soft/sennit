@@ -56,8 +56,7 @@ func (c *threadIndicatorState) fresh(ttl time.Duration) bool {
 func activeThreadCount(threads []proto.Thread) int {
 	n := 0
 	for _, t := range threads {
-		switch thread.Status(t.Status) {
-		case thread.StatusPending, thread.StatusRunning, thread.StatusMerging:
+		if thread.Status(t.Status).Active() {
 			n++
 		}
 	}
@@ -115,6 +114,12 @@ func (c *threadIndicatorState) applyEvent(_ pubsub.Event[proto.Thread]) {
 // when the memoized count has outlived its TTL.
 func (c *threadIndicatorState) staleRefreshCmd(com *common.Common) tea.Cmd {
 	if c.fresh(threadIndicatorTTL) {
+		return nil
+	}
+	// A fetched zero count stays zero until a thread event invalidates it
+	// (checkedAt is zeroed then) — don't re-poll ListThreads forever for
+	// projects that have no active threads.
+	if c.count == 0 && !c.checkedAt.IsZero() {
 		return nil
 	}
 	return c.dispatchRefresh(com)

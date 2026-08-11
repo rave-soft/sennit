@@ -1,421 +1,380 @@
 # Архитектурное ревью Braid и план рефакторинга
 
-Дата: 2026-08-09. Объём кодовой базы: ~143 000 строк Go, 582 файла.
-Метод: пять параллельных ревью по подсистемам (`agent`, `ui`, `config`+`shellconfig`,
-каркас `app`/`cmd`/`server`/`backend`/`workspace`, сквозные пакеты), сведённые в этот документ.
-Все ссылки вида `файл:строка` актуальны на момент ревью.
+Дата: 2026-08-11. Объём кодовой базы: ~177 000 строк Go (~110k прод + ~68k тестов).
+Метод: пять параллельных ревью по подсистемам (`agent`+`permission`+`hooks`, `ui`,
+`config`+`shellconfig`+`oauth`, каркас `app`/`cmd`/`server`/`backend`/`workspace`/`thread`,
+сквозные пакеты), сведённые в этот документ. Ссылки `файл:строка` актуальны на момент
+ревью (main, `12662b01`).
 
-> **Статус реализации (2026-08-09, коммиты `91688614`…`d06ce1e4`).** Фазы 0–4 плана
-> выполнены: чистка (ф. 1), точечные баги (ф. 2), границы и дедупликация (ф. 3 целиком,
-> включая proto-алиасы, `hostaddr`, supervisor, `AgentRunStream`, роль-интерфейсы),
-> структурные изменения (ф. 4: per-store каталог, `dispatcher`, `runTurn`+репортер,
-> per-workspace MCP/LSP, разрез `configureProviders`, permission-очередь, закрытие
-> автоапрува под-агентов, три порции разбора `UI`). Ссылки `файл:строка` в тексте ниже
-> соответствуют состоянию ДО этих правок. Открытым осталось: перезапись кассет
-> `TestCoderAgent` (нужен LLM-эндпоинт; инфраструктура готова, см. TECHDEBT.md),
-> роутер сообщений вместо 707-строчного `Update` (ждёт teatest-сетки), хуки для
-> инструментов под-агентов, дубль enum в swagger от алиаса `proto.MessageRole`
-> и фаза 5 (отдельные проекты).
+Этот документ заменяет ревью от 2026-08-09. Его план (фазы 0–4) выполнен по существу
+и повторно проверен по коду: dispatcher, per-workspace MCP/LSP, proto-алиасы,
+permission-очередь, закрытие автоапрува под-агентов, разрез `configureProviders`,
+чистка Hyper/catwalk, фиксы csync/pubsub/history/projects/unmarshalParts — всё на месте
+и работает. Ниже — только текущее состояние.
+
+Документ прошёл встречную проверку: замечания сверены с кодом и вшиты в находки
+и план (уточнены фиксы legacy-импорта, gc, thread lifecycle, локов Summarize,
+VCR-режимов; риск ряда задач поднят). Инверсия цен кэша, вокруг которой возникло
+разночтение из-за неинтуитивных имён полей, отдельно перепроверена по полной
+цепочке: см. §3.3.
 
 ---
 
 ## 1. Резюме
 
-Braid — зрелый форк Crush с необычно высокой культурой кода: комментарии объясняют
-«почему», а не «что»; долг зафиксирован в `TECHDEBT.md` с причинами и следующими шагами;
-критичные места (жизненный цикл воркспейсов, OAuth single-flight, дебаунс записи
-сообщений) продуманы всерьёз. На этом фоне выделяются **три системные проблемы**,
-которые порождают большинство частных находок:
+С прошлого ревью кодовая база выросла на ~34k строк: unified session panel, threads
+(strands), todos, единая глобальная БД, `braid gc`, `braid import`, model-cache в SQLite,
+discovery-refresh. Новый код в целом написан по правилам, выведенным из прошлого ревью
+(границы `internal/thread` образцовые, комментарии-обоснования на месте), но три
+системные проблемы сменили состав:
 
-1. **Глобальное состояние процесса против мульти-воркспейсного режима.**
-   MCP, LSP-состояния, skills, каталог провайдеров и env-мутации живут в package-level
-   переменных, при том что `backend` держит N воркспейсов в одном процессе. Следствия:
-   закрытие одного воркспейса глушит MCP-брокер всему серверу, `GetLSPStates(workspaceID)`
-   возвращает чужое состояние, второй воркспейс перезатирает MCP-реестр первого.
+1. **Порча данных при миграции на единую БД.** Legacy-импорт складывает сохранённый
+   `message_count` с числом заново вставленных сообщений (при консистентной
+   legacy-БД и полном импорте получается ×2) и затирает `updated_at` временем
+   импорта у сессий, в которые вставилось хотя бы одно сообщение. Ломается
+   сортировка «последняя сессия», а gc-ретенция отсчитывается от импорта, а не от
+   реальной активности. Существующий тест воспроизводит путь, но не проверяет
+   счётчик и timestamp. Затрагивает обновившихся пользователей с такими сессиями.
 
-2. **Два дублирующих пути исполнения** — in-process и client/server. Копии типов
-   (`proto.Message` ≈ 700 строк ручного зеркала `message.Message`), копии логики
-   (резолв модели, резолв сессии, неинтерактивный прогон) с уже разошедшимся
-   поведением. При этом client/server-режим выключен по умолчанию
-   (`BRAID_CLIENT_SERVER`, `cmd/root.go:216`) — ~15k строк почти не обкатываются.
+2. **Жизненный цикл тредов не закрыт.** В client/server-режиме завершённый тред
+   навсегда держит свой backend-воркспейс (полный `app.App` с MCP/LSP/вотчерами);
+   idle-shutdown демона не срабатывает. У `thread.Manager` нет `Shutdown`, `Recover`
+   при старте затирает running-треды другого процесса (общая БД, а локальный режим
+   не берёт workspace-lock).
 
-3. **Концентрация сложности в god-файлах при отсутствии страховочных тестов.**
-   `ui/model/ui.go` — 4 940 строк (Update на 707), `agent.Run` — 757 строк,
-   `configureProviders` — 290 строк с сетевым I/O под мьютексом записи. Единственный
-   e2e-тест агента (`TestCoderAgent`, 10 сценариев) отключён из-за старых VCR-кассет,
-   e2e-тестов TUI нет вовсе. Крупный рефакторинг сейчас пришлось бы делать вслепую.
+3. **Синхронный I/O вернулся в TUI Update.** Старый пункт 3.12 был закрыт для
+   sessions-диалога, но новые фичи принесли новый: `SupportsThreads()` — это полный
+   `ListThreads` по HTTP, и он зовётся с хвоста **каждого** Update; переключение
+   сессии — N+1 запросов; Enter, `/`, Ctrl+P, конфиг-мутации из диалогов — всё
+   синхронно в теле Update. `UI.Update` вырос с 707 до 919 строк, `ui.go` — до 5 761;
+   teatest-сетки (0.2 прошлого плана) по-прежнему нет.
 
-Отдельно: известный по `TECHDEBT.md` баг «потеря полей провайдера при записи
-OAuth-токена» разобран до корня (см. §3.4) — формулировка в TECHDEBT неточна,
-реальный механизм другой, и чинится он дешевле, чем предполагалось.
-
----
-
-## 2. Карта системы
-
-### Слои и направление зависимостей
-
-```
-cmd ──► workspace ──► client ──► server ──► backend ──► app ──► agent / lsp / mcp / db
-  │         │                                  ▲          ▲
-  └─────────┴──────────────────────────────────┴──────────┘
-                  proto (wire-типы; импортирует message, lsp, config, agent/tools)
-```
-
-Циклов нет, граф ацикличен, но «слипшийся»: `go list -deps ./internal/cmd` даёт все
-внутренние пакеты; TUI транзитивно тянет `server`, `backend`, `swagger`.
-`internal/config` — пакет-хаб: его импортируют почти все подсистемы.
-
-### Крупнейшие подсистемы
-
-| Пакет | Строк | Роль |
-|---|---:|---|
-| `internal/ui` | 44 975 | Bubble Tea v2 TUI (`model`, `dialog`, `chat`, `styles`, …) |
-| `internal/agent` | 25 646 | Цикл агента, координатор, инструменты, MCP |
-| `internal/config` | 11 102 | Загрузка/merge/запись конфига, OAuth refresh, каталог провайдеров |
-| `internal/cmd` | 5 477 | Cobra-команды + supervisor демона + аналитика |
-| `internal/server` | 5 476 | HTTP/h2c поверх unix-сокета, 80 роутов `/v1/...`, SSE |
-| `internal/backend` | 4 945 | Мульти-воркспейсный слой сервера, жизненный цикл |
-| `internal/shell` | 4 791 | Встроенный POSIX-интерпретатор (mvdan.cc/sh), jq, coreutils |
-| `internal/swagger` | 4 497 | Сгенерирован swaggo/swag, руками не правится |
-| `internal/workspace` | 3 538 | Интерфейс `Workspace` (~70 методов), in-process и remote реализации |
-| `internal/db` | 2 480 | SQLite (sqlc + goose-миграции), lock на data-dir |
-
-### Файлы-гиганты (нетестовые)
-
-| Файл | Строк |
-|---|---:|
-| `internal/ui/model/ui.go` | 4 940 |
-| `internal/agent/agent.go` | 2 258 |
-| `internal/ui/chat/tools.go` | 1 676 |
-| `internal/agent/coordinator.go` | 1 636 |
-| `internal/config/load.go` | 1 427 |
-| `internal/agent/tools/mcp/init.go` | 1 268 |
-| `internal/config/store.go` | 1 249 |
-| `internal/ui/styles/quickstyle.go` | 1 058 (одна функция на 970 строк) |
-| `internal/cmd/root.go` | 988 (~450 строк — supervisor демона) |
+Плюс шлейф средних находок: три lock-bypass'а вокруг нового dispatcher'а в agent,
+инвертированные цены кэша в braidrc `model add` (с тестом-соучастником), мутация
+опубликованного `Config` после reload, утечка памяти в `message.service.pending`,
+double-close в `pubsub.Shutdown`, и свежая копипаста (три копии TTL-кэша в UI,
+клон confirm-диалога, близнецы `attachLocalThreads`/`attachServerThreads`) — те же
+болезни, что план 2026-08-09 искоренял, воспроизведённые новым кодом.
 
 ---
 
-## 3. Сквозные проблемы
+## 2. Карта системы (текущая)
 
-### 3.1. Глобальное состояние против мульти-воркспейса — критично
+| Пакет | Строк | Динамика | Роль |
+|---|---:|---|---|
+| `internal/ui` | 59 967 | +15k | Bubble Tea v2 TUI; `Root`-роутер экранов, session panel, threads dock |
+| `internal/agent` | 29 841 | +4k | Цикл агента, `dispatcher`, `runTurn`, per-workspace `mcp.Registry` |
+| `internal/config` | 15 463 | +4k | Load/merge/store, OAuth, model-cache в SQLite, `braid import` |
+| `internal/server` | 6 680 | +1.2k | HTTP/h2c, тонкие хендлеры, `server/threads.go` |
+| `internal/cmd` | 6 149 | | Cobra + supervisor (вынесен в `cmd/supervisor/`) |
+| `internal/workspace` | 5 818 | +2.3k | Роль-интерфейсы, threads через оба режима |
+| `internal/backend` | 5 437 | | Мульти-воркспейс, refcount/holds, `thread_spawner` |
+| `internal/db` | 3 450 | +1k | Единая глобальная БД, refcounted-пул, legacy-импорт, gc |
+| `internal/thread` | 2 133 | новый | Ядро тредов (strands): Manager, Spawner, merge-флоу |
+| `internal/discover` | 1 841 | новый | Model discovery, реестр enricher'ов |
+| `internal/herdr` | 859 | | Изолированная аналитика со своим словарём событий |
 
-- `internal/agent/tools/mcp/init.go:67-100` — весь реестр MCP (`sessions`, `states`,
-  `broker`, `initOnce`, …) — package-level. Каждый `app.New` (`app/app.go:143-144`)
-  вызывает `mcp.ArmInit(); go mcp.Initialize(...)` со своим `ConfigStore` — второй
-  воркспейс перезатирает реестр первого.
-- `app/app.go:161` кладёт `mcp.Close(ctx)` в `cleanupFuncs`, а `mcp/init.go:276`
-  внутри делает `broker.Shutdown()` — **закрытие одного воркспейса глушит MCP всему
-  серверу**. Авторы знают частично: `mcp/init.go:214-221` фильтрует одно событие
-  с комментарием «cross-workspace injection path», остальные не фильтруются.
-- `app/lsp_events.go:39-42` — `lspStates`/`lspBroker` глобальны; ключ — имя LSP.
-  `backend/events.go:26-33` принимает `workspaceID`, проверяет его и возвращает
-  глобальное состояние чужих воркспейсов. `MCPGetStates(_ string)`
-  (`backend/events.go:97-108`) игнорирует workspaceID демонстративно.
-- `internal/skills`: двойное состояние — пакетные глобалы `broker`/`latestStates`
-  плюс `Manager` с `globalMirror` (`skills/manager.go:124-149`), синхронизируются вручную.
-- `internal/config/provider.go:23-27` — каталог провайдеров кэшируется `sync.Once`
-  на процесс, хотя зависит от `cfg.Options.DisableDefaultProviders`: первый воркспейс
-  фиксирует решение для всех.
-- `config/load.go:181-207` — `PushPopBraidEnv` мутирует `os.Environ()` на время
-  `configureProviders`: два параллельных воркспейса с разными `BRAID_*` — гонка
-  уровня процесса, невидимая для `-race`.
-- `coordinator.go:231` блокируется на глобальном `mcp.WaitForInit(ctx)` — MCP второго
-  воркспейса не инициализируется повторно.
-
-### 3.2. Дублирование local vs client/server
-
-- **`proto.Message`** (`internal/proto/message.go`, 715 строк) — полная копия
-  `message.Message` со всеми аксессорами. Мост — два зеркальных switch по 9 вариантов
-  частей: `server/events.go:268-326` и `workspace/client_workspace.go:1276-1336`.
-  Новое поле в `message.ToolResult` требует правок в 4 местах и молча теряется,
-  если забыть одно. `LSPClientInfo`/`LSPEvent` существуют в **трёх** копиях
-  (`app/lsp_events.go:21-37`, `proto/proto.go:291-343`, `workspace/workspace.go:82-105`).
-  При этом `proto/tools.go:1-8` уже применяет правильный паттерн (алиасы канонических
-  типов) — но только к параметрам инструментов.
-- **Резолв модели** — близнецы `app/provider.go` и `cmd/run.go:533-607` с реальными
-  расхождениями: `synthetic/moonshot/kimi-k2` парсится только локальной версией;
-  сравнение провайдера `EqualFold` vs точное `!=`; разные тексты ошибок.
-- **`resolveSession`** — `app/app.go:237-262` vs `cmd/run.go:607-638`; локальная
-  версия проверяет `IsAgentToolSession`/`ParentSessionID`, клиентская — нет.
-- **`braid run` пробивает абстракцию `Workspace`** (`cmd/run.go:97-160`): в remote-режиме
-  работает напрямую через `*client.Client`, в локальном — через приведение типа
-  `ws.(*workspace.AppWorkspace)`. `cmd/session.go:107-133` и `cmd/stats.go:138-243`
-  сами открывают БД, минуя все слои, — параллельно живому серверу.
-
-### 3.3. Нарушения слоёв
-
-- `app/app.go:42-43` импортирует `ui/anim` и `ui/styles` (спиннер в `RunNonInteractive`);
-  `backend/backend.go:508` использует `ui/util.NewWarnMsg` как payload серверного события.
-- Событийная шина ядра типизирована UI-фреймворком: `app.events` — `pubsub.Broker[tea.Msg]`,
-  `App.Subscribe(program *tea.Program)` (`app/app.go:645-675`).
-- `agent.go:33-35` — ядро агента импортирует lipgloss/charmtone и формирует стилизованную
-  гиперссылку внутри текста ошибки (`agent.go:1152-1158`), рядом с комментарием
-  «The TUI owns the display copy».
-- `client` импортирует `server` ради `ParseHostURL`/`DefaultHost` (`client/client.go:19,35`).
-- `ui/model` импортирует `app` напрямую в обход `workspace` (`ui.go:918`, `:1323`),
-  причём рядом (`ui.go:925`) стоит дублирующий case с типом из `workspace` —
-  незавершённая миграция.
-
-### 3.4. Баг потери полей OAuth-провайдера — разбор до корня
-
-Формулировка в `TECHDEBT.md` («запись токена перезаписывает секцию провайдера полями
-учётных данных») **неточна**: `writeConfigFields` (`store.go:329-349`) пишет через
-`sjson.Set` и чужие ключи не трогает. Реальная цепочка:
-
-1. `refreshOAuthTokenLocked` → `applyToken` кладёт токен в **in-memory** `Config`.
-2. `SetConfigFields` пишет на диск только `api_key` + `oauth` (`store.go:673-678`).
-3. `SetConfigFields` → `autoReload` → `reloadFromDiskLocked` (`store.go:1105`)
-   **пересобирает конфиг с диска целиком** — всё, что жило только в памяти, исчезает.
-4. `configureProviders` восстанавливает поля только для провайдеров из встроенного
-   каталога (`load.go:222-361`); кастомный провайдер без `base_url`/`models`
-   отбраковывается (`load.go:439-464`).
-
-Корень: **полный `ProviderConfig` никогда не персистится** — `SetProviderAPIKey`
-собирает полную запись только в память (`store.go:544-567`), на диск уходят два ключа.
-Следствия: Copilot фактически **не сломан** (он в каталоге и восстанавливается при
-каждом reload); сломан любой OAuth-провайдер вне каталога.
-
-Отключённые тесты `refresh_singleflight_test.go` падают ещё и по **второй, независимой
-причине**: фикстура пишет в `<tmp>/crush.json`, а reload читает `lookupConfigs(<tmp>)` —
-т.е. реальный `~/.config/braid/braid.json` пользователя (`BRAID_GLOBAL_CONFIG` не
-выставлен). Файл `crush.json` при reload не читается вообще. Архитектурный дефект:
-`configPath(scope)` (`store.go:267-277`) и набор путей reload (`load.go:897`) — два
-независимых источника истины без инварианта «путь записи ⊆ пути чтения».
-
-### 3.5. Конкурентность — точечные дефекты
-
-- `agent.go:1185`, `:1457` — безусловный `activeRequests.Del` там, где основной путь
-  использует `CompareAndDelete`: окно, в котором стирается запись более нового запуска.
-- Три расходящиеся копии протокола «слить очередь» (`Run` хвост `agent.go:1230-1318`,
-  `drainQueueForStep :396-431`, хвост `Summarize :1457-1468`) — последняя не проверяет
-  `cancelMark`: отменённые промпты, поставленные в очередь во время суммаризации, выполнятся.
-- `csync.Map.GetOrSet` (`csync/maps.go:97-106`) **не атомарен** — `Get`, потом `Set`
-  вне общего лока; имя обещает атомарность.
-- `permission.Request` держит глобальный `requestMu` **на всё время ожидания ответа
-  пользователя** (`permission/permission.go:214-215`) — все параллельные tool-calls
-  процесса стоят в одной очереди.
-- `pubsub.PublishMustDeliver` (`broker.go:201-236`) блокируется до 50 мс на подписчика
-  под `RLock` — инверсия приоритетов для `Subscribe`; per-subscription горутины не
-  завершаются после `Shutdown()` — утечка для глобальных брокеров.
-- `history.CreateVersion` (`history/file.go:67-134`) — TOCTOU: версия вычисляется вне
-  транзакции, залатано retry-петлёй, в которой `err` никогда не присваивается.
-- `projects.Register` (`projects/projects.go:78-121`) — `Load`/`Save` берут мьютекс
-  порознь (read-modify-write не защищён), запись без temp+rename → усечённый
-  `projects.json` при падении.
-- Cross-process: конфиг с токенами (`0600`) переписывается целиком любым
-  `SetConfigFields` по несекретному полю; секреты и настройки не разделены.
-
-### 3.6. Незавершённый ребрендинг и мёртвый код
-
-- **Hyper в UI** (~250–350 недостижимых строк): `logo.Opts.Hyper` + `hyperLetterforms`
-  (нигде не включается), цепочка `UI.hyperCredits` → `header` → `sidebar` →
-  `common.ModelInfo` (событие `creditsUpdatedMsg` никогда не отправляется),
-  `hyperRefreshDoneMsg`/`refreshHyperAndRetrySelect` с зашитым провайдером `"hyper"`
-  (`ui.go:2110-2154`), фиктивная тема `HyperbraidObsidiana` = `CharmtonePantera`
-  (`styles/themes.go:113-116`) и весь механизм `themeKey`/`applyThemeForProvider` вокруг неё.
-- **Мёртвый код после удаления catwalk-сервиса**: `config/provider.go:19-21,30-48,80-121`
-  (`syncer`, `cache`), `load.go:36` (`defaultCatwalkURL`), `DisableProviderAutoUpdate`
-  читается, но ни на что не влияет.
-- **`internal/event`** — телеметрия вычищена честно (no-op, posthog удалён из go.mod),
-  но каркас из ~30 пустых функций по-прежнему импортируется из `session`, `log`, `cmd`;
-  развилка `shouldEnableMetrics` (`cmd/root.go:886`) мертва.
-- `cmd/login.go:28` — пример «Authenticate with Charm Hyper» при switch только по copilot;
-  `cmd/logout.go` рекламирует платформу `hyper`; `main.go:6-7` — swagger-контакт Charm.
-- Тип `catwalk.Provider` торчит в публичном контракте фронтенда:
-  `workspace.AgentModel.CatwalkCfg` (`workspace/workspace.go:109`).
-- Мёртвые экспорты: `csync.NewLazyMap`/`NewLazySlice`/`NewMapFrom`,
-  `permission.activeRequest`+`activeRequestMu`, `env.NewFromMap`, `diffdetect.Inspect`,
-  `agent.isYolo` (поле-призрак), ветка `Cancel` по ключу `sessionID + "-summarize"`
-  (`agent.go:1947`), который нигде не устанавливается.
-
-### 3.7. Дублирование внутри подсистем
-
-- **`agent/tools`**: блок «проверка пути вне workdir + запрос permission» (~20 строк)
-  повторён в 12+ инструментах с расходящимися деталями; путь «создать файл»
-  продублирован трижды (`write.go:85-140`, `edit.go:107`, `multiedit.go:148`);
-  HTTP-transport настраивается вручную в `fetch`/`download`/`web_fetch`; нет единой
-  политики «ошибка модели vs ошибка шага».
-- **`ui/dialog`**: `notifications.go` ↔ `reasoning.go` — один диалог, скопированный
-  дважды (~640 строк, различаются ~200); 7 разных `Draw` с одинаковой преамбулой;
-  правила против багов копипасты institutionalized в `AGENTS.md` вместо общего
-  базового типа. Сборка вложения из файла — 3 копии (`dialog/actions.go:174`,
-  `ui.go:4595`, `ui.go:4670`).
-- **`config`**: `Load` и `reloadFromDiskLocked` — расходящиеся дубликаты одной
-  последовательности (`load.go:40-168` vs `store.go:1105-1224`): reload теряет часть
-  стартовых дефолтов, rollback не откатывает уже сделанный `RemoveConfigField`.
-- **`shellconfig`**: JSON-ключи конфига продублированы строковыми литералами
-  (`options.go:180-253` и др.) без связи с тегами `config.Config` — переименование
-  поля ломает braidrc молча.
-
-### 3.8. Прочие заметные находки
-
-- **Схема БД**: комментарии `-- Unix timestamp in milliseconds` при фактических
-  секундах во всей схеме (`db/migrations/20250424200609_initial.sql:11-12,35-36,52-53`);
-  триггер `update_sessions_updated_at` опровергает комментарий в
-  `session/session.go:239-241` — переименование сессии подбрасывает её вверх списка;
-  таблица `files` хранит полные версии файлов без ретенции.
-- **Сериализация сообщений**: `parts` — один TEXT-блоб без версии формата; неизвестный
-  тип части = ошибка на весь `List` → **сессия становится нечитаемой целиком**
-  (`message/message.go:563-646`).
-- **Permission-модель**: ключ нормализуется до директории (`permission.go:236-247`) —
-  «разрешить навсегда» для файла даёт доступ ко всей директории.
-- **Под-агенты обходят и permissions, и хуки**: `agentic_fetch_tool.go:165-199` создаёт
-  инструменты без `permission.Service` и автоапрувит дочернюю сессию;
-  `wrapToolsWithHooks` намеренно не оборачивает под-агентов. Две параллельные модели
-  безопасности, внутренняя — пустая.
-- **hooks**: поддержан только `PreToolUse`; env-префикс `BRAID_` вместо `CLAUDE_`
-  ломает совместимость экосистемных хуков; гонка на буферах при таймауте
-  (`hooks/runner.go:180-200`).
-- **oauth/copilot**: переиспользование client ID и токена VS Code Copilot из
-  `~/.config/github-copilot/apps.json` (`copilot/disk.go:10-27`) — ToS-риск и хрупкость.
-- **`SetProviderAPIKey` пишет на диск до валидации** (`store.go:507-565`): при
-  неизвестном провайдере диск изменён, память — нет. `ImportCopilot` делает двойную
-  запись одних и тех же ключей (`store.go:943-952`).
-- `configureProviders` (`load.go:209-499`) выполняет **сетевой model discovery под
-  `writeMu`** — таймаут в 3 с блокирует все мутаторы конфига.
-- `filetracker` нормализует пути относительно `os.Getwd()` вместо директории
-  воркспейса (`filetracker/service.go:63,83`); panic-лог пишется в CWD
-  (`log/log.go:72-74`).
-- Синхронный I/O в `Update` TUI: `dialog.NewSessions` делает блокирующий
-  `ListSessions` (HTTP в remote-режиме) прямо из обработки клавиши
-  (`ui.go:4307` → `dialog/sessions.go:64`); `InitCoderAgent` — синхронно из
-  `handleSelectModel` (`ui.go:2214`); повсеместный `context.TODO()`.
+Файлы-гиганты (нетестовые): `ui/model/ui.go` 5 761 (**вырос**), `config/load.go` 1 820,
+`workspace/client_workspace.go` 1 675, `ui/chat/tools.go` 1 647, `agent/agent.go` 1 616
+(**сжался** с 2 258), `ui/model/chat.go` 1 594 (новый), `config/store.go` 1 418,
+`server/proto.go` 1 219 (тонкие хендлеры — не помойка), `agent/coordinator.go` 1 188,
+`agent/tools/mcp/init.go` 1 131, `styles/quickstyle.go` — по-прежнему одна функция
+на 985 строк.
 
 ---
 
-## 4. Тестовое покрытие: где сетка есть, а где нет
+## 3. Находки
+
+### 3.1. Критично
+
+- **Legacy-импорт БД портит данные.** `db/legacy_import.go:132-135` вставляет сессию
+  с сохранённым `message_count`, затем вставка сообщений через триггер
+  `update_session_message_count_on_insert` инкрементирует счётчик ещё раз. Точный
+  итог — legacy `message_count` + число успешно вставленных сообщений; ×2
+  получается только при консистентном исходном счётчике и полном импорте. Каскад
+  того же триггера возбуждает `update_sessions_updated_at`: время импорта получают
+  сессии, в которые успешно вставилось хотя бы одно сообщение; ломается сортировка
+  и gc-ретенция. Существующий тест создаёт сценарий, но не проверяет счётчик и
+  `updated_at`. Рядом:
+  `legacy_import.go:136-141` глушит **любую** ошибку вставки как «конфликт id»
+  (disk full / SQLITE_BUSY → тихая потеря сессии, файл переименуется в `.imported`).
+
+- **Утечка воркспейсов тредов (client/server).** `thread/manager.go`:
+  `spawner.Release` вызывается только в `abortSpawn` (:229) и `Remove` (:503);
+  успешный `onRunComplete`/`finishMerge` оставляет живой handle. `threadSpawner`
+  держит backend-воркспейс «как живой SSE-стрим» (`backend/thread_spawner.go:57-60`)
+  — завершённый тред блокирует idle-shutdown демона до явного `braid threads rm`.
+  `Manager` не имеет `Shutdown`; при teardown родителя hold спавнера никто не снимает.
+  Комментарий `thread_spawner.go:31-33` («release immediately when the thread is
+  done») коду не соответствует.
+
+- **Блокирующий HTTP на UI-горутине.** `ClientWorkspace.SupportsThreads` = полный
+  `ListThreads` (`workspace/threads.go:189-192`); guard исполняется в теле Update
+  в трёх TTL-кэшах (`threads_cache.go:81`, `threads_dock.go:119`,
+  `thread_indicator.go:72`); indicator и dock дёргаются через
+  `staleWorkspaceRefreshCmds` с хвоста Update при протухании TTL (`ui.go:1721`),
+  тогда как dashboard-cache живёт в своём экране. После установки `inFlight` повторный
+  HTTP не выполняется, но для воркспейса **без** поддержки тредов false
+  возвращается до установки `inFlight` — probe повторяется постоянно. Тот же
+  вызов — на каждый ввод `/` (`ui.go:3209`) и Ctrl+P. Также синхронно в Update:
+  `loadSessionMsg` — `ListMessages` + рекурсивный N+1 `loadNestedToolCalls`
+  (`ui.go:887`, `:1862`); `sendMessage` — `AgentReadyErr` на каждый Enter и
+  `CreateSession` при отправке без активной сессии (`ui.go:4605-4624`);
+  конфиг-мутации из
+  `applyDialogAction` (`UpdatePreferredModel` `ui.go:2609`, `ImportCopilot` `:2787`,
+  `SetConfigField` `:2457`, Grant/Deny `:2625`); `FilePicker` синхронно открывает и
+  декодирует допустимую картинку при смене выбранного пути, пока для сочетания
+  path/размер превью ещё нет transmission (`filepicker.go:191-204,307-319`).
+
+### 3.2. Средне — конкурентность
+
+- **agent: три lock-bypass'а вокруг dispatcher.** (а) Прямой `Summarize` входит
+  в сессию мимо per-session мьютекса: busy-check `agent.go:726` и
+  `activeRequests.Set` `:749-751` не атомарны — конкурентный Run проходит свой
+  busy-check в окне. (б) Re-queue продолжения после auto-summarize: `Get → append →
+  Set` без per-session лока (`agent.go:629-637`) — lost update; заметить: сам
+  `enqueueCall` лока не берёт (`dispatch.go:182-197`), его держат вызыватели, так
+  что фикс — брать тот же лок вокруг continuation либо атомарный helper.
+  (в) `dispatcher.clearQueue` не берёт per-session мьютекс (`dispatch.go:403-411`),
+  в отличие от `cancel`.
+- **config: `SetupAgents` мутирует опубликованный Config.** `store.go:1365` делает
+  `setConfig(cfg)`, затем `:1380` переписывает `Agents`/`Problems` на живом объекте —
+  нарушение инварианта «published Config is immutable» (`store.go:127`), map
+  read/write race. Тот же паттерн у UI (`ui.go:2728,2808`);
+  `client_workspace.go:89,114` **не** затронут — там `SetupAgents` работает над
+  локальным, ещё не опубликованным объектом. Фикс — reorder: `SetupAgents` до
+  `setConfig`.
+- **config: миграции пишут глобальный файл без flock.** `migrateBloatedModelCache`
+  (`load.go:1315,1354`) и `migrateDisableNotifications` (`load.go:1471-1545`,
+  выполняется на **каждый** Load и reload) минуют `store.atomicWrite`/`lock.File` —
+  окно затирания записи другого процесса.
+- **pubsub: double-close `b.done`.** `broker.go:174-180` — select-then-close без
+  лока; два конкурентных Shutdown → panic. Лечится `sync.Once`.
+- **message: утечка памяти.** `service.pending` (`message/message.go:110`) растёт на
+  каждый уникальный message ID и чистится только в `Delete`; каждая запись держит
+  два полных снапшота Message со всеми parts. Нужна эвикция после финального flush.
+- **thread: `Recover` затирает чужие живые треды.** `manager.go:554-576` помечает
+  все pending/running interrupted при старте; БД общая, а локальный режим не берёт
+  workspace-lock (`cmd/root.go:263-283`) — два процесса конкурируют за одни
+  worktree/ветки.
+- **shell: TOCTOU на лимите фоновых джобов** (`background.go:91-117`) + менеджер —
+  процессный синглтон: в server-режиме все воркспейсы делят лимит 50 и пространство ID.
+- **db: `braid gc` TOCTOU** — selection выполняется вне транзакции удаления
+  (`cmd/gc.go:151-189`): сессия, ожившая в окне, удалится со свежими сообщениями.
+  Простой guard `DELETE ... AND updated_at < ?` не сработает: messages удаляются
+  первыми (`gc.go:312-315`), и их delete-триггер сам поднимает `updated_at`
+  сессии; к тому же подтверждённые descendants удаляются независимо от
+  собственного возраста. Нужна одна `BEGIN IMMEDIATE`-транзакция на selection
+  (roots, descendant closure, thread status) и deletion. Интеграционные тесты у
+  gc есть (`cmd/gc_test.go` — descendants, threads, project scope, dry-run,
+  retention, VACUUM); не покрыты гонки eligibility, новый descendant в окне
+  и rollback.
+
+### 3.3. Средне — корректность и стоимость
+
+- **Инвертированные цены кэша в braidrc.** Перепроверено по полной цепочке
+  (встречное замечание «маппинг соответствует расчёту» не подтвердилось):
+  `cost_per_1m_in_cached` → `CostPer1MInCached` (catwalk `provider.go:94`), и
+  учёт умножает его на `CacheCreationTokens`, а `CostPer1MOutCached` — на
+  `CacheReadTokens` (`agent/agent.go:1244-1245`, `:1302-1303`); внутренний
+  контракт: in_cached = cache creation, out_cached = cache hit.
+  `shellconfig/model.go:72-73` маппит наоборот: `--price-cache-create` →
+  `cost_per_1m_out_cached`, `--price-cache-hit` → `cost_per_1m_in_cached`.
+  Тест `model_test.go:57-63` закрепляет баг.
+- **`UpdateModels` на каждый Run** (`coordinator.go:328,1019-1038`) пересобирает
+  все инструменты и всех custom-агентов: 2(N+1) readiness-горутин с `prompt.Build`
+  (git-сабпроцессы), новый `hooks.Runner` (перекомпиляция regex) — на каждый
+  пользовательский промпт.
+- **Load vs reload разошлись.** Блок мерджа workspace-конфига продублирован
+  (`load.go:64-84` vs `store.go:1271-1287`), и `Load` прогоняет
+  `dropIncompatibleRecentModels`, а reload — нет: старый `recent_models` на reload
+  роняет unmarshal, и вся workspace-секция молча отбрасывается.
+- **`SupportsThreads` без кэша и склейка ошибок** (`workspace/threads.go:189-192`):
+  сетевой сбой = «треды не поддерживаются»; CLI-команды делают второй такой же
+  запрос сразу после первого.
+- SSE-события тредов уходят с пустым `WorkspaceID` (`server/events.go:169-177`) —
+  wire-поле, всегда пустое, ловушка для будущих потребителей.
+- MCP-мелочи: `oauthRoundTripper` при 401 повторяет POST без тела и глотает ошибку
+  `Authorize` (`mcp/init.go:1028-1043`); `stdioCheck` дублирует argv[0]
+  (`:1121-1126`); отменённый auth-флоу может залипнуть в StateError.
+
+### 3.4. Средне — дублирование (новая копипаста)
+
+- **Три копии TTL-кэш-машины в UI** (~220 строк): `threadIndicatorState` ≡
+  `threadsDockState` ≡ `threadsCacheState` — идентичная шестёрка методов;
+  комментарии сами признают «same TTL-cache idiom». Просится `ttlCache[T]`
+  (bool-зачаток уже есть в `workspace_cache.go:79`).
+- **Клон confirm-диалога**: `dialog/quit.go` ↔ `dialog/thread_remove_confirm.go` —
+  ~120 из ~148 строк дословно. Нужен общий `confirmDialog`.
+- **Слой копипасты вокруг делегаций/тредов** (~200 строк): `formatElapsed`/
+  `formatTokenCount` скопированы в `child_session_panel.go:287-311` из
+  `chat/agent.go:902-926`; статус-строка — 4 варианта; классификация todo — 4 копии
+  switch; `drawThreadBlocks` ↔ `drawDelegationBlocks` — ~55 строк × 2.
+- **`attachLocalThreads` ↔ `attachServerThreads`** — ~40-строчные близнецы
+  (`cmd/threads.go:31-68` / `backend/threads.go:23-62`), отличается только Spawner.
+- **`proto.Todo` — трёхполевая копия `session.Todo`** с конверторами в 2-3 местах
+  (`server/events.go:254`, `client_workspace.go:1537,1636`); алиас-паттерн из
+  `proto/message.go` убрал бы их. То же — `LSPClientInfo` в трёх копиях (осталось
+  со старого ревью).
+- **Диалоговая инфраструктура недовнедрена**: `selectDialog` — 4 диалога из ~20,
+  `Base` — 3; преамбула width/innerWidth скопирована 10 раз; item-boilerplate
+  (`SetFocused`/`SetMatch`/`Render`) — в 7 диалогах.
+- **mcp/init.go**: два почти идентичных OAuth-блока HTTP/SSE (`:883-923` vs
+  `:958-992`); `getOrRenewClient` дублирует хвост `connectAndRegister`.
+
+### 3.5. Тестовое покрытие
 
 | Хорошо | Плохо |
 |---|---|
-| `server` 2 702 строк тестов / 2 774 прод; `backend` 2 680 / 2 265, включая e2e против живого HTTP и race-тесты | `TestCoderAgent` — единственный e2e цикла агента, 10 сценариев — **отключён** (кассеты записаны против `hyper.charm.land`) |
-| `config` 1:1 тест/код, race-тесты CoW | Тесты `config` внутрипакетные, лезут в приватные поля, негерметичны (читают домашний конфиг) |
-| `ui/chat` 53 %, golden-тесты `diffview`, инвариантные version-bump-тесты | `ui/dialog` 7 % на 10 421 строк; `styles` и `logo` — 0 %; **ни одного teatest/e2e теста TUI**; `Update` на 707 строк без прямых тестов |
-| `agenttest` строит настоящий `Coordinator` продакшн-конструктором | Стабы `Workspace` встраивают интерфейс на 70 методов — падения только в рантайме |
+| Конкурентность agent покрыта целенаправленно: dispatch_cancel (8 тестов), race-инъекции в summarize, run_complete | **`TestCoderAgent` фактически выключен**: кассеты на диске — старые записи `hyper.charm.land`, скип без `BRAID_TEST_OPENAI_BASE_URL`; 10 e2e-сценариев не гоняются |
+| config: load_test 2 547 строк, path-инвариант, race-сценарии single-flight включены и зелёные | **teatest/e2e TUI — по-прежнему ноль** (0.2 прошлого плана); golden только в diffview |
+| thread 901/2 064, discover 1 086/1 841, threads покрыты с обеих сторон workspace; у gc — 6 интеграционных сценариев (`cmd/gc_test.go`) | **db 26.6%**: у gc нет race/rollback-сценариев; баг импорта прошёл мимо теста (проверяет заголовок, не счётчики и не updated_at) |
+| csync 90.9%, pubsub 85.6%, diffview 89.4%, completions 76.7% | dialog 27.8% (28 файлов без тестов, `question_form.go` 782 строки), styles/logo 0%, chat просел 53→46.8%, history 22.6%, ui/image 3.1% |
+
+### 3.6. Мёртвый код (сводный список на чистку)
+
+UI: `chat/unified_diff.go` целиком; 9 letterform'ов старого wordmark;
+`util.ExecShell`; `list.AdjustArea`/`InvalidateFrozen`/drag-freeze механика;
+навигация сайдбара `pageUp/pageDown/toHome/toEnd`; `common.Model[T]`;
+`styles.LoadingIcon`/`BorderThin`/`BorderThick`; ~28 write-only полей `Styles`
+(вся секция `Pills.Queue*/Todo*/Help*` — очередь переехала в session panel);
+`UI.keyenh`; `common/elements.go:128 FormatCredits`; вырожденный
+`ThemeForProvider(_ string)`. Прочее: `db.ConnectReadOnly` + оба `openDBReadOnly`
+(в modernc-версии к тому же `_txlock=immediate` на ro-соединении);
+`csync.NewMapFrom`, тип `LazySlice` целиком; `env.NewFromMap`;
+`agent.ErrRequestCancelled` (сравнивается, но никогда не возвращается);
+пустой `config/copilot.go`; мёртвый параметр `actions` в
+`validateCustomProviders` (+устаревшие комментарии); duration-арифметика в
+no-op `event/all.go`.
+
+### 3.7. Осознанные политики, требующие явного решения (не баги)
+
+- **Хуки не оборачивают инструменты под-агентов** (`hooked_tool.go:31-42`) —
+  осознанно, но следствие: PreToolUse-guard на `bash rm` не сработает внутри
+  task-агента; защита — только permission-промпт. Если хуки — guard-rail,
+  это дыра политики.
+- **client/server-режим всё ещё выключен по умолчанию** (`BRAID_CLIENT_SERVER`,
+  `cmd/root.go:210-215`) — критичная утечка тредов жила именно там, потому что
+  режим не обкатывается.
+- **Copilot**: чтение `~/.config/github-copilot/apps.json` с vscode-client-ID и
+  имитацией заголовков — ToS-риск, как и был.
+- **`PushPopBraidEnv`** всё так же мутирует `os.Environ()` процесса
+  (`load.go:208-238`); бонус-дефект: `restore()` создаёт пустую переменную вместо
+  `Unsetenv`. Реальный фикс — env-снапшот в аргументах, это отдельный проект.
 
 ---
 
-## 5. Что сделано хорошо (сохранить при рефакторинге)
+## 4. Что сделано хорошо (сохранить)
 
-- **`workspace.Workspace` как граница UI↔бэкенд** — один TUI работает и in-process,
-  и remote; явные ошибки-состояния (`ErrWorkspaceGone`, `ErrServerUnreachable`).
-- **Жизненный цикл воркспейсов в `backend`** — refcount по SSE, `pending` против гонки
-  teardown/create, латч `closing`, idle-shutdown; порядок захвата локов задокументирован.
-- **OAuth single-flight** — двухуровневый (in-process + flock), различение
-  «усыновить чужой токен» / «одолжить refresh», rotating refresh tokens.
-- **Дебаунс записи стриминга** (`message.Service`) с честным контрактом
-  «Flush перед чтением» и `FlushAll` на shutdown.
-- **`hooked_tool.go`** — образцовый декоратор; **`herdr`** — эталон изоляции через
-  собственный словарь событий и единую точку трансляции; **`notify`** — чистые DTO.
-- **`ui/list`** — настоящий переиспользуемый компонент с ленивым рендером и
-  версионированным кэшем; **`Overlay`** с grace-period против случайного подтверждения.
-- **`shellconfig`** — слоёная схема с единым движком флагов; образец того, как стоило бы
-  нарезать и `config`.
-- **Комментарии-обоснования и `TECHDEBT.md`/`AGENTS.md`** — главный нематериальный актив.
+- **`internal/thread` — образцовые границы**: ядро без UI/HTTP-импортов, `Spawner`
+  как интерфейс с двумя честными реализациями, merge-флоу с разбором
+  ff/checked-out/moved-base. Новые пакеты `discover` и `herdr` — так же чисто.
+- **`dispatch.go`** — чистый тип без внешних зависимостей, cancel-mark по
+  монотонным seq; конкурентность тестируется инъекциями гонок, а не заклинаниями.
+- **Локинг `ConfigStore` задокументирован образцово** (роль каждого из пяти
+  мьютексов, lock ordering); `pendingDiskAction` — чистое решение реэнтрантного
+  autoReload; кросс-процессный OAuth-refresh с adopt/borrow-семантикой покрыт
+  включёнными герметичными тестами.
+- **`workspace_cache.go`** — эталонная мемоизация (TTL-бэкстоп, generation-guard,
+  invalidate на run-границах); реестр рендереров инструментов с тестом полноты;
+  `Root`-роутер экранов с честным контрактом.
+- **Единая БД**: refcounted-пул + зеркальный refcounted flock по inode,
+  `_txlock=immediate`, продуманный `braid gc` UX (dry-run, --json, мотивированные
+  per-table delete).
+- **`braid import`** — dry-run, отчёт по каждому файлу, непереводимые поля
+  сохраняются комментариями в frontmatter вместо молчаливой потери.
+- **Комментарии-обоснования** — по-прежнему главный нематериальный актив; новый
+  код им следует.
 
 ---
 
-## 6. План рефакторинга
+## 5. План рефакторинга
 
-Принцип: сначала страховочная сетка, затем чистка и точечные баги (дешёвые, снимают шум),
-затем границы и дедупликация, и только потом крупные структурные изменения.
+Принцип тот же: сначала баги данных и утечки (дёшево, срочно), затем отзывчивость
+UI, затем конкурентные окна, затем дедупликация — и параллельно достроить
+страховочную сетку, без которой роутер Update и дальнейшие разрезы делать нельзя.
+Каждый пункт фаз 1–4 — отдельный PR с зелёными тестами.
 
-### Фаза 0 — страховочная сетка (до любых крупных правок)
-
-| # | Задача | Риск | Эффект |
-|---|---|---|---|
-| 0.1 | Реанимировать `TestCoderAgent`: перенаправить `hyperBuilder` (`agent/common_test.go`) на локальный OpenAI-совместимый эндпоинт, перезаписать кассеты | низкий | Возвращает 10 e2e-сценариев цикла агента — обязательное условие для фаз 3–4 |
-| 0.2 | e2e-тесты TUI через `teatest`: открыть модели, отправить сообщение, отменить агента, permission-flow, golden-снимки | средний | Без этого разбор `ui.go` делать нельзя |
-| 0.3 | Тест-инвариант «путь записи конфига ⊆ пути чтения» + герметизация фикстур через `t.Setenv("BRAID_GLOBAL_CONFIG"/"BRAID_GLOBAL_DATA")` | очень низкий | Ловит класс багов из §3.4, реанимирует часть отключённых тестов |
-
-### Фаза 1 — чистка (риск ≈ 0, можно сразу)
-
-1. **Hyper из UI**: `logo.Opts.Hyper`+`hyperLetterforms`, цепочка `hyperCredits`,
-   `hyperRefreshDoneMsg`/`refreshHyperAndRetrySelect`, тема `HyperbraidObsidiana`
-   с механизмом `themeKey` (либо использовать каркас для настоящей темы Braid
-   и переименовать `CharmtonePantera` → `BraidDark`).
-2. **Мёртвый код catwalk** в `config/provider.go`, `defaultCatwalkURL`,
-   `DisableProviderAutoUpdate`.
-3. **Charm-косметика**: `cmd/login.go:28`, `hyper` в `cmd/logout.go`, swagger-контакт
-   в `main.go` + перегенерация, `event.Init()`/`shouldEnableMetrics` из трёх команд.
-4. **Мёртвые экспорты**: `csync.NewLazyMap`/`NewLazySlice`/`NewMapFrom`,
-   `permission.activeRequest`, `env.NewFromMap`, `diffdetect.Inspect`, `agent.isYolo`,
-   ветка `-summarize` в `Cancel`.
-5. Исправить лживые комментарии о миллисекундах в initial-миграции; правило
-   «timestamps в секундах» — в `AGENTS.md`.
-6. Panic-лог — в data dir вместо CWD (`log/log.go:72-74`).
-
-### Фаза 2 — точечные баги (риск низкий/средний, каждый — отдельный PR)
+### Фаза 1 — баги данных и утечки (сразу, в этом порядке)
 
 | # | Задача | Файлы | Риск |
 |---|---|---|---|
-| 2.1 | Баг §3.4: писать `type`/`base_url`/`name` провайдера вместе с кредами, **только если провайдера нет во встроенном каталоге** | `store.go:673-678`, `:519-522` | низкий |
-| 2.2 | Убрать reload после записи кредов: `SetConfigFields` → `update()` в OAuth-путях | `store.go` | средний |
-| 2.3 | `activeRequests.Del` → `CompareAndDelete` | `agent.go:1185,1457` | минимальный |
-| 2.4 | `csync.Map.GetOrSet` — атомарность (один `Lock`, `fn` под локом; проверить call-sites на дедлок); `CompareAndDelete` — типизировать | `csync/maps.go` | средний |
-| 2.5 | `pubsub`: снапшот подписчиков до отправки (убирает RLock-инверсию), завершение per-subscription горутин по `<-b.done` | `pubsub/broker.go` | средний |
-| 2.6 | `history.CreateVersion`: `MAX(version)` внутри транзакции, убрать retry и мёртвый `err`; ретенция версий | `history/file.go` | средний |
-| 2.7 | `projects.Register`: один мьютекс на операцию + `lock.File` + temp+rename | `projects/projects.go` | низкий |
-| 2.8 | `unmarshalParts`: игнорировать неизвестные типы частей с логом, добавить версию формата | `message/message.go` | средний |
-| 2.9 | `SetProviderAPIKey`: валидация до записи на диск; `ImportCopilot` — одна запись вместо двух | `store.go:507-565,943-952` | низкий |
-| 2.10 | `filetracker`: инжектить workdir вместо `os.Getwd()` | `filetracker/service.go` | средний |
-| 2.11 | `CancelAll`: `sync.WaitGroup` вместо busy-wait; чистка `dispatchMu` по завершении сессий | `agent.go:1997,340` | минимальный |
+| 1.1 | Legacy-импорт: вставлять сессии с `message_count = 0` (триггер досчитает). Восстановление `updated_at` требует **миграции триггера** `update_sessions_updated_at` — сейчас любой явный UPDATE перетирается на now (`initial.sql:16-21`); только затем явный UPDATE в конце транзакции (время импорта получают сессии, у которых вставилось хоть одно сообщение). Единая политика ошибок для **всех пяти** таблиц (`legacy_import.go:132-283`: sessions/messages/files/read_files/threads): `INSERT ... ON CONFLICT DO NOTHING` + `RowsAffected` — пропускать только PK/UNIQUE-конфликты, FK/CHECK/NOT NULL и operational errors → rollback всей транзакции. Явно определить судьбу зависимых rows пропущенной session: сейчас messages/files/read_files молча пропускаются, а threads не получают `skippedSessions` и могут привязаться к чужой session с совпавшим ID; отчёт должен учитывать все такие пропуски. Тесты на счётчики, updated_at, конфликты parent/dependent IDs и rollback | `db/legacy_import.go`, `db/migrations/` | средний |
+| 1.2 | Треды: **отдельный высокорисковый lifecycle-проект**, а не точечный Release — наивный `Release` в `onRunComplete`/`finishMerge` оставит released handle в `m.running`, и `Send` пойдёт в закрытый App (`manager.go:342-363`). Нужны: атомарное изъятие runtime ownership, per-thread сериализация, single-flight respawn, проверка RunID/generation у stale RunComplete, release на всех терминальных исходах, `Manager.Shutdown` с ожиданием горутин; упорядоченный teardown (запрет новых операций → cancel/join manager goroutines → release handles → release thread-store DB reference), а не независимые параллельные cleanup-функции App; решение по attach-семантике завершённых тредов (после release `AttachThread` вернёт «not currently running» — нужен respawn либо read-only load persisted-сессии); попутно фикс derived client ID `<uuid>/thread/<id>`, не проходящего UUID-валидацию backend. Ownership/state-machine тесты обязательны | `thread/manager.go`, `backend/thread_spawner.go`, `workspace/threads.go`, wiring cleanup | **высокий** |
+| 1.3 | Инверсия цен кэша: поменять местами jsonKey у `--price-cache-create`/`--price-cache-hit`, починить тест-соучастник (инверсия перепроверена, см. §3.3) | `shellconfig/model.go:72-73`, `model_test.go` | минимальный |
+| 1.4 | `cfg.SetupAgents()` **до** `setConfig(cfg)` в reload; из UI-вызовов (`ui.go:2728,2808`) убрать мутацию опубликованного конфига (`client_workspace.go` не затронут — работает с локальным объектом) | `config/store.go:1365-1380`, `ui.go` | низкий |
+| 1.5 | `pubsub.Shutdown` через `sync.Once` | `pubsub/broker.go:174-180` | минимальный |
+| 1.6 | Эвикция `message.service.pending` (растёт на каждый уникальный message ID): удалять запись только после finished-снапшота, под `s.mu`, при отсутствии `dirty`/`flushing` — по любому terminal flush эвиктить нельзя (terminal бывает и у tool-call/reasoning) | `message/message.go` | средний |
+| 1.7 | gc: selection (roots, descendant closure, thread status) и deletion — в одной `BEGIN IMMEDIATE`-транзакции (guard по `updated_at` не работает — см. §3.2, delete-триггер messages сам поднимает его); существующие тесты `gc_test.go` сохранить, добавить race-сценарии: ожившая сессия, новый descendant в окне, rollback | `cmd/gc.go`, `internal/db` | средний |
 
-### Фаза 3 — границы и дедупликация (устраняет §3.2, §3.3, §3.7)
+### Фаза 2 — отзывчивость TUI (максимальный видимый эффект)
 
-| # | Задача | Риск | Эффект |
-|---|---|---|---|
-| 3.1 | `ParseHostURL`/`DefaultHost` из `server` в `proto` — снимает зависимость client→server | минимальный | SDK собирается без сервера |
-| 3.2 | Один резолвер модели: перенести из `app/provider.go` в `config`, удалить копию из `cmd/run.go` (тесты уже есть) | низкий | Чинит расхождение поведения `-m` между режимами |
-| 3.3 | `proto.Message` → алиасы над `message` по образцу `proto/tools.go`; сверить JSON-теги. Альтернатива при желании развязать полностью: чистые типы контента в `internal/messagetype` | средний | −700 строк, невозможность «забыть поле» |
-| 3.4 | `braid run` через `workspace.Workspace`: метод `AgentRunStream(ctx, sessionID, prompt, io.Writer)` в обеих реализациях; спиннер остаётся в `cmd` | средний | Оба режима ходят одним путём; удаляется второй `resolveSession` |
-| 3.5 | Развязка слоёв: `RunNonInteractive` со спиннером — из `app` в `cmd`/`workspace`; `backend` → собственный proto-тип предупреждения вместо `ui/util`; далее `pubsub.Broker[tea.Msg]` → `Broker[any]` | низкий→средний | Ядро перестаёт знать про Bubble Tea |
-| 3.6 | Ошибка Copilot-квоты: структурированная ошибка вместо lipgloss-строки в `agent.go:1149-1174` | минимальный | Убирает 3 UI-импорта из ядра агента |
-| 3.7 | Supervisor демона из `cmd/root.go` (~450 строк) в `internal/server/supervisor`; тесты переезжают | низкий | root.go — только флаги |
-| 3.8 | `toolkit` для `agent/tools`: `RequirePermission`, `ResolveWithinWorkdir`, `writeFileWithHistory`, общий HTTP-клиент | низкий | −400 строк дублей, единая политика ошибок |
-| 3.9 | Разрезать `coordinator.go` по файлам: `providers.go`, `auth.go`, `subagents.go`; списки `copilotResponsesModels` → в метаданные каталога | низкий | Механическое разделение |
-| 3.10 | `ui`: `SelectDialog[T]` вместо клонов `notifications`/`reasoning`; базовый `dialog.Base` с шаблонным `Draw`; хелпер вложений; реестр рендереров инструментов вместо switch на 26 case + тест полноты | средний | Институционализированная копипаста уходит в код |
-| 3.11 | Разрезать `workspace.Workspace` (70 методов) на роль-интерфейсы (`SessionReader`, `AgentController`, `ConfigMutator`, …) | средний | Вменяемые стабы, явные потребности компонентов |
-| 3.12 | Убрать синхронный I/O из `Update`: диалоги открываются через `tea.Cmd` + `LoadingDialog`; `context.TODO()` → контекст модели | средний | Убирает фризы TUI в remote-режиме |
+| # | Задача | Риск |
+|---|---|---|
+| 2.0 | **Минимальная command-driving тест-обвязка UI** (предусловие 2.2–2.4): детерминированная прокачка `tea.Cmd` с fake workspace — проверяет исполнение команд, stale-result guard'ы, повторный Enter, permission round-trip и маршрутизацию; golden-снимки — поверх неё, не вместо (rendering-golden state-машины не ловит) | средний |
+| 2.1 | Кэшировать `SupportsThreads` одной пробой на старте воркспейса. Не «час работы»: бит в `proto.Workspace` меняет wire-контракт и wiring server/backend; кэшу нужна инвалидация; транспортную ошибку нельзя кэшировать как «unsupported»; для 409 нет отдельной таксономии ошибок. Убирает HTTP из хвоста Update, `/` и Ctrl+P | средний |
+| 2.2 | `loadSessionMsg` → async `tea.Cmd`. Generation-guard для загрузки сессии **ещё не существует** (в отличие от sessions-диалога) — построить: generation + ожидаемый session ID, отбрасывание stale-результата до любых изменений UI/LSP/history — иначе поздний старый ответ заменит текущую сессию | средний |
+| 2.3 | `sendMessage`: `AgentReadyErr`/`CreateSession` — в cmd; конфиг-мутации из `applyDialogAction` (UpdatePreferredModel, ImportCopilot, SetConfigField, Grant/Deny, SetCompactMode) — в cmd с loading-состоянием | средний |
+| 2.4 | FilePicker: decode/transmit превью — async; cache key включает path, metadata/mtime и размеры/encoding, результат несёт generation выбранного файла и отбрасывается после смены курсора; добавить разумный лимит размера decode. Не мутировать `previewingImage` из `tea.Cmd`, применять результат отдельным msg в Update | средний |
+| 2.5 | agent: не пересобирать мир на каждый Run — кэшировать `buildTools`/`buildAgent`. Это не только стоимость, но и correctness: конкурентные Run могут публиковать tools из разных снапшотов конфига. Инвалидация зависит не только от модели/конфига: MCP registry, skills, thread manager, hooks, LSP, permissions, web-search backend — карту зависимостей составить до правки | средний→высокий |
+| 2.6 | Устранение N+1 в `loadNestedToolCalls` — отдельная задача поверх 2.2: ID глубоких дочерних сессий известны только после разбора предыдущего уровня; нужен новый recursive/batch запрос в DB и соответствующий workspace/server API | средний |
 
-### Фаза 4 — структурные изменения (после фаз 0–3)
+### Фаза 3 — конкурентные окна (каждый фикс точечный)
 
-| # | Задача | Риск | Примечание |
-|---|---|---|---|
-| 4.1 | **MCP/LSP/skills из глобалов в per-workspace объекты** (`*mcp.Registry` в `app.App` и т.д.). Промежуточный шаг с малым риском: `mcp.Close` перестаёт трогать общий брокер | высокий | Обязательное условие корректного мульти-воркспейса; делать одним заходом с явным DI |
-| 4.2 | Каталог провайдеров: убрать `providerOnce`, сделать полем `ConfigStore` | низкий | После удаления catwalk синглтон ничего не экономит |
-| 4.3 | `agent`: вынести протокол очереди/отмены в тип `dispatcher` (9 полей + Begin/Accept/drain/Cancel). Схлопывает три копии протокола; существующие 1000+ строк dispatch-тестов — страховка | средний | Максимальный эффект в подсистеме |
-| 4.4 | `agent`: единая точка `RunComplete` (`sync.Once`-репортер) вместо 4 точек + `skipRunComplete`; затем `runSession`-объект турна вместо 14 замыканий — `Run` сжимается до ~120 строк | низкий → средний | Строго после 0.1 |
-| 4.5 | `config`: разрезать `configureProviders` на `mergeCatalog → validate → apply`; сетевой discovery — за пределы `writeMu`; слить `Load` и `reloadFromDiskLocked` | средний | Табличная фиксация текущего поведения тестами — до правки |
-| 4.6 | `ui`: разбор god-модели — `Sidebar`, `PillsPanel`, `EditorPanel`, `WorkspaceState`; роутер сообщений вместо 707-строчного `Update` | высокий | Только после 0.2 |
-| 4.7 | `permission`: не держать `requestMu` во время ожидания пользователя — очередь показа + ожидание на канале | высокий | UI полагается на «один активный диалог» — нужна очередь в модели |
-| 4.8 | Под-агенты: пропускать их инструменты через настоящий `permission.Service` и хуки вместо `AutoApproveSession` | средний | Закрывает вторую, пустую модель безопасности |
+| # | Задача | Файлы |
+|---|---|---|
+| 3.1 | `Summarize`: под `sessMu` — **только** атомарный busy-check + регистрация active/cancel entry; лок отпустить до DB I/O и сборки промпта (держать его на весь диапазон нельзя), очистка entry на всех ранних выходах | `agent.go:726-751` |
+| 3.2 | Re-queue после auto-summarize — под тем же per-session локом (сам `enqueueCall` лока не берёт — его держат вызыватели) либо новый действительно атомарный helper в dispatcher; проставить acceptSeq | `agent.go:629-637`, `dispatch.go:182-197` |
+| 3.3 | `clearQueue` — под per-session мьютекс, симметрично `cancel` | `dispatch.go:403-411` |
+| 3.4 | Конфиг-миграции: **без** once-маркера (помешает retry после частичной ошибки и пропустит легаси-поле, дописанное старой версией) — `lock.File` + повторное чтение актуальных байт под локом + идемпотентное преобразование; для миграции между двумя файлами — фиксированный порядок захвата обоих локов и повторное чтение обоих файлов | `load.go:1315,1471` |
+| 3.5 | Общий хелпер мерджа workspace-конфига для Load и reload (закрывает и расхождение `dropIncompatibleRecentModels`, и молчаливый skip секции — добавить warn) | `load.go:64-84`, `store.go:1271-1287` |
+| 3.6 | shell background: per-workspace менеджер как зависимость, которой владеет конкретный App и которая передаётся Bash/JobOutput/JobKill — сейчас Shutdown одного App делает `KillAll` процессного синглтона и убивает джобы чужого воркспейса; атомарный check-and-set лимита | `shell/background.go` |
+| 3.7 | Локальный режим берёт **repo-scoped** workspace-lock, закрывающий один git-репозиторий даже при разных `--data-dir`; существующий data-dir lock подходит только при явно зафиксированном инварианте «один repo → один data dir». Простого owner ID для `Recover` недостаточно: альтернатива потребует lease/heartbeat/epoch и является отдельным распределённым протоколом, не точечным фиксом | `cmd/root.go:263-283`, `thread/manager.go:554-576`, `db/datadirlock.go` |
 
-### Фаза 5 — отдельные проекты (по мере надобности)
+### Фаза 4 — дедупликация (пока копии не разошлись)
 
-- **`credentials.json`**: секреты отдельно от настроек (0600, вне merge). Решает сразу
-  несколько проблем §3.4/3.5, но требует миграции — отдельный проект.
-- **Генерация ключей `shellconfig` из json-тегов `Config`** (go:generate) или хотя бы
-  рефлексивный тест соответствия `optionSpecs` ↔ поля `Options`.
-- **hooks**: `PostToolUse`/`Stop`/`SessionStart` + `CLAUDE_*`-алиасы env — расширение
-  публичного контракта, продумать до фиксации.
-- **Сузить permission-ключ до файла** для write/edit с явной опцией «для директории».
-- **`internal/shell`**: вынести jq/coreutils/шебанг-диспатч в подпакеты — огромный diff
-  при нулевой семантике; делать в тихий период.
-- Решение по судьбе client/server-режима: либо включать по умолчанию и гонять в CI
-  (тогда фаза 3 обязательна), либо явно объявить экспериментальным.
+| # | Задача | Эффект |
+|---|---|---|
+| 4.1 | `ttlCache[T]` в ui/model; перевести threadIndicator/threadsDock/threadsCache и bool-кэши workspace_cache | −220 строк, канон для будущих кэшей |
+| 4.2 | `confirmDialog` (quit + thread_remove_confirm); домиграция commands/sessions на `selectDialog`, остальных диалогов на `Base`; `list.BaseItem` для item-boilerplate | −500+ строк, преамбула Draw перестаёт тиражироваться |
+| 4.3 | Общие форматтеры делегаций/тредов: formatElapsed/formatTokenCount/статус-строка/todo-классификация/рендер строки todo — один пакет-хелпер; слить `drawThreadBlocks`/`drawDelegationBlocks` | −200 строк |
+| 4.4 | Один хелпер attach-threads с параметром-Spawner вместо близнецов в cmd и backend | −40 строк, один путь wiring |
+| 4.5 | `proto.Todo` → алиас `session.Todo`; `LSPClientInfo` → алиасы по образцу `proto/message.go` | Конверторы исчезают |
+| 4.6 | mcp/init.go: общий OAuth-блок для HTTP/SSE; `getOrRenewClient` переиспользует хвост `connectAndRegister`; починить `stdioCheck` argv; `oauthRoundTripper` — retry через `req.GetBody` (либо явный отказ от retry), закрытие исходного response body, не глотать ошибку `Authorize`; закрыть гонку `suppressLock`, cancel-без-unlock и восстановление `StateNeedsAuth` после отменённого auth-флоу | −100 строк + пачка мелких багов |
+| 4.7 | Чистка мёртвого кода по списку §3.6 | −1 000+ строк |
+
+### Фаза 5 — страховочная сетка и структура
+
+| # | Задача | Примечание |
+|---|---|---|
+| 5.1 | **Вернуть `TestCoderAgent` в CI** — двумя шагами: сначала разделить VCR-режимы (сейчас без `BRAID_TEST_OPENAI_BASE_URL` тест безусловно skip-ается, а с ней всегда RecordOnly на живой эндпоинт — `agent_test.go:57-95`): replay свежих кассет по умолчанию + отдельный явный флаг записи; затем перезаписать кассеты локальной моделью (команда в TECHDEBT.md) | блокирует дальнейшие разрезы Run |
+| 5.2 | Golden-снимки `uv.ScreenBuffer` поверх обвязки 2.0 для 3-5 ключевых сценариев (открыть модели, отправить сообщение, permission-flow, панель тредов) — как дополнительный уровень проверки, не единственный | предусловие 5.3, после 2.0 |
+| 5.3 | Роутер сообщений вместо 919-строчного `Update`: mouse-обработка (~450 строк) и `loadSessionMsg` — в отдельные обработчики; продолжить вектор apply*-методов | только после 2.0 и 5.2 |
+| 5.4 | Тесты: db/gc (см. 1.7), history.CreateVersion конкурентный, dialog топ-5 непокрытых | параллельно всему |
+| 5.5 | Решение по client/server: флип дефолта или dogfood-режим в CI — утечка 1.2 жила там именно потому, что режим не обкатывается | после 1.2 |
+
+### Фаза 6 — отложенные решения (по мере надобности)
+
+- **Хуки для под-агентов**: зафиксировать политику явно (документировать «хуки не
+  guard-rail для делегаций») либо оборачивать под-агентов с дедупликацией событий.
+  Плюс `PostToolUse`/`Stop` — расширение публичного контракта.
+- **`PushPopBraidEnv`** → передача env-снапшота в discovery вместо мутации
+  `os.Environ()`; попутно фикс `restore()` (Unsetenv для отсутствовавших).
+- **Copilot ToS-риск** — решение владельца проекта (см. TECHDEBT.md).
+- **`event`-каркас** — оставлен осознанно ради diff с upstream; опустошить
+  duration-арифметику в `all.go`, остальное не трогать.
+- **`ErrRequestCancelled`** — либо возвращать из dispatcher, либо удалить вместе
+  со сравнением в `app_workspace.go:308`.
 
 ### Ожидаемый порядок исполнения
 
 ```
-Фаза 0 (0.1 → 0.3 → 0.2)
-  → Фаза 1 (целиком, можно параллельно с 0.2)
-  → Фаза 2 (2.1–2.3, 2.9 в первую очередь — чинят живые баги)
-  → Фаза 3 (3.1 → 3.2 → 3.6 → 3.7 → 3.8/3.9 → 3.3 → 3.4 → 3.5 → 3.10–3.12)
-  → Фаза 4 (4.2 → 4.3 → 4.4 → 4.1 → 4.5 → 4.8 → 4.6 → 4.7)
-  → Фаза 5 по решению
+Фаза 1 (1.3 → 1.4 → 1.5 — в первый же заход; 1.1 с миграцией триггера следом;
+        1.6, 1.7 за ними; 1.2 — отдельный высокорисковый проект, вести параллельно)
+  → Фаза 2 (2.0 обвязка → 2.1 → 2.2–2.5; 2.6 поверх 2.2)
+  → Фаза 3 (целиком, точечные PR, можно параллельно с фазой 2)
+  → Фаза 4 (4.1–4.4 до появления новых копий; 4.7 в тихий период)
+  → Фаза 5 (5.1 — разделение VCR-режимов сразу, перезапись кассет по появлении
+             LLM-эндпоинта; 5.2 после 2.0; 5.3 строго после 5.2; 5.5 после 1.2)
+  → Фаза 6 по решению
 ```
-
-Каждый пункт фаз 2–4 — отдельный PR с зелёными тестами; пункты фазы 4 не начинать,
-пока не влиты соответствующие страховочные тесты фазы 0.

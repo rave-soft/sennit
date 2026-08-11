@@ -89,6 +89,12 @@ func (f *fakeThreadCoordinator) Run(_ context.Context, _, _ string, _ ...message
 	return nil, nil
 }
 
+func (f *fakeThreadCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
+
+func (f *fakeThreadCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
+	return f.Run(ctx, sessionID, prompt, attachments...)
+}
+
 func (f *fakeThreadCoordinator) CancelAll() {}
 
 type fakeThreadHandle struct {

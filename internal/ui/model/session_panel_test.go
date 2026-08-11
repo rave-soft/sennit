@@ -36,33 +36,21 @@ func mkDockThreads(n int) []proto.Thread {
 	return threads
 }
 
-// TestThreadDockBlockLines covers the two-line block's plain text: the
-// number, name, em dash, truncated goal on line 1, and the arrow-prefixed
-// status on line 2 — plus that a narrow width truncates rather than
-// wrapping or panicking. threadDockBlockLines itself lives in
-// threads_dock_view.go's predecessor's file, threads_dock.go — untouched by
-// the panel merge — this just re-confirms the panel still gets the same
-// text out of it.
-func TestThreadDockBlockLines(t *testing.T) {
+// TestThreadDockStatusText covers the block's second-row text source: the
+// step count plus live activity, with the elapsed time measured from the
+// thread's CreatedAt.
+func TestThreadDockStatusText(t *testing.T) {
 	t.Parallel()
 
 	th := proto.Thread{
 		ID: "t1", Name: "fix-auth", Goal: "Refactor login flow to OAuth2",
 		Status: "running", CreatedAt: time.Now().Add(-4 * time.Minute).Unix(),
 	}
-	activity := threadDockActivity{MessageCount: 12}
+	activity := threadDockActivity{MessageCount: 12, LastTool: "bash go test ./..."}
 
-	line1, line2 := threadDockBlockLines(1, th, activity, 200)
-	require.Equal(t, "1 fix-auth — Refactor login flow to OAuth2", line1)
-	require.Contains(t, line2, "  → step 12 · ")
-
-	// A narrow width truncates each line independently instead of
-	// wrapping or panicking.
-	require.NotPanics(t, func() {
-		narrow1, narrow2 := threadDockBlockLines(1, th, activity, 10)
-		require.LessOrEqual(t, ansi.StringWidth(narrow1), 10)
-		require.LessOrEqual(t, ansi.StringWidth(narrow2), 10)
-	})
+	status := threadDockStatusText(th, activity)
+	require.Contains(t, status, "step 12 · → bash go test ./... · ")
+	require.Contains(t, status, "4m0")
 }
 
 // sessionUI builds a uiChat UI with an active session, ready to exercise

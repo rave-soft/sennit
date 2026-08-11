@@ -124,6 +124,44 @@ func TestBroker_DropCountsPreserveSemantics(t *testing.T) {
 	require.Equal(t, uint64(1), b.MustDeliverDropCount())
 }
 
+// TestBroker_ShutdownIdempotentAndConcurrent verifies that any number of
+// concurrent Shutdown calls are safe (no double-close panic), all return
+// after the single teardown completes, the subscription channel is closed,
+// SubscriberCount drops to zero, and Subscribe after shutdown returns a
+// closed channel.
+func TestBroker_ShutdownIdempotentAndConcurrent(t *testing.T) {
+	t.Parallel()
+
+	b := NewBroker[int]()
+
+	const n = 100
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for range n {
+		go func() {
+			defer wg.Done()
+			b.Shutdown()
+		}()
+	}
+	wg.Wait()
+
+	// All subscriptions are closed and removed.
+	require.Equal(t, 0, b.GetSubscriberCount())
+
+	// Subscribe after shutdown returns an immediately-closed channel.
+	ch := b.Subscribe(context.Background())
+	select {
+	case _, ok := <-ch:
+		require.False(t, ok, "Subscribe after Shutdown should return a closed channel")
+	default:
+		t.Fatal("Subscribe after Shutdown returned an open channel")
+	}
+
+	// A second Shutdown call must also be safe.
+	b.Shutdown()
+	b.Shutdown()
+}
+
 // TestBroker_ConcurrentPublishAndSubscribeNoRace exercises concurrent
 // Subscribe/unsubscribe alongside concurrent Publish/PublishMustDeliver
 // to give the race detector a chance to catch any lock ordering or

@@ -31,28 +31,71 @@ import (
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
-// threadDockBlockLines builds one active thread's two-line plain-text
-// block: "<n> <name> — <goal>" and "  → <status>", each independently
-// truncated to width (no wrapping — the panel is a fixed-height area).
-// index is 1-based, matching the visible order visibleDockThreads returns.
-// Unchanged from the pre-merge threads_dock_view.go.
-func threadDockBlockLines(index int, t proto.Thread, activity threadDockActivity, width int) (line1, line2 string) {
-	name := t.Name
-	if name == "" {
-		name = t.ID
-	}
-	goal := threadDockGoalFirstLine(t.Goal)
-	line1 = fmt.Sprintf("%d %s — %s", index, name, goal)
-
-	// CreatedAt, not UpdatedAt: UpdatedAt is bumped on every status
-	// transition (see thread/store.go SetStatus), so it tracks "last
-	// activity", not "how long has this thread been running" — the panel
-	// wants the latter.
+// threadDockStatusText builds one thread's live status text for its
+// block's second row: threadDockStatusLine over the thread's cached
+// activity, with the elapsed time measured from CreatedAt — not UpdatedAt,
+// which is bumped on every status transition (see thread/store.go
+// SetStatus), so it tracks "last activity", not "how long has this thread
+// been running"; the panel wants the latter.
+func threadDockStatusText(t proto.Thread, activity threadDockActivity) string {
 	elapsed := time.Since(time.Unix(t.CreatedAt, 0))
-	status := threadDockStatusLine(thread.Status(t.Status), activity, elapsed)
-	line2 = "  → " + status
+	return threadDockStatusLine(thread.Status(t.Status), activity, elapsed)
+}
 
-	return ansi.Truncate(line1, width, "…"), ansi.Truncate(line2, width, "…")
+// panelSpinnerWanted reports whether the panel currently shows any live
+// work worth animating: an in-progress todo while the local agent is busy
+// (the original todo-spinner condition), a running delegation block, or
+// an active background thread. The spinner used to belong to the todos
+// list alone; the thread/delegation blocks now share it, so it must keep
+// ticking even when the local agent is idle and only background threads
+// are working.
+func (m *UI) panelSpinnerWanted() bool {
+	if !m.hasSession() {
+		return false
+	}
+	if m.isAgentBusy() && hasInProgressTodo(m.session.Todos) {
+		return true
+	}
+	if m.chat != nil && len(m.chat.RunningDelegations()) > 0 {
+		return true
+	}
+	for _, t := range m.threadsDock.threads {
+		switch thread.Status(t.Status) {
+		case thread.StatusRunning, thread.StatusMerging:
+			return true
+		}
+	}
+	return false
+}
+
+// syncPanelSpinner reconciles the shared panel spinner with
+// panelSpinnerWanted: on a stopped→spinning transition it returns the
+// initial Tick command that starts the tick loop (nil otherwise), and it
+// stops the spinner the moment nothing live is left. Every event that can
+// change the answer (busy refresh landing, session/thread events, dock
+// refreshes) funnels through this instead of duplicating the condition.
+func (m *UI) syncPanelSpinner() tea.Cmd {
+	want := m.panelSpinnerWanted()
+	if want && !m.panelIsSpinning {
+		m.panelIsSpinning = true
+		return m.panelSpinner.Tick
+	}
+	if !want {
+		m.panelIsSpinning = false
+	}
+	return nil
+}
+
+// panelActivityIcon is the leading marker for a live block's status line:
+// the shared panel spinner's current frame while spinning (the block
+// represents work in flight), a static spinner glyph otherwise — the same
+// static-fallback the todos list uses, so a briefly-stalled tick loop
+// degrades to a frozen glyph rather than a misleading arrow.
+func (m *UI) panelActivityIcon() string {
+	if m.panelIsSpinning {
+		return m.panelSpinner.View()
+	}
+	return m.com.Styles.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 }
 
 // maxQueueDisplayLength is the maximum length of a queue item in the list.
@@ -97,7 +140,7 @@ const delegationsVisibleCap = 3
 // (messageID/toolCallID) without touching width-dependent text. Its
 // display text (name/task/status line) is resolved from item at draw
 // time, mirroring how thread blocks resolve their text from the raw
-// proto.Thread only at draw time (see threadDockBlockLines) — row counts
+// proto.Thread only at draw time (see threadDockStatusText) — row counts
 // must never depend on rendering width, only per-row truncation does.
 type panelDelegation struct {
 	item       chat.ToolMessageItem
@@ -586,7 +629,7 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 }
 
 // drawThreadBlocks paints plan.threads as the panel's top section — one
-// two-line block per active thread (text from threadDockBlockLines, same as
+// two-line block per active thread (status text from threadDockStatusText, same as
 // the old drawThreadsDock) plus the "…and N more threads" footer — and
 // returns each block's on-screen rect (from threadBlockGeometry), in the
 // same order as plan.threads, for hover-highlight bookkeeping in Draw.
@@ -609,7 +652,6 @@ func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPane
 			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 1},
 		}
 
-		_, line2 := threadDockBlockLines(i+1, t, m.threadsDock.activity[t.ID], width)
 		name := t.Name
 		if name == "" {
 			name = t.ID
@@ -632,7 +674,16 @@ func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPane
 			Min: uv.Position{X: area.Min.X, Y: block.Min.Y + 1},
 			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 2},
 		}
-		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line2, width, "…"))).Draw(scr, line2Row)
+		// A pending thread isn't doing anything yet, so it keeps the
+		// static arrow; running/merging threads get the live spinner.
+		icon := sty.Base.Render("→")
+		switch thread.Status(t.Status) {
+		case thread.StatusRunning, thread.StatusMerging:
+			icon = m.panelActivityIcon()
+		}
+		status := threadDockStatusText(t, m.threadsDock.activity[t.ID])
+		line2 := "  " + icon + " " + sty.Base.Render(status)
+		uv.NewStyledString(ansi.Truncate(line2, width, "…")).Draw(scr, line2Row)
 	}
 
 	if plan.threadsMore > 0 {
@@ -693,7 +744,10 @@ func (m *UI) drawDelegationBlocks(scr uv.Screen, area uv.Rectangle, plan session
 			Min: uv.Position{X: area.Min.X, Y: block.Min.Y + 1},
 			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 2},
 		}
-		line2 := "  " + delegationStatusLine(d.item, m.com.Styles, width-2)
+		// Delegations in this section are running by definition (see
+		// runningDelegationBlocks), so line 2 always leads with the live
+		// spinner, mirroring the running-thread blocks above.
+		line2 := "  " + m.panelActivityIcon() + " " + delegationStatusLine(d.item, m.com.Styles, width-4)
 		uv.NewStyledString(ansi.Truncate(line2, width, "…")).Draw(scr, line2Row)
 	}
 
@@ -830,10 +884,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 			listWidth = max(0, width-1) // reserve the right column for the scrollbar.
 		}
 
-		inProgressIcon := t.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
-		if m.todoIsSpinning {
-			inProgressIcon = m.todoSpinner.View()
-		}
+		inProgressIcon := m.panelActivityIcon()
 		for _, todo := range all[offset:end] {
 			if row.Min.Y >= area.Max.Y {
 				break

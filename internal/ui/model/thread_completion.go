@@ -27,16 +27,11 @@ import (
 // /threads dashboard, which already shows terminal status per thread.
 
 // isTerminalThreadStatus reports whether status is a resting/finished
-// state — anything outside activeDockThreads' active set (pending,
-// running, merging). Mirrors the status groupings threadBadge already
-// uses for the dashboard's badge coloring.
+// state — anything outside the active set (pending, running, merging).
+// Deliberately !Active rather than Terminal: for a toast, an unknown
+// status from a newer build reads as "no longer running" too.
 func isTerminalThreadStatus(status string) bool {
-	switch thread.Status(status) {
-	case thread.StatusPending, thread.StatusRunning, thread.StatusMerging:
-		return false
-	default:
-		return true
-	}
+	return !thread.Status(status).Active()
 }
 
 // notifyThreadCompletion detects a thread's edge transition into a
@@ -92,7 +87,7 @@ func threadCompletionToast(t proto.Thread) tea.Cmd {
 
 // threadCompletionElapsedSuffix renders " · 12m"-style suffix from
 // CreatedAt/CompletedAt, or "" if either is missing/inconsistent —
-// matching threadDockBlockLines' policy of omitting a misleading duration
+// matching threadDockStatusText' policy of omitting a misleading duration
 // rather than guessing.
 func threadCompletionElapsedSuffix(t proto.Thread) string {
 	if t.CreatedAt <= 0 || t.CompletedAt <= 0 || t.CompletedAt < t.CreatedAt {

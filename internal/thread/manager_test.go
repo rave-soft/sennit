@@ -2,10 +2,12 @@ package thread
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -116,18 +118,30 @@ type fakeCoordinator struct {
 	mu              sync.Mutex
 	runs            []fakeRun
 	cancelAllCalled bool
+	runErr          error
 }
 
 type fakeRun struct {
 	sessionID string
 	prompt    string
+	runID     string
 }
 
-func (f *fakeCoordinator) Run(_ context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.runs = append(f.runs, fakeRun{sessionID: sessionID, prompt: prompt})
-	return nil, nil
+	f.runs = append(f.runs, fakeRun{sessionID: sessionID, prompt: prompt, runID: agent.RunIDFromContext(ctx)})
+	return nil, f.runErr
+}
+
+func (f *fakeCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
+
+func (f *fakeCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+	f.mu.Lock()
+	f.runs = append(f.runs, fakeRun{sessionID: sessionID, prompt: prompt, runID: agent.RunIDFromContext(ctx)})
+	err := f.runErr
+	f.mu.Unlock()
+	return nil, err
 }
 
 func (f *fakeCoordinator) CancelAll() {
@@ -159,25 +173,38 @@ func (h *fakeHandle) App() *app.App { return h.app }
 type fakeSpawner struct {
 	t *testing.T
 
-	mu          sync.Mutex
-	byPath      map[string]*fakeHandle
-	coordByPath map[string]*fakeCoordinator
-	released    map[string]bool
-	spawnErr    error
+	mu           sync.Mutex
+	byPath       map[string]*fakeHandle
+	coordByPath  map[string]*fakeCoordinator
+	released     map[string]bool
+	releaseCount map[string]int
+	spawnCount   int
+	spawnErr     error
+	runErr       error
+	blockSpawn   bool
+	spawnEntered chan struct{}
+	spawnRelease chan struct{}
 }
 
 func newFakeSpawner(t *testing.T) *fakeSpawner {
 	return &fakeSpawner{
-		t:           t,
-		byPath:      make(map[string]*fakeHandle),
-		coordByPath: make(map[string]*fakeCoordinator),
-		released:    make(map[string]bool),
+		t:            t,
+		byPath:       make(map[string]*fakeHandle),
+		coordByPath:  make(map[string]*fakeCoordinator),
+		released:     make(map[string]bool),
+		releaseCount: make(map[string]int),
 	}
 }
 
 func (s *fakeSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
+	if s.blockSpawn {
+		close(s.spawnEntered)
+		<-ctx.Done()
+		<-s.spawnRelease
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.spawnCount++
 	if s.spawnErr != nil {
 		return nil, s.spawnErr
 	}
@@ -185,7 +212,7 @@ func (s *fakeSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
 	a.Sessions = &fakeSessions{}
-	coord := &fakeCoordinator{}
+	coord := &fakeCoordinator{runErr: s.runErr}
 	a.AgentCoordinator = coord
 
 	h := &fakeHandle{id: path, app: a}
@@ -194,11 +221,24 @@ func (s *fakeSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
 	return h, nil
 }
 
+func (s *fakeSpawner) spawns() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.spawnCount
+}
+
 func (s *fakeSpawner) Release(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.released[id] = true
+	s.releaseCount[id]++
 	return nil
+}
+
+func (s *fakeSpawner) releases(id string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.releaseCount[id]
 }
 
 func (s *fakeSpawner) appFor(path string) *app.App {
@@ -222,7 +262,12 @@ func (s *fakeSpawner) wasReleased(id string) bool {
 // publishSuccess simulates a thread's agent run finishing successfully.
 func publishSuccess(t *testing.T, a *app.App, sessionID string) {
 	t.Helper()
-	a.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: sessionID, Text: "finished"})
+	coord := a.AgentCoordinator.(*fakeCoordinator)
+	require.Eventually(t, func() bool { return coord.runCount() > 0 }, time.Second, time.Millisecond)
+	coord.mu.Lock()
+	runID := coord.runs[len(coord.runs)-1].runID
+	coord.mu.Unlock()
+	a.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: sessionID, RunID: runID, Text: "finished"})
 }
 
 // -- tests --
@@ -320,7 +365,12 @@ func TestManager_ManualPolicyCompleted(t *testing.T) {
 	require.NoError(t, err)
 
 	writeFile(t, st.WorktreePath, "output.txt", "did the work\n")
-	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() >= 1 }, time.Second, time.Millisecond)
+	coord.mu.Lock()
+	runID := coord.runs[0].runID
+	coord.mu.Unlock()
+	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: runID, Text: "finished"})
 
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
 
@@ -598,7 +648,7 @@ func TestManager_SendRedispatches(t *testing.T) {
 	require.Equal(t, StatusRunning, st.Status)
 
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
 }
 
 func TestManager_HandleAndWorkspaceID(t *testing.T) {
@@ -621,4 +671,196 @@ func TestManager_HandleAndWorkspaceID(t *testing.T) {
 	require.NoError(t, mgr.Remove(t.Context(), st.ID, true, true))
 	require.Nil(t, mgr.Handle(st.ID))
 	require.Empty(t, mgr.WorkspaceID(st.ID))
+}
+
+// A successful Send into an idle thread must NOT release the workspace it
+// just respawned (regression: the ownership-transfer defer used to fire on
+// the success path), and a follow-up queued into a live run must survive
+// the in-flight run's completion: ownership moves to the follow-up's
+// RunID, so only its own completion releases the workspace and settles
+// the thread's status.
+func TestManager_SendOwnershipFollowsLatestRun(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "owner", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
+	require.Nil(t, mgr.Handle(st.ID))
+
+	// Respawn via Send: the workspace must stay alive after Send returns.
+	require.NoError(t, mgr.Send(t.Context(), st.ID, "first"))
+	require.NotNil(t, mgr.Handle(st.ID))
+	require.Zero(t, spawner.releases(st.WorktreePath)-1) // only the goal run's release so far
+
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	coord.mu.Lock()
+	ownerRunID := coord.runs[0].runID
+	coord.mu.Unlock()
+
+	// Queue a follow-up while the first run is in flight.
+	require.NoError(t, mgr.Send(t.Context(), st.ID, "second"))
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	coord.mu.Lock()
+	followUpRunID := coord.runs[1].runID
+	coord.mu.Unlock()
+	require.NotEmpty(t, followUpRunID)
+	require.NotEqual(t, ownerRunID, followUpRunID)
+
+	// The first run completing must neither release the workspace nor
+	// settle the thread: the queued follow-up still owns both.
+	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: ownerRunID, Text: "first done"})
+	require.Never(t, func() bool { return mgr.Handle(st.ID) == nil }, 100*time.Millisecond, 10*time.Millisecond)
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusRunning, got.Status)
+
+	// The follow-up completing settles everything.
+	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: followUpRunID, Text: "second done"})
+	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool {
+		got, err := mgr.Get(t.Context(), st.ID)
+		return err == nil && got.Status == StatusCompleted
+	}, time.Second, time.Millisecond)
+}
+
+func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "once", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
+
+	var wg sync.WaitGroup
+	for range 12 {
+		wg.Go(func() { require.NoError(t, mgr.Send(t.Context(), st.ID, "again")) })
+	}
+	wg.Wait()
+	require.Equal(t, 2, spawner.spawns())
+	coord := spawner.coordFor(st.WorktreePath)
+	// coordFor returns the coordinator of the respawned workspace (each
+	// Spawn builds a fresh one): one respawned run from the first Send
+	// plus eleven queued follow-ups — each dispatched asynchronously, so
+	// wait for all of them to land before completing them.
+	require.Eventually(t, func() bool { return coord.runCount() == 12 }, time.Second, time.Millisecond)
+	// Every dispatched turn eventually publishes its own RunComplete. The
+	// workspace is released only by the turn that currently owns the
+	// runtime (the last dispatched RunID) — completing all of them models
+	// that and asserts exactly one effective release.
+	coord.mu.Lock()
+	runIDs := make([]string, 0, len(coord.runs))
+	for _, r := range coord.runs {
+		runIDs = append(runIDs, r.runID)
+	}
+	coord.mu.Unlock()
+	for _, id := range runIDs {
+		spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: id, Text: "finished"})
+	}
+	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, time.Second, time.Millisecond)
+	require.GreaterOrEqual(t, spawner.releases(st.WorktreePath), 2)
+}
+
+func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "cancel-error", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	coord.mu.Lock()
+	runID := coord.runs[0].runID
+	coord.mu.Unlock()
+	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: runID, Error: "cancelled", Cancelled: true})
+	require.Eventually(t, func() bool {
+		got, err := mgr.Get(t.Context(), st.ID)
+		return err == nil && got.Status == StatusInterrupted
+	}, time.Second, time.Millisecond)
+}
+
+func TestManager_RunAcceptedImmediateErrorCompletesAndReleases(t *testing.T) {
+	repo := initRepo(t)
+	spawner := newFakeSpawner(t)
+	mgr := NewManager(ManagerOptions{
+		Store:       newTestStoreDB(t),
+		Spawner:     spawner,
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+	// Configure the coordinator created by Spawn before Create dispatches.
+	// Its RunAccepted returns this error and deliberately publishes no event.
+	spawner.runErr = errors.New("boom")
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "immediate-error", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		got, err := mgr.Get(t.Context(), st.ID)
+		return err == nil && got.Status == StatusFailed && strings.Contains(got.Error, "boom")
+	}, time.Second, time.Millisecond)
+	require.Nil(t, mgr.Handle(st.ID))
+	require.Equal(t, 1, spawner.releases(st.WorktreePath))
+	require.NoError(t, mgr.Shutdown(t.Context()))
+}
+
+func TestManager_ConcurrentShutdownClosesMutations(t *testing.T) {
+	repo := initRepo(t)
+	mgr, _ := newTestManager(t, repo)
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Go(func() { require.NoError(t, mgr.Shutdown(t.Context())) })
+	}
+	wg.Wait()
+	_, err := mgr.Create(t.Context(), CreateArgs{Name: "closed", Goal: "go"})
+	require.ErrorIs(t, err, ErrManagerClosed)
+	require.ErrorIs(t, mgr.Send(t.Context(), "missing", "go"), ErrManagerClosed)
+	require.ErrorIs(t, mgr.Merge(t.Context(), "missing"), ErrManagerClosed)
+	require.ErrorIs(t, mgr.Remove(t.Context(), "missing", true, false), ErrManagerClosed)
+	require.ErrorIs(t, mgr.Recover(t.Context()), ErrManagerClosed)
+}
+
+func TestManager_ShutdownWaitsForCancelledSpawnRollback(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "blocked", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
+
+	spawner.blockSpawn = true
+	spawner.spawnEntered = make(chan struct{})
+	spawner.spawnRelease = make(chan struct{})
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- mgr.Send(context.Background(), st.ID, "again") }()
+	<-spawner.spawnEntered
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- mgr.Shutdown(context.Background()) }()
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("Shutdown returned before Spawn resolved: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(spawner.spawnRelease)
+	require.Error(t, <-sendDone)
+	require.NoError(t, <-shutdownDone)
+	require.Nil(t, mgr.Handle(st.ID))
+	require.Equal(t, 2, spawner.releases(st.WorktreePath), "the completed original and cancelled respawn are each released once")
+}
+
+func TestManager_RemoveAndCompletionReleaseOnce(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "race-remove", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	coord.mu.Lock()
+	runID := coord.runs[0].runID
+	coord.mu.Unlock()
+	var wg sync.WaitGroup
+	wg.Go(func() { _ = mgr.Remove(t.Context(), st.ID, true, true) })
+	wg.Go(func() {
+		spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: runID})
+	})
+	wg.Wait()
+	require.Equal(t, 1, spawner.releases(st.WorktreePath))
 }

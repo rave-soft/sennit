@@ -231,13 +231,8 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	}
 
 	var cmds []tea.Cmd
-	busy := m.isAgentBusy()
-	if m.hasSession() && hasInProgressTodo(m.session.Todos) && busy && !m.todoIsSpinning {
-		m.todoIsSpinning = true
-		cmds = append(cmds, m.todoSpinner.Tick)
-	}
-	if m.todoIsSpinning && !busy {
-		m.todoIsSpinning = false
+	if cmd := m.syncPanelSpinner(); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	return cmds
 }
@@ -327,8 +322,32 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
+	// The threads dock's list and per-thread activity (step count, current
+	// tool) previously re-probed only on thread pubsub events; with the
+	// panel spinner ticking whenever a thread is live, this Update tail
+	// runs continuously, so their TTLs act as a real backstop and the
+	// "what is this thread doing" line stays fresh between events.
+	cmds = append(cmds, m.threadViewsRefreshCmds()...)
+	return cmds
+}
+
+// threadViewsRefreshCmds re-probes the thread indicator, the dock's thread
+// list, and per-thread activity wherever a TTL has expired or an
+// invalidation demands it. Shared by the thread-event handler and the
+// Update-tail backstop so the sequence exists exactly once. It never does
+// IO itself, and it costs nothing beyond time comparisons while the
+// project has no threads.
+func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
+	var cmds []tea.Cmd
 	if cmd := m.threadIndicator.staleRefreshCmd(m.com); cmd != nil {
 		cmds = append(cmds, cmd)
+	}
+	if cmd := m.threadsDock.staleThreadsDockRefreshCmd(m.com, m.state == uiChat); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if m.state == uiChat && len(m.threadsDock.threads) > 0 {
+		visible, _ := visibleDockThreads(activeDockThreads(m.threadsDock.threads))
+		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds
 }

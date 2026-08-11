@@ -37,10 +37,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 )
 
@@ -64,8 +66,13 @@ type threadDockActivity struct {
 	// InProgressTodo is the ActiveForm (falling back to Content) of the
 	// session's in-progress todo, empty if there is none.
 	InProgressTodo string
-	MessageCount   int64
-	FetchedAt      time.Time
+	// LastTool is a compact summary of the session's most recent tool call
+	// ("Read internal/foo.go", "bash go test ./..."), empty when the
+	// session has no tool calls yet. It answers "what is this thread doing
+	// right now" at a finer grain than the in-progress todo.
+	LastTool     string
+	MessageCount int64
+	FetchedAt    time.Time
 }
 
 // threadsDockState holds the memoized thread list plus per-thread live
@@ -171,6 +178,12 @@ func (c *threadsDockState) staleThreadsDockRefreshCmd(com *common.Common, active
 	if !active || c.fresh(threadsDockTTL) {
 		return nil
 	}
+	// A fetched-and-empty list stays empty until a thread event
+	// invalidates it (checkedAt is zeroed then) — don't re-poll
+	// ListThreads forever for projects that have no threads at all.
+	if len(c.threads) == 0 && !c.checkedAt.IsZero() {
+		return nil
+	}
 	return c.dispatchThreadsDockRefresh(com)
 }
 
@@ -181,8 +194,7 @@ func (c *threadsDockState) staleThreadsDockRefreshCmd(com *common.Common, active
 func activeDockThreads(threads []proto.Thread) []proto.Thread {
 	var active []proto.Thread
 	for _, t := range threads {
-		switch thread.Status(t.Status) {
-		case thread.StatusPending, thread.StatusRunning, thread.StatusMerging:
+		if thread.Status(t.Status).Active() {
 			active = append(active, t)
 		}
 	}
@@ -225,6 +237,7 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 	}
 	ws := com.Workspace
 	gen := c.activityGen
+	prev, hasPrev := c.activity[threadID]
 	return func() tea.Msg {
 		ctx := context.Background()
 		attached, detach, err := ws.AttachThread(ctx, threadID)
@@ -254,6 +267,22 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 				activity.InProgressTodo = todo.Content
 			}
 			break
+		}
+
+		// The last tool call is not on the session row — it takes listing
+		// the session's messages, whose cost grows with the session's
+		// whole history (and, in local mode, forces a FlushAll first). So
+		// only re-list when the message count moved since the previous
+		// probe: an unchanged count means no new tool call, and the cached
+		// summary is still right. A listing failure only costs this one
+		// optional field, so it's a best-effort add-on rather than a
+		// reason to fail the whole probe.
+		if hasPrev && prev.MessageCount == sess.MessageCount {
+			activity.LastTool = prev.LastTool
+		} else if msgs, err := attached.ListMessages(ctx, sessionID); err != nil {
+			slog.Error("list messages for dock activity", "thread", threadID, "error", err)
+		} else {
+			activity.LastTool = lastToolSummary(msgs)
 		}
 		return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, activity: activity}
 	}
@@ -304,6 +333,21 @@ func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, vi
 	return cmds
 }
 
+// lastToolSummary reduces a session's message history to a compact
+// summary of its most recent tool call (chat.LastToolSummary's "name +
+// key argument" shape), scanning from the end since only the newest call
+// matters. "" when no message has any tool calls yet.
+func lastToolSummary(msgs []message.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		calls := msgs[i].ToolCalls()
+		if len(calls) == 0 {
+			continue
+		}
+		return chat.LastToolSummary(calls[len(calls)-1])
+	}
+	return ""
+}
+
 // threadDockGoalFirstLine returns the first line of a thread's goal/prompt
 // text, trimmed of surrounding whitespace — the dock shows one line per
 // thread and leaves wrapping/truncation for the drawing step.
@@ -312,22 +356,30 @@ func threadDockGoalFirstLine(goal string) string {
 	return strings.TrimSpace(line)
 }
 
-// threadDockStatusLine builds the dock's per-thread status text: the
-// in-progress todo if there is one, else a step count from the message
-// count, else the thread's own status word, always suffixed with the
-// elapsed time. Doesn't add the leading "→ " arrow — that's a rendering
-// concern for the drawing step to prepend.
+// threadDockStatusLine builds the dock's per-thread status text: the step
+// count plus what the thread is doing right now — its in-progress todo
+// when there is one (a todo says more about intent than a raw tool name,
+// matching renderPanelStatusLine's priority), else its last tool call —
+// falling back to the thread's own status word when there's no activity
+// at all, always suffixed with the elapsed time. Doesn't add the leading
+// spinner/arrow — that's a rendering concern for the drawing step to
+// prepend.
 func threadDockStatusLine(status thread.Status, activity threadDockActivity, elapsed time.Duration) string {
-	var text string
+	var parts []string
+	if activity.MessageCount > 0 {
+		parts = append(parts, fmt.Sprintf("step %d", activity.MessageCount))
+	}
 	switch {
 	case activity.InProgressTodo != "":
-		text = activity.InProgressTodo
-	case activity.MessageCount > 0:
-		text = fmt.Sprintf("step %d", activity.MessageCount)
-	default:
-		text = threadDockStatusWord(status)
+		parts = append(parts, "→ "+activity.InProgressTodo)
+	case activity.LastTool != "":
+		parts = append(parts, "→ "+activity.LastTool)
 	}
-	return text + " · " + childPanelFormatElapsed(elapsed)
+	if len(parts) == 0 {
+		parts = append(parts, threadDockStatusWord(status))
+	}
+	parts = append(parts, childPanelFormatElapsed(elapsed))
+	return strings.Join(parts, " · ")
 }
 
 // threadDockStatusWord renders a thread's status as the terse, lowercase

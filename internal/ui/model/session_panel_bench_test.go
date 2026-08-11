@@ -114,7 +114,7 @@ func newSessionPanelBenchUI() *UI {
 		{Status: session.TodoStatusCompleted, Content: "done 4"},
 	}
 	u.panel.expanded = true
-	u.todoIsSpinning = true
+	u.panelIsSpinning = true
 
 	u.updateLayoutAndSize()
 	return u
@@ -151,7 +151,7 @@ func BenchmarkSessionPanelDraw(b *testing.B) {
 // ui.go's spinner.TickMsg case).
 func BenchmarkSessionPanelUpdateTick(b *testing.B) {
 	u := newSessionPanelBenchUI()
-	msg := spinner.TickMsg{Time: time.Now(), ID: u.todoSpinner.ID()}
+	msg := spinner.TickMsg{Time: time.Now(), ID: u.panelSpinner.ID()}
 
 	b.ReportAllocs()
 	for b.Loop() {

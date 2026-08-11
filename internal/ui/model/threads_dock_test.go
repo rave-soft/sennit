@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
@@ -71,14 +72,23 @@ func TestThreadDockStatusLine(t *testing.T) {
 
 	elapsed := 4*time.Minute + 3*time.Second
 
-	// In-progress todo wins over everything else.
+	// The step count and the in-progress todo are both shown; the todo
+	// wins over the last tool call as the activity segment.
 	line := threadDockStatusLine(thread.StatusRunning, threadDockActivity{
 		InProgressTodo: "writing tests",
+		LastTool:       "bash go test ./...",
 		MessageCount:   7,
 	}, elapsed)
-	require.Equal(t, "writing tests · 4m03s", line)
+	require.Equal(t, "step 7 · → writing tests · 4m03s", line)
 
-	// Message count wins when there's no in-progress todo.
+	// Without a todo, the last tool call fills the activity segment.
+	line = threadDockStatusLine(thread.StatusRunning, threadDockActivity{
+		LastTool:     "Read internal/ui/model/ui.go",
+		MessageCount: 7,
+	}, elapsed)
+	require.Equal(t, "step 7 · → Read internal/ui/model/ui.go · 4m03s", line)
+
+	// Just a step count when there's neither todo nor tool activity.
 	line = threadDockStatusLine(thread.StatusRunning, threadDockActivity{
 		MessageCount: 7,
 	}, elapsed)
@@ -190,7 +200,11 @@ func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
 			{Content: "task two", Status: session.TodoStatusInProgress, ActiveForm: "doing task two"},
 		},
 	}
-	attached := &threadsDockTestWorkspace{sess: sess}
+	attached := &threadsDockTestWorkspace{sess: sess, msgs: []message.Message{
+		{Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc1", Name: "view", Input: `{"file_path":"internal/ui/model/ui.go"}`},
+		}},
+	}}
 	ws := &threadsDockTestWorkspace{supported: true, attachWS: attached}
 	com := &common.Common{Workspace: ws}
 
@@ -205,6 +219,7 @@ func TestDispatchThreadActivityRefreshAndApply(t *testing.T) {
 	require.NoError(t, loaded.err)
 	require.Equal(t, "doing task two", loaded.activity.InProgressTodo)
 	require.Equal(t, int64(5), loaded.activity.MessageCount)
+	require.Equal(t, "view internal/ui/model/ui.go", loaded.activity.LastTool)
 	require.Equal(t, 1, ws.detachCalls)
 
 	c.activityInFlight = map[string]bool{"t1": true}
@@ -251,6 +266,9 @@ type threadsDockTestWorkspace struct {
 
 	sess    session.Session
 	sessErr error
+
+	msgs    []message.Message
+	msgsErr error
 }
 
 func (w *threadsDockTestWorkspace) SupportsThreads() bool { return w.supported }
@@ -265,4 +283,8 @@ func (w *threadsDockTestWorkspace) AttachThread(context.Context, string) (worksp
 
 func (w *threadsDockTestWorkspace) GetSession(context.Context, string) (session.Session, error) {
 	return w.sess, w.sessErr
+}
+
+func (w *threadsDockTestWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
+	return w.msgs, w.msgsErr
 }

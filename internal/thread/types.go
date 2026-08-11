@@ -15,6 +15,31 @@ const (
 	StatusInterrupted  Status = "interrupted"
 )
 
+// Active reports whether the thread still has work in flight: pending,
+// running, or merging.
+func (s Status) Active() bool {
+	switch s {
+	case StatusPending, StatusRunning, StatusMerging:
+		return true
+	default:
+		return false
+	}
+}
+
+// Terminal reports whether the thread is known to be finished. This is
+// deliberately not !Active(): a status this build doesn't know (from a
+// newer version sharing the database) is neither active nor terminal, so
+// destructive consumers (braid gc) leave it alone.
+func (s Status) Terminal() bool {
+	switch s {
+	case StatusCompleted, StatusMerged, StatusConflict,
+		StatusMergeBlocked, StatusFailed, StatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
 // MergePolicy controls how a completed thread's branch is merged back into
 // its base branch.
 type MergePolicy string

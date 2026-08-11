@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,7 +43,7 @@ type gcFixtureIDs struct {
 	OldChild     string // project A, child of OldParent, updated 1h ago -- must still go with its parent
 	YoungParent  string // project A, updated 1h ago: recent parent
 	OldOrphan    string // project A, child of YoungParent, updated 120d ago -- old enough on its own
-	Boundary     string // project A, updated_at exactly at the cutoff -- must survive (strict <)
+	Boundary     string // project A, just after cutoff -- must survive (strict <)
 	Recent       string // project A, updated 1h ago -- must survive
 	OtherProject string // project B, updated 120d ago -- only swept with --all-projects (the default)
 
@@ -56,7 +58,8 @@ type gcFixtureIDs struct {
 // parent/child expansion, the exact-cutoff boundary, project scoping, and
 // thread status gating. cutoff is the unix timestamp gc will use as its
 // retention boundary (time.Now() minus the retention window); the fixture
-// stamps Boundary's updated_at to exactly that value. projectA/projectB
+// stamps Boundary just after that value to tolerate crossing a Unix-second
+// boundary before runGC computes its cutoff. projectA/projectB
 // must be real directories: runGC's --cwd resolution chdirs into them.
 func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string) gcFixtureIDs {
 	t.Helper()
@@ -74,20 +77,13 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 	q := braiddb.New(conn)
 	ctx := t.Context()
 
-	// sessions/threads each carry an AFTER UPDATE trigger that unconditionally
-	// stamps updated_at to strftime('now') on every UPDATE -- including the
-	// row's own backdating UPDATE below, and including the cascading UPDATE
-	// CreateMessage triggers via update_session_message_count_on_insert. That
-	// is correct production behavior (any activity bumps last-activity time),
-	// but it means no UPDATE can ever set an arbitrary past updated_at, which
-	// is exactly what this fixture needs to simulate old, untouched sessions.
-	// Dropping the triggers for the fixture's own connection sidesteps that;
-	// gc itself never updates session/thread rows (only deletes them), so
-	// this does not weaken what's under test.
-	_, err = conn.ExecContext(ctx, `DROP TRIGGER IF EXISTS update_sessions_updated_at`)
-	require.NoError(t, err)
-	_, err = conn.ExecContext(ctx, `DROP TRIGGER IF EXISTS update_threads_updated_at`)
-	require.NoError(t, err)
+	// sessions/threads each carry an AFTER UPDATE trigger stamping
+	// updated_at to strftime('now'), but only WHEN NEW = OLD — an UPDATE
+	// that sets updated_at explicitly keeps its value (see migration
+	// 20260811000001). The fixture's backdating UPDATEs below rely on
+	// exactly that exemption; the cascading count-trigger UPDATE from
+	// CreateMessage still bumps updated_at, which is why backdating must
+	// be the last write touching each row.
 
 	old := time.Unix(cutoff, 0).Add(-30 * 24 * time.Hour).Unix()
 	recent := time.Unix(cutoff, 0).Add(30 * 24 * time.Hour).Unix()
@@ -174,7 +170,7 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 	setSessionTime(ids.OldChild, recent)
 	setSessionTime(ids.YoungParent, recent)
 	setSessionTime(ids.OldOrphan, old)
-	setSessionTime(ids.Boundary, cutoff)
+	setSessionTime(ids.Boundary, cutoff+10)
 	setSessionTime(ids.Recent, recent)
 	setSessionTime(ids.OtherProject, old)
 	setThread(ids.ThreadOldDone, "completed", old)
@@ -375,4 +371,110 @@ func TestGC_VacuumShrinksFile(t *testing.T) {
 	after, err := os.Stat(dbPath)
 	require.NoError(t, err)
 	require.Less(t, after.Size(), before.Size())
+}
+
+func TestGC_AuthoritativeSelectionKeepsNewlyActiveSession(t *testing.T) {
+	dataDir := t.TempDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	conn, err := braiddb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := braiddb.New(conn)
+	preview, err := gcCollect(t.Context(), q, conn, cutoff, "")
+	require.NoError(t, err)
+	require.Contains(t, preview.sessionIDs, ids.OldParent)
+
+	// This models activity in the interval before the authoritative writer
+	// transaction begins. The old preview must not be used for deletion.
+	_, err = conn.ExecContext(t.Context(), `UPDATE sessions SET updated_at = ? WHERE id = ?`, time.Now().Unix(), ids.OldParent)
+	require.NoError(t, err)
+
+	selection, err := gcDelete(t.Context(), conn, q, cutoff, "")
+	require.NoError(t, err)
+	require.NotContains(t, selection.sessionIDs, ids.OldParent)
+	require.Zero(t, selection.messagesDeleted)
+	require.True(t, sessionExists(t, dataDir, ids.OldParent))
+}
+
+func TestGC_AuthoritativeSelectionIncludesNewDescendant(t *testing.T) {
+	dataDir := t.TempDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	conn, err := braiddb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := braiddb.New(conn)
+	preview, err := gcCollect(t.Context(), q, conn, cutoff, "")
+	require.NoError(t, err)
+	require.NotContains(t, preview.sessionIDs, "sess-new-child")
+
+	_, err = q.CreateSession(t.Context(), braiddb.CreateSessionParams{
+		ID:              "sess-new-child",
+		Title:           "new child",
+		ProjectPath:     projectA,
+		ParentSessionID: sql.NullString{String: ids.OldParent, Valid: true},
+	})
+	require.NoError(t, err)
+
+	selection, err := gcDelete(t.Context(), conn, q, cutoff, "")
+	require.NoError(t, err)
+	require.Contains(t, selection.sessionIDs, "sess-new-child")
+	require.False(t, sessionExists(t, dataDir, "sess-new-child"))
+}
+
+func TestGC_AuthoritativeSelectionKeepsActiveAndUnknownThreads(t *testing.T) {
+	dataDir := t.TempDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	conn, err := braiddb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := braiddb.New(conn)
+	preview, err := gcCollect(t.Context(), q, conn, cutoff, "")
+	require.NoError(t, err)
+	require.Contains(t, preview.threadIDs, ids.ThreadOldDone)
+
+	_, err = conn.ExecContext(t.Context(), `UPDATE threads SET status = 'running' WHERE id = ?`, ids.ThreadOldDone)
+	require.NoError(t, err)
+	_, err = q.CreateThread(t.Context(), braiddb.CreateThreadParams{
+		ID: "thread-unknown", Name: "unknown", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
+		Branch: "thread/unknown", WorktreePath: "/tmp/unknown", Status: "future_status", MergePolicy: "auto",
+	})
+	require.NoError(t, err)
+	_, err = conn.ExecContext(t.Context(), `UPDATE threads SET updated_at = ? WHERE id = 'thread-unknown'`, cutoff-1)
+	require.NoError(t, err)
+
+	selection, err := gcDelete(t.Context(), conn, q, cutoff, "")
+	require.NoError(t, err)
+	require.NotContains(t, selection.threadIDs, ids.ThreadOldDone)
+	require.NotContains(t, selection.threadIDs, "thread-unknown")
+	require.True(t, threadExists(t, dataDir, ids.ThreadOldDone))
+	require.True(t, threadExists(t, dataDir, "thread-unknown"))
+}
+
+func TestGC_DeleteRollbackRestoresAllRows(t *testing.T) {
+	dataDir := t.TempDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	conn, err := braiddb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := braiddb.New(conn)
+	errInjected := errors.New("injected delete failure")
+	_, err = gcDeleteWith(t.Context(), conn, q, cutoff, "", func(ctx context.Context, q *braiddb.Queries, selection gcSelection) error {
+		require.NotEmpty(t, selection.sessionIDs)
+		require.NoError(t, q.DeleteSessionMessages(ctx, selection.sessionIDs[0]))
+		return errInjected
+	})
+	require.ErrorIs(t, err, errInjected)
+	require.True(t, sessionExists(t, dataDir, ids.OldParent))
+	n, err := q.CountSessionMessages(t.Context(), ids.OldParent)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n)
+	require.True(t, threadExists(t, dataDir, ids.ThreadOldDone))
 }

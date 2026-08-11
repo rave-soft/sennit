@@ -47,8 +47,8 @@ model myllm/foo-1 --think`)
 	model := p.Models[0]
 	require.Equal(t, 1.25, model.CostPer1MIn)
 	require.Equal(t, 5.0, model.CostPer1MOut)
-	require.Equal(t, 2.0, model.CostPer1MOutCached)
-	require.Equal(t, 0.25, model.CostPer1MInCached)
+	require.Equal(t, 2.0, model.CostPer1MInCached)
+	require.Equal(t, 0.25, model.CostPer1MOutCached)
 
 	require.Equal(t, "myllm", store.Config().Model.Provider)
 	require.Equal(t, "foo-1", store.Config().Model.Model)

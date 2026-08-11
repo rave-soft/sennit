@@ -1048,3 +1048,90 @@ func TestLoad_AppleTerminalDefaultSurvivesReload(t *testing.T) {
 	require.True(t, cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent,
 		"Apple Terminal transparent default should still be true after reload")
 }
+
+// TestReloadFromDisk_PublishedConfigNotMutated verifies the immutability
+// invariant: reloadFromDisk must not mutate a previously published Config
+// snapshot. It adds a markdown agent on disk between Load and Reload so
+// the new Config differs from the old one; if SetupAgents runs after
+// setConfig the old snapshot would gain the new agent and this test fails.
+func TestReloadFromDisk_PublishedConfigNotMutated(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "braid.json")
+
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{
+		"model": {"provider": "openai", "model": "gpt-4"},
+		"providers": {
+			"openai": {
+				"api_key": "test-key",
+				"models": [{"id": "gpt-4", "name": "GPT-4"}]
+			}
+		}
+	}`), 0o600))
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	oldCfg := store.Config()
+	require.Contains(t, oldCfg.Agents, "coder")
+	require.Contains(t, oldCfg.Agents, "task")
+
+	// Drop a new markdown agent on disk so reload discovers it.
+	agentID := "reviewer"
+	agentPath := filepath.Join(dir, ".braid", "agents", agentID+".md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
+	require.NoError(t, os.WriteFile(agentPath, []byte(`---
+name: reviewer
+description: Reviews Go code
+---
+You review Go code.`), 0o644))
+
+	// Reload directly — no staleness dance needed.
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+
+	// OLD snapshot must NOT have the new agent or its tool in AllowedTools.
+	require.NotContains(t, oldCfg.Agents, agentID,
+		"pre-reload snapshot must not gain new agent")
+	coderTools := oldCfg.Agents["coder"].AllowedTools
+	require.NotContains(t, coderTools, agentID,
+		"pre-reload snapshot coder AllowedTools must not gain new agent")
+
+	// NEW config must have the agent and its tool.
+	newCfg := store.Config()
+	require.True(t, newCfg != oldCfg, "reload should publish a new Config pointer")
+	require.Contains(t, newCfg.Agents, agentID, "reloaded config must have new agent")
+	newCoderTools := newCfg.Agents["coder"].AllowedTools
+	require.Contains(t, newCoderTools, agentID,
+		"reloaded config coder AllowedTools must include new agent")
+}
+
+// TestOnboarding_FirstCredentialBuildsAgents reproduces the fresh-install
+// flow: Load returns early (no provider configured, no SetupAgents), then
+// onboarding writes the first credential and preferred model. The first
+// config mutation that makes the store configured must build the agents
+// map on the new snapshot — InitCoderAgent runs right after onboarding and
+// needs Agents["coder"] — without mutating any previously published Config.
+func TestOnboarding_FirstCredentialBuildsAgents(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
+	t.Setenv("BRAID_GLOBAL_DATA", dir)
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+
+	preCfg := store.Config()
+	require.False(t, preCfg.IsConfigured())
+	require.Empty(t, preCfg.Agents, "unconfigured store must not have agents yet")
+
+	require.NoError(t, store.SetProviderAPIKey(ScopeGlobal, "openai", "test-key"))
+
+	cfg := store.Config()
+	require.True(t, cfg.IsConfigured())
+	require.Contains(t, cfg.Agents, "coder", "first credential write must build agents")
+	require.Contains(t, cfg.Agents, "task")
+	require.Empty(t, preCfg.Agents, "pre-onboarding snapshot must stay untouched")
+}

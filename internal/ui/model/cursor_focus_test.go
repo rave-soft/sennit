@@ -84,6 +84,15 @@ func (u *UI) drawForCursor() *tea.Cursor {
 	return u.Draw(canvas, canvas.Bounds())
 }
 
+func TestViewWindowTitleIncludesSession(t *testing.T) {
+	t.Parallel()
+
+	u := newCursorTestUI(t)
+	u.session.Title = "Fix Kitty title"
+
+	require.Equal(t, "braid /tmp — Fix Kitty title", u.View().WindowTitle)
+}
+
 // stubCursorDialog is a [dialog.Dialog] that always draws a fixed, easily
 // recognizable cursor, so a test can prove the dialog owns the cursor
 // outright while it is open, regardless of the UI's own focus state.

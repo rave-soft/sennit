@@ -219,6 +219,11 @@ func (s *ConfigStore) KnownProviders() []catwalk.Provider {
 }
 
 // SetupAgents configures the coder and task agents on the config.
+//
+// This method is intended for use during store construction (Load) and for
+// test/bootstrap setup. Production runtime must not call it on a store
+// whose Config is already accessible to other goroutines, since it mutates
+// the Config in place.
 func (s *ConfigStore) SetupAgents() {
 	s.Config().SetupAgents()
 }
@@ -430,6 +435,18 @@ func (s *ConfigStore) update(scope Scope, mutate func(*Config) map[string]any) e
 func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]any) error {
 	nc := s.Config().cloneForWrite()
 	fields := mutate(nc)
+	// Load returns early — without SetupAgents — when no provider is
+	// configured yet (fresh install). The first mutation that makes the
+	// config usable (onboarding writing a provider key / preferred model)
+	// must therefore build the agents map itself, or InitCoderAgent finds
+	// no "coder" agent right after onboarding. Doing it here, on the
+	// not-yet-published clone, keeps the published-Config-is-immutable
+	// invariant; steady-state mutations skip it (Agents already built).
+	// The Options guard skips hand-rolled test fixtures whose Config never
+	// went through Load's defaulting (SetupAgents dereferences Options).
+	if len(nc.Agents) == 0 && nc.Options != nil && nc.IsConfigured() {
+		nc.SetupAgents()
+	}
 	s.setConfig(nc)
 	if len(fields) == 0 {
 		return nil
@@ -1343,6 +1360,13 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to configure selected models during reload: %w", err)
 		}
+		// Unlike Load, a fallback model correction (resolved.Fallback)
+		// is not persisted to disk here, only applied in memory. This
+		// matches reloadFromDiskLocked's pre-existing behavior; persisting
+		// via updateLocked here would need its own failure handling (Load
+		// can simply discard the whole store on error, but a reload has
+		// already published a config other goroutines may be reading).
+		// Left as-is rather than risked as part of this refactor.
 		cfg.Model = resolved.Model
 	} else {
 		slog.Warn("No providers configured after reload")
@@ -1362,23 +1386,20 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
+	if configured {
+		// Set up agents on the new config before publishing it.
+		// This preserves the invariant that a published Config is never
+		// mutated in place: SetupAgents is called on cfg (the not-yet-
+		// published clone) and only then is cfg swapped into the store.
+		cfg.SetupAgents()
+	}
+
 	s.setConfig(cfg)
 	s.loadedPaths = loadedPaths
 	s.resolver = resolver
 	s.knownProviders = providers
 	s.overrides = overrides
 	s.workspacePath = workspacePath
-
-	if configured {
-		// Note: unlike Load, a fallback model correction (resolved.*Fallback)
-		// is not persisted to disk here, only applied in memory. This
-		// matches reloadFromDiskLocked's pre-existing behavior; persisting
-		// via updateLocked here would need its own failure handling (Load
-		// can simply discard the whole store on error, but a reload has
-		// already published a config other goroutines may be reading).
-		// Left as-is rather than risked as part of this refactor.
-		s.SetupAgents()
-	}
 
 	// Rebuild staleness tracking. Track every discovered config path, not
 	// just the ones that loaded, so a config file created after this reload

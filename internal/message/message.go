@@ -77,6 +77,11 @@ type pendingState struct {
 	// that has not yet been flushed.
 	latest Message
 
+	// generation identifies the Update that supplied latest. It lets a
+	// completed flush distinguish its snapshot from a concurrent update
+	// without comparing Message values, whose Parts may contain slices.
+	generation uint64
+
 	// dirty is true when latest contains state that has not been
 	// written to SQL since the last successful flush.
 	dirty bool
@@ -229,6 +234,7 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 			s.pending[msg.ID] = p
 		}
 		p.latest = cloned
+		p.generation++
 		p.dirty = true
 		s.mu.Unlock()
 		return s.flushOne(ctx, msg.ID, true)
@@ -241,6 +247,7 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 		s.pending[msg.ID] = p
 	}
 	p.latest = cloned
+	p.generation++
 	p.dirty = true
 
 	var prev *Message
@@ -340,6 +347,7 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			p.timer = nil
 		}
 		snap := p.latest
+		generation := p.generation
 		// Decide whether this snapshot represents a terminal event
 		// against the prior baseline. We must do this before resetting
 		// dirty/flushing because shouldFlushNow looks at p.lastFlushed
@@ -364,9 +372,25 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			// Restore dirty so the next caller retries.
 			p.dirty = true
 		}
-		// If a delta arrived during the SQL write and we are a sync
-		// caller, the user expects that delta to land too.
+		// A delta that arrived during the SQL write must not be left
+		// stranded: an Update while flushing intentionally does not
+		// schedule another timer. Sync callers drain it inline (the
+		// caller expects that delta to land too); the timer-fired path
+		// re-arms the debounce timer below instead — looping here would
+		// collapse the debounce into back-to-back writes for as long as
+		// the stream outpaces SQL write latency.
 		wasDirty := p.dirty
+		if err == nil && snap.IsFinished() && s.pending[id] == p &&
+			!p.flushing && !p.dirty && p.generation == generation {
+			// A finished message needs no coalescing state after its final
+			// snapshot has landed. Stop defensively even though the flush
+			// normally cleared the timer before issuing SQL.
+			if p.timer != nil {
+				p.timer.Stop()
+				p.timer = nil
+			}
+			delete(s.pending, id)
+		}
 		s.mu.Unlock()
 
 		if err != nil {
@@ -384,6 +408,17 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 
 		if wasDirty && syncCaller {
 			continue
+		}
+		if wasDirty {
+			// Timer-fired path: give the leftover dirty state a fresh
+			// debounce window instead of rewriting immediately.
+			s.mu.Lock()
+			if cur, ok := s.pending[id]; ok && cur == p && cur.dirty && !cur.flushing && cur.timer == nil {
+				cur.timer = time.AfterFunc(s.debounce, func() {
+					_ = s.flushOne(context.Background(), id, false)
+				})
+			}
+			s.mu.Unlock()
 		}
 		return nil
 	}
