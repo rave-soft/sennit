@@ -35,9 +35,10 @@ func TestBashRenderTool_RunningNoResultIsOneLine(t *testing.T) {
 	require.NotContains(t, out, "Waiting for tool response")
 }
 
-// TestBashRenderTool_FinishedIsOneLine covers the normal collapsed case: a
-// completed bash call with a result renders as exactly one line.
-func TestBashRenderTool_FinishedIsOneLine(t *testing.T) {
+// TestBashRenderTool_FinishedShowsOutputPreview covers the normal collapsed
+// case: a completed bash call renders its output directly under the header
+// (no blank separator line), and short output needs no expand hint.
+func TestBashRenderTool_FinishedShowsOutputPreview(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -48,8 +49,47 @@ func TestBashRenderTool_FinishedIsOneLine(t *testing.T) {
 	item := NewBashToolMessageItem(&sty, bashToolCall(t), result, false)
 	out := item.Render(80)
 
-	require.Equal(t, 1, strings.Count(out, "\n")+1, "expected a single rendered line, got: %q", out)
-	require.NotContains(t, out, "...")
+	lines := strings.Split(out, "\n")
+	require.Len(t, lines, 2, "expected header + one output line, got: %q", out)
+	require.Contains(t, lines[1], "added 200 packages")
+	require.NotContains(t, out, "Click to expand", "short output has nothing to expand")
+}
+
+// TestBashRenderTool_CollapsedCapsAtFourLinesAndToggles covers the
+// click-to-expand contract: collapsed output is capped at
+// bashCollapsedOutputLines lines followed by a "Click to expand" hint;
+// ToggleExpanded reveals the full output with a "Click to collapse" hint,
+// and toggling again collapses back.
+func TestBashRenderTool_CollapsedCapsAtFourLinesAndToggles(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	output := "l1\nl2\nl3\nl4\nl5\nl6\nl7"
+	meta, err := json.Marshal(tools.BashResponseMetadata{StartTime: 0, EndTime: 2100, Output: output})
+	require.NoError(t, err)
+	result := &message.ToolResult{ToolCallID: "tc-bash", Content: output, Metadata: string(meta)}
+
+	item := NewBashToolMessageItem(&sty, bashToolCall(t), result, false)
+
+	collapsed := item.Render(80)
+	lines := strings.Split(collapsed, "\n")
+	require.Len(t, lines, 1+bashCollapsedOutputLines+1, "expected header + capped body + hint, got: %q", collapsed)
+	require.Contains(t, collapsed, "Click to expand (3 more lines)")
+	require.NotContains(t, collapsed, "l5")
+
+	expandable, ok := item.(Expandable)
+	require.True(t, ok, "bash items must implement Expandable")
+	require.True(t, expandable.ToggleExpanded())
+
+	expanded := item.Render(80)
+	require.Contains(t, expanded, "l7", "expanded render must show the full output")
+	require.Contains(t, expanded, "Click to collapse")
+	require.NotContains(t, expanded, "Click to expand")
+
+	require.False(t, expandable.ToggleExpanded())
+	recollapsed := item.Render(80)
+	require.Contains(t, recollapsed, "Click to expand (3 more lines)")
+	require.NotContains(t, recollapsed, "l5")
 }
 
 // TestBashRenderTool_ErrorAddsSingleTailLine covers the one exception to
@@ -110,7 +150,7 @@ func TestBashRenderTool_MultilineCommandIsOneLine(t *testing.T) {
 
 // TestBashRenderTool_NoMetadataNoJunkSuffix covers the "None" regression:
 // a result with no/unparsable metadata (so bashDurationSummary has nothing
-// to report) must render with no outcome suffix at all — never a
+// to report) must render its header with no outcome suffix at all — never a
 // placeholder value like "None" standing in for missing data.
 func TestBashRenderTool_NoMetadataNoJunkSuffix(t *testing.T) {
 	t.Parallel()
@@ -121,8 +161,9 @@ func TestBashRenderTool_NoMetadataNoJunkSuffix(t *testing.T) {
 	item := NewBashToolMessageItem(&sty, bashToolCall(t), result, false)
 	out := item.Render(80)
 
-	require.Equal(t, 1, strings.Count(out, "\n")+1, "expected a single rendered line, got: %q", out)
-	require.NotContains(t, out, "·", "no timing data means no outcome suffix at all")
+	lines := strings.Split(out, "\n")
+	require.Len(t, lines, 2, "expected header + one output line, got: %q", out)
+	require.NotContains(t, lines[0], "·", "no timing data means no outcome suffix at all")
 	require.NotContains(t, strings.ToLower(out), "none")
 }
 

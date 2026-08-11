@@ -31,11 +31,11 @@ import (
 // still-alive running-delegation preview in agent.go (toolOutputMarkdownContent).
 const responseContextHeight = 10
 
-// previewTruncateFormat notes how much of a body was cut off. There is no
-// click-to-see-more for tool output — file/command content is not
-// something this chat lets you page through — so, unlike
-// assistantMessageTruncateFormat (used for the assistant's own message
-// text), this never invites a click.
+// previewTruncateFormat notes how much of a body was cut off. The tools
+// rendering through this (the running-delegation preview in agent.go) have
+// no click-to-see-more, so unlike assistantMessageTruncateFormat (the
+// assistant's own message text) and Bash's click-to-expand body, this
+// never invites a click.
 const previewTruncateFormat = "… (%d more lines not shown)"
 
 // toolBodyLeftPaddingTotal represents the padding that should be applied to each tool body
@@ -108,6 +108,9 @@ type ToolRenderOpts struct {
 	Compact    bool
 	IsSpinning bool
 	Status     ToolStatus
+	// Expanded reports the item's click-to-expand state for renderers
+	// that show a collapsible body (currently only Bash).
+	Expanded bool
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -161,6 +164,10 @@ type baseToolMessageItem struct {
 	hasCappedWidth bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool
+	// expanded is the click-to-expand state, consumed by renderers that
+	// show a collapsible body (see ToolRenderOpts.Expanded). Toggled via
+	// Expandable on the concrete item types that opt in (e.g. Bash).
+	expanded bool
 	// spinningFunc allows tools to override the default spinning logic.
 	// If nil, uses the default: !toolCall.Finished && !canceled.
 	spinningFunc SpinningFunc
@@ -365,6 +372,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 			Compact:    t.isCompact,
 			IsSpinning: t.isSpinning(),
 			Status:     t.computeStatus(),
+			Expanded:   t.expanded,
 		})
 
 		// Prepend hook indicator if hooks ran for this tool call.
@@ -513,11 +521,21 @@ func (t *baseToolMessageItem) Finished() bool {
 // HandleMouseClick implements MouseClickable. A left click is reported as
 // handled so a click on an agent/agentic_fetch delegation still drills into
 // its child session (see NestedToolContainer in model/chat.go's
-// HandleDelayedClick) — plain tool items no longer implement Expandable, so
-// for them this is otherwise inert: no preview, no toggle. File/command
-// content is not something this chat lets you page through.
+// HandleDelayedClick). For item types that additionally implement
+// Expandable (e.g. Bash), the click then toggles their body expansion;
+// for the rest it is inert.
 func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 	return btn == ansi.MouseLeft
+}
+
+// toggleExpanded flips the click-to-expand state and invalidates the
+// render caches. Concrete item types expose it through the Expandable
+// interface (see BashToolMessageItem.ToggleExpanded).
+func (t *baseToolMessageItem) toggleExpanded() bool {
+	t.expanded = !t.expanded
+	t.clearCache()
+	t.Bump()
+	return t.expanded
 }
 
 // HandleKeyEvent implements KeyEventHandler.

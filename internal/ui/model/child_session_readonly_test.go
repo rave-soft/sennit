@@ -188,9 +188,10 @@ func TestHandleDelayedClickOnNestedContainer_KeyboardSelectionElsewhere(t *testi
 }
 
 // TestHandleDelayedClickOnPlainToolItem is the control case: a plain
-// (non-nested-container) tool item no longer has anything to expand — file
+// (non-nested-container, non-bash) tool item has nothing to expand — file
 // content is not something this chat lets you page through (see
-// tools.go's appendResultSummary). A click is inert: reported handled with
+// tools.go's appendResultSummary; bash is the exception with its
+// click-to-expand output body). A click is inert: reported handled with
 // openContainer false, and the item does not implement chat.Expandable at
 // all, so there's no toggle to fire.
 func TestHandleDelayedClickOnPlainToolItem(t *testing.T) {
@@ -198,7 +199,7 @@ func TestHandleDelayedClickOnPlainToolItem(t *testing.T) {
 
 	u := newChildSessionTestUI(t)
 	item := chat.NewToolMessageItem(u.com.Styles, "msg1",
-		message.ToolCall{ID: "tc-bash", Name: "bash", Input: `{}`, Finished: false}, nil, false, nil)
+		message.ToolCall{ID: "tc-grep", Name: "grep", Input: `{}`, Finished: false}, nil, false, nil)
 	u.chat.AppendMessages(item)
 	u.chat.SetSelected(0)
 

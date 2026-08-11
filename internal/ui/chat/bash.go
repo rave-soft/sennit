@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/stringext"
+	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -23,7 +25,10 @@ type BashToolMessageItem struct {
 	*baseToolMessageItem
 }
 
-var _ ToolMessageItem = (*BashToolMessageItem)(nil)
+var (
+	_ ToolMessageItem = (*BashToolMessageItem)(nil)
+	_ Expandable      = (*BashToolMessageItem)(nil)
+)
 
 // NewBashToolMessageItem creates a new [BashToolMessageItem].
 func NewBashToolMessageItem(
@@ -32,7 +37,7 @@ func NewBashToolMessageItem(
 	result *message.ToolResult,
 	canceled bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &BashToolRenderContext{}, canceled)
+	return &BashToolMessageItem{newBaseToolMessageItem(sty, toolCall, result, &BashToolRenderContext{}, canceled)}
 }
 
 // BashToolRenderContext renders bash tool messages.
@@ -83,9 +88,8 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// result has arrived yet. toolEarlyStateContent's Running case exists
 	// for other tools that legitimately show a status line there, but for
 	// Bash it appended a dangling "Waiting for tool response..." line
-	// below the header, breaking the always-one-line collapsed guarantee
-	// this function documents below. Treat that window the same as the
-	// header-only pending state instead.
+	// below the header. Treat that window the same as the header-only
+	// pending state instead.
 	if opts.Status != ToolStatusRunning {
 		if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
 			return joinToolParts(header, earlyState)
@@ -104,9 +108,59 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return header
 	}
 
-	// Always one line: command output is not paged through in chat — see
-	// appendResultSummary. How long the command ran is the useful bit.
-	return appendResultSummary(sty, header, bashDurationSummary(meta))
+	header = appendResultSummary(sty, header, bashDurationSummary(meta))
+	// The body sits directly under the header (no blank separator line):
+	// up to bashCollapsedOutputLines lines by default, the full output
+	// once the item is click-expanded (see BashToolMessageItem.ToggleExpanded).
+	return header + "\n" + bashOutputContent(sty, output, cappedWidth, opts.Expanded)
+}
+
+// bashCollapsedOutputLines is how many output lines a collapsed bash call
+// shows under its header before offering click-to-expand.
+const bashCollapsedOutputLines = 4
+
+// bashOutputContent renders a bash command's output under its header. While
+// collapsed it shows at most bashCollapsedOutputLines lines followed by a
+// "Click to expand" hint when more were cut off; expanded it shows the full
+// output with a "Click to collapse" hint at the end.
+func bashOutputContent(sty *styles.Styles, content string, width int, expanded bool) string {
+	content = stringext.NormalizeSpace(content)
+	content = common.StripCursorControl(content)
+	content = common.RemapANSI16(content, sty.ANSI)
+	lines := strings.Split(content, "\n")
+
+	maxLines := len(lines)
+	if !expanded {
+		maxLines = min(bashCollapsedOutputLines, len(lines))
+	}
+
+	out := make([]string, 0, maxLines+1)
+	for _, ln := range lines[:maxLines] {
+		ln = " " + ln
+		if lipgloss.Width(ln) > width {
+			ln = ansi.Truncate(ln, width, "…")
+		}
+		out = append(out, sty.Tool.ContentLine.Width(width).Render(ln))
+	}
+
+	switch {
+	case !expanded && len(lines) > maxLines:
+		out = append(out, sty.Tool.ContentTruncation.
+			Width(width).
+			Render(fmt.Sprintf(" Click to expand (%d more lines)", len(lines)-maxLines)))
+	case expanded && len(lines) > bashCollapsedOutputLines:
+		out = append(out, sty.Tool.ContentTruncation.
+			Width(width).
+			Render(" Click to collapse"))
+	}
+
+	return strings.Join(out, "\n")
+}
+
+// ToggleExpanded implements Expandable: a click on a finished bash call
+// toggles between the collapsed 4-line output preview and the full output.
+func (b *BashToolMessageItem) ToggleExpanded() bool {
+	return b.toggleExpanded()
 }
 
 // bashDurationSummary renders a short "2.1s" style summary for a finished
