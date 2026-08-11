@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/thread"
 )
@@ -31,23 +32,32 @@ func (h *threadHandle) App() *app.App { return h.app }
 // timer racing the thread's run, however long it takes, and release
 // immediately (no detach grace) when the thread is done with it.
 type threadSpawner struct {
-	backend *Backend
+	backend      *Backend
+	parentAgents func() map[string]config.Agent
 
 	mu       sync.Mutex
 	clientOf map[string]string // workspace ID -> internal client ID holding it
 }
 
 // ThreadSpawner returns a [thread.Spawner] backed by this Backend.
-func (b *Backend) ThreadSpawner() thread.Spawner {
-	return &threadSpawner{backend: b, clientOf: make(map[string]string)}
+func (b *Backend) ThreadSpawner(parentAgents func() map[string]config.Agent) thread.Spawner {
+	return &threadSpawner{
+		backend:      b,
+		parentAgents: parentAgents,
+		clientOf:     make(map[string]string),
+	}
 }
 
 // Spawn implements thread.Spawner.
 func (s *threadSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
 	clientID := uuid.New().String()
+	var inheritedAgents map[string]config.Agent
+	if s.parentAgents != nil {
+		inheritedAgents = s.parentAgents()
+	}
 	// attachThreads=false: a thread's own workspace must not get a thread
 	// manager of its own — nesting is not supported.
-	ws, _, err := s.backend.createWorkspace(proto.Workspace{Path: path, ClientID: clientID}, false)
+	ws, _, err := s.backend.createWorkspace(proto.Workspace{Path: path, ClientID: clientID}, false, inheritedAgents)
 	if err != nil {
 		return nil, err
 	}

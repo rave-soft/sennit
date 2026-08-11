@@ -164,6 +164,7 @@ type ConfigStore struct {
 	// added or removed, not just edited, between polls. See watch.go.
 	agentSnapshotMu   sync.Mutex
 	agentFileSnapshot map[string]fileSnapshot
+	inheritedAgents   map[string]Agent
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -226,6 +227,13 @@ func (s *ConfigStore) KnownProviders() []catwalk.Provider {
 // the Config in place.
 func (s *ConfigStore) SetupAgents() {
 	s.Config().SetupAgents()
+}
+
+// SetupAgentsWithInherited configures agents during bootstrap with inherited
+// user-defined definitions as the lowest-priority source.
+func (s *ConfigStore) SetupAgentsWithInherited(inherited map[string]Agent) {
+	s.inheritedAgents = cloneAgents(inherited)
+	s.Config().SetupAgentsWithInherited(s.inheritedAgents)
 }
 
 // Overrides returns the runtime overrides for this store.
@@ -1391,7 +1399,7 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		// This preserves the invariant that a published Config is never
 		// mutated in place: SetupAgents is called on cfg (the not-yet-
 		// published clone) and only then is cfg swapped into the store.
-		cfg.SetupAgents()
+		cfg.SetupAgentsWithInherited(s.inheritedAgents)
 	}
 
 	s.setConfig(cfg)

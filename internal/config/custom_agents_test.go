@@ -32,6 +32,17 @@ func TestSetupAgentsKeepsBuiltinsWithoutUserAgents(t *testing.T) {
 	require.Contains(t, cfg.Agents, AgentTask)
 }
 
+func TestSetupAgentsWithInheritedKeepsParentUserAgents(t *testing.T) {
+	cfg := newAgentConfig(t, "")
+	cfg.SetupAgentsWithInherited(map[string]Agent{
+		"reviewer": {Prompt: "Review code."},
+	})
+
+	require.Contains(t, cfg.Agents, "reviewer")
+	require.Contains(t, cfg.Agents[AgentCoder].AllowedTools, "reviewer")
+	require.Equal(t, map[string]Agent{"reviewer": cfg.Agents["reviewer"]}, cfg.UserAgents())
+}
+
 func TestSetupAgentsTaskAgentHasNetworkTools(t *testing.T) {
 	// The Task agent is read-only with respect to local state, but it may
 	// still need to pull in outside context (docs, issue trackers, etc.),

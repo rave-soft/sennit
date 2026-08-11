@@ -342,7 +342,7 @@ func (b *Backend) ListWorkspaces() []proto.Workspace {
 // client which is released either by the first SSE attach (which
 // converts it into a stream claim) or by the grace window expiring.
 func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Workspace, error) {
-	return b.createWorkspace(args, true)
+	return b.createWorkspace(args, true, nil)
 }
 
 // createWorkspace is CreateWorkspace's implementation. attachThreads gates
@@ -352,7 +352,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 // prevent thread workspaces from nesting managers of their own. It has no
 // effect when the call dedupes onto an already-running workspace, which
 // keeps whatever it was given when it was actually created.
-func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool) (*Workspace, proto.Workspace, error) {
+func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool, inheritedAgents map[string]config.Agent) (*Workspace, proto.Workspace, error) {
 	if args.Path == "" {
 		return nil, proto.Workspace{}, ErrPathRequired
 	}
@@ -428,11 +428,12 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool) (*Wo
 	// workspaces. It also leaves the DB connection open on an app.New
 	// failure, matching this function's prior behavior.
 	boot, err := app.Bootstrap(b.ctx, args.Path, app.BootstrapOptions{
-		DataDir:       args.DataDir,
-		Debug:         args.Debug,
-		YOLO:          args.YOLO,
-		Channels:      args.Channels,
-		WorkspaceLock: true,
+		DataDir:         args.DataDir,
+		Debug:           args.Debug,
+		YOLO:            args.YOLO,
+		Channels:        args.Channels,
+		WorkspaceLock:   true,
+		InheritedAgents: inheritedAgents,
 	})
 	if err != nil {
 		return nil, proto.Workspace{}, err

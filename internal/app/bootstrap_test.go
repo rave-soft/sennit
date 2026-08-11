@@ -81,6 +81,27 @@ func TestBootstrap_GlobalSkillsMirror(t *testing.T) {
 		"global mirror should have been written to when GlobalSkillsMirror is set")
 }
 
+func TestBootstrap_InheritsParentAgents(t *testing.T) {
+	setBootstrapTestEnv(t)
+
+	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
+		DataDir: t.TempDir(),
+		InheritedAgents: map[string]config.Agent{
+			"reviewer": {
+				ID:          "reviewer",
+				Name:        "Reviewer",
+				Description: "Reviews code.",
+				Prompt:      "Review the implementation.",
+			},
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(result.App.Shutdown)
+
+	require.Contains(t, result.Config.Config().Agents, "reviewer")
+	require.Contains(t, result.Config.Config().Agents[config.AgentCoder].AllowedTools, "reviewer")
+}
+
 // TestBootstrap_PostDataDirError verifies a failing PostDataDir hook
 // aborts the sequence before the DB connection is opened.
 func TestBootstrap_PostDataDirError(t *testing.T) {

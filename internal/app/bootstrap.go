@@ -24,6 +24,10 @@ type BootstrapOptions struct {
 	YOLO     bool
 	Channels []string
 
+	// InheritedAgents supplies user-defined agents from a parent workspace.
+	// The child workspace's own definitions take precedence.
+	InheritedAgents map[string]config.Agent
+
 	// WorkspaceLock enables db.AcquireWorkspaceLock on the workspace's
 	// .braid data directory. The backend sets this (it hosts multiple
 	// concurrent workspaces and must guard each one's data directory
@@ -80,6 +84,9 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 
 	cfg.Overrides().SkipPermissionRequests = opts.YOLO
 	cfg.Overrides().EnabledChannels = opts.Channels
+	if len(opts.InheritedAgents) > 0 {
+		cfg.SetupAgentsWithInherited(opts.InheritedAgents)
+	}
 
 	// ensureDotBraidDir already wraps its own errors with context, so no
 	// further wrapping here.

@@ -1025,6 +1025,17 @@ func filterSlice(data []string, mask []string, include bool) []string {
 // previous run's built-ins, or nothing at all), so repeated calls (config
 // reload, workspace switch) converge on the same result instead of drifting.
 func (c *Config) SetupAgents() {
+	c.setupAgents(nil)
+}
+
+// SetupAgentsWithInherited configures built-in and discovered agents, using
+// inherited as the lowest-priority source of user-defined agents. Project-local
+// definitions in the current working directory override inherited definitions.
+func (c *Config) SetupAgentsWithInherited(inherited map[string]Agent) {
+	c.setupAgents(inherited)
+}
+
+func (c *Config) setupAgents(inherited map[string]Agent) {
 	// SetupAgents fully recomputes c.Agents and can run more than once on
 	// the same live Config (e.g. after a markdown agent file changes), so
 	// drop any agent problems from a previous run before validUserAgents
@@ -1049,7 +1060,11 @@ func (c *Config) SetupAgents() {
 	// agents. A JSON "agents" block is never read (see loadFromBytes in
 	// load.go); if one was present, jsonAgentsBlockDetected records it and
 	// the Problem above surfaces it instead of using it.
-	c.Agents = discoverMarkdownAgents(c.workingDir, providers)
+	c.Agents = maps.Clone(inherited)
+	if c.Agents == nil {
+		c.Agents = make(map[string]Agent)
+	}
+	maps.Copy(c.Agents, discoverMarkdownAgents(c.workingDir, providers))
 
 	userAgents, invalid := c.validUserAgents()
 	for id, reason := range invalid {
@@ -1100,6 +1115,33 @@ func (c *Config) SetupAgents() {
 	}
 
 	c.Agents = agents
+}
+
+// UserAgents returns a copy of the configured user-defined agents.
+func (c *Config) UserAgents() map[string]Agent {
+	agents := make(map[string]Agent)
+	for id, agent := range c.Agents {
+		if id == AgentCoder || id == AgentTask {
+			continue
+		}
+		agents[id] = cloneAgent(agent)
+	}
+	return agents
+}
+
+func cloneAgents(agents map[string]Agent) map[string]Agent {
+	cloned := make(map[string]Agent, len(agents))
+	for id, agent := range agents {
+		cloned[id] = cloneAgent(agent)
+	}
+	return cloned
+}
+
+func cloneAgent(agent Agent) Agent {
+	agent.AllowedTools = slices.Clone(agent.AllowedTools)
+	agent.AllowedMCP = maps.Clone(agent.AllowedMCP)
+	agent.ContextPaths = slices.Clone(agent.ContextPaths)
+	return agent
 }
 
 // validUserAgents splits the decoded agent map into the definitions that can

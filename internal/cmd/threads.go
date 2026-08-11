@@ -46,7 +46,7 @@ func attachLocalThreads(ctx context.Context, a *app.App, cwd string) {
 	}
 	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       thread.NewStore(db.New(conn), a.Store().WorkingDir()),
-		Spawner:     thread.NewLocalSpawner(),
+		Spawner:     thread.NewLocalSpawner(func() map[string]config.Agent { return a.Config().UserAgents() }),
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,
 		Context:     ctx,

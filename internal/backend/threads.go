@@ -40,7 +40,7 @@ func (b *Backend) attachServerThreads(ctx context.Context, a *app.App, path stri
 	}
 	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       thread.NewStore(db.New(conn), a.Store().WorkingDir()),
-		Spawner:     b.ThreadSpawner(),
+		Spawner:     b.ThreadSpawner(func() map[string]config.Agent { return a.Config().UserAgents() }),
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,
 		Context:     ctx,
