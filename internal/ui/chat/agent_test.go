@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
@@ -39,6 +40,28 @@ func TestFormatElapsed(t *testing.T) {
 	for _, tt := range tests {
 		require.Equal(t, tt.want, formatElapsed(tt.d))
 	}
+}
+
+func TestAgentDelegationWholeItemIsHoverable(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewAgentToolMessageItem(&sty, message.ToolCall{
+		ID:       "agent-hover",
+		Name:     "agent",
+		Input:    `{"prompt":"inspect this"}`,
+		Finished: false,
+	}, nil, false, nil)
+	height := lipgloss.Height(item.Render(80))
+
+	require.True(t, item.HoverableAt(MessageLeftPaddingTotal, 0, 80))
+	require.True(t, item.HoverableAt(MessageLeftPaddingTotal, height-1, 80))
+	require.False(t, item.HoverableAt(MessageLeftPaddingTotal, height, 80))
+
+	version := item.Version()
+	item.SetHovered(true)
+	require.True(t, item.hovered)
+	require.Greater(t, item.Version(), version)
 }
 
 // TestLastToolSummary covers the "→ tool arg" fragment of the status

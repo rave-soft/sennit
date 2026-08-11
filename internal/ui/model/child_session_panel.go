@@ -159,10 +159,8 @@ func (m *UI) childSessionHeaderText(s *styles.Styles, avail int) string {
 //     ticking elapsed time (still running) or the final duration (done).
 //
 // A click anywhere in area exits the child session (see the MouseClickMsg
-// handling in Update); the button itself gets hover feedback tracked via
-// m.childPanelButtonRect (set here, read from MouseMotionMsg) — this is the
-// same click/hover mechanic the old top-of-chat banner used, moved down to
-// replace the editor instead of sitting above it.
+// handling in Update), so hovering anywhere in the panel highlights the
+// visible back button.
 func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	m.childPanelButtonRect = uv.Rectangle{}
 	if area.Dy() <= 0 || area.Dx() <= 0 || len(m.navStack) == 0 {

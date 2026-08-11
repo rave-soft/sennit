@@ -246,6 +246,11 @@ func (a *AgentToolMessageItem) ToggleExpanded() bool {
 	return false
 }
 
+// HoverableAt matches the delegation's whole-item click target.
+func (a *AgentToolMessageItem) HoverableAt(x, y, width int) bool {
+	return x >= MessageLeftPaddingTotal && y >= 0 && y < lipgloss.Height(a.Render(width))
+}
+
 // Animate progresses the message animation if it should be spinning.
 //
 // Bumps the parent's F6 list-cache version on both the parent-tick and
@@ -330,8 +335,9 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		// current activity — elapsed time, step count, last child tool
 		// call — so what the task is doing is visible without opening
 		// the panel.
-		return pendingDelegation(sty, r.agent.displayName, opts, cappedMessageWidth(width),
+		content := pendingDelegation(sty, r.agent.displayName, opts, cappedMessageWidth(width),
 			r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
+		return clickableItemHover(sty, content, cappedMessageWidth(width), opts.Hovered)
 	}
 
 	cappedWidth := cappedMessageWidth(width)
@@ -348,7 +354,8 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// model/effort subtitle carries over, since it describes the
 	// delegation's configuration rather than its runtime progress.
 	if !pending && !opts.Compact {
-		return renderCollapsedDelegation(sty, cappedWidth, r.agent.displayName, opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
+		content := renderCollapsedDelegation(sty, cappedWidth, r.agent.displayName, opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
+		return clickableItemHover(sty, content, cappedWidth, opts.Hovered)
 	}
 
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
@@ -425,7 +432,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return joinToolParts(result, body)
 	}
 
-	return result
+	return clickableItemHover(sty, result, cappedWidth, opts.Hovered)
 }
 
 // -----------------------------------------------------------------------------
@@ -544,6 +551,11 @@ func (a *AgenticFetchToolMessageItem) ToggleExpanded() bool {
 	return false
 }
 
+// HoverableAt matches the delegation's whole-item click target.
+func (a *AgenticFetchToolMessageItem) HoverableAt(x, y, width int) bool {
+	return x >= MessageLeftPaddingTotal && y >= 0 && y < lipgloss.Height(a.Render(width))
+}
+
 // Animate progresses the message animation if it should be spinning.
 // See [AgentToolMessageItem.Animate] for the parent-bump rationale —
 // without an override, the embedded base.Animate would (a) drop
@@ -612,8 +624,9 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	if pending {
 		// See AgentToolRenderContext.RenderTool's matching change: pending
 		// stub plus a current-activity status line underneath.
-		return pendingDelegation(sty, agenticFetchDisplayName, opts, cappedMessageWidth(width),
+		content := pendingDelegation(sty, agenticFetchDisplayName, opts, cappedMessageWidth(width),
 			r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens)
+		return clickableItemHover(sty, content, cappedMessageWidth(width), opts.Hovered)
 	}
 
 	cappedWidth := cappedMessageWidth(width)
@@ -630,7 +643,8 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		if headerParam == "" {
 			headerParam = prompt
 		}
-		return renderCollapsedDelegation(sty, cappedWidth, agenticFetchDisplayName, opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens, "", "")
+		content := renderCollapsedDelegation(sty, cappedWidth, agenticFetchDisplayName, opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens, "", "")
+		return clickableItemHover(sty, content, cappedWidth, opts.Hovered)
 	}
 
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
@@ -708,7 +722,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		return joinToolParts(result, body)
 	}
 
-	return result
+	return clickableItemHover(sty, result, cappedWidth, opts.Hovered)
 }
 
 // maxVisibleNestedTools caps how many nested tool calls a delegation

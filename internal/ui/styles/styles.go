@@ -303,19 +303,22 @@ type Styles struct {
 		ToolCallBlurred  lipgloss.Style
 
 		// Shell (bang mode) item styles.
-		ShellBarFocused    lipgloss.Style // Left vertical bar when focused.
-		ShellBarBlurred    lipgloss.Style // Left vertical bar when blurred.
-		ShellPrompt        lipgloss.Style // "$" prompt symbol (focused).
-		ShellPromptBlurred lipgloss.Style // "$" prompt symbol (blurred).
-		ShellCommand       lipgloss.Style // Command text (syntax-highlighted).
-		ShellOutput        lipgloss.Style // Plain output text.
-		ShellExitCode      lipgloss.Style // Non-zero exit code indicator.
-		ShellTruncation    lipgloss.Style // "N more lines" hint.
-		SectionHeader      lipgloss.Style
-		ChatSeparator      lipgloss.Style // Horizontal rules above and below the chat viewport.
+		ShellBarFocused      lipgloss.Style // Left vertical bar when focused.
+		ShellBarBlurred      lipgloss.Style // Left vertical bar when blurred.
+		ShellPrompt          lipgloss.Style // "$" prompt symbol (focused).
+		ShellPromptBlurred   lipgloss.Style // "$" prompt symbol (blurred).
+		ShellCommand         lipgloss.Style // Command text (syntax-highlighted).
+		ShellOutput          lipgloss.Style // Plain output text.
+		ShellOutputHover     lipgloss.Style // Plain output text under the pointer.
+		ShellExitCode        lipgloss.Style // Non-zero exit code indicator.
+		ShellTruncation      lipgloss.Style // "N more lines" hint.
+		ShellTruncationHover lipgloss.Style // Hovered "N more lines" hint.
+		SectionHeader        lipgloss.Style
+		ChatSeparator        lipgloss.Style // Horizontal rules above and below the chat viewport.
 
 		// Thinking section styles
 		ThinkingBox            lipgloss.Style // Background for thinking content
+		ThinkingBoxHover       lipgloss.Style // Background for hovered clickable thinking content
 		ThinkingTruncationHint lipgloss.Style // "… (N lines hidden)" hint
 		ThinkingFooterTitle    lipgloss.Style // "Thought for" text
 		ThinkingFooterDuration lipgloss.Style // Duration value
@@ -355,6 +358,7 @@ type Styles struct {
 		ContentCodeTruncation  lipgloss.Style // Code truncation message with bgBase
 		ContentCodeBg          color.Color    // Background color for syntax highlighting
 		Body                   lipgloss.Style // Body content padding (PaddingLeft(2))
+		ClickableHoverBg       color.Color    // Background for clickable chat items under the pointer
 
 		// Deprecated - kept for backward compatibility
 		ContentBg         lipgloss.Style // Content background
@@ -589,12 +593,13 @@ type Styles struct {
 
 	// Attachments styles
 	Attachments struct {
-		Normal   lipgloss.Style
-		Image    lipgloss.Style
-		Text     lipgloss.Style
-		Skill    lipgloss.Style
-		Remove   lipgloss.Style
-		Deleting lipgloss.Style
+		Normal      lipgloss.Style
+		Image       lipgloss.Style
+		Text        lipgloss.Style
+		Skill       lipgloss.Style
+		Remove      lipgloss.Style
+		RemoveHover lipgloss.Style
+		Deleting    lipgloss.Style
 	}
 
 	// Pills styles, shared by the merged session panel (threads/todos/queue,

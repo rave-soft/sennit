@@ -665,7 +665,11 @@ func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPane
 		styled := sty.Base.Render(fmt.Sprintf("%d ", i+1)) +
 			nameStyle.Render(name) +
 			sty.Base.Render(" — "+goal)
-		uv.NewStyledString(ansi.Truncate(styled, width, "…")).Draw(scr, line1Row)
+		styled = ansi.Truncate(styled, width, "…")
+		if i == hoveredIdx {
+			styled = common.BlockBackground(styled, width, m.com.Styles.Tool.ClickableHoverBg)
+		}
+		uv.NewStyledString(styled).Draw(scr, line1Row)
 
 		if block.Max.Y-block.Min.Y < 2 {
 			continue // truncated by area's bottom edge: no room for line 2.
@@ -683,7 +687,11 @@ func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPane
 		}
 		status := threadDockStatusText(t, m.threadsDock.activity[t.ID])
 		line2 := "  " + icon + " " + sty.Base.Render(status)
-		uv.NewStyledString(ansi.Truncate(line2, width, "…")).Draw(scr, line2Row)
+		line2 = ansi.Truncate(line2, width, "…")
+		if i == hoveredIdx {
+			line2 = common.BlockBackground(line2, width, m.com.Styles.Tool.ClickableHoverBg)
+		}
+		uv.NewStyledString(line2).Draw(scr, line2Row)
 	}
 
 	if plan.threadsMore > 0 {
@@ -735,7 +743,11 @@ func (m *UI) drawDelegationBlocks(scr uv.Screen, area uv.Rectangle, plan session
 		styled := sty.Base.Render(fmt.Sprintf("%d ", i+1)) +
 			nameStyle.Render(delegationName(d.item)) +
 			sty.Base.Render(" — "+delegationTask(d.item))
-		uv.NewStyledString(ansi.Truncate(styled, width, "…")).Draw(scr, line1Row)
+		styled = ansi.Truncate(styled, width, "…")
+		if i == hoveredIdx {
+			styled = common.BlockBackground(styled, width, m.com.Styles.Tool.ClickableHoverBg)
+		}
+		uv.NewStyledString(styled).Draw(scr, line1Row)
 
 		if block.Max.Y-block.Min.Y < 2 {
 			continue // truncated by area's bottom edge: no room for line 2.
@@ -748,7 +760,11 @@ func (m *UI) drawDelegationBlocks(scr uv.Screen, area uv.Rectangle, plan session
 		// runningDelegationBlocks), so line 2 always leads with the live
 		// spinner, mirroring the running-thread blocks above.
 		line2 := "  " + m.panelActivityIcon() + " " + delegationStatusLine(d.item, m.com.Styles, width-4)
-		uv.NewStyledString(ansi.Truncate(line2, width, "…")).Draw(scr, line2Row)
+		line2 = ansi.Truncate(line2, width, "…")
+		if i == hoveredIdx {
+			line2 = common.BlockBackground(line2, width, m.com.Styles.Tool.ClickableHoverBg)
+		}
+		uv.NewStyledString(line2).Draw(scr, line2Row)
 	}
 
 	if plan.delegationsMore > 0 {
@@ -853,15 +869,14 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		headerRow := todosHeaderRect
 		header := sessionPanelTodosHeaderText(plan.todosCompleted, plan.todosTotal, plan.todosExpanded)
 		// The todos header is the same section-separator style as
-		// threads/agents/queue, restyled (not resized) from the old bare
-		// TodoLabel fill — see common.SectionStyled. Hover swaps just the
-		// title style for the hover cue; the dashes stay muted via
-		// t.Section.Line (SectionStyled's default).
+		// threads/agents/queue. Its full row is clickable, so hover paints the
+		// full row rather than only changing the title.
 		titleStyle := t.Section.Title
+		headerView := common.SectionStyled(t, titleStyle, header, width)
 		if m.panelTodosHover {
-			titleStyle = t.Pills.HeaderHover
+			headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
 		}
-		uv.NewStyledString(common.SectionStyled(t, titleStyle, header, width)).Draw(scr, headerRow)
+		uv.NewStyledString(headerView).Draw(scr, headerRow)
 		m.panelTodosHeaderRect = headerRow
 		m.panelTodosListRect = todosListRect
 		row.Min.Y++

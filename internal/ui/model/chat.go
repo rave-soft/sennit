@@ -116,14 +116,14 @@ type Chat struct {
 	pausedAnimations map[string]struct{}
 
 	// Mouse state
-	mouseDown             bool
-	mouseDownItem         int // Item index where mouse was pressed
-	mouseDownX            int // X position in item content (character offset)
-	mouseDownY            int // Y position in item (line offset)
-	mouseDragItem         int // Current item index being dragged over
-	mouseDragX            int // Current X in item content
-	mouseDragY            int // Current Y in item
-	hoveredExpandableItem list.Item
+	mouseDown            bool
+	mouseDownItem        int // Item index where mouse was pressed
+	mouseDownX           int // X position in item content (character offset)
+	mouseDownY           int // Y position in item (line offset)
+	mouseDragItem        int // Current item index being dragged over
+	mouseDragX           int // Current X in item content
+	mouseDragY           int // Current Y in item
+	hoveredClickableItem list.Item
 
 	// Scrollbar drag state. Independent of the text-selection mouseDown*
 	// fields above — a click on the scrollbar column takes priority over
@@ -1233,25 +1233,23 @@ func (m *Chat) HandleMouseDrag(x, y int) bool {
 	return true
 }
 
-// HandleMouseHover updates hover feedback for expandable tool items.
+// HandleMouseHover updates hover feedback for clickable chat regions.
 func (m *Chat) HandleMouseHover(x, y int) {
 	itemIdx, itemY := m.list.ItemIndexAtPosition(x, y)
 	var hovered list.Item
 	if itemIdx >= 0 {
 		item := m.list.ItemAt(itemIdx)
-		if _, expandable := item.(chat.Expandable); expandable {
-			if hoverable, ok := item.(chat.Hoverable); ok && hoverable.HoverableAt(x, itemY, m.list.Width()) {
-				hovered = item
-			}
+		if hoverable, ok := item.(chat.Hoverable); ok && hoverable.HoverableAt(x, itemY, m.list.Width()) {
+			hovered = item
 		}
 	}
-	if hovered == m.hoveredExpandableItem {
+	if hovered == m.hoveredClickableItem {
 		return
 	}
-	if previous, ok := m.hoveredExpandableItem.(chat.Hoverable); ok {
+	if previous, ok := m.hoveredClickableItem.(chat.Hoverable); ok {
 		previous.SetHovered(false)
 	}
-	m.hoveredExpandableItem = hovered
+	m.hoveredClickableItem = hovered
 	if current, ok := hovered.(chat.Hoverable); ok {
 		current.SetHovered(true)
 	}

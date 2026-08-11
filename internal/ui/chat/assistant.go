@@ -183,6 +183,7 @@ type AssistantMessageItem struct {
 	anim              *anim.Anim
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
+	hovered           bool
 
 	// Incremental FNV-64a hash of the thinking text. Avoids
 	// re-hashing the entire accumulated text on every streaming
@@ -600,7 +601,11 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 		lines = strings.Split(rendered, "\n")
 	}
 
-	thinkingStyle := a.sty.Messages.ThinkingBox.Width(width)
+	thinkingStyle := a.sty.Messages.ThinkingBox
+	if a.hovered {
+		thinkingStyle = a.sty.Messages.ThinkingBoxHover
+	}
+	thinkingStyle = thinkingStyle.Width(width)
 	result := thinkingStyle.Render(strings.Join(lines, "\n"))
 	a.thinkingBoxHeight = lipgloss.Height(result)
 
@@ -807,6 +812,22 @@ func (a *AssistantMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 	// Only the thinking box is clickable; other regions of the assistant
 	// message should not trigger expansion.
 	return a.thinkingBoxHeight > 0 && y < a.thinkingBoxHeight
+}
+
+// HoverableAt matches the thinking box's click target.
+func (a *AssistantMessageItem) HoverableAt(_ int, y, _ int) bool {
+	return a.thinkingBoxHeight > 0 && y >= 0 && y < a.thinkingBoxHeight
+}
+
+// SetHovered updates thinking-box hover feedback.
+func (a *AssistantMessageItem) SetHovered(hovered bool) {
+	if a.hovered == hovered {
+		return
+	}
+	a.hovered = hovered
+	a.thinkingSec.reset()
+	a.cachedMessageItem.clearCache()
+	a.Bump()
 }
 
 // HandleKeyEvent implements KeyEventHandler.

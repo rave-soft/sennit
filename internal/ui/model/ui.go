@@ -455,6 +455,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 			com.Styles.Attachments.Text,
 			com.Styles.Attachments.Skill,
 			com.Styles.Attachments.Remove,
+			com.Styles.Attachments.RemoveHover,
 		),
 		attachments.Keymap{
 			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
@@ -1289,7 +1290,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Hover feedback for the child-session panel's "back" button.
 		if m.viewingChildSession() {
-			m.childPanelHover = image.Pt(msg.X, msg.Y).In(m.childPanelButtonRect)
+			m.childPanelHover = image.Pt(msg.X, msg.Y).In(m.layout.editor)
+		}
+
+		if m.activeInline == nil && len(m.editor.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
+			m.editor.attachments.SetHover(msg.X - m.layout.editor.Min.X)
+		} else {
+			m.editor.attachments.SetHover(-1)
 		}
 
 		// Hover feedback for the session panel's todos header, thread
@@ -1297,16 +1304,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// panel's hover pattern above.
 		if m.state == uiChat {
 			pt := image.Pt(msg.X, msg.Y)
-			m.panelTodosHover = pt.In(m.panelTodosHeaderRect)
+			plan := m.sessionPanelPlan(m.layout.panel.Dy())
+			threadRects, delegationRects, todosHeaderRect, _ := sessionPanelRowLayout(m.layout.panel, plan)
+			m.panelTodosHover = pt.In(todosHeaderRect)
 			m.hoveredPanelThread = -1
-			for i, rect := range m.panelThreadRects {
+			for i, rect := range threadRects {
 				if pt.In(rect) {
 					m.hoveredPanelThread = i
 					break
 				}
 			}
 			m.hoveredPanelDelegation = -1
-			for i, rect := range m.panelDelegationRects {
+			for i, rect := range delegationRects {
 				if pt.In(rect) {
 					m.hoveredPanelDelegation = i
 					break

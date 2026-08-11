@@ -645,6 +645,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ContentCodeTruncation = muted.Background(o.bgBase).PaddingLeft(2)
 	s.Tool.ContentCodeBg = o.bgBase
 	s.Tool.Body = base.PaddingLeft(2)
+	s.Tool.ClickableHoverBg = o.bgHover
 
 	// Deprecated - kept for backward compatibility
 	s.Tool.ContentBg = muted.Background(o.bgLeastVisible)
@@ -920,8 +921,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ShellPromptBlurred = base.Foreground(o.fgMoreSubtle)
 	s.Messages.ShellCommand = base.Foreground(o.fgBase)
 	s.Messages.ShellOutput = lipgloss.NewStyle().Foreground(o.fgSubtle)
+	s.Messages.ShellOutputHover = lipgloss.NewStyle().Foreground(o.fgSubtle).Background(o.bgHover)
 	s.Messages.ShellExitCode = lipgloss.NewStyle().Foreground(o.destructive)
 	s.Messages.ShellTruncation = muted
+	s.Messages.ShellTruncationHover = muted.Background(o.bgHover)
 
 	s.Messages.SectionHeader = base.PaddingLeft(2)
 	s.Messages.ChatSeparator = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
@@ -934,6 +937,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	// Thinking section styles
 	s.Messages.ThinkingBox = subtle.Background(o.bgLeastVisible)
+	s.Messages.ThinkingBoxHover = subtle.Background(o.bgHover)
 	s.Messages.ThinkingTruncationHint = muted
 	s.Messages.ThinkingFooterTitle = muted
 	s.Messages.ThinkingFooterDuration = subtle
@@ -1067,6 +1071,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	// glyph so it isn't flush against the box edge, while MarginRight(1)
 	// keeps a transparent gap between adjacent chips.
 	s.Attachments.Remove = base.Padding(0, 1).MarginRight(1).Background(o.bgLessVisible).Foreground(o.fgSubtle).SetString(RemoveIcon)
+	s.Attachments.RemoveHover = base.Padding(0, 1).MarginRight(1).Background(o.bgHover).Foreground(o.fgBase).SetString(RemoveIcon)
 	s.Attachments.Deleting = base.Padding(0, 1).MarginRight(1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
 
 	// Pills styles

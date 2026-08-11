@@ -42,6 +42,7 @@ type ShellItem struct {
 	sty             *styles.Styles
 	pending         bool
 	anim            *anim.Anim
+	hovered         bool
 }
 
 var (
@@ -159,7 +160,22 @@ func (s *ShellItem) Render(width int) string {
 
 // HandleMouseClick implements MouseClickable so clicks select this item.
 func (s *ShellItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
-	return btn == ansi.MouseLeft
+	return btn == ansi.MouseLeft && s.HoverableAt(x, y, 0)
+}
+
+// HoverableAt reports whether the output block can visibly expand or collapse.
+func (s *ShellItem) HoverableAt(_ int, y, _ int) bool {
+	return s.output.Len() > 0 && strings.Count(strings.TrimSpace(s.output.String()), "\n")+1 > shellMaxCollapsedLines && y > 0
+}
+
+// SetHovered updates shell-output hover feedback.
+func (s *ShellItem) SetHovered(hovered bool) {
+	if s.hovered == hovered {
+		return
+	}
+	s.hovered = hovered
+	s.clearCache()
+	s.Bump()
 }
 
 // HandleKeyEvent implements KeyEventHandler for copy and horizontal scrolling.
@@ -267,6 +283,12 @@ func (s *ShellItem) RawRender(width int) string {
 
 	// Compute max line width for scroll clamping.
 	maxW := 0
+	outputStyle := s.sty.Messages.ShellOutput
+	truncationStyle := s.sty.Messages.ShellTruncation
+	if s.hovered {
+		outputStyle = s.sty.Messages.ShellOutputHover
+		truncationStyle = s.sty.Messages.ShellTruncationHover
+	}
 	for _, ln := range lines {
 		w := ansi.StringWidth(ln)
 		if w > maxW {
@@ -280,9 +302,11 @@ func (s *ShellItem) RawRender(width int) string {
 	// When streaming, hidden lines are above the visible tail, so show
 	// the "more lines" notice before the output.
 	if truncatedCount > 0 && s.pending {
-		body.WriteString(s.sty.Messages.ShellTruncation.Render(
-			fmt.Sprintf("… %d earlier lines", truncatedCount),
-		))
+		truncationStyle := s.sty.Messages.ShellTruncation
+		if s.hovered {
+			truncationStyle = s.sty.Messages.ShellTruncationHover.Width(cappedWidth)
+		}
+		body.WriteString(truncationStyle.Render(fmt.Sprintf("… %d earlier lines", truncatedCount)))
 		body.WriteString("\n")
 	}
 
@@ -292,15 +316,19 @@ func (s *ShellItem) RawRender(width int) string {
 		if s.xOffset > 0 && strings.TrimSpace(truncated) != "" {
 			truncated = "…" + truncated
 		}
-		body.WriteString(s.sty.Messages.ShellOutput.Render(truncated))
+		if s.hovered {
+			outputStyle = outputStyle.Width(cappedWidth)
+		}
+		body.WriteString(outputStyle.Render(truncated))
 		body.WriteString("\n")
 	}
 
 	// When finished, hidden lines are below, so show the notice after.
 	if truncatedCount > 0 && !s.pending && !s.expandedContent {
-		body.WriteString(s.sty.Messages.ShellTruncation.Render(
-			fmt.Sprintf("… %d more lines", truncatedCount),
-		))
+		if s.hovered {
+			truncationStyle = truncationStyle.Width(cappedWidth)
+		}
+		body.WriteString(truncationStyle.Render(fmt.Sprintf("… %d more lines", truncatedCount)))
 		return header + "\n" + body.String()
 	}
 

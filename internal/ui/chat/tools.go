@@ -549,6 +549,13 @@ func (t *baseToolMessageItem) HoverableAt(x, y, width int) bool {
 	return x >= MessageLeftPaddingTotal && y > 0 && y < lipgloss.Height(t.Render(width))
 }
 
+func clickableItemHover(sty *styles.Styles, content string, width int, hovered bool) string {
+	if !hovered {
+		return content
+	}
+	return common.BlockBackground(content, width, sty.Tool.ClickableHoverBg)
+}
+
 // SetHovered updates hover feedback for expandable tool renderers.
 func (t *baseToolMessageItem) SetHovered(hovered bool) {
 	if t.hovered == hovered {

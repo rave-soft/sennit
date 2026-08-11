@@ -34,6 +34,30 @@ func TestRender_IncludesRemoveButton(t *testing.T) {
 	require.Contains(t, out, styles.RemoveIcon)
 }
 
+func TestSetHoverHighlightsRemoveButton(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	r := NewRenderer(
+		sty.Attachments.Normal,
+		sty.Attachments.Deleting,
+		sty.Attachments.Image,
+		sty.Attachments.Text,
+		sty.Attachments.Skill,
+		sty.Attachments.Remove,
+		sty.Attachments.RemoveHover,
+	)
+	m := New(r, Keymap{})
+	m.list = []message.Attachment{{FileName: "test.txt"}}
+	_ = m.Render(80)
+	x := r.bounds[0].startX
+
+	m.SetHover(x)
+	require.Equal(t, 0, r.hoveredRemove)
+	m.SetHover(-1)
+	require.Equal(t, -1, r.hoveredRemove)
+}
+
 func TestRender_DeletingModeNoRemoveButton(t *testing.T) {
 	t.Parallel()
 

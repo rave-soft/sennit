@@ -140,3 +140,20 @@ func TestAssistantMessageItemHandleMouseClick(t *testing.T) {
 	require.False(t, item.HandleMouseClick(ansi.MouseRight, 0, 2))
 	require.Equal(t, thinkingCollapsed, item.thinkingViewMode)
 }
+
+func TestAssistantMessageItemHoverMatchesClickTarget(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewAssistantMessageItem(&sty, &message.Message{ID: "m3", Role: message.Assistant}).(*AssistantMessageItem)
+	item.thinkingBoxHeight = 3
+
+	require.True(t, item.HoverableAt(0, 0, 80))
+	require.True(t, item.HoverableAt(0, 2, 80))
+	require.False(t, item.HoverableAt(0, 3, 80))
+
+	version := item.Version()
+	item.SetHovered(true)
+	require.True(t, item.hovered)
+	require.Greater(t, item.Version(), version)
+}

@@ -90,6 +90,18 @@ func (m *Attachments) HandleClick(x int) bool {
 	return false
 }
 
+// SetHover updates the remove button under the pointer.
+func (m *Attachments) SetHover(x int) {
+	if m == nil || m.renderer == nil {
+		return
+	}
+	if m.deleting {
+		m.renderer.hoveredRemove = -1
+		return
+	}
+	m.renderer.hoveredRemove = m.renderer.HitTestRemove(m.list, x)
+}
+
 func (m *Attachments) Render(width int) string {
 	// The editor is interactive, so the remove button is shown.
 	return m.renderer.Render(m.list, m.deleting, true, width)
@@ -99,14 +111,20 @@ func (m *Attachments) Render(width int) string {
 // styles in place.
 func (m *Attachments) Renderer() *Renderer { return m.renderer }
 
-func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle, removeStyle lipgloss.Style) *Renderer {
+func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle, removeStyle lipgloss.Style, removeHoverStyle ...lipgloss.Style) *Renderer {
+	hoverStyle := removeStyle
+	if len(removeHoverStyle) > 0 {
+		hoverStyle = removeHoverStyle[0]
+	}
 	return &Renderer{
-		normalStyle:   normalStyle,
-		textStyle:     textStyle,
-		imageStyle:    imageStyle,
-		skillStyle:    skillStyle,
-		removeStyle:   removeStyle,
-		deletingStyle: deletingStyle,
+		normalStyle:      normalStyle,
+		textStyle:        textStyle,
+		imageStyle:       imageStyle,
+		skillStyle:       skillStyle,
+		removeStyle:      removeStyle,
+		removeHoverStyle: hoverStyle,
+		deletingStyle:    deletingStyle,
+		hoveredRemove:    -1,
 	}
 }
 
@@ -121,7 +139,8 @@ func (r *Renderer) SetStyles(normalStyle, deletingStyle, imageStyle, textStyle, 
 }
 
 type Renderer struct {
-	normalStyle, textStyle, imageStyle, skillStyle, removeStyle, deletingStyle lipgloss.Style
+	normalStyle, textStyle, imageStyle, skillStyle, removeStyle, removeHoverStyle, deletingStyle lipgloss.Style
+	hoveredRemove                                                                                int
 	// bounds stores the X-coordinate ranges of each chip's remove
 	// button from the most recent Render call, for mouse hit-testing.
 	bounds []chipBounds
@@ -182,9 +201,15 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 			chips = append(chips, numStr)
 			offset += chipW + lipgloss.Width(numStr)
 		case showRemove:
-			chips = append(chips, removeStr)
+			itemRemoveStr := removeStr
+			itemRemoveStyle := r.removeStyle
+			if i == r.hoveredRemove {
+				itemRemoveStr = r.removeHoverStyle.String()
+				itemRemoveStyle = r.removeHoverStyle
+			}
+			chips = append(chips, itemRemoveStr)
 			removeStart := offset + chipW
-			removeW := lipgloss.Width(removeStr)
+			removeW := lipgloss.Width(itemRemoveStr)
 			// If the button carries a trailing margin it is the gap between
 			// chips, not part of the button, so exclude it from the hit
 			// region. (Currently the button uses padding rather than a
@@ -192,7 +217,7 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 			// changes.)
 			r.bounds = append(r.bounds, chipBounds{
 				startX:    removeStart,
-				removeEnd: removeStart + removeW - r.removeStyle.GetHorizontalMargins(),
+				removeEnd: removeStart + removeW - itemRemoveStyle.GetHorizontalMargins(),
 			})
 			offset = removeStart + removeW
 		default:
