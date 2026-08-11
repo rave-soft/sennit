@@ -196,6 +196,20 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 // Section renders a section header with a title and a horizontal line filling
 // the remaining width.
 func Section(t *styles.Styles, text string, width int, info ...string) string {
+	return sectionStyled(t, t.Section.Title, text, width, info...)
+}
+
+// SectionStyled is Section with the title style overridable — used where a
+// section header needs a state-dependent title style (e.g. a hover cue) but
+// must otherwise share Section's title/dashes/info layout.
+func SectionStyled(t *styles.Styles, titleStyle lipgloss.Style, text string, width int, info ...string) string {
+	return sectionStyled(t, titleStyle, text, width, info...)
+}
+
+// sectionStyled is the shared body of Section and SectionStyled: title,
+// then a horizontal line filling the remaining width, then optional info
+// text right after the line.
+func sectionStyled(t *styles.Styles, titleStyle lipgloss.Style, text string, width int, info ...string) string {
 	char := styles.SectionSeparator
 	length := lipgloss.Width(text) + 1
 	remainingWidth := width - length
@@ -209,7 +223,7 @@ func Section(t *styles.Styles, text string, width int, info ...string) string {
 		}
 	}
 
-	text = t.Section.Title.Render(text)
+	text = titleStyle.Render(text)
 	if remainingWidth > 0 {
 		text = text + " " + t.Section.Line.Render(strings.Repeat(char, remainingWidth)) + infoText
 	}

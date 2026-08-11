@@ -272,6 +272,13 @@ type sessionPanelPlan struct {
 	threads     []proto.Thread // visible thread blocks, in draw order
 	threadsMore int
 	threadsRows int
+	// threadsHeaderRows is 1 iff threadsRows > 0 at the final,
+	// post-shedding state (0 otherwise) — the "threads" section-separator
+	// line drawSessionPanel paints directly above the thread blocks. Kept
+	// as its own field (rather than re-deriving threadsRows>0 at draw
+	// time) so sessionPanelRowLayout and drawSessionPanel agree on
+	// exactly how many rows the header consumes without recomputing it.
+	threadsHeaderRows int
 
 	// delegations are currently-running (no result yet) top-level
 	// sub-agent tool calls in this session's own chat, rendered with the
@@ -279,6 +286,9 @@ type sessionPanelPlan struct {
 	delegations     []panelDelegation
 	delegationsMore int
 	delegationsRows int
+	// delegationsHeaderRows mirrors threadsHeaderRows for the "agents"
+	// section-separator line.
+	delegationsHeaderRows int
 
 	todosVisible   bool // at least one incomplete todo exists
 	todosExpanded  bool // m.panel.expanded, verbatim — budget shedding never forces this false anymore
@@ -304,6 +314,10 @@ type sessionPanelPlan struct {
 	todosScrollable   bool
 
 	queue []string
+	// queueHeaderRows is 1 iff len(queue) > 0 at the final, post-shedding
+	// state (0 otherwise) — the "queue" section-separator line
+	// drawSessionPanel paints directly above the queue lines.
+	queueHeaderRows int
 
 	totalRows int
 }
@@ -395,8 +409,34 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		}
 		return 1
 	}
+	// threadsHeaderRows/delegationsHeaderRows/queueHeaderRows are closures,
+	// not snapshotted values, so over() always reflects the CURRENT
+	// row/item counts — a header disappears for free the instant its
+	// section is shed to zero, which shrinks over() by exactly the row it
+	// would otherwise still be charging for.
+	threadsHeaderRows := func() int {
+		if plan.threadsRows > 0 {
+			return 1
+		}
+		return 0
+	}
+	delegationsHeaderRows := func() int {
+		if plan.delegationsRows > 0 {
+			return 1
+		}
+		return 0
+	}
+	queueHeaderRows := func() int {
+		if len(plan.queue) > 0 {
+			return 1
+		}
+		return 0
+	}
 	over := func() int {
-		return plan.threadsRows + plan.delegationsRows + headerRows() + plan.todosViewportRows + len(plan.queue) - budget
+		return threadsHeaderRows() + plan.threadsRows +
+			delegationsHeaderRows() + plan.delegationsRows +
+			headerRows() + plan.todosViewportRows +
+			queueHeaderRows() + len(plan.queue) - budget
 	}
 
 	// Shedding priority, highest to lowest: threads > delegations >
@@ -434,7 +474,13 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	}
 
 	plan.todosScrollable = plan.todosExpanded && plan.todosVisible && plan.todosViewportRows < plan.todosContentRows
-	plan.totalRows = plan.threadsRows + plan.delegationsRows + headerRows() + plan.todosViewportRows + len(plan.queue)
+	plan.threadsHeaderRows = threadsHeaderRows()
+	plan.delegationsHeaderRows = delegationsHeaderRows()
+	plan.queueHeaderRows = queueHeaderRows()
+	plan.totalRows = plan.threadsHeaderRows + plan.threadsRows +
+		plan.delegationsHeaderRows + plan.delegationsRows +
+		headerRows() + plan.todosViewportRows +
+		plan.queueHeaderRows + len(plan.queue)
 	return plan
 }
 
@@ -508,14 +554,17 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 	row.Max.Y = row.Min.Y
 
 	if plan.threadsRows > 0 {
+		row.Min.Y = min(row.Min.Y+plan.threadsHeaderRows, area.Max.Y) // "threads" section-separator line, not hit-tested.
 		threadsArea := area
-		threadsArea.Max.Y = min(area.Min.Y+plan.threadsRows, area.Max.Y)
+		threadsArea.Min.Y = row.Min.Y
+		threadsArea.Max.Y = min(row.Min.Y+plan.threadsRows, area.Max.Y)
 		threadBlockRects = threadBlockGeometry(threadsArea, plan.threads)
 		row.Min.Y = threadsArea.Max.Y
 		row.Max.Y = row.Min.Y
 	}
 
 	if plan.delegationsRows > 0 && row.Min.Y < area.Max.Y {
+		row.Min.Y = min(row.Min.Y+plan.delegationsHeaderRows, area.Max.Y) // "agents" section-separator line, not hit-tested.
 		delegationsArea := area
 		delegationsArea.Min.Y = row.Min.Y
 		delegationsArea.Max.Y = min(row.Min.Y+plan.delegationsRows, area.Max.Y)
@@ -719,8 +768,13 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	row.Max.Y = row.Min.Y
 
 	if plan.threadsRows > 0 {
+		if plan.threadsHeaderRows > 0 {
+			row.Min.Y = drawPanelLine(scr, area, row.Min.Y, common.Section(t, "threads", width))
+			row.Max.Y = row.Min.Y
+		}
 		threadsArea := area
-		threadsArea.Max.Y = min(area.Min.Y+plan.threadsRows, area.Max.Y)
+		threadsArea.Min.Y = row.Min.Y
+		threadsArea.Max.Y = min(row.Min.Y+plan.threadsRows, area.Max.Y)
 		m.panelThreadRects = m.drawThreadBlocks(scr, threadsArea, plan, m.hoveredPanelThread)
 		m.panelThreads = plan.threads
 		row.Min.Y = threadsArea.Max.Y
@@ -728,6 +782,10 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	if plan.delegationsRows > 0 && row.Min.Y < area.Max.Y {
+		if plan.delegationsHeaderRows > 0 {
+			row.Min.Y = drawPanelLine(scr, area, row.Min.Y, common.Section(t, "agents", width))
+			row.Max.Y = row.Min.Y
+		}
 		delegationsArea := area
 		delegationsArea.Min.Y = row.Min.Y
 		delegationsArea.Max.Y = min(row.Min.Y+plan.delegationsRows, area.Max.Y)
@@ -740,11 +798,16 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	if plan.todosVisible && row.Min.Y < area.Max.Y {
 		headerRow := todosHeaderRect
 		header := sessionPanelTodosHeaderText(plan.todosCompleted, plan.todosTotal, plan.todosExpanded)
-		headerStyle := t.Pills.TodoLabel
+		// The todos header is the same section-separator style as
+		// threads/agents/queue, restyled (not resized) from the old bare
+		// TodoLabel fill — see common.SectionStyled. Hover swaps just the
+		// title style for the hover cue; the dashes stay muted via
+		// t.Section.Line (SectionStyled's default).
+		titleStyle := t.Section.Title
 		if m.panelTodosHover {
-			headerStyle = t.Pills.HeaderHover
+			titleStyle = t.Pills.HeaderHover
 		}
-		uv.NewStyledString(headerStyle.Render(ansi.Truncate(header, width, "…"))).Draw(scr, headerRow)
+		uv.NewStyledString(common.SectionStyled(t, titleStyle, header, width)).Draw(scr, headerRow)
 		m.panelTodosHeaderRect = headerRow
 		m.panelTodosListRect = todosListRect
 		row.Min.Y++
@@ -791,11 +854,16 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		}
 	}
 
-	for _, line := range renderSessionQueueLines(plan.queue, t, width) {
-		if row.Min.Y >= area.Max.Y {
-			break
+	if len(plan.queue) > 0 && row.Min.Y < area.Max.Y {
+		if plan.queueHeaderRows > 0 {
+			row.Min.Y = drawPanelLine(scr, area, row.Min.Y, common.Section(t, "queue", width))
 		}
-		row.Min.Y = drawPanelLine(scr, area, row.Min.Y, line)
+		for _, line := range renderSessionQueueLines(plan.queue, t, width) {
+			if row.Min.Y >= area.Max.Y {
+				break
+			}
+			row.Min.Y = drawPanelLine(scr, area, row.Min.Y, line)
+		}
 	}
 }
 
