@@ -289,3 +289,52 @@ func TestImportLegacyProjectDB_NoLegacyFile(t *testing.T) {
 	_, statErr := os.Stat(filepath.Join(projectDir, "braid.db"))
 	require.True(t, os.IsNotExist(statErr))
 }
+
+func TestImportLegacyRows_RollbacksOnOperationalError(t *testing.T) {
+	t.Cleanup(ResetPool)
+	ctx := context.Background()
+	legacyDir := t.TempDir()
+	destDir := t.TempDir()
+
+	seedLegacyProjectDB(t, legacyDir)
+
+	legacy, err := Connect(ctx, legacyDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(legacyDir) })
+
+	dest, err := Connect(ctx, destDir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = Release(destDir) })
+
+	_, err = dest.ExecContext(ctx, `
+		CREATE TRIGGER rollback_test_trigger
+		BEFORE INSERT ON messages FOR EACH ROW
+		BEGIN
+			SELECT CASE WHEN NEW.id = 'legacy-message-1'
+				THEN RAISE(ABORT, 'trigger blocks import') END;
+		END;
+	`)
+	require.NoError(t, err)
+
+	_, err = importLegacyRows(ctx, legacy, dest, "/legacy-project")
+	require.Error(t, err)
+
+	destQ := New(dest)
+
+	_, err = destQ.GetSessionByID(ctx, "legacy-session-1")
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	_, err = destQ.GetMessage(ctx, "legacy-message-1")
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	var cnt int
+	require.NoError(t, dest.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sessions`).Scan(&cnt))
+	require.Zero(t, cnt)
+	require.NoError(t, dest.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM messages`).Scan(&cnt))
+	require.Zero(t, cnt)
+
+	_, err = dest.ExecContext(ctx, `DROP TRIGGER IF EXISTS rollback_test_trigger`)
+	require.NoError(t, err)
+}
