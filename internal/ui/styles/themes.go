@@ -35,6 +35,7 @@ func CharmtonePantera() Styles {
 		fgMoreSubtle: lipgloss.Color("#7E8B99"),
 		fgSubtle:     lipgloss.Color("#AEBDCC"),
 		fgMostSubtle: lipgloss.Color("#57626E"),
+		fgMarkdown:   lipgloss.Color("#C7D2DE"),
 
 		onPrimary: charmtone.Butter,
 

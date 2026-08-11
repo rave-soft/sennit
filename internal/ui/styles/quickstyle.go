@@ -37,6 +37,7 @@ type quickStyleOpts struct {
 	fgSubtle     color.Color
 	fgMoreSubtle color.Color
 	fgMostSubtle color.Color
+	fgMarkdown   color.Color
 
 	// Contrast pairings: foregrounds designed to sit on top of a
 	// matching background role.
@@ -153,7 +154,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Markdown = ansi.StyleConfig{
 		Document: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Color: hex(o.fgSubtle),
+				Color: hex(o.fgMarkdown),
 			},
 			// One cell of breathing room on each side, so prose doesn't
 			// sit flush against the markdown panel's background edge.
@@ -258,10 +259,9 @@ func quickStyle(o quickStyleOpts) Styles {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Prefix:          " ",
-				Suffix:          " ",
-				Color:           hex(o.fgBase),
-				BackgroundColor: hex(o.bgLessVisible),
+				Prefix: " ",
+				Suffix: " ",
+				Color:  hex(o.keyword),
 			},
 		},
 		CodeBlock: ansi.StyleCodeBlock{

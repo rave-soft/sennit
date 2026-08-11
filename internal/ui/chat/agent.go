@@ -319,7 +319,9 @@ type AgentToolRenderContext struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	pending := opts.IsPending()
+	// ToolCall.Finished only means the model finished streaming the tool
+	// arguments. A delegation remains active until its result arrives.
+	pending := !opts.HasResult() && !opts.IsCanceled()
 	if pending {
 		// The session panel owns a running delegation's full live detail
 		// (todos, subtitle — see internal/ui/model/session_panel.go and

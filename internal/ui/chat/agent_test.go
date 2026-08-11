@@ -214,6 +214,20 @@ func TestAgentToolMessageItem_PendingShowsCurrentActivity(t *testing.T) {
 		"pending render is exactly stub + one status line")
 }
 
+func TestAgentToolMessageItem_FinishedInputWithoutResultShowsCurrentActivity(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewAgentToolMessageItem(&sty,
+		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{"prompt":"fix it"}`, Finished: true},
+		nil, false, nil)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "tc-child", "grep", `{"pattern":"Provider"}`))
+
+	out := ansi.Strip(item.Render(100))
+	require.Contains(t, out, "task")
+	require.Contains(t, out, `→ grep "Provider"`)
+}
+
 // TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion covers the
 // live token-count update path (handleChildSessionUpdate in
 // internal/ui/model/ui.go): pushing a new token count must invalidate
