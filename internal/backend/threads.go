@@ -39,8 +39,11 @@ func (b *Backend) attachServerThreads(ctx context.Context, a *app.App, path stri
 		worktreeDir = opts.WorktreeDir
 	}
 	mgr := thread.NewManager(thread.ManagerOptions{
-		Store:       thread.NewStore(db.New(conn), a.Store().WorkingDir()),
-		Spawner:     b.ThreadSpawner(func() map[string]config.Agent { return a.Config().UserAgents() }),
+		Store: thread.NewStore(db.New(conn), a.Store().WorkingDir()),
+		Spawner: b.ThreadSpawner(
+			func() map[string]config.Agent { return a.Config().UserAgents() },
+			func() bool { return a.Store().Overrides().SkipPermissionRequests },
+		),
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,
 		Context:     ctx,

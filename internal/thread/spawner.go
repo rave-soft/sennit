@@ -52,13 +52,15 @@ func (h *localHandle) App() *app.App { return h.app }
 type LocalSpawner struct {
 	apps         *csync.Map[string, *app.App]
 	parentAgents func() map[string]config.Agent
+	parentYOLO   func() bool
 }
 
 // NewLocalSpawner returns a ready-to-use LocalSpawner.
-func NewLocalSpawner(parentAgents func() map[string]config.Agent) *LocalSpawner {
+func NewLocalSpawner(parentAgents func() map[string]config.Agent, parentYOLO func() bool) *LocalSpawner {
 	return &LocalSpawner{
 		apps:         csync.NewMap[string, *app.App](),
 		parentAgents: parentAgents,
+		parentYOLO:   parentYOLO,
 	}
 }
 
@@ -68,10 +70,15 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
 	if s.parentAgents != nil {
 		inheritedAgents = s.parentAgents()
 	}
+	var yolo bool
+	if s.parentYOLO != nil {
+		yolo = s.parentYOLO()
+	}
 	boot, err := app.Bootstrap(ctx, path, app.BootstrapOptions{
 		WorkspaceLock:      true,
 		GlobalSkillsMirror: false,
 		InheritedAgents:    inheritedAgents,
+		YOLO:               yolo,
 	})
 	if err != nil {
 		return nil, err

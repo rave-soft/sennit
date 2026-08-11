@@ -34,16 +34,18 @@ func (h *threadHandle) App() *app.App { return h.app }
 type threadSpawner struct {
 	backend      *Backend
 	parentAgents func() map[string]config.Agent
+	parentYOLO   func() bool
 
 	mu       sync.Mutex
 	clientOf map[string]string // workspace ID -> internal client ID holding it
 }
 
 // ThreadSpawner returns a [thread.Spawner] backed by this Backend.
-func (b *Backend) ThreadSpawner(parentAgents func() map[string]config.Agent) thread.Spawner {
+func (b *Backend) ThreadSpawner(parentAgents func() map[string]config.Agent, parentYOLO func() bool) thread.Spawner {
 	return &threadSpawner{
 		backend:      b,
 		parentAgents: parentAgents,
+		parentYOLO:   parentYOLO,
 		clientOf:     make(map[string]string),
 	}
 }
@@ -55,9 +57,13 @@ func (s *threadSpawner) Spawn(ctx context.Context, path string) (thread.Handle, 
 	if s.parentAgents != nil {
 		inheritedAgents = s.parentAgents()
 	}
+	var yolo bool
+	if s.parentYOLO != nil {
+		yolo = s.parentYOLO()
+	}
 	// attachThreads=false: a thread's own workspace must not get a thread
 	// manager of its own — nesting is not supported.
-	ws, _, err := s.backend.createWorkspace(proto.Workspace{Path: path, ClientID: clientID}, false, inheritedAgents)
+	ws, _, err := s.backend.createWorkspace(proto.Workspace{Path: path, ClientID: clientID, YOLO: yolo}, false, inheritedAgents)
 	if err != nil {
 		return nil, err
 	}
