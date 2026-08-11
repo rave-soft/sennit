@@ -110,20 +110,22 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 
 	header = appendResultSummary(sty, header, bashDurationSummary(meta))
 	// The body sits directly under the header (no blank separator line):
-	// up to bashCollapsedOutputLines lines by default, the full output
+	// up to collapsedBodyLines lines by default, the full output
 	// once the item is click-expanded (see BashToolMessageItem.ToggleExpanded).
-	return header + "\n" + bashOutputContent(sty, output, cappedWidth, opts.Expanded)
+	return header + "\n" + expandableBodyContent(sty, output, cappedWidth, opts.Expanded)
 }
 
-// bashCollapsedOutputLines is how many output lines a collapsed bash call
-// shows under its header before offering click-to-expand.
-const bashCollapsedOutputLines = 4
+// collapsedBodyLines is how many content lines a collapsed expandable tool
+// body (bash output, written file content) shows under its header before
+// offering click-to-expand.
+const collapsedBodyLines = 4
 
-// bashOutputContent renders a bash command's output under its header. While
-// collapsed it shows at most bashCollapsedOutputLines lines followed by a
-// "Click to expand" hint when more were cut off; expanded it shows the full
-// output with a "Click to collapse" hint at the end.
-func bashOutputContent(sty *styles.Styles, content string, width int, expanded bool) string {
+// expandableBodyContent renders a tool's content body under its header —
+// shared by Bash (command output) and Write (file content). While collapsed
+// it shows at most collapsedBodyLines lines followed by a "Click to expand"
+// hint when more were cut off; expanded it shows the full content with a
+// "Click to collapse" hint at the end.
+func expandableBodyContent(sty *styles.Styles, content string, width int, expanded bool) string {
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
 	// Drop the command's own ANSI colors (red test failures, linter
@@ -134,7 +136,7 @@ func bashOutputContent(sty *styles.Styles, content string, width int, expanded b
 
 	maxLines := len(lines)
 	if !expanded {
-		maxLines = min(bashCollapsedOutputLines, len(lines))
+		maxLines = min(collapsedBodyLines, len(lines))
 	}
 
 	out := make([]string, 0, maxLines+1)
@@ -151,7 +153,7 @@ func bashOutputContent(sty *styles.Styles, content string, width int, expanded b
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
 			Render(fmt.Sprintf(" Click to expand (%d more lines)", len(lines)-maxLines)))
-	case expanded && len(lines) > bashCollapsedOutputLines:
+	case expanded && len(lines) > collapsedBodyLines:
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
 			Render(" Click to collapse"))

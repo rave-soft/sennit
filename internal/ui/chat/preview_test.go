@@ -13,8 +13,8 @@ import (
 // a finished tool call must render as a single line by default — no body,
 // no wall of content — across every major tool class (file, search,
 // network). Regression target: "жму init — улетает портянка вверх". Bash
-// is the deliberate exception: it shows a capped output preview under its
-// header (see TestToolMessageItem_BashShowsCappedPreview).
+// and Write are the deliberate exceptions: they show a capped content
+// preview under their header (see TestToolMessageItem_ExpandableBodyPreview).
 func TestToolMessageItem_CollapsedByDefaultIsOneLine(t *testing.T) {
 	t.Parallel()
 
@@ -34,11 +34,6 @@ func TestToolMessageItem_CollapsedByDefaultIsOneLine(t *testing.T) {
 				ToolCallID: "1",
 				Metadata:   `{"content":` + toJSONString(longFile) + `}`,
 			},
-		},
-		{
-			name:   "write",
-			tc:     message.ToolCall{ID: "2", Name: "write", Input: `{"file_path":"docs/x.md","content":` + toJSONString(longFile) + `}`, Finished: true},
-			result: &message.ToolResult{ToolCallID: "2", Content: "wrote file"},
 		},
 		{
 			name: "grep",
@@ -67,29 +62,49 @@ func TestToolMessageItem_CollapsedByDefaultIsOneLine(t *testing.T) {
 	}
 }
 
-// TestToolMessageItem_BashShowsCappedPreview covers bash's exception to
-// the one-line rule: a finished bash call shows its output under the
-// header, capped at bashCollapsedOutputLines lines plus a "Click to
-// expand" hint when more was cut off (full toggle behavior is covered in
-// bash_test.go).
-func TestToolMessageItem_BashShowsCappedPreview(t *testing.T) {
+// TestToolMessageItem_ExpandableBodyPreview covers the exceptions to the
+// one-line rule: a finished bash call shows its output — and a finished
+// write call the written content — under the header, capped at
+// collapsedBodyLines lines plus a "Click to expand" hint when more was
+// cut off (full toggle behavior is covered in bash_test.go).
+func TestToolMessageItem_ExpandableBodyPreview(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
 	longFile := strings.Repeat("line of code\n", 300)
 
-	tc := message.ToolCall{ID: "3", Name: "bash", Input: `{"command":"go test ./..."}`, Finished: true}
-	result := &message.ToolResult{
-		ToolCallID: "3",
-		Metadata:   `{"output":` + toJSONString(longFile) + `,"start_time":0,"end_time":2100}`,
+	tests := []struct {
+		name   string
+		tc     message.ToolCall
+		result *message.ToolResult
+	}{
+		{
+			name: "bash",
+			tc:   message.ToolCall{ID: "3", Name: "bash", Input: `{"command":"go test ./..."}`, Finished: true},
+			result: &message.ToolResult{
+				ToolCallID: "3",
+				Metadata:   `{"output":` + toJSONString(longFile) + `,"start_time":0,"end_time":2100}`,
+			},
+		},
+		{
+			name:   "write",
+			tc:     message.ToolCall{ID: "2", Name: "write", Input: `{"file_path":"docs/x.md","content":` + toJSONString(longFile) + `}`, Finished: true},
+			result: &message.ToolResult{ToolCallID: "2", Content: "wrote file"},
+		},
 	}
 
-	item := NewToolMessageItem(&sty, "m1", tc, result, false, nil)
-	out := item.Render(120)
-	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	require.Lenf(t, lines, 1+bashCollapsedOutputLines+1,
-		"collapsed bash render must be header + capped body + hint, got:\n%s", out)
-	require.Contains(t, out, "Click to expand")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			item := NewToolMessageItem(&sty, "m1", tt.tc, tt.result, false, nil)
+			require.Implements(t, (*Expandable)(nil), item)
+			out := item.Render(120)
+			lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+			require.Lenf(t, lines, 1+collapsedBodyLines+1,
+				"collapsed %s render must be header + capped body + hint, got:\n%s", tt.name, out)
+			require.Contains(t, out, "Click to expand")
+		})
+	}
 }
 
 // TestToolMessageItem_NoExpand covers plain tool items staying collapsed: a

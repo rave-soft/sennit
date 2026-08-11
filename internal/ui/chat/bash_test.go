@@ -57,7 +57,7 @@ func TestBashRenderTool_FinishedShowsOutputPreview(t *testing.T) {
 
 // TestBashRenderTool_CollapsedCapsAtFourLinesAndToggles covers the
 // click-to-expand contract: collapsed output is capped at
-// bashCollapsedOutputLines lines followed by a "Click to expand" hint;
+// collapsedBodyLines lines followed by a "Click to expand" hint;
 // ToggleExpanded reveals the full output with a "Click to collapse" hint,
 // and toggling again collapses back.
 func TestBashRenderTool_CollapsedCapsAtFourLinesAndToggles(t *testing.T) {
@@ -73,7 +73,7 @@ func TestBashRenderTool_CollapsedCapsAtFourLinesAndToggles(t *testing.T) {
 
 	collapsed := item.Render(80)
 	lines := strings.Split(collapsed, "\n")
-	require.Len(t, lines, 1+bashCollapsedOutputLines+1, "expected header + capped body + hint, got: %q", collapsed)
+	require.Len(t, lines, 1+collapsedBodyLines+1, "expected header + capped body + hint, got: %q", collapsed)
 	require.Contains(t, collapsed, "Click to expand (3 more lines)")
 	require.NotContains(t, collapsed, "l5")
 
