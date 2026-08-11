@@ -23,6 +23,8 @@ type modelsTestWorkspace struct {
 	setConfigFields   map[string]any
 }
 
+func (w *modelsTestWorkspace) SupportsThreads() bool { return false }
+
 func (w *modelsTestWorkspace) Config() *config.Config {
 	return w.cfg
 }

@@ -282,6 +282,23 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 			m.scrollbarContentSize = contentSize
 			m.scrollbarViewportSize = listHeight
 			m.scrollbarThumbStart, m.scrollbarThumbSize, _ = common.ScrollbarThumbBounds(listHeight, contentSize, listHeight, offset)
+
+			// While hovered/dragging, thicken the thumb by painting an
+			// extra overlay column one cell to the left of the real
+			// scrollbar column, covering only the thumb's rows. This never
+			// touches scrollbarWidth/layout — it's a transient visual that
+			// paints over the last column of message text, which is
+			// expected while actively grabbing the thumb.
+			if hovered && m.scrollbarThumbSize > 0 && m.scrollbarColX >= 1 {
+				overlay := common.ScrollbarThumbOverlay(m.com.Styles, m.scrollbarThumbSize)
+				if overlay != "" {
+					overlayArea := image.Rectangle{
+						Min: image.Point{X: area.Max.X - scrollbarWidth - 1, Y: area.Min.Y + m.scrollbarThumbStart},
+						Max: image.Point{X: area.Max.X - scrollbarWidth, Y: area.Min.Y + m.scrollbarThumbStart + m.scrollbarThumbSize},
+					}
+					uv.NewStyledString(overlay).Draw(scr, overlayArea)
+				}
+			}
 		} else {
 			m.scrollbarShown = false
 		}
@@ -1125,12 +1142,40 @@ func (m *Chat) HandleMouseDrag(x, y int) bool {
 	return true
 }
 
+// scrollbarHitZone returns the [start, end) range of relative x columns that
+// count as "on the scrollbar" for hit-testing. Baseline (wide=false) is a
+// single column (scrollbarColX), matching pre-widening behavior exactly.
+// wide=true widens it to up to 3 columns ending at scrollbarColX (clamped so
+// the zone never reaches negative x in a very narrow pane) — this is the
+// "approach" zone that lets a cursor coming from the left find the
+// scrollbar before landing exactly on it.
+//
+// Both callers apply this with a single deterministic membership test, not
+// a pair of enter/exit thresholds, so there's no flicker at the boundary:
+// ScrollbarHoverAt always tests against the wide zone (a given x either is
+// or isn't within 2 columns of scrollbarColX — that answer doesn't depend on
+// anything else), and HandleScrollbarMouseDown widens only when
+// m.scrollbarHover is already true from that same test on the prior motion
+// event. Once the cursor leaves the wide zone, the very next motion event
+// turns m.scrollbarHover back off, which shrinks the effective click zone
+// back to 1 column before the next mouse-down is even possible.
+func (m *Chat) scrollbarHitZone(wide bool) (start, end int) {
+	width := 1
+	if wide {
+		width = min(3, m.scrollbarColX+1)
+	}
+	return m.scrollbarColX - width + 1, m.scrollbarColX + 1
+}
+
 // HandleScrollbarMouseDown starts a scrollbar drag if (x, y) lands on the
-// scrollbar's column, as computed by the last Draw. It takes priority over
-// text selection — callers should try this before HandleMouseDown and only
-// fall through to it when this returns false.
+// scrollbar's hit zone (see scrollbarHitZone) — widened when the last
+// ScrollbarHoverAt call left m.scrollbarHover set, single-column otherwise —
+// as computed by the last Draw. It takes priority over text selection —
+// callers should try this before HandleMouseDown and only fall through to
+// it when this returns false.
 func (m *Chat) HandleScrollbarMouseDown(x, y int) (bool, tea.Cmd) {
-	if !m.scrollbarShown || x != m.scrollbarColX || y < 0 || y >= m.scrollbarTrackHeight {
+	start, end := m.scrollbarHitZone(m.scrollbarHover)
+	if !m.scrollbarShown || x < start || x >= end || y < 0 || y >= m.scrollbarTrackHeight {
 		return false, nil
 	}
 
@@ -1167,10 +1212,15 @@ func (m *Chat) HandleScrollbarMouseUp() bool {
 }
 
 // ScrollbarHoverAt updates and returns whether (x, y) is hovering the
-// scrollbar's column, for hover-highlight rendering from mouse-motion events
-// that aren't part of a drag.
+// scrollbar, for hover-highlight rendering from mouse-motion events that
+// aren't part of a drag. This always tests against the widened zone (see
+// scrollbarHitZone) — that's what lets a cursor approach from up to 2
+// columns away and "find" the scrollbar; HandleScrollbarMouseDown then
+// consults the m.scrollbarHover this sets to decide whether a click gets
+// the same widened zone or just the single baseline column.
 func (m *Chat) ScrollbarHoverAt(x, y int) bool {
-	m.scrollbarHover = m.scrollbarShown && x == m.scrollbarColX && y >= 0 && y < m.scrollbarTrackHeight
+	start, end := m.scrollbarHitZone(true)
+	m.scrollbarHover = m.scrollbarShown && x >= start && x < end && y >= 0 && y < m.scrollbarTrackHeight
 	return m.scrollbarHover
 }
 

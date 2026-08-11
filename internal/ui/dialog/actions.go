@@ -55,7 +55,10 @@ type (
 	}
 	ActionToggleTransparentBackground struct{}
 	ActionInitializeProject           struct{}
-	ActionSummarize                   struct {
+	// ActionOpenThreadsDashboard requests switching to the threads
+	// dashboard screen (see internal/ui/model/root.go's screenDashboard).
+	ActionOpenThreadsDashboard struct{}
+	ActionSummarize            struct {
 		SessionID string
 	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort

@@ -18,6 +18,8 @@ type commandsNamesTestWorkspace struct {
 	cfg *config.Config
 }
 
+func (w *commandsNamesTestWorkspace) SupportsThreads() bool { return false }
+
 func (w *commandsNamesTestWorkspace) Config() *config.Config {
 	return w.cfg
 }

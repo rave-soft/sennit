@@ -22,6 +22,8 @@ type apiKeyTestWorkspace struct {
 	savedAPIKey     string
 }
 
+func (w *apiKeyTestWorkspace) SupportsThreads() bool { return false }
+
 func (w *apiKeyTestWorkspace) SetProviderAPIKey(_ config.Scope, providerID string, apiKey any) error {
 	w.savedProviderID = providerID
 	w.savedAPIKey = apiKey.(string)

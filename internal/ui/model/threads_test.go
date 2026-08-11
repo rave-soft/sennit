@@ -136,8 +136,8 @@ func TestThreadsDashboardHandleKeyRemove(t *testing.T) {
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "x", Code: 'x'})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	msg, ok := cmd().(removeThreadMsg)
-	require.True(t, ok)
+	msg, ok := cmd().(confirmRemoveThreadMsg)
+	require.True(t, ok, "x should request confirmation, not remove directly")
 	require.Equal(t, "s1", msg.id)
 }
 

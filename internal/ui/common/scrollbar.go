@@ -75,6 +75,26 @@ func Scrollbar(s *styles.Styles, height, contentSize, viewportSize, offset int) 
 	return sb.String()
 }
 
+// ScrollbarThumbOverlay renders thumbSize lines of the scrollbar thumb glyph
+// in the hover-highlighted style, for drawing as an extra column beside the
+// normal scrollbar track when the chat's scrollbar is hovered/dragged (see
+// Chat.Draw). Returns "" when thumbSize <= 0.
+func ScrollbarThumbOverlay(s *styles.Styles, thumbSize int) string {
+	if thumbSize <= 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for i := range thumbSize {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(s.Dialog.ScrollbarThumbHover.Render(styles.ScrollbarThumb))
+	}
+
+	return sb.String()
+}
+
 // ScrollbarStyled renders a vertical scrollbar like Scrollbar, but draws the
 // thumb with a hover-highlighted style when hovered is true. Used by the
 // chat's draggable scrollbar to show hover/drag feedback.

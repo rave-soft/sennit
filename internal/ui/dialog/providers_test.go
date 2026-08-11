@@ -21,6 +21,8 @@ type providersTestWorkspace struct {
 	cfg *config.Config
 }
 
+func (w *providersTestWorkspace) SupportsThreads() bool { return false }
+
 func (w *providersTestWorkspace) Config() *config.Config {
 	return w.cfg
 }

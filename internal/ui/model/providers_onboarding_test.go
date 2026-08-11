@@ -80,6 +80,8 @@ func (w *onboardingTestWorkspace) PermissionSkipRequests() bool { return false }
 
 func (w *onboardingTestWorkspace) AgentIsReady() bool { return false }
 
+func (w *onboardingTestWorkspace) SupportsThreads() bool { return false }
+
 func (w *onboardingTestWorkspace) AgentModel() workspace.AgentModel { return workspace.AgentModel{} }
 
 func (w *onboardingTestWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }

@@ -970,7 +970,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Spinner = base.Foreground(o.secondary)
 	s.Dialog.ScrollbarThumb = base.Foreground(o.secondary)
 	s.Dialog.ScrollbarTrack = base.Foreground(o.separator)
-	s.Dialog.ScrollbarThumbHover = base.Foreground(o.primary)
+	s.Dialog.ScrollbarThumbHover = base.Foreground(o.primary).Bold(true)
 
 	s.Dialog.ImagePreview = lipgloss.NewStyle().Padding(0, 1).Foreground(o.fgMostSubtle)
 

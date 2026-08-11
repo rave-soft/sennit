@@ -7,6 +7,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/chat"
+	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 
@@ -160,4 +161,104 @@ func TestScrollbarDrag_DoesNotMoveFocus(t *testing.T) {
 
 	require.Equal(t, uiFocusEditor, u.focus, "dragging the scrollbar must never move focus")
 	require.True(t, u.editor.textarea.Focused(), "the editor must stay focused across a scrollbar drag")
+}
+
+// TestScrollbarHitZone_NarrowWithoutHover pins the baseline (non-widened)
+// hit zone: with no prior hover, a click one column left of scrollbarColX
+// must miss the scrollbar entirely and fall through to text selection,
+// exactly as before this change.
+func TestScrollbarHitZone_NarrowWithoutHover(t *testing.T) {
+	t.Parallel()
+
+	u := scrollbarOverflowUI(t)
+	colX := u.chat.scrollbarColX
+	require.GreaterOrEqual(t, colX, 1)
+
+	handled, cmd := u.chat.HandleScrollbarMouseDown(colX-1, 0)
+	require.False(t, handled, "without hover, one column left of the scrollbar must miss")
+	require.Nil(t, cmd)
+	require.False(t, u.chat.scrollbarDragging)
+}
+
+// TestScrollbarHitZone_WidensAfterHover pins the widened zone: once a motion
+// event has hovered the scrollbar (which ScrollbarHoverAt itself detects
+// using the same zone, widening on approach), a click up to 2 columns left
+// of scrollbarColX must hit and start a drag.
+func TestScrollbarHitZone_WidensAfterHover(t *testing.T) {
+	t.Parallel()
+
+	u := scrollbarOverflowUI(t)
+	colX := u.chat.scrollbarColX
+	require.GreaterOrEqual(t, colX, 1)
+
+	hovered := u.chat.ScrollbarHoverAt(colX-1, 0)
+	require.True(t, hovered, "hover detection must itself use the widened zone")
+
+	handled, _ := u.chat.HandleScrollbarMouseDown(colX-1, 0)
+	require.True(t, handled, "with hover active, one column left of the scrollbar must hit")
+	require.True(t, u.chat.scrollbarDragging)
+}
+
+// TestScrollbarDrag_StartedFromWidenedZone_MovesOffset extends the widened
+// hit-zone test with an actual drag, confirming the whole gesture (approach
+// via hover, mouse-down in the widened zone, drag down the track) still
+// scrolls the list, not just that mouse-down "handles" the event.
+func TestScrollbarDrag_StartedFromWidenedZone_MovesOffset(t *testing.T) {
+	t.Parallel()
+
+	u := scrollbarOverflowUI(t)
+	colX := u.chat.scrollbarColX
+	trackHeight := u.chat.scrollbarTrackHeight
+	require.GreaterOrEqual(t, colX, 1)
+
+	screenX := u.layout.main.Min.X + colX
+	wideX := screenX - 1
+	topY := u.layout.main.Min.Y
+	bottomY := u.layout.main.Min.Y + trackHeight - 1
+
+	_, _ = u.Update(tea.MouseMotionMsg(tea.Mouse{X: wideX, Y: topY, Button: uv.MouseLeft}))
+	require.True(t, u.chat.scrollbarHover)
+
+	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{X: wideX, Y: topY, Button: uv.MouseLeft}))
+	require.True(t, u.chat.scrollbarDragging, "clicking in the widened zone must start a drag")
+
+	offsetNearTop := u.chat.list.Offset()
+
+	_, _ = u.Update(tea.MouseMotionMsg(tea.Mouse{X: wideX, Y: bottomY, Button: uv.MouseLeft}))
+	offsetNearBottom := u.chat.list.Offset()
+
+	require.Greater(t, offsetNearBottom, offsetNearTop,
+		"a drag started from the widened hit zone must still scroll the list")
+}
+
+// TestScrollbarThumbOverlay_RendersWhenHovered pins the thicker-thumb
+// rendering: hovering (or dragging) must paint the thumb glyph, in the
+// hover style, into the column one cell left of scrollbarColX for the
+// thumb's rows — without changing scrollbarWidth/layout. The unhovered draw
+// must leave that column as ordinary chat text.
+func TestScrollbarThumbOverlay_RendersWhenHovered(t *testing.T) {
+	t.Parallel()
+
+	u := scrollbarOverflowUI(t)
+	w, h := u.layout.main.Dx(), u.layout.main.Dy()
+	area := uv.Rect(0, 0, w, h)
+
+	colX := u.chat.scrollbarColX
+	require.GreaterOrEqual(t, colX, 1, "need room to the left of the scrollbar column for the overlay")
+	thumbRow := u.chat.scrollbarThumbStart
+
+	scrNoHover := uv.NewScreenBuffer(w, h)
+	u.chat.Draw(scrNoHover, area)
+	cellNoHover := scrNoHover.CellAt(colX-1, thumbRow)
+	require.NotNil(t, cellNoHover)
+	require.NotEqual(t, styles.ScrollbarThumb, cellNoHover.Content,
+		"without hover, the column left of the scrollbar must be plain chat text, not the thumb glyph")
+
+	u.chat.scrollbarHover = true
+	scrHover := uv.NewScreenBuffer(w, h)
+	u.chat.Draw(scrHover, area)
+	cellHover := scrHover.CellAt(colX-1, thumbRow)
+	require.NotNil(t, cellHover)
+	require.Equal(t, styles.ScrollbarThumb, cellHover.Content,
+		"hovering must overlay the thumb glyph one column left of the scrollbar")
 }

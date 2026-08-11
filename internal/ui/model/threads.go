@@ -51,10 +51,18 @@ type mergeThreadMsg struct {
 	id string
 }
 
-// removeThreadMsg requests removing a thread. Sent directly on 'x' for now
-// — no confirmation dialog yet.
+// removeThreadMsg requests removing a thread, already confirmed by the
+// thread-remove-confirm dialog (see confirmRemoveThreadMsg).
 type removeThreadMsg struct {
 	id string
+}
+
+// confirmRemoveThreadMsg requests opening the remove-confirmation dialog
+// for a thread. Consumed by the router (root.go), which pushes
+// dialog.NewThreadRemoveConfirm onto dashboardDialog; that dialog's
+// ActionRemoveThreadConfirmed is what actually sends removeThreadMsg.
+type confirmRemoveThreadMsg struct {
+	id, name string
 }
 
 // threadsKeyMap holds the key bindings local to the threads dashboard. It
@@ -94,8 +102,8 @@ func defaultThreadsKeyMap() threadsKeyMap {
 			key.WithHelp("m", "merge"),
 		),
 		Remove: key.NewBinding(
-			key.WithKeys("x"),
-			key.WithHelp("x", "remove"),
+			key.WithKeys("x", "d"),
+			key.WithHelp("x/d", "remove"),
 		),
 		Reload: key.NewBinding(
 			key.WithKeys("r"),
@@ -282,10 +290,8 @@ func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea
 		if !ok {
 			return true, nil
 		}
-		id := item.thread.ID
-		// TODO: confirm before removing — a confirmation dialog is planned
-		// for a later step. For now this fires immediately.
-		return true, func() tea.Msg { return removeThreadMsg{id: id} }
+		id, name := item.thread.ID, item.thread.Name
+		return true, func() tea.Msg { return confirmRemoveThreadMsg{id: id, name: name} }
 	case key.Matches(msg, m.keyMap.Reload):
 		return true, m.cache.dispatchThreadsRefresh(m.com)
 	}

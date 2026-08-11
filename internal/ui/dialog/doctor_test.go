@@ -22,6 +22,8 @@ type doctorTestWorkspace struct {
 	states map[string]mcptools.ClientInfo
 }
 
+func (w *doctorTestWorkspace) SupportsThreads() bool { return false }
+
 func (w *doctorTestWorkspace) Config() *config.Config { return w.cfg }
 
 func (w *doctorTestWorkspace) MCPGetStates() map[string]mcptools.ClientInfo { return w.states }

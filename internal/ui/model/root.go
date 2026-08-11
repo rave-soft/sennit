@@ -210,6 +210,12 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, r.mergeThreadCmd(msg.id)
 	case removeThreadMsg:
 		return r, r.removeThreadCmd(msg.id)
+	case openThreadCreateMsg:
+		r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
+		return r, nil
+	case confirmRemoveThreadMsg:
+		r.dashboardDialog.OpenDialog(dialog.NewThreadRemoveConfirm(r.com, msg.id, msg.name))
+		return r, nil
 	case threadActionDoneMsg:
 		if msg.err != nil {
 			return r, util.ReportError(msg.err)
@@ -319,7 +325,8 @@ func (r *Root) handleDashboardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleDashboardDialogAction mirrors UI.handleDialogMsg's shape, but only
-// for the actions the thread-create dialog can produce.
+// for the actions the dashboard's own dialogs (thread-create, thread-remove
+// confirmation) can produce.
 func (r *Root) handleDashboardDialogAction(action dialog.Action) tea.Cmd {
 	switch action := action.(type) {
 	case dialog.ActionClose:
@@ -329,6 +336,9 @@ func (r *Root) handleDashboardDialogAction(action dialog.Action) tea.Cmd {
 	case dialog.ActionCreateThread:
 		r.dashboardDialog.CloseFrontDialog()
 		return r.createThreadCmd(action.Name, action.Goal)
+	case dialog.ActionRemoveThreadConfirmed:
+		r.dashboardDialog.CloseFrontDialog()
+		return r.removeThreadCmd(action.ID)
 	}
 	return nil
 }

@@ -224,6 +224,8 @@ type drillInWorkspace struct {
 	workspace.Workspace
 }
 
+func (drillInWorkspace) SupportsThreads() bool { return false }
+
 func (drillInWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return messageID + "$$" + toolCallID
 }

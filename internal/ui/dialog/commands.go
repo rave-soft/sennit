@@ -499,6 +499,14 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 		NewCommandItem(sty, "doctor", "doctor", "", ActionOpenDialog{DoctorID}).WithDescription("check config problems"),
 	}
 
+	// Only offer the threads dashboard for workspaces that actually own a
+	// thread manager (see workspace.Workspace.SupportsThreads).
+	if com.Workspace != nil && com.Workspace.SupportsThreads() {
+		commands = append(commands, NewCommandItem(sty, "threads", "threads", "ctrl+e", ActionOpenThreadsDashboard{}).
+			WithAliases("monitor work threads", "thread dashboard").
+			WithDescription("monitor work threads"))
+	}
+
 	// Only show compact command if there's an active session
 	if hasSession {
 		commands = append(commands, NewCommandItem(sty, "summarize", "compact", "", ActionSummarize{SessionID: sessionID}).

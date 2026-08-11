@@ -329,6 +329,10 @@ type UI struct {
 	// state and its TTL-cache bookkeeping. See workspace_cache.go.
 	wsCache workspaceCacheState
 
+	// threadIndicator holds the memoized active-thread count shown as a
+	// header badge. See thread_indicator.go.
+	threadIndicator threadIndicatorState
+
 	// sessionsDialogLoading / sessionsDialogGen track the off-thread
 	// ListSessions fetch dispatched by openSessionsDialog; see
 	// sessionsLoadedMsg.
@@ -1108,6 +1112,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// A click anywhere on the header while threads are active opens the
+		// threads dashboard — the badge rendered there (see header.go's
+		// renderHeaderDetails) is the only visible hint threads are running
+		// while on the main screen, so it doubles as a button.
+		if msg.Button == tea.MouseLeft && m.threadIndicator.count > 0 && image.Pt(msg.X, msg.Y).In(m.layout.header) {
+			cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
+			return m, tea.Batch(cmds...)
+		}
+
 		// A click anywhere on the child-session panel (see
 		// drawChildSessionPanel, which occupies the editor area in place of
 		// the textarea while a child session is being viewed) exits the
@@ -1449,6 +1462,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ttl = DefaultStatusTTL
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
+	case pubsub.Event[proto.Thread]:
+		// Root fans this to both screens (see root.go); the main screen
+		// only cares about keeping the header badge's count current.
+		m.threadIndicator.applyEvent(msg)
+		if cmd := m.threadIndicator.staleRefreshCmd(m.com); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case threadIndicatorLoadedMsg:
+		if cmd := m.threadIndicator.applyLoaded(m.com, msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case app.UpdateAvailableMsg:
 		text := fmt.Sprintf("Braid update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
@@ -2360,6 +2384,13 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 		}
 		cmds = append(cmds, m.initializeProject())
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionOpenThreadsDashboard:
+		m.dialog.CloseDialog(dialog.CommandsID)
+		if !m.com.Workspace.SupportsThreads() {
+			cmds = append(cmds, util.ReportInfo("This workspace doesn't support threads."))
+			break
+		}
+		cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
@@ -3194,6 +3225,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.detailsOpen,
 		area.Dx(),
 		m.lspErrorCount(),
+		m.threadIndicator.count,
 	)
 }
 

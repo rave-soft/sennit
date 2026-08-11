@@ -24,6 +24,8 @@ type slashCommandsTestWorkspace struct {
 	cfg *config.Config
 }
 
+func (w *slashCommandsTestWorkspace) SupportsThreads() bool { return false }
+
 func (w *slashCommandsTestWorkspace) Config() *config.Config {
 	return w.cfg
 }

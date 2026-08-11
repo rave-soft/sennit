@@ -31,6 +31,8 @@ func (agentSessionWorkspace) Config() *config.Config {
 	return nil
 }
 
+func (agentSessionWorkspace) SupportsThreads() bool { return false }
+
 func (agentSessionWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return messageID + "$$" + toolCallID
 }

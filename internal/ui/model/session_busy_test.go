@@ -50,6 +50,8 @@ type countingWorkspace struct {
 	lspDiagCalls    int
 }
 
+func (w *countingWorkspace) SupportsThreads() bool { return false }
+
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
 

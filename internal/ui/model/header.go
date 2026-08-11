@@ -65,6 +65,7 @@ func (h *header) drawHeader(
 	detailsOpen bool,
 	width int,
 	lspErrorCount int,
+	activeThreads int,
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
@@ -91,6 +92,7 @@ func (h *header) drawHeader(
 		h.com,
 		session,
 		lspErrorCount,
+		activeThreads,
 		detailsOpen,
 		availDetailWidth,
 	)
@@ -122,6 +124,7 @@ func renderHeaderDetails(
 	com *common.Common,
 	session *session.Session,
 	lspErrorCount int,
+	activeThreads int,
 	detailsOpen bool,
 	availWidth int,
 ) string {
@@ -131,6 +134,14 @@ func renderHeaderDetails(
 
 	if lspErrorCount > 0 {
 		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
+	}
+
+	// activeThreads counts pending/running/merging threads (see
+	// thread_indicator.go); shown so a "ctrl+e" glance from the main chat
+	// confirms background threads are still alive without switching
+	// screens. Zero threads (the common case) renders nothing.
+	if activeThreads > 0 {
+		parts = append(parts, t.Status.InfoMessage.Render(fmt.Sprintf("⋈ %d", activeThreads)))
 	}
 
 	// The coder agent leaves Model unset (it inherits the app's configured
