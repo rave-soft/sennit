@@ -7,8 +7,27 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/braid/internal/log"
 	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/thread"
 )
+
+// threadEventPubsubType maps a thread lifecycle event's semantic type
+// (created/status_changed/merged/removed, see proto.ThreadEventType) onto
+// the coarser pubsub.EventType the TUI's thread state machines
+// (threads_cache.go, threads_dock.go, thread_indicator.go) key their
+// upsert/remove logic off. Both AppWorkspace.translateEvent (local mode)
+// and ClientWorkspace.translateEvent (client/server mode, decoding SSE)
+// funnel through this so the two modes agree on the mapping.
+func threadEventPubsubType(t proto.ThreadEventType) pubsub.EventType {
+	switch t {
+	case proto.ThreadEventCreated:
+		return pubsub.CreatedEvent
+	case proto.ThreadEventRemoved:
+		return pubsub.DeletedEvent
+	default: // status_changed, merged
+		return pubsub.UpdatedEvent
+	}
+}
 
 // -- AppWorkspace: Threads --
 

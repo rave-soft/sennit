@@ -244,6 +244,48 @@ func TestTranslateEvent_UpdateAvailable(t *testing.T) {
 	require.True(t, got.IsDevelopment)
 }
 
+// TestTranslateEvent_Thread verifies that an incoming proto.ThreadEvent
+// (SSE-decoded — see internal/server/events.go's wrapEvent) is converted
+// into pubsub.Event[proto.Thread], the shape root.go/ui.go's Update()
+// switches on (via threads_dock.go, thread_indicator.go,
+// thread_completion.go and threads.go), and not the raw domain
+// thread.Event. Before this, translateEvent produced pubsub.Event[thread.
+// Event], which none of those match, so thread status/completion updates
+// only ever reached the TUI through the TTL-poll fallback.
+func TestTranslateEvent_Thread(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+
+	for _, tc := range []struct {
+		name     string
+		evType   proto.ThreadEventType
+		wantType pubsub.EventType
+	}{
+		{"created", proto.ThreadEventCreated, pubsub.CreatedEvent},
+		{"status_changed", proto.ThreadEventStatusChanged, pubsub.UpdatedEvent},
+		{"merged", proto.ThreadEventMerged, pubsub.UpdatedEvent},
+		{"removed", proto.ThreadEventRemoved, pubsub.DeletedEvent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ev := pubsub.Event[proto.ThreadEvent]{
+				Type: pubsub.UpdatedEvent, // outer pubsub envelope type is unused by threads
+				Payload: proto.ThreadEvent{
+					Type:   tc.evType,
+					Thread: proto.Thread{ID: "t1", Name: "fix-auth", Status: "running"},
+				},
+			}
+			out := w.translateEvent(ev)
+			got, ok := out.(pubsub.Event[proto.Thread])
+			require.True(t, ok, "expected pubsub.Event[proto.Thread], got %T", out)
+			require.Equal(t, tc.wantType, got.Type)
+			require.Equal(t, "t1", got.Payload.ID)
+			require.Equal(t, "fix-auth", got.Payload.Name)
+		})
+	}
+}
+
 func TestClientWorkspaceListMCPPrompts(t *testing.T) {
 	t.Parallel()
 

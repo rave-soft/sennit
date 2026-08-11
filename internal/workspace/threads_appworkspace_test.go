@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/agent"
@@ -15,6 +16,7 @@ import (
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/thread"
 	"github.com/stretchr/testify/require"
@@ -224,4 +226,50 @@ func TestAppWorkspace_AttachThread_UnknownID(t *testing.T) {
 
 	_, _, err := aw.AttachThread(t.Context(), "no-such-thread")
 	require.Error(t, err)
+}
+
+// TestAppWorkspace_TranslateEvent_ThreadLifecycle drives a real
+// *thread.Manager through a create-then-remove lifecycle and verifies
+// that AppWorkspace.translateEvent (the local-mode counterpart of
+// ClientWorkspace.translateEvent's proto.ThreadEvent case) turns each
+// raw pubsub.Event[thread.Event] the Manager publishes into the
+// pubsub.Event[proto.Thread] that root.go/ui.go's Update() actually
+// switches on. Before this fix, AppWorkspace.Subscribe forwarded the raw
+// event untranslated, so a live thread status change never reached the
+// TUI's docked panel/badge/completion toast — they only ever updated via
+// TTL polling.
+func TestAppWorkspace_TranslateEvent_ThreadLifecycle(t *testing.T) {
+	aw, mgr := newTestThreadAppWorkspace(t)
+	ctx := t.Context()
+
+	events := mgr.Subscribe(ctx)
+
+	created, err := aw.CreateThread(ctx, proto.CreateThreadRequest{
+		Name: "lifecycle-thread",
+		Goal: "do the thing",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, aw.RemoveThread(ctx, created.ID, proto.RemoveThreadOptions{Force: true}))
+
+	var sawCreated, sawRemoved bool
+	for !sawCreated || !sawRemoved {
+		select {
+		case raw := <-events:
+			translated := aw.translateEvent(raw)
+			got, ok := translated.(pubsub.Event[proto.Thread])
+			require.True(t, ok, "expected pubsub.Event[proto.Thread], got %T", translated)
+			if got.Payload.ID != created.ID {
+				continue
+			}
+			switch got.Type {
+			case pubsub.CreatedEvent:
+				sawCreated = true
+			case pubsub.DeletedEvent:
+				sawRemoved = true
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for translated created/removed thread events")
+		}
+	}
 }

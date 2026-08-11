@@ -21,10 +21,12 @@ import (
 	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/braid/internal/thread"
 )
 
 // AppWorkspace implements the Workspace interface by delegating
@@ -625,7 +627,40 @@ func (w *AppWorkspace) Subscribe(program *tea.Program) {
 	// *tea.Program (the app package is core and must not import UI
 	// frameworks); adapt it to a *tea.Program here at the workspace
 	// boundary, which is where UI-facing types are allowed to appear.
-	w.app.Subscribe(func(msg any) { program.Send(msg) }, program.Quit)
+	w.app.Subscribe(func(msg any) { program.Send(w.translateEvent(msg)) }, program.Quit)
+}
+
+// translateEvent adapts a message from app's event fan-in into the shape
+// the TUI's Update() expects. Every source app.setupEvents wires in at
+// construction already arrives pre-shaped; the one exception is thread
+// events, forwarded raw by app.ForwardEvents (see SetThreadManager in
+// internal/cmd/threads.go / internal/backend/threads.go) as the
+// pubsub.Event[thread.Event] the Manager itself publishes, because
+// ForwardEvents is generic over T and has no way to convert on the way
+// in. Convert here, at the UI-facing boundary, into
+// pubsub.Event[proto.Thread] — the same shape
+// ClientWorkspace.translateEvent produces for client/server mode's
+// SSE-decoded equivalent — so threads_dock.go, thread_indicator.go,
+// thread_completion.go and threads.go (the dashboard) see live updates
+// instead of relying solely on their TTL-poll fallback. Any other
+// message passes through unchanged.
+func (w *AppWorkspace) translateEvent(msg any) any {
+	e, ok := msg.(pubsub.Event[thread.Event])
+	if !ok {
+		return msg
+	}
+	// The manager (still attached — it's what published this event) can
+	// resolve the thread's live WorkspaceID; client/server mode's
+	// wrapEvent can't (see its own doc comment) and passes "" instead.
+	workspaceID := ""
+	if mgr, ok := w.threadManager(); ok {
+		workspaceID = mgr.WorkspaceID(e.Payload.Thread.ID)
+	}
+	pe := thread.EventToProto(e.Payload, workspaceID)
+	return pubsub.Event[proto.Thread]{
+		Type:    threadEventPubsubType(pe.Type),
+		Payload: pe.Thread,
+	}
 }
 
 func (w *AppWorkspace) Shutdown() {

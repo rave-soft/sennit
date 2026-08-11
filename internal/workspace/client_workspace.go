@@ -32,7 +32,6 @@ import (
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/skills"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/version"
 )
 
@@ -1422,9 +1421,15 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Payload: protoToSession(e.Payload),
 		}
 	case pubsub.Event[proto.ThreadEvent]:
-		return pubsub.Event[thread.Event]{
-			Type:    e.Type,
-			Payload: thread.EventFromProto(e.Payload),
+		// The TUI's Update() switches on pubsub.Event[proto.Thread] (see
+		// root.go/ui.go and threads_dock.go/thread_indicator.go/
+		// thread_completion.go/threads.go), not the domain thread.Event —
+		// mirror AppWorkspace.translateEvent's local-mode conversion here
+		// so both modes feed the same live-update path instead of only
+		// the TTL-poll fallback.
+		return pubsub.Event[proto.Thread]{
+			Type:    threadEventPubsubType(e.Payload.Type),
+			Payload: e.Payload.Thread,
 		}
 	case pubsub.Event[proto.File]:
 		return pubsub.Event[history.File]{
