@@ -20,7 +20,7 @@ const childSessionPanelHeight = 3
 
 // childPanelButtonLabel is the explicit, clickable "go back up" affordance
 // on the child-session panel (see drawChildSessionPanel).
-const childPanelButtonLabel = "↑ back (alt+up)"
+const childPanelButtonLabel = "↑ back (ctrl+up)"
 
 // delegationInfo resolves a delegation tool item's display name,
 // model/effort override, and timing (see chat.DelegationInfoProvider) for

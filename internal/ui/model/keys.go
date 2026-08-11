@@ -256,21 +256,23 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("shift+right", "L"),
 		key.WithHelp("shift+→/L", "scroll right"),
 	)
+	// Subagent navigation lives on ctrl+arrows; the old alt+arrow keys
+	// stay as hidden aliases so existing muscle memory keeps working.
 	km.Chat.EnterChildSession = key.NewBinding(
-		key.WithKeys("alt+down"),
-		key.WithHelp("alt+↓", "enter subagent"),
+		key.WithKeys("ctrl+down", "alt+down"),
+		key.WithHelp("ctrl+↓", "enter subagent"),
 	)
 	km.Chat.ExitChildSession = key.NewBinding(
-		key.WithKeys("alt+up"),
-		key.WithHelp("alt+↑", "exit subagent"),
+		key.WithKeys("ctrl+up", "alt+up"),
+		key.WithHelp("ctrl+↑", "exit subagent"),
 	)
 	km.Chat.PrevChildSession = key.NewBinding(
-		key.WithKeys("alt+left"),
-		key.WithHelp("alt+←", "prev subagent"),
+		key.WithKeys("ctrl+left", "alt+left"),
+		key.WithHelp("ctrl+←", "prev subagent"),
 	)
 	km.Chat.NextChildSession = key.NewBinding(
-		key.WithKeys("alt+right"),
-		key.WithHelp("alt+→", "next subagent"),
+		key.WithKeys("ctrl+right", "alt+right"),
+		key.WithHelp("ctrl+→", "next subagent"),
 	)
 
 	km.Initialize.Yes = key.NewBinding(

@@ -1705,7 +1705,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusEditor:
 		// Textarea placeholder logic
 		if m.viewingChildSession() {
-			m.editor.textarea.Placeholder = "viewing subagent session · alt+up to return"
+			m.editor.textarea.Placeholder = "viewing subagent session · ctrl+up to return"
 		} else if m.editor.bangMode {
 			m.editor.textarea.Placeholder = "Run a shell command"
 		} else if m.isAgentBusy() {
@@ -4590,7 +4590,7 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 // sendMessage sends a message with the given content and attachments.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if m.viewingChildSession() {
-		return util.ReportWarn("viewing subagent session · alt+up to return")
+		return util.ReportWarn("viewing subagent session · ctrl+up to return")
 	}
 	if err := m.com.Workspace.AgentReadyErr(); err != nil {
 		return util.ReportError(err)
