@@ -1040,7 +1040,7 @@ func LastToolSummary(tc message.ToolCall) string {
 // doing X". Unrecognized tools and unparsable input yield "".
 func toolKeyArgument(tc message.ToolCall) string {
 	switch tc.Name {
-	case tools.GrepToolName, tools.GlobToolName:
+	case tools.GrepToolName, tools.RipgrepToolName, tools.GlobToolName:
 		var p struct {
 			Pattern string `json:"pattern"`
 			Path    string `json:"path"`

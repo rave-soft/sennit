@@ -905,7 +905,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "grep", "ls", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "view"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -915,6 +915,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 				"edit",
 				"download",
 				"grep",
+				"ripgrep",
 			},
 		},
 	}
@@ -953,6 +954,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 			DisabledTools: []string{
 				"glob",
 				"grep",
+				"ripgrep",
 				"ls",
 				"lsp_call_hierarchy",
 				"lsp_definition",

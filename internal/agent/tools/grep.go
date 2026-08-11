@@ -2,17 +2,14 @@ package tools
 
 import (
 	"bufio"
-	"bytes"
 	"cmp"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -145,43 +142,8 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 			}
 
-			var output strings.Builder
-			if len(matches) == 0 {
-				output.WriteString("No files found")
-			} else {
-				fmt.Fprintf(&output, "Found %d matches\n", len(matches))
-
-				currentFile := ""
-				for _, match := range matches {
-					if currentFile != match.path {
-						if currentFile != "" {
-							output.WriteString("\n")
-						}
-						currentFile = match.path
-						fmt.Fprintf(&output, "%s:\n", filepath.ToSlash(match.path))
-					}
-					if match.lineNum > 0 {
-						lineText := match.lineText
-						if ansi.StringWidth(lineText) > maxGrepContentWidth {
-							lineText = ansi.Truncate(lineText, maxGrepContentWidth, "...")
-						}
-						if match.charNum > 0 {
-							fmt.Fprintf(&output, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
-						} else {
-							fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, lineText)
-						}
-					} else {
-						fmt.Fprintf(&output, "  %s\n", match.path)
-					}
-				}
-
-				if truncated {
-					output.WriteString("\n(Results are truncated. Consider using a more specific path or pattern.)")
-				}
-			}
-
 			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output.String()),
+				fantasy.NewTextResponse(renderGrepMatches(matches, truncated)),
 				GrepResponseMetadata{
 					NumberOfMatches: len(matches),
 					Truncated:       truncated,
@@ -192,17 +154,20 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
-	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
+	matches, err := searchFilesWithRegex(ctx, pattern, rootPath, include)
 	if err != nil {
-		matches, err = searchFilesWithRegex(pattern, rootPath, include)
-		if err != nil {
-			return nil, false, err
-		}
+		return nil, false, err
 	}
+	matches, truncated := sortAndTruncateMatches(matches, limit)
+	return matches, truncated, nil
+}
 
-	// Use a stable sort so that the multiple matches a single file can
-	// contribute (all sharing the same modTime) keep their original
-	// line order and stay grouped together in the rendered output.
+// sortAndTruncateMatches orders matches by file modification time (newest
+// first) and caps them at limit. It uses a stable sort so that the multiple
+// matches a single file can contribute (all sharing the same modTime) keep
+// their original line order and stay grouped together in the rendered
+// output.
+func sortAndTruncateMatches(matches []grepMatch, limit int) ([]grepMatch, bool) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		return matches[i].modTime.After(matches[j].modTime)
 	})
@@ -212,79 +177,52 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 		matches = matches[:limit]
 	}
 
-	return matches, truncated, nil
+	return matches, truncated
 }
 
-func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
-	cmd := getRgSearchCmd(ctx, pattern, path, include)
-	if cmd == nil {
-		return nil, fmt.Errorf("ripgrep not found in $PATH")
+// renderGrepMatches renders search matches grouped by file, shared by the
+// grep and ripgrep tools.
+func renderGrepMatches(matches []grepMatch, truncated bool) string {
+	var output strings.Builder
+	if len(matches) == 0 {
+		output.WriteString("No files found")
+		return output.String()
 	}
 
-	// Only add ignore files if they exist
-	for _, ignoreFile := range []string{".gitignore", ".braidignore"} {
-		ignorePath := filepath.Join(path, ignoreFile)
-		if _, err := os.Stat(ignorePath); err == nil {
-			cmd.Args = append(cmd.Args, "--ignore-file", ignorePath)
-		}
-	}
+	fmt.Fprintf(&output, "Found %d matches\n", len(matches))
 
-	output, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return []grepMatch{}, nil
-		}
-		return nil, err
-	}
-
-	var matches []grepMatch
-	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
-		if len(line) == 0 {
-			continue
-		}
-		var match ripgrepMatch
-		if err := json.Unmarshal(line, &match); err != nil {
-			continue
-		}
-		if match.Type != "match" {
-			continue
-		}
-		for _, m := range match.Data.Submatches {
-			fi, err := os.Stat(match.Data.Path.Text)
-			if err != nil {
-				continue // Skip files we can't access
+	currentFile := ""
+	for _, match := range matches {
+		if currentFile != match.path {
+			if currentFile != "" {
+				output.WriteString("\n")
 			}
-			matches = append(matches, grepMatch{
-				path:     match.Data.Path.Text,
-				modTime:  fi.ModTime(),
-				lineNum:  match.Data.LineNumber,
-				charNum:  m.Start + 1, // ensure 1-based
-				lineText: strings.TrimSpace(match.Data.Lines.Text),
-			})
-			// only get the first match of each line
-			break
+			currentFile = match.path
+			fmt.Fprintf(&output, "%s:\n", filepath.ToSlash(match.path))
+		}
+		if match.lineNum > 0 {
+			lineText := match.lineText
+			if ansi.StringWidth(lineText) > maxGrepContentWidth {
+				lineText = ansi.Truncate(lineText, maxGrepContentWidth, "...")
+			}
+			if match.charNum > 0 {
+				fmt.Fprintf(&output, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
+			} else {
+				fmt.Fprintf(&output, "  Line %d: %s\n", match.lineNum, lineText)
+			}
+		} else {
+			fmt.Fprintf(&output, "  %s\n", match.path)
 		}
 	}
-	return matches, nil
+
+	if truncated {
+		output.WriteString("\n(Results are truncated. Consider using a more specific path or pattern.)")
+	}
+
+	return output.String()
 }
 
-type ripgrepMatch struct {
-	Type string `json:"type"`
-	Data struct {
-		Path struct {
-			Text string `json:"text"`
-		} `json:"path"`
-		Lines struct {
-			Text string `json:"text"`
-		} `json:"lines"`
-		LineNumber int `json:"line_number"`
-		Submatches []struct {
-			Start int `json:"start"`
-		} `json:"submatches"`
-	} `json:"data"`
-}
-
-func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error) {
+func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
 	matches := []grepMatch{}
 
 	// Use cached regex compilation
@@ -306,6 +244,9 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	walker := fsext.NewFastGlobWalker(rootPath)
 
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return nil // Skip errors
 		}

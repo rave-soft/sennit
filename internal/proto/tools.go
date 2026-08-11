@@ -129,6 +129,21 @@ type GrepResponseMetadata struct {
 	Truncated       bool `json:"truncated"`
 }
 
+const RipgrepToolName = "ripgrep"
+
+// RipgrepParams represents the parameters for the ripgrep tool.
+type RipgrepParams struct {
+	Pattern         string `json:"pattern"`
+	Path            string `json:"path"`
+	Include         string `json:"include"`
+	LiteralText     bool   `json:"literal_text"`
+	CaseInsensitive bool   `json:"case_insensitive"`
+}
+
+// RipgrepResponseMetadata represents the metadata for a ripgrep tool
+// response; it matches the grep tool's metadata shape.
+type RipgrepResponseMetadata = GrepResponseMetadata
+
 const LSToolName = "ls"
 
 // LSParams represents the parameters for the ls tool.

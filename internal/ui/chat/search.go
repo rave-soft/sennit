@@ -86,20 +86,36 @@ func NewGrepToolMessageItem(
 	result *message.ToolResult,
 	canceled bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &GrepToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &GrepToolRenderContext{title: "Grep"}, canceled)
 }
 
-// GrepToolRenderContext renders grep tool messages.
-type GrepToolRenderContext struct{}
+// NewRipgrepToolMessageItem creates a message item for a ripgrep tool call.
+// It shares the grep renderer: the two tools differ only in backend and in
+// the extra case_insensitive parameter.
+func NewRipgrepToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	return newBaseToolMessageItem(sty, toolCall, result, &GrepToolRenderContext{title: "Ripgrep"}, canceled)
+}
+
+// GrepToolRenderContext renders grep and ripgrep tool messages.
+type GrepToolRenderContext struct {
+	title string
+}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Grep", opts.Anim, opts.Compact)
+		return pendingTool(sty, g.title, opts.Anim, opts.Compact)
 	}
 
-	var params tools.GrepParams
+	// RipgrepParams is a superset of GrepParams, so it decodes both tools'
+	// inputs.
+	var params tools.RipgrepParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
@@ -114,8 +130,11 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	if params.LiteralText {
 		toolParams = append(toolParams, "literal", "true")
 	}
+	if params.CaseInsensitive {
+		toolParams = append(toolParams, "case-insensitive", "true")
+	}
 
-	header := toolHeader(sty, opts.Status, "Grep", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, g.title, cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

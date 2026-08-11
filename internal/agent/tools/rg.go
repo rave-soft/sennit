@@ -26,6 +26,11 @@ var getRg = sync.OnceValue(func() string {
 	return path
 })
 
+// HasRipgrep reports whether the rg binary is available on this system.
+func HasRipgrep() bool {
+	return getRg() != ""
+}
+
 func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	name := getRg()
 	if name == "" {
@@ -46,13 +51,17 @@ func getRgCmd(ctx context.Context, globPattern string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
 
-func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cmd {
+func getRgSearchCmd(ctx context.Context, pattern, path, include string, caseInsensitive bool) *exec.Cmd {
 	name := getRg()
 	if name == "" {
 		return nil
 	}
 	// Use -n to show line numbers, -0 for null separation to handle Windows paths
-	args := []string{"--json", "-H", "-n", "-0", pattern}
+	args := []string{"--json", "-H", "-n", "-0"}
+	if caseInsensitive {
+		args = append(args, "-i")
+	}
+	args = append(args, pattern)
 	if include != "" {
 		args = append(args, "--glob", include)
 	}

@@ -226,6 +226,7 @@ var toolMessageItemFactories = map[string]toolMessageItemFactory{
 	tools.MultiEditToolName:   NewMultiEditToolMessageItem,
 	tools.GlobToolName:        NewGlobToolMessageItem,
 	tools.GrepToolName:        NewGrepToolMessageItem,
+	tools.RipgrepToolName:     NewRipgrepToolMessageItem,
 	tools.LSToolName:          NewLSToolMessageItem,
 	tools.DownloadToolName:    NewDownloadToolMessageItem,
 	tools.FetchToolName:       NewFetchToolMessageItem,
@@ -1178,8 +1179,8 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**URL:** %s", params.URL)
 		}
-	case tools.GrepToolName:
-		var params tools.GrepParams
+	case tools.GrepToolName, tools.RipgrepToolName:
+		var params tools.RipgrepParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**Pattern:** %s", params.Pattern))
@@ -1281,7 +1282,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatWebFetchResultForCopy()
 	case agent.AgentToolName:
 		return t.formatAgentResultForCopy()
-	case tools.DownloadToolName, tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.DiagnosticsToolName, tools.TodosToolName:
+	case tools.DownloadToolName, tools.GrepToolName, tools.RipgrepToolName, tools.GlobToolName, tools.LSToolName, tools.DiagnosticsToolName, tools.TodosToolName:
 		return fmt.Sprintf("```\n%s\n```", t.result.Content)
 	default:
 		return t.result.Content
@@ -1633,6 +1634,8 @@ func prettifyToolName(name string) string {
 		return "Glob"
 	case tools.GrepToolName:
 		return "Grep"
+	case tools.RipgrepToolName:
+		return "Ripgrep"
 	case tools.LSToolName:
 		return "List"
 	case tools.TodosToolName:

@@ -647,7 +647,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewWebFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil, searchBackend),
 		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
-		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
+		tools.NewSearchTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
 		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, skillTrackerSnapshot, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
@@ -704,9 +704,20 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		)
 	}
 
+	// grep and ripgrep are alternative registrations of the same content
+	// search slot (which one exists depends on whether rg is installed), so
+	// an agent allowing either name gets whichever is available.
+	allowsTool := func(name string) bool {
+		if name == tools.GrepToolName || name == tools.RipgrepToolName {
+			return slices.Contains(agent.AllowedTools, tools.GrepToolName) ||
+				slices.Contains(agent.AllowedTools, tools.RipgrepToolName)
+		}
+		return slices.Contains(agent.AllowedTools, name)
+	}
+
 	var filteredTools []fantasy.AgentTool
 	for _, tool := range allTools {
-		if slices.Contains(agent.AllowedTools, tool.Info().Name) {
+		if allowsTool(tool.Info().Name) {
 			filteredTools = append(filteredTools, tool)
 		}
 	}

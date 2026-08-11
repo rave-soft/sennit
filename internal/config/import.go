@@ -449,7 +449,7 @@ func normalizeReasoningEffort(v string) (mapped string, adjusted bool, ok bool) 
 // internal/config, and config importing it back would cycle.
 var importKnownTools = map[string]bool{
 	"view": true, "write": true, "edit": true, "multiedit": true, "bash": true,
-	"grep": true, "glob": true, "ls": true, "fetch": true, "web_fetch": true,
+	"grep": true, "ripgrep": true, "glob": true, "ls": true, "fetch": true, "web_fetch": true,
 	"web_search": true, "download": true, "todos": true, "agent": true,
 	"question": true, "braid_info": true, "braid_logs": true,
 	"job_output": true, "job_kill": true,
