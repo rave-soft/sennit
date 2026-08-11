@@ -48,15 +48,16 @@ func newTestUI() *UI {
 	ta.Focus()
 
 	u := &UI{
-		com:                com,
-		status:             NewStatus(com, nil),
-		chat:               NewChat(com, config.ScrollbarDefault),
-		editor:             editorState{textarea: ta},
-		state:              uiChat,
-		focus:              uiFocusEditor,
-		width:              140,
-		height:             45,
-		hoveredPanelThread: -1,
+		com:                    com,
+		status:                 NewStatus(com, nil),
+		chat:                   NewChat(com, config.ScrollbarDefault),
+		editor:                 editorState{textarea: ta},
+		state:                  uiChat,
+		focus:                  uiFocusEditor,
+		width:                  140,
+		height:                 45,
+		hoveredPanelThread:     -1,
+		hoveredPanelDelegation: -1,
 	}
 
 	return u

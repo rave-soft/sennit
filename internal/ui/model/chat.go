@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/clipperhouse/displaywidth"
 	"github.com/clipperhouse/uax29/v2/words"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/anim"
@@ -921,6 +922,34 @@ func (m *Chat) NestedToolContainerRefs() []childSessionRef {
 	return refs
 }
 
+// RunningDelegations returns, in list order, every top-level nested-tool
+// container item (agent / agentic_fetch delegation — see
+// NestedToolContainerRefs) whose tool call has neither finished nor been
+// canceled. Used by the session panel's delegations section
+// (runningDelegationBlocks in session_panel.go) to enumerate what to show
+// as a live block — no IO involved, since a delegation's live detail
+// (todos, tokens, nested-tool count) is already pushed into these items by
+// the existing ChildSessionTokenTracker/ChildSessionTodoTracker/
+// AddNestedTool live-update path.
+func (m *Chat) RunningDelegations() []chat.ToolMessageItem {
+	var running []chat.ToolMessageItem
+	for i := range m.list.Len() {
+		item := m.list.ItemAt(i)
+		toolItem, isTool := item.(chat.ToolMessageItem)
+		if !isTool {
+			continue
+		}
+		if _, isContainer := item.(chat.NestedToolContainer); !isContainer {
+			continue
+		}
+		if toolItem.ToolCall().Finished || toolItem.Status() == chat.ToolStatusCanceled {
+			continue
+		}
+		running = append(running, toolItem)
+	}
+	return running
+}
+
 // ToolStepCount returns the number of top-level tool-call items in the
 // list — a cheap proxy for "how many steps has this session taken so far".
 // Used by the child-session panel's live activity line while a child
@@ -946,6 +975,29 @@ func (m *Chat) LastToolCall() (message.ToolCall, bool) {
 		}
 	}
 	return message.ToolCall{}, false
+}
+
+// SetTodosCompact syncs every top-level todos tool call's compact state to
+// compact — reusing the same Compactable/SetCompact mechanism the
+// nested-tool-call redesign (commit b1efdc60) uses for one-line rows. The
+// session panel is the live, persistent view of the current todos list
+// while any todo is incomplete; while it's showing, the chat transcript's
+// own todos tool call(s) render as a compact one-liner (header only) rather
+// than duplicating the full list. Once the panel disappears (every todo
+// completed), compact is cleared so the transcript becomes the permanent
+// record of the finished checklist. Only top-level items are touched —
+// nested sub-agent tool calls (loadNestedToolCalls) are unconditionally
+// compact already and unrelated to this session's panel.
+func (m *Chat) SetTodosCompact(compact bool) {
+	for i := range m.list.Len() {
+		toolItem, ok := m.list.ItemAt(i).(chat.ToolMessageItem)
+		if !ok || toolItem.ToolCall().Name != tools.TodosToolName {
+			continue
+		}
+		if compactable, ok := toolItem.(chat.Compactable); ok {
+			compactable.SetCompact(compact)
+		}
+	}
 }
 
 // IsSelectedShellItem returns true if the currently selected item is a

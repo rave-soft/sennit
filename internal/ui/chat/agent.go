@@ -175,6 +175,26 @@ func (a *AgentToolMessageItem) DelegationInfo() (displayName, model, effort stri
 	return a.displayName, a.model, a.effort, a.startTime, a.duration
 }
 
+// PanelLiveActivityProvider is implemented by running-delegation tool items
+// ([AgentToolMessageItem], [AgenticFetchToolMessageItem]) to expose a
+// ready-to-draw status line for the session panel's delegation block (see
+// internal/ui/model/session_panel.go). It's the exact same styled text
+// renderAgentStatusLine already produces for the (now-retired) inline
+// pending render — elapsed time, step count, last tool call, token count —
+// reused here so the panel never needs its own copy of that formatting, and
+// needs no extra IO: everything is already pushed into the item live via
+// ChildSessionTokenTracker/AddNestedTool.
+type PanelLiveActivityProvider interface {
+	PanelStatusLine(sty *styles.Styles, width int) string
+}
+
+var _ PanelLiveActivityProvider = (*AgentToolMessageItem)(nil)
+
+// PanelStatusLine implements [PanelLiveActivityProvider].
+func (a *AgentToolMessageItem) PanelStatusLine(sty *styles.Styles, width int) string {
+	return renderPanelStatusLine(sty, width, a.startTime, a.nestedTools, a.todos, a.promptTokens, a.completionTokens)
+}
+
 // SetChildSessionTokens implements [ChildSessionTokenTracker].
 func (a *AgentToolMessageItem) SetChildSessionTokens(prompt, completion int64) {
 	if a.promptTokens == prompt && a.completionTokens == completion {
@@ -299,31 +319,19 @@ type AgentToolRenderContext struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	pending := opts.IsPending()
-	if pending && len(r.agent.nestedTools) == 0 {
-		header := pendingTool(sty, r.agent.displayName, opts.Anim, opts.Compact)
-		if opts.Compact {
-			return header
-		}
-		lines := []string{header}
-		if subtitle := renderAgentSubtitle(sty, cappedWidth, r.agent.model, r.agent.effort); subtitle != "" {
-			lines = append(lines, subtitle)
-		}
-		// No child tool call has arrived yet — still show elapsed time so
-		// the very first seconds of a delegation don't read as frozen.
-		if status := renderAgentStatusLine(sty, cappedWidth, r.agent.startTime, nil, r.agent.promptTokens, r.agent.completionTokens); status != "" {
-			lines = append(lines, status)
-		}
-		if todos := renderChildTodos(sty, cappedWidth, r.agent.todos); todos != "" {
-			lines = append(lines, todos)
-		}
-		if len(lines) == 1 {
-			return header
-		}
-		return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	if pending {
+		// The session panel now owns all of a running delegation's live
+		// detail (status line, todos, subtitle) — see the panel's
+		// delegations section in internal/ui/model/session_panel.go and
+		// PanelStatusLine below, which panel reuses. The chat transcript
+		// shows just the one-line pending stub while it's running,
+		// regardless of how many nested tool calls have landed —
+		// previously this only collapsed once len(nestedTools) == 0.
+		return pendingTool(sty, r.agent.displayName, opts.Anim, opts.Compact)
 	}
 
+	cappedWidth := cappedMessageWidth(width)
 	var params agent.AgentParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
@@ -460,6 +468,14 @@ func (r *AgenticFetchToolMessageItem) DelegationInfo() (displayName, model, effo
 	return agenticFetchDisplayName, "", "", r.startTime, r.duration
 }
 
+var _ PanelLiveActivityProvider = (*AgenticFetchToolMessageItem)(nil)
+
+// PanelStatusLine implements [PanelLiveActivityProvider]. See
+// AgentToolMessageItem.PanelStatusLine.
+func (r *AgenticFetchToolMessageItem) PanelStatusLine(sty *styles.Styles, width int) string {
+	return renderPanelStatusLine(sty, width, r.startTime, r.nestedTools, r.todos, r.promptTokens, r.completionTokens)
+}
+
 // NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].
 func NewAgenticFetchToolMessageItem(
 	sty *styles.Styles,
@@ -589,26 +605,14 @@ type agenticFetchParams struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	pending := opts.IsPending()
-	if pending && len(r.fetch.nestedTools) == 0 {
-		header := pendingTool(sty, agenticFetchDisplayName, opts.Anim, opts.Compact)
-		if opts.Compact {
-			return header
-		}
-		lines := []string{header}
-		if status := renderAgentStatusLine(sty, cappedWidth, r.fetch.startTime, nil, r.fetch.promptTokens, r.fetch.completionTokens); status != "" {
-			lines = append(lines, status)
-		}
-		if todos := renderChildTodos(sty, cappedWidth, r.fetch.todos); todos != "" {
-			lines = append(lines, todos)
-		}
-		if len(lines) == 1 {
-			return header
-		}
-		return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	if pending {
+		// See AgentToolRenderContext.RenderTool's matching change: the
+		// panel now owns all of a running delegation's live detail.
+		return pendingTool(sty, agenticFetchDisplayName, opts.Anim, opts.Compact)
 	}
 
+	cappedWidth := cappedMessageWidth(width)
 	var params agenticFetchParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
@@ -848,6 +852,49 @@ func renderAgentStatusLine(sty *styles.Styles, width int, startTime time.Time, n
 	}
 
 	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(strings.Join(parts, " · "), width, "…"))
+}
+
+// renderPanelStatusLine is renderAgentStatusLine's counterpart for the
+// session panel's delegation block (see PanelLiveActivityProvider): same
+// elapsed/step/tokens shape, but the "current activity" segment prefers the
+// child session's in-progress todo (its ActiveForm, falling back to
+// Content) over the last nested tool call, matching
+// childSessionCurrentActivity's own priority in internal/ui/model — a todo
+// says more about what's actually happening than a raw tool name.
+func renderPanelStatusLine(sty *styles.Styles, width int, startTime time.Time, nestedTools []ToolMessageItem, todos []session.Todo, promptTokens, completionTokens int64) string {
+	if width <= 0 {
+		return ""
+	}
+
+	parts := []string{formatElapsed(time.Since(startTime)), fmt.Sprintf("step %d", len(nestedTools))}
+	switch {
+	case currentTodoActivity(todos) != "":
+		parts = append(parts, "→ "+currentTodoActivity(todos))
+	case len(nestedTools) > 0:
+		if summary := LastToolSummary(nestedTools[len(nestedTools)-1].ToolCall()); summary != "" {
+			parts = append(parts, "→ "+summary)
+		}
+	}
+	if total := promptTokens + completionTokens; total > 0 {
+		parts = append(parts, formatTokenCount(total)+" tok")
+	}
+
+	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(strings.Join(parts, " · "), width, "…"))
+}
+
+// currentTodoActivity returns the in-progress todo's ActiveForm (falling
+// back to Content), or "" if none of todos is in progress.
+func currentTodoActivity(todos []session.Todo) string {
+	for _, t := range todos {
+		if t.Status != session.TodoStatusInProgress {
+			continue
+		}
+		if t.ActiveForm != "" {
+			return t.ActiveForm
+		}
+		return t.Content
+	}
+	return ""
 }
 
 // formatElapsed renders a duration the way a status line wants it: "45s",

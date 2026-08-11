@@ -94,8 +94,12 @@ func TestHandleChildSessionUpdate(t *testing.T) {
 	childID := u.com.Workspace.CreateAgentToolSessionID("parent-msg", "tc-agent")
 	u.handleChildSessionUpdate(session.Session{ID: childID, PromptTokens: 500, CompletionTokens: 120})
 
-	out := ansi.Strip(item.Render(120))
-	require.Contains(t, out, "620 tok", "child session token totals must surface on the parent's status line")
+	// A pending delegation's chat transcript render is now just the bare
+	// stub (see TestAgentToolMessageItem_PendingRendersBareStub in
+	// chat/agent_test.go) — the token total now surfaces on the session
+	// panel's delegation block instead, via PanelLiveActivityProvider.
+	line := ansi.Strip(item.PanelStatusLine(u.com.Styles, 120))
+	require.Contains(t, line, "620 tok", "child session token totals must surface on the panel's status line")
 
 	// A session ID that isn't an agent-tool child session (the top-level
 	// session's own updates, for instance) must be ignored rather than
@@ -127,6 +131,10 @@ func TestHandleChildSessionUpdate_Todos(t *testing.T) {
 		},
 	})
 
-	out := ansi.Strip(item.Render(120))
-	require.Contains(t, out, "Fixing the bug", "child session todos must surface on the parent's running block")
+	// See TestHandleChildSessionUpdate: a pending delegation's chat render
+	// is just the bare stub now, so the in-progress todo's ActiveForm must
+	// surface on the panel's status line instead (renderPanelStatusLine
+	// prefers it over the last tool call — see currentTodoActivity).
+	line := ansi.Strip(item.PanelStatusLine(u.com.Styles, 120))
+	require.Contains(t, line, "Fixing the bug", "child session todos must surface on the panel's status line")
 }

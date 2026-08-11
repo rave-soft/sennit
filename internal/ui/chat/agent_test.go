@@ -121,6 +121,38 @@ func TestRenderAgentStatusLine_Content(t *testing.T) {
 		"status line fields must render in elapsed -> step -> last-tool -> tokens order, got: %s", plain)
 }
 
+// TestPanelStatusLine_MatchesUnderlyingStatusLine covers the new
+// PanelLiveActivityProvider accessor the session panel's delegations
+// section (internal/ui/model/session_panel.go) uses: it must reuse the
+// exact same renderAgentStatusLine formatting/data (elapsed, step count,
+// last tool, tokens) the old inline pending render used, for both
+// AgentToolMessageItem and AgenticFetchToolMessageItem, with no extra IO —
+// everything comes from fields already pushed in via AddNestedTool /
+// SetChildSessionTokens.
+func TestPanelStatusLine_MatchesUnderlyingStatusLine(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+
+	agentItem := NewAgentToolMessageItem(&sty, message.ToolCall{ID: "a1", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
+	agentItem.startTime = time.Now().Add(-30 * time.Second)
+	agentItem.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "bash", `{"command":"echo hi"}`))
+	agentItem.SetChildSessionTokens(100, 50)
+
+	var provider PanelLiveActivityProvider = agentItem
+	line := ansi.Strip(provider.PanelStatusLine(&sty, 200))
+	require.Contains(t, line, "30s")
+	require.Contains(t, line, "step 1")
+	require.Contains(t, line, "150 tok")
+
+	fetchItem := NewAgenticFetchToolMessageItem(&sty, message.ToolCall{ID: "f1", Name: "agentic_fetch", Input: `{}`, Finished: false}, nil, false)
+	fetchItem.startTime = time.Now().Add(-5 * time.Second)
+	var fetchProvider PanelLiveActivityProvider = fetchItem
+	fline := ansi.Strip(fetchProvider.PanelStatusLine(&sty, 200))
+	require.Contains(t, fline, "5s")
+	require.Contains(t, fline, "step 0")
+}
+
 // TestRenderAgentStatusLine_NoNestedTools covers the very first seconds
 // of a delegation, before any child-session event has arrived. Elapsed
 // time and step count must still render — this is what keeps the first
@@ -157,12 +189,16 @@ func TestRenderAgentStatusLine_Truncation(t *testing.T) {
 }
 
 // TestAgentToolMessageItem_PendingStatusLine is the render-path
-// regression test for the reported bug: a still-running "agent"
-// delegation with no nested tools yet must show more than a bare
-// spinner — specifically, an elapsed-time status line — and once a
-// child tool call arrives, that tool must appear in the rendered
-// output.
-func TestAgentToolMessageItem_PendingStatusLine(t *testing.T) {
+// pending stub regression test: the session panel now owns all of a
+// running delegation's live detail (see PanelStatusLine and the panel's
+// delegations section in internal/ui/model/session_panel.go), so the chat
+// transcript itself must render just the one-line pending header — no
+// elapsed time, step count, or nested-tool detail leaking into the
+// transcript — regardless of whether any child tool calls have landed yet.
+// This used to only collapse to a bare stub while nestedTools was empty;
+// once any arrived it grew a status line inline. See PanelStatusLine's own
+// tests for coverage of that detail now living in the panel instead.
+func TestAgentToolMessageItem_PendingRendersBareStub(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -171,13 +207,13 @@ func TestAgentToolMessageItem_PendingStatusLine(t *testing.T) {
 	item.startTime = time.Now().Add(-9 * time.Second)
 
 	out := ansi.Strip(item.Render(120))
-	require.Contains(t, out, "9s", "pending agent tool with no nested tools yet must still show elapsed time")
-	require.Contains(t, out, "step 0")
+	require.NotContains(t, out, "9s", "elapsed time now belongs to the panel, not the transcript")
+	require.NotContains(t, out, "step 0")
 
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"Provider","path":"internal/config"}`))
 	out = ansi.Strip(item.Render(120))
-	require.Contains(t, out, `→ grep "Provider" internal/config`,
-		"once a child tool call arrives it must show up in the rendered status line")
+	require.NotContains(t, out, "grep",
+		"a landed child tool call must not leak into the transcript stub either")
 }
 
 // TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion covers the
@@ -205,15 +241,15 @@ func TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {
 	})
 }
 
-// TestAgentToolRenderCapsNestedTools covered the display density cap for a
-// *running* delegation's nested-tool tree (last few visible, "+N earlier
-// steps" summary for the rest). Now that a finished delegation collapses
-// to a compact summary (see TestAgentToolRenderFinishedCollapses below),
-// the cap only matters while still running — see
-// TestRenderAgentStatusLine_* in this file for that coverage. This test is
-// kept as the still-running counterpart: caps apply, full nested tree
-// still renders.
-func TestAgentToolRenderCapsNestedTools(t *testing.T) {
+// TestAgentToolRenderPending_ManyNestedToolsStillJustStub is the
+// replacement for the old display-density-cap tests (TestAgentToolRenderCapsNestedTools
+// / TestAgentToolRenderNoCapBelowThreshold): those tested a *running*
+// delegation's inline nested-tool tree ("+N earlier steps" cap), which no
+// longer renders in the transcript at all now that the panel owns live
+// delegation detail (see TestAgentToolMessageItem_PendingRendersBareStub).
+// This confirms the transcript stays a bare stub even with well past the
+// old cap's threshold worth of nested tool calls — no leak, capped or not.
+func TestAgentToolRenderPending_ManyNestedToolsStillJustStub(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -224,39 +260,13 @@ func TestAgentToolRenderCapsNestedTools(t *testing.T) {
 		id := "tool-" + string(rune('0'+i))
 		item.AddNestedTool(mkNestedToolCall(t, &sty, id, "bash", `{"command":"echo `+id+`"}`))
 	}
-	require.Len(t, item.NestedTools(), 6, "capping display must not truncate the underlying slice")
-
-	out := ansi.Strip(item.Render(120))
-
-	require.Contains(t, out, "+3 earlier steps")
-	for i := 4; i <= 6; i++ {
-		id := "echo tool-" + string(rune('0'+i))
-		require.Contains(t, out, id, "last 3 nested tools must be rendered")
-	}
-	for i := 1; i <= 3; i++ {
-		id := "echo tool-" + string(rune('0'+i))
-		require.NotContains(t, out, id, "dropped earlier nested tools must not be rendered")
-	}
-}
-
-// TestAgentToolRenderNoCapBelowThreshold is the regression guard for the
-// cap: with maxVisibleNestedTools or fewer nested tools on a still-running
-// delegation, no "+N earlier" summary line should appear at all (e.g.
-// never "+0 earlier steps").
-func TestAgentToolRenderNoCapBelowThreshold(t *testing.T) {
-	t.Parallel()
-
-	sty := styles.CharmtonePantera()
-	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
-	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
-
-	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-1", "bash", `{"command":"echo tool-1"}`))
-	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-2", "bash", `{"command":"echo tool-2"}`))
+	require.Len(t, item.NestedTools(), 6, "the underlying slice is still tracked, for PanelStatusLine/the panel block")
 
 	out := ansi.Strip(item.Render(120))
 	require.NotContains(t, out, "earlier steps")
-	require.Contains(t, out, "echo tool-1")
-	require.Contains(t, out, "echo tool-2")
+	require.NotContains(t, out, "echo tool-")
+	lines := strings.Split(strings.TrimRight(out, " \n"), "\n")
+	require.Len(t, lines, 1, "pending transcript render must stay a single stub line")
 }
 
 // TestAgentToolRenderFinishedCollapses is the render-path regression test
@@ -450,8 +460,12 @@ func TestAgentToolRender_CustomAgentShowsModelAndEffort(t *testing.T) {
 	cfg := &config.Config{Agents: map[string]config.Agent{
 		"developer": {ID: "developer", Model: "qwen36-local/Qwen3-Coder-Next", ReasoningEffort: "high"},
 	}}
-	parent := message.ToolCall{ID: "dev-parent", Name: "developer", Input: `{"prompt":"fix the bug"}`, Finished: false}
-	item := NewToolMessageItem(&sty, "msg", parent, nil, false, cfg)
+	// A pending delegation now renders just the bare stub (see
+	// TestAgentToolMessageItem_PendingRendersBareStub) — the model/effort
+	// subtitle only shows once finished, in the collapsed summary.
+	parent := message.ToolCall{ID: "dev-parent", Name: "developer", Input: `{"prompt":"fix the bug"}`, Finished: true}
+	result := &message.ToolResult{ToolCallID: "dev-parent", Content: "done"}
+	item := NewToolMessageItem(&sty, "msg", parent, result, false, cfg)
 
 	out := ansi.Strip(item.Render(120))
 	require.Contains(t, out, "qwen36-local/Qwen3-Coder-Next")
@@ -514,10 +528,13 @@ func TestAgenticFetchToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing
 	})
 }
 
-// TestAgentToolRender_RunningShowsTodos covers requirement 4: a running
-// delegation's child-session todos must render, with the in-progress
-// item's ActiveForm preferred over its Content.
-func TestAgentToolRender_RunningShowsTodos(t *testing.T) {
+// TestAgentToolRender_RunningHidesTodosFromTranscript covers the flip side
+// of TestAgentToolRender_FinishedHidesTodos: a *running* delegation's
+// child-session todos must not render in the chat transcript either — the
+// panel is the only place a running delegation's live todos show now (via
+// PanelStatusLine's caller in internal/ui/model), matching the pending
+// stub's "just the header" behavior.
+func TestAgentToolRender_RunningHidesTodosFromTranscript(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
@@ -530,9 +547,9 @@ func TestAgentToolRender_RunningShowsTodos(t *testing.T) {
 	})
 
 	out := ansi.Strip(item.Render(120))
-	require.Contains(t, out, "Fixing the bug", "in-progress todo must show its ActiveForm")
-	require.Contains(t, out, "Write a test")
-	require.Contains(t, out, "Read the file")
+	require.NotContains(t, out, "Fixing the bug")
+	require.NotContains(t, out, "Write a test")
+	require.NotContains(t, out, "Read the file")
 }
 
 // TestAgentToolRender_FinishedHidesTodos covers requirement 5: once a

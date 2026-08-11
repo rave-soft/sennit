@@ -152,9 +152,10 @@ func TestSessionPanelPlan_TodosOrderingActiveFirstThenCompleted(t *testing.T) {
 
 	plan := u.sessionPanelPlan(100)
 	require.True(t, plan.todosExpanded)
-	require.Len(t, plan.todosActive, 2)
-	require.Equal(t, "working now", plan.todosActive[0].Content, "in-progress must lead")
-	require.Equal(t, "pending one", plan.todosActive[1].Content, "pending follows in-progress")
+	require.Len(t, plan.todosInProgress, 1)
+	require.Equal(t, "working now", plan.todosInProgress[0].Content, "in-progress must lead")
+	require.Len(t, plan.todosPending, 1)
+	require.Equal(t, "pending one", plan.todosPending[0].Content, "pending follows in-progress")
 	require.Len(t, plan.todosDone, 2)
 	require.Equal(t, "done first", plan.todosDone[0].Content)
 	require.Equal(t, "done second", plan.todosDone[1].Content)
@@ -190,7 +191,7 @@ func TestSessionPanelPlan_AllInProgressTodosGetMarker(t *testing.T) {
 	}
 
 	plan := u.sessionPanelPlan(100)
-	require.Len(t, plan.todosActive, 2)
+	require.Len(t, plan.todosInProgress, 2)
 
 	scr := uv.NewScreenBuffer(u.width, 10)
 	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: 10}}
@@ -226,9 +227,9 @@ func TestSessionPanelPlan_HeaderTextCollapsedVsExpanded(t *testing.T) {
 	expanded := u.sessionPanelPlan(100)
 	require.True(t, expanded.todosExpanded)
 	require.Equal(t, "todos 1/2 ▾", sessionPanelTodosHeaderText(expanded.todosCompleted, expanded.todosTotal, expanded.todosExpanded))
-	require.Equal(t, 1, len(expanded.todosActive), "collapsing hides item rows, expanding shows them")
+	require.Equal(t, 1, len(expanded.todosPending), "collapsing hides item rows, expanding shows them")
 	require.Equal(t, 1, len(expanded.todosDone))
-	require.Equal(t, 3, expanded.totalRows, "expanded with ample budget: header + active + completed rows")
+	require.Equal(t, 3, expanded.totalRows, "expanded with ample budget: header + pending + completed rows")
 }
 
 // TestSessionPanelPlan_QueueAlwaysVisibleRegardlessOfTodosExpand covers that
@@ -280,35 +281,42 @@ func TestSessionPanelPlan_BudgetCapAndPriorityOrder(t *testing.T) {
 	require.Equal(t, 4, p.threadsRows, "threads must not shrink yet")
 	require.True(t, p.todosExpanded, "todos list must still be expanded")
 	require.Empty(t, p.todosDone, "completed todos are dropped first")
-	require.Len(t, p.todosActive, 3)
+	require.Len(t, p.todosInProgress, 1)
+	require.Len(t, p.todosPending, 2)
 	require.Len(t, p.queue, 4, "queue must be untouched")
 	require.LessOrEqual(t, p.totalRows, 12)
 
-	// Budget 9: tight enough to also force todos to collapse, but the
-	// queue is still untouched.
+	// Budget 9: tight enough to also force todos to collapse. Collapsing is
+	// never total, though — the in-progress todo ("active 1") stays visible
+	// even collapsed, so it still costs one row, which eats one more row of
+	// queue than a fully-collapsed (header-only) section would.
 	p = u.sessionPanelPlan(9)
 	require.Equal(t, 4, p.threadsRows, "threads still must not shrink")
 	require.False(t, p.todosExpanded, "todos collapse before threads shrink")
-	require.Len(t, p.queue, 4, "queue still untouched")
+	require.Len(t, p.todosInProgress, 1, "collapsed but the in-progress todo stays visible")
+	require.Equal(t, session.TodoStatusInProgress, p.todosInProgress[0].Status)
+	require.Empty(t, p.todosPending, "pending todos hide while collapsed, unlike in-progress")
+	require.Len(t, p.queue, 3, "queue truncated by the one row the always-visible in-progress todo costs")
 	require.LessOrEqual(t, p.totalRows, 9)
 
-	// Budget 7: tight enough to also truncate the queue, but threads still
-	// hold their full 4 rows.
+	// Budget 7: tight enough to also truncate the queue further, but
+	// threads still hold their full 4 rows.
 	p = u.sessionPanelPlan(7)
 	require.Equal(t, 4, p.threadsRows, "threads still must not shrink")
 	require.False(t, p.todosExpanded)
-	require.Len(t, p.queue, 2, "queue truncated to whatever fits before threads shrink")
+	require.Len(t, p.todosInProgress, 1, "in-progress todo still visible while collapsed")
+	require.Len(t, p.queue, 1, "queue truncated to whatever fits before threads shrink")
 	require.LessOrEqual(t, p.totalRows, 7)
 
 	// Pathological budget: even threads must shrink.
 	p = u.sessionPanelPlan(3)
-	require.Equal(t, 2, p.threadsRows, "threads section is the last resort to shrink")
+	require.Equal(t, 1, p.threadsRows, "threads section is the last resort to shrink")
 	require.LessOrEqual(t, p.totalRows, 3)
 
-	// The overall cap: with a tall terminal but tiny budget passed
-	// directly, sessionPanelHeight itself must respect the 40% cap.
-	u.height = 20
-	require.LessOrEqual(t, u.sessionPanelHeight(), int(float64(u.height)*sessionPanelBudgetFraction))
+	// The overall cap: sessionPanelHeight itself must respect the 40% cap
+	// against whatever available height it's handed.
+	available := 20
+	require.LessOrEqual(t, u.sessionPanelHeight(available), int(float64(available)*sessionPanelBudgetFraction))
 }
 
 // TestSessionPanelHeight_ZeroContentMatchesBaseline is the regression guard
@@ -328,8 +336,122 @@ func TestSessionPanelHeight_ZeroContentMatchesBaseline(t *testing.T) {
 	u.wsCache.promptQueueItems = nil
 	u.updateLayoutAndSize()
 
-	require.Zero(t, u.sessionPanelHeight())
+	require.Zero(t, u.sessionPanelHeight(100))
 	require.Zero(t, u.layout.panel, "panel must occupy zero space with no threads/todos/queue")
+}
+
+// TestSessionPanelPlan_PanelHidesOnceAllTodosCompleted covers the panel's
+// role as the *live* view of active work: it disappears once every todo is
+// completed (and can no longer be toggled open), handing off to the chat
+// transcript — which always renders the full list (see
+// chat.TodosToolRenderContext) — as the permanent record. Nothing is lost;
+// it just moves from the docked panel to the scrollback.
+func TestSessionPanelPlan_PanelHidesOnceAllTodosCompleted(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.dialog = dialog.NewOverlay()
+	u.session.Todos = []session.Todo{
+		{Content: "a", Status: session.TodoStatusCompleted},
+		{Content: "b", Status: session.TodoStatusCompleted},
+	}
+	u.updateLayoutAndSize()
+
+	plan := u.sessionPanelPlan(100)
+	require.False(t, plan.todosVisible, "an all-completed list must no longer occupy the panel")
+	require.Zero(t, u.layout.panel, "panel must occupy zero space once every todo is completed")
+
+	// Nothing left to toggle: an all-completed list can't be expanded via
+	// the panel (it isn't there to expand).
+	u.toggleTodosExpanded()
+	require.False(t, u.panel.expanded)
+}
+
+// TestDrawSessionPanel_CollapsedStillShowsInProgressTodo is the regression
+// test for "collapsing the panel is never total": even with the todos
+// section collapsed (m.panel.expanded == false), a todo that's actively
+// in progress right now must still be painted, not hidden behind the
+// header until the user expands the section. sessionPanelPlan populating
+// plan.todosActive with the in-progress subset isn't enough on its own —
+// drawSessionPanel used to re-gate the whole item-drawing loop on
+// plan.todosExpanded, which silently swallowed those rows again.
+func TestDrawSessionPanel_CollapsedStillShowsInProgressTodo(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.session.Todos = []session.Todo{
+		{Content: "in flight", Status: session.TodoStatusInProgress, ActiveForm: "Doing the in-flight task"},
+		{Content: "not started", Status: session.TodoStatusPending},
+		{Content: "already done", Status: session.TodoStatusCompleted},
+	}
+	require.False(t, u.panel.expanded, "collapsed by default")
+
+	plan := u.sessionPanelPlan(100)
+	require.False(t, plan.todosExpanded)
+	require.Equal(t, 2, plan.totalRows, "header + the one always-visible in-progress row")
+
+	scr := uv.NewScreenBuffer(u.width, 3)
+	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: 3}}
+	u.drawSessionPanel(scr, area)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "Doing the in-flight task", "in-progress todo must render even while collapsed")
+	require.NotContains(t, out, "not started", "pending todo must stay hidden while collapsed")
+	require.NotContains(t, out, "already done", "completed todo must stay hidden while collapsed")
+}
+
+// TestSessionPanelPlan_RealisticTerminalNoSheddingForEverydayTodoList is the
+// regression test for the 40%-budget bug: sessionPanelHeight used to
+// compute its 40% cap against the whole-terminal m.height, which includes
+// rows (header, editor, help) that never compete with the panel for space.
+// Since generateLayout also hard-clamps the result against mainRect.Dy()
+// (the space actually split between chat and the panel) immediately
+// afterward, basing the 40% budget on m.height instead of that same
+// mainRect.Dy() made the internal budget check inconsistent with the real
+// downstream constraint — a small, everyday todo list could get shed
+// (completed rows dropped) even though nothing else was competing for the
+// space. This covers a small (5-item) list on both a generous terminal
+// (140x45, matching newTestUI's convention) and a common, tighter one
+// (80x24): in neither case should a handful of todos trigger shedding.
+func TestSessionPanelPlan_RealisticTerminalNoSheddingForEverydayTodoList(t *testing.T) {
+	t.Parallel()
+
+	todos := []session.Todo{
+		{Content: "one", Status: session.TodoStatusCompleted},
+		{Content: "two", Status: session.TodoStatusCompleted},
+		{Content: "three", Status: session.TodoStatusInProgress, ActiveForm: "Doing three"},
+		{Content: "four", Status: session.TodoStatusPending},
+		{Content: "five", Status: session.TodoStatusPending},
+	}
+	// header + all active (in-progress + pending) + all completed.
+	wantTotalRows := 1 + 3 + 2
+
+	for _, tc := range []struct {
+		name          string
+		width, height int
+	}{
+		{"newTestUI convention (140x45)", 140, 45},
+		{"typical screen (80x24)", 80, 24},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			u := sessionUI()
+			u.width, u.height = tc.width, tc.height
+			u.panel.expanded = true
+			u.session.Todos = todos
+
+			u.dialog = dialog.NewOverlay()
+			u.updateLayoutAndSize()
+
+			plan := u.sessionPanelPlan(u.layout.panel.Dy())
+			require.True(t, plan.todosExpanded, "no shedding: list must stay expanded")
+			require.Len(t, plan.todosInProgress, 1, "no shedding: in-progress rows must all be present")
+			require.Len(t, plan.todosPending, 2, "no shedding: pending rows must all be present")
+			require.Len(t, plan.todosDone, 2, "no shedding: completed rows must not be dropped")
+			require.Equal(t, wantTotalRows, plan.totalRows, "unclamped natural size, nothing dropped")
+		})
+	}
 }
 
 // TestMouseClick_ThreadBlockEntersThread covers the click hit-test: a
@@ -391,7 +513,7 @@ func TestMouseClick_TodosHeaderTogglesWithoutPriorDraw(t *testing.T) {
 	// Derive the header's expected coordinates the same way the fixed click
 	// handler does, independently of any cached Draw-time field.
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	_, headerRect := sessionPanelRowLayout(u.layout.panel, plan)
+	_, _, headerRect := sessionPanelRowLayout(u.layout.panel, plan)
 	require.NotZero(t, headerRect, "expected a non-empty todos header rect")
 
 	_, cmd := u.Update(tea.MouseClickMsg{X: headerRect.Min.X, Y: headerRect.Min.Y, Button: tea.MouseLeft})
@@ -415,7 +537,7 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	require.Empty(t, u.panelThreadRects, "must not have been populated by any Draw call yet")
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	threadRects, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	threadRects, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.Len(t, threadRects, 1)
 
 	rect := threadRects[0]

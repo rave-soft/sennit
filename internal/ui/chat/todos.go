@@ -105,14 +105,14 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 						headerText = ratio
 					}
 
-					// Build body with details.
-					if allCompleted {
-						// Show all todos when all are completed, like when created.
-						body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
-					} else if meta.JustStarted != "" {
-						body = sty.Tool.TodoInProgressIcon.Render(styles.ArrowRightIcon+" ") +
-							sty.Tool.TodoJustStarted.Render(meta.JustStarted)
-					}
+					// Todos is a deliberate exception to the one-line tool-row
+					// redesign (see commit b1efdc60): it always shows the
+					// full current list body, not just a delta summary. A
+					// conditional body here (only on newly-completed or
+					// newly-started items) left updates with neither —
+					// e.g. the model just adding pending items, or a
+					// reorder — rendering as a bare header with no list.
+					body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
 				}
 			}
 		}

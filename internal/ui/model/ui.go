@@ -336,11 +336,23 @@ type UI struct {
 	// tracking.
 	panelThreadRects []uv.Rectangle
 	panelThreads     []proto.Thread
+	// hoveredPanelDelegation/panelDelegationRects/panelDelegations mirror
+	// hoveredPanelThread/panelThreadRects/panelThreads for the delegations
+	// section — see runningDelegationBlocks/drawDelegationBlocks in
+	// session_panel.go.
+	hoveredPanelDelegation int
+	panelDelegationRects   []uv.Rectangle
+	panelDelegations       []panelDelegation
 	// panelTodosHover / panelTodosHeaderRect mirror childPanelHover /
 	// childPanelButtonRect for the todos header row's click-to-toggle
 	// affordance.
 	panelTodosHover      bool
 	panelTodosHeaderRect uv.Rectangle
+
+	// threadLastStatus tracks each thread's last-seen status, so
+	// notifyThreadCompletion (thread_completion.go) can detect the exact
+	// edge transition into a terminal state and toast it exactly once.
+	threadLastStatus map[string]string
 
 	// wsCache holds the memoized workspace busy/yolo/ready/model/queue
 	// state and its TTL-cache bookkeeping. See workspace_cache.go.
@@ -446,17 +458,18 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 			completions: comp,
 			attachments: attachments,
 		},
-		chat:                ch,
-		header:              header,
-		todoSpinner:         todoSpinner,
-		lspStates:           make(map[string]workspace.LSPClientInfo),
-		mcpStates:           make(map[string]mcp.ClientInfo),
-		notifyBackend:       notification.NoopBackend{},
-		notifyWindowFocused: true,
-		initialSessionID:    initialSessionID,
-		continueLastSession: continueLast,
-		skillStates:         skills.GetLatestStates(),
-		hoveredPanelThread:  -1,
+		chat:                   ch,
+		header:                 header,
+		todoSpinner:            todoSpinner,
+		lspStates:              make(map[string]workspace.LSPClientInfo),
+		mcpStates:              make(map[string]mcp.ClientInfo),
+		notifyBackend:          notification.NoopBackend{},
+		notifyWindowFocused:    true,
+		initialSessionID:       initialSessionID,
+		continueLastSession:    continueLast,
+		skillStates:            skills.GetLatestStates(),
+		hoveredPanelThread:     -1,
+		hoveredPanelDelegation: -1,
 	}
 	for _, opt := range opts {
 		opt(ui)
@@ -945,7 +958,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			prevHasInProgress := hasInProgressTodo(m.session.Todos)
-			prevPanelHeight := m.sessionPanelHeight()
+			prevTodosLen := len(m.session.Todos)
+			// mainRect.Dy() as of the last layout pass — main and panel
+			// together reconstruct it, since generateLayout splits mainRect
+			// into exactly those two rects. Only used here to detect
+			// whether the panel's footprint changed, not as an actual
+			// layout budget, so approximating off the last computed layout
+			// (rather than recomputing mainRect from scratch) is fine.
+			available := m.layout.main.Dy() + m.layout.panel.Dy()
+			prevPanelHeight := m.sessionPanelHeight(available)
 			m.session = &msg.Payload
 			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
 				m.todoIsSpinning = true
@@ -959,8 +980,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// no extra re-render is needed when the footprint is
 			// unchanged (e.g. the in-progress spinner just ticks on the
 			// next frame).
-			if m.sessionPanelHeight() != prevPanelHeight {
+			if m.sessionPanelHeight(available) != prevPanelHeight {
 				m.updateLayoutAndSize()
+			}
+			// While the panel is showing this session's todos, the chat
+			// transcript's own todos tool call(s) render compact (header
+			// only) instead of duplicating the full list; once every todo
+			// is completed and the panel disappears, the transcript
+			// becomes the permanent record again.
+			m.chat.SetTodosCompact(hasIncompleteTodos(m.session.Todos))
+			// A brand new list (0 -> N todos) always opens the panel,
+			// unconditionally — distinct from autoExpandTodosIfReasonable
+			// below, which is a gentler one-shot-per-session, tall-enough-
+			// terminal nicety for the "resumed a session that already had
+			// an active list" case. This only fires on the transition
+			// itself: a later update to the same list (items added,
+			// statuses changed) must respect a user's manual collapse.
+			if prevTodosLen == 0 && len(m.session.Todos) > 0 {
+				m.panel.expanded = true
 			}
 			m.autoExpandTodosIfReasonable()
 		} else {
@@ -1172,7 +1209,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseLeft && m.state == uiChat && m.hasSession() {
 			pt := image.Pt(msg.X, msg.Y)
 			plan := m.sessionPanelPlan(m.layout.panel.Dy())
-			threadBlockRects, todosHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
+			threadBlockRects, delegationBlockRects, todosHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
 			if pt.In(todosHeaderRect) {
 				if cmd := m.toggleTodosExpanded(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -1185,6 +1222,20 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				th := plan.threads[i]
 				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID}))
+				return m, tea.Batch(cmds...)
+			}
+			// A click on a delegation block drills into its child session —
+			// real navStack-based drill-in via enterChildSession, unlike
+			// threads (which need AttachThread): a delegation's session
+			// already lives in this same workspace/DB.
+			for i, rect := range delegationBlockRects {
+				if !pt.In(rect) {
+					continue
+				}
+				d := plan.delegations[i]
+				if cmd := m.enterChildSession(d.messageID, d.toolCallID); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -1231,8 +1282,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.childPanelHover = image.Pt(msg.X, msg.Y).In(m.childPanelButtonRect)
 		}
 
-		// Hover feedback for the session panel's todos header and thread
-		// blocks, mirroring the child-session panel's hover pattern above.
+		// Hover feedback for the session panel's todos header, thread
+		// blocks, and delegation blocks, mirroring the child-session
+		// panel's hover pattern above.
 		if m.state == uiChat {
 			pt := image.Pt(msg.X, msg.Y)
 			m.panelTodosHover = pt.In(m.panelTodosHeaderRect)
@@ -1240,6 +1292,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for i, rect := range m.panelThreadRects {
 				if pt.In(rect) {
 					m.hoveredPanelThread = i
+					break
+				}
+			}
+			m.hoveredPanelDelegation = -1
+			for i, rect := range m.panelDelegationRects {
+				if pt.In(rect) {
+					m.hoveredPanelDelegation = i
 					break
 				}
 			}
@@ -1543,6 +1602,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		visible, _ := visibleDockThreads(activeDockThreads(m.threadsDock.threads))
 		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
+		// A thread's edge transition into a terminal status (merged,
+		// failed, ...) gets a toast — see thread_completion.go for why a
+		// toast rather than a persisted chat entry.
+		if cmd := m.notifyThreadCompletion(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case threadIndicatorLoadedMsg:
 		if cmd := m.threadIndicator.applyLoaded(m.com, msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1691,6 +1756,13 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 
 	if cmd := m.chat.SetMessages(items...); cmd != nil {
 		cmds = append(cmds, cmd)
+	}
+	// New items just replaced the whole list — sync their todos compact
+	// state to whether the panel is currently showing this session's
+	// todos, same as the pubsub session-update handler does for
+	// already-loaded items.
+	if m.hasSession() {
+		m.chat.SetTodosCompact(hasIncompleteTodos(m.session.Todos))
 	}
 	if cmd := m.chat.RestartPausedVisibleAnimations(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -3993,9 +4065,8 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.header = headerRect
-			panelHeight := m.sessionPanelHeight()
+			panelHeight := m.sessionPanelHeight(mainRect.Dy())
 			if panelHeight > 0 {
-				panelHeight = min(panelHeight, mainRect.Dy())
 				var chatRect, panelRect image.Rectangle
 				layout.Vertical(
 					layout.Len(mainRect.Dy()-panelHeight),
@@ -4034,9 +4105,8 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			).Split(mainRect).Assign(&mainRect, &editorRect)
 			mainRect.Max.X -= 1 // Add padding right
 			uiLayout.sidebar = sideRect
-			panelHeight := m.sessionPanelHeight()
+			panelHeight := m.sessionPanelHeight(mainRect.Dy())
 			if panelHeight > 0 {
-				panelHeight = min(panelHeight, mainRect.Dy())
 				var chatRect, panelRect image.Rectangle
 				layout.Vertical(
 					layout.Len(mainRect.Dy()-panelHeight),
