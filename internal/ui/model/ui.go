@@ -1159,19 +1159,31 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// that thread's own session — the same transition Enter takes on
 		// the threads dashboard (see Root.attachThreadCmd), not
 		// enterChildSession/navStack, which point at the wrong workspace.
-		if msg.Button == tea.MouseLeft && m.state == uiChat {
+		//
+		// Hit-test rects are recomputed here from m.layout.panel +
+		// m.sessionPanelPlan (via sessionPanelRowLayout), NOT read from
+		// m.panelTodosHeaderRect/m.panelThreadRects: those are only
+		// populated as a side effect of drawSessionPanel, which runs inside
+		// Draw/View. A click can be delivered by Update before View has
+		// ever painted the current layout (e.g. right after
+		// updateLayoutAndSize runs synchronously inside Update in response
+		// to a session/todos event), which would leave the cached rects
+		// stale or zero and silently swallow the click.
+		if msg.Button == tea.MouseLeft && m.state == uiChat && m.hasSession() {
 			pt := image.Pt(msg.X, msg.Y)
-			if pt.In(m.panelTodosHeaderRect) {
+			plan := m.sessionPanelPlan(m.layout.panel.Dy())
+			threadBlockRects, todosHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
+			if pt.In(todosHeaderRect) {
 				if cmd := m.toggleTodosExpanded(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return m, tea.Batch(cmds...)
 			}
-			for i, rect := range m.panelThreadRects {
+			for i, rect := range threadBlockRects {
 				if !pt.In(rect) {
 					continue
 				}
-				th := m.panelThreads[i]
+				th := plan.threads[i]
 				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID}))
 				return m, tea.Batch(cmds...)
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/session"
@@ -13,6 +14,12 @@ import (
 var todosDescription string
 
 const TodosToolName = "todos"
+
+// normalizeTodoContent folds whitespace and case so the merge logic below
+// treats "Run tests" and "  run tests  " as the same item.
+func normalizeTodoContent(content string) string {
+	return strings.ToLower(strings.TrimSpace(content))
+}
 
 type TodosParams struct {
 	Todos []TodoItem `json:"todos" description:"The updated todo list"`
@@ -92,6 +99,33 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 							justStarted = item.Content
 						}
 					}
+				}
+			}
+
+			// Small/local models don't reliably repeat every previously
+			// completed item on each todos call. Treating params.Todos as a
+			// full replacement would silently drop those — merge back any
+			// old completed todo the model didn't mention this time, unless
+			// params.Todos is empty, which is an explicit reset. Items the
+			// model DID mention (any status) are left alone: the incoming
+			// copy wins outright.
+			if len(params.Todos) > 0 {
+				seen := make(map[string]bool, len(todos))
+				for _, t := range todos {
+					seen[normalizeTodoContent(t.Content)] = true
+				}
+				appended := make(map[string]bool)
+				for _, old := range currentSession.Todos {
+					if old.Status != session.TodoStatusCompleted {
+						continue
+					}
+					key := normalizeTodoContent(old.Content)
+					if seen[key] || appended[key] {
+						continue
+					}
+					appended[key] = true
+					todos = append(todos, old)
+					completedCount++
 				}
 			}
 

@@ -364,3 +364,67 @@ func TestMouseClick_ThreadBlockEntersThread(t *testing.T) {
 	require.Equal(t, "t1", entered.id)
 	require.Equal(t, "s-t1", entered.sessionID)
 }
+
+// TestMouseClick_TodosHeaderTogglesWithoutPriorDraw is the regression test
+// for the dead-click-on-first-frame bug: the click hit-test used to read
+// m.panelTodosHeaderRect, which is only populated as a side effect of
+// drawSessionPanel — itself only reachable through Draw/View. A click
+// delivered by Update before the panel's first paint (e.g. immediately
+// after updateLayoutAndSize runs synchronously inside Update, which is
+// exactly what happens when a session/todos event arrives) hit a
+// stale/zero rect and was silently swallowed. This test deliberately never
+// calls drawSessionPanel or Draw — only updateLayoutAndSize, the same
+// layout step a real running Program takes inside Update — to prove the
+// click still works.
+func TestMouseClick_TodosHeaderTogglesWithoutPriorDraw(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.dialog = dialog.NewOverlay()
+	u.session.Todos = []session.Todo{
+		{Content: "write tests", Status: session.TodoStatusPending},
+	}
+	u.updateLayoutAndSize()
+	require.NotZero(t, u.layout.panel, "panel must occupy space with an incomplete todo present")
+	require.False(t, u.panel.expanded)
+
+	// Derive the header's expected coordinates the same way the fixed click
+	// handler does, independently of any cached Draw-time field.
+	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	_, headerRect := sessionPanelRowLayout(u.layout.panel, plan)
+	require.NotZero(t, headerRect, "expected a non-empty todos header rect")
+
+	_, cmd := u.Update(tea.MouseClickMsg{X: headerRect.Min.X, Y: headerRect.Min.Y, Button: tea.MouseLeft})
+	require.True(t, u.panel.expanded, "click on the todos header must toggle expand state on the very first frame")
+	_ = cmd
+}
+
+// TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw mirrors
+// TestMouseClick_TodosHeaderTogglesWithoutPriorDraw for the thread-block
+// hit-test, which shared the same Draw-time-cache bug via
+// m.panelThreadRects/m.panelThreads.
+func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.dialog = dialog.NewOverlay()
+	u.threadsDock.threads = []proto.Thread{
+		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
+	}
+	u.updateLayoutAndSize()
+	require.Empty(t, u.panelThreadRects, "must not have been populated by any Draw call yet")
+
+	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	threadRects, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	require.Len(t, threadRects, 1)
+
+	rect := threadRects[0]
+	_, cmd := u.Update(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseLeft})
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	entered, ok := msg.(enterThreadMsg)
+	require.True(t, ok, "expected enterThreadMsg, got %T", msg)
+	require.Equal(t, "t1", entered.id)
+	require.Equal(t, "s-t1", entered.sessionID)
+}

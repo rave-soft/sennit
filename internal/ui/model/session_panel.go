@@ -281,14 +281,76 @@ func (m *UI) sessionPanelHeight() int {
 	return m.sessionPanelPlan(budget).totalRows
 }
 
+// threadBlockGeometry computes each visible thread's two-row (or one-row,
+// if truncated by area's bottom edge) on-screen rect, in the same order as
+// threads — no drawing, no *UI dependency, so it can be called both from
+// drawThreadBlocks (which paints from it) and, via sessionPanelRowLayout,
+// from the click/hover hit-test, which must not wait for a Draw call to
+// have populated anything.
+func threadBlockGeometry(area uv.Rectangle, threads []proto.Thread) []uv.Rectangle {
+	if area.Dy() <= 0 || area.Dx() <= 0 || len(threads) == 0 {
+		return nil
+	}
+
+	row := area
+	row.Max.Y = row.Min.Y + 1
+
+	rects := make([]uv.Rectangle, 0, len(threads))
+	for range threads {
+		if row.Min.Y >= area.Max.Y {
+			break
+		}
+		block := row
+		block.Max.Y = min(block.Min.Y+2, area.Max.Y)
+		rects = append(rects, block)
+
+		row.Min.Y += 2
+		row.Max.Y = row.Min.Y
+	}
+
+	return rects
+}
+
+// sessionPanelRowLayout is the single source of truth for where each
+// hit-testable row of the session panel lands, given an area and a plan —
+// pure geometry, no drawing. Both drawSessionPanel (which paints from it)
+// and the tea.MouseClickMsg/tea.MouseMotionMsg handlers in ui.go (which
+// need it computed fresh, synchronously, at click/hover time — not lagged
+// behind whatever the last Draw call happened to cache) call this instead
+// of duplicating the row-advancing math.
+func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects []uv.Rectangle, todosHeaderRect uv.Rectangle) {
+	if area.Dy() <= 0 || area.Dx() <= 0 {
+		return nil, uv.Rectangle{}
+	}
+
+	row := area
+	row.Max.Y = row.Min.Y
+
+	if plan.threadsRows > 0 {
+		threadsArea := area
+		threadsArea.Max.Y = min(area.Min.Y+plan.threadsRows, area.Max.Y)
+		threadBlockRects = threadBlockGeometry(threadsArea, plan.threads)
+		row.Min.Y = threadsArea.Max.Y
+		row.Max.Y = row.Min.Y
+	}
+
+	if plan.todosVisible && row.Min.Y < area.Max.Y {
+		todosHeaderRect = row
+		todosHeaderRect.Max.Y = todosHeaderRect.Min.Y + 1
+	}
+
+	return threadBlockRects, todosHeaderRect
+}
+
 // drawThreadBlocks paints plan.threads as the panel's top section — one
 // two-line block per active thread (text from threadDockBlockLines, same as
 // the old drawThreadsDock) plus the "…and N more threads" footer — and
-// returns each block's on-screen rect, in the same order as plan.threads,
-// for the click/hover hit-test in Update. hoveredIdx (-1 for none)
-// highlights the block under the pointer.
+// returns each block's on-screen rect (from threadBlockGeometry), in the
+// same order as plan.threads, for hover-highlight bookkeeping in Draw.
+// hoveredIdx (-1 for none) highlights the block under the pointer.
 func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPanelPlan, hoveredIdx int) []uv.Rectangle {
-	if area.Dy() <= 0 || area.Dx() <= 0 || len(plan.threads) == 0 {
+	rects := threadBlockGeometry(area, plan.threads)
+	if len(rects) == 0 {
 		return nil
 	}
 
@@ -296,16 +358,13 @@ func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPane
 	// group, matching the old drawThreadsDock.
 	sty := &m.com.Styles.ChildBanner
 	width := area.Dx()
-	row := area
-	row.Max.Y = row.Min.Y + 1
 
-	rects := make([]uv.Rectangle, 0, len(plan.threads))
-	for i, t := range plan.threads {
-		if row.Min.Y >= area.Max.Y {
-			break
+	for i, block := range rects {
+		t := plan.threads[i]
+		line1Row := uv.Rectangle{
+			Min: uv.Position{X: area.Min.X, Y: block.Min.Y},
+			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 1},
 		}
-		block := row
-		block.Max.Y = min(block.Min.Y+2, area.Max.Y)
 
 		_, line2 := threadDockBlockLines(i+1, t, m.threadsDock.activity[t.ID], width)
 		name := t.Name
@@ -321,22 +380,28 @@ func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPane
 		styled := sty.Base.Render(fmt.Sprintf("%d ", i+1)) +
 			nameStyle.Render(name) +
 			sty.Base.Render(" — "+goal)
-		uv.NewStyledString(ansi.Truncate(styled, width, "…")).Draw(scr, row)
-		row.Min.Y++
-		row.Max.Y++
-		rects = append(rects, block)
+		uv.NewStyledString(ansi.Truncate(styled, width, "…")).Draw(scr, line1Row)
 
-		if row.Min.Y >= area.Max.Y {
-			continue
+		if block.Max.Y-block.Min.Y < 2 {
+			continue // truncated by area's bottom edge: no room for line 2.
 		}
-		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line2, width, "…"))).Draw(scr, row)
-		row.Min.Y++
-		row.Max.Y++
+		line2Row := uv.Rectangle{
+			Min: uv.Position{X: area.Min.X, Y: block.Min.Y + 1},
+			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 2},
+		}
+		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line2, width, "…"))).Draw(scr, line2Row)
 	}
 
-	if plan.threadsMore > 0 && row.Min.Y < area.Max.Y {
-		footer := fmt.Sprintf("…and %d more threads", plan.threadsMore)
-		uv.NewStyledString(sty.Base.Render(ansi.Truncate(footer, width, "…"))).Draw(scr, row)
+	if plan.threadsMore > 0 {
+		footerY := rects[len(rects)-1].Max.Y
+		if footerY < area.Max.Y {
+			footer := fmt.Sprintf("…and %d more threads", plan.threadsMore)
+			footerRow := uv.Rectangle{
+				Min: uv.Position{X: area.Min.X, Y: footerY},
+				Max: uv.Position{X: area.Max.X, Y: footerY + 1},
+			}
+			uv.NewStyledString(sty.Base.Render(ansi.Truncate(footer, width, "…"))).Draw(scr, footerRow)
+		}
 	}
 
 	return rects
@@ -346,9 +411,13 @@ func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPane
 // header (plus list when expanded and budget allows), then the queue tail
 // — all from sessionPanelPlan(area.Dy()), so it never paints a different
 // row count than sessionPanelHeight reserved for this exact area. Also
-// rebuilds the hit-test state (m.panelThreadRects/m.panelThreads,
-// m.panelTodosHeaderRect) that the MouseClickMsg/MouseMotionMsg handlers in
-// ui.go read.
+// caches m.panelThreadRects/m.panelThreads/m.panelTodosHeaderRect for
+// hover-highlight rendering (drawThreadBlocks' underline, panelTodosHover's
+// style swap) — cosmetic state that can tolerate one frame of staleness.
+// The click hit-test itself does NOT read these fields: it recomputes the
+// same rects on demand from sessionPanelRowLayout, since a click can arrive
+// before this function has ever run for the current layout (see ui.go's
+// tea.MouseClickMsg handler).
 func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	m.panelThreadRects = nil
 	m.panelThreads = nil
@@ -360,6 +429,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	plan := m.sessionPanelPlan(area.Dy())
 	t := m.com.Styles
 	width := area.Dx()
+	_, todosHeaderRect := sessionPanelRowLayout(area, plan)
 	row := area
 	row.Max.Y = row.Min.Y
 
@@ -373,8 +443,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	if plan.todosVisible && row.Min.Y < area.Max.Y {
-		headerRow := row
-		headerRow.Max.Y = headerRow.Min.Y + 1
+		headerRow := todosHeaderRect
 		header := sessionPanelTodosHeaderText(plan.todosCompleted, plan.todosTotal, plan.todosExpanded)
 		headerStyle := t.Pills.TodoLabel
 		if m.panelTodosHover {
