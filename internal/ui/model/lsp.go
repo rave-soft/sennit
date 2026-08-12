@@ -132,22 +132,30 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	return lipgloss.NewStyle().Width(width).Render(fmt.Sprintf("%s\n\n%s", title, list))
 }
 
-// lspDiagnostics formats diagnostic counts with appropriate icons and colors.
+// lspDiagnostics formats diagnostic counts with readable severity labels.
 func lspDiagnostics(t *styles.Styles, diagnostics map[protocol.DiagnosticSeverity]int) string {
 	var errs []string
 	if diagnostics[protocol.SeverityError] > 0 {
-		errs = append(errs, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, diagnostics[protocol.SeverityError])))
+		errs = append(errs, t.LSP.ErrorDiagnostic.Render(diagnosticLabel(diagnostics[protocol.SeverityError], "error", "errors")))
 	}
 	if diagnostics[protocol.SeverityWarning] > 0 {
-		errs = append(errs, t.LSP.WarningDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPWarningIcon, diagnostics[protocol.SeverityWarning])))
+		errs = append(errs, t.LSP.WarningDiagnostic.Render(diagnosticLabel(diagnostics[protocol.SeverityWarning], "warning", "warnings")))
 	}
 	if diagnostics[protocol.SeverityHint] > 0 {
-		errs = append(errs, t.LSP.HintDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPHintIcon, diagnostics[protocol.SeverityHint])))
+		errs = append(errs, t.LSP.HintDiagnostic.Render(diagnosticLabel(diagnostics[protocol.SeverityHint], "hint", "hints")))
 	}
 	if diagnostics[protocol.SeverityInformation] > 0 {
-		errs = append(errs, t.LSP.InfoDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPInfoIcon, diagnostics[protocol.SeverityInformation])))
+		errs = append(errs, t.LSP.InfoDiagnostic.Render(diagnosticLabel(diagnostics[protocol.SeverityInformation], "info", "info")))
 	}
-	return strings.Join(errs, " ")
+	return strings.Join(errs, ", ")
+}
+
+func diagnosticLabel(count int, singular, plural string) string {
+	label := plural
+	if count == 1 {
+		label = singular
+	}
+	return fmt.Sprintf("%d %s", count, label)
 }
 
 // lspList renders a list of LSP clients with their status and diagnostics,
@@ -173,8 +181,12 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 			icon = t.Resource.BusyIcon.String()
 			description = t.Resource.StatusText.Render("starting...")
 		case lsp.StateReady:
-			icon = t.Resource.OnlineIcon.String()
+			icon = t.Resource.EnabledIcon.String()
+			description = t.Resource.StatusText.Render("ready")
 			diagnostics = lspDiagnostics(t, l.Diagnostics)
+			if diagnostics == "" {
+				diagnostics = t.LSP.CleanDiagnostic.Render("no issues")
+			}
 		case lsp.StateError:
 			icon = t.Resource.ErrorIcon.String()
 			description = t.Resource.StatusText.Render("error")

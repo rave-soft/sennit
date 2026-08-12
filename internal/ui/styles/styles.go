@@ -51,8 +51,6 @@ const (
 
 	LSPErrorIcon   string = "E"
 	LSPWarningIcon string = "W"
-	LSPInfoIcon    string = "I"
-	LSPHintIcon    string = "H"
 )
 
 const (
@@ -234,6 +232,7 @@ type Styles struct {
 		WarningDiagnostic lipgloss.Style
 		HintDiagnostic    lipgloss.Style
 		InfoDiagnostic    lipgloss.Style
+		CleanDiagnostic   lipgloss.Style
 	}
 
 	// Sidebar

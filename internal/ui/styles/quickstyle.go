@@ -845,6 +845,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.LSP.WarningDiagnostic = base.Foreground(o.warningSubtle)
 	s.LSP.HintDiagnostic = base.Foreground(o.fgSubtle)
 	s.LSP.InfoDiagnostic = base.Foreground(o.info)
+	s.LSP.CleanDiagnostic = base.Foreground(o.successMostSubtle)
 
 	// Files
 	s.Files.Path = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)

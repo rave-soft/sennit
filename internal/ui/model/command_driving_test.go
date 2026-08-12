@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/rave-soft/braid/internal/ui/attachments"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
+	"github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -63,9 +65,11 @@ type cmdDrivingWorkspace struct {
 	permDenyCalls           int
 	permSkipCalls           int
 
-	listMessagesCalls int
-	listThreadsCalls  int
-	getSessionCalls   int
+	listMessagesCalls  int
+	listMessagesResult []message.Message
+	listMessagesErr    error
+	listThreadsCalls   int
+	getSessionCalls    int
 
 	// Session return value
 	returnSession session.Session
@@ -178,12 +182,22 @@ func (w *cmdDrivingWorkspace) CreateSession(_ context.Context, title string) (se
 
 func (w *cmdDrivingWorkspace) GetSession(_ context.Context, id string) (session.Session, error) {
 	w.getSessionCalls++
-	return session.Session{ID: id}, nil
+	s := w.returnSession
+	switch s.ID {
+	case "":
+		s = session.Session{ID: id}
+	case id:
+		// Return the configured session for matching IDs.
+	default:
+		// Different ID: return a basic session.
+		s = session.Session{ID: id}
+	}
+	return s, nil
 }
 
 func (w *cmdDrivingWorkspace) ListMessages(_ context.Context, id string) ([]message.Message, error) {
 	w.listMessagesCalls++
-	return nil, nil
+	return w.listMessagesResult, w.listMessagesErr
 }
 
 func (w *cmdDrivingWorkspace) ListUserMessages(_ context.Context, _ string) ([]message.Message, error) {
@@ -921,4 +935,167 @@ func TestCmdDriving_UnknownMessage_RoutedThroughUpdate(t *testing.T) {
 	require.Nil(t, updated[reflect.TypeOf(unknownMsg{})], "unknown message follows Update's default route")
 	require.Nil(t, updated[reflect.TypeOf(sliceShapedMsg{})], "named slice must not be expanded as commands")
 	require.NotNil(t, updated[reflect.TypeOf(tea.EnvMsg{})], "tea.EnvMsg must run its Update route")
+}
+
+// ---------------------------------------------------------------------------
+// Test: loadSessionMsg — successful async load applies session + messages.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_LoadSession_Success(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady:    true,
+		returnSession: session.Session{ID: "s-loaded", Title: "Loaded Session"},
+		listMessagesResult: []message.Message{
+			{ID: "m1", Role: message.User, SessionID: "s-loaded", Parts: []message.ContentPart{
+				message.TextContent{Text: "hello"},
+			}},
+		},
+	}
+	m := newCmdDrivenUI(ws)
+	// Set the session so currentSessionID returns "s-loaded".
+	m.session = &session.Session{ID: "s-loaded"}
+	warmCmdDrivenCaches(m)
+
+	// Call loadSession which dispatches the off-thread fetch.
+	cmd := m.loadSession("s-loaded")
+	require.NotNil(t, cmd, "loadSession must return a cmd")
+
+	// Run the command tree: the batch contains [load, reportCurrentSession].
+	messages := runCmdTree(m, cmd, nil)
+
+	// Must have received a loadSessionMsg.
+	var gotLoad bool
+	for _, msg := range messages {
+		if lsm, ok := msg.(loadSessionMsg); ok {
+			gotLoad = true
+			require.Equal(t, uint64(1), lsm.gen, "gen must match current generation")
+			require.Equal(t, "s-loaded", lsm.sessionID)
+			require.Equal(t, "Loaded Session", lsm.session.Title)
+			require.Len(t, lsm.messages, 1, "messages must be carried by the msg")
+		}
+	}
+	require.True(t, gotLoad, "must receive loadSessionMsg")
+
+	// The UI must have applied the session and its messages.
+	require.Equal(t, "s-loaded", m.session.ID, "session must be set")
+	require.GreaterOrEqual(t, m.chat.Len(), 1, "chat must contain the loaded message")
+}
+
+// ---------------------------------------------------------------------------
+// Test: loadSessionMsg — stale result from a superseded session switch
+// must be discarded without changing UI state.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_LoadSession_StaleResultDiscarded(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady:    true,
+		returnSession: session.Session{ID: "s-old", Title: "Old Session"},
+		listMessagesResult: []message.Message{
+			{ID: "m-old", Role: message.User, SessionID: "s-old", Parts: []message.ContentPart{
+				message.TextContent{Text: "stale"},
+			}},
+		},
+	}
+	m := newCmdDrivenUI(ws)
+	m.session = &session.Session{ID: "s-current"}
+	warmCmdDrivenCaches(m)
+
+	// First, load session "s-current" which sets sessionLoadGen to 1.
+	cmd1 := m.loadSession("s-current")
+	require.NotNil(t, cmd1)
+
+	// Simulate a session switch: set the UI's session pointer to a new session
+	// and dispatch a new load (gen will be 2).
+	m.session = &session.Session{ID: "s-new"}
+	cmd2 := m.loadSession("s-new")
+	require.NotNil(t, cmd2)
+
+	// Run both commands. Process cmd1 (stale, gen=1, sessionID="s-current") first.
+	runCmdTree(m, cmd1, nil)
+
+	// The UI must NOT have changed its session to s-old.
+	require.Equal(t, "s-new", m.session.ID,
+		"stale result must not replace the current session")
+}
+
+// ---------------------------------------------------------------------------
+// Test: loadSession — overlapping loads are safe.  The latest generation
+// wins; older results are discarded.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_LoadSession_OverlappingLoads(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady:    true,
+		returnSession: session.Session{ID: "s-overlap", Title: "Overlap Session"},
+		listMessagesResult: []message.Message{
+			{ID: "m-ov", Role: message.User, SessionID: "s-overlap", Parts: []message.ContentPart{
+				message.TextContent{Text: "overlap"},
+			}},
+		},
+	}
+	m := newCmdDrivenUI(ws)
+	// Start with session "s-base".
+	m.session = &session.Session{ID: "s-base"}
+	warmCmdDrivenCaches(m)
+
+	// Dispatch two loads in rapid succession.
+	cmd1 := m.loadSession("s-base")
+	require.NotNil(t, cmd1)
+	cmd2 := m.loadSession("s-overlap")
+	require.NotNil(t, cmd2)
+
+	// Simulate correct caller flow: set m.session before processing.
+	m.session = &session.Session{ID: "s-overlap"}
+
+	// Process cmd2 (the latest gen, sessionID="s-overlap" matching m.session).
+	messages2 := runCmdTree(m, cmd2, nil)
+	var latestApplied bool
+	for _, msg := range messages2 {
+		if lsm, ok := msg.(loadSessionMsg); ok {
+			if lsm.gen == m.sessionLoadGen && lsm.sessionID == m.currentSessionID() {
+				latestApplied = true
+			}
+		}
+	}
+	require.True(t, latestApplied, "latest-generation load must be applied")
+	require.Equal(t, "s-overlap", m.session.ID, "session must reflect the latest load")
+}
+
+// ---------------------------------------------------------------------------
+// Test: loadSession — error from ListMessages is reported via UI.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_LoadSession_ListMessagesError(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady:      true,
+		returnSession:   session.Session{ID: "s-err", Title: "Error Session"},
+		listMessagesErr: fmt.Errorf("database timeout"),
+	}
+	m := newCmdDrivenUI(ws)
+	m.session = &session.Session{ID: "s-err"}
+	warmCmdDrivenCaches(m)
+
+	cmd := m.loadSession("s-err")
+	require.NotNil(t, cmd)
+
+	messages := runCmdTree(m, cmd, nil)
+
+	// Must have received an InfoMsg with error type.
+	var gotError bool
+	for _, msg := range messages {
+		if infoMsg, ok := msg.(util.InfoMsg); ok {
+			gotError = true
+			require.Equal(t, util.InfoTypeError, infoMsg.Type, "must be error type")
+			require.Contains(t, infoMsg.Msg, "database timeout")
+		}
+	}
+	require.True(t, gotError, "ListMessages error must surface as InfoMsg with error type")
 }
