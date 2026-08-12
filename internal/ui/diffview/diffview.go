@@ -45,6 +45,7 @@ type DiffView struct {
 	width           int
 	xOffset         int
 	yOffset         int
+	wrapLines       bool
 	infiniteYScroll bool
 	style           Style
 	tabWidth        int
@@ -162,6 +163,13 @@ func (dv *DiffView) XOffset(xOffset int) *DiffView {
 	return dv
 }
 
+// WrapLines sets whether long code lines are wrapped to the available width.
+// Continuation rows omit line numbers and diff symbols.
+func (dv *DiffView) WrapLines(wrapLines bool) *DiffView {
+	dv.wrapLines = wrapLines
+	return dv
+}
+
 // YOffset sets the vertical offset for the DiffView.
 func (dv *DiffView) YOffset(yOffset int) *DiffView {
 	dv.yOffset = yOffset
@@ -210,14 +218,16 @@ func (dv *DiffView) String() string {
 	dv.convertDiffToSplit()
 	dv.adjustStyles()
 	dv.detectNumDigits()
-	dv.detectTotalLines()
-	dv.preventInfiniteYScroll()
-
 	if dv.width <= 0 {
 		dv.detectCodeWidth()
 	} else {
 		dv.resizeCodeWidth()
 	}
+	dv.detectTotalLines()
+	if dv.wrapLines {
+		dv.detectWrappedTotalLines()
+	}
+	dv.preventInfiniteYScroll()
 
 	style := lipgloss.NewStyle()
 	if dv.width > 0 {
@@ -229,11 +239,47 @@ func (dv *DiffView) String() string {
 
 	switch dv.layout {
 	case layoutUnified:
+		if dv.wrapLines {
+			return style.Render(strings.TrimSuffix(dv.renderWrappedUnified(), "\n"))
+		}
 		return style.Render(strings.TrimSuffix(dv.renderUnified(), "\n"))
 	case layoutSplit:
+		if dv.wrapLines {
+			return style.Render(strings.TrimSuffix(dv.renderWrappedSplit(), "\n"))
+		}
 		return style.Render(strings.TrimSuffix(dv.renderSplit(), "\n"))
 	default:
 		panic("unknown diffview layout")
+	}
+}
+
+// detectWrappedTotalLines accounts for code lines that occupy multiple visual
+// rows when wrapping is enabled.
+func (dv *DiffView) detectWrappedTotalLines() {
+	for _, h := range dv.unified.Hunks {
+		for _, l := range h.Lines {
+			dv.totalLines += len(dv.wrapCode(l.Content, dv.codeWidth)) - 1
+		}
+	}
+
+	if dv.layout != layoutSplit {
+		return
+	}
+
+	// Split rows must be as tall as their tallest pane, rather than the sum of
+	// both panes. Recalculate the code-row portion accordingly.
+	dv.detectTotalLines()
+	for _, h := range dv.splitHunks {
+		for _, l := range h.lines {
+			beforeRows, afterRows := 1, 1
+			if l.before != nil {
+				beforeRows = len(dv.wrapCode(l.before.Content, dv.codeWidth))
+			}
+			if l.after != nil {
+				afterRows = len(dv.wrapCode(l.after.Content, dv.codeWidth+btoi(dv.extraColOnAfter)))
+			}
+			dv.totalLines += max(beforeRows, afterRows) - 1
+		}
 	}
 }
 
@@ -529,6 +575,175 @@ outer:
 	}
 
 	return b.String()
+}
+
+func (dv *DiffView) wrapCode(content string, width int) []string {
+	content = strings.TrimSuffix(content, "\n")
+	if width < 1 {
+		width = 1
+	}
+	wrapped := ansi.Hardwrap(content, width, true)
+	return strings.Split(wrapped, "\n")
+}
+
+func (dv *DiffView) visibleRows(rows []string) []string {
+	start := min(dv.yOffset, len(rows))
+	rows = rows[start:]
+	if dv.height > 0 {
+		rows = rows[:min(dv.height, len(rows))]
+	}
+	return rows
+}
+
+func (dv *DiffView) renderWrappedUnified() string {
+	var rows []string
+	for i, h := range dv.unified.Hunks {
+		if i == 0 && dv.fileName != "" {
+			ls := dv.style.Filename
+			row := ""
+			if dv.lineNumbers {
+				row += ls.LineNumber.Render(pad("…", dv.beforeNumDigits))
+				row += ls.LineNumber.Render(pad("…", dv.afterNumDigits))
+			}
+			rows = append(rows, row+ls.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate("  "+dv.fileName, dv.fullCodeWidth, "…")))
+		}
+		ls := dv.style.DividerLine
+		row := ""
+		if dv.lineNumbers {
+			row += ls.LineNumber.Render(pad("…", dv.beforeNumDigits))
+			row += ls.LineNumber.Render(pad("…", dv.afterNumDigits))
+		}
+		rows = append(rows, row+ls.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate(dv.hunkLineFor(h), dv.fullCodeWidth, "…")))
+
+		beforeLine, afterLine := h.FromLine, h.ToLine
+		for _, l := range h.Lines {
+			ls := dv.lineStyleForType(l.Kind)
+			parts := dv.wrapCode(dv.hightlightCode(strings.TrimSuffix(l.Content, "\n"), ls.Code.GetBackground()), dv.codeWidth)
+			for j, part := range parts {
+				row := ""
+				if dv.lineNumbers {
+					before, after := " ", " "
+					if j == 0 {
+						switch l.Kind {
+						case udiff.Equal:
+							before, after = strconv.Itoa(beforeLine), strconv.Itoa(afterLine)
+						case udiff.Insert:
+							after = strconv.Itoa(afterLine)
+						case udiff.Delete:
+							before = strconv.Itoa(beforeLine)
+						}
+					}
+					row += ls.LineNumber.Render(pad(before, dv.beforeNumDigits))
+					row += ls.LineNumber.Render(pad(after, dv.afterNumDigits))
+				}
+				prefix := "  "
+				if j == 0 {
+					switch l.Kind {
+					case udiff.Insert:
+						prefix = ls.Symbol.Render("+ ")
+					case udiff.Delete:
+						prefix = ls.Symbol.Render("- ")
+					}
+				}
+				rows = append(rows, row+ls.Code.Width(dv.fullCodeWidth).Render(prefix+part))
+			}
+			switch l.Kind {
+			case udiff.Equal:
+				beforeLine++
+				afterLine++
+			case udiff.Insert:
+				afterLine++
+			case udiff.Delete:
+				beforeLine++
+			}
+		}
+	}
+	return strings.Join(dv.visibleRows(rows), "\n")
+}
+
+func (dv *DiffView) renderWrappedSplit() string {
+	var rows []string
+	for i, h := range dv.splitHunks {
+		if i == 0 && dv.fileName != "" {
+			ls := dv.style.Filename
+			left, right := "", ""
+			if dv.lineNumbers {
+				left = ls.LineNumber.Render(pad("…", dv.beforeNumDigits))
+				right = ls.LineNumber.Render(pad("…", dv.afterNumDigits))
+			}
+			rows = append(rows, left+ls.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate("  "+dv.fileName, dv.fullCodeWidth, "…"))+right+ls.Code.Width(dv.fullCodeWidth+btoi(dv.extraColOnAfter)).Render(" "))
+		}
+		ls := dv.style.DividerLine
+		left, right := "", ""
+		if dv.lineNumbers {
+			left = ls.LineNumber.Render(pad("…", dv.beforeNumDigits))
+			right = ls.LineNumber.Render(pad("…", dv.afterNumDigits))
+		}
+		rows = append(rows, left+ls.Code.Width(dv.fullCodeWidth).Render(ansi.Truncate(dv.hunkLineFor(dv.unified.Hunks[i]), dv.fullCodeWidth, "…"))+right+ls.Code.Width(dv.fullCodeWidth+btoi(dv.extraColOnAfter)).Render(" "))
+
+		beforeLine, afterLine := h.fromLine, h.toLine
+		for _, l := range h.lines {
+			before := dv.wrappedSplitPane(l.before, beforeLine, dv.beforeNumDigits, dv.fullCodeWidth)
+			after := dv.wrappedSplitPane(l.after, afterLine, dv.afterNumDigits, dv.fullCodeWidth+btoi(dv.extraColOnAfter))
+			count := max(len(before), len(after))
+			for j := range count {
+				left, right := dv.emptySplitPane(dv.beforeNumDigits, dv.fullCodeWidth), dv.emptySplitPane(dv.afterNumDigits, dv.fullCodeWidth+btoi(dv.extraColOnAfter))
+				if j < len(before) {
+					left = before[j]
+				}
+				if j < len(after) {
+					right = after[j]
+				}
+				rows = append(rows, left+right)
+			}
+			if l.before != nil {
+				beforeLine++
+			}
+			if l.after != nil {
+				afterLine++
+			}
+		}
+	}
+	return strings.Join(dv.visibleRows(rows), "\n")
+}
+
+func (dv *DiffView) emptySplitPane(numDigits, fullWidth int) string {
+	row := ""
+	if dv.lineNumbers {
+		row = dv.style.MissingLine.LineNumber.Render(pad(" ", numDigits))
+	}
+	return row + dv.style.MissingLine.Code.Width(fullWidth).Render("  ")
+}
+
+func (dv *DiffView) wrappedSplitPane(line *udiff.Line, lineNumber, numDigits, fullWidth int) []string {
+	if line == nil {
+		return []string{dv.emptySplitPane(numDigits, fullWidth)}
+	}
+	ls := dv.lineStyleForType(line.Kind)
+	codeWidth := fullWidth - leadingSymbolsSize
+	parts := dv.wrapCode(dv.hightlightCode(strings.TrimSuffix(line.Content, "\n"), ls.Code.GetBackground()), codeWidth)
+	rows := make([]string, len(parts))
+	for i, part := range parts {
+		row := ""
+		if dv.lineNumbers {
+			number := " "
+			if i == 0 {
+				number = strconv.Itoa(lineNumber)
+			}
+			row = ls.LineNumber.Render(pad(number, numDigits))
+		}
+		prefix := "  "
+		if i == 0 {
+			switch line.Kind {
+			case udiff.Insert:
+				prefix = ls.Symbol.Render("+ ")
+			case udiff.Delete:
+				prefix = ls.Symbol.Render("- ")
+			}
+		}
+		rows[i] = row + ls.Code.Width(fullWidth).Render(prefix+part)
+	}
+	return rows
 }
 
 // renderSplit renders the split (side-by-side) diff view as a string.

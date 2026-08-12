@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/rave-soft/braid/internal/ui/diffview"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 //go:embed testdata/TestDefault.before
@@ -318,6 +320,80 @@ func TestDiffViewYOffsetInfinite(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDiffViewWrapLinesUnified(t *testing.T) {
+	t.Parallel()
+
+	const width = 20
+	const before = "const value = \"this is a very long old value\"\n"
+	const after = "const value = \"this is a very long new value\"\n"
+
+	output := diffview.New().
+		Before("main.go", before).
+		After("main.go", after).
+		Width(width).
+		XOffset(10).
+		WrapLines(true).
+		ChromaStyle(styles.Get("catppuccin-latte")).
+		String()
+
+	assertLineWidthsAtMost(t, width, output)
+	stripped := ansi.Strip(output)
+	assert.Contains(t, strings.Join(strings.Fields(stripped), ""), "thisisaverylongoldvalue")
+	assert.Contains(t, strings.Join(strings.Fields(stripped), ""), "thisisaverylongnewvalue")
+	assert.Equal(t, 1, strings.Count(stripped, "- "))
+	assert.Equal(t, 1, strings.Count(stripped, "+ "))
+	assert.Equal(t, output, diffview.New().
+		Before("main.go", before).
+		After("main.go", after).
+		Width(width).
+		WrapLines(true).
+		ChromaStyle(styles.Get("catppuccin-latte")).
+		String())
+}
+
+func TestDiffViewWrapLinesSplit(t *testing.T) {
+	t.Parallel()
+
+	const width = 38
+	const before = "const value = \"this is a very long old value\"\n"
+	const after = "const value = \"this is a very long new value that wraps further\"\n"
+
+	output := diffview.New().
+		Split().
+		Before("main.go", before).
+		After("main.go", after).
+		Width(width).
+		WrapLines(true).
+		ChromaStyle(styles.Get("catppuccin-latte")).
+		String()
+
+	assertLineWidthsAtMost(t, width, output)
+	stripped := ansi.Strip(output)
+	beforeContent, afterContent := splitWrappedContent(stripped, 19)
+	assert.Contains(t, beforeContent, "constvalue=\"thisisaverylongoldvalue\"")
+	assert.Contains(t, afterContent, "constvalue=\"thisisaverylongnewvaluethatwrapsfurther\"")
+	assert.Equal(t, 1, strings.Count(stripped, "- "))
+	assert.Equal(t, 1, strings.Count(stripped, "+ "))
+}
+
+func assertLineWidthsAtMost(t *testing.T, width int, output string) {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		require.LessOrEqual(t, ansi.StringWidth(line), width)
+	}
+}
+
+func splitWrappedContent(output string, paneWidth int) (string, string) {
+	var before, after strings.Builder
+	lines := strings.Split(output, "\n")
+	for _, line := range lines[1:] { // Skip the hunk header.
+		before.WriteString(line[3:paneWidth])
+		after.WriteString(line[paneWidth+3:])
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(before.String(), " ", ""), "-", ""),
+		strings.ReplaceAll(strings.ReplaceAll(after.String(), " ", ""), "+", "")
 }
 
 func assertLineWidth(t *testing.T, expected int, output string) {

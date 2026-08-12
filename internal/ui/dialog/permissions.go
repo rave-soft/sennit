@@ -681,7 +681,8 @@ func (p *Permissions) renderDiff(filePath, oldContent, newContent string, conten
 		Before(fsext.PrettyPath(filePath), oldContent).
 		After(fsext.PrettyPath(filePath), newContent).
 		XOffset(p.diffXOffset).
-		Width(contentWidth)
+		Width(contentWidth).
+		WrapLines(true)
 
 	var result string
 	if isSplitMode {

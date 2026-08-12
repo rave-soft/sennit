@@ -425,7 +425,8 @@ func expandableDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	formatter := common.DiffFormatter(sty).
 		Before(file, oldContent).
 		After(file, newContent).
-		Width(bodyWidth)
+		Width(bodyWidth).
+		WrapLines(true)
 	if hovered {
 		hoverBackground := sty.Tool.DiffTruncationHover.GetBackground()
 		formatter = formatter.Style(diffStyleBackground(sty.Diff, hoverBackground))
