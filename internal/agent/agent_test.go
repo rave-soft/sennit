@@ -8,19 +8,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"charm.land/x/vcr"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -42,57 +41,93 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-var modelPairs = []modelPair{
-	{"glm-5.1", openaiCompatBuilder("glm-5.1"), openaiCompatBuilder("gpt-oss-120b")},
-}
+// ---------------------------------------------------------------------------
+// Agent construction helpers
+// ---------------------------------------------------------------------------
 
-func getModels(t *testing.T, r *vcr.Recorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
-	large, err := pair.largeModel(t, r)
-	require.NoError(t, err)
-	small, err := pair.smallModel(t, r)
-	require.NoError(t, err)
-	return large, small
+var fixtureResourceURLs sync.Map // working directory -> fixture server URL
+
+func fixtureResourceURL(env fakeEnv, path string) string {
+	baseURL, ok := fixtureResourceURLs.Load(env.workingDir)
+	if !ok {
+		return cassetteAuthority + path
+	}
+	return baseURL.(string) + path
 }
 
 func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
-	var opts []vcr.Option
-	if recordCassettes() {
-		// Force a fresh recording rather than replaying (and failing to
-		// match) the stale cassette already on disk.
-		opts = append(opts, vcr.WithMode(recorder.ModeRecordOnly))
-	}
-	r := vcr.NewRecorder(t, opts...)
-	large, small := getModels(t, r, pair)
-	env := testEnv(t)
+	t.Helper()
+	mode := os.Getenv("BRAID_TEST_VCR_MODE")
+	cfg, err := resolveTestVCRConfig(
+		mode,
+		os.Getenv("BRAID_TEST_CASSETTE_ROOT"),
+		os.Getenv("BRAID_TEST_OPENAI_BASE_URL"),
+		os.Getenv("BRAID_TEST_OPENAI_MODEL"),
+	)
+	require.NoError(t, err)
 
+	var scenario func() string
+	if mode == vcrModeFixture {
+		scenario = func() string {
+			return strings.ReplaceAll(strings.Split(t.Name(), "/")[2], " ", "_")
+		}
+	}
+	return setupAgentWithVCR(t, cfg, cassetteName(t, pair.name), "", scenario)
+}
+
+// setupAgentWithVCR constructs the production-like test agent with an explicit
+// cassette destination and, optionally, the deterministic fixture endpoint.
+// Keeping these inputs explicit lets determinism tests run isolated recordings
+// without mutating process-wide test environment variables.
+func setupAgentWithVCR(t *testing.T, cfg testVCRConfig, cassetteBasename, workspaceDir string, scenario func() string) (SessionAgent, fakeEnv) {
+	t.Helper()
+	var env fakeEnv
+	if workspaceDir == "" {
+		env = testEnv(t)
+	} else {
+		env = testEnvAt(t, workspaceDir)
+	}
+	if scenario != nil {
+		_, server := NewFixtureHTTPServer(FixtureConfig{Scenario: scenario, DefaultModel: cfg.Model})
+		fixtureResourceURLs.Store(env.workingDir, server.URL)
+		t.Cleanup(func() {
+			fixtureResourceURLs.Delete(env.workingDir)
+			server.Close()
+		})
+		cfg.BaseURL = server.URL + "/v1"
+	}
+
+	recorder := newTestRecorder(t, cfg, cassetteBasename)
+	large, small := getModels(t, recorder, cfg.BaseURL, cfg.Model)
 	createSimpleGoProject(t, env.workingDir)
-	agent, err := coderAgent(r, env, large, small)
+	agent, err := coderAgent(recorder.GetDefaultClient(), env, large, small)
 	require.NoError(t, err)
 	return agent, env
+}
+
+func createSimpleGoProject(t *testing.T, dir string) {
+	goMod := `module example.com/testproject
+
+go 1.23
+`
+	err := os.WriteFile(dir+"/go.mod", []byte(goMod), 0o644)
+	require.NoError(t, err)
+
+	mainGo := `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello, World!")
+}
+`
+	err = os.WriteFile(dir+"/main.go", []byte(mainGo), 0o644)
+	require.NoError(t, err)
 }
 
 func TestCoderAgent(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows for now")
-	}
-
-	// These cassettes replay traffic Charm recorded against hyper.charm.land,
-	// and the recorded request bodies embed the full tool schema and system
-	// prompt of the time — including the crush_info / crush_logs tool names and
-	// the old product name. The rebrand changes both, so no request in this
-	// cassette can ever match a request built with today's code.
-	//
-	// The test and its fixtures are kept rather than deleted: openaiCompatBuilder
-	// (common_test.go) points at any OpenAI-compatible endpoint via env vars, so
-	// re-recording is one command away once such an endpoint is available. See
-	// TECHDEBT.md for the state of this and what re-recording changes.
-	if !recordCassettes() {
-		t.Skip("cassettes recorded pre-rebrand are stale (old crush_info/crush_logs tool names, old system " +
-			"prompt); re-record with BRAID_TEST_OPENAI_BASE_URL=<endpoint> BRAID_TEST_OPENAI_MODEL=<model> " +
-			"go test ./internal/agent/ -run TestCoderAgent -v")
-	}
-	if os.Getenv("BRAID_TEST_OPENAI_MODEL") == "" {
-		t.Skip("BRAID_TEST_OPENAI_MODEL is required to record cassettes; there is no default model")
 	}
 
 	for _, pair := range modelPairs {
@@ -259,7 +294,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "download the file from https://example-files.online-convert.com/document/txt/example.txt and save it as example.txt",
+					Prompt:          "download the file from " + fixtureResourceURL(env, "/download") + " and save it as example.txt",
 					SessionID:       session.ID,
 					MaxOutputTokens: 10000,
 				})
@@ -302,7 +337,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "fetch the content from https://example-files.online-convert.com/website/html/example.html and tell me if it contains the word 'John Doe'",
+					Prompt:          "fetch the content from " + fixtureResourceURL(env, "/fetch") + " and tell me if it contains the word 'John Doe'",
 					SessionID:       session.ID,
 					MaxOutputTokens: 10000,
 				})
@@ -327,6 +362,8 @@ func TestCoderAgent(t *testing.T) {
 						for _, tr := range msg.ToolResults() {
 							if tr.ToolCallID == fetchTCID {
 								foundFetch = true
+								require.False(t, tr.IsError)
+								require.Contains(t, tr.Content, "John Doe fixture content")
 							}
 						}
 					}
@@ -366,7 +403,8 @@ func TestCoderAgent(t *testing.T) {
 						for _, tr := range msg.ToolResults() {
 							if tr.ToolCallID == globTCID {
 								foundGlob = true
-								require.Contains(t, tr.Content, "main.go", "Expected glob to find main.go")
+								require.False(t, tr.IsError)
+								require.Contains(t, tr.Content, "main.go")
 							}
 						}
 					}
@@ -387,32 +425,30 @@ func TestCoderAgent(t *testing.T) {
 				})
 				require.NoError(t, err)
 				assert.NotNil(t, res)
-
 				msgs, err := env.messages.List(t.Context(), session.ID)
 				require.NoError(t, err)
-
-				foundGrep := false
-				var grepTCID string
-
+				grepCallID := ""
+				grepResult := false
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
 							if tc.Name == tools.GrepToolName {
-								grepTCID = tc.ID
+								grepCallID = tc.ID
 							}
 						}
 					}
 					if msg.Role == message.Tool {
 						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == grepTCID {
-								foundGrep = true
-								require.Contains(t, tr.Content, "main.go", "Expected grep to find main.go")
+							if tr.ToolCallID == grepCallID {
+								grepResult = true
+								require.False(t, tr.IsError)
+								require.Contains(t, tr.Content, "package main")
 							}
 						}
 					}
 				}
-
-				require.True(t, foundGrep, "Expected to find a grep operation")
+				require.NotEmpty(t, grepCallID, "Expected a grep tool call")
+				require.True(t, grepResult, "Expected a successful grep result")
 			})
 			t.Run("ls tool", func(t *testing.T) {
 				agent, env := setupAgent(t, pair)
@@ -487,6 +523,8 @@ func TestCoderAgent(t *testing.T) {
 						for _, tr := range msg.ToolResults() {
 							if tr.ToolCallID == multiEditTCID {
 								foundMultiEdit = true
+								require.False(t, tr.IsError)
+								require.NotEmpty(t, tr.Content)
 							}
 						}
 					}
@@ -497,7 +535,8 @@ func TestCoderAgent(t *testing.T) {
 				mainGoPath := filepath.Join(env.workingDir, "main.go")
 				content, err := os.ReadFile(mainGoPath)
 				require.NoError(t, err)
-				require.Contains(t, string(content), "Hello, Braid!", "Expected file to contain 'Hello, Braid!'")
+				require.Contains(t, string(content), "// Greeting")
+				require.Contains(t, string(content), "Hello, Braid!")
 			})
 			t.Run("write tool", func(t *testing.T) {
 				agent, env := setupAgent(t, pair)
@@ -606,8 +645,8 @@ func TestCoderAgent(t *testing.T) {
 					for _, tr := range msg.ToolResults() {
 						if tr.ToolCallID == globTCID {
 							foundGlobResult = true
-							require.Contains(t, tr.Content, "main.go", "Expected glob result to contain main.go")
 							require.False(t, tr.IsError, "Expected glob result to not be an error")
+							require.Contains(t, tr.Content, "main.go", "Expected glob result to contain main.go")
 						}
 						if tr.ToolCallID == lsTCID {
 							foundLSResult = true

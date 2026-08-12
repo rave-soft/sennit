@@ -57,53 +57,46 @@
 инвариант выполняется для обоих скоупов — расхождения между «куда пишем» и
 «откуда читаем» не найдено.
 
-### Записанные интеграционные кассеты агента — 13 подтестов
+### Записанные интеграционные кассеты агента — выполнено
 
 `internal/agent/agent_test.go`, `internal/agent/testdata/`
 
-`TestCoderAgent` целиком отключён. Кассеты содержат трафик, записанный Charm
-против `hyper.charm.land`, и в телах запросов зашиты полная схема инструментов
-и системный промпт того времени — включая имена `crush_info` и `crush_logs` и
-старое название продукта. После ребрендинга ни один запрос не совпадёт, а
-перезаписать записи без ключа от сервиса Charm невозможно.
+`TestCoderAgent` работает в трёх режимах:
 
-Инфраструктура для перезаписи готова (сама перезапись — нет, в этом окружении
-нет ни локального LLM-эндпоинта, ни ключей). `hyperBuilder` в
-`internal/agent/common_test.go` заменён на `openaiCompatBuilder`, который
-строит провайдера против произвольного OpenAI-совместимого эндпоинта, целиком
-через переменные окружения:
+1. **Replay (по умолчанию, `BRAID_TEST_VCR_MODE` unset).** Воспроизводит
+   записанные взаимодействия с LLM из `testdata/TestCoderAgent/glm-5.1/*.yaml`.
+   Кассеты содержат текущую схему инструментов и системный промпт. Все 12
+   подтестов проходят без внешнего LLM-эндпоинта.
 
-- `BRAID_TEST_OPENAI_BASE_URL` — базовый URL API. По умолчанию
-  `http://localhost:11434/v1` (адрес Ollama), если переменная не задана.
-- `BRAID_TEST_OPENAI_MODEL` — имя модели. Дефолта нет намеренно: какая модель
-  доступна локально, заранее не угадать. Без неё перезапись пропускается с
-  понятным сообщением.
-- `BRAID_TEST_OPENAI_API_KEY` — опционально, локальным серверам обычно не
-  нужен.
+2. **Fixture (перегенерация, `BRAID_TEST_VCR_MODE=fixture`).** Запускает
+   детерминированный локальный fixture-сервер с instance-local состоянием и
+   случайным портом. `BRAID_TEST_CASSETTE_ROOT` обязателен; BeforeSave-hook
+   записывает кассеты с canonical authority прямо в указанный каталог.
 
-Наличие `BRAID_TEST_OPENAI_BASE_URL` — это и есть переключатель режима:
-`setupAgent` (`internal/agent/agent_test.go`) передаёт VCR-рекордеру
-`recorder.ModeRecordOnly`, чтобы перезаписать (а не пытаться воспроизвести и
-провалиться на несовпадении) уже лежащую на диске протухшую кассету. Без этой
-переменной рекордер работает в дефолтном режиме `ModeRecordOnce`
-(replay, если кассета уже существует) — так работают все остальные тесты
-пакета.
+3. **Record (внешний endpoint, `BRAID_TEST_VCR_MODE=record`).** Разрешён
+   только при одновременном задании `BRAID_TEST_OPENAI_BASE_URL` и
+   `BRAID_TEST_OPENAI_MODEL`; URL сам по себе режим не переключает.
 
-**Команда перезаписи**, когда эндпоинт появится:
+**Команды:**
 
 ```
-BRAID_TEST_OPENAI_BASE_URL=http://localhost:11434/v1 \
-BRAID_TEST_OPENAI_MODEL=<имя-модели> \
+# Replay (по умолчанию, без env)
 go test ./internal/agent/ -run TestCoderAgent -v
+
+# Перезапись кассет через fixture mode (из корня репозитория)
+BRAID_TEST_VCR_MODE=fixture BRAID_TEST_CASSETTE_ROOT=$(pwd)/internal/agent/testdata go test ./internal/agent/ -run TestCoderAgent -count=2 -v
+
+# Запись с внешнего OpenAI-совместимого endpoint
+BRAID_TEST_VCR_MODE=record BRAID_TEST_CASSETTE_ROOT=$(pwd)/internal/agent/testdata BRAID_TEST_OPENAI_BASE_URL=https://provider.example/v1 BRAID_TEST_OPENAI_MODEL=model go test ./internal/agent/ -run TestCoderAgent -v
 ```
 
-`TestCoderAgent` сейчас всё равно пропускается (`t.Skip`) при отсутствии
-`BRAID_TEST_OPENAI_BASE_URL` — сообщение скипа само подсказывает эту команду.
-Кассеты нужно будет перезаписывать заново при любом изменении схемы
-инструментов (`internal/agent/tools/`) или системного промпта
-(`internal/agent/templates/*.md.tpl`, `internal/agent/prompt/`) — записанные
-тела запросов содержат их целиком, и любое расхождение снова ломает сравнение
-VCR-матчера.
+Инфраструктура VCR полностью переписана:
+- `recordCassettes()` удалён — единичный селектор `BRAID_TEST_VCR_MODE`.
+- Единый test VCR helper принимает explicit mode/root/base URL/model.
+- Canonical authority `http://vcr.test` для URL; strict method+path+query+body matcher.
+- Deterministic fixture server с instance-local state, 12 predefined сценариев.
+- Никаких глобальных мутабельных кешей или production VCR-кода.
+- Body match = JSON semantic equality, model включён, без normalize.
 
 ## Поведение, требующее проверки
 

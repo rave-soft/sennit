@@ -10,8 +10,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/openaicompat"
-	"charm.land/x/vcr"
 	"github.com/rave-soft/braid/internal/agent/prompt"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/config"
@@ -28,6 +26,10 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 )
 
+// ---------------------------------------------------------------------------
+// Test environment
+// ---------------------------------------------------------------------------
+
 // fakeEnv is an environment for testing.
 type fakeEnv struct {
 	workingDir  string
@@ -39,63 +41,13 @@ type fakeEnv struct {
 	lspClients  *csync.Map[string, *lsp.Client]
 }
 
-type builderFunc func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error)
-
-type modelPair struct {
-	name       string
-	largeModel builderFunc
-	smallModel builderFunc
-}
-
-// defaultTestOpenAIBaseURL is Ollama's default local listen address — a
-// reasonable default for anyone re-recording cassettes without configuring
-// anything else. There is deliberately no default model: what's available
-// locally varies too much to guess, so callers must set
-// BRAID_TEST_OPENAI_MODEL.
-const defaultTestOpenAIBaseURL = "http://localhost:11434/v1"
-
-// recordCassettes reports whether TestCoderAgent should hit a live
-// OpenAI-compatible endpoint and overwrite its VCR cassettes, instead of the
-// default replay-from-testdata/ behavior. Setting BRAID_TEST_OPENAI_BASE_URL
-// is what opts a run into recording — its presence is the trigger.
-func recordCassettes() bool {
-	return os.Getenv("BRAID_TEST_OPENAI_BASE_URL") != ""
-}
-
-// openaiCompatBuilder builds a language model against any OpenAI-compatible
-// endpoint (Ollama, llama.cpp, vLLM, ...), configured via env vars so
-// cassettes can be re-recorded without touching code:
-//
-//   - BRAID_TEST_OPENAI_BASE_URL: API base URL (default: defaultTestOpenAIBaseURL)
-//   - BRAID_TEST_OPENAI_MODEL: overrides the model name given below, if set
-//   - BRAID_TEST_OPENAI_API_KEY: optional; most local servers don't need one
-//
-// This replaces the old hyperBuilder, which pointed at Charm's
-// hyper.charm.land — a service this fork no longer has access to (see
-// TECHDEBT.md).
-func openaiCompatBuilder(model string) builderFunc {
-	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
-		baseURL := os.Getenv("BRAID_TEST_OPENAI_BASE_URL")
-		if baseURL == "" {
-			baseURL = defaultTestOpenAIBaseURL
-		}
-		if m := os.Getenv("BRAID_TEST_OPENAI_MODEL"); m != "" {
-			model = m
-		}
-		provider, err := openaicompat.New(
-			openaicompat.WithBaseURL(baseURL),
-			openaicompat.WithAPIKey(os.Getenv("BRAID_TEST_OPENAI_API_KEY")),
-			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
-		)
-		if err != nil {
-			return nil, err
-		}
-		return provider.LanguageModel(t.Context(), model)
-	}
-}
-
 func testEnv(t *testing.T) fakeEnv {
-	workingDir := filepath.Join("/tmp/crush-test/", t.Name())
+	t.Helper()
+	return testEnvAt(t, filepath.Join(os.TempDir(), "braid-test-", t.Name()))
+}
+
+func testEnvAt(t *testing.T, workingDir string) fakeEnv {
+	t.Helper()
 	_ = os.RemoveAll(workingDir)
 
 	err := os.MkdirAll(workingDir, 0o755)
@@ -129,6 +81,10 @@ func testEnv(t *testing.T) fakeEnv {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Agent construction
+// ---------------------------------------------------------------------------
+
 func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
 	largeModel := Model{
 		Model: large,
@@ -155,12 +111,12 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 	return agent
 }
 
-func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
+func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
 	fixedTime := func() time.Time {
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
 	}
-	prompt, err := coderPrompt(
+	p, err := coderPrompt(
 		prompt.WithTimeFunc(fixedTime),
 		prompt.WithPlatform("linux"),
 		prompt.WithWorkingDir(filepath.ToSlash(env.workingDir)),
@@ -187,7 +143,7 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	cfg.Config().Options.GlobalContextPaths = nil
 	cfg.Config().LSP = nil
 
-	systemPrompt, err := prompt.Build(context.TODO(), large.Provider(), large.Model(), cfg)
+	systemPrompt, err := p.Build(context.TODO(), large.Provider(), large.Model(), cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -200,10 +156,10 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 
 	allTools := []fantasy.AgentTool{
 		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.Attribution, modelName),
-		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
+		tools.NewDownloadTool(env.permissions, env.workingDir, client),
 		tools.NewEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 		tools.NewMultiEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
-		tools.NewFetchTool(env.permissions, env.workingDir, r.GetDefaultClient()),
+		tools.NewFetchTool(env.permissions, env.workingDir, client),
 		tools.NewGlobTool(env.workingDir, cfg.Config().Tools.Glob),
 		tools.NewGrepTool(env.workingDir, cfg.Config().Tools.Grep),
 		tools.NewLsTool(env.permissions, env.workingDir, cfg.Config().Tools.Ls),
@@ -212,26 +168,4 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 	}
 
 	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil
-}
-
-// createSimpleGoProject creates a simple Go project structure in the given directory.
-// It creates a go.mod file and a main.go file with a basic hello world program.
-func createSimpleGoProject(t *testing.T, dir string) {
-	goMod := `module example.com/testproject
-
-go 1.23
-`
-	err := os.WriteFile(dir+"/go.mod", []byte(goMod), 0o644)
-	require.NoError(t, err)
-
-	mainGo := `package main
-
-import "fmt"
-
-func main() {
-	fmt.Println("Hello, World!")
-}
-`
-	err = os.WriteFile(dir+"/main.go", []byte(mainGo), 0o644)
-	require.NoError(t, err)
 }
