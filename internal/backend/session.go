@@ -88,7 +88,7 @@ func (b *Backend) ListSessionHistory(ctx context.Context, workspaceID, sessionID
 		return nil, err
 	}
 
-	return ws.History.ListBySession(ctx, sessionID)
+	return ws.History.ListBySessionTree(ctx, sessionID)
 }
 
 // SaveSession updates a session in the given workspace.

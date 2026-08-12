@@ -16,6 +16,35 @@ FROM files
 WHERE session_id = ?
 ORDER BY version ASC, created_at ASC;
 
+-- name: ListFilesBySessionTree :many
+WITH RECURSIVE
+ancestors(id, parent_session_id) AS (
+    SELECT sessions.id, sessions.parent_session_id
+    FROM sessions
+    WHERE sessions.id = sqlc.arg(session_id)
+    UNION ALL
+    SELECT s.id, s.parent_session_id
+    FROM sessions s
+    JOIN ancestors a ON s.id = a.parent_session_id
+),
+root(id) AS (
+    SELECT ancestors.id
+    FROM ancestors
+    WHERE ancestors.parent_session_id IS NULL
+    LIMIT 1
+),
+session_tree(id) AS (
+    SELECT root.id FROM root
+    UNION ALL
+    SELECT s.id
+    FROM sessions s
+    JOIN session_tree tree ON s.parent_session_id = tree.id
+)
+SELECT files.*
+FROM files
+JOIN session_tree ON files.session_id = session_tree.id
+ORDER BY files.version ASC, files.created_at ASC;
+
 -- name: ListFilesByPath :many
 SELECT *
 FROM files

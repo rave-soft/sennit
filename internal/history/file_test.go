@@ -12,7 +12,7 @@ import (
 // newTestService sets up an isolated on-disk SQLite DB (with migrations) and
 // a session to attach files to, mirroring the pattern used in
 // internal/session/session_test.go.
-func newTestService(t *testing.T) (Service, string) {
+func newTestService(t *testing.T) (Service, session.Service, string) {
 	t.Helper()
 
 	dataDir := t.TempDir()
@@ -28,11 +28,11 @@ func newTestService(t *testing.T) (Service, string) {
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 
-	return NewService(db.New(conn), conn), sess.ID
+	return NewService(db.New(conn), conn), sessions, sess.ID
 }
 
 func TestCreateVersionSequentialVersions(t *testing.T) {
-	files, sessionID := newTestService(t)
+	files, _, sessionID := newTestService(t)
 
 	first, err := files.CreateVersion(t.Context(), sessionID, "foo.go", "v0")
 	require.NoError(t, err)
@@ -49,7 +49,7 @@ func TestCreateVersionSequentialVersions(t *testing.T) {
 // guards against the historical TOCTOU bug where the next version was
 // computed outside the insert transaction.
 func TestCreateVersionConcurrent(t *testing.T) {
-	files, sessionID := newTestService(t)
+	files, _, sessionID := newTestService(t)
 
 	const n = 20
 	var wg sync.WaitGroup
@@ -77,5 +77,32 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	}
 	for v := range int64(n) {
 		require.True(t, seen[v], "missing version %d", v)
+	}
+}
+
+func TestListBySessionTreeSharesFilesAcrossAgents(t *testing.T) {
+	files, sessions, rootID := newTestService(t)
+	child, err := sessions.CreateTaskSession(t.Context(), "child", rootID, "child")
+	require.NoError(t, err)
+	sibling, err := sessions.CreateTaskSession(t.Context(), "sibling", rootID, "sibling")
+	require.NoError(t, err)
+	nested, err := sessions.CreateTaskSession(t.Context(), "nested", child.ID, "nested")
+	require.NoError(t, err)
+
+	_, err = files.CreateVersion(t.Context(), rootID, "root.go", "root")
+	require.NoError(t, err)
+	_, err = files.CreateVersion(t.Context(), child.ID, "child.go", "child")
+	require.NoError(t, err)
+	_, err = files.CreateVersion(t.Context(), nested.ID, "nested.go", "nested")
+	require.NoError(t, err)
+
+	for _, sessionID := range []string{rootID, child.ID, sibling.ID, nested.ID} {
+		treeFiles, listErr := files.ListBySessionTree(t.Context(), sessionID)
+		require.NoError(t, listErr)
+		paths := make([]string, len(treeFiles))
+		for i, file := range treeFiles {
+			paths[i] = file.Path
+		}
+		require.ElementsMatch(t, []string{"root.go", "child.go", "nested.go"}, paths)
 	}
 }

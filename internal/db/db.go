@@ -102,6 +102,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listFilesBySessionStmt, err = db.PrepareContext(ctx, listFilesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesBySession: %w", err)
 	}
+	if q.listFilesBySessionTreeStmt, err = db.PrepareContext(ctx, listFilesBySessionTree); err != nil {
+		return nil, fmt.Errorf("error preparing query ListFilesBySessionTree: %w", err)
+	}
 	if q.listLatestSessionFilesStmt, err = db.PrepareContext(ctx, listLatestSessionFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListLatestSessionFiles: %w", err)
 	}
@@ -297,6 +300,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listFilesBySessionStmt: %w", cerr)
 		}
 	}
+	if q.listFilesBySessionTreeStmt != nil {
+		if cerr := q.listFilesBySessionTreeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listFilesBySessionTreeStmt: %w", cerr)
+		}
+	}
 	if q.listLatestSessionFilesStmt != nil {
 		if cerr := q.listLatestSessionFilesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listLatestSessionFilesStmt: %w", cerr)
@@ -462,6 +470,7 @@ type Queries struct {
 	listAssistantMessagesSinceStmt *sql.Stmt
 	listFilesByPathStmt            *sql.Stmt
 	listFilesBySessionStmt         *sql.Stmt
+	listFilesBySessionTreeStmt     *sql.Stmt
 	listLatestSessionFilesStmt     *sql.Stmt
 	listMessagesBySessionStmt      *sql.Stmt
 	listNewFilesStmt               *sql.Stmt
@@ -514,6 +523,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAssistantMessagesSinceStmt: q.listAssistantMessagesSinceStmt,
 		listFilesByPathStmt:            q.listFilesByPathStmt,
 		listFilesBySessionStmt:         q.listFilesBySessionStmt,
+		listFilesBySessionTreeStmt:     q.listFilesBySessionTreeStmt,
 		listLatestSessionFilesStmt:     q.listLatestSessionFilesStmt,
 		listMessagesBySessionStmt:      q.listMessagesBySessionStmt,
 		listNewFilesStmt:               q.listNewFilesStmt,

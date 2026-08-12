@@ -210,6 +210,67 @@ func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]F
 	return items, nil
 }
 
+const listFilesBySessionTree = `-- name: ListFilesBySessionTree :many
+WITH RECURSIVE
+ancestors(id, parent_session_id) AS (
+    SELECT sessions.id, sessions.parent_session_id
+    FROM sessions
+    WHERE sessions.id = ?1
+    UNION ALL
+    SELECT s.id, s.parent_session_id
+    FROM sessions s
+    JOIN ancestors a ON s.id = a.parent_session_id
+),
+root(id) AS (
+    SELECT ancestors.id
+    FROM ancestors
+    WHERE ancestors.parent_session_id IS NULL
+    LIMIT 1
+),
+session_tree(id) AS (
+    SELECT root.id FROM root
+    UNION ALL
+    SELECT s.id
+    FROM sessions s
+    JOIN session_tree tree ON s.parent_session_id = tree.id
+)
+SELECT files.id, files.session_id, files.path, files.content, files.version, files.created_at, files.updated_at
+FROM files
+JOIN session_tree ON files.session_id = session_tree.id
+ORDER BY files.version ASC, files.created_at ASC
+`
+
+func (q *Queries) ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error) {
+	rows, err := q.query(ctx, q.listFilesBySessionTreeStmt, listFilesBySessionTree, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []File{}
+	for rows.Next() {
+		var i File
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Path,
+			&i.Content,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestSessionFiles = `-- name: ListLatestSessionFiles :many
 SELECT f.id, f.session_id, f.path, f.content, f.version, f.created_at, f.updated_at
 FROM files f
