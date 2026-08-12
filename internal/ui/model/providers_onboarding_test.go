@@ -14,7 +14,7 @@ import (
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
-	"github.com/rave-soft/braid/internal/ui/util"
+	util "github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -46,6 +46,58 @@ func collectTeaMsgs(cmd tea.Cmd) []tea.Msg {
 	for i := range v.Len() {
 		if sub, ok := v.Index(i).Interface().(tea.Cmd); ok {
 			out = append(out, collectTeaMsgs(sub)...)
+		}
+	}
+	return out
+}
+
+// collectTeaMsgsAndHandleResults drives the cmd tree, and for any
+// providerConfiguredResult or modelSelectResult messages that appear,
+// handles them manually to trigger the follow-up commands (initAgentAndReportModel)
+// without going through the full Update loop (which would dispatch LSP/busy
+// refreshes that the test workspace stub doesn't implement).
+func collectTeaMsgsAndHandleResults(ui *UI, cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	var out []tea.Msg
+	stack := []tea.Cmd{cmd}
+	for len(stack) > 0 {
+		c := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		msg := c()
+		v := reflect.ValueOf(msg)
+		if v.Kind() == reflect.Slice {
+			for i := range v.Len() {
+				if sub, ok := v.Index(i).Interface().(tea.Cmd); ok {
+					stack = append(stack, sub)
+				}
+			}
+			continue
+		}
+		out = append(out, msg)
+		switch r := msg.(type) {
+		case providerConfiguredResult:
+			if r.Err != nil {
+				out = append(out, util.ReportError(r.Err)())
+			} else {
+				out = append(out, collectTeaMsgsAndHandleResults(ui, ui.initAgentAndReportModel(true, r.Model, r.generation))...)
+			}
+		case modelSelectResult:
+			if r.Err != nil {
+				out = append(out, util.ReportError(r.Err)())
+			} else {
+				out = append(out, collectTeaMsgsAndHandleResults(ui, ui.initAgentAndReportModel(r.Onboarding, r.Model, r.generation))...)
+			}
+		case agentModelInitializedMsg:
+			if r.Err != nil {
+				out = append(out, util.ReportError(r.Err)())
+				break
+			}
+			if r.Onboarding {
+				ui.setState(uiLanding, uiFocusEditor)
+			}
+			out = append(out, util.NewInfoMsg("Model changed to "+r.Model.Model))
 		}
 	}
 	return out
@@ -198,7 +250,7 @@ func TestActionProviderConfigured_OnboardingSelectsDefaultModelAndEntersLanding(
 
 	cmd := ui.handleDialogMsg(struct{}{})
 	require.NotNil(t, cmd)
-	runTeaCmd(cmd)
+	collectTeaMsgsAndHandleResults(ui, cmd)
 
 	require.Equal(t, uiLanding, ui.state)
 	require.False(t, ui.dialog.ContainsDialog(dialog.ProvidersID))
@@ -230,7 +282,7 @@ func TestActionProviderConfigured_ReportsModelChangedStatus(t *testing.T) {
 
 	cmd := ui.handleDialogMsg(struct{}{})
 	require.NotNil(t, cmd)
-	msgs := collectTeaMsgs(cmd)
+	msgs := collectTeaMsgsAndHandleResults(ui, cmd)
 
 	var infoMsgs []string
 	for _, msg := range msgs {

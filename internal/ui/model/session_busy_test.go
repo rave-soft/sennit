@@ -356,19 +356,18 @@ func TestToggleYoloWritesThroughCache(t *testing.T) {
 	ws := &countingWorkspace{ready: true, yolo: false}
 	m := newBusyUI(ws)
 
-	got := m.toggleYoloMode()
-	require.True(t, got)
+	msg := m.toggleYoloMode()().(yoloToggledMsg)
+	_, _ = m.Update(msg)
+	require.True(t, m.yoloModeCached())
 	require.Equal(t, 1, ws.permSetCalls)
 	readsAfterToggle := ws.permCalls
-	require.Equal(t, 1, readsAfterToggle, "toggle reads the authoritative value exactly once")
 
-	require.True(t, m.yoloModeCached(), "the new value must be served from the cache")
 	require.True(t, m.wsCache.yoloCache.fresh(busyCacheTTL), "write-through must stamp the cache fresh")
 	m.yoloModeCached()
 	require.Equal(t, readsAfterToggle, ws.permCalls, "reads after the toggle must not re-probe")
 
-	got = m.toggleYoloMode()
-	require.False(t, got)
+	msg = m.toggleYoloMode()().(yoloToggledMsg)
+	_, _ = m.Update(msg)
 	require.False(t, m.yoloModeCached())
 }
 
@@ -387,7 +386,8 @@ func TestLocalYoloToggleSupersedesInFlightProbe(t *testing.T) {
 	m.wsCache.busyFetchInFlight = true
 	staleGen := m.wsCache.busyFetchGen
 
-	require.True(t, m.toggleYoloMode())
+	msg := m.toggleYoloMode()().(yoloToggledMsg)
+	_, _ = m.Update(msg)
 	require.NotEqual(t, staleGen, m.wsCache.busyFetchGen,
 		"toggle must advance the busy generation to supersede in-flight probes")
 	require.True(t, m.yoloModeCached(), "toggle must write the new value through the cache")

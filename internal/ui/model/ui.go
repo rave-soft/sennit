@@ -69,6 +69,92 @@ import (
 	"github.com/rave-soft/braid/internal/workspace"
 )
 
+// transparentToggledMsg carries the result of a transparency-toggle config mutation.
+type transparentToggledMsg struct {
+	Err        error
+	Enabled    bool
+	generation uint64
+}
+
+// compactModeToggledMsg carries the result of a compact-mode config mutation.
+type compactModeToggledMsg struct {
+	Err        error
+	Enabled    bool
+	generation uint64
+}
+
+// providerConfiguredResult carries the outcome of the async provider-config
+// flow (UpdatePreferredModel + init) dispatched by ActionProviderConfigured.
+type providerConfiguredResult struct {
+	Err        error
+	Model      config.SelectedModel
+	Onboarding bool
+	generation uint64
+}
+
+// modelSelectResult carries the outcome of the async model-select flow
+// dispatched by handleSelectModel.
+type modelSelectResult struct {
+	Err        error
+	Onboarding bool
+	Model      config.SelectedModel
+	generation uint64
+}
+
+type agentModelInitializedMsg struct {
+	Err        error
+	Onboarding bool
+	Model      config.SelectedModel
+	generation uint64
+}
+
+type modelSettingUpdatedMsg struct {
+	Err        error
+	Info       string
+	generation uint64
+}
+
+// notificationStyleSetMsg carries the result of a notification-style config mutation.
+type notificationStyleSetMsg struct {
+	Err        error
+	Style      string
+	generation uint64
+}
+
+type yoloToggledMsg struct {
+	Err        error
+	Enabled    bool
+	generation uint64
+}
+
+type permissionResponseMsg struct {
+	Accepted   bool
+	Permission string
+	generation uint64
+}
+
+// sendPendingQueueMsg advances one pending send after a session load completes.
+type sendPendingQueueMsg struct{}
+
+type notificationSentMsg struct{}
+
+// sendQueueItem holds one pending-send entry with generation tracking.
+type sendQueueItem struct {
+	content        string
+	attachments    []message.Attachment
+	generation     uint64
+	sessionID      string
+	loadGeneration uint64
+	bang           bool
+	isFirstMessage bool
+}
+
+// configMutationMsg carries the result of a config-mutation cmd.
+type configMutationMsg struct {
+	Err error
+	Msg tea.Msg
+}
+
 // Compact mode breakpoints.
 const (
 	compactModeWidthBreakpoint  = 120
@@ -140,10 +226,14 @@ type openEditorMsg struct {
 }
 
 type shellResultMsg struct {
-	PendingID string // ID of the pending ShellItem to update.
-	Command   string
-	Output    string
-	ExitCode  int
+	PendingID  string // ID of the pending ShellItem to update.
+	Command    string
+	Output     string
+	ExitCode   int
+	Err        error
+	Canceled   bool
+	sessionID  string
+	generation uint64
 }
 
 // shellStreamMsg carries incremental output from a streaming shell command.
@@ -191,6 +281,16 @@ type (
 	sessionFilesUpdatesMsg struct {
 		sessionFiles []SessionFile
 	}
+
+	// createSessionMsg carries a newly created session and the captured send
+	// parameters so that Update can apply the session creation and then
+	// dispatch the AgentRun cmd.
+	createSessionMsg struct {
+		session     session.Session
+		content     string
+		attachments []message.Attachment
+		generation  uint64
+	}
 )
 
 // UI represents the main user interface model.
@@ -201,6 +301,20 @@ type UI struct {
 
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
+
+	compactModeGeneration    uint64
+	notificationGeneration   uint64
+	yoloGeneration           uint64
+	modelOperationGeneration uint64
+	modelOperationLoading    bool
+	notificationLoading      bool
+	transparentLoading       bool
+	transparentGeneration    uint64
+	compactModeLoading       bool
+	yoloLoading              bool
+	permissionLoading        bool
+	permissionGeneration     uint64
+	permissionID             string
 
 	// initialSessionID is set when loading a specific session on startup.
 	initialSessionID string
@@ -636,8 +750,8 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 	if !m.shouldSendNotification() {
 		return nil
 	}
-
-	return m.notifyBackend.Send(n)
+	backend := m.notifyBackend
+	return tea.Sequence(backend.Send(n), func() tea.Msg { return notificationSentMsg{} })
 }
 
 // maxNotificationBodyLen caps notification body text so OS notification
@@ -854,6 +968,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case agentRunSubmittedMsg:
+		if m.sessionLoadExpectedID != "" && (msg.sessionID != m.sessionLoadExpectedID || msg.loadGeneration != m.sessionLoadGen) {
+			break
+		}
 		// A prompt was just accepted (run started or enqueued): fetch the
 		// authoritative busy/queue state to confirm the optimistic values
 		// sendMessage wrote.
@@ -865,11 +982,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		m.editor.pendingSendActive = false
+		if len(m.editor.pendingSendQueue) > 0 {
+			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+		}
 	case loadSessionMsg:
 		if msg.gen != m.sessionLoadGen || msg.sessionID != m.sessionLoadExpectedID {
 			break
 		}
 		if msg.err != nil {
+			// On error: discard pending sends and clear stale queue.
+			m.editor.pendingSendQueue = nil
+			m.editor.pendingSendGen = 0
+			m.editor.pendingSendLoading = false
 			cmds = append(cmds, util.ReportError(msg.err))
 			break
 		}
@@ -902,12 +1027,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.autoExpandTodosIfReasonable(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		// If a bang command was issued before the session finished
-		// loading, start it now that the chat list is stable.
-		if m.editor.pendingBangCommand != "" {
-			cmds = append(cmds, m.runShellCommandInternal(m.editor.pendingBangCommand, true))
-			m.editor.pendingBangCommand = ""
-		}
 		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -918,22 +1037,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload prompt history for the new session.
 		m.editor.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
+
+		m.editor.pendingSendLoading = false
+		m.editor.pendingSendActive = false
+		if len(m.editor.pendingSendQueue) > 0 {
+			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+		}
 		m.updateLayoutAndSize()
 
 	case requestSessionLoad:
-		m.sessionLoadGen++
-		m.sessionLoadExpectedID = msg.sessionID
-		gen := m.sessionLoadGen
-		sessionID := msg.sessionID
-		loader := sessionLoadResolver{
-			ctx:       m.com.Context(),
-			workspace: m.com.Workspace,
-			styles:    m.com.Styles,
-			config:    m.com.Config(),
-		}
-		cmds = append(cmds, func() tea.Msg {
-			return loader.resolve(sessionID, gen)
-		})
+		cmds = append(cmds, m.beginSessionLoad(msg.sessionID))
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -945,6 +1058,33 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
+
+	case createSessionMsg:
+		if !m.editor.pendingSendLoading || msg.generation != m.editor.pendingSendGen {
+			break
+		}
+		expectedLoadGeneration := m.sessionLoadGen + 1
+		for i := range m.editor.pendingSendQueue {
+			if m.editor.pendingSendQueue[i].generation == msg.generation {
+				m.editor.pendingSendQueue[i].sessionID = msg.session.ID
+				m.editor.pendingSendQueue[i].loadGeneration = expectedLoadGeneration
+			}
+		}
+		if m.forceCompactMode {
+			m.isCompact = true
+		}
+		m.session = &msg.session
+		m.setState(uiChat, m.focus)
+		// Request loading the chat for the new session, then dispatch
+		// sendMessage once the session is loaded.
+		m.editor.pendingSendQueue = append([]sendQueueItem{{
+			content:        msg.content,
+			attachments:    msg.attachments,
+			generation:     msg.generation,
+			sessionID:      msg.session.ID,
+			loadGeneration: expectedLoadGeneration,
+		}}, m.editor.pendingSendQueue...)
+		return m, m.requestSessionLoad(msg.session.ID)
 
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
@@ -1136,6 +1276,219 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[question.Notification]:
 		m.handleQuestionNotification(msg.Payload)
+	case providerConfiguredResult:
+		if msg.generation != m.modelOperationGeneration {
+			break
+		}
+		if msg.Err != nil {
+			m.modelOperationLoading = false
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		cmds = append(cmds, m.initAgentAndReportModel(true, msg.Model, msg.generation))
+
+	case modelSelectResult:
+		if msg.generation != m.modelOperationGeneration {
+			break
+		}
+		if msg.Err != nil {
+			m.modelOperationLoading = false
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		cmds = append(cmds, m.initAgentAndReportModel(msg.Onboarding, msg.Model, msg.generation))
+
+	case agentModelInitializedMsg:
+		if msg.generation != m.modelOperationGeneration {
+			break
+		}
+		m.modelOperationLoading = false
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		if msg.Onboarding {
+			m.setState(uiLanding, uiFocusEditor)
+		}
+		modelName := msg.Model.Model
+		if cfg := m.com.Config(); cfg != nil {
+			if selected := cfg.GetModel(msg.Model.Provider, msg.Model.Model); selected != nil && selected.Name != "" {
+				modelName = selected.Name
+			}
+		}
+		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Model changed to %s", modelName)), func() tea.Msg { return agentModelChangedMsg{} })
+
+	case modelSettingUpdatedMsg:
+		if msg.generation != m.modelOperationGeneration {
+			break
+		}
+		m.modelOperationLoading = false
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+		} else {
+			cmds = append(cmds, util.ReportInfo(msg.Info))
+		}
+
+	case transparentToggledMsg:
+		if msg.generation != m.transparentGeneration {
+			break
+		}
+		m.transparentLoading = false
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		m.isTransparent = msg.Enabled
+		m.dialog.CloseDialog(dialog.CommandsID)
+
+	case compactModeToggledMsg:
+		if msg.generation != m.compactModeGeneration {
+			break
+		}
+		m.compactModeLoading = false
+		if msg.Err == nil {
+			m.forceCompactMode = msg.Enabled
+			m.isCompact = msg.Enabled
+			m.updateLayoutAndSize()
+			m.dialog.CloseDialog(dialog.CommandsID)
+		} else {
+			cmds = append(cmds, util.ReportError(msg.Err))
+		}
+
+	case notificationStyleSetMsg:
+		if msg.generation != m.notificationGeneration {
+			break
+		}
+		m.notificationLoading = false
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		m.updateNotificationBackend()
+		m.dialog.CloseDialog(dialog.NotificationsID)
+		cmds = append(cmds, util.ReportInfo("Notifications set to: "+msg.Style))
+
+	case permissionResponseMsg:
+		if msg.generation != m.permissionGeneration || msg.Permission != m.permissionID {
+			break
+		}
+		m.permissionLoading = false
+		if !msg.Accepted {
+			cmds = append(cmds, util.ReportError(errors.New("permission response was not accepted")))
+			break
+		}
+		m.dialog.CloseDialog(dialog.PermissionsID)
+
+	case yoloToggledMsg:
+		if msg.generation != m.yoloGeneration {
+			break
+		}
+		m.yoloLoading = false
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		m.wsCache.yoloCache.set(msg.Enabled)
+		m.wsCache.busyFetchGen++
+		m.setEditorPrompt(msg.Enabled)
+		status := "disabled"
+		if msg.Enabled {
+			status = "enabled"
+		}
+		cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
+
+	case notificationSentMsg:
+		m.updateNotificationBackend()
+
+	case importCopilotResult:
+		if msg.generation != m.modelOperationGeneration {
+			break
+		}
+		// ImportCopilot completed (successfully or not). Now check
+		// whether the provider is actually configured.
+		cfg := m.com.Config()
+		ws := m.com.Workspace
+		isConfigured := func() bool {
+			_, ok := cfg.Providers.Get(msg.providerID)
+			return ok
+		}
+		if !isConfigured() {
+			m.modelOperationLoading = false
+			m.dialog.CloseDialog(dialog.ModelsID)
+			provider := catwalk.Provider{ID: catwalk.InferenceProvider(msg.providerID)}
+			if cmd := m.openAuthenticationDialog(provider, msg.model, ""); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+		// Provider is configured after import: proceed to UpdatePreferredModel.
+		capturedModel := msg.model
+		generation := msg.generation
+		cmds = append(cmds, func() tea.Msg {
+			if err := ws.UpdatePreferredModel(config.ScopeGlobal, capturedModel); err != nil {
+				return modelSelectResult{Err: err, generation: generation}
+			}
+			return modelSelectResult{Onboarding: msg.isOnboarding, Model: capturedModel, generation: generation}
+		})
+		return m, tea.Batch(cmds...)
+
+	case sendMessageErrorMsg:
+		if !msg.creating && m.sessionLoadExpectedID != "" && (msg.sessionID != m.sessionLoadExpectedID || msg.loadGeneration != m.sessionLoadGen) {
+			break
+		}
+		m.editor.pendingSendActive = false
+		if msg.creating && msg.generation == m.editor.pendingSendGen {
+			m.editor.pendingSendLoading = false
+			m.editor.pendingSendQueue = nil
+		}
+		cmds = append(cmds, util.ReportError(msg.Err))
+		m.wsCache.agentBusyCache.set(false)
+		if !msg.creating && len(m.editor.pendingSendQueue) > 0 {
+			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+		}
+
+	case sendPendingQueueMsg:
+		if m.editor.pendingSendActive || len(m.editor.pendingSendQueue) == 0 || m.session == nil {
+			break
+		}
+		item := m.editor.pendingSendQueue[0]
+		m.editor.pendingSendQueue = m.editor.pendingSendQueue[1:]
+		if item.sessionID != m.session.ID || item.loadGeneration != m.sessionLoadGen {
+			if len(m.editor.pendingSendQueue) > 0 {
+				cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+			}
+			break
+		}
+		m.editor.pendingSendActive = true
+		if item.bang {
+			cmds = append(cmds, m.runShellCommandInternal(item.content, item.isFirstMessage))
+		} else {
+			cmds = append(cmds, m.sendMessageNow(item.content, item.attachments...))
+		}
+
+	case bangSessionCreatedMsg:
+		if !m.editor.pendingSendLoading || msg.generation != m.editor.pendingSendGen {
+			break
+		}
+		expectedLoadGeneration := m.sessionLoadGen + 1
+		for i := range m.editor.pendingSendQueue {
+			if m.editor.pendingSendQueue[i].generation == msg.generation {
+				m.editor.pendingSendQueue[i].sessionID = msg.session.ID
+				m.editor.pendingSendQueue[i].loadGeneration = expectedLoadGeneration
+			}
+		}
+		m.editor.pendingSendQueue = append([]sendQueueItem{{
+			content:        msg.command,
+			generation:     msg.generation,
+			sessionID:      msg.session.ID,
+			loadGeneration: expectedLoadGeneration,
+			bang:           true,
+			isFirstMessage: msg.isFirstMessage,
+		}}, m.editor.pendingSendQueue...)
+		m.session = &msg.session
+		m.setState(uiChat, m.focus)
+		cmds = append(cmds, m.requestSessionLoad(msg.session.ID))
+
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 	case tea.TerminalVersionMsg:
@@ -1607,6 +1960,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 	case shellResultMsg:
+		if (m.sessionLoadExpectedID != "" && msg.sessionID != m.sessionLoadExpectedID) || msg.generation != m.sessionLoadGen {
+			break
+		}
+		m.editor.pendingSendActive = false
 		// Clear the bang cancel func — command is done.
 		if m.editor.bangCancel != nil {
 			m.editor.bangCancel()
@@ -1625,6 +1982,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		if msg.Err != nil {
+			cmds = append(cmds, util.ReportError(fmt.Errorf("shell command failed: %w", msg.Err)))
+		}
 		if !completed {
 			item := chat.NewShellItem(m.com.Styles, msg.Command, msg.Output, msg.ExitCode)
 			m.chat.AppendMessages(item)
@@ -1633,6 +1993,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		cmds = append(cmds, m.loadPromptHistory())
+		if len(m.editor.pendingSendQueue) > 0 {
+			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
 			slog.Error("Error reported", "error", msg.Msg)
@@ -2491,21 +2854,23 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 
 	// Command dialog messages.
 	case dialog.ActionToggleYoloMode:
-		m.toggleYoloMode()
+		cmds = append(cmds, m.toggleYoloMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
-		cfg := m.com.Config()
-		if cfg != nil && cfg.Options != nil {
-			cfg.Options.Notifications = msg.Style
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notifications", msg.Style); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			} else {
-				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
-			}
-			// Reinitialize notification backend with new style.
-			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
+		if m.notificationLoading {
+			cmds = append(cmds, util.ReportWarn("Notification settings are already being updated"))
+			break
 		}
-		m.dialog.CloseDialog(dialog.NotificationsID)
+		style := msg.Style
+		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
+			m.notificationLoading = true
+			m.notificationGeneration++
+			generation := m.notificationGeneration
+			workspace := m.com.Workspace
+			cmds = append(cmds, func() tea.Msg {
+				return notificationStyleSetMsg{Err: workspace.SetConfigField(config.ScopeGlobal, "options.notifications", style), Style: style, generation: generation}
+			})
+		}
 	case dialog.ActionNewSession:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
@@ -2551,53 +2916,54 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
+		if m.modelOperationLoading {
+			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
+			break
+		}
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
+			break
+		}
+		if _, ok := cfg.Agents[config.AgentCoder]; !ok {
+			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
+			break
+		}
+		currentModel := cfg.Model
+		currentModel.Think = !currentModel.Think
+		status := "disabled"
+		if currentModel.Think {
+			status = "enabled"
+		}
+		m.modelOperationLoading = true
+		m.modelOperationGeneration++
+		generation := m.modelOperationGeneration
+		workspace := m.com.Workspace
+		ctx := m.com.Context()
+		cmds = append(cmds, func() tea.Msg {
+			if err := workspace.UpdatePreferredModel(config.ScopeGlobal, currentModel); err != nil {
+				return modelSettingUpdatedMsg{Err: err, generation: generation}
 			}
-
-			if _, ok := cfg.Agents[config.AgentCoder]; !ok {
-				return util.ReportError(errors.New("agent configuration not found"))()
-			}
-
-			// The coder agent leaves Model unset (it inherits the app's
-			// configured model), so the model it actually runs on is always
-			// cfg.Model.
-			currentModel := cfg.Model
-			currentModel.Think = !currentModel.Think
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, currentModel); err != nil {
-				return util.ReportError(err)()
-			}
-			if err := m.com.Workspace.UpdateAgentModel(m.com.Context()); err != nil {
-				return util.NewErrorMsg(err)
-			}
-			status := "disabled"
-			if currentModel.Think {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Thinking mode " + status)
-		}))
+			return modelSettingUpdatedMsg{Err: workspace.UpdateAgentModel(ctx), Info: "Thinking mode " + status, generation: generation}
+		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
+		if m.transparentLoading {
+			cmds = append(cmds, util.ReportWarn("Transparency is already being updated"))
+			break
+		}
+		cfg := m.com.Config()
+		if cfg == nil {
+			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
+			break
+		}
+		desired := cfg.Options == nil || cfg.Options.TUI.Transparent == nil || !*cfg.Options.TUI.Transparent
+		m.transparentLoading = true
+		m.transparentGeneration++
+		generation := m.transparentGeneration
+		workspace := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.Transparent != nil && *cfg.Options.TUI.Transparent
-			newValue := !isTransparent
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
-				return util.ReportError(err)()
-			}
-			m.isTransparent = newValue
-
-			status := "disabled"
-			if newValue {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Transparent background " + status)
+			return transparentToggledMsg{Err: workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", desired), Enabled: desired, generation: generation}
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
@@ -2628,6 +2994,10 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
+		if m.modelOperationLoading {
+			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
+			break
+		}
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
 			break
@@ -2649,28 +3019,45 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 		// cfg.Model.
 		currentModel := cfg.Model
 		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, currentModel); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
+		effort := msg.Effort
 
-		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			if err := m.com.Workspace.UpdateAgentModel(m.com.Context()); err != nil {
-				return util.NewErrorMsg(err)
+		m.modelOperationLoading = true
+		m.modelOperationGeneration++
+		generation := m.modelOperationGeneration
+		workspace := m.com.Workspace
+		ctx := m.com.Context()
+		cmds = append(cmds, func() tea.Msg {
+			if err := workspace.UpdatePreferredModel(config.ScopeGlobal, currentModel); err != nil {
+				return modelSettingUpdatedMsg{Err: err, generation: generation}
 			}
-			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
-		}))
+			return modelSettingUpdatedMsg{Err: workspace.UpdateAgentModel(ctx), Info: "Reasoning effort set to " + effort, generation: generation}
+		})
 		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPermissionResponse:
-		m.dialog.CloseDialog(dialog.PermissionsID)
-		switch msg.Action {
-		case dialog.PermissionAllow:
-			m.com.Workspace.PermissionGrant(msg.Permission)
-		case dialog.PermissionAllowForSession:
-			m.com.Workspace.PermissionGrantPersistent(msg.Permission)
-		case dialog.PermissionDeny:
-			m.com.Workspace.PermissionDeny(msg.Permission)
+		if m.permissionLoading {
+			cmds = append(cmds, util.ReportWarn("Permission response is already being submitted"))
+			break
 		}
+		m.permissionLoading = true
+		m.permissionGeneration++
+		generation := m.permissionGeneration
+		action := msg.Action
+		perm := msg.Permission
+		m.permissionID = perm.ID
+		permissionID := perm.ID
+		workspace := m.com.Workspace
+		cmds = append(cmds, func() tea.Msg {
+			accepted := false
+			switch action {
+			case dialog.PermissionAllow:
+				accepted = workspace.PermissionGrant(perm)
+			case dialog.PermissionAllowForSession:
+				accepted = workspace.PermissionGrantPersistent(perm)
+			case dialog.PermissionDeny:
+				accepted = workspace.PermissionDeny(perm)
+			}
+			return permissionResponseMsg{Accepted: accepted, Permission: permissionID, generation: generation}
+		})
 
 	case dialog.ActionFilePickerSelected:
 		cmds = append(cmds, tea.Sequence(
@@ -2732,6 +3119,10 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 			return dialog.ActionCustomProviderResult{ProviderID: msg.ID, Err: err}
 		})
 	case dialog.ActionProviderConfigured:
+		if m.modelOperationLoading {
+			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
+			break
+		}
 		m.dialog.CloseDialog(dialog.ProviderFormID)
 		m.dialog.CloseDialog(dialog.APIKeyInputID)
 		m.dialog.CloseDialog(dialog.OAuthID)
@@ -2763,13 +3154,19 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 			model = def
 		}
 
-		if err := ws.UpdatePreferredModel(config.ScopeGlobal, model); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-		}
-
-		m.setState(uiLanding, uiFocusEditor)
-
-		cmds = append(cmds, m.initAgentAndReportModel(true, model))
+		// Move UpdatePreferredModel into a tea.Cmd so it does not block
+		// Update.  The result (providerConfiguredResult) is handled in
+		// Update and only calls initAgentAndReportModel on success.
+		m.modelOperationLoading = true
+		m.modelOperationGeneration++
+		generation := m.modelOperationGeneration
+		capturedModel := model
+		cmds = append(cmds, func() tea.Msg {
+			if err := ws.UpdatePreferredModel(config.ScopeGlobal, capturedModel); err != nil {
+				return providerConfiguredResult{Err: err, generation: generation}
+			}
+			return providerConfiguredResult{Model: capturedModel, Onboarding: true, generation: generation}
+		})
 
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
@@ -2803,9 +3200,15 @@ func substituteArgs(content string, args map[string]string) string {
 }
 
 // handleSelectModel performs the model selection after any provider
-// pre-checks have completed.
+// pre-checks have completed.  The ImportCopilot, UpdatePreferredModel, and
+// initAgentAndReportModel steps run sequentially via typed result messages;
+// errors stop the chain without a false success.
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
+
+	if m.modelOperationLoading {
+		return util.ReportWarn("Model settings are already being updated")
+	}
 
 	// we ignore dialogs with the oauth id as they need to be able to be dismissed
 	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
@@ -2825,8 +3228,24 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	)
 
 	// Attempt to import GitHub Copilot tokens from VSCode if available.
-	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
-		m.com.Workspace.ImportCopilot()
+	// ImportCopilot runs first via a typed result; when it lands we
+	// re-check whether the provider is configured and decide auth vs model
+	// flow — never batch the import with the subsequent steps.
+	if isCopilot && !msg.ReAuthenticate {
+		m.modelOperationLoading = true
+		m.modelOperationGeneration++
+		generation := m.modelOperationGeneration
+		ws := m.com.Workspace
+		cmds = append(cmds, func() tea.Msg {
+			ws.ImportCopilot()
+			return importCopilotResult{
+				providerID:   providerID,
+				model:        msg.Model,
+				isOnboarding: isOnboarding,
+				generation:   generation,
+			}
+		})
+		return tea.Batch(cmds...)
 	}
 
 	if !isConfigured() || msg.ReAuthenticate {
@@ -2837,19 +3256,23 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.Model); err != nil {
-		cmds = append(cmds, util.ReportError(err))
-	}
+	// Move UpdatePreferredModel into the cmd; the result is handled by a
+	// modelSelectResult case that only calls initAgentAndReportModel on success.
+	m.modelOperationLoading = true
+	m.modelOperationGeneration++
+	generation := m.modelOperationGeneration
+	capturedModel := msg.Model
+	ws := m.com.Workspace
+	cmds = append(cmds, func() tea.Msg {
+		if err := ws.UpdatePreferredModel(config.ScopeGlobal, capturedModel); err != nil {
+			return modelSelectResult{Err: err, generation: generation}
+		}
+		return modelSelectResult{Onboarding: isOnboarding, Model: capturedModel, generation: generation}
+	})
 
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
 	m.dialog.CloseDialog(dialog.OAuthID)
 	m.dialog.CloseDialog(dialog.ModelsID)
-
-	if isOnboarding {
-		m.setState(uiLanding, uiFocusEditor)
-	}
-
-	cmds = append(cmds, m.initAgentAndReportModel(isOnboarding, msg.Model))
 
 	return tea.Batch(cmds...)
 }
@@ -2859,8 +3282,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 // which model is now active. Shared by handleSelectModel and
 // ActionProviderConfigured's onboarding branch, which both land here right
 // after a model has been chosen.
-func (m *UI) initAgentAndReportModel(isOnboarding bool, model config.SelectedModel) tea.Cmd {
-	cfg := m.com.Config()
+func (m *UI) initAgentAndReportModel(isOnboarding bool, model config.SelectedModel, generation uint64) tea.Cmd {
 	ws := m.com.Workspace
 	ctx := m.com.Context()
 	return m.updateAgentModelCmd(func() tea.Msg {
@@ -2870,18 +3292,13 @@ func (m *UI) initAgentAndReportModel(isOnboarding bool, model config.SelectedMod
 		// separate commands racing each other.
 		if isOnboarding {
 			if err := ws.InitCoderAgent(ctx); err != nil {
-				return util.NewErrorMsg(err)
+				return agentModelInitializedMsg{Err: err, Onboarding: isOnboarding, Model: model, generation: generation}
 			}
 		}
 		if err := ws.UpdateAgentModel(ctx); err != nil {
-			return util.NewErrorMsg(err)
+			return agentModelInitializedMsg{Err: err, Onboarding: isOnboarding, Model: model, generation: generation}
 		}
-
-		modelName := model.Model
-		if catwalkModel := cfg.GetModel(model.Provider, model.Model); catwalkModel != nil && catwalkModel.Name != "" {
-			modelName = catwalkModel.Name
-		}
-		return util.NewInfoMsg(fmt.Sprintf("Model changed to %s", modelName))
+		return agentModelInitializedMsg{Onboarding: isOnboarding, Model: model, generation: generation}
 	})
 }
 
@@ -2959,12 +3376,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			cmds = append(cmds, tea.Suspend)
 			return true
 		case key.Matches(msg, m.keyMap.ToggleYolo):
-			yolo := m.toggleYoloMode()
-			status := "disabled"
-			if yolo {
-				status = "enabled"
-			}
-			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
+			cmds = append(cmds, m.toggleYoloMode())
 			return true
 		}
 		return false
@@ -3114,7 +3526,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				attachments := m.editor.attachments.List()
 				m.editor.attachments.Reset()
-				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
+				if len(value) == 0 && len(attachments) == 0 {
 					return nil
 				}
 
@@ -3920,17 +4332,20 @@ func (m *UI) currentModelSupportsImages() bool {
 }
 
 // toggleCompactMode toggles compact mode between uiChat and uiChatCompact states.
+// The actual SetCompactMode I/O runs inside the returned cmd; the UI state
+// is updated only when the result lands via compactModeToggledMsg.
 func (m *UI) toggleCompactMode() tea.Cmd {
-	m.forceCompactMode = !m.forceCompactMode
-
-	err := m.com.Workspace.SetCompactMode(config.ScopeGlobal, m.forceCompactMode)
-	if err != nil {
-		return util.ReportError(err)
+	if m.compactModeLoading {
+		return util.ReportWarn("Compact mode is already being updated")
 	}
-
-	m.updateLayoutAndSize()
-
-	return nil
+	desired := !m.forceCompactMode
+	m.compactModeLoading = true
+	m.compactModeGeneration++
+	generation := m.compactModeGeneration
+	workspace := m.com.Workspace
+	return func() tea.Msg {
+		return compactModeToggledMsg{Err: workspace.SetCompactMode(config.ScopeGlobal, desired), Enabled: desired, generation: generation}
+	}
 }
 
 // updateLayoutAndSize updates the layout and sizes of UI components.
@@ -4625,85 +5040,138 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 	}
 }
 
+// sendAfterSessionLoaded first loads the session and then sends the captured
+// message.  It works by chaining through messages so that the command-driving
+// harness sees each intermediate step.
+
 // sendMessage sends a message with the given content and attachments.
+// All I/O (AgentReadyErr, CreateSession, AgentRun) runs inside a tea.Cmd
+// so that the Update goroutine is never blocked.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if m.viewingChildSession() {
 		return util.ReportWarn("viewing subagent session · ctrl+up to return")
 	}
-	if err := m.com.Workspace.AgentReadyErr(); err != nil {
-		return util.ReportError(err)
-	}
-
-	// Start the turn timer.
-	common.StartTurn()
-
-	var cmds []tea.Cmd
-	if !m.hasSession() {
-		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
-		if err != nil {
-			return util.ReportError(err)
-		}
-		if m.forceCompactMode {
-			m.isCompact = true
-		}
-		if newSession.ID != "" {
-			m.session = &newSession
-			cmds = append(cmds, m.requestSessionLoad(newSession.ID))
-		}
-		m.setState(uiChat, m.focus)
-	}
-
-	ctx := context.Background()
-	cmds = append(cmds, func() tea.Msg {
-		for _, path := range m.sessionFileReads {
-			m.com.Workspace.FileTrackerRecordRead(ctx, m.session.ID, path)
-			m.com.Workspace.LSPStart(ctx, path)
-		}
+	if m.session != nil && m.sessionLoadExpectedID != "" && m.sessionLoadExpectedID != m.session.ID {
+		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
+			content:        content,
+			attachments:    attachments,
+			sessionID:      m.sessionLoadExpectedID,
+			loadGeneration: m.sessionLoadGen,
+		})
 		return nil
-	})
+	}
+	if m.session != nil {
+		if m.editor.pendingSendActive {
+			m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
+				content:        content,
+				attachments:    attachments,
+				sessionID:      m.session.ID,
+				loadGeneration: m.sessionLoadGen,
+			})
+			return nil
+		}
+		m.editor.pendingSendActive = true
+	}
+	return m.sendMessageNow(content, attachments...)
+}
 
-	// Capture session ID to avoid race with main goroutine updating m.session.
-	sessionID := m.session.ID
-	// Optimistically mark the agent busy: the prompt we are about to submit
-	// either starts a run or is enqueued behind one. This keeps esc pressed
-	// right after enter routing to cancelAgent instead of reading a stale
-	// idle value; the authoritative state arrives via agentRunSubmittedMsg.
-	// Bump the busy/queue generations so any probe started before this
-	// optimistic write is discarded rather than reverting us to idle.
-	m.wsCache.agentBusyCache.set(true)
-	m.wsCache.busyFetchGen++
-	m.invalidatePromptQueue()
-	cmds = append(cmds, func() tea.Msg {
-		// AgentRun is fire-and-forget: it returns once the prompt has
-		// been accepted (HTTP 202) or synchronously with a validation
-		// or transport error. Run failures and cancellation surface
-		// through SSE-derived events, not this return value.
-		err := m.com.Workspace.AgentRun(context.Background(), sessionID, content, attachments...)
-		if err != nil && !errors.Is(err, context.Canceled) {
+func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) tea.Cmd {
+	if m.session == nil && m.editor.pendingSendLoading {
+		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{content: content, attachments: attachments, generation: m.editor.pendingSendGen})
+		return nil
+	}
+
+	workspace := m.com.Workspace
+	styles := m.com.Styles
+	reads := append([]string(nil), m.sessionFileReads...)
+	ctx := context.Background()
+	sessionID := ""
+	generation := m.editor.pendingSendGen
+	loadGeneration := m.sessionLoadGen
+	creating := m.session == nil
+	if creating {
+		m.editor.pendingSendLoading = true
+		m.editor.pendingSendGen++
+		generation = m.editor.pendingSendGen
+	} else {
+		sessionID = m.session.ID
+		m.wsCache.agentBusyCache.set(true)
+		m.wsCache.busyFetchGen++
+		m.invalidatePromptQueue()
+	}
+
+	return func() tea.Msg {
+		if err := workspace.AgentReadyErr(); err != nil {
+			return sendMessageErrorMsg{Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration, creating: creating}
+		}
+		if creating {
+			created, err := workspace.CreateSession(ctx, "New Session")
+			if err != nil {
+				return sendMessageErrorMsg{Err: err, generation: generation, creating: true}
+			}
+			return createSessionMsg{session: created, content: content, attachments: attachments, generation: generation}
+		}
+		common.StartTurn()
+		for _, path := range reads {
+			workspace.FileTrackerRecordRead(ctx, sessionID, path)
+			workspace.LSPStart(ctx, path)
+		}
+		if err := workspace.AgentRun(ctx, sessionID, content, attachments...); err != nil && !errors.Is(err, context.Canceled) {
 			var quotaErr *agent.ProviderQuotaError
 			if errors.As(err, &quotaErr) {
-				link := m.com.Styles.Dialog.OAuth.Link.
-					Hyperlink(quotaErr.SettingsURL, "id=copilot").
-					Render(quotaErr.SettingsURL)
-				return util.InfoMsg{
-					Type: util.InfoTypeError,
-					Msg:  fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quotaErr.Model, link),
-				}
+				link := styles.Dialog.OAuth.Link.Hyperlink(quotaErr.SettingsURL, "id=copilot").Render(quotaErr.SettingsURL)
+				return sendMessageErrorMsg{Err: fmt.Errorf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quotaErr.Model, link), generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
 			}
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("%v", err),
-			}
+			return sendMessageErrorMsg{Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
 		}
-		return agentRunSubmittedMsg{}
-	})
-	return tea.Batch(cmds...)
+		return agentRunSubmittedMsg{sessionID: sessionID, loadGeneration: loadGeneration}
+	}
+}
+
+// sendMessageErrorMsg carries an error from a sendMessage cmd. The Update
+// handler converts it into a util.InfoMsg and clears the optimistic busy
+// state (already done inside the cmd).
+type importCopilotResult struct {
+	providerID   string
+	model        config.SelectedModel
+	isOnboarding bool
+	generation   uint64
+}
+
+type sendMessageErrorMsg struct {
+	Err            error
+	generation     uint64
+	sessionID      string
+	loadGeneration uint64
+	creating       bool
+}
+
+// bangSessionCreatedMsg is returned by runShellCommandInternal when a bang
+// command triggered a session creation; the Update handler uses it to load
+// the session and then starts the shell command.
+type bangSessionCreatedMsg struct {
+	session        session.Session
+	command        string
+	isFirstMessage bool
+	generation     uint64
 }
 
 // runShellCommand executes a shell command server-side without triggering
 // the LLM. The result is displayed as a tool-style item in the chat.
 func (m *UI) runShellCommand(command string) tea.Cmd {
-	return m.runShellCommandInternal(command, false)
+	if m.viewingChildSession() {
+		return util.ReportWarn("viewing subagent session · ctrl+up to return")
+	}
+	if m.session != nil {
+		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
+			content:        command,
+			sessionID:      m.session.ID,
+			loadGeneration: m.sessionLoadGen,
+			bang:           true,
+		})
+		return func() tea.Msg { return sendPendingQueueMsg{} }
+	}
+	return m.runShellCommandInternal(command, true)
 }
 
 // runShellCommandInternal is the shared implementation for bang-mode shell
@@ -4712,25 +5180,26 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cmd {
 	var cmds []tea.Cmd
 	if !m.hasSession() {
-		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
-		if err != nil {
-			return util.ReportError(err)
+		if m.editor.pendingSendLoading {
+			m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{content: command, generation: m.editor.pendingSendGen, bang: true})
+			return nil
 		}
-		if m.forceCompactMode {
-			m.isCompact = true
-		}
-		if newSession.ID != "" {
-			m.session = &newSession
-			cmds = append(cmds, m.requestSessionLoad(newSession.ID))
-		}
-		m.setState(uiChat, m.focus)
-		// Defer shell execution until loadSessionMsg fires so the chat
-		// list is stable before we add items or start streaming.
-		m.editor.pendingBangCommand = command
+		m.editor.pendingSendLoading = true
+		m.editor.pendingSendGen++
+		generation := m.editor.pendingSendGen
+		workspace := m.com.Workspace
+		cmds = append(cmds, func() tea.Msg {
+			newSession, err := workspace.CreateSession(context.Background(), "New Session")
+			if err != nil {
+				return sendMessageErrorMsg{Err: err, generation: generation, creating: true}
+			}
+			return bangSessionCreatedMsg{session: newSession, command: command, isFirstMessage: isFirstMessage, generation: generation}
+		})
 		return tea.Batch(cmds...)
 	}
 
 	sessionID := m.session.ID
+	loadGeneration := m.sessionLoadGen
 	contentWidth := min(m.layout.main.Dx()-2, 120)
 
 	// Append a pending shell item immediately so the user sees feedback.
@@ -4768,25 +5237,29 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	ctx, cancel := context.WithCancel(context.Background())
 	m.editor.bangCancel = cancel
 
+	workspace := m.com.Workspace
 	cmds = append(cmds, func() tea.Msg {
-		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
+		resp, err := workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
 		close(streamCh)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("shell: %v", err),
-			}
+		result := shellResultMsg{
+			PendingID:  pendingID,
+			Command:    command,
+			Output:     resp.Output,
+			sessionID:  sessionID,
+			generation: loadGeneration,
 		}
-		exitCode := resp.ExitCode
 		if errors.Is(err, context.Canceled) {
-			exitCode = 130 // conventional SIGINT exit code
+			result.Canceled = true
+			result.ExitCode = 130
+			return result
 		}
-		return shellResultMsg{
-			PendingID: pendingID,
-			Command:   command,
-			Output:    resp.Output,
-			ExitCode:  exitCode,
+		if err != nil {
+			result.Err = err
+			result.ExitCode = 1
+			return result
 		}
+		result.ExitCode = resp.ExitCode
+		return result
 	})
 	return tea.Batch(cmds...)
 }
@@ -5189,6 +5662,9 @@ func (m *UI) openFilesDialog() tea.Cmd {
 //
 //nolint:unparam // always nil today, but matches the tea.Cmd signature shared by the other open*Dialog methods
 func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
+	m.permissionGeneration++
+	m.permissionLoading = false
+	m.permissionID = perm.ID
 	// Close any existing permissions dialog first.
 	m.dialog.CloseDialog(dialog.PermissionsID)
 
@@ -5411,6 +5887,9 @@ func (m *UI) newSession() tea.Cmd {
 	m.sidebar.offset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
+	m.editor.pendingSendQueue = nil
+	m.editor.pendingSendGen = 0
+	m.editor.pendingSendLoading = false
 	m.setState(uiLanding, uiFocusEditor)
 	m.editor.textarea.Focus()
 	m.chat.Blur()

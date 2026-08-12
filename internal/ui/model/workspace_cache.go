@@ -29,6 +29,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/workspace"
 )
 
@@ -131,7 +132,10 @@ type promptQueueMsg struct {
 // agentRunSubmittedMsg reports that AgentRun accepted a prompt (it either
 // started a run or was enqueued behind one), so busy and queue state should
 // be re-fetched.
-type agentRunSubmittedMsg struct{}
+type agentRunSubmittedMsg struct {
+	sessionID      string
+	loadGeneration uint64
+}
 
 // agentModelChangedMsg reports that the coordinator's model was updated
 // (model selection, thinking toggle, reasoning effort), so the memoized
@@ -352,22 +356,19 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 	return cmds
 }
 
-// toggleYoloMode flips permission auto-approval and writes the new value
-// through the yolo cache (no re-probe needed) and the editor prompt. Shared
-// by the direct keybinding and the commands-dialog action so both stay
-// write-through. Returns the new mode.
-func (m *UI) toggleYoloMode() bool {
-	yolo := !m.com.Workspace.PermissionSkipRequests()
-	m.com.Workspace.PermissionSetSkipRequests(yolo)
-	m.wsCache.yoloCache.set(yolo)
-	// Supersede any in-flight busy/yolo probe: its result carries the old
-	// generation and would otherwise overwrite the value we just wrote.
-	// Bump the generation (rather than invalidateBusyCaches, which would
-	// clear the fresh value) so applyBusyState's guard discards and
-	// re-dispatches the stale probe.
-	m.wsCache.busyFetchGen++
-	m.setEditorPrompt(yolo)
-	return yolo
+func (m *UI) toggleYoloMode() tea.Cmd {
+	if m.yoloLoading {
+		return util.ReportWarn("Yolo mode is already being updated")
+	}
+	desired := !m.yoloModeCached()
+	m.yoloLoading = true
+	m.yoloGeneration++
+	generation := m.yoloGeneration
+	workspace := m.com.Workspace
+	return func() tea.Msg {
+		workspace.PermissionSetSkipRequests(desired)
+		return yoloToggledMsg{Enabled: desired, generation: generation}
+	}
 }
 
 // yoloModeCached reports the memoized permission-skip ("yolo") mode. Toggles

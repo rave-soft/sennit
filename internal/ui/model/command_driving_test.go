@@ -27,6 +27,7 @@ import (
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
+	"github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -46,6 +47,7 @@ type cmdDrivingWorkspace struct {
 
 	// Call counters
 	createSessionCalls    int
+	createSessionErr      error
 	agentRunCalls         int
 	agentRunSession       string
 	agentRunPrompt        string
@@ -177,6 +179,9 @@ func (w *cmdDrivingWorkspace) AgentIsSessionBusy(string) bool { return false }
 
 func (w *cmdDrivingWorkspace) CreateSession(_ context.Context, title string) (session.Session, error) {
 	w.createSessionCalls++
+	if w.createSessionErr != nil {
+		return session.Session{}, w.createSessionErr
+	}
 	return session.Session{ID: "sess-" + title}, nil
 }
 
@@ -622,9 +627,18 @@ func TestCmdDriving_PermissionRoundTrip_Allow(t *testing.T) {
 	// handleDialogMsg → permsDialog.HandleMsg → ActionPermissionResponse →
 	// applyDialogAction (side effects: PermissionGrant + CloseDialog).
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	// The permission action is all side-effects (PermissionGrant + CloseDialog)
-	// and produces no tea.Cmd; the cmd is nil here.
-	require.Nil(t, cmd, "allow action produces no cmd — only side effects")
+	// The permission action dispatches a tea.Cmd (PermissionGrant) so the
+	// I/O is not done on the Update goroutine. Drive it to verify the call.
+	require.NotNil(t, cmd, "allow action dispatches a cmd for the I/O")
+	messages := runCmdTree(m, cmd, nil)
+	// Verify the cmd produced no error.
+	for _, msg := range messages {
+		if info, ok := msg.(util.InfoMsg); ok {
+			if info.Type == util.InfoTypeError {
+				t.Fatalf("permission allow returned error: %s", info.Msg)
+			}
+		}
+	}
 
 	// Verify workspace call fired.
 	require.GreaterOrEqual(t, ws.permGrantCalls, 1,
@@ -633,11 +647,6 @@ func TestCmdDriving_PermissionRoundTrip_Allow(t *testing.T) {
 	// Dialog must close.
 	require.False(t, m.dialog.ContainsDialog(dialog.PermissionsID),
 		"permissions dialog must close after action")
-
-	// Verify the action flowed through — applyDialogAction for
-	// ActionPermissionResponse is side-effects only (no cmds), so we
-	// verify via workspace state.
-	require.GreaterOrEqual(t, ws.permGrantCalls, 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -723,9 +732,11 @@ func TestCmdDriving_EnterWhenNoSession_CreatesSession(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{
-		agentReady:          true,
-		agentErr:            nil,
-		sessionsBySessionID: map[string]session.Session{"auto-created": {ID: "auto-created"}},
+		agentReady: true,
+		agentErr:   nil,
+		sessionsBySessionID: map[string]session.Session{
+			"sess-New Session": {ID: "sess-New Session", Title: "New Session"},
+		},
 	}
 	// No session set — m.session is nil.
 	m := newCmdDrivenUI(ws)
@@ -748,14 +759,21 @@ func TestCmdDriving_EnterWhenNoSession_CreatesSession(t *testing.T) {
 	require.GreaterOrEqual(t, ws.agentRunCalls, 1,
 		"after session creation, message must be sent")
 
-	// Must have received a loadSessionMsg for the new session.
-	var gotLoadSession bool
+	// Session creation now produces createSessionMsg which Update handles
+	// by setting the session and dispatching requestSessionLoad + sendMessage.
+	// The cmd tree follows both, so we should see loadSessionMsg and
+	// agentRunSubmittedMsg in the message stream.
+	var gotLoadSession, gotRunSubmitted bool
 	for _, msg := range messages {
 		if _, ok := msg.(loadSessionMsg); ok {
 			gotLoadSession = true
 		}
+		if _, ok := msg.(agentRunSubmittedMsg); ok {
+			gotRunSubmitted = true
+		}
 	}
 	require.True(t, gotLoadSession, "session creation must trigger loadSessionMsg")
+	require.True(t, gotRunSubmitted, "must produce agentRunSubmittedMsg")
 }
 
 // ---------------------------------------------------------------------------
@@ -782,8 +800,9 @@ func TestCmdDriving_PermissionRoundTrip_Deny(t *testing.T) {
 
 	// Simulate pressing 'd' (Deny) through the real Update path:
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
-	// The permission action is side-effects only.
-	require.Nil(t, cmd, "deny action produces no cmd — only side effects")
+	// The permission action dispatches a tea.Cmd (PermissionDeny).
+	require.NotNil(t, cmd, "deny action dispatches a cmd for the I/O")
+	_ = runCmdTree(m, cmd, nil)
 
 	// Verify workspace call fired.
 	require.GreaterOrEqual(t, ws.permDenyCalls, 1,
@@ -817,8 +836,9 @@ func TestCmdDriving_PermissionRoundTrip_AllowForSession(t *testing.T) {
 
 	// Press 's' (Allow for session) through the real Update path:
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
-	// Side-effects only.
-	require.Nil(t, cmd, "allow-for-session action produces no cmd — only side effects")
+	// The permission action dispatches a tea.Cmd (PermissionGrantPersistent).
+	require.NotNil(t, cmd, "allow-for-session action dispatches a cmd for the I/O")
+	_ = runCmdTree(m, cmd, nil)
 
 	// The workspace call must use the persistent grant path.
 	require.GreaterOrEqual(t, ws.permGrantCalls, 1,
@@ -1159,4 +1179,154 @@ func TestCmdDriving_LoadSession_StaleErrorDiscarded(t *testing.T) {
 	require.Equal(t, presenceCalls, ws.setCurrentSessionCalls)
 	require.Equal(t, lspCalls, ws.lspStartCalls)
 	require.Equal(t, historyCalls, ws.listSessionHistoryCalls)
+}
+
+// ---------------------------------------------------------------------------
+// Test: sendMessage when agent not ready — AgentReadyErr blocks the send.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_SendMessage_AgentNotReady(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady:          false,
+		agentErr:            fmt.Errorf("agent not initialized"),
+		sessionsBySessionID: map[string]session.Session{"s1": {ID: "s1"}},
+	}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	_, cmd := m.Update(sendMessageMsg{Content: "test"})
+	require.NotNil(t, cmd)
+	messages := runCmdTree(m, cmd, nil)
+
+	// Must have gotten an error info message, not agentRunSubmittedMsg.
+	var gotError bool
+	for _, msg := range messages {
+		if info, ok := msg.(util.InfoMsg); ok && info.Type == util.InfoTypeError {
+			gotError = true
+		}
+	}
+	require.True(t, gotError, "must surface AgentReadyErr as InfoMsg")
+
+	// AgentRun must NOT have been called.
+	require.Zero(t, ws.agentRunCalls)
+	// CreateSession must NOT have been called.
+	require.Zero(t, ws.createSessionCalls)
+}
+
+// ---------------------------------------------------------------------------
+// Test: sendMessage CreateSession failure — error surfaces, no AgentRun.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_SendMessage_CreateSessionError(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady: true,
+		agentErr:   nil,
+		// No sessions registered and CreateSession returns error.
+	}
+	ws.createSessionErr = fmt.Errorf("DB full")
+	m := newCmdDrivenUI(ws)
+	m.session = nil // No session → triggers CreateSession
+	warmCmdDrivenCaches(m)
+
+	_, cmd := m.Update(sendMessageMsg{Content: "test"})
+	require.NotNil(t, cmd)
+	messages := runCmdTree(m, cmd, nil)
+
+	var gotError bool
+	for _, msg := range messages {
+		if info, ok := msg.(util.InfoMsg); ok && info.Type == util.InfoTypeError {
+			gotError = true
+		}
+	}
+	require.True(t, gotError, "must surface CreateSession error")
+	require.Zero(t, ws.agentRunCalls)
+}
+
+// ---------------------------------------------------------------------------
+// Test: sendMessage with existing session — no session creation, direct AgentRun.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_SendMessage_SessionExists(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady:          true,
+		agentErr:            nil,
+		sessionsBySessionID: map[string]session.Session{"s1": {ID: "s1"}},
+	}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	_, cmd := m.Update(sendMessageMsg{Content: "hello"})
+	require.NotNil(t, cmd)
+	messages := runCmdTree(m, cmd, nil)
+
+	// No session creation should happen.
+	require.Zero(t, ws.createSessionCalls)
+
+	// AgentRun should be called.
+	require.Equal(t, 1, ws.agentRunCalls)
+
+	// Must produce agentRunSubmittedMsg.
+	var gotRunSubmitted bool
+	for _, msg := range messages {
+		if _, ok := msg.(agentRunSubmittedMsg); ok {
+			gotRunSubmitted = true
+		}
+	}
+	require.True(t, gotRunSubmitted)
+}
+
+// ---------------------------------------------------------------------------
+// Test: SetCompactMode runs in a cmd — toggleCompactMode returns a cmd.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_ToggleCompactMode_InCmd(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{agentReady: true}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	cmd := m.toggleCompactMode()
+	require.NotNil(t, cmd, "toggleCompactMode must return a cmd for SetCompactMode I/O")
+
+	messages := runCmdTree(m, cmd, nil)
+	// The cmd returns nil (success), so no messages should be errors.
+	for _, msg := range messages {
+		if info, ok := msg.(util.InfoMsg); ok && info.Type == util.InfoTypeError {
+			t.Fatalf("unexpected error: %s", info.Msg)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: PermissionGrant runs in a cmd — workspace call is off the Update goroutine.
+// ---------------------------------------------------------------------------
+
+func TestCmdDriving_PermissionGrant_InCmd(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{agentReady: true}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	// Directly dispatch the permission cmd.
+	perm := permission.PermissionRequest{ID: "p1", ToolName: "bash"}
+	cmd := func() tea.Msg {
+		m.com.Workspace.PermissionGrant(perm)
+		return nil
+	}
+
+	messages := runCmdTree(m, cmd, nil)
+	require.Equal(t, 1, ws.permGrantCalls, "PermissionGrant must fire in the cmd")
+	for _, msg := range messages {
+		if info, ok := msg.(util.InfoMsg); ok && info.Type == util.InfoTypeError {
+			t.Fatalf("unexpected error: %s", info.Msg)
+		}
+	}
 }

@@ -25,8 +25,28 @@ import (
 )
 
 func (m *UI) requestSessionLoad(sessionID string) tea.Cmd {
+	return m.beginSessionLoad(sessionID)
+}
+
+func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
+	m.sessionLoadGen++
+	if m.sessionLoadExpectedID != "" && m.sessionLoadExpectedID != sessionID {
+		m.editor.pendingSendQueue = nil
+		m.editor.pendingSendActive = false
+	}
+	m.sessionLoadExpectedID = sessionID
+	generation := m.sessionLoadGen
+	ctx := m.com.Context()
+	workspace := m.com.Workspace
+	styles := m.com.Styles
 	return func() tea.Msg {
-		return requestSessionLoad{sessionID: sessionID}
+		loader := sessionLoadResolver{
+			ctx:       ctx,
+			workspace: workspace,
+			styles:    styles,
+			config:    workspace.Config(),
+		}
+		return loader.resolve(sessionID, generation)
 	}
 }
 

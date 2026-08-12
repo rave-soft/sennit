@@ -40,11 +40,11 @@ type editorState struct {
 	bangMode     bool
 	bangWasEmpty bool // true when bang prompt became empty on last keystroke
 
-	// pendingBangCommand holds a shell command that was issued before
-	// the session finished loading. The loadSessionMsg handler creates
-	// the pending UI item and starts execution once the chat list is
-	// stable, eliminating races between session load and shell output.
-	pendingBangCommand string
+	// pendingSendQueue holds FIFO sends received while a session is loading.
+	pendingSendQueue   []sendQueueItem
+	pendingSendGen     uint64
+	pendingSendLoading bool
+	pendingSendActive  bool
 
 	// bangCancel cancels a running bang-mode shell command. Nil when no
 	// bang command is in progress. Set by runShellCommand, cleared by
