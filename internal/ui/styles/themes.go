@@ -100,6 +100,7 @@ func CharmtonePantera() Styles {
 		Foreground(charmtone.Hazy)
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
 		Foreground(charmtone.Hazy)
+	s.Files.Additions = s.Files.Additions.Foreground(charmtone.Guac)
 
 	return s
 }

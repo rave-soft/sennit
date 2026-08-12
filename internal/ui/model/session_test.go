@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/ui/styles"
@@ -110,6 +111,13 @@ func TestFileList(t *testing.T) {
 		got := fileList(st, "/", files, 20, 0)
 		require.Empty(t, got)
 	})
+}
+
+func TestModifiedFileAdditionsUseGreen(t *testing.T) {
+	t.Parallel()
+
+	st := styles.CharmtonePantera()
+	require.Equal(t, charmtone.Guac, st.Files.Additions.GetForeground())
 }
 
 func TestUncommittedSessionFiles(t *testing.T) {
