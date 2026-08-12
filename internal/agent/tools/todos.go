@@ -55,7 +55,17 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to get session: %w", err)
 			}
 
-			isNew := len(currentSession.Todos) == 0
+			startsNewCycle := len(currentSession.Todos) > 0 && !session.HasIncompleteTodos(currentSession.Todos)
+			if startsNewCycle {
+				startsNewCycle = false
+				for _, item := range params.Todos {
+					if session.TodoStatus(item.Status) != session.TodoStatusCompleted {
+						startsNewCycle = true
+						break
+					}
+				}
+			}
+			isNew := len(currentSession.Todos) == 0 || startsNewCycle
 			oldStatusByContent := make(map[string]session.TodoStatus)
 			for _, todo := range currentSession.Todos {
 				oldStatusByContent[todo.Content] = todo.Status
@@ -109,7 +119,7 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 			// params.Todos is empty, which is an explicit reset. Items the
 			// model DID mention (any status) are left alone: the incoming
 			// copy wins outright.
-			if len(params.Todos) > 0 {
+			if len(params.Todos) > 0 && !startsNewCycle {
 				seen := make(map[string]bool, len(todos))
 				for _, t := range todos {
 					seen[normalizeTodoContent(t.Content)] = true

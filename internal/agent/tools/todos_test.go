@@ -158,6 +158,7 @@ func TestTodosTool_DedupesDuplicateOldCompletedEntries(t *testing.T) {
 		Todos: []session.Todo{
 			{Content: "write tests", Status: session.TodoStatusCompleted},
 			{Content: "Write Tests", Status: session.TodoStatusCompleted},
+			{Content: "ship it", Status: session.TodoStatusPending},
 		},
 	}}
 
@@ -170,4 +171,48 @@ func TestTodosTool_DedupesDuplicateOldCompletedEntries(t *testing.T) {
 	require.Equal(t, "write tests", todos[1].Content)
 	require.Equal(t, 1, meta.Completed)
 	require.Equal(t, 2, meta.Total)
+}
+
+func TestTodosTool_StartsNewCycleAfterAllTodosCompleted(t *testing.T) {
+	t.Parallel()
+
+	sessions := &fakeTodoSessions{sess: session.Session{
+		ID: "session-1",
+		Todos: []session.Todo{
+			{Content: "write tests", Status: session.TodoStatusCompleted},
+			{Content: "ship it", Status: session.TodoStatusCompleted},
+		},
+	}}
+
+	todos, meta := runTodosTool(t, sessions, []TodoItem{
+		{Content: "monitor rollout", Status: "in_progress", ActiveForm: "Monitoring rollout"},
+	})
+
+	require.Equal(t, []session.Todo{{
+		Content:    "monitor rollout",
+		Status:     session.TodoStatusInProgress,
+		ActiveForm: "Monitoring rollout",
+	}}, todos)
+	require.True(t, meta.IsNew)
+	require.Equal(t, 0, meta.Completed)
+	require.Equal(t, 1, meta.Total)
+}
+
+func TestTodosTool_RepeatedCompletedListDoesNotStartNewCycle(t *testing.T) {
+	t.Parallel()
+
+	sessions := &fakeTodoSessions{sess: session.Session{
+		ID: "session-1",
+		Todos: []session.Todo{
+			{Content: "write tests", Status: session.TodoStatusCompleted},
+		},
+	}}
+
+	todos, meta := runTodosTool(t, sessions, []TodoItem{
+		{Content: "write tests", Status: "completed"},
+	})
+
+	require.Len(t, todos, 1)
+	require.False(t, meta.IsNew)
+	require.Equal(t, 1, meta.Completed)
 }
