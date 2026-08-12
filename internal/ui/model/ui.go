@@ -393,6 +393,9 @@ type UI struct {
 	panelSpinner    spinner.Model
 	panelIsSpinning bool
 
+	sessionLoadGen        uint64
+	sessionLoadExpectedID string
+
 	// mouse highlighting related state
 	lastClickTime time.Time
 	hoverX        int
@@ -613,14 +616,15 @@ func (m *UI) loadInitialSession() tea.Cmd {
 		// Only load if we're in landing state (i.e., fully configured)
 		return nil
 	case m.initialSessionID != "":
-		return m.loadSession(m.initialSessionID)
+		return m.requestSessionLoad(m.initialSessionID)
 	case m.continueLastSession:
+		ws := m.com.Workspace
 		return func() tea.Msg {
-			sessions, err := m.com.Workspace.ListSessions(context.Background())
+			sessions, err := ws.ListSessions(context.Background())
 			if err != nil || len(sessions) == 0 {
 				return nil
 			}
-			return m.loadSession(sessions[0].ID)()
+			return requestSessionLoad{sessionID: sessions[0].ID}
 		}
 	default:
 		return nil
@@ -862,6 +866,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case loadSessionMsg:
+		if msg.gen != m.sessionLoadGen || msg.sessionID != m.sessionLoadExpectedID {
+			break
+		}
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
 		if m.forceCompactMode {
 			m.isCompact = true
 		}
@@ -885,12 +896,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
-		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
-		if err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
-		if cmd := m.setSessionMessages(msgs); cmd != nil {
+		if cmd := m.applySessionMessageItems(msg.items, msg.lastUserMessageTime); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.autoExpandTodosIfReasonable(); cmd != nil {
@@ -905,6 +911,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		cmds = append(cmds, m.reportCurrentSession(msg.sessionID))
 		if hasInProgressTodo(m.session.Todos) {
 			m.updateLayoutAndSize()
 		}
@@ -912,6 +919,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.historyReset()
 		cmds = append(cmds, m.loadPromptHistory())
 		m.updateLayoutAndSize()
+
+	case requestSessionLoad:
+		m.sessionLoadGen++
+		m.sessionLoadExpectedID = msg.sessionID
+		gen := m.sessionLoadGen
+		sessionID := msg.sessionID
+		loader := sessionLoadResolver{
+			ctx:       m.com.Context(),
+			workspace: m.com.Workspace,
+			styles:    m.com.Styles,
+			config:    m.com.Config(),
+		}
+		cmds = append(cmds, func() tea.Msg {
+			return loader.resolve(sessionID, gen)
+		})
 
 	case sessionFilesUpdatesMsg:
 		m.sessionFiles = msg.sessionFiles
@@ -1754,38 +1776,41 @@ func serverNoticeLevelToInfoType(level proto.ServerNoticeLevel) util.InfoType {
 
 // setSessionMessages sets the messages for the current session in the chat
 func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
-	var cmds []tea.Cmd
-	// Build tool result map to link tool calls with their results
+	items, lastUserMessageTime := m.sessionMessageItems(msgs)
+	m.loadNestedToolCalls(items)
+	return m.applySessionMessageItems(items, lastUserMessageTime)
+}
+
+func (m *UI) sessionMessageItems(msgs []message.Message) ([]chat.MessageItem, int64) {
+	return sessionMessageItems(m.com.Styles, m.com.Config(), msgs)
+}
+
+func sessionMessageItems(sty *styles.Styles, cfg *config.Config, msgs []message.Message) ([]chat.MessageItem, int64) {
 	msgPtrs := make([]*message.Message, len(msgs))
 	for i := range msgs {
 		msgPtrs[i] = &msgs[i]
 	}
 	toolResultMap := chat.BuildToolResultMap(msgPtrs)
+	var lastUserMessageTime int64
 	if len(msgPtrs) > 0 {
-		m.lastUserMessageTime = msgPtrs[0].CreatedAt
+		lastUserMessageTime = msgPtrs[0].CreatedAt
 	}
-
-	// Add messages to chat with linked tool results
 	items := make([]chat.MessageItem, 0, len(msgs)*2)
 	for _, msg := range msgPtrs {
-		switch msg.Role {
-		case message.User:
-			m.lastUserMessageTime = msg.CreatedAt
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Config())...)
-		case message.Assistant:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Config())...)
-			if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
-				items = append(items, infoItem)
-			}
-		default:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.com.Config())...)
+		if msg.Role == message.User {
+			lastUserMessageTime = msg.CreatedAt
+		}
+		items = append(items, chat.ExtractMessageItems(sty, msg, toolResultMap, cfg)...)
+		if msg.Role == message.Assistant && msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
+			items = append(items, chat.NewAssistantInfoItem(sty, msg, cfg, time.Unix(lastUserMessageTime, 0)))
 		}
 	}
+	return items, lastUserMessageTime
+}
 
-	// Load nested tool calls for agent/agentic_fetch tools.
-	m.loadNestedToolCalls(items)
-
+func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageTime int64) tea.Cmd {
+	var cmds []tea.Cmd
+	m.lastUserMessageTime = lastUserMessageTime
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
 	// being busy: a session that was killed mid-generation can persist an
@@ -1848,13 +1873,17 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	m.status.SetInfoMsg(info)
 	cmds := []tea.Cmd{clearInfoMsgCmd(info.TTL)}
 	if msg.State == workspace.ConnectionRecovered && m.session != nil {
-		cmds = append(cmds, m.loadSession(m.session.ID))
+		cmds = append(cmds, m.requestSessionLoad(m.session.ID))
 	}
 	return cmds
 }
 
 // loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
 func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
+	loadNestedToolCalls(context.Background(), m.com.Workspace, m.com.Styles, m.com.Config(), items)
+}
+
+func loadNestedToolCalls(ctx context.Context, ws workspace.Workspace, sty *styles.Styles, cfg *config.Config, items []chat.MessageItem) {
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)
 		if !ok {
@@ -1869,10 +1898,10 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		messageID := toolItem.MessageID()
 
 		// Get the agent tool session ID.
-		agentSessionID := m.com.Workspace.CreateAgentToolSessionID(messageID, tc.ID)
+		agentSessionID := ws.CreateAgentToolSessionID(messageID, tc.ID)
 
 		// Fetch nested messages.
-		nestedMsgs, err := m.com.Workspace.ListMessages(context.Background(), agentSessionID)
+		nestedMsgs, err := ws.ListMessages(ctx, agentSessionID)
 		if err != nil || len(nestedMsgs) == 0 {
 			continue
 		}
@@ -1887,7 +1916,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		// Extract nested tool items.
 		var nestedTools []chat.ToolMessageItem
 		for _, nestedMsg := range nestedMsgPtrs {
-			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.com.Config())
+			nestedItems := chat.ExtractMessageItems(sty, nestedMsg, nestedToolResultMap, cfg)
 			for _, nestedItem := range nestedItems {
 				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
 					// Mark nested tools as simple (compact) rendering.
@@ -1904,7 +1933,7 @@ func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
 		for i, nt := range nestedTools {
 			nestedMessageItems[i] = nt
 		}
-		m.loadNestedToolCalls(nestedMessageItems)
+		loadNestedToolCalls(ctx, ws, sty, cfg, nestedMessageItems)
 
 		// Set nested tools on the parent.
 		nestedContainer.SetNestedTools(nestedTools)
@@ -2224,7 +2253,7 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	// rendered as a full-width green bar under the panel. Redundant with
 	// the panel and visually loud for what's just a location cue.
 
-	return m.loadSession(childID)
+	return m.requestSessionLoad(childID)
 }
 
 // exitChildSession pops the top navigation frame and returns a tea.Cmd
@@ -2241,9 +2270,9 @@ func (m *UI) exitChildSession() tea.Cmd {
 		// Tab no longer offers a manual way back in.
 		m.focus = uiFocusEditor
 		m.chat.Blur()
-		return tea.Batch(m.loadSession(frame.parentSessionID), m.editor.textarea.Focus())
+		return tea.Batch(m.requestSessionLoad(frame.parentSessionID), m.editor.textarea.Focus())
 	}
-	return m.loadSession(frame.parentSessionID)
+	return m.requestSessionLoad(frame.parentSessionID)
 }
 
 // cycleChildSession moves the sibling index of the current navigation
@@ -2281,7 +2310,7 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 	frame.agentName, frame.model, frame.effort = agentName, model, effort
 	frame.delegationStart, frame.delegationDuration = delegationStart, delegationDuration
 
-	return m.loadSession(m.com.Workspace.CreateAgentToolSessionID(sibling.messageID, sibling.toolCallID))
+	return m.requestSessionLoad(m.com.Workspace.CreateAgentToolSessionID(sibling.messageID, sibling.toolCallID))
 }
 
 // findNestedToolContainer looks up the top-level tool item in the chat
@@ -2451,7 +2480,7 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 	// Session dialog messages.
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
-		cmds = append(cmds, m.loadSession(msg.Session.ID))
+		cmds = append(cmds, m.requestSessionLoad(msg.Session.ID))
 
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
@@ -4619,7 +4648,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		}
 		if newSession.ID != "" {
 			m.session = &newSession
-			cmds = append(cmds, m.loadSession(newSession.ID))
+			cmds = append(cmds, m.requestSessionLoad(newSession.ID))
 		}
 		m.setState(uiChat, m.focus)
 	}
@@ -4692,7 +4721,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		}
 		if newSession.ID != "" {
 			m.session = &newSession
-			cmds = append(cmds, m.loadSession(newSession.ID))
+			cmds = append(cmds, m.requestSessionLoad(newSession.ID))
 		}
 		m.setState(uiChat, m.focus)
 		// Defer shell execution until loadSessionMsg fires so the chat

@@ -98,6 +98,10 @@ func (w *countingWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCo
 	return w.lspDiags[name]
 }
 
+func (w *countingWorkspace) SetCurrentSession(_ context.Context, _ string) error {
+	return nil
+}
+
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
 }

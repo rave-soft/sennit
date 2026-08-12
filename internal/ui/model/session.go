@@ -11,22 +11,40 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/diff"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/rave-soft/braid/internal/ui/util"
+	"github.com/rave-soft/braid/internal/workspace"
 )
+
+func (m *UI) requestSessionLoad(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		return requestSessionLoad{sessionID: sessionID}
+	}
+}
 
 // loadSessionMsg is a message indicating that a session and its files have
 // been loaded.
 type loadSessionMsg struct {
-	session   *session.Session
-	files     []SessionFile
-	readFiles []string
+	gen                 uint64
+	sessionID           string
+	session             *session.Session
+	files               []SessionFile
+	readFiles           []string
+	items               []chat.MessageItem
+	lastUserMessageTime int64
+	err                 error
+}
+
+type requestSessionLoad struct {
+	sessionID string
 }
 
 // lspFilePaths returns deduplicated file paths from both modified and read
@@ -79,39 +97,42 @@ func uncommittedSessionFiles(sessionFiles []SessionFile, files []git.FileChange)
 	return result
 }
 
-// loadSession loads the session along with its associated files and computes
-// the diff statistics (additions and deletions) for each file in the session.
-// It returns a tea.Cmd that, when executed, fetches the session data and
-// returns a sessionFilesLoadedMsg containing the processed session files.
-//
-// The returned batch also reports the new current-session selection to
-// the workspace so the server can update its per-client presence map.
-// That report is fire-and-forget: errors are logged at debug and the
-// UI never blocks on the call.
-func (m *UI) loadSession(sessionID string) tea.Cmd {
-	load := func() tea.Msg {
-		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
-		if err != nil {
-			return util.ReportError(err)
-		}
+type sessionLoadResolver struct {
+	ctx       context.Context
+	workspace workspace.Workspace
+	styles    *styles.Styles
+	config    *config.Config
+}
 
-		sessionFiles, err := m.loadModifiedFiles(sessionID)
-		if err != nil {
-			return util.ReportError(err)
-		}
-
-		readFiles, err := m.com.Workspace.FileTrackerListReadFiles(context.Background(), sessionID)
-		if err != nil {
-			slog.Error("Failed to load read files for session", "error", err)
-		}
-
-		return loadSessionMsg{
-			session:   &session,
-			files:     sessionFiles,
-			readFiles: readFiles,
-		}
+func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
+	s, err := r.workspace.GetSession(r.ctx, sessionID)
+	if err != nil {
+		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
 	}
-	return tea.Batch(load, m.reportCurrentSession(sessionID))
+	sessionFiles, err := loadModifiedFiles(r.ctx, r.workspace, sessionID)
+	if err != nil {
+		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
+	}
+	readFiles, err := r.workspace.FileTrackerListReadFiles(r.ctx, sessionID)
+	if err != nil {
+		slog.Error("Failed to load read files for session", "error", err)
+	}
+	msgs, err := r.workspace.ListMessages(r.ctx, sessionID)
+	if err != nil {
+		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
+	}
+	items, lastUserMessageTime := sessionMessageItems(r.styles, r.config, msgs)
+	loadNestedToolCalls(r.ctx, r.workspace, r.styles, r.config, items)
+
+	return loadSessionMsg{
+		gen:                 gen,
+		sessionID:           sessionID,
+		session:             &s,
+		files:               sessionFiles,
+		readFiles:           readFiles,
+		items:               items,
+		lastUserMessageTime: lastUserMessageTime,
+	}
 }
 
 // reportCurrentSession returns a fire-and-forget tea.Cmd that
@@ -120,8 +141,9 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 // for server-side presence tracking, not correctness-critical
 // state.
 func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
+	workspace := m.com.Workspace
 	return func() tea.Msg {
-		if err := m.com.Workspace.SetCurrentSession(context.Background(), sessionID); err != nil {
+		if err := workspace.SetCurrentSession(context.Background(), sessionID); err != nil {
 			slog.Debug("Failed to report current session", "session_id", sessionID, "error", err)
 		}
 		return nil
@@ -133,7 +155,10 @@ func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	return sessionFilesFromHistory(files), nil
+}
 
+func sessionFilesFromHistory(files []history.File) []SessionFile {
 	filesByPath := make(map[string][]history.File)
 	for _, f := range files {
 		filesByPath[f.Path] = append(filesByPath[f.Path], f)
@@ -174,22 +199,27 @@ func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
 		}
 		return 0
 	})
+	return sessionFiles
+}
+
+func loadModifiedFiles(ctx context.Context, ws workspace.Workspace, sessionID string) ([]SessionFile, error) {
+	files, err := ws.ListSessionHistory(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	sessionFiles := sessionFilesFromHistory(files)
+	uncommittedFiles, err := ws.UncommittedFiles(ctx)
+	if err != nil {
+		slog.Error("Failed to load uncommitted files", "error", err)
+	}
+	if uncommittedFiles != nil {
+		return uncommittedSessionFiles(sessionFiles, uncommittedFiles), nil
+	}
 	return sessionFiles, nil
 }
 
 func (m *UI) loadModifiedFiles(sessionID string) ([]SessionFile, error) {
-	sessionFiles, err := m.loadSessionFiles(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	files, err := m.com.Workspace.UncommittedFiles(context.Background())
-	if err != nil {
-		slog.Error("Failed to load uncommitted files", "error", err)
-	}
-	if files != nil {
-		return uncommittedSessionFiles(sessionFiles, files), nil
-	}
-	return sessionFiles, nil
+	return loadModifiedFiles(context.Background(), m.com.Workspace, sessionID)
 }
 
 // handleFileEvent processes file change events and updates the session file

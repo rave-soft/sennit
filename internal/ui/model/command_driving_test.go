@@ -24,9 +24,9 @@ import (
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/skills"
 	"github.com/rave-soft/braid/internal/ui/attachments"
+	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
-	"github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -65,14 +65,18 @@ type cmdDrivingWorkspace struct {
 	permDenyCalls           int
 	permSkipCalls           int
 
-	listMessagesCalls  int
-	listMessagesResult []message.Message
-	listMessagesErr    error
-	listThreadsCalls   int
-	getSessionCalls    int
+	listMessagesCalls       int
+	listMessagesErrByID     map[string]error
+	listThreadsCalls        int
+	getSessionCalls         int
+	listSessionHistoryCalls int
+	lspStartCalls           int
+	setCurrentSessionCalls  int
+	currentSessionIDs       []string
 
-	// Session return value
-	returnSession session.Session
+	sessionsBySessionID map[string]session.Session
+	messagesBySessionID map[string][]message.Message
+	historyBySessionID  map[string][]history.File
 }
 
 func (w *cmdDrivingWorkspace) Config() *config.Config {
@@ -173,31 +177,30 @@ func (w *cmdDrivingWorkspace) AgentIsSessionBusy(string) bool { return false }
 
 func (w *cmdDrivingWorkspace) CreateSession(_ context.Context, title string) (session.Session, error) {
 	w.createSessionCalls++
-	s := w.returnSession
-	if s.ID == "" {
-		s = session.Session{ID: "sess-" + title}
-	}
-	return s, nil
+	return session.Session{ID: "sess-" + title}, nil
 }
 
 func (w *cmdDrivingWorkspace) GetSession(_ context.Context, id string) (session.Session, error) {
 	w.getSessionCalls++
-	s := w.returnSession
-	switch s.ID {
-	case "":
-		s = session.Session{ID: id}
-	case id:
-		// Return the configured session for matching IDs.
-	default:
-		// Different ID: return a basic session.
-		s = session.Session{ID: id}
+	s, ok := w.sessionsBySessionID[id]
+	if !ok {
+		return session.Session{}, fmt.Errorf("session %s not found", id)
 	}
 	return s, nil
 }
 
 func (w *cmdDrivingWorkspace) ListMessages(_ context.Context, id string) ([]message.Message, error) {
 	w.listMessagesCalls++
-	return w.listMessagesResult, w.listMessagesErr
+	if err := w.listMessagesErrByID[id]; err != nil {
+		return nil, err
+	}
+	msgs, ok := w.messagesBySessionID[id]
+	if !ok {
+		return nil, nil
+	}
+	result := make([]message.Message, len(msgs))
+	copy(result, msgs)
+	return result, nil
 }
 
 func (w *cmdDrivingWorkspace) ListUserMessages(_ context.Context, _ string) ([]message.Message, error) {
@@ -215,11 +218,20 @@ func (w *cmdDrivingWorkspace) SaveSession(_ context.Context, s session.Session) 
 func (w *cmdDrivingWorkspace) DeleteSession(_ context.Context, _ string) error {
 	return nil
 }
-func (w *cmdDrivingWorkspace) CreateAgentToolSessionID(_, _ string) string { return "" }
+
+func (w *cmdDrivingWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
+	return messageID + ":" + toolCallID
+}
+
 func (w *cmdDrivingWorkspace) ParseAgentToolSessionID(_ string) (string, string, bool) {
 	return "", "", false
 }
-func (w *cmdDrivingWorkspace) SetCurrentSession(_ context.Context, _ string) error { return nil }
+
+func (w *cmdDrivingWorkspace) SetCurrentSession(_ context.Context, sessionID string) error {
+	w.setCurrentSessionCalls++
+	w.currentSessionIDs = append(w.currentSessionIDs, sessionID)
+	return nil
+}
 
 func (w *cmdDrivingWorkspace) SupportsThreads() bool { return false }
 func (w *cmdDrivingWorkspace) ListThreads(_ context.Context) ([]proto.Thread, error) {
@@ -255,7 +267,7 @@ func (w *cmdDrivingWorkspace) InitCoderAgentNonInteractive(ctx context.Context) 
 func (w *cmdDrivingWorkspace) GetDefaultSmallModel(string) config.SelectedModel {
 	return config.SelectedModel{}
 }
-func (w *cmdDrivingWorkspace) LSPStart(ctx context.Context, path string) {}
+func (w *cmdDrivingWorkspace) LSPStart(ctx context.Context, path string) { w.lspStartCalls++ }
 func (w *cmdDrivingWorkspace) LSPStopAll(ctx context.Context)            {}
 func (w *cmdDrivingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
 	return nil
@@ -358,7 +370,8 @@ func (w *cmdDrivingWorkspace) FileTrackerListReadFiles(ctx context.Context, sess
 }
 
 func (w *cmdDrivingWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
-	return nil, nil
+	w.listSessionHistoryCalls++
+	return w.historyBySessionID[sessionID], nil
 }
 func (w *cmdDrivingWorkspace) QuestionAnswer(responses []question.Answer) bool { return false }
 func (w *cmdDrivingWorkspace) QuestionCancel() bool                            { return false }
@@ -544,9 +557,9 @@ func TestCmdDriving_RepeatedEnter_SendAndSubmit(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{
-		agentReady:    true,
-		agentErr:      nil,
-		returnSession: session.Session{ID: "new-sess"},
+		agentReady:          true,
+		agentErr:            nil,
+		sessionsBySessionID: map[string]session.Session{"new-sess": {ID: "new-sess"}},
 	}
 	m := newCmdDrivenUI(ws)
 	warmCmdDrivenCaches(m)
@@ -710,9 +723,9 @@ func TestCmdDriving_EnterWhenNoSession_CreatesSession(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{
-		agentReady:    true,
-		agentErr:      nil,
-		returnSession: session.Session{ID: "auto-created"},
+		agentReady:          true,
+		agentErr:            nil,
+		sessionsBySessionID: map[string]session.Session{"auto-created": {ID: "auto-created"}},
 	}
 	// No session set — m.session is nil.
 	m := newCmdDrivenUI(ws)
@@ -937,165 +950,213 @@ func TestCmdDriving_UnknownMessage_RoutedThroughUpdate(t *testing.T) {
 	require.NotNil(t, updated[reflect.TypeOf(tea.EnvMsg{})], "tea.EnvMsg must run its Update route")
 }
 
-// ---------------------------------------------------------------------------
-// Test: loadSessionMsg — successful async load applies session + messages.
-// ---------------------------------------------------------------------------
-
-func TestCmdDriving_LoadSession_Success(t *testing.T) {
+func TestCmdDriving_LoadSession_FreshResultApplied(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{
-		agentReady:    true,
-		returnSession: session.Session{ID: "s-loaded", Title: "Loaded Session"},
-		listMessagesResult: []message.Message{
-			{ID: "m1", Role: message.User, SessionID: "s-loaded", Parts: []message.ContentPart{
-				message.TextContent{Text: "hello"},
+		agentReady: true,
+		sessionsBySessionID: map[string]session.Session{
+			"s-new": {ID: "s-new", Title: "New Session"},
+		},
+		messagesBySessionID: map[string][]message.Message{
+			"s-new": {
+				{ID: "m1", Role: message.User, SessionID: "s-new", Parts: []message.ContentPart{
+					message.TextContent{Text: "hello"},
+				}},
+			},
+		},
+	}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	_, cmd := m.Update(requestSessionLoad{sessionID: "s-new"})
+	require.NotNil(t, cmd, "requestSessionLoad must produce a cmd")
+
+	messages := runCmdTree(m, cmd, nil)
+
+	var got loadSessionMsg
+	for _, msg := range messages {
+		if lsm, ok := msg.(loadSessionMsg); ok {
+			got = lsm
+		}
+	}
+	require.True(t, got.gen > 0, "must receive loadSessionMsg with generation")
+	require.Equal(t, "s-new", got.sessionID)
+	require.Equal(t, "New Session", got.session.Title)
+	require.Len(t, got.items, 1)
+	require.Equal(t, "s-new", m.session.ID, "session must be set")
+	require.GreaterOrEqual(t, m.chat.Len(), 1, "chat must contain the loaded message")
+	require.GreaterOrEqual(t, ws.agentReadyCalls, 1, "must probe AgentIsReady")
+	require.True(t, m.wsCache.agentReady, "ready state must be cached")
+}
+
+func TestCmdDriving_LoadSession_NestedToolsApplied(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady: true,
+		sessionsBySessionID: map[string]session.Session{
+			"parent": {ID: "parent"},
+		},
+		messagesBySessionID: map[string][]message.Message{
+			"parent": {{
+				ID: "parent-message", Role: message.Assistant, SessionID: "parent",
+				Parts: []message.ContentPart{message.ToolCall{ID: "agent-call", Name: "agent", Input: `{}`}},
+			}},
+			"parent-message:agent-call": {{
+				ID: "child-message", Role: message.Assistant, SessionID: "parent-message:agent-call",
+				Parts: []message.ContentPart{message.ToolCall{ID: "child-call", Name: "bash", Input: `{}`}},
 			}},
 		},
 	}
 	m := newCmdDrivenUI(ws)
-	// Set the session so currentSessionID returns "s-loaded".
-	m.session = &session.Session{ID: "s-loaded"}
 	warmCmdDrivenCaches(m)
 
-	// Call loadSession which dispatches the off-thread fetch.
-	cmd := m.loadSession("s-loaded")
-	require.NotNil(t, cmd, "loadSession must return a cmd")
+	_, cmd := m.Update(requestSessionLoad{sessionID: "parent"})
+	result := cmd().(loadSessionMsg)
+	require.NoError(t, result.err)
+	require.Len(t, result.items, 1)
+	container, ok := result.items[0].(chat.NestedToolContainer)
+	require.True(t, ok)
+	require.Len(t, container.NestedTools(), 1)
+	require.Equal(t, "child-call", container.NestedTools()[0].ToolCall().ID)
 
-	// Run the command tree: the batch contains [load, reportCurrentSession].
-	messages := runCmdTree(m, cmd, nil)
-
-	// Must have received a loadSessionMsg.
-	var gotLoad bool
-	for _, msg := range messages {
-		if lsm, ok := msg.(loadSessionMsg); ok {
-			gotLoad = true
-			require.Equal(t, uint64(1), lsm.gen, "gen must match current generation")
-			require.Equal(t, "s-loaded", lsm.sessionID)
-			require.Equal(t, "Loaded Session", lsm.session.Title)
-			require.Len(t, lsm.messages, 1, "messages must be carried by the msg")
-		}
-	}
-	require.True(t, gotLoad, "must receive loadSessionMsg")
-
-	// The UI must have applied the session and its messages.
-	require.Equal(t, "s-loaded", m.session.ID, "session must be set")
-	require.GreaterOrEqual(t, m.chat.Len(), 1, "chat must contain the loaded message")
+	m.Update(result)
+	delegations := m.chat.RunningDelegations()
+	require.Len(t, delegations, 1)
+	applied := delegations[0].(chat.NestedToolContainer)
+	require.Len(t, applied.NestedTools(), 1)
+	require.Equal(t, "child-call", applied.NestedTools()[0].ToolCall().ID)
 }
 
-// ---------------------------------------------------------------------------
-// Test: loadSessionMsg — stale result from a superseded session switch
-// must be discarded without changing UI state.
-// ---------------------------------------------------------------------------
+func TestCmdDriving_LoadSession_CapturesWorkspace(t *testing.T) {
+	t.Parallel()
+
+	original := &cmdDrivingWorkspace{
+		sessionsBySessionID: map[string]session.Session{
+			"captured": {ID: "captured", Title: "Captured"},
+		},
+	}
+	replacement := &cmdDrivingWorkspace{
+		sessionsBySessionID: map[string]session.Session{
+			"captured": {ID: "captured", Title: "Replacement"},
+		},
+	}
+	m := newCmdDrivenUI(original)
+	warmCmdDrivenCaches(m)
+
+	_, cmd := m.Update(requestSessionLoad{sessionID: "captured"})
+	m.com.Workspace = replacement
+
+	msg := cmd().(loadSessionMsg)
+	require.NoError(t, msg.err)
+	require.Equal(t, "Captured", msg.session.Title)
+	require.Equal(t, 1, original.getSessionCalls)
+	require.Zero(t, replacement.getSessionCalls)
+}
 
 func TestCmdDriving_LoadSession_StaleResultDiscarded(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{
-		agentReady:    true,
-		returnSession: session.Session{ID: "s-old", Title: "Old Session"},
-		listMessagesResult: []message.Message{
-			{ID: "m-old", Role: message.User, SessionID: "s-old", Parts: []message.ContentPart{
-				message.TextContent{Text: "stale"},
-			}},
+		agentReady: true,
+		sessionsBySessionID: map[string]session.Session{
+			"s-old":   {ID: "s-old", Title: "Old Session"},
+			"s-fresh": {ID: "s-fresh", Title: "Fresh Session"},
+		},
+		messagesBySessionID: map[string][]message.Message{
+			"s-old":   {{ID: "old", Role: message.User, SessionID: "s-old", Parts: []message.ContentPart{message.TextContent{Text: "old"}}}},
+			"s-fresh": {{ID: "fresh", Role: message.User, SessionID: "s-fresh", Parts: []message.ContentPart{message.TextContent{Text: "fresh"}}}},
+		},
+		historyBySessionID: map[string][]history.File{
+			"s-fresh": {{SessionID: "s-fresh", Path: "fresh.go", Content: "fresh", Version: 1}},
 		},
 	}
 	m := newCmdDrivenUI(ws)
-	m.session = &session.Session{ID: "s-current"}
 	warmCmdDrivenCaches(m)
 
-	// First, load session "s-current" which sets sessionLoadGen to 1.
-	cmd1 := m.loadSession("s-current")
-	require.NotNil(t, cmd1)
+	_, oldCmd := m.Update(requestSessionLoad{sessionID: "s-old"})
+	_, freshCmd := m.Update(requestSessionLoad{sessionID: "s-fresh"})
+	oldResult := oldCmd().(loadSessionMsg)
+	runCmdTree(m, freshCmd, nil)
 
-	// Simulate a session switch: set the UI's session pointer to a new session
-	// and dispatch a new load (gen will be 2).
-	m.session = &session.Session{ID: "s-new"}
-	cmd2 := m.loadSession("s-new")
-	require.NotNil(t, cmd2)
+	sessionID, sessionTitle := m.session.ID, m.session.Title
+	chatLen, filesLen := m.chat.Len(), len(m.sessionFiles)
+	lspCalls, historyCalls := ws.lspStartCalls, ws.listSessionHistoryCalls
+	presenceCalls, errorInfo := ws.setCurrentSessionCalls, m.status.InfoMsg()
 
-	// Run both commands. Process cmd1 (stale, gen=1, sessionID="s-current") first.
-	runCmdTree(m, cmd1, nil)
-
-	// The UI must NOT have changed its session to s-old.
-	require.Equal(t, "s-new", m.session.ID,
-		"stale result must not replace the current session")
+	_, staleCmd := m.Update(oldResult)
+	require.Nil(t, staleCmd)
+	require.Equal(t, sessionID, m.session.ID)
+	require.Equal(t, sessionTitle, m.session.Title)
+	require.Equal(t, chatLen, m.chat.Len())
+	require.Equal(t, filesLen, len(m.sessionFiles))
+	require.Equal(t, lspCalls, ws.lspStartCalls)
+	require.Equal(t, historyCalls, ws.listSessionHistoryCalls)
+	require.Equal(t, presenceCalls, ws.setCurrentSessionCalls)
+	require.Equal(t, errorInfo, m.status.InfoMsg())
 }
 
-// ---------------------------------------------------------------------------
-// Test: loadSession — overlapping loads are safe.  The latest generation
-// wins; older results are discarded.
-// ---------------------------------------------------------------------------
-
-func TestCmdDriving_LoadSession_OverlappingLoads(t *testing.T) {
+func TestCmdDriving_LoadSession_ReportUsesAcceptedSessionAfterSupersedingRequest(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{
-		agentReady:    true,
-		returnSession: session.Session{ID: "s-overlap", Title: "Overlap Session"},
-		listMessagesResult: []message.Message{
-			{ID: "m-ov", Role: message.User, SessionID: "s-overlap", Parts: []message.ContentPart{
-				message.TextContent{Text: "overlap"},
-			}},
+		agentReady: true,
+		sessionsBySessionID: map[string]session.Session{
+			"s-old":   {ID: "s-old"},
+			"s-fresh": {ID: "s-fresh"},
 		},
 	}
 	m := newCmdDrivenUI(ws)
-	// Start with session "s-base".
-	m.session = &session.Session{ID: "s-base"}
 	warmCmdDrivenCaches(m)
 
-	// Dispatch two loads in rapid succession.
-	cmd1 := m.loadSession("s-base")
-	require.NotNil(t, cmd1)
-	cmd2 := m.loadSession("s-overlap")
-	require.NotNil(t, cmd2)
+	_, oldLoadCmd := m.Update(requestSessionLoad{sessionID: "s-old"})
+	oldResult := oldLoadCmd().(loadSessionMsg)
+	_, freshLoadCmd := m.Update(requestSessionLoad{sessionID: "s-fresh"})
+	freshResult := freshLoadCmd().(loadSessionMsg)
+	_, reportCmd := m.Update(freshResult)
+	require.NotNil(t, reportCmd)
 
-	// Simulate correct caller flow: set m.session before processing.
-	m.session = &session.Session{ID: "s-overlap"}
+	m.Update(requestSessionLoad{sessionID: "s-next"})
+	runCmdTree(m, reportCmd, nil)
+	require.Equal(t, []string{"s-fresh"}, ws.currentSessionIDs)
 
-	// Process cmd2 (the latest gen, sessionID="s-overlap" matching m.session).
-	messages2 := runCmdTree(m, cmd2, nil)
-	var latestApplied bool
-	for _, msg := range messages2 {
-		if lsm, ok := msg.(loadSessionMsg); ok {
-			if lsm.gen == m.sessionLoadGen && lsm.sessionID == m.currentSessionID() {
-				latestApplied = true
-			}
-		}
-	}
-	require.True(t, latestApplied, "latest-generation load must be applied")
-	require.Equal(t, "s-overlap", m.session.ID, "session must reflect the latest load")
+	_, staleCmd := m.Update(oldResult)
+	require.Nil(t, staleCmd)
+	require.Equal(t, []string{"s-fresh"}, ws.currentSessionIDs)
 }
 
-// ---------------------------------------------------------------------------
-// Test: loadSession — error from ListMessages is reported via UI.
-// ---------------------------------------------------------------------------
-
-func TestCmdDriving_LoadSession_ListMessagesError(t *testing.T) {
+func TestCmdDriving_LoadSession_StaleErrorDiscarded(t *testing.T) {
 	t.Parallel()
 
 	ws := &cmdDrivingWorkspace{
-		agentReady:      true,
-		returnSession:   session.Session{ID: "s-err", Title: "Error Session"},
-		listMessagesErr: fmt.Errorf("database timeout"),
+		agentReady: true,
+		sessionsBySessionID: map[string]session.Session{
+			"s-old":   {ID: "s-old"},
+			"s-fresh": {ID: "s-fresh"},
+		},
+		messagesBySessionID: map[string][]message.Message{
+			"s-fresh": {{ID: "fresh", Role: message.User, SessionID: "s-fresh", Parts: []message.ContentPart{message.TextContent{Text: "fresh"}}}},
+		},
+		listMessagesErrByID: map[string]error{"s-old": fmt.Errorf("old load failed")},
 	}
 	m := newCmdDrivenUI(ws)
-	m.session = &session.Session{ID: "s-err"}
 	warmCmdDrivenCaches(m)
 
-	cmd := m.loadSession("s-err")
-	require.NotNil(t, cmd)
+	_, oldCmd := m.Update(requestSessionLoad{sessionID: "s-old"})
+	_, freshCmd := m.Update(requestSessionLoad{sessionID: "s-fresh"})
+	oldResult := oldCmd().(loadSessionMsg)
+	require.Error(t, oldResult.err)
+	runCmdTree(m, freshCmd, nil)
 
-	messages := runCmdTree(m, cmd, nil)
-
-	// Must have received an InfoMsg with error type.
-	var gotError bool
-	for _, msg := range messages {
-		if infoMsg, ok := msg.(util.InfoMsg); ok {
-			gotError = true
-			require.Equal(t, util.InfoTypeError, infoMsg.Type, "must be error type")
-			require.Contains(t, infoMsg.Msg, "database timeout")
-		}
-	}
-	require.True(t, gotError, "ListMessages error must surface as InfoMsg with error type")
+	sessionID, chatLen, errorInfo := m.session.ID, m.chat.Len(), m.status.InfoMsg()
+	presenceCalls, lspCalls, historyCalls := ws.setCurrentSessionCalls, ws.lspStartCalls, ws.listSessionHistoryCalls
+	_, staleCmd := m.Update(oldResult)
+	require.Nil(t, staleCmd)
+	require.Equal(t, sessionID, m.session.ID)
+	require.Equal(t, chatLen, m.chat.Len())
+	require.Equal(t, errorInfo, m.status.InfoMsg())
+	require.Equal(t, presenceCalls, ws.setCurrentSessionCalls)
+	require.Equal(t, lspCalls, ws.lspStartCalls)
+	require.Equal(t, historyCalls, ws.listSessionHistoryCalls)
 }
