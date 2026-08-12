@@ -87,7 +87,11 @@ func GetBackgroundShellManager() *BackgroundShellManager {
 
 // Start creates and starts a new background shell with the given command.
 func (m *BackgroundShellManager) Start(ctx context.Context, workingDir string, blockFuncs []BlockFunc, command string, description string) (*BackgroundShell, error) {
-	// Check job limit
+	// Completed jobs remain available for job_output, but must not prevent new
+	// commands from starting when all slots are occupied.
+	if m.shells.Len() >= MaxBackgroundJobs {
+		m.removeCompleted()
+	}
 	if m.shells.Len() >= MaxBackgroundJobs {
 		return nil, fmt.Errorf("maximum number of background jobs (%d) reached. Please terminate or wait for some jobs to complete", MaxBackgroundJobs)
 	}
@@ -171,6 +175,25 @@ func (m *BackgroundShellManager) List() []string {
 	return ids
 }
 
+// BackgroundJobCounts reports running and retained completed jobs.
+type BackgroundJobCounts struct {
+	Active    int
+	Completed int
+}
+
+// Counts returns background jobs grouped by execution state.
+func (m *BackgroundShellManager) Counts() BackgroundJobCounts {
+	var counts BackgroundJobCounts
+	for shell := range m.shells.Seq() {
+		if shell.IsDone() {
+			counts.Completed++
+		} else {
+			counts.Active++
+		}
+	}
+	return counts
+}
+
 // Cleanup removes completed jobs that have been finished for more than the retention period
 func (m *BackgroundShellManager) Cleanup() int {
 	now := time.Now().Unix()
@@ -186,6 +209,21 @@ func (m *BackgroundShellManager) Cleanup() int {
 
 	for _, id := range toRemove {
 		_ = m.Remove(id) // retention cleanup; shell already completed
+	}
+
+	return len(toRemove)
+}
+
+func (m *BackgroundShellManager) removeCompleted() int {
+	var toRemove []string
+	for shell := range m.shells.Seq() {
+		if shell.IsDone() {
+			toRemove = append(toRemove, shell.ID)
+		}
+	}
+
+	for _, id := range toRemove {
+		_ = m.Remove(id)
 	}
 
 	return len(toRemove)

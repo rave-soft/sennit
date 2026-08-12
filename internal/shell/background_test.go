@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -302,6 +303,54 @@ func TestBackgroundShellManager_KillAll_Timeout(t *testing.T) {
 
 	// Must return promptly after timeout, not hang for 60 seconds.
 	require.Less(t, elapsed, 2*time.Second)
+}
+
+func TestBackgroundShellManager_StartReclaimsCompletedJobsAtLimit(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	for range MaxBackgroundJobs {
+		done := make(chan struct{})
+		close(done)
+		bgShell := &BackgroundShell{
+			ID:   fmt.Sprintf("completed-%d", manager.shells.Len()),
+			done: done,
+		}
+		manager.shells.Set(bgShell.ID, bgShell)
+	}
+
+	bgShell, err := manager.Start(t.Context(), t.TempDir(), nil, "echo reclaimed", "")
+	require.NoError(t, err)
+	bgShell.Wait()
+	require.Equal(t, 1, manager.shells.Len())
+}
+
+func TestBackgroundShellManager_StartRejectsRunningJobsAtLimit(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	for range MaxBackgroundJobs {
+		bgShell := &BackgroundShell{
+			ID:   fmt.Sprintf("running-%d", manager.shells.Len()),
+			done: make(chan struct{}),
+		}
+		manager.shells.Set(bgShell.ID, bgShell)
+	}
+
+	_, err := manager.Start(t.Context(), t.TempDir(), nil, "echo blocked", "")
+	require.EqualError(t, err, "maximum number of background jobs (50) reached. Please terminate or wait for some jobs to complete")
+}
+
+func TestBackgroundShellManager_Counts(t *testing.T) {
+	t.Parallel()
+
+	manager := newBackgroundShellManager()
+	completed := make(chan struct{})
+	close(completed)
+	manager.shells.Set("active", &BackgroundShell{ID: "active", done: make(chan struct{})})
+	manager.shells.Set("completed", &BackgroundShell{ID: "completed", done: completed})
+
+	require.Equal(t, BackgroundJobCounts{Active: 1, Completed: 1}, manager.Counts())
 }
 
 func TestBackgroundShell_WaitContext_Completed(t *testing.T) {

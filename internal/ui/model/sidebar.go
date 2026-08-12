@@ -10,8 +10,10 @@ import (
 	"github.com/charmbracelet/ultraviolet/layout"
 	mcp "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/logo"
+	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
 // sidebarState holds virtual-scroll state and cached rendered content for
@@ -123,6 +125,13 @@ func (m *UI) modelInfo(width int) string {
 	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width)
 }
 
+func backgroundJobsInfo(t *styles.Styles, counts shell.BackgroundJobCounts, width int) string {
+	header := common.Section(t, "Background Jobs", width)
+	active := t.Resource.Name.Render("Active") + " " + t.Resource.CapabilityCount.Render(fmt.Sprintf("%d/%d", counts.Active, shell.MaxBackgroundJobs))
+	completed := t.Resource.Name.Render("Completed") + " " + t.Resource.CapabilityCount.Render(fmt.Sprintf("%d", counts.Completed))
+	return lipgloss.JoinVertical(lipgloss.Left, header, active, completed)
+}
+
 // updateSidebarScrollState renders the sidebar content and computes scroll
 // state (scrollability, max offset, clamp) before drawing. This keeps all
 // state mutation in the update path rather than in the draw function.
@@ -168,6 +177,8 @@ func (m *UI) updateSidebarScrollState() {
 		cwd,
 		"",
 		m.modelInfo(contentWidth),
+		"",
+		backgroundJobsInfo(t, shell.GetBackgroundShellManager().Counts(), contentWidth),
 		"",
 		filesSection,
 		"",
