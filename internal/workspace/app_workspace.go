@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/lsp"
 	"github.com/rave-soft/braid/internal/message"
@@ -387,6 +388,10 @@ func (w *AppWorkspace) QuestionCancel() bool {
 }
 
 // -- FileTracker --
+
+func (w *AppWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
+	return git.UncommittedFiles(ctx, w.store.WorkingDir())
+}
 
 func (w *AppWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
 	w.app.FileTracker.RecordRead(ctx, sessionID, path)

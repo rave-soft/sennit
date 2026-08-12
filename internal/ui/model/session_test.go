@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -109,6 +110,28 @@ func TestFileList(t *testing.T) {
 		got := fileList(st, "/", files, 20, 0)
 		require.Empty(t, got)
 	})
+}
+
+func TestUncommittedSessionFiles(t *testing.T) {
+	t.Parallel()
+
+	sessionFiles := []SessionFile{
+		{FirstVersion: history.File{Path: "/repo/changed.go"}, Additions: 2, Deletions: 1},
+		{FirstVersion: history.File{Path: "/repo/committed.go"}, Additions: 4},
+	}
+	gitFiles := []git.FileChange{
+		{Path: "/repo/preexisting.go", Additions: 20},
+		{Path: "/repo/changed.go", Additions: 12, Deletions: 3},
+	}
+
+	got := uncommittedSessionFiles(sessionFiles, gitFiles)
+
+	require.Equal(t, []SessionFile{{
+		FirstVersion: history.File{Path: "/repo/changed.go"},
+		Additions:    2,
+		Deletions:    1,
+		Uncommitted:  true,
+	}}, got)
 }
 
 func minimalFileStyles() *styles.Styles {

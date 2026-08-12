@@ -1989,6 +1989,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 				}
 			}
 		}
+		cmds = append(cmds, m.refreshModifiedFiles())
 	}
 	return tea.Sequence(cmds...)
 }

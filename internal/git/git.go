@@ -13,6 +13,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -32,6 +35,11 @@ var (
 // On failure the returned error wraps git's stderr so callers get an
 // actionable message without having to inspect *exec.ExitError themselves.
 func run(ctx context.Context, dir string, args ...string) (string, error) {
+	out, err := runRaw(ctx, dir, args...)
+	return strings.TrimSpace(out), err
+}
+
+func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	// Force a C locale so error-message matching (see FastForward) doesn't
@@ -45,7 +53,7 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
 
 // IsRepo reports whether dir is inside a git working tree (or repo dir).
@@ -84,6 +92,81 @@ func IsDirty(ctx context.Context, dir string) (bool, error) {
 		return false, fmt.Errorf("git: status: %w", err)
 	}
 	return out != "", nil
+}
+
+// FileChange describes an uncommitted file and its line statistics.
+type FileChange struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// UncommittedFiles returns staged, unstaged, and untracked files in dir's
+// repository. A directory outside a Git repository returns an empty list.
+func UncommittedFiles(ctx context.Context, dir string) ([]FileChange, error) {
+	if !IsRepo(ctx, dir) {
+		return nil, nil
+	}
+
+	repo, err := TopLevel(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	status, err := runRaw(ctx, repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, fmt.Errorf("git: uncommitted files: %w", err)
+	}
+	if status == "" {
+		return []FileChange{}, nil
+	}
+
+	changes := make(map[string]FileChange)
+	entries := strings.Split(status, "\x00")
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) < 4 {
+			continue
+		}
+		path := entry[3:]
+		changes[path] = FileChange{Path: filepath.Join(repo, path)}
+		if entry[0] == 'R' || entry[0] == 'C' || entry[1] == 'R' || entry[1] == 'C' {
+			i++ // Porcelain -z includes the original path as the next field.
+		}
+	}
+
+	numstat, err := run(ctx, repo, "diff", "--numstat", "HEAD", "--")
+	if err != nil {
+		return nil, fmt.Errorf("git: diff stats: %w", err)
+	}
+	for line := range strings.Lines(numstat) {
+		parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		change, ok := changes[parts[2]]
+		if !ok {
+			continue
+		}
+		change.Additions, _ = strconv.Atoi(parts[0])
+		change.Deletions, _ = strconv.Atoi(parts[1])
+		changes[parts[2]] = change
+	}
+
+	result := make([]FileChange, 0, len(changes))
+	for path, change := range changes {
+		if change.Additions == 0 && change.Deletions == 0 {
+			content, readErr := os.ReadFile(filepath.Join(repo, path))
+			if readErr == nil && !bytes.Contains(content, []byte{0}) {
+				change.Additions = bytes.Count(content, []byte{'\n'})
+				if len(content) > 0 && content[len(content)-1] != '\n' {
+					change.Additions++
+				}
+			}
+		}
+		result = append(result, change)
+	}
+	slices.SortFunc(result, func(a, b FileChange) int { return strings.Compare(a.Path, b.Path) })
+	return result, nil
 }
 
 // BranchExists reports whether a local branch named name exists in repo.

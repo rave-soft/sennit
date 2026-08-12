@@ -20,6 +20,7 @@ import (
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/herdr"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/log"
@@ -693,6 +694,10 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 }
 
 // -- FileTracker --
+
+func (w *ClientWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
+	return w.client.UncommittedFiles(ctx, w.workspaceID())
+}
 
 func (w *ClientWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
 	_ = w.client.FileTrackerRecordRead(ctx, w.workspaceID(), sessionID, path)

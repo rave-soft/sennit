@@ -15,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
@@ -959,6 +960,23 @@ func (c *Client) FileTrackerListReadFiles(ctx context.Context, id string, sessio
 	var files []string
 	if err := json.NewDecoder(rsp.Body).Decode(&files); err != nil {
 		return nil, fmt.Errorf("failed to decode read files: %w", err)
+	}
+	return files, nil
+}
+
+// UncommittedFiles returns uncommitted files for a workspace.
+func (c *Client) UncommittedFiles(ctx context.Context, id string) ([]git.FileChange, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/git/uncommitted", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get uncommitted files: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get uncommitted files: status code %d", rsp.StatusCode)
+	}
+	var files []git.FileChange
+	if err := json.NewDecoder(rsp.Body).Decode(&files); err != nil {
+		return nil, fmt.Errorf("failed to decode uncommitted files: %w", err)
 	}
 	return files, nil
 }

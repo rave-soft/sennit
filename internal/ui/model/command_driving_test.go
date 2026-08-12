@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/lsp"
 	"github.com/rave-soft/braid/internal/message"
@@ -81,6 +82,9 @@ func (w *cmdDrivingWorkspace) Config() *config.Config {
 
 func (w *cmdDrivingWorkspace) WorkingDir() string                { return "/tmp" }
 func (w *cmdDrivingWorkspace) Resolver() config.VariableResolver { return nil }
+func (w *cmdDrivingWorkspace) UncommittedFiles(context.Context) ([]git.FileChange, error) {
+	return nil, nil
+}
 
 func (w *cmdDrivingWorkspace) PermissionSkipRequests() bool {
 	w.permSkipCalls++

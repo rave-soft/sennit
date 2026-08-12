@@ -101,6 +101,27 @@ func TestIsDirty(t *testing.T) {
 	require.True(t, dirty)
 }
 
+func TestUncommittedFiles(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	writeFile(t, repo, "README.md", "hello\nworld\n")
+	writeFile(t, repo, "untracked.txt", "one\ntwo")
+
+	files, err := UncommittedFiles(ctx, repo)
+	require.NoError(t, err)
+	require.Equal(t, []FileChange{
+		{Path: filepath.Join(repo, "README.md"), Additions: 1},
+		{Path: filepath.Join(repo, "untracked.txt"), Additions: 2},
+	}, files)
+}
+
+func TestUncommittedFilesOutsideRepo(t *testing.T) {
+	files, err := UncommittedFiles(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	require.Nil(t, files)
+}
+
 func TestBranchExists(t *testing.T) {
 	repo := initRepo(t)
 	ctx := context.Background()

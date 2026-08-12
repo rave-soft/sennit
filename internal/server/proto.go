@@ -644,6 +644,25 @@ func (c *controllerV1) handleGetWorkspaceSessionFileTrackerFiles(w http.Response
 	jsonEncode(w, files)
 }
 
+// handleGetWorkspaceUncommittedFiles lists uncommitted workspace files.
+//
+//	@Summary		List uncommitted files
+//	@Tags			git
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Success		200	{array}		git.FileChange
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/git/uncommitted [get]
+func (c *controllerV1) handleGetWorkspaceUncommittedFiles(w http.ResponseWriter, r *http.Request) {
+	files, err := c.backend.UncommittedFiles(r.Context(), r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, files)
+}
+
 // handlePostWorkspaceFileTrackerRead records a file read event.
 //
 //	@Summary		Record file read

@@ -10,6 +10,7 @@ import (
 	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/lsp"
 	"github.com/rave-soft/braid/internal/message"
@@ -279,6 +280,10 @@ func (w *readOnlyWorkspace) QuestionCancel() bool {
 }
 
 // -- FileTracker (reads only) --
+
+func (w *readOnlyWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
+	return w.underlying.UncommittedFiles(ctx)
+}
 
 func (w *readOnlyWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
 	// No-op: recording reads is harmless.

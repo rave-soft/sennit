@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/diff"
 	"github.com/rave-soft/braid/internal/fsext"
+	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/common"
@@ -58,6 +59,24 @@ type SessionFile struct {
 	LatestVersion history.File
 	Additions     int
 	Deletions     int
+	Uncommitted   bool
+}
+
+func uncommittedSessionFiles(sessionFiles []SessionFile, files []git.FileChange) []SessionFile {
+	uncommitted := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		uncommitted[filepath.Clean(file.Path)] = struct{}{}
+	}
+
+	result := make([]SessionFile, 0, len(sessionFiles))
+	for _, file := range sessionFiles {
+		if _, ok := uncommitted[filepath.Clean(file.FirstVersion.Path)]; !ok {
+			continue
+		}
+		file.Uncommitted = true
+		result = append(result, file)
+	}
+	return result
 }
 
 // loadSession loads the session along with its associated files and computes
@@ -76,7 +95,7 @@ func (m *UI) loadSession(sessionID string) tea.Cmd {
 			return util.ReportError(err)
 		}
 
-		sessionFiles, err := m.loadSessionFiles(sessionID)
+		sessionFiles, err := m.loadModifiedFiles(sessionID)
 		if err != nil {
 			return util.ReportError(err)
 		}
@@ -158,6 +177,21 @@ func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
 	return sessionFiles, nil
 }
 
+func (m *UI) loadModifiedFiles(sessionID string) ([]SessionFile, error) {
+	sessionFiles, err := m.loadSessionFiles(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	files, err := m.com.Workspace.UncommittedFiles(context.Background())
+	if err != nil {
+		slog.Error("Failed to load uncommitted files", "error", err)
+	}
+	if files != nil {
+		return uncommittedSessionFiles(sessionFiles, files), nil
+	}
+	return sessionFiles, nil
+}
+
 // handleFileEvent processes file change events and updates the session file
 // list with new or updated file information.
 func (m *UI) handleFileEvent(file history.File) tea.Cmd {
@@ -166,15 +200,28 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		sessionFiles, err := m.loadSessionFiles(m.session.ID)
+		sessionFiles, err := m.loadModifiedFiles(m.session.ID)
 		// could not load session files
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
-
 		return sessionFilesUpdatesMsg{
 			sessionFiles: sessionFiles,
 		}
+	}
+}
+
+func (m *UI) refreshModifiedFiles() tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		files, err := m.loadModifiedFiles(sessionID)
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return sessionFilesUpdatesMsg{sessionFiles: files}
 	}
 }
 
@@ -190,7 +237,7 @@ func (m *UI) filesInfo(cwd string, width, maxItems int, isSection bool) string {
 	list := t.Files.EmptyMessage.Render("None")
 	var filesWithChanges []SessionFile
 	for _, f := range m.sessionFiles {
-		if f.Additions == 0 && f.Deletions == 0 {
+		if !f.Uncommitted && f.Additions == 0 && f.Deletions == 0 {
 			continue
 		}
 		filesWithChanges = append(filesWithChanges, f)

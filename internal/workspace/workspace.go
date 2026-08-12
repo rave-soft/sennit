@@ -14,6 +14,7 @@ import (
 	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/lsp"
 	"github.com/rave-soft/braid/internal/message"
@@ -204,6 +205,8 @@ type QuestionResponder interface {
 // FileServices covers per-session file tracking (what's been read, when)
 // and the on-disk edit history used to render diffs.
 type FileServices interface {
+	UncommittedFiles(ctx context.Context) ([]git.FileChange, error)
+
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
 	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time
 	FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error)
