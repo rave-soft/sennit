@@ -100,12 +100,13 @@ type Manager struct {
 
 	broker *pubsub.Broker[Event]
 
-	mu           sync.Mutex
-	controls     map[string]*threadControl
-	closed       bool
-	shutdownOnce sync.Once
-	shutdownDone chan struct{}
-	workers      sync.WaitGroup
+	mu              sync.Mutex
+	controls        map[string]*threadControl
+	closed          bool
+	shutdownOnce    sync.Once
+	shutdownStarted chan struct{}
+	shutdownDone    chan struct{}
+	workers         sync.WaitGroup
 
 	// changeCh is closed and replaced on every status-affecting event,
 	// giving Wait a broadcast condition to select on without polling.
@@ -129,15 +130,16 @@ func NewManager(opts ManagerOptions) *Manager {
 		worktreeDir = filepath.Join(filepath.Dir(opts.RepoRoot), worktreeDir)
 	}
 	m := &Manager{
-		store:        opts.Store,
-		spawner:      opts.Spawner,
-		repoRoot:     opts.RepoRoot,
-		worktreeDir:  worktreeDir,
-		ctx:          ctx,
-		broker:       pubsub.NewBroker[Event](),
-		controls:     make(map[string]*threadControl),
-		shutdownDone: make(chan struct{}),
-		changeCh:     make(chan struct{}),
+		store:           opts.Store,
+		spawner:         opts.Spawner,
+		repoRoot:        opts.RepoRoot,
+		worktreeDir:     worktreeDir,
+		ctx:             ctx,
+		broker:          pubsub.NewBroker[Event](),
+		controls:        make(map[string]*threadControl),
+		shutdownStarted: make(chan struct{}),
+		shutdownDone:    make(chan struct{}),
+		changeCh:        make(chan struct{}),
 	}
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	return m
@@ -628,6 +630,21 @@ func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary strin
 	if err != nil {
 		return err
 	}
+	if c := m.existingControl(threadID); c != nil {
+		c.mu.Lock()
+		rt := c.runtime
+		c.runtime = nil
+		c.mu.Unlock()
+		if rt != nil {
+			rt.watchCancel()
+			if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
+				a.AgentCoordinator.CancelAll()
+			}
+			if err := m.spawner.Release(ctx, rt.handle.ID()); err != nil {
+				slog.Error("thread: release merged workspace failed", "thread", threadID, "error", err)
+			}
+		}
+	}
 	m.publish(EventMerged, st)
 	return nil
 }
@@ -742,6 +759,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		m.mu.Lock()
 		m.closed = true
 		m.mu.Unlock()
+		close(m.shutdownStarted)
 		m.cancel()
 		go func() {
 			// beginOp/Add are serialized with closed above. Existing workers

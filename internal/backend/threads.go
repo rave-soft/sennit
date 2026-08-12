@@ -48,14 +48,21 @@ func (b *Backend) attachServerThreads(ctx context.Context, a *app.App, path stri
 		WorktreeDir: worktreeDir,
 		Context:     ctx,
 	})
-	a.AddCleanup(func(context.Context) error {
-		// App cleanup functions run concurrently. Do not close this DB
-		// connection until the manager has joined every DB-writing worker.
-		if err := mgr.Shutdown(context.Background()); err != nil {
-			return err
-		}
+	if err := a.AddShutdownHook(func(context.Context) error {
+		return mgr.Shutdown(context.Background())
+	}); err != nil {
+		slog.Warn("Failed to register thread manager shutdown", "error", err)
+		_ = db.Release(dbDir)
+		return
+	}
+	if err := a.AddCriticalCleanup(func(context.Context) error {
 		return db.Release(dbDir)
-	})
+	}); err != nil {
+		slog.Warn("Failed to register thread database cleanup", "error", err)
+		_ = mgr.Shutdown(context.Background())
+		_ = db.Release(dbDir)
+		return
+	}
 	if err := mgr.Recover(ctx); err != nil {
 		slog.Warn("Failed to recover thread state", "error", err)
 	}

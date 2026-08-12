@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
@@ -175,6 +176,50 @@ func TestClientWorkspace_AttachThreadAndDetach(t *testing.T) {
 	// derived-clientID mechanic in AttachThread.
 	_, err = c.GetWorkspace(ctx, parentWorkspaceID)
 	require.NoError(t, err)
+	_, err = ws.ListSessions(ctx)
+	require.NoError(t, err)
+}
+
+func TestClientWorkspace_AttachThread_ClosedThread(t *testing.T) {
+	xdgIsolate(t)
+	rt := newRuntimeServer(t)
+	ctx := context.Background()
+
+	repo := initThreadRepoForClientWorkspace(t)
+	c := rt.newClient(t, repo)
+	wsProto, err := c.CreateWorkspace(ctx, proto.Workspace{Path: repo, DataDir: t.TempDir()})
+	require.NoError(t, err)
+	ws := workspace.NewClientWorkspace(c, *wsProto)
+
+	created, err := ws.CreateThread(ctx, proto.CreateThreadRequest{Name: "closed-thread", Goal: "do the thing"})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = ws.RemoveThread(context.Background(), created.ID, proto.RemoveThreadOptions{Force: true})
+	})
+
+	backendWorkspace, err := rt.srv.Backend().GetWorkspace(wsProto.ID)
+	require.NoError(t, err)
+	mgr, ok := backendWorkspace.ThreadManager().(*thread.Manager)
+	require.True(t, ok)
+	require.NoError(t, mgr.Shutdown(ctx))
+
+	closed, err := ws.GetThread(ctx, created.ID)
+	require.NoError(t, err)
+	require.Empty(t, closed.WorkspaceID)
+	require.Equal(t, created.SessionID, closed.SessionID)
+
+	attached, detach, err := ws.AttachThread(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, attached)
+	require.NotNil(t, detach)
+	require.True(t, workspace.IsReadOnlyError(attached.AgentRun(ctx, created.SessionID, "hello")))
+	_, err = attached.GetSession(ctx, created.SessionID)
+	require.NoError(t, err)
+	_, err = attached.GetSession(ctx, "other-session")
+	require.Error(t, err)
+
+	attached.Shutdown()
+	detach()
 	_, err = ws.ListSessions(ctx)
 	require.NoError(t, err)
 }

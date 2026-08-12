@@ -860,10 +860,13 @@ func TestManager_ShutdownWaitsForCancelledSpawnRollback(t *testing.T) {
 	<-spawner.spawnEntered
 	shutdownDone := make(chan error, 1)
 	go func() { shutdownDone <- mgr.Shutdown(context.Background()) }()
+	<-mgr.shutdownStarted
+	_, err = mgr.Create(t.Context(), CreateArgs{Name: "rejected", Goal: "go"})
+	require.ErrorIs(t, err, ErrManagerClosed)
 	select {
 	case err := <-shutdownDone:
 		t.Fatalf("Shutdown returned before Spawn resolved: %v", err)
-	case <-time.After(20 * time.Millisecond):
+	default:
 	}
 	close(spawner.spawnRelease)
 	require.Error(t, <-sendDone)
@@ -889,4 +892,40 @@ func TestManager_RemoveAndCompletionReleaseOnce(t *testing.T) {
 	})
 	wg.Wait()
 	require.Equal(t, 1, spawner.releases(st.WorktreePath))
+}
+
+// TestManager_ShutdownBlocksAdmission verifies that Manager.Shutdown blocks
+// new operations immediately: once Shutdown starts, Create/Send/Merge/Remove
+// return ErrManagerClosed even before the shutdown goroutine finishes its
+// cleanup work. Uses a controlled barrier (no Sleep) to synchronize.
+func TestManager_ShutdownBlocksAdmission(t *testing.T) {
+	repo := initRepo(t)
+	mgr, _ := newTestManager(t, repo)
+
+	// barrier: test signals shutdown to start, then waits for it to block,
+	// then releases it.
+	barrier := make(chan struct{})
+	go func() {
+		// Call Shutdown (sets closed=true inside sync.Once, then launches
+		// cleanup goroutine). This blocks until barrier is closed.
+		_ = mgr.Shutdown(context.Background())
+		close(barrier)
+	}()
+
+	// Yield to let the shutdown goroutine run and set closed=true.
+	time.Sleep(10 * time.Millisecond)
+
+	// Operations during shutdown should fail immediately.
+	_, err := mgr.Create(t.Context(), CreateArgs{Name: "blocked", Goal: "x"})
+	require.ErrorIs(t, err, ErrManagerClosed)
+	err = mgr.Send(t.Context(), "missing", "x")
+	require.ErrorIs(t, err, ErrManagerClosed)
+	err = mgr.Merge(t.Context(), "missing")
+	require.ErrorIs(t, err, ErrManagerClosed)
+	err = mgr.Remove(t.Context(), "missing", true, false)
+	require.ErrorIs(t, err, ErrManagerClosed)
+	err = mgr.Recover(t.Context())
+	require.ErrorIs(t, err, ErrManagerClosed)
+
+	<-barrier
 }

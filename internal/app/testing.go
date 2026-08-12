@@ -36,6 +36,7 @@ func NewForTest(ctx context.Context) *App {
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+		shutdownTimeout:    defaultShutdownTimeout,
 	}
 
 	eventsCtx, cancel := context.WithCancel(ctx)
@@ -61,17 +62,34 @@ func NewForTest(ctx context.Context) *App {
 	return app
 }
 
-// ShutdownForTest tears down the App's event broker and fan-in
-// goroutines. It is safe to call multiple times.
-//
-// Use this in tests instead of [App.Shutdown], which drives a full
-// production shutdown path (database release, LSP teardown, MCP
-// shutdown) that synthetic test apps cannot satisfy.
+// ShutdownForTest tears down resources registered by a synthetic App without
+// invoking production services that its test doubles may not fully implement.
 func (app *App) ShutdownForTest() {
-	for _, cleanup := range app.cleanupFuncs {
+	app.shutdownMu.Lock()
+	if app.shutdownState == shutdownStateDone {
+		app.shutdownMu.Unlock()
+		return
+	}
+	if app.shutdownState == shutdownStateShuttingDown {
+		done := app.shutdownDone
+		app.shutdownMu.Unlock()
+		<-done
+		return
+	}
+	app.shutdownState = shutdownStateShuttingDown
+	app.shutdownDone = make(chan struct{})
+	cleanups := append([]func(context.Context) error(nil), app.cleanupFuncs...)
+	app.cleanupFuncs = nil
+	app.shutdownMu.Unlock()
+
+	for _, cleanup := range cleanups {
 		if cleanup != nil {
 			_ = cleanup(context.Background())
 		}
 	}
-	app.cleanupFuncs = nil
+
+	app.shutdownMu.Lock()
+	app.shutdownState = shutdownStateDone
+	close(app.shutdownDone)
+	app.shutdownMu.Unlock()
 }

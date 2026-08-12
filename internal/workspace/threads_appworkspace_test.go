@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,15 +74,50 @@ func newTestThreadStoreDB(t *testing.T) thread.Store {
 
 type fakeThreadSessions struct {
 	session.Service
-	mu sync.Mutex
-	n  int
+	mu    sync.Mutex
+	n     int
+	sesss map[string]session.Session
+}
+
+func newFakeThreadSessions() *fakeThreadSessions {
+	return &fakeThreadSessions{sesss: make(map[string]session.Session)}
 }
 
 func (f *fakeThreadSessions) Create(_ context.Context, title string) (session.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.n++
-	return session.Session{ID: "sess-" + title, Title: title}, nil
+	s := session.Session{ID: fmt.Sprintf("sess-%d", f.n), Title: title}
+	f.sesss[s.ID] = s
+	return s, nil
+}
+
+func (f *fakeThreadSessions) Get(_ context.Context, sessionID string) (session.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.sesss[sessionID]
+	if !ok {
+		return session.Session{}, fmt.Errorf("session %q not found", sessionID)
+	}
+	return s, nil
+}
+
+func (f *fakeThreadSessions) List(_ context.Context) ([]session.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sesss := make([]session.Session, 0, len(f.sesss))
+	for _, s := range f.sesss {
+		sesss = append(sesss, s)
+	}
+	return sesss, nil
+}
+
+func (f *fakeThreadSessions) CreateTaskSession(_ context.Context, id, parentSessionID, title string) (session.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := session.Session{ID: id, ParentSessionID: parentSessionID, Title: title}
+	f.sesss[s.ID] = s
+	return s, nil
 }
 
 type fakeThreadCoordinator struct {
@@ -128,7 +164,7 @@ func (s *fakeThreadSpawner) Spawn(ctx context.Context, path string) (thread.Hand
 
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
-	a.Sessions = &fakeThreadSessions{}
+	a.Sessions = newFakeThreadSessions()
 	a.AgentCoordinator = &fakeThreadCoordinator{}
 
 	h := &fakeThreadHandle{id: path, app: a}
@@ -138,6 +174,13 @@ func (s *fakeThreadSpawner) Spawn(ctx context.Context, path string) (thread.Hand
 
 func (s *fakeThreadSpawner) Release(ctx context.Context, id string) error {
 	return nil
+}
+
+// appFor returns the spawned app.App for the given worktree path.
+func (s *fakeThreadSpawner) appFor(path string) *app.App {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.byPath[path].app
 }
 
 // newTestThreadAppWorkspace wires an AppWorkspace whose App has a real
@@ -234,6 +277,106 @@ func TestAppWorkspace_AttachThread_UnknownID(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
+	repo := initRepoForWorkspaceThreadsTest(t)
+
+	a := app.NewForTest(t.Context())
+	t.Cleanup(a.ShutdownForTest)
+	fs := newFakeThreadSessions()
+	a.Sessions = fs
+
+	store := newTestThreadStoreDB(t)
+	spawner := newFakeThreadSpawner(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       store,
+		Spawner:     spawner,
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+	a.SetThreadManager(mgr)
+
+	// Pre-populate the fake session store so the attached workspace
+	// can read the session through the main app.
+	_, err := fs.Create(t.Context(), "complete-me")
+	require.NoError(t, err)
+
+	// Insert a completed thread directly into the store (bypassing
+	// Create so no workspace was ever spawned — Handle returns nil).
+	created, err := store.Create(t.Context(), thread.CreateParams{
+		Name:         "complete-me",
+		Goal:         "do the thing",
+		BaseBranch:   "main",
+		Branch:       "thread/complete-me",
+		WorktreePath: t.TempDir(),
+		SessionID:    "sess-1",
+	})
+	require.NoError(t, err)
+	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{
+		Status: thread.StatusCompleted,
+	})
+	require.NoError(t, err)
+
+	// Handle returns nil (no runtime was ever installed).
+	require.Nil(t, mgr.Handle(created.ID))
+
+	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
+	attached, detach, err := aw.AttachThread(t.Context(), created.ID)
+	require.NoError(t, err, "AttachThread for completed thread should return a workspace")
+	require.NotNil(t, attached)
+	require.NotNil(t, detach)
+	require.NotPanics(t, detach)
+
+	// The attached workspace can read the persisted session from the shared DB.
+	sess, err := attached.GetSession(t.Context(), "sess-1")
+	require.NoError(t, err, "should be able to read persisted session")
+	require.Equal(t, "complete-me", sess.Title)
+
+	// The thread is still listable and readable via the main workspace.
+	got, err := aw.GetThread(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, string(thread.StatusCompleted), got.Status)
+}
+
+// TestAppWorkspace_AttachThread_LiveThread verifies that AttachThread for
+// a live thread succeeds and returns a Workspace backed by the thread's
+// own App.
+func TestAppWorkspace_AttachThread_LiveThread(t *testing.T) {
+	repo := initRepoForWorkspaceThreadsTest(t)
+
+	a := app.NewForTest(t.Context())
+	t.Cleanup(a.ShutdownForTest)
+
+	spawner := newFakeThreadSpawner(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       newTestThreadStoreDB(t),
+		Spawner:     spawner,
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+	a.SetThreadManager(mgr)
+
+	// Create via manager to get a real handle.
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name:       "live-thread",
+		Goal:       "do the thing",
+		BaseBranch: "main",
+	})
+	require.NoError(t, err)
+
+	// Handle must be non-nil (workspace is spawned).
+	handle := mgr.Handle(st.ID)
+	require.NotNil(t, handle)
+
+	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
+	attached, detach, err := aw.AttachThread(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.NotNil(t, attached)
+	require.NotNil(t, detach)
+
+	// Detach should be a no-op (no workspace to release in local mode).
+	require.NotPanics(t, detach)
+}
+
 // TestAppWorkspace_TranslateEvent_ThreadLifecycle drives a real
 // *thread.Manager through a create-then-remove lifecycle and verifies
 // that AppWorkspace.translateEvent (the local-mode counterpart of
@@ -278,4 +421,118 @@ func TestAppWorkspace_TranslateEvent_ThreadLifecycle(t *testing.T) {
 			t.Fatal("timed out waiting for translated created/removed thread events")
 		}
 	}
+}
+
+// TestAppWorkspace_AttachThread_CompletedThread_ReadMessages verifies that
+// attaching to a completed thread's persisted session yields the session
+// metadata read from the shared database via the main app's session store.
+func TestAppWorkspace_AttachThread_CompletedThread_ReadMessages(t *testing.T) {
+	repo := initRepoForWorkspaceThreadsTest(t)
+
+	a := app.NewForTest(t.Context())
+	t.Cleanup(a.ShutdownForTest)
+	fs := newFakeThreadSessions()
+	a.Sessions = fs
+
+	store := newTestThreadStoreDB(t)
+	spawner := newFakeThreadSpawner(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       store,
+		Spawner:     spawner,
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+	a.SetThreadManager(mgr)
+
+	// Pre-populate the fake session store.
+	_, err := fs.Create(t.Context(), "read-msgs")
+	require.NoError(t, err)
+
+	// Create a completed thread directly in the store.
+	created, err := store.Create(t.Context(), thread.CreateParams{
+		Name:         "read-msgs",
+		Goal:         "do the thing",
+		BaseBranch:   "main",
+		Branch:       "thread/read-msgs",
+		WorktreePath: t.TempDir(),
+		SessionID:    "sess-1",
+	})
+	require.NoError(t, err)
+	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{
+		Status: thread.StatusCompleted,
+	})
+	require.NoError(t, err)
+
+	require.Nil(t, mgr.Handle(created.ID), "handle should be nil after completion")
+
+	// Attach to the completed thread — should return a read-only workspace.
+	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
+	attached, detach, err := aw.AttachThread(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, attached)
+	require.NotNil(t, detach)
+	require.NotPanics(t, detach)
+
+	// The attached workspace can read the persisted session from the
+	// shared session store via the main app.
+	sess, err := attached.GetSession(t.Context(), "sess-1")
+	require.NoError(t, err, "GetSession on completed thread should succeed")
+	require.Equal(t, "read-msgs", sess.Title)
+}
+
+// TestAppWorkspace_AttachThread_CompletedThread_IsReadOnly verifies that
+// the workspace returned for a completed thread is read-only: all
+// mutating operations return ErrReadOnlyOperation, and shutdown of the
+// attached workspace does not affect the parent.
+func TestAppWorkspace_AttachThread_CompletedThread_IsReadOnly(t *testing.T) {
+	repo := initRepoForWorkspaceThreadsTest(t)
+
+	a := app.NewForTest(t.Context())
+	t.Cleanup(a.ShutdownForTest)
+	fs := newFakeThreadSessions()
+	a.Sessions = fs
+
+	store := newTestThreadStoreDB(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       store,
+		Spawner:     newFakeThreadSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+	a.SetThreadManager(mgr)
+
+	_, err := fs.Create(t.Context(), "readonly-check")
+	require.NoError(t, err)
+
+	created, err := store.Create(t.Context(), thread.CreateParams{
+		Name:         "readonly-check",
+		Goal:         "do the thing",
+		BaseBranch:   "main",
+		Branch:       "thread/readonly-check",
+		WorktreePath: t.TempDir(),
+		SessionID:    "sess-1",
+	})
+	require.NoError(t, err)
+	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{
+		Status: thread.StatusCompleted,
+	})
+	require.NoError(t, err)
+
+	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
+	attached, _, err := aw.AttachThread(t.Context(), created.ID)
+	require.NoError(t, err)
+
+	// Verify it's a read-only workspace.
+	require.True(t, IsReadOnlyError(attached.AgentRun(t.Context(), "sess-1", "hello")))
+	_, err = attached.CreateThread(t.Context(), proto.CreateThreadRequest{})
+	require.True(t, IsReadOnlyError(err))
+	require.True(t, IsReadOnlyError(attached.UpdatePreferredModel(config.ScopeWorkspace, config.SelectedModel{})))
+
+	// Verify WorkingDir is the thread worktree, not the parent's.
+	require.Equal(t, created.WorktreePath, attached.WorkingDir())
+
+	// Shutdown the read-only workspace — should NOT affect parent.
+	attached.Shutdown()
+	_, err = aw.ListThreads(t.Context())
+	require.NoError(t, err, "parent workspace should still be functional after attached shutdown")
 }

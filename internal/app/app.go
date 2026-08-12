@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -120,9 +121,16 @@ type App struct {
 	tuiWG  *sync.WaitGroup
 
 	// global context and cleanup functions
-	globalCtx          context.Context
-	cleanupFuncs       []func(context.Context) error
-	agentNotifications *pubsub.Broker[notify.Notification]
+	globalCtx            context.Context
+	preCleanupHooks      []func(context.Context) error // stop and join resources used by ordinary cleanup
+	shutdownHooks        []func(context.Context) error // stop resources used by critical cleanup
+	cleanupFuncs         []func(context.Context) error
+	criticalCleanupFuncs []func(context.Context) error // only after all hooks finish
+	mcpInitCancel        context.CancelFunc
+	mcpInitWG            sync.WaitGroup
+	mcpClose             func(context.Context) error
+	mainDBRelease        func(context.Context) error
+	agentNotifications   *pubsub.Broker[notify.Notification]
 	// runCompletions is the authoritative per-run completion signal,
 	// emitted once per top-level agent turn after all message
 	// updates have been flushed. Bridged into app.events so SSE
@@ -134,7 +142,46 @@ type App struct {
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
+
+	// shutdown lifecycle: ensures Shutdown is idempotent and race-safe.
+	// mu guards shutdownState, shutdownHooks, and cleanupFuncs.
+	shutdownMu sync.Mutex
+	// shutdownState tracks lifecycle: 0=idle, 1=shuttingDown, 2=done.
+	shutdownState int
+	// shutdownDone is closed when Shutdown completes; concurrent callers
+	// block on it so repeated/concurrent Shutdown calls wait for one
+	// teardown and return together.
+	shutdownDone    chan struct{}
+	shutdownTimeout time.Duration
 }
+
+// shutdownState values.
+const defaultShutdownTimeout = 5 * time.Second
+
+// runShutdownCallback supplies a bounded context and never synchronously
+// waits past its deadline, even if the callback ignores cancellation.
+func (app *App) runShutdownCallback(fn func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), app.shutdownTimeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- fn(ctx) }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+const (
+	shutdownStateIdle = iota
+	shutdownStateShuttingDown
+	shutdownStateDone
+)
+
+// ErrAppShutdownBlocked is returned when a shutdown registration method is
+// called after shutdown has already started.
+var ErrAppShutdownBlocked = errors.New("app: shutdown already started, cannot register new hooks/cleanups")
 
 // New initializes a new application instance. skillsMgr carries the
 // per-workspace skill discovery results computed by the caller; the
@@ -177,6 +224,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+		shutdownTimeout:    defaultShutdownTimeout,
 	}
 
 	app.setupEvents()
@@ -195,7 +243,9 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// blocks for the in-flight init instead of racing the goroutine and
 	// returning before any MCP tools register.
 	app.MCP.ArmInit()
-	go app.MCP.Initialize(ctx, app.Permissions, store)
+	mcpInitCtx, mcpInitCancel := context.WithCancel(ctx)
+	app.mcpInitCancel = mcpInitCancel
+	app.mcpInitWG.Go(func() { app.MCP.Initialize(mcpInitCtx, app.Permissions, store) })
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
@@ -206,17 +256,12 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Messages:          app.Messages,
 	})
 
-	// Release the shared database connection on shutdown. The pool
-	// closes the underlying *sql.DB when the last reference is released.
-	// This is the shared global database directory, not the project's own
-	// .braid directory (cfg.Options.DataDirectory), which is still used
-	// elsewhere in this function for project-local state.
+	// Keep production resources in explicit dependency phases rather than
+	// relying on their registration order among general cleanups. The shared
+	// DB is always released last.
 	dbDir := config.GlobalDBDir()
-	app.cleanupFuncs = append(
-		app.cleanupFuncs,
-		func(context.Context) error { return db.Release(dbDir) },
-		func(ctx context.Context) error { return app.MCP.Close(ctx) },
-	)
+	app.mcpClose = func(ctx context.Context) error { return app.MCP.Close(ctx) }
+	app.mainDBRelease = func(context.Context) error { return db.Release(dbDir) }
 
 	// Hot-reload config and skills on external edits, in both local mode
 	// and client/server mode (see startExternalChangeWatchers' doc).
@@ -309,8 +354,63 @@ func (app *App) ThreadManager() any {
 // when Shutdown is called. Used by callers that attach extra resources to
 // an App post-construction — e.g. the thread manager's own database
 // connection — that need to be released on the same schedule.
-func (app *App) AddCleanup(fn func(context.Context) error) {
+//
+// If called after shutdown has started, returns ErrAppShutdownBlocked
+// and the function is not registered.
+func (app *App) AddCleanup(fn func(context.Context) error) error {
+	app.shutdownMu.Lock()
+	defer app.shutdownMu.Unlock()
+	if app.shutdownState >= shutdownStateShuttingDown {
+		return ErrAppShutdownBlocked
+	}
 	app.cleanupFuncs = append(app.cleanupFuncs, fn)
+	return nil
+}
+
+// AddPreCleanupHook registers a stop-and-join operation that must finish
+// before ordinary DB-dependent resources, such as MCP, can close. It is used
+// by the external watchers, which can otherwise initiate MCP work during
+// teardown.
+func (app *App) AddPreCleanupHook(fn func(context.Context) error) error {
+	app.shutdownMu.Lock()
+	defer app.shutdownMu.Unlock()
+	if app.shutdownState >= shutdownStateShuttingDown {
+		return ErrAppShutdownBlocked
+	}
+	app.preCleanupHooks = append(app.preCleanupHooks, fn)
+	return nil
+}
+
+// AddCriticalCleanup registers cleanup that depends on every shutdown hook
+// completing. It is intended for a thread database release: if its manager
+// did not stop, releasing that database could race a live manager. Critical
+// cleanup is deliberately separate from the main App database, which is
+// released in the final shutdown phase regardless of hook failures.
+func (app *App) AddCriticalCleanup(fn func(context.Context) error) error {
+	app.shutdownMu.Lock()
+	defer app.shutdownMu.Unlock()
+	if app.shutdownState >= shutdownStateShuttingDown {
+		return ErrAppShutdownBlocked
+	}
+	app.criticalCleanupFuncs = append(app.criticalCleanupFuncs, fn)
+	return nil
+}
+
+// AddShutdownHook registers fn to run before any cleanup functions when
+// Shutdown is called. Use this for subsystems (e.g. thread manager) that
+// must block new operations as soon as shutdown begins, before other
+// cleanup (DB connections, LSP, MCP) tears down their dependencies.
+//
+// If called after shutdown has started, returns ErrAppShutdownBlocked
+// and the function is not registered.
+func (app *App) AddShutdownHook(fn func(context.Context) error) error {
+	app.shutdownMu.Lock()
+	defer app.shutdownMu.Unlock()
+	if app.shutdownState >= shutdownStateShuttingDown {
+		return ErrAppShutdownBlocked
+	}
+	app.shutdownHooks = append(app.shutdownHooks, fn)
+	return nil
 }
 
 // Events returns a per-caller subscription channel for application events.
@@ -414,7 +514,10 @@ func (app *App) setupEvents() {
 		app.events.Shutdown()
 		return nil
 	}
-	app.cleanupFuncs = append(app.cleanupFuncs, cleanupFunc)
+	if err := app.AddCleanup(cleanupFunc); err != nil {
+		slog.Error("Failed to register event cleanup", "error", err)
+		_ = cleanupFunc(context.Background())
+	}
 }
 
 func setupSubscriber[T any](
@@ -544,12 +647,14 @@ func (app *App) Subscribe(send func(any), onPanic func()) {
 
 	app.tuiWG.Add(1)
 	tuiCtx, tuiCancel := context.WithCancel(app.globalCtx)
-	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
+	if err := app.AddCleanup(func(context.Context) error {
 		slog.Debug("Cancelling TUI message handler")
 		tuiCancel()
 		app.tuiWG.Wait()
 		return nil
-	})
+	}); err != nil {
+		tuiCancel()
+	}
 	defer app.tuiWG.Done()
 
 	events := app.events.Subscribe(tuiCtx)
@@ -568,78 +673,199 @@ func (app *App) Subscribe(send func(any), onPanic func()) {
 	}
 }
 
-// Shutdown performs a graceful shutdown of the application.
+// Shutdown performs a graceful, race-safe shutdown of the application.
+// It is idempotent: repeated or concurrent callers wait for the same
+// teardown and return together. The shutdown order is:
+//
+//  1. Run shutdown hooks first (e.g. thread manager admission block),
+//     before anything else, so subsystems that depend on other resources
+//     (DB, MCP, LSP) are blocked before those resources are torn down.
+//  2. Cancel all agents and wait for them to finish.
+//  3. Flush pending message updates.
+//  4. Close MCP and other ordinary resources sequentially. Watchers have
+//     already stopped and joined, so none can begin MCP work while it closes.
+//  5. Release critical dependent resources only after their hooks succeeded,
+//     then release the main DB last.
+//  6. Kill background shells, stop LSP, close coordinator readiness
+//     work, signal herdr, emit AppExited — in parallel where safe.
 func (app *App) Shutdown() {
+	app.shutdownMu.Lock()
+	// If already done, return immediately.
+	if app.shutdownState == shutdownStateDone {
+		app.shutdownMu.Unlock()
+		return
+	}
+	// If already shutting down, wait for completion.
+	if app.shutdownState == shutdownStateShuttingDown {
+		done := app.shutdownDone
+		app.shutdownMu.Unlock()
+		<-done
+		return
+	}
+	// Enter shutting down state, create done channel.
+	app.shutdownState = shutdownStateShuttingDown
+	app.shutdownDone = make(chan struct{})
+
+	// Capture phased hooks and cleanups under the lock so no new ones arrive
+	// mid-shutdown.
+	preCleanupHooks := make([]func(context.Context) error, len(app.preCleanupHooks))
+	copy(preCleanupHooks, app.preCleanupHooks)
+	app.preCleanupHooks = nil
+	hooks := make([]func(context.Context) error, len(app.shutdownHooks))
+	copy(hooks, app.shutdownHooks)
+	app.shutdownHooks = nil // prevent concurrent AddShutdownHook from appending
+	cleanups := make([]func(context.Context) error, len(app.cleanupFuncs))
+	copy(cleanups, app.cleanupFuncs)
+	app.cleanupFuncs = nil // prevent concurrent AddCleanup from appending
+	criticalCleanups := make([]func(context.Context) error, len(app.criticalCleanupFuncs))
+	copy(criticalCleanups, app.criticalCleanupFuncs)
+	app.criticalCleanupFuncs = nil
+	app.shutdownMu.Unlock()
+
 	start := time.Now()
 	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
+	defer close(app.shutdownDone)
 
-	// First, cancel all agents and wait for them to finish. This must complete
-	// before closing the DB so agents can finish writing their state.
-	if app.AgentCoordinator != nil {
-		app.AgentCoordinator.CancelAll()
-	}
-
-	// Shared shutdown context for all timeout-bounded cleanup.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Drain any debounced message updates before the DB-close cleanup
-	// runs in the parallel block below. message.Service buffers
-	// streaming deltas (see internal/message/message.go) and we must
-	// land them while the connection is still open.
-	if app.Messages != nil {
-		if err := app.Messages.FlushAll(shutdownCtx); err != nil {
-			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
+	// 1. Stop and join watchers before MCP closes. A failed watcher hook means
+	// it may still initiate MCP work, so MCP cannot safely be closed.
+	preCleanupHooksSucceeded := true
+	for _, hook := range preCleanupHooks {
+		if hook != nil {
+			if err := app.runShutdownCallback(hook); err != nil {
+				preCleanupHooksSucceeded = false
+				slog.Error("Failed to run pre-cleanup hook", "error", err)
+			}
 		}
 	}
 
-	// Now run remaining cleanup tasks in parallel.
+	// Stop dependent subsystems before cancelling or releasing shared resources.
+	// A hook that does not finish is treated as a failure: its dependent
+	// cleanup (notably the thread DB release) must not run while it can still
+	// access that resource.
+	hooksSucceeded := true
+	for _, hook := range hooks {
+		if hook != nil {
+			if err := app.runShutdownCallback(hook); err != nil {
+				hooksSucceeded = false
+				slog.Error("Failed to run shutdown hook", "error", err)
+			}
+		}
+	}
+
+	// 2. Stop agent-owned work before closing MCP or database resources it may
+	// still use. CancelAll bounds its own wait; retain dependencies when active
+	// work or coordinator readiness work does not stop.
+	agentWorkStopped := true
+	if app.AgentCoordinator != nil {
+		app.AgentCoordinator.CancelAll()
+		if app.AgentCoordinator.IsBusy() {
+			agentWorkStopped = false
+			slog.Error("Agent work did not stop before shutdown deadline")
+		}
+		if closer, ok := app.AgentCoordinator.(coordinatorCloser); ok {
+			if err := app.runShutdownCallback(closer.Close); err != nil {
+				agentWorkStopped = false
+				slog.Error("Failed to close agent coordinator readiness work", "error", err)
+			}
+		}
+	}
+
+	// Initial MCP setup is independent of watcher-triggered reinitialization.
+	// Cancel and join it before Registry.Close so it cannot publish a session
+	// after the registry has closed.
+	mcpInitStopped := true
+	if app.mcpInitCancel != nil {
+		if err := app.runShutdownCallback(func(context.Context) error {
+			app.mcpInitCancel()
+			app.mcpInitWG.Wait()
+			return nil
+		}); err != nil {
+			mcpInitStopped = false
+			slog.Error("Failed to stop MCP initialization", "error", err)
+		}
+	}
+
+	// 3. Flush any debounced message updates before the DB-close cleanup
+	// runs. message.Service buffers streaming deltas and we must land
+	// them while the connection is still open.
+	if app.Messages != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), app.shutdownTimeout)
+		if err := app.Messages.FlushAll(ctx); err != nil {
+			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
+		}
+		cancel()
+	}
+
+	dependenciesStopped := preCleanupHooksSucceeded && agentWorkStopped && mcpInitStopped
+
+	// 4. MCP can use the App database during close, so close it after all
+	// stop-and-join hooks and before the database's final release.
+	if dependenciesStopped && app.mcpClose != nil {
+		if err := app.runShutdownCallback(app.mcpClose); err != nil {
+			dependenciesStopped = false
+			slog.Error("Failed to close MCP on shutdown", "error", err)
+		}
+	}
+
+	// General cleanups do not determine the ordering of production resources.
+	for _, cleanup := range cleanups {
+		if cleanup != nil {
+			if err := app.runShutdownCallback(cleanup); err != nil {
+				slog.Error("Failed to cleanup app properly on shutdown", "error", err)
+			}
+		}
+	}
+
+	// 5. Never release a thread DB used by a hook that failed to finish.
+	if hooksSucceeded {
+		for _, cleanup := range criticalCleanups {
+			if cleanup != nil {
+				if err := app.runShutdownCallback(cleanup); err != nil {
+					slog.Error("Failed to run critical app cleanup on shutdown", "error", err)
+				}
+			}
+		}
+	}
+	if dependenciesStopped && app.mainDBRelease != nil {
+		if err := app.runShutdownCallback(app.mainDBRelease); err != nil {
+			slog.Error("Failed to release main database on shutdown", "error", err)
+		}
+	}
+
+	// 6. Parallel independent teardown.
 	var wg sync.WaitGroup
 
-	// Send exit event
 	wg.Go(func() {
 		event.AppExited()
 	})
 
-	// Kill all background shells.
 	wg.Go(func() {
-		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
-	})
-
-	// Close herdr client to stop its background writer.
-	app.herdrClient.Close()
-
-	// Shutdown all LSP clients.
-	wg.Go(func() {
-		app.LSPManager.KillAll(shutdownCtx)
-	})
-
-	// Cancel and join the agent coordinator's own background readiness
-	// work (buildAgent's async system-prompt/tool-list setup — see
-	// internal/agent/coordinator.go). Without this, those goroutines (and
-	// the git/MCP subprocesses they may spawn) can outlive App.Shutdown
-	// entirely, which in tests races a t.TempDir cleanup removing the
-	// workspace's repo out from under a still-running `git status`.
-	// coordinatorCloser is checked via a type assertion instead of being
-	// added to the agent.Coordinator interface itself, so the many
-	// test-only Coordinator stubs elsewhere don't all need a no-op Close.
-	if closer, ok := app.AgentCoordinator.(coordinatorCloser); ok {
-		wg.Go(func() {
-			if err := closer.Close(shutdownCtx); err != nil {
-				slog.Error("Failed to close agent coordinator readiness work", "error", err)
-			}
-		})
-	}
-
-	// Call all cleanup functions.
-	for _, cleanup := range app.cleanupFuncs {
-		if cleanup != nil {
-			wg.Go(func() {
-				if err := cleanup(shutdownCtx); err != nil {
-					slog.Error("Failed to cleanup app properly on shutdown", "error", err)
-				}
-			})
+		if err := app.runShutdownCallback(func(ctx context.Context) error {
+			shell.GetBackgroundShellManager().KillAll(ctx)
+			return nil
+		}); err != nil {
+			slog.Error("Failed to stop background shells", "error", err)
 		}
+	})
+
+	if app.herdrClient != nil {
+		app.herdrClient.Close()
 	}
+
+	wg.Go(func() {
+		if app.LSPManager != nil {
+			if err := app.runShutdownCallback(func(ctx context.Context) error {
+				app.LSPManager.KillAll(ctx)
+				return nil
+			}); err != nil {
+				slog.Error("Failed to stop LSP clients", "error", err)
+			}
+		}
+	})
+
 	wg.Wait()
+
+	app.shutdownMu.Lock()
+	app.shutdownState = shutdownStateDone
+	app.shutdownMu.Unlock()
 }

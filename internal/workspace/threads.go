@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 
@@ -126,21 +125,43 @@ func (w *AppWorkspace) RemoveThread(ctx context.Context, id string, opts proto.R
 	return mgr.Remove(ctx, id, opts.Force, opts.DeleteBranch)
 }
 
+// AttachThread connects to id's own spawned workspace and returns a
+// Workspace bound to it, plus a detach func to release that
+// connection (NOT the thread itself — the thread keeps running
+// regardless of whether anything is attached to view it). Callers
+// must call detach exactly once when done.
+//
+// If the thread's workspace is not currently spawned (it completed
+// and was released), AttachThread returns a read-only workspace
+// bound to the shared session/message stores so the caller can
+// still inspect persisted session data in the database.
 func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, func(), error) {
 	mgr, ok := w.threadManager()
 	if !ok {
 		return nil, nil, ErrThreadsNotSupported
 	}
 	h := mgr.Handle(id)
-	if h == nil {
-		return nil, nil, fmt.Errorf("thread %q is not currently running", id)
+	if h != nil {
+		// Live thread: bind to the running workspace.
+		// detach is a no-op for local mode: the thread's App is owned by the
+		// Manager, not by whoever is viewing it, so there is nothing to
+		// release here — teardown happens via Manager.Remove or process
+		// shutdown, not via this detach.
+		a := h.App()
+		aw := NewAppWorkspace(a, a.Store())
+		return aw, func() {}, nil
 	}
-	a := h.App()
-	aw := NewAppWorkspace(a, a.Store())
-	// detach is a no-op for local mode: the thread's App is owned by the
-	// Manager, not by whoever is viewing it, so there is nothing to
-	// release here — teardown happens via Manager.Remove or process
-	// shutdown, not via this detach.
+	// Thread is not currently spawned (completed, interrupted, failed).
+	// Verify the thread actually exists before returning a workspace —
+	// an unknown ID should still fail.
+	st, err := mgr.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Return a read-only workspace bound to the main app with the
+	// thread's worktree as WorkingDir, so the caller can inspect
+	// persisted session data but cannot mutate anything.
+	aw := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
 	return aw, func() {}, nil
 }
 
@@ -230,22 +251,30 @@ func (w *ClientWorkspace) RemoveThread(ctx context.Context, id string, opts prot
 }
 
 // AttachThread connects to a thread's own backend workspace using a
-// separate client identity,
-// never the parent ClientWorkspace's own client ID. This matters
-// because the returned Workspace's detach func calls Shutdown, which
-// retires the client (or deletes the workspace on an older server) —
-// if it shared the parent's client ID, detaching an attached thread
-// view would tear down the PARENT workspace's own claim too. The
-// client shares the same underlying *http.Client/connection
-// pool (see client.Client.WithClientID), so this costs nothing beyond
-// one extra small struct.
+// separate client identity, never the parent ClientWorkspace's own
+// client ID. This matters because the returned Workspace's detach func
+// calls Shutdown, which retires the client (or deletes the workspace on
+// an older server) — if it shared the parent's client ID, detaching an
+// attached thread view would tear down the PARENT workspace's own claim
+// too. The client shares the same underlying *http.Client/connection pool
+// (see client.Client.WithClientID), so this costs nothing beyond one
+// extra small struct.
+//
+// If the thread's workspace is not currently spawned (WorkspaceID is
+// empty), AttachThread returns a read-only workspace over the parent
+// ClientWorkspace so the caller can still inspect persisted session data
+// without risking mutations or tearing down the parent.
 func (w *ClientWorkspace) AttachThread(ctx context.Context, id string) (Workspace, func(), error) {
 	st, err := w.client.GetThread(ctx, w.workspaceID(), id)
 	if err != nil {
 		return nil, nil, err
 	}
 	if st.WorkspaceID == "" {
-		return nil, nil, fmt.Errorf("thread %q is not currently running", id)
+		// Thread is not currently spawned (completed, interrupted, failed).
+		// Return a read-only workspace over the parent so the caller
+		// can still inspect persisted session data.
+		ro := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
+		return ro, func() {}, nil
 	}
 	derived := w.client.WithClientID(uuid.NewString())
 	ws, err := derived.GetWorkspace(ctx, st.WorkspaceID)

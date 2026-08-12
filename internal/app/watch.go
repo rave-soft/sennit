@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/rave-soft/braid/internal/pubsub"
@@ -33,26 +34,26 @@ type WorkspaceChanged struct{}
 // an externally-edited config or skill file without a restart.
 //
 // A dedicated context/WaitGroup pair, not app.eventsCtx/serviceEventsWG:
-// those belong to setupEvents' own fan-in and are torn down by its own
-// cleanupFunc. Keeping this pair separate means its cleanupFunc can
-// cancel-then-wait without reasoning about ordering against the event
-// fan-in's shutdown.
+// those belong to setupEvents' own fan-in. The shutdown hook cancels and
+// joins the pollers before MCP closes, so a watcher cannot start a new MCP
+// reinitialization against a closing registry.
 func (app *App) startExternalChangeWatchers(ctx context.Context) {
 	watchCtx, cancel := context.WithCancel(ctx)
-	var wg sync.WaitGroup
+	var watcherWG sync.WaitGroup
+	var reinitializeWG sync.WaitGroup
 
 	app.config.OnExternalChange(func() {
 		// Re-init MCP servers whose config changed, against this app's own
 		// registry. Run async so the poll loop is never blocked on MCP
 		// reconciliation (mirrors backend's former publishConfigChanged).
-		go app.MCP.Reinitialize(watchCtx, app.config)
+		reinitializeWG.Go(func() { app.MCP.Reinitialize(watchCtx, app.config) })
 		app.applyConfigPermissionsBypass()
 		app.publishWorkspaceChanged()
 	})
-	wg.Go(func() { app.config.WatchForExternalChanges(watchCtx) })
+	watcherWG.Go(func() { app.config.WatchForExternalChanges(watchCtx) })
 
 	if app.Skills != nil {
-		wg.Go(func() {
+		watcherWG.Go(func() {
 			skills.WatchForChanges(watchCtx, SkillsDiscoveryConfig(app.config), app.Skills, 0, func() {
 				// Unlike config, skill discovery is not re-run by anything
 				// else, so the watcher's onChange must also refresh the
@@ -67,11 +68,19 @@ func (app *App) startExternalChangeWatchers(ctx context.Context) {
 		})
 	}
 
-	app.cleanupFuncs = append(app.cleanupFuncs, func(context.Context) error {
+	if err := app.AddPreCleanupHook(func(context.Context) error {
 		cancel()
-		wg.Wait()
+		watcherWG.Wait()
+		reinitializeWG.Wait()
 		return nil
-	})
+	}); err != nil {
+		// Shutdown has already started. Do not leave the pollers running when
+		// their owner cannot register a join hook.
+		cancel()
+		watcherWG.Wait()
+		reinitializeWG.Wait()
+		slog.Error("Failed to register external watcher pre-cleanup", "error", err)
+	}
 }
 
 // applyConfigPermissionsBypass re-applies the persisted permissions.bypass

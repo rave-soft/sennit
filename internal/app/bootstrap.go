@@ -158,7 +158,7 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 
 	// Release the workspace lock (if any) on the same schedule as the
 	// rest of the workspace's resources.
-	appInstance.AddCleanup(func(context.Context) error {
+	_ = appInstance.AddCleanup(func(context.Context) error {
 		wsLock.Release()
 		return nil
 	})

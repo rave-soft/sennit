@@ -1,0 +1,511 @@
+package workspace
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
+	"github.com/rave-soft/braid/internal/commands"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/history"
+	"github.com/rave-soft/braid/internal/lsp"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/braid/internal/question"
+	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/skills"
+	"github.com/stretchr/testify/require"
+)
+
+// TestReadOnlyWorkspace_DeniesMutations verifies all mutating operations
+// return a typed read-only error.
+func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
+	t.Parallel()
+	stub := &stubWorkspace{}
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+
+	// Session mutations denied.
+	_, err := ro.CreateSession(t.Context(), "title")
+	require.True(t, IsReadOnlyError(err))
+	err = ro.DeleteSession(t.Context(), "sess-1")
+	require.True(t, IsReadOnlyError(err))
+	_, err = ro.SaveSession(t.Context(), session.Session{ID: "sess-1"})
+	require.True(t, IsReadOnlyError(err))
+
+	// Agent mutations denied.
+	err = ro.AgentRun(t.Context(), "sess-1", "hello")
+	require.True(t, IsReadOnlyError(err))
+	_, err = ro.AgentRunShellCommand(t.Context(), "sess-1", "echo hi", 80, nil, false)
+	require.True(t, IsReadOnlyError(err))
+	err = ro.AgentSummarize(t.Context(), "sess-1")
+	require.True(t, IsReadOnlyError(err))
+	_, err = ro.AgentRunStream(t.Context(), "sess-1", "hello")
+	require.True(t, IsReadOnlyError(err))
+	err = ro.InitCoderAgent(t.Context())
+	require.True(t, IsReadOnlyError(err))
+	err = ro.InitCoderAgentNonInteractive(t.Context())
+	require.True(t, IsReadOnlyError(err))
+	err = ro.UpdateAgentModel(t.Context())
+	require.True(t, IsReadOnlyError(err))
+
+	// Importing credentials is a mutation and must not reach the underlying workspace.
+	_, imported := ro.ImportCopilot()
+	require.False(t, imported)
+	require.Zero(t, stub.importCopilotCalls)
+
+	// Config mutations denied.
+	err = ro.UpdatePreferredModel(config.ScopeWorkspace, config.SelectedModel{})
+	require.True(t, IsReadOnlyError(err))
+	err = ro.OverridePreferredModel(config.SelectedModel{})
+	require.True(t, IsReadOnlyError(err))
+	err = ro.SetCompactMode(config.ScopeWorkspace, true)
+	require.True(t, IsReadOnlyError(err))
+	err = ro.SetProviderAPIKey(config.ScopeWorkspace, "provider", "key")
+	require.True(t, IsReadOnlyError(err))
+	err = ro.SetConfigField(config.ScopeWorkspace, "key", "val")
+	require.True(t, IsReadOnlyError(err))
+	err = ro.RemoveConfigField(config.ScopeWorkspace, "key")
+	require.True(t, IsReadOnlyError(err))
+	err = ro.RefreshOAuthToken(t.Context(), config.ScopeWorkspace, "provider")
+	require.True(t, IsReadOnlyError(err))
+
+	// MCP mutations denied.
+	err = ro.EnableDockerMCP(t.Context())
+	require.True(t, IsReadOnlyError(err))
+	err = ro.DisableDockerMCP()
+	require.True(t, IsReadOnlyError(err))
+	err = ro.MCPAuthenticate(t.Context(), "name")
+	require.True(t, IsReadOnlyError(err))
+
+	// Thread mutations denied.
+	_, err = ro.CreateThread(t.Context(), proto.CreateThreadRequest{Name: "x"})
+	require.True(t, IsReadOnlyError(err))
+	err = ro.SendThread(t.Context(), "id", "msg")
+	require.True(t, IsReadOnlyError(err))
+	_, err = ro.MergeThread(t.Context(), "id")
+	require.True(t, IsReadOnlyError(err))
+	err = ro.RemoveThread(t.Context(), "id", proto.RemoveThreadOptions{})
+	require.True(t, IsReadOnlyError(err))
+	_, _, err = ro.AttachThread(t.Context(), "id")
+	require.True(t, IsReadOnlyError(err))
+
+	// Project lifecycle write denied.
+	err = ro.MarkProjectInitialized()
+	require.True(t, IsReadOnlyError(err))
+
+	// Question resolution denied.
+	require.False(t, ro.QuestionAnswer(nil))
+	require.False(t, ro.QuestionCancel())
+
+	// Permission mutations denied.
+	require.False(t, ro.PermissionGrant(permission.PermissionRequest{}))
+	require.False(t, ro.PermissionGrantPersistent(permission.PermissionRequest{}))
+	require.False(t, ro.PermissionDeny(permission.PermissionRequest{}))
+}
+
+// TestReadOnlyWorkspace_AllowsReads verifies read-only operations delegate
+// to the underlying workspace.
+func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
+	t.Parallel()
+	stub := &stubWorkspace{}
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+
+	// Session reads pass through.
+	sess, err := ro.GetSession(t.Context(), "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, "sess-1", sess.ID)
+
+	sessions, err := ro.ListSessions(t.Context())
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+
+	// Messages pass through.
+	msgs, err := ro.ListMessages(t.Context(), "sess-1")
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+
+	userMsgs, err := ro.ListUserMessages(t.Context(), "sess-1")
+	require.NoError(t, err)
+	require.Len(t, userMsgs, 1)
+
+	allUserMsgs, err := ro.ListAllUserMessages(t.Context())
+	require.NoError(t, err)
+	require.Len(t, allUserMsgs, 1)
+
+	// WorkingDir is the thread worktree.
+	require.Equal(t, "/tmp/thread-worktree", ro.WorkingDir())
+
+	_, err = ro.GetSession(t.Context(), "other-session")
+	require.Error(t, err)
+	_, err = ro.ListMessages(t.Context(), "other-session")
+	require.Error(t, err)
+	_, err = ro.ListUserMessages(t.Context(), "other-session")
+	require.Error(t, err)
+	_, err = ro.FileTrackerListReadFiles(t.Context(), "other-session")
+	require.Error(t, err)
+	_, err = ro.ListSessionHistory(t.Context(), "other-session")
+	require.Error(t, err)
+
+	// Config reads pass through.
+	cfg := ro.Config()
+	require.NotNil(t, cfg)
+
+	// LSP queries pass through.
+	states := ro.LSPGetStates()
+	require.IsType(t, map[string]LSPClientInfo{}, states)
+	counts := ro.LSPGetDiagnosticCounts("test")
+	require.NotNil(t, counts)
+
+	// Agent query state passes through.
+	require.False(t, ro.AgentIsBusy())
+	require.False(t, ro.AgentIsSessionBusy("sess-1"))
+	model := ro.AgentModel()
+	require.Equal(t, AgentModel{}, model)
+	require.False(t, ro.AgentIsReady())
+	require.Error(t, ro.AgentReadyErr())
+	require.Equal(t, 0, ro.AgentQueuedPrompts("sess-1"))
+	require.Nil(t, ro.AgentQueuedPromptsList("sess-1"))
+
+	// File reads pass through.
+	require.True(t, ro.FileTrackerLastReadTime(t.Context(), "sess-1", "/foo").IsZero())
+	files, err := ro.FileTrackerListReadFiles(t.Context(), "sess-1")
+	require.NoError(t, err)
+	require.Empty(t, files)
+
+	// History passes through.
+	history, err := ro.ListSessionHistory(t.Context(), "sess-1")
+	require.NoError(t, err)
+	require.Empty(t, history)
+
+	// Project lifecycle reads pass through.
+	needs, err := ro.ProjectNeedsInitialization()
+	require.NoError(t, err)
+	require.False(t, needs)
+
+	// MCP query state passes through.
+	require.NoError(t, ro.WaitForMCPInit(t.Context()))
+	require.IsType(t, map[string]mcptools.ClientInfo{}, ro.MCPGetStates())
+	require.IsType(t, []MCPResourceInfo{}, ro.MCPResources())
+	resources, err := ro.ReadMCPResource(t.Context(), "name", "uri")
+	require.NoError(t, err)
+	require.Empty(t, resources)
+	_, _ = ro.ListMCPPrompts(t.Context())
+	_, _ = ro.GetMCPPrompt("client", "prompt", map[string]string{})
+	require.Nil(t, ro.MCPPendingAuth())
+	require.Empty(t, ro.MCPAuthURL("name"))
+
+	// Thread query state passes through.
+	require.False(t, ro.SupportsThreads())
+	threads, err := ro.ListThreads(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, threads)
+	_, err = ro.GetThread(t.Context(), "id")
+	require.NoError(t, err)
+
+	// Utility functions pass through.
+	sid := ro.CreateAgentToolSessionID("msg-1", "tool-1")
+	require.Equal(t, "msg-1$$tool-1", sid)
+	msgID, toolID, ok := ro.ParseAgentToolSessionID(sid)
+	require.True(t, ok)
+	require.Equal(t, "msg-1", msgID)
+	require.Equal(t, "tool-1", toolID)
+
+	// SetCurrentSession only updates local UI state.
+	require.NoError(t, ro.SetCurrentSession(t.Context(), "sess-1"))
+	require.Error(t, ro.SetCurrentSession(t.Context(), "other-session"))
+
+	// PermissionSkipRequests query passes through.
+	require.False(t, ro.PermissionSkipRequests())
+}
+
+// TestReadOnlyWorkspace_AllowsOnlyRootToolDescendants verifies nested agent
+// tool sessions are accessible only when their persisted parent chain reaches
+// the thread root. IDs alone, including root-like prefixes, are insufficient.
+func TestReadOnlyWorkspace_AllowsOnlyRootToolDescendants(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubWorkspace{sessions: map[string]session.Session{
+		"root$$child":                {ID: "root$$child", ParentSessionID: "root"},
+		"child-message$$nested-tool": {ID: "child-message$$nested-tool", ParentSessionID: "root$$child"},
+		"root$$unrelated":            {ID: "root$$unrelated", ParentSessionID: "other-root"},
+		"root$$forged":               {ID: "root$$forged", ParentSessionID: "root-prefix"},
+	}}
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "root")
+
+	for _, id := range []string{"root", "root$$child", "child-message$$nested-tool"} {
+		_, err := ro.ListMessages(t.Context(), id)
+		require.NoError(t, err, id)
+	}
+	for _, id := range []string{"root$$unrelated", "root$$forged", "root-not-a-tool"} {
+		_, err := ro.ListMessages(t.Context(), id)
+		require.Error(t, err, id)
+	}
+}
+
+// TestReadOnlyWorkspace_ShutdownIsNoop verifies Shutdown is safe and idempotent.
+func TestReadOnlyWorkspace_ShutdownIsNoop(t *testing.T) {
+	t.Parallel()
+	stub := &stubWorkspace{}
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+
+	require.NotPanics(t, func() { ro.Shutdown() })
+	require.NotPanics(t, func() { ro.Shutdown() })
+}
+
+// TestReadOnlyError_TypeCheck verifies the error type.
+func TestReadOnlyError_TypeCheck(t *testing.T) {
+	t.Parallel()
+	err := &ErrReadOnlyOperation{Operation: "AgentRun"}
+	require.True(t, IsReadOnlyError(err))
+	require.False(t, IsReadOnlyError(nil))
+	require.False(t, IsReadOnlyError(context.DeadlineExceeded))
+	require.False(t, IsReadOnlyError(context.Canceled))
+}
+
+// TestReadOnlyWorkspace_NoopMethods verify no-op methods don't panic.
+func TestReadOnlyWorkspace_NoopMethods(t *testing.T) {
+	t.Parallel()
+	stub := &stubWorkspace{}
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+
+	require.NotPanics(t, func() { ro.AgentCancel("sess-1") })
+	require.NotPanics(t, func() { ro.AgentClearQueue("sess-1") })
+	require.NotPanics(t, func() { ro.Subscribe(nil) })
+	require.NotPanics(t, func() { ro.LSPStart(t.Context(), "/tmp") })
+	require.NotPanics(t, func() { ro.LSPStopAll(t.Context()) })
+	require.NotPanics(t, func() { ro.MCPRefreshPrompts(t.Context(), "test") })
+	require.NotPanics(t, func() { ro.MCPRefreshResources(t.Context(), "test") })
+	require.NotPanics(t, func() { ro.RefreshMCPTools(t.Context(), "test") })
+	require.NotPanics(t, func() { ro.FileTrackerRecordRead(t.Context(), "sess-1", "/foo/bar") })
+	require.NotPanics(t, func() { ro.PermissionSetSkipRequests(true) })
+}
+
+// --- Stub ---
+
+type stubWorkspace struct {
+	sessionID          string
+	sessionCreateCount int
+	sessions           map[string]session.Session
+	importCopilotCalls int
+}
+
+// SessionStore
+func (s *stubWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
+	s.sessionCreateCount++
+	return session.Session{ID: "s" + string(rune(title[0])), Title: title}, nil
+}
+
+func (s *stubWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {
+	if sess, ok := s.sessions[sessionID]; ok {
+		return sess, nil
+	}
+	return session.Session{ID: sessionID}, nil
+}
+
+func (s *stubWorkspace) ListSessions(ctx context.Context) ([]session.Session, error) {
+	return []session.Session{{ID: "sess-1"}}, nil
+}
+
+func (s *stubWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
+	return sess, nil
+}
+
+func (s *stubWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
+	return nil
+}
+
+func (s *stubWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
+	return messageID + "$$" + toolCallID
+}
+
+func (s *stubWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
+	for i := 0; i <= len(sessionID)-2; i++ {
+		if sessionID[i:i+2] == "$$" {
+			return sessionID[:i], sessionID[i+2:], true
+		}
+	}
+	return "", "", false
+}
+
+func (s *stubWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	s.sessionID = sessionID
+	return nil
+}
+
+// Messages
+func (s *stubWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	return []message.Message{{ID: "msg-1"}}, nil
+}
+
+func (s *stubWorkspace) ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
+	return []message.Message{{ID: "user-1"}}, nil
+}
+
+func (s *stubWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
+	return []message.Message{{ID: "all-1"}}, nil
+}
+
+// Agent (query only for stub)
+func (s *stubWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
+	return nil
+}
+
+func (s *stubWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error) {
+	return proto.ShellCommandResponse{}, nil
+}
+func (s *stubWorkspace) AgentCancel(sessionID string)                               {}
+func (s *stubWorkspace) AgentIsBusy() bool                                          { return false }
+func (s *stubWorkspace) AgentIsSessionBusy(sessionID string) bool                   { return false }
+func (s *stubWorkspace) AgentModel() AgentModel                                     { return AgentModel{} }
+func (s *stubWorkspace) AgentIsReady() bool                                         { return false }
+func (s *stubWorkspace) AgentReadyErr() error                                       { return ErrAgentNotInitialized }
+func (s *stubWorkspace) AgentQueuedPrompts(sessionID string) int                    { return 0 }
+func (s *stubWorkspace) AgentQueuedPromptsList(sessionID string) []string           { return nil }
+func (s *stubWorkspace) AgentClearQueue(sessionID string)                           {}
+func (s *stubWorkspace) AgentSummarize(ctx context.Context, sessionID string) error { return nil }
+func (s *stubWorkspace) UpdateAgentModel(ctx context.Context) error                 { return nil }
+func (s *stubWorkspace) InitCoderAgent(ctx context.Context) error                   { return nil }
+func (s *stubWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error     { return nil }
+func (s *stubWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
+	return config.SelectedModel{}
+}
+
+func (s *stubWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
+	return nil, nil
+}
+
+// PermissionResolver
+func (s *stubWorkspace) PermissionGrant(perm permission.PermissionRequest) bool { return false }
+
+func (s *stubWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+	return false
+}
+func (s *stubWorkspace) PermissionDeny(perm permission.PermissionRequest) bool { return false }
+func (s *stubWorkspace) PermissionSkipRequests() bool                          { return false }
+func (s *stubWorkspace) PermissionSetSkipRequests(skip bool)                   {}
+
+// QuestionResponder
+func (s *stubWorkspace) QuestionAnswer(responses []question.Answer) bool { return false }
+func (s *stubWorkspace) QuestionCancel() bool                            { return false }
+
+// FileServices
+func (s *stubWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {}
+
+func (s *stubWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time {
+	return time.Time{}
+}
+
+func (s *stubWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
+	return nil, nil
+}
+
+// History
+func (s *stubWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
+	return nil, nil
+}
+
+// LSP
+func (s *stubWorkspace) LSPStart(ctx context.Context, path string) {}
+func (s *stubWorkspace) LSPStopAll(ctx context.Context)            {}
+func (s *stubWorkspace) LSPGetStates() map[string]LSPClientInfo    { return nil }
+func (s *stubWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
+	return lsp.DiagnosticCounts{}
+}
+
+// Config
+func (s *stubWorkspace) Config() *config.Config            { return &config.Config{} }
+func (s *stubWorkspace) WorkingDir() string                { return "/default" }
+func (s *stubWorkspace) Resolver() config.VariableResolver { return config.IdentityResolver() }
+
+// Config mutations (for stub, not blocked)
+func (s *stubWorkspace) UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error {
+	return nil
+}
+func (s *stubWorkspace) OverridePreferredModel(model config.SelectedModel) error { return nil }
+func (s *stubWorkspace) SetCompactMode(scope config.Scope, enabled bool) error   { return nil }
+func (s *stubWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+	return nil
+}
+
+func (s *stubWorkspace) SetConfigField(scope config.Scope, key string, value any) error { return nil }
+
+func (s *stubWorkspace) RemoveConfigField(scope config.Scope, key string) error { return nil }
+
+func (s *stubWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
+	return nil
+}
+
+// ProjectLifecycle
+func (s *stubWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }
+func (s *stubWorkspace) MarkProjectInitialized() error             { return nil }
+func (s *stubWorkspace) InitializePrompt() (string, error)         { return "", nil }
+
+// Skills
+func (s *stubWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
+	return nil, nil
+}
+
+func (s *stubWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
+	return nil, skills.SkillReadResult{}, nil
+}
+
+// MCP
+func (s *stubWorkspace) WaitForMCPInit(ctx context.Context) error             { return nil }
+func (s *stubWorkspace) MCPGetStates() map[string]mcptools.ClientInfo         { return nil }
+func (s *stubWorkspace) MCPResources() []MCPResourceInfo                      { return nil }
+func (s *stubWorkspace) MCPRefreshPrompts(ctx context.Context, name string)   {}
+func (s *stubWorkspace) MCPRefreshResources(ctx context.Context, name string) {}
+func (s *stubWorkspace) RefreshMCPTools(ctx context.Context, name string)     {}
+func (s *stubWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
+	return nil, nil
+}
+
+func (s *stubWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error) {
+	return nil, nil
+}
+
+func (s *stubWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
+	return "", nil
+}
+func (s *stubWorkspace) EnableDockerMCP(ctx context.Context) error              { return nil }
+func (s *stubWorkspace) DisableDockerMCP() error                                { return nil }
+func (s *stubWorkspace) MCPAuthenticate(ctx context.Context, name string) error { return nil }
+func (s *stubWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer           { return nil }
+func (s *stubWorkspace) MCPAuthURL(name string) string                          { return "" }
+
+// ThreadController (query only for stub)
+func (s *stubWorkspace) SupportsThreads() bool                                   { return false }
+func (s *stubWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) { return nil, nil }
+func (s *stubWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, error) {
+	return proto.Thread{}, nil
+}
+
+func (s *stubWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
+	return proto.Thread{}, nil
+}
+func (s *stubWorkspace) SendThread(ctx context.Context, id, message string) error { return nil }
+func (s *stubWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
+	return proto.Thread{}, nil
+}
+
+func (s *stubWorkspace) RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error {
+	return nil
+}
+
+func (s *stubWorkspace) AttachThread(ctx context.Context, id string) (Workspace, func(), error) {
+	return nil, nil, nil
+}
+
+// EventSubscriber
+func (s *stubWorkspace) Subscribe(program *tea.Program) {}
+func (s *stubWorkspace) Shutdown()                      {}
+
+// ImportCopilot
+func (s *stubWorkspace) ImportCopilot() (*oauth.Token, bool) {
+	s.importCopilotCalls++
+	return nil, false
+}

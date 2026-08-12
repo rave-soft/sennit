@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -174,6 +175,296 @@ func TestForwardEvents(t *testing.T) {
 		require.Equal(t, "thread-1", payload.Payload.ID)
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for forwarded event")
+	}
+}
+
+// TestApp_Shutdown_IsIdempotent verifies that repeated Shutdown calls are
+// safe and only run teardown once.
+func TestApp_Shutdown_IsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	a := NewForTest(t.Context())
+	require.NoError(t, a.AddShutdownHook(func(context.Context) error { return nil }))
+	require.NoError(t, a.AddCleanup(func(context.Context) error { return nil }))
+
+	a.Shutdown()
+	a.Shutdown() // repeated
+	a.Shutdown() // repeated
+
+	require.Equal(t, shutdownStateDone, a.shutdownState)
+}
+
+// TestApp_Shutdown_Concurrent waits for multiple concurrent callers to
+// return together after a single teardown.
+func TestApp_Shutdown_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	a := NewForTest(t.Context())
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() { a.Shutdown() })
+	}
+	wg.Wait()
+
+	require.Equal(t, shutdownStateDone, a.shutdownState)
+}
+
+// TestApp_Shutdown_HooksRunBeforeCleanups verifies that shutdown hooks
+// are called before cleanup functions.
+func TestApp_Shutdown_HooksRunBeforeCleanups(t *testing.T) {
+	t.Parallel()
+
+	var order []string
+	mu := sync.Mutex{}
+	addOrder := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, s)
+	}
+
+	a := NewForTest(t.Context())
+	require.NoError(t, a.AddShutdownHook(func(context.Context) error {
+		addOrder("hook-1")
+		return nil
+	}))
+	require.NoError(t, a.AddCleanup(func(context.Context) error {
+		addOrder("cleanup-1")
+		return nil
+	}))
+	require.NoError(t, a.AddCleanup(func(context.Context) error {
+		addOrder("cleanup-2")
+		return nil
+	}))
+
+	a.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"hook-1", "cleanup-1", "cleanup-2"}, order)
+}
+
+// TestApp_Shutdown_AddAfterStartRejects verifies that AddCleanup and
+// AddShutdownHook return ErrAppShutdownBlocked after shutdown begins.
+func TestApp_Shutdown_AddAfterStartRejects(t *testing.T) {
+	t.Parallel()
+
+	a := NewForTest(t.Context())
+
+	// Register a hook that blocks so we can test mid-shutdown.
+	barrier := make(chan struct{})
+	require.NoError(t, a.AddShutdownHook(func(context.Context) error {
+		<-barrier
+		return nil
+	}))
+
+	// Start shutdown in background.
+	done := make(chan struct{})
+	go func() {
+		a.Shutdown()
+		close(done)
+	}()
+
+	// Wait for hook to block (shutdown in progress).
+	time.Sleep(50 * time.Millisecond)
+
+	// Now AddCleanup/AddShutdownHook should fail.
+	require.ErrorIs(t, a.AddCleanup(func(context.Context) error { return nil }), ErrAppShutdownBlocked)
+	require.ErrorIs(t, a.AddShutdownHook(func(context.Context) error { return nil }), ErrAppShutdownBlocked)
+
+	// Release shutdown to let the test finish.
+	close(barrier)
+	<-done
+}
+
+// TestApp_Shutdown_BoundsBlockingCallbacks verifies shutdown and concurrent
+// callers return when a cleanup ignores cancellation.
+func TestApp_Shutdown_BoundsBlockingCallbacks(t *testing.T) {
+	t.Parallel()
+
+	a := NewForTest(t.Context())
+	a.shutdownTimeout = 20 * time.Millisecond
+	block := make(chan struct{})
+	require.NoError(t, a.AddCleanup(func(context.Context) error {
+		<-block
+		return nil
+	}))
+
+	done := make(chan struct{})
+	go func() {
+		a.Shutdown()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Shutdown did not return after the cleanup deadline")
+	}
+	close(block)
+}
+
+// TestApp_Shutdown_SkipsCriticalCleanupAfterHookTimeout ensures a thread DB
+// is not released while its manager hook is still running.
+func TestApp_Shutdown_SkipsCriticalCleanupAfterHookTimeout(t *testing.T) {
+	t.Parallel()
+
+	a := NewForTest(t.Context())
+	a.shutdownTimeout = 20 * time.Millisecond
+	block := make(chan struct{})
+	var released atomic.Bool
+	require.NoError(t, a.AddShutdownHook(func(context.Context) error {
+		<-block
+		return nil
+	}))
+	require.NoError(t, a.AddCriticalCleanup(func(context.Context) error {
+		released.Store(true)
+		return nil
+	}))
+
+	a.Shutdown()
+	require.False(t, released.Load())
+	close(block)
+}
+
+// TestApp_Shutdown_ProductionResourcePhasesAreDependencySafe verifies the
+// production-like registration sequence cannot make a generic cleanup close
+// the main DB before watchers and MCP have stopped. Production resources use
+// explicit phases rather than their position in cleanupFuncs.
+func TestApp_Shutdown_ProductionResourcePhasesAreDependencySafe(t *testing.T) {
+	t.Parallel()
+
+	var order []string
+	var mu sync.Mutex
+	addOrder := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, s)
+	}
+
+	a := NewForTest(t.Context())
+	// Deliberately register a normal cleanup before the production resources,
+	// matching the fact that their registration order is not a contract.
+	require.NoError(t, a.AddCleanup(func(context.Context) error {
+		addOrder("ordinary-cleanup")
+		return nil
+	}))
+	require.NoError(t, a.AddPreCleanupHook(func(context.Context) error {
+		addOrder("watchers-stopped")
+		return nil
+	}))
+	a.mcpClose = func(context.Context) error {
+		addOrder("mcp-closed")
+		return nil
+	}
+	a.mainDBRelease = func(context.Context) error {
+		addOrder("main-db-released")
+		return nil
+	}
+
+	a.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{
+		"watchers-stopped",
+		"mcp-closed",
+		"ordinary-cleanup",
+		"main-db-released",
+	}, order)
+}
+
+// TestApp_Shutdown_PreCleanupHookFailureSkipsMCP ensures a watcher that has
+// not stopped cannot race MCP shutdown; unrelated main DB release continues.
+func TestApp_Shutdown_PreCleanupHookFailureRetainsDependencies(t *testing.T) {
+	t.Parallel()
+
+	a := NewForTest(t.Context())
+	var mcpClosed, dbReleased atomic.Bool
+	require.NoError(t, a.AddPreCleanupHook(func(context.Context) error {
+		return fmt.Errorf("watcher did not stop")
+	}))
+	a.mcpClose = func(context.Context) error {
+		mcpClosed.Store(true)
+		return nil
+	}
+	a.mainDBRelease = func(context.Context) error {
+		dbReleased.Store(true)
+		return nil
+	}
+
+	a.Shutdown()
+	require.False(t, mcpClosed.Load())
+	require.False(t, dbReleased.Load())
+}
+
+func TestApp_Shutdown_MCPInitBeforeCloseAndDB(t *testing.T) {
+	t.Parallel()
+
+	a := NewForTest(t.Context())
+	initStopped := make(chan struct{})
+	a.mcpInitCancel = func() { close(initStopped) }
+	a.mcpInitWG.Add(1)
+	go func() {
+		defer a.mcpInitWG.Done()
+		<-initStopped
+	}()
+
+	var order []string
+	a.mcpClose = func(context.Context) error {
+		select {
+		case <-initStopped:
+		default:
+			t.Fatal("MCP initialization was not stopped before close")
+		}
+		order = append(order, "mcp")
+		return nil
+	}
+	a.mainDBRelease = func(context.Context) error {
+		order = append(order, "db")
+		return nil
+	}
+
+	a.Shutdown()
+	require.Equal(t, []string{"mcp", "db"}, order)
+}
+
+func TestApp_Shutdown_ManagerBeforeDB(t *testing.T) {
+	t.Parallel()
+
+	var order []string
+	mu := sync.Mutex{}
+	addOrder := func(s string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, s)
+	}
+
+	a := NewForTest(t.Context())
+	// Simulate thread manager shutdown (runs as hook).
+	require.NoError(t, a.AddShutdownHook(func(context.Context) error {
+		addOrder("manager-shutdown")
+		return nil
+	}))
+	// Simulate DB release (runs as cleanup).
+	require.NoError(t, a.AddCriticalCleanup(func(context.Context) error {
+		addOrder("db-release")
+		return nil
+	}))
+
+	a.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Manager shutdown must appear before DB release.
+	for i, s := range order {
+		if s == "db-release" {
+			found := false
+			for _, prev := range order[:i] {
+				if prev == "manager-shutdown" {
+					found = true
+				}
+			}
+			require.True(t, found, "manager-shutdown must appear before db-release")
+		}
 	}
 }
 
