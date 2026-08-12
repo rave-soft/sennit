@@ -51,6 +51,15 @@ type ClientWorkspace struct {
 	// whole workspace) may have been re-created in the meantime.
 	lastSession string
 
+	supportsThreads          threadsSupport
+	threadsProbeStarted      bool
+	threadsProbeDone         chan struct{}
+	threadsProbeComplete     bool
+	threadsProbeErr          error
+	threadsProbeGeneration   uint64
+	threadsProbes            sync.WaitGroup
+	threadsProbeAdmissionOff bool
+
 	// subCtx bounds the lifetime of the event subscription (and its
 	// reconnect loop). Shutdown cancels it so Subscribe stops
 	// reconnecting instead of racing the teardown.
@@ -91,7 +100,8 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	states := protoToSkillStates(ws.Skills)
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	subCtx, subCancel := context.WithCancel(context.Background())
-	return &ClientWorkspace{
+
+	ws_ := &ClientWorkspace{
 		client:      c,
 		ws:          ws,
 		skills:      mgr,
@@ -100,10 +110,15 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 		subDone:     make(chan struct{}),
 		herdrClient: herdr.Init(),
 	}
+
+	ws_.setThreadsSupported(ws.ThreadsSupported)
+
+	return ws_
 }
 
 // refreshWorkspace re-fetches the workspace from the server, updating
-// the cached snapshot. Called after config-mutating operations.
+// the cached snapshot and the SupportsThreads cache. Called after
+// config-mutating operations.
 func (w *ClientWorkspace) refreshWorkspace() {
 	updated, err := w.client.GetWorkspace(context.Background(), w.workspaceID())
 	if err != nil {
@@ -115,7 +130,12 @@ func (w *ClientWorkspace) refreshWorkspace() {
 	}
 	w.mu.Lock()
 	w.ws = *updated
+	w.threadsProbeGeneration++
+	w.threadsProbeComplete = false
+	w.threadsProbeErr = nil
+	w.setThreadsSupported(updated.ThreadsSupported)
 	w.mu.Unlock()
+	w.startThreadsProbe()
 }
 
 // cached returns a snapshot of the cached workspace.
@@ -1084,6 +1104,8 @@ const maxRecoveryEscalate = 20
 // A var, not a const, so tests can shrink it.
 var recoveryCreateTimeout = 30 * time.Second
 
+var threadsProbeTimeout = 5 * time.Second
+
 // runSubscription subscribes to the workspace event stream and forwards
 // translated events to send, reconnecting with capped exponential
 // backoff whenever the stream drops. It returns only when the
@@ -1098,6 +1120,7 @@ var recoveryCreateTimeout = 30 * time.Second
 // re-asserts the client's session and asks the UI to resync.
 func (w *ClientWorkspace) runSubscription(send func(tea.Msg)) {
 	w.subStarted.Store(true)
+	w.startThreadsProbe()
 	defer close(w.subDone)
 
 	backoff := sseReconnectInitialBackoff
@@ -1199,9 +1222,15 @@ func (w *ClientWorkspace) recoverWorkspace() error {
 	w.mu.Lock()
 	oldID := w.ws.ID
 	w.ws = *created
+	w.threadsProbeGeneration++
+	w.threadsProbeComplete = false
+	w.threadsProbeErr = nil
+	newID := created.ID
+	w.setThreadsSupported(created.ThreadsSupported)
 	w.mu.Unlock()
+	w.startThreadsProbe()
 	slog.Info("Re-registered workspace after server-side loss",
-		"old_id", oldID, "new_id", created.ID)
+		"old_id", oldID, "new_id", newID)
 
 	if created.Config != nil && created.Config.IsConfigured() {
 		if err := w.InitCoderAgent(w.subCtx); err != nil {
@@ -1298,7 +1327,11 @@ func (w *ClientWorkspace) Shutdown() {
 	if w.subCancel != nil {
 		w.subCancel()
 	}
+	w.mu.Lock()
+	w.threadsProbeAdmissionOff = true
+	w.mu.Unlock()
 	w.awaitSubscription()
+	w.threadsProbes.Wait()
 	w.herdrClient.Close()
 
 	// Retiring the client releases every claim it holds, on every workspace,

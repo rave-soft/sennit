@@ -189,5 +189,5 @@ func TestThreads_NonGitWorkspaceRejectsThreads(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = c.ListThreads(ctx, ws.ID)
-	require.Error(t, err)
+	require.ErrorIs(t, err, client.ErrThreadsUnsupported)
 }

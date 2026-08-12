@@ -287,6 +287,22 @@ type MCPController interface {
 // nesting is not supported); every other method's behavior when it's
 // false is implementation-defined (both implementations return a clear
 // error rather than panicking — see each method's doc below).
+// ThreadCapabilityInitializer is an optional extension for frontends that
+// need a definitive answer before checking SupportsThreads. Implementations
+// may resolve an older server's unknown capability snapshot using ctx.
+type ThreadCapabilityInitializer interface {
+	InitializeThreadsCapability(ctx context.Context) error
+}
+
+// InitializeThreadsCapability resolves an optional workspace capability when
+// supported. Existing Workspace implementations and test stubs remain valid.
+func InitializeThreadsCapability(ctx context.Context, ws ThreadController) error {
+	if initializer, ok := ws.(ThreadCapabilityInitializer); ok {
+		return initializer.InitializeThreadsCapability(ctx)
+	}
+	return nil
+}
+
 type ThreadController interface {
 	SupportsThreads() bool
 	ListThreads(ctx context.Context) ([]proto.Thread, error)

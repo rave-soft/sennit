@@ -987,3 +987,77 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
 }
+
+func TestClientWorkspaceThreadsSnapshotDoesNotProbe(t *testing.T) {
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/threads") {
+			calls.Add(1)
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	supported := true
+	w := NewClientWorkspace(c, proto.Workspace{ID: "ws", ThreadsSupported: &supported})
+	for range 10 {
+		require.True(t, w.SupportsThreads())
+	}
+	require.Zero(t, calls.Load())
+}
+
+func TestClientWorkspaceThreadsUnknownProbesOnce(t *testing.T) {
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/threads"):
+			calls.Add(1)
+			w.WriteHeader(http.StatusConflict)
+		case strings.HasSuffix(r.URL.Path, "/events"):
+			<-r.Context().Done()
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	w := NewClientWorkspace(c, proto.Workspace{ID: "ws"})
+	go w.runSubscription(func(tea.Msg) {})
+	require.Eventually(t, func() bool { return calls.Load() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return !w.SupportsThreads() }, time.Second, time.Millisecond)
+	w.Shutdown()
+	require.EqualValues(t, 1, calls.Load())
+}
+
+func TestClientWorkspaceThreadsProbeFailureRemainsUnknown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/threads") {
+			<-r.Context().Done()
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	c, err := client.NewClient(t.TempDir(), "tcp", u.Host)
+	require.NoError(t, err)
+	w := NewClientWorkspace(c, proto.Workspace{ID: "ws"})
+	w.startThreadsProbe()
+	require.Eventually(t, func() bool {
+		w.mu.RLock()
+		defer w.mu.RUnlock()
+		return w.threadsProbeStarted
+	}, time.Second, time.Millisecond)
+	w.subCancel()
+	require.Eventually(t, func() bool {
+		w.mu.RLock()
+		defer w.mu.RUnlock()
+		return w.supportsThreads == threadsUnknown && !w.threadsProbeStarted
+	}, time.Second, time.Millisecond)
+}

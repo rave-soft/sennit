@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -161,6 +162,9 @@ func runThreadsList(cmd *cobra.Command, _ []string) error {
 	}
 	defer cleanup()
 
+	if err := workspace.InitializeThreadsCapability(ctx, ws); err != nil {
+		return fmt.Errorf("threads: determine capability: %w", err)
+	}
 	if !ws.SupportsThreads() {
 		return fmt.Errorf("threads: this workspace doesn't support threads (not a git repository, or already inside a thread's own workspace)")
 	}
@@ -203,6 +207,9 @@ func runThreadsCreate(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
+	if err := workspace.InitializeThreadsCapability(ctx, ws); err != nil {
+		return fmt.Errorf("threads: determine capability: %w", err)
+	}
 	if !ws.SupportsThreads() {
 		return fmt.Errorf("threads: this workspace doesn't support threads")
 	}
@@ -223,6 +230,9 @@ func runThreadsMerge(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
+	if err := workspace.InitializeThreadsCapability(ctx, ws); err != nil {
+		return fmt.Errorf("threads: determine capability: %w", err)
+	}
 	if !ws.SupportsThreads() {
 		return fmt.Errorf("threads: this workspace doesn't support threads")
 	}
@@ -243,6 +253,9 @@ func runThreadsRemove(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
+	if err := workspace.InitializeThreadsCapability(ctx, ws); err != nil {
+		return fmt.Errorf("threads: determine capability: %w", err)
+	}
 	if !ws.SupportsThreads() {
 		return fmt.Errorf("threads: this workspace doesn't support threads")
 	}

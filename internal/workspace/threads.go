@@ -2,10 +2,13 @@ package workspace
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/log"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
@@ -46,6 +49,10 @@ func (w *AppWorkspace) SupportsThreads() bool {
 	_, ok := w.threadManager()
 	return ok
 }
+
+// InitializeThreadsCapability is deliberately a cheap no-op for local
+// workspaces: their thread manager is already available in-process.
+func (w *AppWorkspace) InitializeThreadsCapability(context.Context) error { return nil }
 
 func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) {
 	mgr, ok := w.threadManager()
@@ -199,19 +206,161 @@ func (w *AppWorkspace) SubscribeWith(send func(tea.Msg)) func() {
 
 // -- ClientWorkspace: Threads --
 
-// SupportsThreads does a live round trip to the server: unlike
-// AgentIsReady/AgentIsBusy (which read locally-cached state that's kept
-// fresh by the subscription stream), there is no cached "does this
-// workspace support threads" bit anywhere in proto.Workspace, so the
-// only accurate answer requires asking the server; a cheap-but-wrong
-// boolean would be worse than a slightly expensive correct one.
-//
-// SupportsThreads has no ctx parameter (see the ThreadController
-// interface), so this uses context.Background() internally, meaning the
-// call cannot be cancelled by a caller.
+type threadsSupport uint8
+
+const (
+	threadsUnknown threadsSupport = iota
+	threadsUnsupported
+	threadsSupported
+)
+
+// SupportsThreads returns only the cached capability state. It never performs
+// I/O: callers that must resolve an older server's unknown snapshot first use
+// InitializeThreadsCapability.
 func (w *ClientWorkspace) SupportsThreads() bool {
-	_, err := w.client.ListThreads(context.Background(), w.workspaceID())
-	return err == nil
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.supportsThreads == threadsSupported
+}
+
+// InitializeThreadsCapability resolves an unknown capability snapshot with one
+// bounded request. A 409 is a definitive unsupported result; other request
+// failures leave the capability unknown and are returned to the caller.
+func (w *ClientWorkspace) InitializeThreadsCapability(ctx context.Context) error {
+	for {
+		w.mu.Lock()
+		if w.supportsThreads != threadsUnknown {
+			w.mu.Unlock()
+			return nil
+		}
+		if w.threadsProbeAdmissionOff {
+			w.mu.Unlock()
+			return context.Canceled
+		}
+		if w.threadsProbeComplete {
+			err := w.threadsProbeErr
+			w.mu.Unlock()
+			return err
+		}
+		if w.threadsProbeStarted {
+			done := w.threadsProbeDone
+			w.mu.Unlock()
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		w.threadsProbeStarted = true
+		w.threadsProbeDone = make(chan struct{})
+		done := w.threadsProbeDone
+		workspaceID, generation := w.ws.ID, w.threadsProbeGeneration
+		w.threadsProbes.Add(1)
+		w.mu.Unlock()
+
+		attemptCtx, cancel := context.WithTimeout(ctx, threadsProbeTimeout)
+		stopCancel := context.AfterFunc(w.subCtx, cancel)
+		_, err := w.client.ListThreads(attemptCtx, workspaceID)
+		stopCancel()
+		cancel()
+
+		w.mu.Lock()
+		current := w.ws.ID == workspaceID &&
+			w.threadsProbeGeneration == generation &&
+			w.threadsProbeDone == done
+		if current {
+			if err == nil {
+				w.supportsThreads = threadsSupported
+				err = nil
+			} else if errors.Is(err, client.ErrThreadsUnsupported) {
+				w.supportsThreads = threadsUnsupported
+				err = nil
+			} else {
+				err = fmt.Errorf("determine thread capability: %w", err)
+			}
+			w.threadsProbeErr = err
+			w.threadsProbeComplete = true
+			w.threadsProbeStarted = false
+		} else if w.threadsProbeDone == done {
+			w.threadsProbeStarted = false
+		}
+		close(done)
+		w.mu.Unlock()
+		w.threadsProbes.Done()
+		if current {
+			return err
+		}
+	}
+}
+
+func (w *ClientWorkspace) setThreadsSupported(supported *bool) {
+	switch {
+	case supported == nil:
+		w.supportsThreads = threadsUnknown
+	case *supported:
+		w.supportsThreads = threadsSupported
+	default:
+		w.supportsThreads = threadsUnsupported
+	}
+}
+
+func (w *ClientWorkspace) startThreadsProbe() {
+	if w.client == nil {
+		return
+	}
+	w.mu.Lock()
+	if w.threadsProbeAdmissionOff || w.supportsThreads != threadsUnknown || w.threadsProbeStarted {
+		w.mu.Unlock()
+		return
+	}
+	w.threadsProbeStarted = true
+	w.threadsProbeDone = make(chan struct{})
+	workspaceID, generation := w.ws.ID, w.threadsProbeGeneration
+	w.threadsProbes.Add(1)
+	w.mu.Unlock()
+
+	done := w.threadsProbeDone
+	go func() {
+		defer w.threadsProbes.Done()
+		w.probeThreads(w.subCtx, workspaceID, generation, done)
+	}()
+}
+
+func (w *ClientWorkspace) probeThreads(ctx context.Context, workspaceID string, generation uint64, done chan struct{}) {
+	attemptCtx, cancel := context.WithTimeout(ctx, threadsProbeTimeout)
+	_, err := w.client.ListThreads(attemptCtx, workspaceID)
+	cancel()
+
+	w.mu.Lock()
+	current := w.ws.ID == workspaceID &&
+		w.threadsProbeGeneration == generation &&
+		w.threadsProbeDone == done
+	if !current {
+		if w.threadsProbeDone == done {
+			w.threadsProbeStarted = false
+		}
+		close(done)
+		w.mu.Unlock()
+		w.startThreadsProbe()
+		return
+	}
+	if err == nil {
+		w.supportsThreads = threadsSupported
+		err = nil
+	} else if errors.Is(err, client.ErrThreadsUnsupported) {
+		w.supportsThreads = threadsUnsupported
+		err = nil
+	} else if ctx.Err() == nil && !w.threadsProbeAdmissionOff {
+		err = fmt.Errorf("determine thread capability: %w", err)
+	} else {
+		err = nil
+	}
+	w.threadsProbeErr = err
+	w.threadsProbeComplete = true
+	w.threadsProbeStarted = false
+	close(done)
+	w.mu.Unlock()
 }
 
 func (w *ClientWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) {

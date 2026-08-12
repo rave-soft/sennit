@@ -29,6 +29,14 @@ type Workspace struct {
 	// creation time. Subsequent updates flow through the SSE event
 	// stream.
 	Skills []SkillState `json:"skills,omitempty"`
+	// ThreadsSupported reports whether this workspace has a thread
+	// manager attached (i.e. it is rooted at a git repository and not
+	// itself a thread's nested workspace). The server sets this field
+	// based on attachServerThreads; the client seeds its local cache
+	// from it, avoiding a live probe at construction time. A nil value
+	// means the server predates this field and the client must perform
+	// a single fallback probe in a controlled point (not the hot path).
+	ThreadsSupported *bool `json:"threads_supported,omitempty"`
 }
 
 // Error represents an error response.

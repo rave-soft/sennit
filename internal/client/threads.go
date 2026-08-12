@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,6 +19,9 @@ func (c *Client) ListThreads(ctx context.Context, id string) ([]proto.Thread, er
 	}
 	defer rsp.Body.Close()
 	if err := checkStatus(rsp); err != nil {
+		if errors.Is(err, ErrConflict) {
+			err = fmt.Errorf("%w: %w", ErrThreadsUnsupported, err)
+		}
 		return nil, fmt.Errorf("failed to list threads: %w", err)
 	}
 	var threads []proto.Thread

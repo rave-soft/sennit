@@ -209,6 +209,17 @@ type Workspace struct {
 	shutdownFn func()
 }
 
+// ThreadManagerSupported reports whether this workspace has a thread
+// manager attached. It is safe to call concurrently and is used by
+// workspaceToProto to populate the ThreadsSupported field in the
+// wire-format snapshot.
+func (w *Workspace) ThreadManagerSupported() bool {
+	if w.App == nil {
+		return false
+	}
+	return w.ThreadManager() != nil
+}
+
 // invokeShutdown calls the workspace shutdown hook if set, falling
 // back to the workspace [Workspace.Shutdown] wrapper when not.
 func (w *Workspace) invokeShutdown() {
@@ -1065,15 +1076,16 @@ func validateClientID(id string) (string, error) {
 func workspaceToProto(ws *Workspace) proto.Workspace {
 	cfg := ws.Cfg.Config()
 	out := proto.Workspace{
-		ID:       ws.ID,
-		Path:     ws.Path,
-		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
-		Channels: ws.Cfg.Overrides().EnabledChannels,
-		DataDir:  cfg.Options.DataDirectory,
-		Debug:    cfg.Options.Debug,
-		Config:   cfg,
-		Env:      ws.Env,
-		Version:  version.Version,
+		ID:               ws.ID,
+		Path:             ws.Path,
+		YOLO:             ws.Cfg.Overrides().SkipPermissionRequests,
+		Channels:         ws.Cfg.Overrides().EnabledChannels,
+		DataDir:          cfg.Options.DataDirectory,
+		Debug:            cfg.Options.Debug,
+		Config:           cfg,
+		Env:              ws.Env,
+		Version:          version.Version,
+		ThreadsSupported: boolPtr(ws.ThreadManagerSupported()),
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())
@@ -1131,3 +1143,6 @@ func stringSlicesEqual(a, b []string) bool {
 	}
 	return true
 }
+
+// boolPtr returns a pointer to b.
+func boolPtr(b bool) *bool { return &b }
