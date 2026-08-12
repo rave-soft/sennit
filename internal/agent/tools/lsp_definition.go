@@ -42,7 +42,7 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			workingDir := cmp.Or(params.Path, ".")
 			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, workingDir)
 			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
+				return fantasy.NewTextResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
 			}
 
 			locations, err := resolved.client.Definition(ctx, resolved.path, resolved.line, resolved.char)
@@ -55,7 +55,7 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			}
 
 			if len(locations) == 0 {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
+				return fantasy.NewTextResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
 			}
 
 			text, meta := formatDefinitions(locations)

@@ -30,19 +30,31 @@ func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, working
 	if err != nil {
 		return nil, err
 	}
+	return firstSymbolWithDefinition(ctx, results)
+}
 
-	// Try each candidate until the LSP confirms it's a real identifier.
-	// This filters out grep matches in comments, strings, or partial
-	// identifiers that slipped past the word-boundary filter.
+func firstSymbolWithDefinition(ctx context.Context, results []*resolvedSymbol) (*resolvedSymbol, error) {
+	return firstWithDefinition(results, func(r *resolvedSymbol) ([]protocol.Location, error) {
+		return r.client.Definition(ctx, r.path, r.line, r.char)
+	})
+}
+
+func firstWithDefinition[T any](results []T, definition func(T) ([]protocol.Location, error)) (T, error) {
+	var zero T
+	var lastErr error
 	for _, r := range results {
-		_, err := r.client.Definition(ctx, r.path, r.line, r.char)
-		if err == nil || !isNoIdentifierError(err) {
+		locations, err := definition(r)
+		if err == nil && len(locations) > 0 {
 			return r, nil
 		}
+		if err != nil && !isNoIdentifierError(err) {
+			lastErr = err
+		}
 	}
-	// All candidates were rejected by the LSP; return the first one
-	// so the caller gets a meaningful error from their own LSP call.
-	return results[0], nil
+	if lastErr != nil {
+		return zero, lastErr
+	}
+	return zero, fmt.Errorf("no definition found for any symbol candidate")
 }
 
 // resolveSymbolResults greps for a symbol and returns all viable

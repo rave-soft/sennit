@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,6 +34,44 @@ func TestGetSymbolOffset(t *testing.T) {
 			require.Equal(t, tt.want, got, "getSymbolOffset(%q)", tt.symbol)
 		})
 	}
+}
+
+func TestFirstWithDefinitionSkipsEmptyAndInvalidCandidates(t *testing.T) {
+	t.Parallel()
+
+	candidates := []string{"comment", "unresolved", "definition"}
+	got, err := firstWithDefinition(candidates, func(candidate string) ([]protocol.Location, error) {
+		switch candidate {
+		case "comment":
+			return nil, errors.New("no identifier found")
+		case "unresolved":
+			return nil, nil
+		default:
+			return []protocol.Location{{}}, nil
+		}
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "definition", got)
+}
+
+func TestFirstWithDefinitionReturnsLastMeaningfulError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("language server unavailable")
+	got, err := firstWithDefinition([]string{"empty", "error", "invalid"}, func(candidate string) ([]protocol.Location, error) {
+		switch candidate {
+		case "error":
+			return nil, wantErr
+		case "invalid":
+			return nil, errors.New("no identifier found")
+		default:
+			return nil, nil
+		}
+	})
+
+	require.ErrorIs(t, err, wantErr)
+	require.Empty(t, got)
 }
 
 // TestGetSymbolOffset_DoesNotOvershoot verifies that the offset lands
