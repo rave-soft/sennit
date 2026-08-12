@@ -21,7 +21,7 @@ func TestBackgroundJobsInfo(t *testing.T) {
 
 	require.Contains(t, plain, "Background Jobs")
 	require.Contains(t, plain, "Active 3/50")
-	require.Contains(t, plain, "Completed 7")
+	require.NotContains(t, plain, "Completed")
 	for line := range strings.Lines(info) {
 		require.LessOrEqual(t, lipgloss.Width(strings.TrimSuffix(line, "\n")), width)
 	}

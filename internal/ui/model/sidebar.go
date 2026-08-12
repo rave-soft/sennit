@@ -128,8 +128,7 @@ func (m *UI) modelInfo(width int) string {
 func backgroundJobsInfo(t *styles.Styles, counts shell.BackgroundJobCounts, width int) string {
 	header := common.Section(t, "Background Jobs", width)
 	active := t.Resource.Name.Render("Active") + " " + t.Resource.CapabilityCount.Render(fmt.Sprintf("%d/%d", counts.Active, shell.MaxBackgroundJobs))
-	completed := t.Resource.Name.Render("Completed") + " " + t.Resource.CapabilityCount.Render(fmt.Sprintf("%d", counts.Completed))
-	return lipgloss.JoinVertical(lipgloss.Left, header, active, completed)
+	return lipgloss.JoinVertical(lipgloss.Left, header, active)
 }
 
 // updateSidebarScrollState renders the sidebar content and computes scroll
