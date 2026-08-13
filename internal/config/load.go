@@ -29,6 +29,7 @@ import (
 	"github.com/rave-soft/braid/internal/filepathext"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/home"
+	"github.com/rave-soft/braid/internal/lock"
 	"github.com/rave-soft/braid/internal/shellconfig"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -1309,9 +1310,25 @@ const modelCacheMigrationThreshold = 50
 // unmarshaled before this runs; that's fine; only the next Load() benefits,
 // via resolveCustomProviderModels reading the now-populated cache.
 func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Provider) {
+	migrateBloatedModelCacheWithSave(globalDataPath, knownProviders, saveCachedModelsWithError)
+}
+
+func migrateBloatedModelCacheWithSave(
+	globalDataPath string,
+	knownProviders []catwalk.Provider,
+	saveModels func(string, string, []catwalk.Model) error,
+) {
 	if globalDataPath == "" {
 		return
 	}
+
+	unlock, err := lockConfigMigrationFiles(globalDataPath)
+	if err != nil {
+		slog.Warn("Failed to acquire model cache migration lock", "path", globalDataPath, "error", err)
+		return
+	}
+	defer unlock()
+
 	data, err := os.ReadFile(globalDataPath)
 	if err != nil || len(data) == 0 {
 		return
@@ -1340,7 +1357,10 @@ func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Pr
 			return true
 		}
 
-		saveCachedModels(globalDataPath, providerID, parsed)
+		if err := saveModels(globalDataPath, providerID, parsed); err != nil {
+			slog.Warn("Failed to migrate provider models to cache", "provider", providerID, "error", err)
+			return true
+		}
 		if out, err := sjson.Delete(updated, ProviderFieldKey(providerID, "models")); err == nil {
 			updated = out
 			changed = true
@@ -1469,26 +1489,49 @@ func hasAWSCredentials(env env.Env) bool {
 // Regardless of value, it removes the deprecated fields from any file that
 // contains them.
 func migrateDisableNotifications() {
+	migrateDisableNotificationsWithWrite(atomicWriteFile)
+}
+
+func migrateDisableNotificationsWithWrite(writeFile func(string, []byte, os.FileMode) error) {
 	globalConfig := GlobalConfig()
 	dataConfig := GlobalConfigData()
+	unlock, err := lockConfigMigrationFiles(globalConfig, dataConfig)
+	if err != nil {
+		slog.Warn("Failed to acquire notification migration locks", "error", err)
+		return
+	}
+	defer unlock()
+
+	paths := []string{globalConfig, dataConfig}
+	dataByPath := make(map[string][]byte, len(paths))
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				dataByPath[path] = []byte(`{}`)
+				continue
+			}
+			slog.Warn("Skipping notification migration after config read failure", "path", path, "error", err)
+			return
+		}
+		if !json.Valid(data) || !gjson.ParseBytes(data).IsObject() {
+			slog.Warn("Skipping notification migration for invalid config JSON", "path", path)
+			return
+		}
+		dataByPath[path] = data
+	}
 
 	var wasDisabled bool
 	var styleValue string
-	filesToClean := []string{}
-
-	for _, path := range []string{globalConfig, dataConfig} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
+	filesToClean := make([]string, 0, len(paths))
+	for _, path := range paths {
+		data := dataByPath[path]
 		needsClean := false
-		if gjson.Get(string(data), "options.disable_notifications").Exists() {
+		if v := gjson.GetBytes(data, "options.disable_notifications"); v.Exists() {
 			needsClean = true
-			if gjson.Get(string(data), "options.disable_notifications").Bool() {
-				wasDisabled = true
-			}
+			wasDisabled = wasDisabled || v.Bool()
 		}
-		if v := gjson.Get(string(data), "options.notification_style"); v.Exists() {
+		if v := gjson.GetBytes(data, "options.notification_style"); v.Exists() {
 			needsClean = true
 			if styleValue == "" {
 				styleValue = v.String()
@@ -1498,50 +1541,95 @@ func migrateDisableNotifications() {
 			filesToClean = append(filesToClean, path)
 		}
 	}
-
 	if len(filesToClean) == 0 {
 		return
 	}
 
-	// Determine the value to persist: notification_style takes precedence,
-	// then disable_notifications: true maps to "disabled".
-	migratedValue := styleValue
-	if migratedValue == "" && wasDisabled {
-		migratedValue = "disabled"
-	}
-
-	if migratedValue != "" {
-		data, err := os.ReadFile(dataConfig)
-		if err == nil {
-			if !gjson.Get(string(data), "options.notifications").Exists() {
-				updated, err := sjson.Set(string(data), "options.notifications", migratedValue)
-				if err == nil {
-					if err := atomicWriteFile(dataConfig, []byte(updated), 0o600); err != nil {
-						slog.Warn("Failed to migrate to notifications field", "error", err)
-					} else {
-						slog.Info("Migrated notification settings to notifications field", "value", migratedValue)
-					}
-				}
+	data := dataByPath[dataConfig]
+	updatedData := string(data)
+	if !gjson.GetBytes(data, "options.notifications").Exists() {
+		migratedValue := styleValue
+		if migratedValue == "" && wasDisabled {
+			migratedValue = "disabled"
+		}
+		if migratedValue != "" {
+			updatedData, err = sjson.Set(updatedData, "options.notifications", migratedValue)
+			if err != nil {
+				slog.Warn("Failed to prepare migrated notification settings", "error", err)
+				return
 			}
+			slog.Info("Migrated notification settings to notifications field", "value", migratedValue)
 		}
+	}
+	updatedData, err = sjson.Delete(updatedData, "options.disable_notifications")
+	if err != nil {
+		slog.Warn("Failed to prepare notification migration cleanup", "path", dataConfig, "error", err)
+		return
+	}
+	updatedData, err = sjson.Delete(updatedData, "options.notification_style")
+	if err != nil {
+		slog.Warn("Failed to prepare notification migration cleanup", "path", dataConfig, "error", err)
+		return
+	}
+	if err := writeFile(dataConfig, []byte(updatedData), 0o600); err != nil {
+		slog.Warn("Failed to write migrated notification settings", "path", dataConfig, "error", err)
+		return
 	}
 
-	// Remove deprecated fields from all files that contain them.
 	for _, path := range filesToClean {
-		data, err := os.ReadFile(path)
+		if path == dataConfig {
+			continue
+		}
+		updated := string(dataByPath[path])
+		updated, err = sjson.Delete(updated, "options.disable_notifications")
 		if err != nil {
+			slog.Warn("Failed to prepare notification migration cleanup", "path", path, "error", err)
 			continue
 		}
-		updated := string(data)
-		updated, _ = sjson.Delete(updated, "options.disable_notifications")
-		updated, _ = sjson.Delete(updated, "options.notification_style")
-		if updated == string(data) {
+		updated, err = sjson.Delete(updated, "options.notification_style")
+		if err != nil {
+			slog.Warn("Failed to prepare notification migration cleanup", "path", path, "error", err)
 			continue
 		}
-		if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
-			slog.Warn("Failed to write migrated config", "path", path, "error", err)
+		if err := writeFile(path, []byte(updated), 0o600); err != nil {
+			slog.Warn("Failed to write migrated config cleanup", "path", path, "error", err)
 		}
 	}
+}
+
+func lockConfigMigrationFiles(paths ...string) (func(), error) {
+	unique := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if path != "" {
+			unique[filepath.Clean(path)] = struct{}{}
+		}
+	}
+	ordered := slices.Collect(maps.Keys(unique))
+	slices.Sort(ordered)
+	releases := make([]func(), 0, len(ordered))
+	ctx, cancel := context.WithTimeout(context.Background(), configLockDeadline)
+	defer cancel()
+	for _, path := range ordered {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			for _, release := range slices.Backward(releases) {
+				release()
+			}
+			return nil, fmt.Errorf("create config directory: %w", err)
+		}
+		release, err := lock.File(ctx, path+".lock")
+		if err != nil {
+			for _, release := range slices.Backward(releases) {
+				release()
+			}
+			return nil, fmt.Errorf("acquire config lock: %w", err)
+		}
+		releases = append(releases, release)
+	}
+	return func() {
+		for _, release := range slices.Backward(releases) {
+			release()
+		}
+	}, nil
 }
 
 // GlobalConfig returns the global configuration file path for the application.

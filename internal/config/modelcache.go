@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -144,20 +145,27 @@ func mergeCachedModelMetadata(cached, fresh []catwalk.Model) []catwalk.Model {
 // succeeded is the part that matters.
 func saveCachedModels(globalDataPath, providerID string, models []catwalk.Model) {
 	if globalDataPath == "" {
-		// See loadCachedModels: no anchor path means no cache.
 		return
+	}
+	if err := saveCachedModelsWithError(globalDataPath, providerID, models); err != nil {
+		slog.Warn("Failed to save models to cache", "provider", providerID, "error", err)
+	}
+}
+
+func saveCachedModelsWithError(globalDataPath, providerID string, models []catwalk.Model) error {
+	if globalDataPath == "" {
+		return errors.New("no global data path configured")
 	}
 	if cached, ok := loadCachedModels(globalDataPath, providerID); ok {
 		models = mergeCachedModelMetadata(cached, models)
 	}
 	modelsJSON, err := json.Marshal(models)
 	if err != nil {
-		slog.Warn("Failed to marshal models for cache", "provider", providerID, "error", err)
-		return
+		return fmt.Errorf("marshal models: %w", err)
 	}
 
 	dbPath := modelCacheDBPath(globalDataPath)
-	err = withModelCache(dbPath, func(conn *sql.DB) error {
+	if err := withModelCache(dbPath, func(conn *sql.DB) error {
 		_, err := conn.ExecContext(context.Background(), `
 			INSERT INTO provider_models (provider_id, models_json, fetched_at)
 			VALUES (?, ?, ?)
@@ -166,10 +174,10 @@ func saveCachedModels(globalDataPath, providerID string, models []catwalk.Model)
 				fetched_at = excluded.fetched_at
 		`, providerID, string(modelsJSON), time.Now().Unix())
 		return err
-	})
-	if err != nil {
-		slog.Warn("Failed to save models to cache", "provider", providerID, "error", err)
+	}); err != nil {
+		return fmt.Errorf("write model cache: %w", err)
 	}
+	return nil
 }
 
 // SaveCachedProviderModels writes freshly discovered models for providerID
@@ -180,23 +188,5 @@ func (s *ConfigStore) SaveCachedProviderModels(providerID string, models []catwa
 	if s.globalDataPath == "" {
 		return errors.New("no global data path configured for this store")
 	}
-	if cached, ok := loadCachedModels(s.globalDataPath, providerID); ok {
-		models = mergeCachedModelMetadata(cached, models)
-	}
-	modelsJSON, err := json.Marshal(models)
-	if err != nil {
-		return err
-	}
-
-	dbPath := modelCacheDBPath(s.globalDataPath)
-	return withModelCache(dbPath, func(conn *sql.DB) error {
-		_, err := conn.ExecContext(context.Background(), `
-			INSERT INTO provider_models (provider_id, models_json, fetched_at)
-			VALUES (?, ?, ?)
-			ON CONFLICT(provider_id) DO UPDATE SET
-				models_json = excluded.models_json,
-				fetched_at = excluded.fetched_at
-		`, providerID, string(modelsJSON), time.Now().Unix())
-		return err
-	})
+	return saveCachedModelsWithError(s.globalDataPath, providerID, models)
 }
