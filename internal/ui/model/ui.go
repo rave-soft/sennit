@@ -934,6 +934,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	// Update terminal capabilities
 	m.caps.Update(msg)
+	if m.dialog.ContainsDialog(dialog.FilePickerID) {
+		switch msg := msg.(type) {
+		case tea.WindowSizeMsg:
+			if cmd := m.applyDialogAction(m.dialog.UpdateDialog(dialog.FilePickerID, dialog.FilePickerUpdateMsg{Capabilities: m.caps, WindowSize: &msg})); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case tea.EnvMsg, uv.PixelSizeEvent, uv.KittyGraphicsEvent:
+			if cmd := m.applyDialogAction(m.dialog.UpdateDialog(dialog.FilePickerID, dialog.FilePickerUpdateMsg{Capabilities: m.caps})); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
 	switch msg := msg.(type) {
 	case tea.EnvMsg:
 		// Is this Windows Terminal?
@@ -2094,6 +2106,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
 		if m.dialog.HasDialogs() {
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+	case fimage.PreviewPreparedMsg:
+		if action := m.dialog.UpdateDialog(dialog.FilePickerID, msg); action != nil {
+			if cmd := m.applyDialogAction(action); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -5688,6 +5706,10 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	filePicker, cmd := dialog.NewFilePicker(m.com)
 	filePicker.SetImageCapabilities(&m.caps)
 	m.dialog.OpenDialog(filePicker)
+	size := tea.WindowSizeMsg{Width: m.caps.Columns, Height: m.caps.Rows}
+	if layoutCmd := m.applyDialogAction(m.dialog.UpdateDialog(dialog.FilePickerID, dialog.FilePickerUpdateMsg{Capabilities: m.caps, WindowSize: &size})); layoutCmd != nil {
+		cmd = tea.Batch(cmd, layoutCmd)
+	}
 	event.FilePickerOpened()
 
 	return cmd

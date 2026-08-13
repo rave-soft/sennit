@@ -27,6 +27,7 @@ import (
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
+	fimage "github.com/rave-soft/braid/internal/ui/image"
 	"github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -990,6 +991,21 @@ func TestCmdDriving_UnknownMessage_RoutedThroughUpdate(t *testing.T) {
 	require.Nil(t, updated[reflect.TypeOf(unknownMsg{})], "unknown message follows Update's default route")
 	require.Nil(t, updated[reflect.TypeOf(sliceShapedMsg{})], "named slice must not be expanded as commands")
 	require.NotNil(t, updated[reflect.TypeOf(tea.EnvMsg{})], "tea.EnvMsg must run its Update route")
+}
+
+func TestCmdDriving_PreviewResultRoutedToCoveredFilePicker(t *testing.T) {
+	ws := &cmdDrivingWorkspace{agentReady: true}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+	m.dialog.OpenDialog(&stubActionDialog{
+		id:     dialog.FilePickerID,
+		action: dialog.ActionCmd{Cmd: tea.Raw("terminal-output")},
+	})
+	m.dialog.OpenDialog(&stubActionDialog{id: "top"})
+
+	messages := runCmdTree(m, func() tea.Msg { return fimage.PreviewPreparedMsg{} }, nil)
+
+	require.Contains(t, messages, tea.RawMsg{Msg: "terminal-output"})
 }
 
 func TestCmdDriving_LoadSession_FreshResultApplied(t *testing.T) {

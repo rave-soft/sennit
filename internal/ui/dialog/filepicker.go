@@ -3,11 +3,12 @@ package dialog
 import (
 	"fmt"
 	"image"
-	_ "image/jpeg" // register JPEG format
-	_ "image/png"  // register PNG format
+	_ "image/jpeg"
+	_ "image/png"
+	"maps"
 	"os"
 	"strings"
-	"sync"
+	"sync/atomic"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
@@ -20,82 +21,53 @@ import (
 	fimage "github.com/rave-soft/braid/internal/ui/image"
 )
 
-// FilePickerID is the identifier for the FilePicker dialog.
 const FilePickerID = "filepicker"
 
-// FilePicker is a dialog that allows users to select files or directories.
+var filePickerInstance atomic.Uint64
+
+type FilePickerUpdateMsg struct {
+	Capabilities common.Capabilities
+	WindowSize   *tea.WindowSizeMsg
+}
+
 type FilePicker struct {
 	com *common.Common
 
-	imgEnc                      fimage.Encoding
-	imgPrevWidth, imgPrevHeight int
-	cellSizeW, cellSizeH        int
+	fp   filepicker.Model
+	help help.Model
 
-	fp              filepicker.Model
-	help            help.Model
-	previewingImage bool // indicates if an image is being previewed
-	isTmux          bool
+	imgEnc        fimage.Encoding
+	imgPrevWidth  int
+	imgPrevHeight int
+	cellSizeW     int
+	cellSizeH     int
+	isTmux        bool
+
+	instance     uint64
+	selectedPath string
+	generation   uint64
+	preview      string
+	cache        map[fimage.PreviewKey]string
 
 	km struct {
-		Select,
-		Down,
-		Up,
-		Forward,
-		Backward,
-		Navigate,
-		Close key.Binding
-	}
-}
-
-// CellSize returns the cell size used for image rendering.
-func (f *FilePicker) CellSize() fimage.CellSize {
-	return fimage.CellSize{
-		Width:  f.cellSizeW,
-		Height: f.cellSizeH,
+		Select, Down, Up, Forward, Backward, Navigate, Close key.Binding
 	}
 }
 
 var _ Dialog = (*FilePicker)(nil)
 
-// NewFilePicker creates a new [FilePicker] dialog.
 func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
-	f := new(FilePicker)
-	f.com = com
-
-	help := help.New()
-	help.Styles = com.Styles.DialogHelpStyles()
-
-	f.help = help
-
-	f.km.Select = key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "accept"),
-	)
-	f.km.Down = key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("down/j", "move down"),
-	)
-	f.km.Up = key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("up/k", "move up"),
-	)
-	f.km.Forward = key.NewBinding(
-		key.WithKeys("right", "l"),
-		key.WithHelp("right/l", "move forward"),
-	)
-	f.km.Backward = key.NewBinding(
-		key.WithKeys("left", "h"),
-		key.WithHelp("left/h", "move backward"),
-	)
-	f.km.Navigate = key.NewBinding(
-		key.WithKeys("right", "l", "left", "h", "up", "k", "down", "j"),
-		key.WithHelp("↑↓←→", "navigate"),
-	)
-	f.km.Close = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
-		key.WithHelp("esc", "close/exit"),
-	)
-
+	f := &FilePicker{com: com, instance: filePickerInstance.Add(1), cache: make(map[fimage.PreviewKey]string)}
+	helpModel := help.New()
+	helpModel.Styles = com.Styles.DialogHelpStyles()
+	f.help = helpModel
+	f.km.Select = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "accept"))
+	f.km.Down = key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("down/j", "move down"))
+	f.km.Up = key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("up/k", "move up"))
+	f.km.Forward = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("right/l", "move forward"))
+	f.km.Backward = key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("left/h", "move backward"))
+	f.km.Navigate = key.NewBinding(key.WithKeys("right", "l", "left", "h", "up", "k", "down", "j"), key.WithHelp("↑↓←→", "navigate"))
+	f.km.Close = key.NewBinding(key.WithKeys("esc", "alt+esc"), key.WithHelp("esc", "close/exit"))
 	fp := filepicker.New()
 	fp.AllowedTypes = common.AllowedImageTypes
 	fp.ShowPermissions = false
@@ -104,114 +76,198 @@ func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
 	fp.Styles = com.Styles.FilePicker
 	fp.Cursor = ""
 	fp.CurrentDirectory = f.WorkingDir()
-
 	f.fp = fp
-
 	return f, f.fp.Init()
 }
 
-// SetImageCapabilities sets the image capabilities for the [FilePicker].
 func (f *FilePicker) SetImageCapabilities(caps *common.Capabilities) {
-	if caps != nil {
-		if caps.SupportsKittyGraphics() {
-			f.imgEnc = fimage.EncodingKitty
-		}
-		f.cellSizeW, f.cellSizeH = caps.CellSize()
-		_, f.isTmux = caps.Env.LookupEnv("TMUX")
-	}
+	f.setImageCapabilities(caps)
 }
 
-// WorkingDir returns the current working directory of the [FilePicker].
-func (f *FilePicker) WorkingDir() string {
-	wd := f.com.Workspace.WorkingDir()
-	if len(wd) > 0 {
-		return wd
+func (f *FilePicker) setImageCapabilities(caps *common.Capabilities) bool {
+	encoding := fimage.EncodingBlocks
+	cellSizeW, cellSizeH := 0, 0
+	isTmux := false
+	if caps != nil {
+		if caps.SupportsKittyGraphics() {
+			encoding = fimage.EncodingKitty
+		}
+		cellSizeW, cellSizeH = caps.CellSize()
+		_, isTmux = caps.Env.LookupEnv("TMUX")
 	}
+	if encoding == f.imgEnc && cellSizeW == f.cellSizeW && cellSizeH == f.cellSizeH && isTmux == f.isTmux {
+		return false
+	}
+	f.imgEnc, f.cellSizeW, f.cellSizeH, f.isTmux = encoding, cellSizeW, cellSizeH, isTmux
+	f.invalidatePreview()
+	return true
+}
 
+func (f *FilePicker) WorkingDir() string {
+	if f.com != nil && f.com.Workspace != nil {
+		if wd := f.com.Workspace.WorkingDir(); wd != "" {
+			return wd
+		}
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return home.Dir()
 	}
-
 	return cwd
 }
 
-// ShortHelp returns the short help key bindings for the [FilePicker] dialog.
 func (f *FilePicker) ShortHelp() []key.Binding {
-	return []key.Binding{
-		f.km.Navigate,
-		f.km.Select,
-		f.km.Close,
-	}
+	return []key.Binding{f.km.Navigate, f.km.Select, f.km.Close}
 }
 
-// FullHelp returns the full help key bindings for the [FilePicker] dialog.
 func (f *FilePicker) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{
-			f.km.Select,
-			f.km.Down,
-			f.km.Up,
-			f.km.Forward,
-		},
-		{
-			f.km.Backward,
-			f.km.Close,
-		},
-	}
+	return [][]key.Binding{{f.km.Select, f.km.Down, f.km.Up, f.km.Forward}, {f.km.Backward, f.km.Close}}
 }
 
-// ID returns the identifier of the [FilePicker] dialog.
-func (f *FilePicker) ID() string {
-	return FilePickerID
-}
+func (f *FilePicker) ID() string { return FilePickerID }
 
-// HandleMsg updates the [FilePicker] dialog based on the given message.
 func (f *FilePicker) HandleMsg(msg tea.Msg) Action {
-	var cmds []tea.Cmd
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, f.km.Close):
-			return ActionClose{}
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok && key.Matches(keyMsg, f.km.Close) {
+		return ActionClose{}
+	}
+	if prepared, ok := msg.(fimage.PreviewPreparedMsg); ok {
+		return f.handlePreviewPrepared(prepared)
+	}
+	previewChanged := false
+	switch update := msg.(type) {
+	case FilePickerUpdateMsg:
+		previewChanged = f.setImageCapabilities(&update.Capabilities)
+		if update.WindowSize != nil && f.setPreviewSize(update.WindowSize.Width, update.WindowSize.Height) {
+			f.invalidatePreview()
+			previewChanged = true
+		}
+		if previewChanged {
+			return f.preparePreviewAction()
+		}
+		return ActionCmd{}
+	case tea.WindowSizeMsg:
+		if f.setPreviewSize(update.Width, update.Height) {
+			f.invalidatePreview()
+			previewChanged = true
 		}
 	}
-
+	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	f.fp, cmd = f.fp.Update(msg)
-	if selFile := f.fp.HighlightedPath(); selFile != "" {
-		var allowed bool
-		for _, allowedExt := range f.fp.AllowedTypes {
-			if strings.HasSuffix(strings.ToLower(selFile), allowedExt) {
-				allowed = true
-				break
-			}
-		}
-
-		f.previewingImage = allowed
-		if allowed && !fimage.HasTransmitted(selFile, f.imgPrevWidth, f.imgPrevHeight) {
-			f.previewingImage = false
-			img, err := loadImage(selFile)
-			if err == nil {
-				cmds = append(cmds, tea.Sequence(
-					f.imgEnc.Transmit(selFile, img, f.CellSize(), f.imgPrevWidth, f.imgPrevHeight, f.isTmux),
-					func() tea.Msg {
-						f.previewingImage = true
-						return nil
-					},
-				))
-			}
-		}
-	}
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-
-	if didSelect, path := f.fp.DidSelectFile(msg); didSelect {
+	if selected, path := f.fp.DidSelectFile(msg); selected {
 		return ActionFilePickerSelected{Path: path}
 	}
+	if path := f.fp.HighlightedPath(); path != f.selectedPath {
+		f.selectedPath = path
+		f.invalidatePreview()
+		previewChanged = true
+	}
+	if previewChanged && f.isImagePath(f.selectedPath) {
+		cmds = append(cmds, f.preparePreviewCmd(f.instance, f.selectedPath, f.generation, f.previewKey(f.selectedPath), f.cacheSnapshot()))
+	}
+	if len(cmds) == 0 {
+		return ActionCmd{}
+	}
+	return ActionCmd{Cmd: tea.Batch(cmds...)}
+}
 
-	return ActionCmd{tea.Batch(cmds...)}
+func (f *FilePicker) preparePreviewAction() Action {
+	if !f.isImagePath(f.selectedPath) {
+		return ActionCmd{}
+	}
+	return ActionCmd{Cmd: f.preparePreviewCmd(f.instance, f.selectedPath, f.generation, f.previewKey(f.selectedPath), f.cacheSnapshot())}
+}
+
+func (f *FilePicker) handlePreviewPrepared(msg fimage.PreviewPreparedMsg) Action {
+	if msg.Instance != f.instance || msg.Generation != f.generation || msg.Key.Path != f.selectedPath {
+		return ActionCmd{}
+	}
+	if msg.Err != nil {
+		f.preview = ""
+		return ActionCmd{}
+	}
+	f.cache[msg.Key] = msg.Rendered
+	f.preview = msg.Rendered
+	if msg.Output == "" {
+		return ActionCmd{}
+	}
+	return ActionCmd{Cmd: tea.Raw(msg.Output)}
+}
+
+func (f *FilePicker) preparePreviewCmd(instance uint64, path string, generation uint64, requested fimage.PreviewKey, cache map[fimage.PreviewKey]string) tea.Cmd {
+	return func() tea.Msg {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: requested, Generation: generation, Err: fmt.Errorf("stat image: %w", err)}
+		}
+		key := requested
+		key.Size = info.Size()
+		key.ModTimeUnixNano = info.ModTime().UnixNano()
+		if info.IsDir() {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("image path is a directory")}
+		}
+		if info.Size() > common.MaxPreviewSize {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("image exceeds preview size limit")}
+		}
+		if rendered, ok := cache[key]; ok {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Rendered: rendered}
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("open image: %w", err)}
+		}
+		defer file.Close()
+		img, _, err := image.Decode(file)
+		if err != nil {
+			return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Err: fmt.Errorf("decode image: %w", err)}
+		}
+		rendered, output, err := fimage.Prepare(key, img)
+		return fimage.PreviewPreparedMsg{Instance: instance, Key: key, Generation: generation, Rendered: rendered, Output: output, Err: err}
+	}
+}
+
+func (f *FilePicker) cacheSnapshot() map[fimage.PreviewKey]string {
+	cache := make(map[fimage.PreviewKey]string, len(f.cache))
+	maps.Copy(cache, f.cache)
+	return cache
+}
+
+func (f *FilePicker) previewKey(path string) fimage.PreviewKey {
+	return fimage.PreviewKey{Path: path, Columns: f.imgPrevWidth, Rows: f.imgPrevHeight, Encoding: f.imgEnc, CellSize: fimage.CellSize{Width: f.cellSizeW, Height: f.cellSizeH}, Tmux: f.isTmux}
+}
+
+func (f *FilePicker) invalidatePreview() {
+	f.generation++
+	f.preview = ""
+}
+
+func (f *FilePicker) isImagePath(path string) bool {
+	path = strings.ToLower(path)
+	for _, extension := range f.fp.AllowedTypes {
+		if strings.HasSuffix(path, extension) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *FilePicker) setPreviewSize(screenWidth, screenHeight int) bool {
+	t := f.com.Styles
+	width := max(0, min(filePickerMinWidth, screenWidth-t.Dialog.View.GetHorizontalBorderSize()))
+	height := max(0, min(10, screenHeight-t.Dialog.View.GetVerticalBorderSize()))
+	previewHeight := 0
+	if height > 5 {
+		previewHeight = filePickerMinHeight*2 - t.Dialog.ImagePreview.GetVerticalFrameSize()
+	}
+	previewWidth := width - t.Dialog.View.GetHorizontalFrameSize() - t.Dialog.ImagePreview.GetHorizontalFrameSize()
+	if previewWidth == f.imgPrevWidth && previewHeight == f.imgPrevHeight {
+		return false
+	}
+	f.imgPrevWidth, f.imgPrevHeight = previewWidth, previewHeight
+	return true
 }
 
 const (
@@ -219,102 +275,42 @@ const (
 	filePickerMinHeight = 10
 )
 
-// Draw renders the [FilePicker] dialog as a string.
 func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := f.com.Styles
 	width := max(0, min(filePickerMinWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(10, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-
-	// Scale down image preview on small screens. Hide it entirely
-	// when the dialog is too short to show both preview and files.
-	imgPrevHeight := 0
-	if height > 5 {
-		imgPrevHeight = filePickerMinHeight*2 - t.Dialog.ImagePreview.GetVerticalFrameSize()
-	}
-	imgPrevWidth := innerWidth - t.Dialog.ImagePreview.GetHorizontalFrameSize()
-	f.imgPrevWidth = imgPrevWidth
-	f.imgPrevHeight = imgPrevHeight
 	f.fp.SetHeight(height)
-
 	styles := t.FilePicker
 	styles.File = styles.File.Width(innerWidth)
 	styles.Directory = styles.Directory.Width(innerWidth)
 	styles.Selected = styles.Selected.PaddingLeft(1).Width(innerWidth)
 	styles.DisabledSelected = styles.DisabledSelected.PaddingLeft(1).Width(innerWidth)
 	f.fp.Styles = styles
-
 	rc := NewRenderContext(t, width)
 	rc.Gap = 1
 	rc.Title = "Add Image"
 	rc.Help = renderDialogHelp(t, &f.help, f, innerWidth)
-
-	if imgPrevHeight > 0 {
-		imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview(imgPrevWidth, imgPrevHeight))
-		rc.AddPart(imgPreview)
+	if f.imgPrevHeight > 0 {
+		rc.AddPart(t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview()))
 	}
-
-	files := strings.TrimSpace(f.fp.View())
-	rc.AddPart(files)
-
-	view := rc.Render()
-
-	DrawCenter(scr, area, view)
+	rc.AddPart(strings.TrimSpace(f.fp.View()))
+	DrawCenter(scr, area, rc.Render())
 	return nil
 }
 
-var (
-	imagePreviewCache = map[string]string{}
-	imagePreviewMutex sync.RWMutex
-)
-
-// imagePreview returns the image preview section of the [FilePicker] dialog.
-func (f *FilePicker) imagePreview(imgPrevWidth, imgPrevHeight int) string {
-	if !f.previewingImage {
-		key := fmt.Sprintf("%dx%d", imgPrevWidth, imgPrevHeight)
-		imagePreviewMutex.RLock()
-		cached, ok := imagePreviewCache[key]
-		imagePreviewMutex.RUnlock()
-		if ok {
-			return cached
+func (f *FilePicker) imagePreview() string {
+	if f.preview != "" {
+		return f.preview
+	}
+	var output strings.Builder
+	for y := range f.imgPrevHeight {
+		for range f.imgPrevWidth {
+			output.WriteRune('█')
 		}
-
-		var sb strings.Builder
-		for y := range imgPrevHeight {
-			for range imgPrevWidth {
-				sb.WriteRune('█')
-			}
-			if y < imgPrevHeight-1 {
-				sb.WriteRune('\n')
-			}
+		if y < f.imgPrevHeight-1 {
+			output.WriteByte('\n')
 		}
-
-		imagePreviewMutex.Lock()
-		imagePreviewCache[key] = sb.String()
-		imagePreviewMutex.Unlock()
-
-		return sb.String()
 	}
-
-	if id := f.fp.HighlightedPath(); id != "" {
-		r := f.imgEnc.Render(id, imgPrevWidth, imgPrevHeight)
-		return r
-	}
-
-	return ""
-}
-
-func loadImage(path string) (img image.Image, err error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	img, _, err = image.Decode(file)
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
+	return output.String()
 }

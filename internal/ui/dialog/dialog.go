@@ -212,6 +212,15 @@ func (d *Overlay) BringToFront(dialogID string) {
 	}
 }
 
+func (d *Overlay) UpdateDialog(dialogID string, msg tea.Msg) tea.Msg {
+	for _, dialog := range d.dialogs {
+		if dialog.ID() == dialogID {
+			return dialog.HandleMsg(msg)
+		}
+	}
+	return nil
+}
+
 // Update handles dialog updates.
 func (d *Overlay) Update(msg tea.Msg) tea.Msg {
 	if len(d.dialogs) == 0 {

@@ -15,6 +15,8 @@ import (
 	"github.com/rave-soft/braid/internal/workspace"
 )
 
+const MaxPreviewSize = int64(2 * 1024 * 1024)
+
 // MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
 const MaxAttachmentSize = int64(5 * 1024 * 1024)
 

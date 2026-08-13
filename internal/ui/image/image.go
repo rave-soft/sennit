@@ -7,282 +7,149 @@ import (
 	"image"
 	"image/color"
 	"io"
-	"log/slog"
-	"strings"
-	"sync"
 
-	tea "charm.land/bubbletea/v2"
+	"golang.org/x/image/draw"
+
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/ansi/kitty"
 	"github.com/disintegration/imaging"
-	paintbrush "github.com/jordanella/go-ansi-paintbrush"
-	"github.com/rave-soft/braid/internal/ui/util"
 )
 
-// TransmittedMsg is a message indicating that an image has been transmitted to
-// the terminal.
-type TransmittedMsg struct {
-	ID string
-}
-
-// Encoding represents the encoding format of the image.
 type Encoding byte
 
-// Image encodings.
 const (
 	EncodingBlocks Encoding = iota
 	EncodingKitty
 )
 
-type imageKey struct {
-	id   string
-	cols int
-	rows int
+type CellSize struct {
+	Width, Height int
 }
 
-// Hash returns a hash value for the image key.
-// This uses FNV-32a for simplicity and speed.
-func (k imageKey) Hash() uint32 {
+type PreviewKey struct {
+	Path            string
+	Size            int64
+	ModTimeUnixNano int64
+	Columns         int
+	Rows            int
+	Encoding        Encoding
+	CellSize        CellSize
+	Tmux            bool
+}
+
+type PreviewPreparedMsg struct {
+	Instance   uint64
+	Key        PreviewKey
+	Generation uint64
+	Rendered   string
+	Output     string
+	Err        error
+}
+
+func ResetCache() {}
+
+func (k PreviewKey) ID() string {
+	return fmt.Sprintf("%s-%d-%d-%dx%d-%d-%dx%d-%t", k.Path, k.Size, k.ModTimeUnixNano, k.Columns, k.Rows, k.Encoding, k.CellSize.Width, k.CellSize.Height, k.Tmux)
+}
+
+func (k PreviewKey) hash() uint32 {
 	h := fnv.New32a()
 	_, _ = io.WriteString(h, k.ID())
 	return h.Sum32()
 }
 
-// ID returns a unique string representation of the image key.
-func (k imageKey) ID() string {
-	return fmt.Sprintf("%s-%dx%d", k.id, k.cols, k.rows)
-}
-
-// CellSize represents the size of a single terminal cell in pixels.
-type CellSize struct {
-	Width, Height int
-}
-
-type cachedImage struct {
-	img        image.Image
-	cols, rows int
-}
-
-var (
-	cachedImages = map[imageKey]cachedImage{}
-	cachedMutex  sync.RWMutex
-)
-
-// ResetCache clears the image cache, freeing all cached decoded images.
-func ResetCache() {
-	cachedMutex.Lock()
-	clear(cachedImages)
-	cachedMutex.Unlock()
-}
-
-// fitImage resizes the image to fit within the specified dimensions in
-// terminal cells, maintaining the aspect ratio.
-func fitImage(id string, img image.Image, cs CellSize, cols, rows int) image.Image {
+func Prepare(key PreviewKey, img image.Image) (string, string, error) {
 	if img == nil {
-		return nil
+		return "", "", fmt.Errorf("image is nil")
 	}
-
-	key := imageKey{id: id, cols: cols, rows: rows}
-
-	cachedMutex.RLock()
-	cached, ok := cachedImages[key]
-	cachedMutex.RUnlock()
-	if ok {
-		return cached.img
+	if key.Columns <= 0 || key.Rows <= 0 {
+		return "", "", nil
 	}
-
-	if cs.Width == 0 || cs.Height == 0 {
-		return img
-	}
-
-	maxWidth := cols * cs.Width
-	maxHeight := rows * cs.Height
-
-	img = imaging.Fit(img, maxWidth, maxHeight, imaging.Lanczos)
-
-	cachedMutex.Lock()
-	cachedImages[key] = cachedImage{
-		img:  img,
-		cols: cols,
-		rows: rows,
-	}
-	cachedMutex.Unlock()
-
-	return img
-}
-
-// HasTransmitted checks if the image with the given ID has already been
-// transmitted to the terminal.
-func HasTransmitted(id string, cols, rows int) bool {
-	key := imageKey{id: id, cols: cols, rows: rows}
-
-	cachedMutex.RLock()
-	_, ok := cachedImages[key]
-	cachedMutex.RUnlock()
-	return ok
-}
-
-// Transmit transmits the image data to the terminal if needed. This is used to
-// cache the image on the terminal for later rendering.
-func (e Encoding) Transmit(id string, img image.Image, cs CellSize, cols, rows int, tmux bool) tea.Cmd {
-	if img == nil {
-		return nil
-	}
-
-	key := imageKey{id: id, cols: cols, rows: rows}
-
-	cachedMutex.RLock()
-	_, ok := cachedImages[key]
-	cachedMutex.RUnlock()
-	if ok {
-		return nil
-	}
-
-	cmd := func() tea.Msg {
-		if e != EncodingKitty {
-			cachedMutex.Lock()
-			cachedImages[key] = cachedImage{
-				img:  img,
-				cols: cols,
-				rows: rows,
-			}
-			cachedMutex.Unlock()
-			return TransmittedMsg{ID: key.ID()}
-		}
-
-		var buf bytes.Buffer
-		img := fitImage(id, img, cs, cols, rows)
+	img = fitImage(img, key.CellSize, key.Columns, key.Rows)
+	switch key.Encoding {
+	case EncodingBlocks:
+		return paint(img, key.Columns, key.Rows), "", nil
+	case EncodingKitty:
+		var output bytes.Buffer
 		bounds := img.Bounds()
-		imgWidth := bounds.Dx()
-		imgHeight := bounds.Dy()
-		imgID := int(key.Hash())
-		if err := kitty.EncodeGraphics(&buf, img, &kitty.Options{
-			ID:               imgID,
+		if err := kitty.EncodeGraphics(&output, img, &kitty.Options{
+			ID:               int(key.hash()),
 			Action:           kitty.TransmitAndPut,
 			Transmission:     kitty.Direct,
 			Format:           kitty.RGBA,
-			ImageWidth:       imgWidth,
-			ImageHeight:      imgHeight,
-			Columns:          cols,
-			Rows:             rows,
+			ImageWidth:       bounds.Dx(),
+			ImageHeight:      bounds.Dy(),
+			Columns:          key.Columns,
+			Rows:             key.Rows,
 			VirtualPlacement: true,
 			Quite:            1,
 			Chunk:            true,
 			ChunkFormatter: func(chunk string) string {
-				if tmux {
+				if key.Tmux {
 					return ansi.TmuxPassthrough(chunk)
 				}
 				return chunk
 			},
 		}); err != nil {
-			slog.Error("Failed to encode image for kitty graphics", "err", err)
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  "failed to encode image",
-			}
+			return "", "", fmt.Errorf("encode kitty graphics: %w", err)
 		}
-
-		return tea.RawMsg{Msg: buf.String()}
+		return kittyPlaceholder(key), output.String(), nil
+	default:
+		return "", "", fmt.Errorf("unsupported image encoding")
 	}
-
-	return cmd
 }
 
-// Render renders the given image within the specified dimensions using the
-// specified encoding.
-func (e Encoding) Render(id string, cols, rows int) string {
-	key := imageKey{id: id, cols: cols, rows: rows}
-	cachedMutex.RLock()
-	cached, ok := cachedImages[key]
-	cachedMutex.RUnlock()
-	if !ok {
-		return ""
+func fitImage(img image.Image, cellSize CellSize, columns, rows int) image.Image {
+	if cellSize.Width <= 0 || cellSize.Height <= 0 {
+		return img
 	}
+	return imaging.Fit(img, columns*cellSize.Width, rows*cellSize.Height, imaging.Lanczos)
+}
 
-	img := cached.img
-
-	switch e {
-	case EncodingBlocks:
-		canvas := paintbrush.New()
-		canvas.SetImage(img)
-		canvas.SetWidth(cols)
-		canvas.SetHeight(rows)
-		canvas.Weights = map[rune]float64{
-			'': .95,
-			'': .95,
-			'▁': .9,
-			'▂': .9,
-			'▃': .9,
-			'▄': .9,
-			'▅': .9,
-			'▆': .85,
-			'█': .85,
-			'▊': .95,
-			'▋': .95,
-			'▌': .95,
-			'▍': .95,
-			'▎': .95,
-			'▏': .95,
-			'●': .95,
-			'◀': .95,
-			'▲': .95,
-			'▶': .95,
-			'▼': .9,
-			'○': .8,
-			'◉': .95,
-			'◧': .9,
-			'◨': .9,
-			'◩': .9,
-			'◪': .9,
+func paint(img image.Image, columns, rows int) string {
+	bounds := img.Bounds()
+	canvas := image.NewRGBA(image.Rect(0, 0, columns, rows))
+	draw.ApproxBiLinear.Scale(canvas, canvas.Bounds(), img, bounds, draw.Over, nil)
+	var output bytes.Buffer
+	for y := range rows {
+		for x := range columns {
+			red, green, blue, _ := canvas.At(x, y).RGBA()
+			fmt.Fprintf(&output, "\x1b[48;2;%d;%d;%dm ", red>>8, green>>8, blue>>8)
 		}
-		canvas.Paint()
-		return strings.TrimSpace(canvas.GetResult())
-	case EncodingKitty:
-		// Build Kitty graphics unicode place holders
-		var fg color.Color
-		var extra int
-		var r, g, b int
-		hashedID := key.Hash()
-		id := int(hashedID)
-		extra, r, g, b = id>>24&0xff, id>>16&0xff, id>>8&0xff, id&0xff
-
-		if id <= 255 {
-			fg = ansi.IndexedColor(b)
-		} else {
-			fg = color.RGBA{
-				R: uint8(r), //nolint:gosec
-				G: uint8(g), //nolint:gosec
-				B: uint8(b), //nolint:gosec
-				A: 0xff,
-			}
+		output.WriteString("\x1b[0m")
+		if y < rows-1 {
+			output.WriteByte('\n')
 		}
-
-		fgStyle := ansi.NewStyle().ForegroundColor(fg).String()
-
-		var buf bytes.Buffer
-		for y := range rows {
-			// As an optimization, we only write the fg color sequence id, and
-			// column-row data once on the first cell. The terminal will handle
-			// the rest.
-			buf.WriteString(fgStyle)
-			buf.WriteRune(kitty.Placeholder)
-			buf.WriteRune(kitty.Diacritic(y))
-			buf.WriteRune(kitty.Diacritic(0))
-			if extra > 0 {
-				buf.WriteRune(kitty.Diacritic(extra))
-			}
-			for x := 1; x < cols; x++ {
-				buf.WriteString(fgStyle)
-				buf.WriteRune(kitty.Placeholder)
-			}
-			if y < rows-1 {
-				buf.WriteByte('\n')
-			}
-		}
-
-		return buf.String()
-
-	default:
-		return ""
 	}
+	return output.String()
+}
+
+func kittyPlaceholder(key PreviewKey) string {
+	id := int(key.hash())
+	extra, r, g, b := id>>24&0xff, id>>16&0xff, id>>8&0xff, id&0xff
+	var foreground color.Color
+	if id <= 255 {
+		foreground = ansi.IndexedColor(b)
+	} else {
+		foreground = color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 0xff}
+	}
+	style := ansi.NewStyle().ForegroundColor(foreground).String()
+	var output bytes.Buffer
+	for y := range key.Rows {
+		output.WriteString(style)
+		output.WriteRune(kitty.Placeholder)
+		output.WriteRune(kitty.Diacritic(y))
+		output.WriteRune(kitty.Diacritic(0))
+		if extra > 0 {
+			output.WriteRune(kitty.Diacritic(extra))
+		}
+		for x := 1; x < key.Columns; x++ {
+			output.WriteString(style)
+			output.WriteRune(kitty.Placeholder)
+		}
+		if y < key.Rows-1 {
+			output.WriteByte('\n')
+		}
+	}
+	return output.String()
 }
