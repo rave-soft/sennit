@@ -1352,23 +1352,8 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	}
 	cfg.setDefaults(s.workingDir, dataDir)
 
-	// Merge workspace config if present
-	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
-	if wsData, err := os.ReadFile(workspacePath); err == nil && len(wsData) > 0 {
-		if !json.Valid(wsData) {
-			return fmt.Errorf("invalid JSON in config file %s", workspacePath)
-		}
-		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
-		if mergeErr == nil {
-			dataDir := cfg.Options.DataDirectory
-			// See the matching comment in Load: OR the flag forward so
-			// detection from the earlier loadFromConfigPaths phase survives
-			// this second loadFromBytes call.
-			merged.jsonAgentsBlockDetected = merged.jsonAgentsBlockDetected || cfg.jsonAgentsBlockDetected
-			*cfg = *merged
-			cfg.setDefaults(s.workingDir, dataDir)
-			loadedPaths = append(loadedPaths, workspacePath)
-		}
+	if err := applyWorkspaceConfig(cfg, s.workingDir, &loadedPaths); err != nil {
+		return err
 	}
 
 	// Apply the same environment-derived defaults Load applies at startup,
@@ -1489,7 +1474,7 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	s.resolver = resolver
 	s.knownProviders = providers
 	s.overrides = overrides
-	s.workspacePath = workspacePath
+	s.workspacePath = filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
 
 	// Rebuild staleness tracking. Track every discovered config path, not
 	// just the ones that loaded, so a config file created after this reload

@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -82,6 +83,124 @@ func TestConfig_LoadFromBytes_DropsIncompatibleRecentModels(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Empty(t, loadedConfig.RecentModels)
+}
+
+func TestApplyWorkspaceConfig(t *testing.T) {
+	workingDir := t.TempDir()
+	workspaceDir := filepath.Join(t.TempDir(), "workspace-data")
+	workspacePath := filepath.Join(workspaceDir, appName+".json")
+	newConfig := func() *Config {
+		cfg := &Config{}
+		cfg.setDefaults(workingDir, workspaceDir)
+		return cfg
+	}
+
+	t.Run("missing and empty are no-ops", func(t *testing.T) {
+		cfg := newConfig()
+		var loaded []string
+		require.NoError(t, applyWorkspaceConfig(cfg, workingDir, &loaded))
+		require.Empty(t, loaded)
+		require.False(t, cfg.Options.Debug)
+
+		require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+		require.NoError(t, os.WriteFile(workspacePath, nil, 0o644))
+		require.NoError(t, applyWorkspaceConfig(cfg, workingDir, &loaded))
+		require.Empty(t, loaded)
+		require.False(t, cfg.Options.Debug)
+	})
+
+	t.Run("read error includes path and cause", func(t *testing.T) {
+		cfg := newConfig()
+		var loaded []string
+		require.NoError(t, os.RemoveAll(workspaceDir))
+		require.NoError(t, os.WriteFile(workspaceDir, nil, 0o644))
+
+		err := applyWorkspaceConfig(cfg, workingDir, &loaded)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), workspacePath)
+		var pathErr *os.PathError
+		require.True(t, errors.As(err, &pathErr))
+		require.Equal(t, "open", pathErr.Op)
+		require.Equal(t, workspacePath, pathErr.Path)
+		require.Error(t, pathErr.Err)
+		require.Empty(t, loaded)
+		require.NoError(t, os.Remove(workspaceDir))
+	})
+
+	t.Run("valid config merges and retains data directory and agents marker", func(t *testing.T) {
+		cfg := newConfig()
+		cfg.jsonAgentsBlockDetected = true
+		var loaded []string
+		require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+		require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":true}}`), 0o644))
+
+		require.NoError(t, applyWorkspaceConfig(cfg, workingDir, &loaded))
+		require.True(t, cfg.Options.Debug)
+		require.Equal(t, workspaceDir, cfg.Options.DataDirectory)
+		require.True(t, cfg.jsonAgentsBlockDetected)
+		require.Equal(t, []string{workspacePath}, loaded)
+	})
+
+	t.Run("invalid JSON returns the established error", func(t *testing.T) {
+		cfg := newConfig()
+		var loaded []string
+		require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+		require.NoError(t, os.WriteFile(workspacePath, []byte(`{invalid`), 0o644))
+
+		err := applyWorkspaceConfig(cfg, workingDir, &loaded)
+		require.EqualError(t, err, "invalid JSON in config file "+workspacePath)
+		require.Empty(t, loaded)
+		require.False(t, cfg.Options.Debug)
+	})
+
+	t.Run("merge error warns and leaves the base unchanged", func(t *testing.T) {
+		cfg := newConfig()
+		var loaded []string
+		require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+		require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":"invalid"}`), 0o644))
+
+		require.NoError(t, applyWorkspaceConfig(cfg, workingDir, &loaded))
+		require.False(t, cfg.Options.Debug)
+		require.Equal(t, workspaceDir, cfg.Options.DataDirectory)
+		require.Empty(t, loaded)
+	})
+}
+
+func TestLoad_WorkspaceMergePreservesAgentsMarker(t *testing.T) {
+	workingDir := t.TempDir()
+	globalDir := t.TempDir()
+	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("BRAID_GLOBAL_DATA", globalDir)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"agents":{},"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
+
+	workspacePath := filepath.Join(workspaceDir, appName+".json")
+	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":true}}`), 0o644))
+
+	store, err := Load(workingDir, "", false)
+	require.NoError(t, err)
+	require.True(t, store.Config().jsonAgentsBlockDetected)
+}
+
+func TestLoad_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *testing.T) {
+	workingDir := t.TempDir()
+	globalDir := t.TempDir()
+	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("BRAID_GLOBAL_DATA", globalDir)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
+
+	workspacePath := filepath.Join(workspaceDir, appName+".json")
+	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"recent_models":{"large":[]},"options":{"debug":true}}`), 0o644))
+
+	store, err := Load(workingDir, "", false)
+	require.NoError(t, err)
+	require.True(t, store.Config().Options.Debug)
+	require.Empty(t, store.Config().RecentModels)
+	require.Equal(t, workspaceDir, store.Config().Options.DataDirectory)
+	require.Contains(t, store.LoadedPaths(), workspacePath)
 }
 
 // TestConfig_LoadFromBytes_DeprecatedStrandsAlias verifies that the old

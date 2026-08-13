@@ -63,25 +63,8 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 
 	// Load workspace config last so it has highest priority.
-	if wsData, err := os.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
-		if !json.Valid(wsData) {
-			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
-		}
-		wsData = dropIncompatibleRecentModels(wsData, store.workspacePath)
-		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
-		if mergeErr == nil {
-			// Preserve defaults that setDefaults already applied.
-			dataDir := cfg.Options.DataDirectory
-			// merged is a fresh Config decoded only from cfg (already
-			// marshaled) plus wsData; OR the flag forward so a JSON
-			// "agents" block detected during the earlier loadFromConfigPaths
-			// phase is not lost by this second, unrelated loadFromBytes call.
-			merged.jsonAgentsBlockDetected = merged.jsonAgentsBlockDetected || cfg.jsonAgentsBlockDetected
-			*cfg = *merged
-			cfg.setDefaults(workingDir, dataDir)
-			store.config = cfg
-			store.loadedPaths = append(store.loadedPaths, store.workspacePath)
-		}
+	if err := applyWorkspaceConfig(cfg, workingDir, &store.loadedPaths); err != nil {
+		return nil, err
 	}
 
 	// Validate hooks after all config merging is complete so workspace
@@ -171,6 +154,37 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.captureAgentFileSnapshot()
 
 	return store, nil
+}
+
+func applyWorkspaceConfig(cfg *Config, workingDir string, loadedPaths *[]string) error {
+	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
+	workspaceData, err := os.ReadFile(workspacePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read workspace config %s: %w", workspacePath, err)
+	}
+	if len(workspaceData) == 0 {
+		return nil
+	}
+	if !json.Valid(workspaceData) {
+		return fmt.Errorf("invalid JSON in config file %s", workspacePath)
+	}
+
+	workspaceData = dropIncompatibleRecentModels(workspaceData, workspacePath)
+	merged, err := loadFromBytes([][]byte{mustMarshalConfig(cfg), workspaceData})
+	if err != nil {
+		slog.Warn("Failed to merge workspace config", "path", workspacePath, "error", err)
+		return nil
+	}
+
+	dataDir := cfg.Options.DataDirectory
+	merged.jsonAgentsBlockDetected = merged.jsonAgentsBlockDetected || cfg.jsonAgentsBlockDetected
+	*cfg = *merged
+	cfg.setDefaults(workingDir, dataDir)
+	*loadedPaths = append(*loadedPaths, workspacePath)
+	return nil
 }
 
 // applyEnvironmentDefaults applies defaults that depend on the process

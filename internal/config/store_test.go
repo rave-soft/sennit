@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -316,6 +318,64 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 	require.False(t, result.Dirty)
 	require.Empty(t, result.Changed)
 	require.Empty(t, result.Missing)
+}
+
+func TestReloadFromDisk_WorkspaceMergeErrorKeepsPublishedConfig(t *testing.T) {
+	workingDir := t.TempDir()
+	globalDir := t.TempDir()
+	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("BRAID_GLOBAL_DATA", globalDir)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
+
+	workspacePath := filepath.Join(workspaceDir, appName+".json")
+	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":true}}`), 0o644))
+
+	store, err := Load(workingDir, "", false)
+	require.NoError(t, err)
+	published := store.Config()
+	require.True(t, published.Options.Debug)
+	require.Equal(t, workspacePath, store.workspacePath)
+
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":"invalid"}`), 0o644))
+	var logs strings.Builder
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+	require.True(t, published.Options.Debug)
+	require.False(t, store.Config().Options.Debug)
+	require.NotContains(t, store.LoadedPaths(), workspacePath)
+	require.Equal(t, workspacePath, store.workspacePath)
+	require.Contains(t, logs.String(), workspacePath)
+	require.Contains(t, logs.String(), "type mismatch")
+}
+
+func TestReloadFromDisk_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *testing.T) {
+	workingDir := t.TempDir()
+	globalDir := t.TempDir()
+	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
+	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("BRAID_GLOBAL_DATA", globalDir)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
+
+	workspacePath := filepath.Join(workspaceDir, appName+".json")
+	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":false}}`), 0o644))
+
+	store, err := Load(workingDir, "", false)
+	require.NoError(t, err)
+	require.False(t, store.Config().Options.Debug)
+
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"recent_models":{"small":[]},"options":{"debug":true}}`), 0o644))
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+
+	require.True(t, store.Config().Options.Debug)
+	require.Empty(t, store.Config().RecentModels)
+	require.Equal(t, workspaceDir, store.Config().Options.DataDirectory)
+	require.Contains(t, store.LoadedPaths(), workspacePath)
 }
 
 // TestReloadFromDisk_UsesNewConfigValues is a regression test ensuring that
