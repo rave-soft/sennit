@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/shell"
 )
 
 // NewCoordinator builds a real agent.Coordinator through the production
@@ -64,9 +65,10 @@ func NewCoordinator(
 	cfg.Config().Agents[config.AgentCoder] = coderCfg
 
 	return agent.NewCoordinator(ctx, agent.CoordinatorOptions{
-		Config:      cfg,
-		Sessions:    sessions,
-		Messages:    messages,
-		Permissions: permission.NewPermissionService(workingDir, true, nil),
+		Config:           cfg,
+		Sessions:         sessions,
+		Messages:         messages,
+		Permissions:      permission.NewPermissionService(workingDir, true, nil),
+		BackgroundShells: shell.NewBackgroundShellManager(),
 	})
 }

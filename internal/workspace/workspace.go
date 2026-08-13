@@ -23,6 +23,7 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/skills"
 )
 
@@ -326,6 +327,10 @@ type ThreadController interface {
 
 // EventSubscriber wires a frontend into the workspace's event stream and
 // tears it down.
+type BackgroundJobs interface {
+	BackgroundJobCounts() shell.BackgroundJobCounts
+}
+
 type EventSubscriber interface {
 	Subscribe(program *tea.Program)
 	Shutdown()
@@ -350,6 +355,7 @@ type Workspace interface {
 	ProjectLifecycle
 	MCPController
 	ThreadController
+	BackgroundJobs
 	EventSubscriber
 }
 

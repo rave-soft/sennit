@@ -49,6 +49,10 @@ func NewAppWorkspace(a *app.App, store *config.ConfigStore) *AppWorkspace {
 
 // -- Sessions --
 
+func (w *AppWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
+	return w.app.BackgroundShells.Counts()
+}
+
 func (w *AppWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
 	return w.app.Sessions.Create(ctx, title)
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/skills"
 )
 
@@ -95,6 +96,10 @@ func (w *readOnlyWorkspace) scopeError(id string) error {
 }
 
 // -- Sessions (reads only) --
+
+func (w *readOnlyWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
+	return w.underlying.BackgroundJobCounts()
+}
 
 func (w *readOnlyWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
 	return session.Session{}, w.readOnlyError("CreateSession")

@@ -177,7 +177,7 @@ func (m *UI) updateSidebarScrollState() {
 		"",
 		m.modelInfo(contentWidth),
 		"",
-		backgroundJobsInfo(t, shell.GetBackgroundShellManager().Counts(), contentWidth),
+		backgroundJobsInfo(t, m.com.Workspace.BackgroundJobCounts(), contentWidth),
 		"",
 		filesSection,
 		"",

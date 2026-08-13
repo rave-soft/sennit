@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,6 +84,7 @@ func newThreadsTestCoordinator(t *testing.T, threads tools.ThreadManager) (*coor
 		filetracker: *env.filetracker,
 		mcp:         mcp.NewRegistry(),
 		threads:     threads,
+		background:  shell.NewBackgroundShellManager(),
 	}
 	return coord, cfg.Config().Agents[config.AgentCoder]
 }

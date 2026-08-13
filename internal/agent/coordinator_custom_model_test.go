@@ -7,6 +7,7 @@ import (
 
 	"github.com/rave-soft/braid/internal/agent/prompt"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,6 +45,7 @@ func buildCustomModelCoordinator(t *testing.T) (*coordinator, *prompt.Prompt) {
 		permissions: env.permissions,
 		history:     env.history,
 		filetracker: *env.filetracker,
+		background:  shell.NewBackgroundShellManager(),
 	}
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))

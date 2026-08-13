@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/prompt"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,6 +52,7 @@ func TestCoordinatorCloseRaceWithBuildAgent(t *testing.T) {
 		history:     env.history,
 		filetracker: *env.filetracker,
 		mcp:         mcp.NewRegistry(),
+		background:  shell.NewBackgroundShellManager(),
 	}
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))

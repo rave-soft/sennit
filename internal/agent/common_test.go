@@ -21,6 +21,7 @@ import (
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/stretchr/testify/require"
 
 	_ "github.com/joho/godotenv/autoload"
@@ -155,7 +156,7 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 	}
 
 	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.Attribution, modelName),
+		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.Attribution, modelName, shell.NewBackgroundShellManager()),
 		tools.NewDownloadTool(env.permissions, env.workingDir, client),
 		tools.NewEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 		tools.NewMultiEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),

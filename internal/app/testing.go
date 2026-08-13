@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/question"
+	"github.com/rave-soft/braid/internal/shell"
 )
 
 // NewForTest constructs a minimal [App] suitable for in-process tests
@@ -30,6 +31,7 @@ func NewForTest(ctx context.Context) *App {
 	app := &App{
 		Permissions:        permission.NewPermissionService("", false, nil),
 		Questions:          question.NewService(),
+		BackgroundShells:   shell.NewBackgroundShellManager(),
 		globalCtx:          ctx,
 		events:             pubsub.NewBroker[any](),
 		serviceEventsWG:    &sync.WaitGroup{},

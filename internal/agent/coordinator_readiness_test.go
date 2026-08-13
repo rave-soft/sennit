@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/prompt"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,6 +63,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		history:     env.history,
 		filetracker: *env.filetracker,
 		mcp:         reg,
+		background:  shell.NewBackgroundShellManager(),
 	}
 
 	// Arm the MCP init gate so buildAgent's readiness goroutine blocks in

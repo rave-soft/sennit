@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -207,6 +208,23 @@ func TestApp_Shutdown_Concurrent(t *testing.T) {
 	wg.Wait()
 
 	require.Equal(t, shutdownStateDone, a.shutdownState)
+}
+
+func TestAppShutdownDoesNotAffectOtherBackgroundShells(t *testing.T) {
+	t.Parallel()
+	workingDir := t.TempDir()
+	first, second := NewForTest(t.Context()), NewForTest(t.Context())
+	first.BackgroundShells = shell.NewBackgroundShellManager()
+	second.BackgroundShells = shell.NewBackgroundShellManager()
+	firstJob, err := first.BackgroundShells.Start(t.Context(), workingDir, nil, "sleep 5", "")
+	require.NoError(t, err)
+	secondJob, err := second.BackgroundShells.Start(t.Context(), workingDir, nil, "sleep 5", "")
+	require.NoError(t, err)
+	first.Shutdown()
+	require.True(t, firstJob.IsDone())
+	require.False(t, secondJob.IsDone())
+	second.Shutdown()
+	require.True(t, secondJob.IsDone())
 }
 
 // TestApp_Shutdown_HooksRunBeforeCleanups verifies that shutdown hooks

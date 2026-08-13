@@ -32,6 +32,7 @@ import (
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/skills"
 	"github.com/rave-soft/braid/internal/version"
 )
@@ -40,6 +41,10 @@ import (
 // operations to a remote server via the client SDK. It caches the
 // proto.Workspace returned at creation time and refreshes it after
 // config-mutating operations.
+func (w *ClientWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
+	return shell.BackgroundJobCounts{}
+}
+
 type ClientWorkspace struct {
 	client *client.Client
 

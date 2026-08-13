@@ -27,6 +27,7 @@ import (
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/skills"
 	"golang.org/x/sync/errgroup"
 
@@ -43,6 +44,7 @@ var (
 	errSmallModelProviderNotConfigured = errors.New("provider not configured for the summarization model")
 	errLargeModelNotFound              = errors.New("model not found in provider config")
 	errSmallModelNotFound              = errors.New("summarization model not found in provider config")
+	errBackgroundShellsRequired        = errors.New("background shell manager is required")
 )
 
 type Coordinator interface {
@@ -99,6 +101,7 @@ type coordinator struct {
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
 	mcp         *mcp.Registry
+	background  *shell.BackgroundShellManager
 
 	localVersion atomic.Uint64
 	runtime      *runtimeCache
@@ -245,10 +248,15 @@ type CoordinatorOptions struct {
 	// since the thread manager is set up post-bootstrap; this field
 	// exists mainly so tests and other in-process callers can supply one
 	// up front.
-	Threads tools.ThreadManager
+	Threads          tools.ThreadManager
+	BackgroundShells *shell.BackgroundShellManager
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
+	if opts.BackgroundShells == nil {
+		return nil, errBackgroundShellsRequired
+	}
+
 	// Skills are pre-discovered by the caller (see app.New /
 	// backend.CreateWorkspace) and passed in via the manager. If no
 	// manager was provided (legacy callers), fall back to an in-line
@@ -280,6 +288,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:  opts.Interactive,
 		mcp:          opts.MCP,
 		threads:      opts.Threads,
+		background:   opts.BackgroundShells,
 		runtime:      newRuntimeCache(),
 	}
 
@@ -638,11 +647,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID),
+		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, c.background),
 		tools.NewBraidInfoTool(c.cfg, c.mcp, c.lspManager, allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot),
 		tools.NewBraidLogsTool(logFile),
-		tools.NewJobOutputTool(),
-		tools.NewJobKillTool(),
+		tools.NewJobOutputTool(c.background),
+		tools.NewJobKillTool(c.background),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),

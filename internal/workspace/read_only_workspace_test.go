@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/skills"
 	"github.com/stretchr/testify/require"
 )
@@ -297,6 +298,10 @@ type stubWorkspace struct {
 }
 
 // SessionStore
+func (s *stubWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
+	return shell.BackgroundJobCounts{}
+}
+
 func (s *stubWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
 	s.sessionCreateCount++
 	return session.Session{ID: "s" + string(rune(title[0])), Title: title}, nil

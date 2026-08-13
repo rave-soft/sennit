@@ -69,7 +69,8 @@ type App struct {
 	// than on mcp's process-wide defaultRegistry, so two App instances in
 	// one process (multi-client backend mode) don't clobber each other's
 	// MCP servers. See ARCHITECTURE_REVIEW.md section 3.1.
-	MCP *mcp.Registry
+	MCP              *mcp.Registry
+	BackgroundShells *shell.BackgroundShellManager
 
 	Skills *skills.Manager
 
@@ -203,16 +204,17 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	app := &App{
-		Sessions:    sessions,
-		Messages:    messages,
-		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
-		Questions:   question.NewService(),
-		FileTracker: filetracker.NewService(q, store.WorkingDir()),
-		LSPManager:  lsp.NewManager(store),
-		lsp:         newLSPEvents(),
-		MCP:         mcp.NewRegistry(),
-		Skills:      skillsMgr,
+		Sessions:         sessions,
+		Messages:         messages,
+		History:          files,
+		Permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		Questions:        question.NewService(),
+		FileTracker:      filetracker.NewService(q, store.WorkingDir()),
+		LSPManager:       lsp.NewManager(store),
+		lsp:              newLSPEvents(),
+		MCP:              mcp.NewRegistry(),
+		BackgroundShells: shell.NewBackgroundShellManager(),
+		Skills:           skillsMgr,
 
 		globalCtx: ctx,
 
@@ -612,19 +614,20 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	}
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
-		Config:      app.config,
-		Sessions:    app.Sessions,
-		Messages:    app.Messages,
-		Permissions: app.Permissions,
-		Questions:   app.Questions,
-		History:     app.History,
-		FileTracker: app.FileTracker,
-		LSPManager:  app.LSPManager,
-		Notify:      app.agentNotifications,
-		RunComplete: app.runCompletions,
-		Skills:      app.Skills,
-		Interactive: interactive,
-		MCP:         app.MCP,
+		Config:           app.config,
+		Sessions:         app.Sessions,
+		Messages:         app.Messages,
+		Permissions:      app.Permissions,
+		Questions:        app.Questions,
+		History:          app.History,
+		FileTracker:      app.FileTracker,
+		LSPManager:       app.LSPManager,
+		Notify:           app.agentNotifications,
+		RunComplete:      app.runCompletions,
+		Skills:           app.Skills,
+		Interactive:      interactive,
+		MCP:              app.MCP,
+		BackgroundShells: app.BackgroundShells,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)
@@ -840,10 +843,10 @@ func (app *App) Shutdown() {
 	})
 
 	wg.Go(func() {
-		if err := app.runShutdownCallback(func(ctx context.Context) error {
-			shell.GetBackgroundShellManager().KillAll(ctx)
-			return nil
-		}); err != nil {
+		if app.BackgroundShells == nil {
+			return
+		}
+		if err := app.runShutdownCallback(app.BackgroundShells.Shutdown); err != nil {
 			slog.Error("Failed to stop background shells", "error", err)
 		}
 	})

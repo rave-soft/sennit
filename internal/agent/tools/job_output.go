@@ -30,7 +30,10 @@ type JobOutputResponseMetadata struct {
 	WorkingDirectory string `json:"working_directory"`
 }
 
-func NewJobOutputTool() fantasy.AgentTool {
+func NewJobOutputTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool {
+	if bgManager == nil {
+		panic("background shell manager is required")
+	}
 	return fantasy.NewAgentTool(
 		JobOutputToolName,
 		jobOutputDescription,
@@ -39,7 +42,6 @@ func NewJobOutputTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("missing shell_id"), nil
 			}
 
-			bgManager := shell.GetBackgroundShellManager()
 			bgShell, ok := bgManager.Get(params.ShellID)
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("background shell not found: %s", params.ShellID)), nil
