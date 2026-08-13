@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
@@ -97,6 +98,48 @@ func TestHandleScrollbarMouseUp_EndsDrag(t *testing.T) {
 	handled, cmd := u.chat.HandleScrollbarMouseDrag(colX, 5)
 	require.False(t, handled, "a drag call after mouse-up must be a no-op")
 	require.Nil(t, cmd)
+}
+
+func TestScrollbarDrag_SuspendsFollowUntilReleasedAtBottom(t *testing.T) {
+	t.Parallel()
+
+	u := scrollbarOverflowUI(t)
+	u.chat.ScrollToBottom()
+	u.drawForCursor()
+	require.True(t, u.chat.Follow())
+	require.True(t, u.chat.AtBottom())
+
+	colX := u.chat.scrollbarColX
+	bottomY := u.chat.scrollbarThumbStart + u.chat.scrollbarThumbSize - 1
+	handled, _ := u.chat.HandleScrollbarMouseDown(colX, bottomY)
+	require.True(t, handled)
+	require.False(t, u.chat.Follow(),
+		"grabbing the thumb must suspend follow before the first pointer movement")
+
+	handled, _ = u.chat.HandleScrollbarMouseDrag(colX, 0)
+	require.True(t, handled)
+	offsetAtTop := u.chat.list.Offset()
+	require.False(t, u.chat.Follow())
+	require.False(t, u.chat.AtBottom())
+
+	// A live progress tick must not pull the viewport back to the end.
+	_, _ = u.Update(anim.StepMsg{ID: "live-progress"})
+	require.Equal(t, offsetAtTop, u.chat.list.Offset())
+
+	require.True(t, u.chat.HandleScrollbarMouseUp())
+	require.False(t, u.chat.Follow(),
+		"releasing above the bottom must keep history browsing detached")
+
+	// A subsequent drag back to the end restores automatic progress following.
+	u.drawForCursor()
+	handled, _ = u.chat.HandleScrollbarMouseDown(u.chat.scrollbarColX, u.chat.scrollbarThumbStart)
+	require.True(t, handled)
+	handled, _ = u.chat.HandleScrollbarMouseDrag(u.chat.scrollbarColX, u.chat.scrollbarTrackHeight-1)
+	require.True(t, handled)
+	require.False(t, u.chat.Follow(), "follow stays suspended for the entire drag")
+	require.True(t, u.chat.HandleScrollbarMouseUp())
+	require.True(t, u.chat.AtBottom())
+	require.True(t, u.chat.Follow(), "releasing at the bottom must resume follow")
 }
 
 // TestTextSelection_UnaffectedByScrollbarDrag is a regression test proving

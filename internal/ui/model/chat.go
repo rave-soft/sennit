@@ -1301,6 +1301,10 @@ func (m *Chat) HandleScrollbarMouseDown(x, y int) (bool, tea.Cmd) {
 		m.scrollbarDragAnchor = m.scrollbarThumbSize / 2
 	}
 	m.scrollbarDragging = true
+	// Grabbing the scrollbar is an explicit request to control the viewport.
+	// Suspend follow immediately, even before the pointer moves, so a progress
+	// tick cannot pull the view back to the bottom during the drag.
+	m.follow = false
 
 	return true, m.dragScrollbarTo(y)
 }
@@ -1321,6 +1325,8 @@ func (m *Chat) HandleScrollbarMouseUp() bool {
 		return false
 	}
 	m.scrollbarDragging = false
+	// Resume progress following only when the user released at the end.
+	m.follow = m.AtBottom()
 	return true
 }
 
@@ -1345,7 +1351,11 @@ func (m *Chat) ScrollbarHoverAt(x, y int) bool {
 func (m *Chat) dragScrollbarTo(y int) tea.Cmd {
 	thumbStart := y - m.scrollbarDragAnchor
 	target := common.ScrollbarOffsetForThumbStart(thumbStart, m.scrollbarThumbSize, m.scrollbarTrackHeight, m.scrollbarContentSize, m.scrollbarViewportSize)
-	return m.ScrollBy(target - m.list.Offset())
+	cmd := m.ScrollBy(target - m.list.Offset())
+	// ScrollBy normally re-enables follow upon reaching the bottom. Keep it
+	// suspended until mouse-up so live updates never fight an active drag.
+	m.follow = false
+	return cmd
 }
 
 // HasHighlight returns whether there is currently highlighted content.
