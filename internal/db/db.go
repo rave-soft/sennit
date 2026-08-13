@@ -24,6 +24,9 @@ func New(db DBTX) *Queries {
 func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	q := Queries{db: db}
 	var err error
+	if q.batchValidateSessionIDsInTreeStmt, err = db.PrepareContext(ctx, batchValidateSessionIDsInTree); err != nil {
+		return nil, fmt.Errorf("error preparing query BatchValidateSessionIDsInTree: %w", err)
+	}
 	if q.countSessionFilesStmt, err = db.PrepareContext(ctx, countSessionFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query CountSessionFiles: %w", err)
 	}
@@ -111,6 +114,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listMessagesBySessionStmt, err = db.PrepareContext(ctx, listMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListMessagesBySession: %w", err)
 	}
+	if q.listMessagesBySessionIDsStmt, err = db.PrepareContext(ctx, listMessagesBySessionIDs); err != nil {
+		return nil, fmt.Errorf("error preparing query ListMessagesBySessionIDs: %w", err)
+	}
 	if q.listNewFilesStmt, err = db.PrepareContext(ctx, listNewFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListNewFiles: %w", err)
 	}
@@ -170,6 +176,11 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 
 func (q *Queries) Close() error {
 	var err error
+	if q.batchValidateSessionIDsInTreeStmt != nil {
+		if cerr := q.batchValidateSessionIDsInTreeStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing batchValidateSessionIDsInTreeStmt: %w", cerr)
+		}
+	}
 	if q.countSessionFilesStmt != nil {
 		if cerr := q.countSessionFilesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countSessionFilesStmt: %w", cerr)
@@ -315,6 +326,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listMessagesBySessionStmt: %w", cerr)
 		}
 	}
+	if q.listMessagesBySessionIDsStmt != nil {
+		if cerr := q.listMessagesBySessionIDsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listMessagesBySessionIDsStmt: %w", cerr)
+		}
+	}
 	if q.listNewFilesStmt != nil {
 		if cerr := q.listNewFilesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listNewFilesStmt: %w", cerr)
@@ -442,107 +458,111 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                             DBTX
-	tx                             *sql.Tx
-	countSessionFilesStmt          *sql.Stmt
-	countSessionMessagesStmt       *sql.Stmt
-	countSessionReadFilesStmt      *sql.Stmt
-	createFileStmt                 *sql.Stmt
-	createMessageStmt              *sql.Stmt
-	createSessionStmt              *sql.Stmt
-	createThreadStmt               *sql.Stmt
-	deleteFileStmt                 *sql.Stmt
-	deleteMessageStmt              *sql.Stmt
-	deleteSessionStmt              *sql.Stmt
-	deleteSessionFilesStmt         *sql.Stmt
-	deleteSessionMessagesStmt      *sql.Stmt
-	deleteSessionReadFilesStmt     *sql.Stmt
-	deleteThreadStmt               *sql.Stmt
-	getFileStmt                    *sql.Stmt
-	getFileByPathAndSessionStmt    *sql.Stmt
-	getFileReadStmt                *sql.Stmt
-	getLastSessionStmt             *sql.Stmt
-	getMessageStmt                 *sql.Stmt
-	getSessionByIDStmt             *sql.Stmt
-	getThreadStmt                  *sql.Stmt
-	getThreadByNameStmt            *sql.Stmt
-	listAllUserMessagesStmt        *sql.Stmt
-	listAssistantMessagesSinceStmt *sql.Stmt
-	listFilesByPathStmt            *sql.Stmt
-	listFilesBySessionStmt         *sql.Stmt
-	listFilesBySessionTreeStmt     *sql.Stmt
-	listLatestSessionFilesStmt     *sql.Stmt
-	listMessagesBySessionStmt      *sql.Stmt
-	listNewFilesStmt               *sql.Stmt
-	listSessionReadFilesStmt       *sql.Stmt
-	listSessionsStmt               *sql.Stmt
-	listSessionsForGCStmt          *sql.Stmt
-	listSessionsSinceStmt          *sql.Stmt
-	listSkillLoadsSinceStmt        *sql.Stmt
-	listThreadsStmt                *sql.Stmt
-	listThreadsForGCStmt           *sql.Stmt
-	listUserMessagesBySessionStmt  *sql.Stmt
-	nextFileVersionStmt            *sql.Stmt
-	projectStatsSinceStmt          *sql.Stmt
-	recordFileReadStmt             *sql.Stmt
-	renameSessionStmt              *sql.Stmt
-	updateMessageStmt              *sql.Stmt
-	updateSessionStmt              *sql.Stmt
-	updateSessionTitleAndUsageStmt *sql.Stmt
-	updateThreadSessionStmt        *sql.Stmt
-	updateThreadStatusStmt         *sql.Stmt
+	db                                DBTX
+	tx                                *sql.Tx
+	batchValidateSessionIDsInTreeStmt *sql.Stmt
+	countSessionFilesStmt             *sql.Stmt
+	countSessionMessagesStmt          *sql.Stmt
+	countSessionReadFilesStmt         *sql.Stmt
+	createFileStmt                    *sql.Stmt
+	createMessageStmt                 *sql.Stmt
+	createSessionStmt                 *sql.Stmt
+	createThreadStmt                  *sql.Stmt
+	deleteFileStmt                    *sql.Stmt
+	deleteMessageStmt                 *sql.Stmt
+	deleteSessionStmt                 *sql.Stmt
+	deleteSessionFilesStmt            *sql.Stmt
+	deleteSessionMessagesStmt         *sql.Stmt
+	deleteSessionReadFilesStmt        *sql.Stmt
+	deleteThreadStmt                  *sql.Stmt
+	getFileStmt                       *sql.Stmt
+	getFileByPathAndSessionStmt       *sql.Stmt
+	getFileReadStmt                   *sql.Stmt
+	getLastSessionStmt                *sql.Stmt
+	getMessageStmt                    *sql.Stmt
+	getSessionByIDStmt                *sql.Stmt
+	getThreadStmt                     *sql.Stmt
+	getThreadByNameStmt               *sql.Stmt
+	listAllUserMessagesStmt           *sql.Stmt
+	listAssistantMessagesSinceStmt    *sql.Stmt
+	listFilesByPathStmt               *sql.Stmt
+	listFilesBySessionStmt            *sql.Stmt
+	listFilesBySessionTreeStmt        *sql.Stmt
+	listLatestSessionFilesStmt        *sql.Stmt
+	listMessagesBySessionStmt         *sql.Stmt
+	listMessagesBySessionIDsStmt      *sql.Stmt
+	listNewFilesStmt                  *sql.Stmt
+	listSessionReadFilesStmt          *sql.Stmt
+	listSessionsStmt                  *sql.Stmt
+	listSessionsForGCStmt             *sql.Stmt
+	listSessionsSinceStmt             *sql.Stmt
+	listSkillLoadsSinceStmt           *sql.Stmt
+	listThreadsStmt                   *sql.Stmt
+	listThreadsForGCStmt              *sql.Stmt
+	listUserMessagesBySessionStmt     *sql.Stmt
+	nextFileVersionStmt               *sql.Stmt
+	projectStatsSinceStmt             *sql.Stmt
+	recordFileReadStmt                *sql.Stmt
+	renameSessionStmt                 *sql.Stmt
+	updateMessageStmt                 *sql.Stmt
+	updateSessionStmt                 *sql.Stmt
+	updateSessionTitleAndUsageStmt    *sql.Stmt
+	updateThreadSessionStmt           *sql.Stmt
+	updateThreadStatusStmt            *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                             tx,
-		tx:                             tx,
-		countSessionFilesStmt:          q.countSessionFilesStmt,
-		countSessionMessagesStmt:       q.countSessionMessagesStmt,
-		countSessionReadFilesStmt:      q.countSessionReadFilesStmt,
-		createFileStmt:                 q.createFileStmt,
-		createMessageStmt:              q.createMessageStmt,
-		createSessionStmt:              q.createSessionStmt,
-		createThreadStmt:               q.createThreadStmt,
-		deleteFileStmt:                 q.deleteFileStmt,
-		deleteMessageStmt:              q.deleteMessageStmt,
-		deleteSessionStmt:              q.deleteSessionStmt,
-		deleteSessionFilesStmt:         q.deleteSessionFilesStmt,
-		deleteSessionMessagesStmt:      q.deleteSessionMessagesStmt,
-		deleteSessionReadFilesStmt:     q.deleteSessionReadFilesStmt,
-		deleteThreadStmt:               q.deleteThreadStmt,
-		getFileStmt:                    q.getFileStmt,
-		getFileByPathAndSessionStmt:    q.getFileByPathAndSessionStmt,
-		getFileReadStmt:                q.getFileReadStmt,
-		getLastSessionStmt:             q.getLastSessionStmt,
-		getMessageStmt:                 q.getMessageStmt,
-		getSessionByIDStmt:             q.getSessionByIDStmt,
-		getThreadStmt:                  q.getThreadStmt,
-		getThreadByNameStmt:            q.getThreadByNameStmt,
-		listAllUserMessagesStmt:        q.listAllUserMessagesStmt,
-		listAssistantMessagesSinceStmt: q.listAssistantMessagesSinceStmt,
-		listFilesByPathStmt:            q.listFilesByPathStmt,
-		listFilesBySessionStmt:         q.listFilesBySessionStmt,
-		listFilesBySessionTreeStmt:     q.listFilesBySessionTreeStmt,
-		listLatestSessionFilesStmt:     q.listLatestSessionFilesStmt,
-		listMessagesBySessionStmt:      q.listMessagesBySessionStmt,
-		listNewFilesStmt:               q.listNewFilesStmt,
-		listSessionReadFilesStmt:       q.listSessionReadFilesStmt,
-		listSessionsStmt:               q.listSessionsStmt,
-		listSessionsForGCStmt:          q.listSessionsForGCStmt,
-		listSessionsSinceStmt:          q.listSessionsSinceStmt,
-		listSkillLoadsSinceStmt:        q.listSkillLoadsSinceStmt,
-		listThreadsStmt:                q.listThreadsStmt,
-		listThreadsForGCStmt:           q.listThreadsForGCStmt,
-		listUserMessagesBySessionStmt:  q.listUserMessagesBySessionStmt,
-		nextFileVersionStmt:            q.nextFileVersionStmt,
-		projectStatsSinceStmt:          q.projectStatsSinceStmt,
-		recordFileReadStmt:             q.recordFileReadStmt,
-		renameSessionStmt:              q.renameSessionStmt,
-		updateMessageStmt:              q.updateMessageStmt,
-		updateSessionStmt:              q.updateSessionStmt,
-		updateSessionTitleAndUsageStmt: q.updateSessionTitleAndUsageStmt,
-		updateThreadSessionStmt:        q.updateThreadSessionStmt,
-		updateThreadStatusStmt:         q.updateThreadStatusStmt,
+		db:                                tx,
+		tx:                                tx,
+		batchValidateSessionIDsInTreeStmt: q.batchValidateSessionIDsInTreeStmt,
+		countSessionFilesStmt:             q.countSessionFilesStmt,
+		countSessionMessagesStmt:          q.countSessionMessagesStmt,
+		countSessionReadFilesStmt:         q.countSessionReadFilesStmt,
+		createFileStmt:                    q.createFileStmt,
+		createMessageStmt:                 q.createMessageStmt,
+		createSessionStmt:                 q.createSessionStmt,
+		createThreadStmt:                  q.createThreadStmt,
+		deleteFileStmt:                    q.deleteFileStmt,
+		deleteMessageStmt:                 q.deleteMessageStmt,
+		deleteSessionStmt:                 q.deleteSessionStmt,
+		deleteSessionFilesStmt:            q.deleteSessionFilesStmt,
+		deleteSessionMessagesStmt:         q.deleteSessionMessagesStmt,
+		deleteSessionReadFilesStmt:        q.deleteSessionReadFilesStmt,
+		deleteThreadStmt:                  q.deleteThreadStmt,
+		getFileStmt:                       q.getFileStmt,
+		getFileByPathAndSessionStmt:       q.getFileByPathAndSessionStmt,
+		getFileReadStmt:                   q.getFileReadStmt,
+		getLastSessionStmt:                q.getLastSessionStmt,
+		getMessageStmt:                    q.getMessageStmt,
+		getSessionByIDStmt:                q.getSessionByIDStmt,
+		getThreadStmt:                     q.getThreadStmt,
+		getThreadByNameStmt:               q.getThreadByNameStmt,
+		listAllUserMessagesStmt:           q.listAllUserMessagesStmt,
+		listAssistantMessagesSinceStmt:    q.listAssistantMessagesSinceStmt,
+		listFilesByPathStmt:               q.listFilesByPathStmt,
+		listFilesBySessionStmt:            q.listFilesBySessionStmt,
+		listFilesBySessionTreeStmt:        q.listFilesBySessionTreeStmt,
+		listLatestSessionFilesStmt:        q.listLatestSessionFilesStmt,
+		listMessagesBySessionStmt:         q.listMessagesBySessionStmt,
+		listMessagesBySessionIDsStmt:      q.listMessagesBySessionIDsStmt,
+		listNewFilesStmt:                  q.listNewFilesStmt,
+		listSessionReadFilesStmt:          q.listSessionReadFilesStmt,
+		listSessionsStmt:                  q.listSessionsStmt,
+		listSessionsForGCStmt:             q.listSessionsForGCStmt,
+		listSessionsSinceStmt:             q.listSessionsSinceStmt,
+		listSkillLoadsSinceStmt:           q.listSkillLoadsSinceStmt,
+		listThreadsStmt:                   q.listThreadsStmt,
+		listThreadsForGCStmt:              q.listThreadsForGCStmt,
+		listUserMessagesBySessionStmt:     q.listUserMessagesBySessionStmt,
+		nextFileVersionStmt:               q.nextFileVersionStmt,
+		projectStatsSinceStmt:             q.projectStatsSinceStmt,
+		recordFileReadStmt:                q.recordFileReadStmt,
+		renameSessionStmt:                 q.renameSessionStmt,
+		updateMessageStmt:                 q.updateMessageStmt,
+		updateSessionStmt:                 q.updateSessionStmt,
+		updateSessionTitleAndUsageStmt:    q.updateSessionTitleAndUsageStmt,
+		updateThreadSessionStmt:           q.updateThreadSessionStmt,
+		updateThreadStatusStmt:            q.updateThreadStatusStmt,
 	}
 }

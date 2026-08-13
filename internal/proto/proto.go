@@ -85,7 +85,8 @@ type ServerNotice struct {
 // CurrentSession is the request body for the per-client
 // current-session endpoint. An empty SessionID clears the entry.
 type CurrentSession struct {
-	SessionID string `json:"session_id"`
+	SessionID  string `json:"session_id"`
+	Generation uint64 `json:"generation"`
 }
 
 // RunComplete is the authoritative end-of-run signal for a session,

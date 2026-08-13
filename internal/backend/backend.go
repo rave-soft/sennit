@@ -35,6 +35,7 @@ var (
 	ErrUnknownCommand          = errors.New("unknown command")
 	ErrInvalidClientID         = errors.New("invalid client_id")
 	ErrClientNotAttached       = errors.New("client not attached")
+	ErrSessionScope            = errors.New("session is outside the client scope")
 	ErrWorkspaceClosing        = errors.New("workspace closing")
 	ErrServerShuttingDown      = errors.New("server is shutting down")
 	ErrServerNotIdle           = errors.New("server is hosting live workspaces")
@@ -158,10 +159,11 @@ type Backend struct {
 // timer is stopped the moment an SSE stream attaches), but both being
 // zero/nil means the entry has been released and should be removed.
 type clientState struct {
-	streams          int
-	holdTimer        *time.Timer
-	currentSessionID string
-	released         bool
+	streams                  int
+	holdTimer                *time.Timer
+	currentSessionID         string
+	currentSessionGeneration uint64
+	released                 bool
 }
 
 // Workspace represents a running [app.App] workspace with its
@@ -928,7 +930,11 @@ func (b *Backend) DeleteWorkspace(id, clientID string) error {
 // guards against zombie writes from a client that has detached and
 // against ghost presence from a hold-only client that never opened an
 // SSE stream.
-func (b *Backend) SetCurrentSession(workspaceID, clientID, sessionID string) error {
+func (b *Backend) SetCurrentSession(workspaceID, clientID, sessionID string, generations ...uint64) error {
+	var generation uint64
+	if len(generations) > 0 {
+		generation = generations[0]
+	}
 	if _, err := validateClientID(clientID); err != nil {
 		return err
 	}
@@ -940,13 +946,16 @@ func (b *Backend) SetCurrentSession(workspaceID, clientID, sessionID string) err
 	defer ws.clientsMu.Unlock()
 	cs, ok := ws.clients[clientID]
 	if !ok || cs.streams == 0 {
-		// No entry, or hold-only (no live stream): refuse the
-		// write. The presence record this is meant to feed
-		// should only reflect clients that can actually observe
-		// session events.
 		return ErrClientNotAttached
 	}
+	if generation < cs.currentSessionGeneration {
+		return ErrSessionScope
+	}
+	if generation > 0 && generation == cs.currentSessionGeneration && cs.currentSessionID != "" && cs.currentSessionID != sessionID {
+		return ErrSessionScope
+	}
 	cs.currentSessionID = sessionID
+	cs.currentSessionGeneration = generation
 	return nil
 }
 
@@ -955,6 +964,29 @@ func (b *Backend) SetCurrentSession(workspaceID, clientID, sessionID string) err
 // SSE stream (streams > 0) AND a matching currentSessionID are counted;
 // pure creation holds do not contribute. Returns [ErrWorkspaceNotFound]
 // if the workspace is unknown.
+func (b *Backend) validateSessionScope(workspaceID, clientID, sessionID string, generation uint64) (*Workspace, error) {
+	if _, err := validateClientID(clientID); err != nil {
+		return nil, err
+	}
+	ws, ok := b.workspaces.Get(workspaceID)
+	if !ok {
+		return nil, ErrWorkspaceNotFound
+	}
+	ws.clientsMu.Lock()
+	defer ws.clientsMu.Unlock()
+	client, ok := ws.clients[clientID]
+	if !ok || client.streams == 0 {
+		return nil, ErrClientNotAttached
+	}
+	if generation < client.currentSessionGeneration {
+		return nil, ErrSessionScope
+	}
+	if generation == client.currentSessionGeneration && client.currentSessionID != "" && client.currentSessionID != sessionID {
+		return nil, ErrSessionScope
+	}
+	return ws, nil
+}
+
 func (b *Backend) AttachedClients(workspaceID, sessionID string) (int, error) {
 	ws, ok := b.workspaces.Get(workspaceID)
 	if !ok {

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"slices"
 
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
@@ -79,6 +80,31 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 		return nil, err
 	}
 	return ws.Messages.List(ctx, sessionID)
+}
+
+func (b *Backend) ListSessionMessagesByIDs(ctx context.Context, workspaceID, clientID, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]message.Message, error) {
+	ws, err := b.validateSessionScope(workspaceID, clientID, rootSessionID, generation)
+	if err != nil {
+		return nil, err
+	}
+	validated, err := ws.Sessions.ValidateSessionIDsInTree(ctx, rootSessionID, append(sessionIDs, rootSessionID))
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(validated, rootSessionID) {
+		return nil, ErrSessionScope
+	}
+	if err := ws.Messages.FlushAll(ctx); err != nil {
+		return nil, err
+	}
+	messages, err := ws.Messages.ListBySessionIDs(ctx, validated)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.SetCurrentSession(workspaceID, clientID, rootSessionID, generation); err != nil {
+		return nil, err
+	}
+	return messages, nil
 }
 
 // ListSessionHistory returns the history items for a session.

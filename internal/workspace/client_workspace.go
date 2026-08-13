@@ -50,7 +50,8 @@ type ClientWorkspace struct {
 	// SetCurrentSession. The subscription loop re-asserts it after a
 	// reconnect, because the server's per-client presence entry (or the
 	// whole workspace) may have been re-created in the meantime.
-	lastSession string
+	lastSession           string
+	lastSessionGeneration uint64
 
 	supportsThreads          threadsSupport
 	threadsProbeStarted      bool
@@ -210,11 +211,21 @@ func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, str
 // are propagated to the caller; the TUI logs and ignores them since
 // the presence record is a hint, not correctness-critical state.
 func (w *ClientWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
-	w.herdrClient.SetSessionID(sessionID)
+	return w.SetCurrentSessionGeneration(ctx, sessionID, 0)
+}
+
+func (w *ClientWorkspace) SetCurrentSessionGeneration(ctx context.Context, sessionID string, generation uint64) error {
+	if err := w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID, generation); err != nil {
+		return err
+	}
 	w.mu.Lock()
-	w.lastSession = sessionID
+	if generation >= w.lastSessionGeneration {
+		w.lastSession = sessionID
+		w.lastSessionGeneration = generation
+		w.herdrClient.SetSessionID(sessionID)
+	}
 	w.mu.Unlock()
-	return w.client.SetCurrentSession(ctx, w.workspaceID(), sessionID)
+	return nil
 }
 
 // -- Messages --
@@ -241,6 +252,18 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 		return nil, err
 	}
 	return protoToMessages(msgs), nil
+}
+
+func (w *ClientWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]message.Message, error) {
+	msgs, err := w.client.ListMessagesBySessionIDs(ctx, w.workspaceID(), rootSessionID, generation, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]message.Message)
+	for sessionID, sessionMsgs := range msgs {
+		result[sessionID] = protoToMessages(sessionMsgs)
+	}
+	return result, nil
 }
 
 // -- Agent --
@@ -1273,9 +1296,10 @@ func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 func (w *ClientWorkspace) afterReconnect(send func(tea.Msg)) {
 	w.mu.RLock()
 	sid := w.lastSession
+	generation := w.lastSessionGeneration
 	w.mu.RUnlock()
 	if sid != "" {
-		if err := w.SetCurrentSession(w.subCtx, sid); err != nil {
+		if err := w.SetCurrentSessionGeneration(w.subCtx, sid, generation); err != nil {
 			slog.Warn("Failed to re-assert current session after reconnect", "error", err)
 		}
 	}

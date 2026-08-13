@@ -102,7 +102,15 @@ func (w *countingWorkspace) SetCurrentSession(_ context.Context, _ string) error
 	return nil
 }
 
+func (w *countingWorkspace) SetCurrentSessionGeneration(_ context.Context, _ string, _ uint64) error {
+	return nil
+}
+
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
+	return nil, nil
+}
+
+func (w *countingWorkspace) ListMessagesBySessionIDs(context.Context, string, uint64, []string) (map[string][]message.Message, error) {
 	return nil, nil
 }
 

@@ -50,6 +50,7 @@ type Service interface {
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
+	ListBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	Delete(ctx context.Context, id string) error
@@ -532,6 +533,33 @@ func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 		}
 	}
 	return messages, nil
+}
+
+func (s *service) ListBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]Message, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+
+	idsJSON, err := json.Marshal(sessionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal session IDs: %w", err)
+	}
+
+	rows, err := s.q.ListMessagesBySessionIDs(ctx, string(idsJSON))
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]Message)
+	for _, row := range rows {
+		msg, err := s.fromDBItem(row)
+		if err != nil {
+			slog.Warn("list batch messages", "message_id", row.ID, "error", err)
+			continue
+		}
+		result[msg.SessionID] = append(result[msg.SessionID], msg)
+	}
+	return result, nil
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {

@@ -10,6 +10,58 @@ import (
 	"database/sql"
 )
 
+const batchValidateSessionIDsInTree = `-- name: BatchValidateSessionIDsInTree :many
+WITH RECURSIVE
+input AS (
+    SELECT CAST(?1 AS TEXT) AS session_ids_json
+),
+tree AS (
+    SELECT sessions.id AS session_id
+    FROM sessions
+    WHERE sessions.id = CAST(?2 AS TEXT)
+      AND sessions.project_path = CAST(?3 AS TEXT)
+    UNION ALL
+    SELECT sessions.id
+    FROM sessions
+    JOIN tree ON sessions.parent_session_id = tree.session_id
+    WHERE sessions.project_path = CAST(?3 AS TEXT)
+)
+SELECT tree.session_id AS id
+FROM tree
+WHERE tree.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+)
+`
+
+type BatchValidateSessionIDsInTreeParams struct {
+	SessionIdsJson string `json:"session_ids_json"`
+	RootSessionID  string `json:"root_session_id"`
+	ProjectPath    string `json:"project_path"`
+}
+
+func (q *Queries) BatchValidateSessionIDsInTree(ctx context.Context, arg BatchValidateSessionIDsInTreeParams) ([]string, error) {
+	rows, err := q.query(ctx, q.batchValidateSessionIDsInTreeStmt, batchValidateSessionIDsInTree, arg.SessionIdsJson, arg.RootSessionID, arg.ProjectPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countSessionMessages = `-- name: CountSessionMessages :one
 SELECT COUNT(*) FROM messages
 WHERE session_id = ?
@@ -178,6 +230,52 @@ ORDER BY created_at ASC
 
 func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := q.query(ctx, q.listMessagesBySessionStmt, listMessagesBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesBySessionIDs = `-- name: ListMessagesBySessionIDs :many
+WITH input AS (
+    SELECT CAST(?1 AS TEXT) AS session_ids_json
+)
+SELECT messages.id, messages.session_id, messages.role, messages.parts, messages.model, messages.created_at, messages.updated_at, messages.finished_at, messages.provider, messages.is_summary_message
+FROM messages
+WHERE messages.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+)
+ORDER BY messages.session_id, messages.created_at ASC
+`
+
+func (q *Queries) ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson string) ([]Message, error) {
+	rows, err := q.query(ctx, q.listMessagesBySessionIDsStmt, listMessagesBySessionIDs, sessionIdsJson)
 	if err != nil {
 		return nil, err
 	}

@@ -66,3 +66,36 @@ WHERE messages.role = 'user'
       WHERE threads.session_id = sessions.id
   )
 ORDER BY messages.created_at DESC;
+
+-- name: ListMessagesBySessionIDs :many
+WITH input AS (
+    SELECT CAST(sqlc.arg(session_ids_json) AS TEXT) AS session_ids_json
+)
+SELECT messages.*
+FROM messages
+WHERE messages.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+)
+ORDER BY messages.session_id, messages.created_at ASC;
+
+-- name: BatchValidateSessionIDsInTree :many
+WITH RECURSIVE
+input AS (
+    SELECT CAST(sqlc.arg(session_ids_json) AS TEXT) AS session_ids_json
+),
+tree AS (
+    SELECT sessions.id AS session_id
+    FROM sessions
+    WHERE sessions.id = CAST(sqlc.arg(root_session_id) AS TEXT)
+      AND sessions.project_path = CAST(sqlc.arg(project_path) AS TEXT)
+    UNION ALL
+    SELECT sessions.id
+    FROM sessions
+    JOIN tree ON sessions.parent_session_id = tree.session_id
+    WHERE sessions.project_path = CAST(sqlc.arg(project_path) AS TEXT)
+)
+SELECT tree.session_id AS id
+FROM tree
+WHERE tree.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+);

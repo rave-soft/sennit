@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/backend"
@@ -187,7 +188,7 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 		jsonError(w, http.StatusBadRequest, "failed to decode request")
 		return
 	}
-	if err := c.backend.SetCurrentSession(id, clientID, req.SessionID); err != nil {
+	if err := c.backend.SetCurrentSession(id, clientID, req.SessionID, req.Generation); err != nil {
 		c.handleError(w, r, err)
 		return
 	}
@@ -522,6 +523,39 @@ func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, 
 		return
 	}
 	jsonEncode(w, messagesToProto(messages))
+}
+
+func (c *controllerV1) handleGetWorkspaceSessionMessagesBatch(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ids := r.URL.Query()["ids"]
+	if len(ids) == 0 {
+		jsonError(w, http.StatusBadRequest, "ids query parameter is required")
+		return
+	}
+	rootSessionID := r.URL.Query().Get("root_session_id")
+	if rootSessionID == "" {
+		jsonError(w, http.StatusBadRequest, "root_session_id query parameter is required")
+		return
+	}
+	generation, err := strconv.ParseUint(r.URL.Query().Get("generation"), 10, 64)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "generation query parameter is required")
+		return
+	}
+	clientID, ok := c.requireClientID(w, r)
+	if !ok {
+		return
+	}
+	messages, err := c.backend.ListSessionMessagesByIDs(r.Context(), id, clientID, rootSessionID, generation, ids)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	out := make(map[string][]proto.Message, len(messages))
+	for sid, msgs := range messages {
+		out[sid] = messagesToProto(msgs)
+	}
+	jsonEncode(w, out)
 }
 
 // handlePutWorkspaceSession updates a session.
@@ -1207,6 +1241,8 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrInvalidClientID):
 		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrSessionScope):
+		status = http.StatusForbidden
 	case errors.Is(err, backend.ErrClientNotAttached):
 		// 409, not 404: the workspace exists, the caller just has no live
 		// stream yet. A 404 here is indistinguishable from "workspace

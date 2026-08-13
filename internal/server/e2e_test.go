@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/backend"
+	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
@@ -629,4 +630,149 @@ func TestE2E_ShutdownCallbackFiresWhenLastClientLeaves(t *testing.T) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	r.Body.Close()
 	require.Equal(t, http.StatusNotFound, r.StatusCode)
+}
+
+func TestE2E_ClientListMessagesBySessionIDs(t *testing.T) {
+	h := newRealCreateHarness(t)
+	c, err := client.NewClient(t.TempDir(), "tcp", h.httpSrv.Listener.Addr().String())
+	require.NoError(t, err)
+	wsProto, err := c.CreateWorkspace(t.Context(), proto.Workspace{Path: t.TempDir(), DataDir: t.TempDir()})
+	require.NoError(t, err)
+	ws, err := h.backend.GetWorkspace(wsProto.ID)
+	require.NoError(t, err)
+	root, err := ws.Sessions.Create(t.Context(), "root")
+	require.NoError(t, err)
+	child, err := ws.Sessions.CreateTaskSession(t.Context(), "child", root.ID, "child")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		sessionID string
+		text      string
+	}{
+		{root.ID, "root message"},
+		{child.ID, "child message"},
+	} {
+		_, err := ws.Messages.Create(t.Context(), tc.sessionID, message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.TextContent{Text: tc.text}},
+		})
+		require.NoError(t, err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	_, err = c.SubscribeEvents(ctx, wsProto.ID)
+	require.NoError(t, err)
+	require.NoError(t, c.SetCurrentSession(t.Context(), wsProto.ID, root.ID))
+
+	pending, err := ws.Messages.Create(t.Context(), child.ID, message.CreateMessageParams{Role: message.Assistant})
+	require.NoError(t, err)
+	pending.AppendContent("pending update")
+	require.NoError(t, ws.Messages.Update(t.Context(), pending))
+
+	got, err := c.ListMessagesBySessionIDs(t.Context(), wsProto.ID, root.ID, 1, []string{root.ID, child.ID})
+	require.NoError(t, err)
+	require.Equal(t, "root message", got[root.ID][0].Content().Text)
+	require.Equal(t, "child message", got[child.ID][0].Content().Text)
+	require.Equal(t, "pending update", got[child.ID][1].Content().Text)
+}
+
+func TestE2E_BatchMessagesSwitchesScopeMonotonically(t *testing.T) {
+	h := newRealCreateHarness(t)
+	c, err := client.NewClient(t.TempDir(), "tcp", h.httpSrv.Listener.Addr().String())
+	require.NoError(t, err)
+	wsProto, err := c.CreateWorkspace(t.Context(), proto.Workspace{Path: t.TempDir(), DataDir: t.TempDir()})
+	require.NoError(t, err)
+	ws, err := h.backend.GetWorkspace(wsProto.ID)
+	require.NoError(t, err)
+	rootA, err := ws.Sessions.Create(t.Context(), "root A")
+	require.NoError(t, err)
+	rootB, err := ws.Sessions.Create(t.Context(), "root B")
+	require.NoError(t, err)
+	childB, err := ws.Sessions.CreateTaskSession(t.Context(), "child B", rootB.ID, "child B")
+	require.NoError(t, err)
+	_, err = ws.Messages.Create(t.Context(), childB.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "nested B"}},
+	})
+	require.NoError(t, err)
+
+	streamCtx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	_, err = c.SubscribeEvents(streamCtx, wsProto.ID)
+	require.NoError(t, err)
+	require.NoError(t, c.SetCurrentSession(t.Context(), wsProto.ID, rootA.ID))
+
+	got, err := c.ListMessagesBySessionIDs(t.Context(), wsProto.ID, rootB.ID, 2, []string{childB.ID})
+	require.NoError(t, err)
+	require.Equal(t, "nested B", got[childB.ID][0].Content().Text)
+
+	_, err = c.ListMessagesBySessionIDs(t.Context(), wsProto.ID, rootA.ID, 1, []string{rootA.ID})
+	require.Error(t, err)
+	got, err = c.ListMessagesBySessionIDs(t.Context(), wsProto.ID, rootB.ID, 2, []string{childB.ID})
+	require.NoError(t, err)
+	require.Equal(t, "nested B", got[childB.ID][0].Content().Text)
+}
+
+func TestE2E_BatchMessagesRejectsForgedRoot(t *testing.T) {
+	h := newRealCreateHarness(t)
+	c, err := client.NewClient(t.TempDir(), "tcp", h.httpSrv.Listener.Addr().String())
+	require.NoError(t, err)
+	wsProto, err := c.CreateWorkspace(t.Context(), proto.Workspace{Path: t.TempDir(), DataDir: t.TempDir()})
+	require.NoError(t, err)
+	ws, err := h.backend.GetWorkspace(wsProto.ID)
+	require.NoError(t, err)
+	rootA, err := ws.Sessions.Create(t.Context(), "root A")
+	require.NoError(t, err)
+	childA, err := ws.Sessions.CreateTaskSession(t.Context(), "child A", rootA.ID, "child A")
+	require.NoError(t, err)
+	rootB, err := ws.Sessions.Create(t.Context(), "root B")
+	require.NoError(t, err)
+	childB, err := ws.Sessions.CreateTaskSession(t.Context(), "child B", rootB.ID, "child B")
+	require.NoError(t, err)
+	_, err = ws.Messages.Create(t.Context(), childB.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "private B"}},
+	})
+	require.NoError(t, err)
+
+	streamCtx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	_, err = c.SubscribeEvents(streamCtx, wsProto.ID)
+	require.NoError(t, err)
+	require.NoError(t, c.SetCurrentSession(t.Context(), wsProto.ID, rootA.ID))
+
+	q := url.Values{
+		"client_id":       []string{c.ClientID()},
+		"root_session_id": []string{rootB.ID},
+		"generation":      []string{"0"},
+		"ids":             []string{childB.ID},
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.httpSrv.URL+"/v1/workspaces/"+wsProto.ID+"/sessions/batch/messages?"+q.Encode(), nil)
+	require.NoError(t, err)
+	resp, err := h.httpSrv.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	msgs, err := c.ListMessagesBySessionIDs(t.Context(), wsProto.ID, rootA.ID, 1, []string{childA.ID, childB.ID})
+	require.NoError(t, err)
+	require.Empty(t, msgs)
+}
+
+func TestHTTP_BatchMessages_RequiresIDs(t *testing.T) {
+	t.Parallel()
+
+	h := newE2EHarness(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	reqURL := h.httpSrv.URL + "/v1/workspaces/" + h.workspace.ID + "/sessions/batch/messages"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	require.NoError(t, err)
+	resp, err := h.httpSrv.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }

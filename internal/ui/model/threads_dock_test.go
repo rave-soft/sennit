@@ -285,6 +285,20 @@ func (w *threadsDockTestWorkspace) GetSession(context.Context, string) (session.
 	return w.sess, w.sessErr
 }
 
+func (w *threadsDockTestWorkspace) SetCurrentSessionGeneration(context.Context, string, uint64) error {
+	return nil
+}
+
 func (w *threadsDockTestWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return w.msgs, w.msgsErr
+}
+
+func (w *threadsDockTestWorkspace) ListMessagesBySessionIDs(context.Context, string, uint64, []string) (map[string][]message.Message, error) {
+	result := make(map[string][]message.Message)
+	if w.msgsErr == nil {
+		for _, m := range w.msgs {
+			result[m.SessionID] = append(result[m.SessionID], m)
+		}
+	}
+	return result, w.msgsErr
 }

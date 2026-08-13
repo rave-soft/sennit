@@ -136,6 +136,10 @@ func (w *readOnlyWorkspace) ParseAgentToolSessionID(sessionID string) (string, s
 }
 
 func (w *readOnlyWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	return w.SetCurrentSessionGeneration(ctx, sessionID, 0)
+}
+
+func (w *readOnlyWorkspace) SetCurrentSessionGeneration(ctx context.Context, sessionID string, _ uint64) error {
 	if sessionID == "" {
 		return nil
 	}
@@ -175,6 +179,13 @@ func (w *readOnlyWorkspace) ListUserMessages(ctx context.Context, sessionID stri
 
 func (w *readOnlyWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
 	return w.underlying.ListUserMessages(ctx, w.sessionID)
+}
+
+func (w *readOnlyWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]message.Message, error) {
+	if rootSessionID != w.sessionID {
+		return nil, w.scopeError(rootSessionID)
+	}
+	return w.underlying.ListMessagesBySessionIDs(ctx, w.sessionID, generation, sessionIDs)
 }
 
 // -- Agent (query only, no mutations) --

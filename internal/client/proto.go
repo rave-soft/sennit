@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
@@ -92,13 +93,17 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string) error {
 // request carries the process-scoped client ID minted in [NewClient]
 // as a query parameter so the server can route the update to the
 // correct [clientState] entry.
-func (c *Client) SetCurrentSession(ctx context.Context, workspaceID, sessionID string) error {
+func (c *Client) SetCurrentSession(ctx context.Context, workspaceID, sessionID string, generations ...uint64) error {
+	var generation uint64
+	if len(generations) > 0 {
+		generation = generations[0]
+	}
 	q := url.Values{"client_id": []string{c.clientID}}
 	rsp, err := c.post(
 		ctx,
 		fmt.Sprintf("/workspaces/%s/current-session", workspaceID),
 		q,
-		jsonBody(proto.CurrentSession{SessionID: sessionID}),
+		jsonBody(proto.CurrentSession{SessionID: sessionID, Generation: generation}),
 		http.Header{"Content-Type": []string{"application/json"}},
 	)
 	if err != nil {
@@ -613,6 +618,30 @@ func (c *Client) ListMessages(ctx context.Context, id string, sessionID string) 
 	var msgs []proto.Message
 	if err := json.NewDecoder(rsp.Body).Decode(&msgs); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("failed to decode messages: %w", err)
+	}
+	return msgs, nil
+}
+
+func (c *Client) ListMessagesBySessionIDs(ctx context.Context, id, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]proto.Message, error) {
+	q := url.Values{
+		"client_id":       []string{c.clientID},
+		"root_session_id": []string{rootSessionID},
+		"generation":      []string{strconv.FormatUint(generation, 10)},
+	}
+	for _, sid := range sessionIDs {
+		q.Add("ids", sid)
+	}
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/sessions/batch/messages", id), q, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get batch messages: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get batch messages: status code %d", rsp.StatusCode)
+	}
+	var msgs map[string][]proto.Message
+	if err := json.NewDecoder(rsp.Body).Decode(&msgs); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("failed to decode batch messages: %w", err)
 	}
 	return msgs, nil
 }

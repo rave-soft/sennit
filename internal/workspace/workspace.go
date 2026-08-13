@@ -133,8 +133,10 @@ type SessionStore interface {
 	// mode it informs the server's per-client presence map so other
 	// observers can compute attached-client counts per session.
 	SetCurrentSession(ctx context.Context, sessionID string) error
+	SetCurrentSessionGeneration(ctx context.Context, sessionID string, generation uint64) error
 
 	ListMessages(ctx context.Context, sessionID string) ([]message.Message, error)
+	ListMessagesBySessionIDs(ctx context.Context, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]message.Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListAllUserMessages(ctx context.Context) ([]message.Message, error)
 }

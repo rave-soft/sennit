@@ -70,6 +70,7 @@ type Service interface {
 	Get(ctx context.Context, id string) (Session, error)
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
+	ValidateSessionIDsInTree(ctx context.Context, rootSessionID string, sessionIDs []string) ([]string, error)
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
@@ -251,6 +252,21 @@ func (s *service) Rename(ctx context.Context, id string, title string) error {
 	}
 	s.publishSessionUpdate(ctx, id)
 	return nil
+}
+
+func (s *service) ValidateSessionIDsInTree(ctx context.Context, rootSessionID string, sessionIDs []string) ([]string, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	idsJSON, err := json.Marshal(sessionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal session IDs: %w", err)
+	}
+	return s.q.BatchValidateSessionIDsInTree(ctx, db.BatchValidateSessionIDsInTreeParams{
+		SessionIdsJson: string(idsJSON),
+		RootSessionID:  rootSessionID,
+		ProjectPath:    s.projectPath,
+	})
 }
 
 func (s *service) List(ctx context.Context) ([]Session, error) {

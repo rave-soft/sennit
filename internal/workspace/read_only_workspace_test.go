@@ -292,6 +292,8 @@ type stubWorkspace struct {
 	sessionCreateCount int
 	sessions           map[string]session.Session
 	importCopilotCalls int
+	getSessionCalls    int
+	batchRoots         []string
 }
 
 // SessionStore
@@ -301,6 +303,7 @@ func (s *stubWorkspace) CreateSession(ctx context.Context, title string) (sessio
 }
 
 func (s *stubWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {
+	s.getSessionCalls++
 	if sess, ok := s.sessions[sessionID]; ok {
 		return sess, nil
 	}
@@ -333,6 +336,10 @@ func (s *stubWorkspace) ParseAgentToolSessionID(sessionID string) (string, strin
 }
 
 func (s *stubWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	return s.SetCurrentSessionGeneration(ctx, sessionID, 0)
+}
+
+func (s *stubWorkspace) SetCurrentSessionGeneration(_ context.Context, sessionID string, _ uint64) error {
 	s.sessionID = sessionID
 	return nil
 }
@@ -509,8 +516,43 @@ func (s *stubWorkspace) AttachThread(ctx context.Context, id string) (Workspace,
 func (s *stubWorkspace) Subscribe(program *tea.Program) {}
 func (s *stubWorkspace) Shutdown()                      {}
 
+func (s *stubWorkspace) ListMessagesBySessionIDs(_ context.Context, rootSessionID string, _ uint64, sessionIDs []string) (map[string][]message.Message, error) {
+	s.batchRoots = append(s.batchRoots, rootSessionID)
+	result := make(map[string][]message.Message)
+	for _, sid := range sessionIDs {
+		result[sid] = []message.Message{{ID: "msg-" + sid}}
+	}
+	return result, nil
+}
+
 // ImportCopilot
 func (s *stubWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	s.importCopilotCalls++
 	return nil, false
+}
+
+func TestReadOnlyWorkspace_BatchMessages_ChildAndSibling(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubWorkspace{
+		sessions: map[string]session.Session{
+			"root":         {ID: "root"},
+			"root$$child":  {ID: "root$$child", ParentSessionID: "root"},
+			"root$$sib":    {ID: "root$$sib", ParentSessionID: "root"},
+			"other$$child": {ID: "other$$child", ParentSessionID: "other"},
+		},
+	}
+	ro := newReadOnlyWorkspace(stub, "/tmp/worktree", "root")
+
+	msgs, err := ro.ListMessagesBySessionIDs(t.Context(), "root", 7, []string{"root", "root$$child", "root$$sib"})
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+	require.Contains(t, msgs, "root")
+	require.Contains(t, msgs, "root$$child")
+	require.Contains(t, msgs, "root$$sib")
+	require.Zero(t, stub.getSessionCalls)
+	require.Equal(t, []string{"root"}, stub.batchRoots)
+	_, err = ro.ListMessagesBySessionIDs(t.Context(), "other", 8, []string{"other$$child"})
+	require.Error(t, err)
+	require.Equal(t, []string{"root"}, stub.batchRoots)
 }

@@ -2241,12 +2241,20 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	return cmds
 }
 
-// loadNestedToolCalls recursively loads nested tool calls for agent/agentic_fetch tools.
 func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
-	loadNestedToolCalls(context.Background(), m.com.Workspace, m.com.Styles, m.com.Config(), items)
+	if m.session != nil {
+		_ = loadNestedToolCalls(context.Background(), m.com.Workspace, m.com.Styles, m.com.Config(), m.session.ID, m.sessionLoadGen, items)
+	}
 }
 
-func loadNestedToolCalls(ctx context.Context, ws workspace.Workspace, sty *styles.Styles, cfg *config.Config, items []chat.MessageItem) {
+type childLoad struct {
+	sessionID string
+	container chat.NestedToolContainer
+	tools     []chat.ToolMessageItem
+}
+
+func loadNestedToolCalls(ctx context.Context, ws workspace.Workspace, sty *styles.Styles, cfg *config.Config, rootSessionID string, generation uint64, items []chat.MessageItem) error {
+	var children []childLoad
 	for _, item := range items {
 		nestedContainer, ok := item.(chat.NestedToolContainer)
 		if !ok {
@@ -2256,51 +2264,66 @@ func loadNestedToolCalls(ctx context.Context, ws workspace.Workspace, sty *style
 		if !ok {
 			continue
 		}
-
 		tc := toolItem.ToolCall()
-		messageID := toolItem.MessageID()
+		children = append(children, childLoad{
+			sessionID: ws.CreateAgentToolSessionID(toolItem.MessageID(), tc.ID),
+			container: nestedContainer,
+		})
+	}
 
-		// Get the agent tool session ID.
-		agentSessionID := ws.CreateAgentToolSessionID(messageID, tc.ID)
+	if len(children) == 0 {
+		return nil
+	}
 
-		// Fetch nested messages.
-		nestedMsgs, err := ws.ListMessages(ctx, agentSessionID)
-		if err != nil || len(nestedMsgs) == 0 {
+	sessionIDs := make([]string, len(children))
+	for i, c := range children {
+		sessionIDs[i] = c.sessionID
+	}
+
+	nestedMsgsMap, err := ws.ListMessagesBySessionIDs(ctx, rootSessionID, generation, sessionIDs)
+	if err != nil {
+		return err
+	}
+
+	var deeperItems []chat.MessageItem
+	for i := range children {
+		c := &children[i]
+		nestedMsgs, ok := nestedMsgsMap[c.sessionID]
+		if !ok || len(nestedMsgs) == 0 {
 			continue
 		}
 
-		// Build tool result map for nested messages.
 		nestedMsgPtrs := make([]*message.Message, len(nestedMsgs))
 		for i := range nestedMsgs {
 			nestedMsgPtrs[i] = &nestedMsgs[i]
 		}
 		nestedToolResultMap := chat.BuildToolResultMap(nestedMsgPtrs)
 
-		// Extract nested tool items.
-		var nestedTools []chat.ToolMessageItem
 		for _, nestedMsg := range nestedMsgPtrs {
 			nestedItems := chat.ExtractMessageItems(sty, nestedMsg, nestedToolResultMap, cfg)
 			for _, nestedItem := range nestedItems {
 				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
-					// Mark nested tools as simple (compact) rendering.
 					if simplifiable, ok := nestedToolItem.(chat.Compactable); ok {
 						simplifiable.SetCompact(true)
 					}
-					nestedTools = append(nestedTools, nestedToolItem)
+					c.tools = append(c.tools, nestedToolItem)
+
+					if _, ok := nestedItem.(chat.NestedToolContainer); ok {
+						deeperItems = append(deeperItems, nestedItem)
+					}
 				}
 			}
 		}
-
-		// Recursively load nested tool calls for any agent tools within.
-		nestedMessageItems := make([]chat.MessageItem, len(nestedTools))
-		for i, nt := range nestedTools {
-			nestedMessageItems[i] = nt
-		}
-		loadNestedToolCalls(ctx, ws, sty, cfg, nestedMessageItems)
-
-		// Set nested tools on the parent.
-		nestedContainer.SetNestedTools(nestedTools)
 	}
+
+	if err := loadNestedToolCalls(ctx, ws, sty, cfg, rootSessionID, generation, deeperItems); err != nil {
+		return err
+	}
+
+	for i := range children {
+		children[i].container.SetNestedTools(children[i].tools)
+	}
+	return nil
 }
 
 // appendSessionMessage appends a new message to the current session in the chat
@@ -5883,6 +5906,8 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
+	m.sessionLoadGen++
+	m.sessionLoadExpectedID = ""
 	m.session = nil
 	m.sidebar.offset = 0
 	m.sessionFiles = nil

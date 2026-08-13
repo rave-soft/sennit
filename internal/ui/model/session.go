@@ -142,7 +142,9 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
 	}
 	items, lastUserMessageTime := sessionMessageItems(r.styles, r.config, msgs)
-	loadNestedToolCalls(r.ctx, r.workspace, r.styles, r.config, items)
+	if err := loadNestedToolCalls(r.ctx, r.workspace, r.styles, r.config, sessionID, gen, items); err != nil {
+		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
+	}
 
 	return loadSessionMsg{
 		gen:                 gen,
@@ -162,8 +164,9 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 // state.
 func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	workspace := m.com.Workspace
+	generation := m.sessionLoadGen
 	return func() tea.Msg {
-		if err := workspace.SetCurrentSession(context.Background(), sessionID); err != nil {
+		if err := workspace.SetCurrentSessionGeneration(context.Background(), sessionID, generation); err != nil {
 			slog.Debug("Failed to report current session", "session_id", sessionID, "error", err)
 		}
 		return nil

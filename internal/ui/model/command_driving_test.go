@@ -68,6 +68,8 @@ type cmdDrivingWorkspace struct {
 	permSkipCalls           int
 
 	listMessagesCalls       int
+	listMessagesByIDsCalls  int
+	listMessagesByIDs       [][]string
 	listMessagesErrByID     map[string]error
 	listThreadsCalls        int
 	getSessionCalls         int
@@ -208,6 +210,22 @@ func (w *cmdDrivingWorkspace) ListMessages(_ context.Context, id string) ([]mess
 	return result, nil
 }
 
+func (w *cmdDrivingWorkspace) ListMessagesBySessionIDs(_ context.Context, _ string, _ uint64, ids []string) (map[string][]message.Message, error) {
+	w.listMessagesByIDsCalls++
+	w.listMessagesByIDs = append(w.listMessagesByIDs, append([]string(nil), ids...))
+	result := make(map[string][]message.Message)
+	for _, id := range ids {
+		if err := w.listMessagesErrByID[id]; err != nil {
+			return nil, err
+		}
+		msgs, ok := w.messagesBySessionID[id]
+		if ok {
+			result[id] = append([]message.Message{}, msgs...)
+		}
+	}
+	return result, nil
+}
+
 func (w *cmdDrivingWorkspace) ListUserMessages(_ context.Context, _ string) ([]message.Message, error) {
 	return nil, nil
 }
@@ -233,6 +251,10 @@ func (w *cmdDrivingWorkspace) ParseAgentToolSessionID(_ string) (string, string,
 }
 
 func (w *cmdDrivingWorkspace) SetCurrentSession(_ context.Context, sessionID string) error {
+	return w.SetCurrentSessionGeneration(context.Background(), sessionID, 0)
+}
+
+func (w *cmdDrivingWorkspace) SetCurrentSessionGeneration(_ context.Context, sessionID string, _ uint64) error {
 	w.setCurrentSessionCalls++
 	w.currentSessionIDs = append(w.currentSessionIDs, sessionID)
 	return nil
@@ -1047,6 +1069,122 @@ func TestCmdDriving_LoadSession_NestedToolsApplied(t *testing.T) {
 	applied := delegations[0].(chat.NestedToolContainer)
 	require.Len(t, applied.NestedTools(), 1)
 	require.Equal(t, "child-call", applied.NestedTools()[0].ToolCall().ID)
+}
+
+func TestCmdDriving_LoadSession_MultipleChildrenBatched(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady: true,
+		sessionsBySessionID: map[string]session.Session{
+			"parent": {ID: "parent"},
+		},
+		messagesBySessionID: map[string][]message.Message{
+			"parent": {
+				{
+					ID: "parent-message", Role: message.Assistant, SessionID: "parent",
+					Parts: []message.ContentPart{
+						message.ToolCall{ID: "agent-1", Name: "agent", Input: `{}`},
+						message.ToolCall{ID: "agent-2", Name: "agent", Input: `{}`},
+						message.ToolCall{ID: "bash-1", Name: "bash", Input: `{}`},
+					},
+				},
+			},
+			"parent-message:agent-1": {
+				{
+					ID: "child1-msg", Role: message.Assistant, SessionID: "parent-message:agent-1",
+					Parts: []message.ContentPart{message.ToolCall{ID: "child1-call", Name: "bash", Input: `{}`}},
+				},
+			},
+			"parent-message:agent-2": {
+				{
+					ID: "child2-msg", Role: message.Assistant, SessionID: "parent-message:agent-2",
+					Parts: []message.ContentPart{message.ToolCall{ID: "child2-call", Name: "bash", Input: `{}`}},
+				},
+			},
+		},
+	}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	_, cmd := m.Update(requestSessionLoad{sessionID: "parent"})
+	result := cmd().(loadSessionMsg)
+	require.NoError(t, result.err)
+
+	require.Len(t, result.items, 3)
+
+	var agentContainers []chat.NestedToolContainer
+	for _, item := range result.items {
+		if container, ok := item.(chat.NestedToolContainer); ok {
+			agentContainers = append(agentContainers, container)
+		}
+	}
+	require.Len(t, agentContainers, 2, "should have 2 agent containers")
+
+	for _, container := range agentContainers {
+		nested := container.NestedTools()
+		require.Len(t, nested, 1)
+	}
+
+	require.Equal(t, 1, ws.listMessagesCalls)
+	require.Equal(t, 1, ws.listMessagesByIDsCalls)
+	require.ElementsMatch(t, []string{"parent-message:agent-1", "parent-message:agent-2"}, ws.listMessagesByIDs[0])
+}
+
+func TestCmdDriving_LoadSession_DeepNestingRecursiveBatch(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{
+		agentReady: true,
+		sessionsBySessionID: map[string]session.Session{
+			"parent": {ID: "parent"},
+		},
+		messagesBySessionID: map[string][]message.Message{
+			"parent": {
+				{
+					ID: "msg-level1", Role: message.Assistant, SessionID: "parent",
+					Parts: []message.ContentPart{
+						message.ToolCall{ID: "agent-level1", Name: "agent", Input: `{}`},
+					},
+				},
+			},
+			"msg-level1:agent-level1": {
+				{
+					ID: "msg-level2", Role: message.Assistant, SessionID: "msg-level1:agent-level1",
+					Parts: []message.ContentPart{
+						message.ToolCall{ID: "agent-level2", Name: "agent", Input: `{}`},
+					},
+				},
+			},
+			"msg-level2:agent-level2": {
+				{
+					ID: "msg-level3", Role: message.Assistant, SessionID: "msg-level2:agent-level2",
+					Parts: []message.ContentPart{message.ToolCall{ID: "deep-call", Name: "bash", Input: `{}`}},
+				},
+			},
+		},
+	}
+	m := newCmdDrivenUI(ws)
+	warmCmdDrivenCaches(m)
+
+	_, cmd := m.Update(requestSessionLoad{sessionID: "parent"})
+	result := cmd().(loadSessionMsg)
+	require.NoError(t, result.err)
+
+	require.Len(t, result.items, 1)
+	level1Container := result.items[0].(chat.NestedToolContainer)
+	level1Nested := level1Container.NestedTools()
+	require.Len(t, level1Nested, 1)
+
+	level2Container := level1Nested[0].(chat.NestedToolContainer)
+	level2Nested := level2Container.NestedTools()
+	require.Len(t, level2Nested, 1)
+
+	require.Equal(t, "deep-call", level2Nested[0].ToolCall().ID)
+	require.Equal(t, 1, ws.listMessagesCalls)
+	require.Equal(t, 2, ws.listMessagesByIDsCalls)
+	require.Equal(t, []string{"msg-level1:agent-level1"}, ws.listMessagesByIDs[0])
+	require.Equal(t, []string{"msg-level2:agent-level2"}, ws.listMessagesByIDs[1])
 }
 
 func TestCmdDriving_LoadSession_CapturesWorkspace(t *testing.T) {

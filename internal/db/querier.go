@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	BatchValidateSessionIDsInTree(ctx context.Context, arg BatchValidateSessionIDsInTreeParams) ([]string, error)
 	CountSessionFiles(ctx context.Context, sessionID string) (int64, error)
 	CountSessionMessages(ctx context.Context, sessionID string) (int64, error)
 	CountSessionReadFiles(ctx context.Context, sessionID string) (int64, error)
@@ -40,6 +41,7 @@ type Querier interface {
 	ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
+	ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context, projectPath string) ([]Session, error)

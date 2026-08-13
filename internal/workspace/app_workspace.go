@@ -82,6 +82,10 @@ func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string
 // is irrelevant in single-client local mode, but herdr still needs
 // to know which session is live to support agent resume.
 func (w *AppWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
+	return w.SetCurrentSessionGeneration(ctx, sessionID, 0)
+}
+
+func (w *AppWorkspace) SetCurrentSessionGeneration(_ context.Context, sessionID string, _ uint64) error {
 	w.app.ReportCurrentSession(sessionID)
 	return nil
 }
@@ -104,6 +108,17 @@ func (w *AppWorkspace) ListUserMessages(ctx context.Context, sessionID string) (
 
 func (w *AppWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
 	return w.app.Messages.ListAllUserMessages(ctx)
+}
+
+func (w *AppWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSessionID string, _ uint64, sessionIDs []string) (map[string][]message.Message, error) {
+	validated, err := w.app.Sessions.ValidateSessionIDsInTree(ctx, rootSessionID, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := w.app.Messages.FlushAll(ctx); err != nil {
+		return nil, err
+	}
+	return w.app.Messages.ListBySessionIDs(ctx, validated)
 }
 
 // -- Agent --
