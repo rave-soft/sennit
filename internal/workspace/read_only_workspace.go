@@ -499,6 +499,10 @@ func (w *readOnlyWorkspace) SendThread(ctx context.Context, id, message string) 
 	return w.readOnlyError("SendThread")
 }
 
+func (w *readOnlyWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
+	return proto.Thread{}, w.readOnlyError("ActivateThread")
+}
+
 func (w *readOnlyWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
 	return proto.Thread{}, w.readOnlyError("MergeThread")
 }

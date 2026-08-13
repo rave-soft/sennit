@@ -209,6 +209,15 @@ func (m *Manager) resolve(ctx context.Context, idOrName string) (Thread, error) 
 // launches its goal prompt in the background. It returns once the thread
 // is running (or has failed to get there); it does not wait for the
 // agent run itself to finish — subscribe or use [Manager.Wait] for that.
+//
+// An empty Goal creates the thread without dispatching anything: the
+// worktree, branch, session, and workspace are set up and the thread
+// rests at [StatusIdle], ready to be attached to and driven by hand. Both
+// callers already treat the goal as optional (the CLI's --goal flag, the
+// TUI's create dialog), and isolating work you intend to do yourself is
+// the point of that path — dispatching an empty prompt would only fail
+// agent validation and strand the thread at [StatusFailed] with a
+// worktree on disk.
 func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	done, err := m.beginOp()
 	if err != nil {
@@ -303,6 +312,20 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
 
+	if args.Goal == "" {
+		st, err = m.setStatus(ctx, st.ID, StatusIdle, "", "", 0)
+		if err != nil {
+			m.abortSpawn(ctx, handle, worktreePath)
+			return Thread{}, err
+		}
+		// Keep the workspace live so attaching to the thread lands in a
+		// writable session rather than the read-only view reserved for
+		// unspawned threads. Shutdown and Remove release it like any
+		// other runtime.
+		m.installRuntime(handle, st.ID)
+		return st, nil
+	}
+
 	st, err = m.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 	if err != nil {
 		m.abortSpawn(ctx, handle, worktreePath)
@@ -347,12 +370,43 @@ func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error 
 // observe "no runtime", delete the thread, and leave this runtime
 // stranded on a thread that no longer exists.
 func (m *Manager) startRun(handle Handle, threadID, sessionID, prompt string) {
+	rt := m.installRuntime(handle, threadID)
 	c := m.control(threadID)
 	runID := uuid.NewString()
+	c.mu.Lock()
+	rt.runID = runID
+	c.mu.Unlock()
+
+	// Reserve acceptance before dispatch so cancellation cannot leave a run
+	// unaccounted for between goroutine scheduling and coordinator admission.
+	accept := handle.App().AgentCoordinator.BeginAccepted(sessionID)
+	m.goWorker(func() {
+		if _, err := handle.App().AgentCoordinator.RunAccepted(agent.WithRunID(m.ctx, runID), accept, sessionID, prompt); err != nil {
+			slog.Error("thread: agent run returned an error", "session_id", sessionID, "error", err)
+			// backend.runAgent documents this fallback for pre-execution
+			// failures. Local coordinators do not provide that wrapper.
+			m.onRunComplete(threadID, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
+		}
+	})
+}
+
+// installRuntime binds handle to threadID as the thread's live workspace
+// and starts the RunComplete watcher for it, without dispatching any run.
+// The returned runtime carries an empty runID: nothing is in flight yet,
+// and onRunComplete ignores completions that do not match the current
+// runID, so a stray event cannot tear the workspace down.
+//
+// This is the state an idle thread rests in — a live, isolated workspace
+// with no agent run of its own — and the first half of what startRun
+// does. Callers must hold the thread's opMu, for the reason startRun
+// documents.
+func (m *Manager) installRuntime(handle Handle, threadID string) *runtimeState {
+	c := m.control(threadID)
 	watchCtx, cancel := context.WithCancel(m.ctx)
 	sub := handle.App().RunCompletions().Subscribe(watchCtx)
+	rt := &runtimeState{handle: handle, watchCancel: cancel}
 	c.mu.Lock()
-	c.runtime = &runtimeState{handle: handle, watchCancel: cancel, runID: runID}
+	c.runtime = rt
 	c.mu.Unlock()
 
 	m.goWorker(func() {
@@ -368,18 +422,7 @@ func (m *Manager) startRun(handle Handle, threadID, sessionID, prompt string) {
 			}
 		}
 	})
-
-	// Reserve acceptance before dispatch so cancellation cannot leave a run
-	// unaccounted for between goroutine scheduling and coordinator admission.
-	accept := handle.App().AgentCoordinator.BeginAccepted(sessionID)
-	m.goWorker(func() {
-		if _, err := handle.App().AgentCoordinator.RunAccepted(agent.WithRunID(m.ctx, runID), accept, sessionID, prompt); err != nil {
-			slog.Error("thread: agent run returned an error", "session_id", sessionID, "error", err)
-			// backend.runAgent documents this fallback for pre-execution
-			// failures. Local coordinators do not provide that wrapper.
-			m.onRunComplete(threadID, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
-		}
-	})
+	return rt
 }
 
 // onRunComplete is the RunComplete handler: it reacts to the authoritative
@@ -450,6 +493,72 @@ func (m *Manager) onRunComplete(threadID string, rc notify.RunComplete) {
 	}
 }
 
+// Activate makes a thread's isolated workspace live again without
+// dispatching any agent run, moving it to [StatusIdle] while preserving
+// the result summary and error of whatever run finished earlier. It is
+// what lets a caller attach to a thread whose run is over and keep
+// working in it by hand: an unspawned thread can only be viewed
+// read-only.
+//
+// Activating a thread that is already live is a no-op that returns its
+// current state. Threads in the merge flow (merging, merged, conflict,
+// merge_blocked) are rejected: their branch is being folded into the base
+// branch, and reopening the worktree for hand edits underneath that is a
+// different feature with its own conflict semantics.
+func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error) {
+	done, err := m.beginOp()
+	if err != nil {
+		return Thread{}, err
+	}
+	defer done()
+	st, err := m.resolve(ctx, idOrName)
+	if err != nil {
+		return Thread{}, err
+	}
+
+	c := m.control(st.ID)
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	c.mu.Lock()
+	rt := c.runtime
+	removed := c.removed
+	c.mu.Unlock()
+	if removed {
+		return Thread{}, fmt.Errorf("thread: %q has been removed", idOrName)
+	}
+	if rt != nil {
+		return st, nil
+	}
+
+	switch st.Status {
+	case StatusMerging, StatusMerged, StatusConflict, StatusMergeBlocked:
+		return Thread{}, fmt.Errorf("thread: %q is in the merge flow (%s) and cannot be reactivated", idOrName, st.Status)
+	}
+	if _, err := os.Stat(st.WorktreePath); err != nil {
+		return Thread{}, fmt.Errorf("thread: worktree for %q is unavailable: %w", idOrName, err)
+	}
+
+	handle, err := m.spawner.Spawn(m.ctx, st.WorktreePath)
+	if err != nil {
+		return Thread{}, fmt.Errorf("thread: respawn workspace: %w", err)
+	}
+	if err := m.ctx.Err(); err != nil {
+		_ = m.spawner.Release(context.Background(), handle.ID())
+		return Thread{}, err
+	}
+
+	// Preserve the earlier run's outcome: SetStatus rewrites all four
+	// columns, so the summary/error/timestamp have to be carried across
+	// explicitly or reactivating would erase the record of what ran.
+	st, err = m.setStatus(ctx, st.ID, StatusIdle, st.Error, st.ResultSummary, st.CompletedAt)
+	if err != nil {
+		_ = m.spawner.Release(ctx, handle.ID())
+		return Thread{}, err
+	}
+	m.installRuntime(handle, st.ID)
+	return st, nil
+}
+
 // Send re-dispatches message into a thread's session, resuming it if its
 // workspace is not currently spawned (e.g. after an interrupted run — the
 // worktree is still on disk, so the workspace is simply respawned).
@@ -476,13 +585,16 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 	}
 
 	if rt != nil {
-		// A run is already in flight. Queue the follow-up as its own
+		// The workspace is live: either a run is in flight, or the
+		// thread is idle (created without a goal, or reactivated). Both
+		// take the same path — dispatch the message as its own
 		// RunID-bearing turn (the dispatcher gives every RunID-bearing
 		// queued prompt its own turn and terminal RunComplete) and hand
 		// workspace ownership to it: rt.runID is advanced under c.mu, so
-		// the in-flight run's completion no longer matches in
+		// any in-flight run's completion no longer matches in
 		// onRunComplete and cannot release the workspace out from under
-		// the queued turn.
+		// the queued turn. For an idle thread rt.runID was empty, so
+		// there is no earlier run to displace.
 		st, err = m.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 		if err != nil {
 			return err

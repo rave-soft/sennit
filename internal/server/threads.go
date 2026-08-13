@@ -189,6 +189,42 @@ func (c *controllerV1) handlePostWorkspaceThreadSend(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceThreadActivate reactivates a thread's workspace.
+//
+//	@Summary		Activate thread
+//	@Tags			threads
+//	@Produce		json
+//	@Param			id			path		string	true	"Workspace ID"
+//	@Param			threadID	path		string	true	"Thread ID or name"
+//	@Success		200			{object}	proto.Thread
+//	@Failure		404			{object}	proto.Error
+//	@Failure		409			{object}	proto.Error
+//	@Failure		500			{object}	proto.Error
+//	@Router			/workspaces/{id}/threads/{threadID}/activate [post]
+func (c *controllerV1) handlePostWorkspaceThreadActivate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	threadID := r.PathValue("threadID")
+	mgr, ok := c.requireThreadManager(w, r, id)
+	if !ok {
+		return
+	}
+
+	if _, err := mgr.Get(r.Context(), threadID); err != nil {
+		jsonError(w, http.StatusNotFound, "thread not found")
+		return
+	}
+	st, err := mgr.Activate(r.Context(), threadID)
+	if err != nil {
+		// Refusing to reactivate a thread in the merge flow is a
+		// statement about the thread's state, not a server fault, so it
+		// reads as a conflict rather than a 500.
+		c.server.logError(r, "Failed to activate thread", "error", err)
+		jsonError(w, http.StatusConflict, err.Error())
+		return
+	}
+	jsonEncode(w, mgr.ToProto(st))
+}
+
 // handlePostWorkspaceThreadMerge merges (or retries merging) a thread.
 //
 //	@Summary		Merge thread

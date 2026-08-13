@@ -277,6 +277,10 @@ func TestAppWorkspace_AttachThread_UnknownID(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestAppWorkspace_AttachThread_CompletedThread verifies that attaching
+// to a thread whose run has finished reactivates it: the workspace is
+// respawned and the caller gets a writable workspace, so the user can
+// keep working in the thread by hand instead of only reading it.
 func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 
@@ -312,7 +316,8 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{
-		Status: thread.StatusCompleted,
+		Status:        thread.StatusCompleted,
+		ResultSummary: "did the thing",
 	})
 	require.NoError(t, err)
 
@@ -326,15 +331,16 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	require.NotNil(t, detach)
 	require.NotPanics(t, detach)
 
-	// The attached workspace can read the persisted session from the shared DB.
-	sess, err := attached.GetSession(t.Context(), "sess-1")
-	require.NoError(t, err, "should be able to read persisted session")
-	require.Equal(t, "complete-me", sess.Title)
+	// The thread was reactivated: a writable workspace bound to the
+	// thread's own respawned app, not the read-only view.
+	require.IsType(t, &AppWorkspace{}, attached, "attaching to a finished thread should reactivate it")
+	require.NotNil(t, mgr.Handle(created.ID), "reactivation should install a runtime")
 
-	// The thread is still listable and readable via the main workspace.
+	// It now rests at idle, and the finished run's summary survives.
 	got, err := aw.GetThread(t.Context(), created.ID)
 	require.NoError(t, err)
-	require.Equal(t, string(thread.StatusCompleted), got.Status)
+	require.Equal(t, string(thread.StatusIdle), got.Status)
+	require.Equal(t, "did the thing", got.ResultSummary, "reactivation must not erase the earlier run's result")
 }
 
 // TestAppWorkspace_AttachThread_LiveThread verifies that AttachThread for
@@ -423,10 +429,12 @@ func TestAppWorkspace_TranslateEvent_ThreadLifecycle(t *testing.T) {
 	}
 }
 
-// TestAppWorkspace_AttachThread_CompletedThread_ReadMessages verifies that
-// attaching to a completed thread's persisted session yields the session
-// metadata read from the shared database via the main app's session store.
-func TestAppWorkspace_AttachThread_CompletedThread_ReadMessages(t *testing.T) {
+// TestAppWorkspace_AttachThread_MergedThread_ReadMessages verifies the
+// read-only fallback: a thread in the merge flow is deliberately refused
+// reactivation, so attaching to it still yields a read-only workspace
+// whose session metadata is read from the shared database via the main
+// app's session store.
+func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 
 	a := app.NewForTest(t.Context())
@@ -459,32 +467,36 @@ func TestAppWorkspace_AttachThread_CompletedThread_ReadMessages(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{
-		Status: thread.StatusCompleted,
+		Status: thread.StatusMerged,
 	})
 	require.NoError(t, err)
 
 	require.Nil(t, mgr.Handle(created.ID), "handle should be nil after completion")
 
-	// Attach to the completed thread — should return a read-only workspace.
+	// Attach to the merged thread — reactivation is refused, so this
+	// falls back to a read-only workspace.
 	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
 	attached, detach, err := aw.AttachThread(t.Context(), created.ID)
 	require.NoError(t, err)
 	require.NotNil(t, attached)
 	require.NotNil(t, detach)
 	require.NotPanics(t, detach)
+	require.IsType(t, &readOnlyWorkspace{}, attached, "merge-flow threads must not be reactivated")
+	require.Nil(t, mgr.Handle(created.ID), "refused reactivation must not spawn a workspace")
 
 	// The attached workspace can read the persisted session from the
 	// shared session store via the main app.
 	sess, err := attached.GetSession(t.Context(), "sess-1")
-	require.NoError(t, err, "GetSession on completed thread should succeed")
+	require.NoError(t, err, "GetSession on merged thread should succeed")
 	require.Equal(t, "read-msgs", sess.Title)
 }
 
-// TestAppWorkspace_AttachThread_CompletedThread_IsReadOnly verifies that
-// the workspace returned for a completed thread is read-only: all
-// mutating operations return ErrReadOnlyOperation, and shutdown of the
-// attached workspace does not affect the parent.
-func TestAppWorkspace_AttachThread_CompletedThread_IsReadOnly(t *testing.T) {
+// TestAppWorkspace_AttachThread_MergedThread_IsReadOnly verifies that the
+// workspace returned for a thread that cannot be reactivated (one in the
+// merge flow) is read-only: all mutating operations return
+// ErrReadOnlyOperation, and shutdown of the attached workspace does not
+// affect the parent.
+func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 
 	a := app.NewForTest(t.Context())
@@ -514,7 +526,7 @@ func TestAppWorkspace_AttachThread_CompletedThread_IsReadOnly(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{
-		Status: thread.StatusCompleted,
+		Status: thread.StatusMerged,
 	})
 	require.NoError(t, err)
 

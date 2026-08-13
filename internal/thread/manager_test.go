@@ -344,6 +344,181 @@ func TestManager_CreateHappyPath(t *testing.T) {
 	require.True(t, gotRunning)
 }
 
+// A thread created without a goal is an isolation-only thread: the
+// worktree, branch, session, and workspace are set up, but nothing is
+// dispatched. Before this, Create always called startRun, and the agent's
+// empty-prompt validation pushed the thread straight to failed.
+func TestManager_CreateWithoutGoalStaysIdle(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "solo", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	require.Equal(t, StatusIdle, st.Status)
+	require.NotEmpty(t, st.SessionID)
+	require.DirExists(t, st.WorktreePath)
+	require.Contains(t, runGit(t, repo, "branch", "--list", "thread/solo"), "thread/solo")
+
+	// The workspace stays live so attaching lands in a writable session.
+	require.NotNil(t, mgr.Handle(st.ID))
+
+	// Nothing was dispatched, and nothing arrives late either.
+	coord := spawner.coordFor(st.WorktreePath)
+	require.NotNil(t, coord)
+	require.Never(t, func() bool { return coord.runCount() > 0 }, 200*time.Millisecond, 20*time.Millisecond)
+
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusIdle, got.Status)
+	require.Empty(t, got.Error)
+}
+
+// An idle thread is a live workspace with no run in flight, so Send
+// dispatches into it directly rather than respawning.
+func TestManager_SendIntoIdleThread(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "solo-send", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	require.Equal(t, StatusIdle, st.Status)
+
+	require.NoError(t, mgr.Send(t.Context(), st.ID, "now do the thing"))
+
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusRunning, got.Status)
+
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
+
+	// The run completes normally, which means the RunComplete watcher was
+	// installed when the idle workspace was created, not only by startRun.
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	got, err = mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusCompleted, got.Status)
+}
+
+// Activate respawns a finished thread's workspace without dispatching a
+// run, so a caller can attach and work in it by hand.
+func TestManager_ActivateFinishedThread(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "revive", Goal: "do it", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.Nil(t, mgr.Handle(st.ID), "a completed thread releases its workspace")
+
+	completed, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, "finished", completed.ResultSummary)
+
+	activated, err := mgr.Activate(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusIdle, activated.Status)
+	require.Equal(t, "finished", activated.ResultSummary, "the earlier run's result must survive")
+	require.NotNil(t, mgr.Handle(st.ID))
+
+	// Activation dispatches nothing on its own.
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Never(t, func() bool { return coord.runCount() > 0 }, 200*time.Millisecond, 20*time.Millisecond)
+
+	// Activating a live thread is a no-op that reports its current state.
+	again, err := mgr.Activate(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusIdle, again.Status)
+}
+
+// Threads in the merge flow are refused: their branch is being folded
+// into the base branch, and reopening the worktree underneath that is a
+// different feature with its own conflict semantics.
+func TestManager_ActivateRefusesMergeFlow(t *testing.T) {
+	repo := initRepo(t)
+	store := newTestStoreDB(t)
+	mgr := NewManager(ManagerOptions{
+		Store:       store,
+		Spawner:     newFakeSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+
+	for _, status := range []Status{StatusMerging, StatusMerged, StatusConflict, StatusMergeBlocked} {
+		t.Run(string(status), func(t *testing.T) {
+			st, err := store.Create(t.Context(), CreateParams{
+				Name: "merge-" + string(status), Goal: "x", BaseBranch: "main",
+				Branch: "thread/merge-" + string(status), WorktreePath: t.TempDir(),
+			})
+			require.NoError(t, err)
+			_, err = store.SetStatus(t.Context(), st.ID, SetStatusParams{Status: status})
+			require.NoError(t, err)
+
+			_, err = mgr.Activate(t.Context(), st.ID)
+			require.Error(t, err)
+			require.Nil(t, mgr.Handle(st.ID), "a refused activation must not spawn a workspace")
+
+			got, err := store.Get(t.Context(), st.ID)
+			require.NoError(t, err)
+			require.Equal(t, status, got.Status, "a refused activation must not change status")
+		})
+	}
+}
+
+// A vanished worktree cannot be reopened, and the failure must not leave
+// a half-installed runtime behind.
+func TestManager_ActivateRejectsMissingWorktree(t *testing.T) {
+	repo := initRepo(t)
+	store := newTestStoreDB(t)
+	mgr := NewManager(ManagerOptions{
+		Store:       store,
+		Spawner:     newFakeSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+
+	st, err := store.Create(t.Context(), CreateParams{
+		Name: "gone", Goal: "x", BaseBranch: "main",
+		Branch: "thread/gone", WorktreePath: filepath.Join(t.TempDir(), "missing"),
+	})
+	require.NoError(t, err)
+	_, err = store.SetStatus(t.Context(), st.ID, SetStatusParams{Status: StatusCompleted})
+	require.NoError(t, err)
+
+	_, err = mgr.Activate(t.Context(), st.ID)
+	require.Error(t, err)
+	require.Nil(t, mgr.Handle(st.ID))
+}
+
+// Idle threads are not active, so Recover leaves them alone: their
+// workspace is simply not spawned until something attaches.
+func TestManager_RecoverLeavesIdleThreads(t *testing.T) {
+	repo := initRepo(t)
+	store := newTestStoreDB(t)
+	mgr := NewManager(ManagerOptions{
+		Store:       store,
+		Spawner:     newFakeSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+
+	idle, err := store.Create(t.Context(), CreateParams{
+		Name: "idle-across-restart", Goal: "", BaseBranch: "main",
+		Branch: "thread/idle-across-restart", WorktreePath: t.TempDir(),
+	})
+	require.NoError(t, err)
+	_, err = store.SetStatus(t.Context(), idle.ID, SetStatusParams{Status: StatusIdle})
+	require.NoError(t, err)
+
+	require.NoError(t, mgr.Recover(t.Context()))
+
+	got, err := store.Get(t.Context(), idle.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusIdle, got.Status)
+}
+
 func TestManager_CreateMarksAgentThreadSessionAsChild(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
