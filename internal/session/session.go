@@ -33,7 +33,7 @@ func HashID(id string) string {
 
 type Todo struct {
 	Content    string     `json:"content"`
-	Status     TodoStatus `json:"status"`
+	Status     TodoStatus `json:"status" swaggertype:"string"`
 	ActiveForm string     `json:"active_form"`
 }
 

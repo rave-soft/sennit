@@ -437,18 +437,7 @@ func (w *AppWorkspace) LSPStopAll(ctx context.Context) {
 }
 
 func (w *AppWorkspace) LSPGetStates() map[string]LSPClientInfo {
-	states := w.app.GetLSPStates()
-	result := make(map[string]LSPClientInfo, len(states))
-	for k, v := range states {
-		result[k] = LSPClientInfo{
-			Name:            v.Name,
-			State:           v.State,
-			Error:           v.Error,
-			DiagnosticCount: v.DiagnosticCount,
-			ConnectedAt:     v.ConnectedAt,
-		}
-	}
-	return result
+	return w.app.GetLSPStates()
 }
 
 func (w *AppWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {

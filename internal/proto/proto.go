@@ -3,7 +3,6 @@ package proto
 import (
 	"encoding/json"
 	"errors"
-	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/braid/internal/config"
@@ -362,47 +361,6 @@ func (e *LSPEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// LSPClientInfo holds information about an LSP client's state.
-type LSPClientInfo struct {
-	Name            string          `json:"name"`
-	State           lsp.ServerState `json:"state"`
-	Error           error           `json:"error,omitempty"`
-	DiagnosticCount int             `json:"diagnostic_count,omitempty"`
-	ConnectedAt     time.Time       `json:"connected_at"`
-}
-
-// MarshalJSON implements the [json.Marshaler] interface.
-func (i LSPClientInfo) MarshalJSON() ([]byte, error) {
-	type Alias LSPClientInfo
-	return json.Marshal(&struct {
-		Error string `json:"error,omitempty"`
-		Alias
-	}{
-		Error: func() string {
-			if i.Error != nil {
-				return i.Error.Error()
-			}
-			return ""
-		}(),
-		Alias: Alias(i),
-	})
-}
-
-// UnmarshalJSON implements the [json.Unmarshaler] interface.
-func (i *LSPClientInfo) UnmarshalJSON(data []byte) error {
-	type Alias LSPClientInfo
-	aux := &struct {
-		Error string `json:"error,omitempty"`
-		Alias
-	}{
-		Alias: Alias(*i),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	*i = LSPClientInfo(aux.Alias)
-	if aux.Error != "" {
-		i.Error = errors.New(aux.Error)
-	}
-	return nil
-}
+// LSPClientInfo is the LSP client wire representation. It aliases the
+// canonical leaf-package type, including its JSON error handling.
+type LSPClientInfo = lsp.ClientInfo

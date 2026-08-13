@@ -26,15 +26,8 @@ type LSPEvent struct {
 	DiagnosticCount int
 }
 
-// LSPClientInfo holds information about an LSP client's state
-type LSPClientInfo struct {
-	Name            string
-	State           lsp.ServerState
-	Error           error
-	Client          *lsp.Client
-	DiagnosticCount int
-	ConnectedAt     time.Time
-}
+// LSPClientInfo aliases the canonical LSP client state.
+type LSPClientInfo = lsp.ClientInfo
 
 // lspEvents holds one workspace's LSP client state and event broker. It
 // used to be a pair of package-level vars, which meant every App in a

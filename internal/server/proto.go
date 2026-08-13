@@ -358,17 +358,7 @@ func (c *controllerV1) handleGetWorkspaceLSPs(w http.ResponseWriter, r *http.Req
 		c.handleError(w, r, err)
 		return
 	}
-	result := make(map[string]proto.LSPClientInfo, len(states))
-	for k, v := range states {
-		result[k] = proto.LSPClientInfo{
-			Name:            v.Name,
-			State:           v.State,
-			Error:           v.Error,
-			DiagnosticCount: v.DiagnosticCount,
-			ConnectedAt:     v.ConnectedAt,
-		}
-	}
-	jsonEncode(w, result)
+	jsonEncode(w, states)
 }
 
 // handleGetWorkspaceLSPDiagnostics returns diagnostics for an LSP client.

@@ -3481,6 +3481,41 @@ paths:
       summary: Get thread
       tags:
       - threads
+  /workspaces/{id}/threads/{threadID}/activate:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Thread ID or name
+        in: path
+        name: threadID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Thread'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Activate thread
+      tags:
+      - threads
   /workspaces/{id}/threads/{threadID}/merge:
     post:
       parameters:

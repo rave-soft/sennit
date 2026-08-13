@@ -377,7 +377,7 @@ no-op `event/all.go`.
 | 4.2 | **Выполнено:** общий `confirmDialog` обслуживает quit и удаление thread; `selectDialog` выделяет переиспользуемые input/list/help/filter/navigation/layout hooks, которыми композиционно пользуются Commands и Session при сохранении их tabs/shortcuts/async и mode-specific state machines. `Base` применяется к centered framed Draw-путям с совместимой геометрией, включая Models; `list.BaseItem` заменяет item lifecycle boilerplate. Намеренные исключения: многошаговые формы, overlay/absolute cursor layouts и другие Draw-пути с отличающейся геометрией не мигрируются механически. | −500+ строк, преамбула Draw перестаёт тиражироваться |
 | 4.3 | **Выполнено:** leaf-пакет `internal/ui/presentation` объединяет форматирование elapsed/token, join/truncate status parts, todo-классификацию и рендер строки; chat/model consumers сохранены через context options. Один параметризованный draw path сохраняет различия thread/delegation blocks, geometry, hover и footer. | дедупликация presentation-логики |
 | 4.4 | **Выполнено:** `thread.Attach` принимает `Spawner`; local и backend строят свой spawner, а общий путь сохраняет best-effort attach, порядок cleanup и forwarding событий | один путь wiring, регрессии root/subdir, forwarding и shutdown DB release |
-| 4.5 | `proto.Todo` → алиас `session.Todo`; `LSPClientInfo` → алиасы по образцу `proto/message.go` | Конверторы исчезают |
+| 4.5 | **Выполнено:** `proto.Todo` — алиас `session.Todo`; канонический `lsp.ClientInfo` переэкспортирован алиасами в app/proto/workspace, а ручные конверторы удалены. JSON/REST/SSE совместимость покрыта контрактными тестами; Swagger schema IDs сохранены. | Конверторы исчезают |
 | 4.6 | mcp/init.go: общий OAuth-блок для HTTP/SSE; `getOrRenewClient` переиспользует хвост `connectAndRegister`; починить `stdioCheck` argv; `oauthRoundTripper` — retry через `req.GetBody` (либо явный отказ от retry), закрытие исходного response body, не глотать ошибку `Authorize`; закрыть гонку `suppressLock`, cancel-без-unlock и восстановление `StateNeedsAuth` после отменённого auth-флоу | −100 строк + пачка мелких багов |
 | 4.7 | Чистка мёртвого кода по списку §3.6 | −1 000+ строк |
 
@@ -420,4 +420,6 @@ async rebuild Commands, а также rename/delete/cancel/busy transitions Sess
 4.3 закрыт: общие presentation helpers и параметризованный draw path
 покрыты регрессиями.
 4.4 закрыт: общий `thread.Attach` параметризован `Spawner`, сохраняет
-best-effort wiring и порядок shutdown; ближайший пункт — 4.5.
+best-effort wiring и порядок shutdown.
+4.5 закрыт: Todo и LSP client state унифицированы алиасами с сохранением
+wire/OpenAPI контрактов; следующий пункт — 4.6.

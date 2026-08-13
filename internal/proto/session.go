@@ -1,5 +1,12 @@
 package proto
 
+import "github.com/rave-soft/braid/internal/session"
+
+// Todo is the session todo wire representation. It is an alias so the
+// client/server boundary preserves every session status, including statuses
+// introduced by newer peers.
+type Todo = session.Todo
+
 // Session represents a session in the proto layer.
 //
 // IsBusy is computed on read (it is not persisted with the session) and
@@ -27,11 +34,4 @@ type Session struct {
 	UpdatedAt        int64   `json:"updated_at"`
 	IsBusy           bool    `json:"is_busy"`
 	AttachedClients  int     `json:"attached_clients"`
-}
-
-// Todo represents a single todo entry on a session in the proto layer.
-type Todo struct {
-	Content    string `json:"content"`
-	Status     string `json:"status"`
-	ActiveForm string `json:"active_form"`
 }

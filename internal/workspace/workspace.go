@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+
 	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
@@ -83,16 +84,8 @@ type ConnectionEvent struct {
 	Stuck bool
 }
 
-// LSPClientInfo holds information about an LSP client's state. This is
-// the frontend-facing type; implementations translate from the
-// underlying app or proto representation.
-type LSPClientInfo struct {
-	Name            string
-	State           lsp.ServerState
-	Error           error
-	DiagnosticCount int
-	ConnectedAt     time.Time
-}
+// LSPClientInfo is the frontend-facing LSP client state.
+type LSPClientInfo = lsp.ClientInfo
 
 // LSPEventType represents the type of LSP event.
 type LSPEventType string
