@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
@@ -24,6 +25,10 @@ import (
 //     [App.Events] observe the same permission events the production
 //     wiring would deliver to SSE clients.
 //   - An [App.agentNotifications] broker.
+//   - A non-nil [App.AgentDispatcher], the same as a production App, so
+//     tests can dispatch fire-and-forget runs against a fake
+//     agent.Coordinator assigned to AgentCoordinator and exercise
+//     [App.Shutdown]'s join ordering without booting a real one.
 //
 // The caller owns lifetime: cancel ctx (or call [App.Shutdown]) to
 // tear down the fan-in goroutines and the events broker.
@@ -40,6 +45,7 @@ func NewForTest(ctx context.Context) *App {
 		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
 		shutdownTimeout:    defaultShutdownTimeout,
 	}
+	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() agent.Coordinator { return app.AgentCoordinator }, app.agentNotifications, app.runCompletions)
 
 	eventsCtx, cancel := context.WithCancel(ctx)
 	app.eventsCtx = eventsCtx

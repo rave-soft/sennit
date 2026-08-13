@@ -1,6 +1,11 @@
 package backend
 
-import "context"
+import (
+	"context"
+
+	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/app"
+)
 
 // InsertWorkspaceForTest registers ws with b under its current ID and
 // path. It is intended for tests in other packages that need to drive
@@ -10,7 +15,11 @@ import "context"
 // If the workspace has no run context yet it is derived from the
 // backend context (falling back to context.Background), mirroring the
 // initialization CreateWorkspace performs, so dispatched agent runs
-// have a non-nil ws.ctx.
+// have a non-nil ws.ctx. Likewise, if ws.dispatcher is nil it is built
+// here exactly as createWorkspace builds it — same lazy coordinator
+// getter, bound to ws.ctx — after the ctx back-fill above, so a
+// hand-built Workspace looks like a real one to SendMessage instead of
+// leaving it with a nil dispatcher.
 func InsertWorkspaceForTest(b *Backend, ws *Workspace) {
 	if ws.resolvedPath == "" {
 		ws.resolvedPath = ws.Path
@@ -24,6 +33,15 @@ func InsertWorkspaceForTest(b *Backend, ws *Workspace) {
 			parent = context.Background()
 		}
 		ws.ctx, ws.cancel = context.WithCancel(parent)
+	}
+	// AgentNotifications/RunCompletions are promoted methods on the
+	// embedded *app.App; some synthetic workspaces (e.g. multiclient_test.go)
+	// have no App at all, so guard against calling them on a nil
+	// receiver. Such a workspace has no coordinator either, so leaving
+	// dispatcher nil here is correct: SendMessage's own nil-dispatcher
+	// guard turns that into ErrAgentNotInitialized instead of a panic.
+	if ws.dispatcher == nil && ws.App != nil {
+		ws.dispatcher = app.NewAgentDispatcher(ws.ctx, func() agent.Coordinator { return ws.AgentCoordinator }, ws.AgentNotifications(), ws.RunCompletions())
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -127,12 +127,29 @@ func (w *AppWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSession
 
 // -- Agent --
 
-func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
-	if w.app.AgentCoordinator == nil {
-		return errors.New("agent coordinator not initialized")
+// AgentRun dispatches a prompt fire-and-forget through the App's
+// AgentDispatcher and returns as soon as it is accepted, matching
+// ClientWorkspace.AgentRun's contract: structural/refusal errors
+// (empty prompt, missing session, an uninitialized coordinator, or a
+// dispatcher already closing) come back synchronously, while a failure
+// in the turn itself reaches observers later as a notify.TypeAgentError
+// notification instead of through this return value. The interactive
+// TUI does not consume notify.RunComplete for completion detection (it
+// observes message events directly), so passing an empty RunID is
+// correct here — matching ClientWorkspace.AgentRun's runID for the
+// same reason: it skips the correlator stamping path without
+// functional consequences.
+func (w *AppWorkspace) AgentRun(_ context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
+	dispatcher := w.app.AgentDispatcher()
+	if dispatcher == nil {
+		// Only reachable for a hand-built *app.App that skipped both
+		// New and NewForTest (every real construction path sets a
+		// dispatcher unconditionally); guard it the same way
+		// Backend.SendMessage guards ws.dispatcher, rather than
+		// dereferencing a nil pointer.
+		return app.ErrCoordinatorNotInitialized
 	}
-	_, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
-	return err
+	return dispatcher.Send(sessionID, "", prompt, attachments)
 }
 
 func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error) {

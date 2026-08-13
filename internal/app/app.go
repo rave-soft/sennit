@@ -148,6 +148,17 @@ type App struct {
 	// instead of guessing from message finish parts.
 	runCompletions *pubsub.Broker[notify.RunComplete]
 
+	// agentDispatcher accepts and dispatches fire-and-forget agent runs
+	// on this App's behalf, bound to globalCtx. It resolves
+	// AgentCoordinator lazily (see AgentDispatcher's coordinator field
+	// doc) so it is safe to build before InitCoderAgent runs and
+	// survives a later coordinator reinitialization. Built
+	// unconditionally in New/NewForTest, so it is never nil: Shutdown
+	// still nil-checks it defensively, matching the same guard added to
+	// backend.Workspace.dispatcher for hand-built test doubles that
+	// bypass both constructors.
+	agentDispatcher *AgentDispatcher
+
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
@@ -278,6 +289,16 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Started regardless of cfg.IsConfigured(): an unconfigured project's
 	// config or an empty skills dir can still change externally.
 	app.startExternalChangeWatchers(ctx)
+
+	// Built unconditionally, before the IsConfigured early return below:
+	// an unconfigured project still needs a non-nil dispatcher (its
+	// coordinator getter yields nil, so Send answers
+	// ErrCoordinatorNotInitialized instead of every caller having to
+	// nil-check app.AgentDispatcher() first). Bound to globalCtx, not a
+	// context this constructor derives and could cancel itself — that
+	// mirrors backend.Workspace's own dispatcher, whose lifetime tracks
+	// its owner rather than any single request.
+	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() agent.Coordinator { return app.AgentCoordinator }, app.agentNotifications, app.runCompletions)
 
 	// TODO: remove the concept of agent config, most likely.
 	if !cfg.IsConfigured() {
@@ -460,6 +481,16 @@ func (app *App) AgentNotifications() *pubsub.Broker[notify.Notification] {
 // coordinator could publish one of its own.
 func (app *App) RunCompletions() *pubsub.Broker[notify.RunComplete] {
 	return app.runCompletions
+}
+
+// AgentDispatcher returns this App's fire-and-forget agent-run
+// dispatcher. It is always non-nil for an App built by New or
+// NewForTest. Local (non-backend) mode uses it, via
+// internal/workspace, to send prompts the same way
+// backend.Backend.SendMessage does: dispatch and return, without
+// waiting for the LLM turn to complete.
+func (app *App) AgentDispatcher() *AgentDispatcher {
+	return app.agentDispatcher
 }
 
 // ReportCurrentSession tells herdr which session the user is now
@@ -665,10 +696,14 @@ func (app *App) Subscribe(send func(any), onPanic func()) {
 // It is idempotent: repeated or concurrent callers wait for the same
 // teardown and return together. The shutdown order is:
 //
+//  0. Close the agent dispatcher's accept gate immediately, before any
+//     other teardown step, so no new fire-and-forget run can be
+//     dispatched once shutdown has begun.
 //  1. Run shutdown hooks first (e.g. thread manager admission block),
 //     before anything else, so subsystems that depend on other resources
 //     (DB, MCP, LSP) are blocked before those resources are torn down.
-//  2. Cancel all agents and wait for them to finish.
+//  2. Cancel all agents, join every dispatcher goroutine, and wait for
+//     both to finish.
 //  3. Flush pending message updates.
 //  4. Close MCP and other ordinary resources sequentially. Watchers have
 //     already stopped and joined, so none can begin MCP work while it closes.
@@ -712,6 +747,16 @@ func (app *App) Shutdown() {
 	copy(finalCleanups, app.finalCleanupFuncs)
 	app.finalCleanupFuncs = nil
 	app.shutdownMu.Unlock()
+
+	// 0. Latch the dispatcher's accept gate before any teardown phase
+	// runs, the same way backend.Workspace.Shutdown flips its gate
+	// before cancelling or joining anything: a Send that lands after
+	// this point must be refused rather than racing the teardown below.
+	// Nil only for a hand-built App that skipped both New and
+	// NewForTest.
+	if app.agentDispatcher != nil {
+		app.agentDispatcher.MarkClosing()
+	}
 
 	start := time.Now()
 	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
@@ -763,6 +808,27 @@ func (app *App) Shutdown() {
 				agentWorkStopped = false
 				slog.Error("Failed to close agent coordinator readiness work", "error", err)
 			}
+		}
+	}
+
+	// Join every dispatched run before anything below touches shared
+	// resources. CancelAll above already poisons/cancels each run
+	// through the coordinator's own accept/cancel protocol regardless of
+	// which branch above ran it (including the agentWorkStopped test
+	// seam), so Wait is unconditional here rather than nested in the
+	// CancelAll branch. Bounded by shutdownTimeout like every other
+	// phase-2 wait: an unbounded wait would let one hung run stall
+	// Shutdown forever, whereas a bounded one degrades to the same
+	// "retain dependencies and log" contract agentWorkStopped already
+	// has, keeping MCP and the DB from closing under a run that is
+	// still using them.
+	if app.agentDispatcher != nil {
+		if err := app.runShutdownCallback(func(context.Context) error {
+			app.agentDispatcher.Wait()
+			return nil
+		}); err != nil {
+			agentWorkStopped = false
+			slog.Error("Agent dispatcher runs did not join before shutdown deadline", "error", err)
 		}
 	}
 

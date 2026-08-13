@@ -70,6 +70,7 @@ func insertRunCompleteWorkspace(t *testing.T, b *Backend, base context.Context, 
 	}
 	ws.App = a
 	ws.ctx, ws.cancel = context.WithCancel(base)
+	ws.dispatcher = app.NewAgentDispatcher(ws.ctx, func() agent.Coordinator { return coord }, ws.AgentNotifications(), ws.RunCompletions())
 	b.mu.Lock()
 	b.workspaces.Set(ws.ID, ws)
 	b.pathIndex[ws.resolvedPath] = ws.ID
@@ -130,7 +131,7 @@ func TestRunAgent_NoFallbackWhenCoordinatorPublished(t *testing.T) {
 
 	// Wait for the dispatched run goroutine to return so any publish
 	// has already happened.
-	ws.runWG.Wait()
+	ws.dispatcher.Wait()
 
 	select {
 	case ev := <-ch:
@@ -157,7 +158,7 @@ func TestRunAgent_CancellationPublishesNoErrorTerminal(t *testing.T) {
 	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
 	require.NoError(t, err)
 
-	ws.runWG.Wait()
+	ws.dispatcher.Wait()
 
 	select {
 	case ev := <-ch:

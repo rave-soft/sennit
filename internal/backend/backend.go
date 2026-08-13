@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
@@ -191,13 +192,15 @@ type Workspace struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// runMu guards closing and gates dispatch of new agent runs.
-	// closing is set by Shutdown so no new runs are accepted once
-	// teardown has begun. runWG tracks dispatched agent goroutines
-	// so Shutdown can wait for them to return before app cleanup.
-	runMu   sync.Mutex
-	closing bool
-	runWG   sync.WaitGroup
+	// dispatcher owns the accept gate and fire-and-forget dispatch of
+	// agent runs bound to ctx. It is built once, in createWorkspace
+	// alongside ctx/cancel, and never nil for the workspace's life —
+	// its coordinator is resolved lazily so it works whether the
+	// coordinator is already live (app.New calls InitCoderAgent) or
+	// initialized/reinitialized later via Backend.InitAgent. Shutdown
+	// uses it in place of the runMu/closing/runWG trio this package
+	// used to keep on Workspace directly.
+	dispatcher *app.AgentDispatcher
 
 	// clientsMu guards clients. It is held only briefly (no IO).
 	clientsMu sync.Mutex
@@ -251,11 +254,11 @@ func (w *Workspace) invokeShutdown() {
 //
 // CancelAll is idempotent, so the second call inside app.App.Shutdown
 // is harmless; the important guarantee is that cancel -> CancelAll ->
-// runWG.Wait completes before the embedded cleanup touches the DB.
+// dispatcher.Wait completes before the embedded cleanup touches the DB.
 func (w *Workspace) Shutdown() {
-	w.runMu.Lock()
-	w.closing = true
-	w.runMu.Unlock()
+	if w.dispatcher != nil {
+		w.dispatcher.MarkClosing()
+	}
 
 	if w.cancel != nil {
 		w.cancel()
@@ -263,7 +266,9 @@ func (w *Workspace) Shutdown() {
 	if w.App != nil && w.AgentCoordinator != nil {
 		w.AgentCoordinator.CancelAll()
 	}
-	w.runWG.Wait()
+	if w.dispatcher != nil {
+		w.dispatcher.Wait()
+	}
 	if w.App != nil {
 		w.App.Shutdown()
 	}
@@ -466,6 +471,15 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool, inhe
 		cancel:       wsCancel,
 		clients:      make(map[string]*clientState),
 	}
+	// The dispatcher is built once for the workspace's whole life, here
+	// alongside wsCtx/wsCancel, rather than in InitAgent: a workspace's
+	// coordinator can already be live (app.New calls InitCoderAgent) or
+	// may not be initialized until a later InitAgent call, and it can be
+	// reinitialized after that. Resolving the coordinator lazily through
+	// a getter means SendMessage always has a non-nil dispatcher to call
+	// into, and a run that outlives a coordinator swap is still tracked
+	// by the one WaitGroup Shutdown joins.
+	ws.dispatcher = app.NewAgentDispatcher(wsCtx, func() agent.Coordinator { return ws.AgentCoordinator }, ws.AgentNotifications(), ws.RunCompletions())
 
 	// Config and skills external-change watchers now start in app.New
 	// itself (see app.startExternalChangeWatchers), so both local mode and
