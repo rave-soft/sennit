@@ -19,12 +19,6 @@ import (
 // cmd.WaitDelay = time.Second behavior of the previous os/exec path.
 const abandonGrace = time.Second
 
-// runShell is the shell executor used by runOne. It is a package-level
-// variable so tests can substitute a blocking or non-yielding
-// implementation to exercise the abandon-on-timeout path without
-// depending on the scheduling behavior of the real interpreter.
-var runShell = shell.Run
-
 // compiledHook pairs a HookConfig with its compiled matcher regex. A nil
 // matcher means "match every tool".
 type compiledHook struct {
@@ -37,6 +31,8 @@ type Runner struct {
 	hooks      []compiledHook
 	cwd        string
 	projectDir string
+	runShell   func(context.Context, shell.RunOptions) error
+	abandonFor time.Duration
 }
 
 // NewRunner creates a Runner from the given hook configs. Each hook's
@@ -70,6 +66,8 @@ func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
 		hooks:      compiled,
 		cwd:        cwd,
 		projectDir: projectDir,
+		runShell:   shell.Run,
+		abandonFor: abandonGrace,
 	}
 }
 
@@ -177,7 +175,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		done <- runShell(ctx, shell.RunOptions{
+		done <- r.runShell(ctx, shell.RunOptions{
 			Command: hook.Command,
 			Cwd:     r.cwd,
 			Env:     envVars,
@@ -195,7 +193,7 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 		select {
 		case err = <-done:
 			// Interpreter yielded within the grace period; safe to read.
-		case <-time.After(abandonGrace):
+		case <-time.After(r.abandonFor):
 			slog.Warn(
 				"Hook did not yield after cancel; abandoning goroutine",
 				"command", hook.Command,

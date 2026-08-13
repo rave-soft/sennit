@@ -622,21 +622,23 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 // diagnostics change within firstChangeDuration, it returns early since the
 // server likely isn't going to republish.
 func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) {
+	c.waitForDiagnostics(ctx, timeout, time.Second, 300*time.Millisecond, 100*time.Millisecond)
+}
+
+func (c *Client) waitForDiagnostics(
+	ctx context.Context,
+	timeout, firstChangeDuration, settleDuration, pollInterval time.Duration,
+) {
 	if c == nil {
 		return
 	}
-
-	const (
-		firstChangeDuration = 1 * time.Second
-		settleDuration      = 300 * time.Millisecond
-	)
 
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	firstChangeTimer := time.NewTimer(min(timeout, firstChangeDuration))
 	defer firstChangeTimer.Stop()
 	previousVersion := c.diagnostics.Version()
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -652,7 +654,7 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) 
 			currentVersion := c.diagnostics.Version()
 			if currentVersion != previousVersion {
 				// Diagnostics changed — now wait for them to settle.
-				c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration)
+				c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration, pollInterval/2)
 				return
 			}
 		}
@@ -661,9 +663,13 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) 
 
 // waitForDiagnosticsToSettle waits until diagnostics version stays the same
 // for settleDuration, indicating the LSP server has finished publishing.
-func (c *Client) waitForDiagnosticsToSettle(ctx context.Context, deadline <-chan time.Time, settleDuration time.Duration) {
+func (c *Client) waitForDiagnosticsToSettle(
+	ctx context.Context,
+	deadline <-chan time.Time,
+	settleDuration, pollInterval time.Duration,
+) {
 	lastVersion := c.diagnostics.Version()
-	settleTicker := time.NewTicker(50 * time.Millisecond)
+	settleTicker := time.NewTicker(pollInterval)
 	defer settleTicker.Stop()
 
 	// Track how long the version has been stable.

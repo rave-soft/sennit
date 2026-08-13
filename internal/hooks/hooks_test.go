@@ -655,20 +655,17 @@ func TestAggregationUpdatedInput(t *testing.T) {
 // Under -race this catches any code path in runOne that reads those
 // buffers after returning the DecisionNone abandon result.
 func TestRunnerAbandonRaceSafety(t *testing.T) {
-	origRunShell := runShell
-	t.Cleanup(func() { runShell = origRunShell })
-
 	// Synchronize shutdown with the abandoned goroutine so the test
 	// exits cleanly even under -race.
 	var wg sync.WaitGroup
+	wg.Add(1)
 	release := make(chan struct{})
 	t.Cleanup(func() {
 		close(release)
 		wg.Wait()
 	})
 
-	runShell = func(_ context.Context, opts shell.RunOptions) error {
-		wg.Add(1)
+	stubRunShell := func(_ context.Context, opts shell.RunOptions) error {
 		defer wg.Done()
 		// Write before the caller observes ctx.Done(); the caller will
 		// not read the buffer while we still own it.
@@ -677,28 +674,29 @@ func TestRunnerAbandonRaceSafety(t *testing.T) {
 		// the abandon branch, then continue writing. If the caller
 		// reads these buffers after abandoning, -race will flag it.
 		select {
-		case <-time.After(5 * time.Second):
+		case <-time.After(time.Second):
 		case <-release:
 		}
 		_, _ = io.WriteString(opts.Stdout, "after\n")
 		return nil
 	}
 
-	hookCfg := config.HookConfig{
-		Command: "# irrelevant; runShell is stubbed",
-		Timeout: 1,
-	}
+	hookCfg := config.HookConfig{Command: "# irrelevant; runShell is stubbed"}
 	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r.runShell = stubRunShell
+	r.abandonFor = 20 * time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
 
 	start := time.Now()
-	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
+	result, err := r.Run(ctx, EventPreToolUse, "sess", "bash", `{}`)
 	elapsed := time.Since(start)
 
 	require.NoError(t, err)
 	require.Equal(t, DecisionNone, result.Decision)
 	// Abandon must happen at ~timeout + abandonGrace. Allow generous
 	// slack so CI noise doesn't flake the test.
-	require.Less(t, elapsed, 3500*time.Millisecond,
+	require.Less(t, elapsed, 500*time.Millisecond,
 		"runOne should return within timeout+abandonGrace+slack")
 }
 

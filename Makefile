@@ -43,7 +43,11 @@ test:
 
 ## race: full suite exactly as CI runs it
 race:
-	$(GO) test -race -failfast ./...
+	@set -eu; \
+	test_binary=$$(mktemp "$${TMPDIR:-/tmp}/braid-test.XXXXXX"); \
+	trap 'rm -f "$$test_binary"' EXIT; \
+	$(GO) build -o "$$test_binary" .; \
+	BRAID_TEST_BINARY="$$test_binary" $(GO) test -race -failfast ./...
 
 ## lint: golangci-lint with the CI config
 lint:

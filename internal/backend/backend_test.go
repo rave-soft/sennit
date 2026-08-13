@@ -325,9 +325,6 @@ func TestHoldExpiry_RaceWithAttach(t *testing.T) {
 		go func() { errCh <- b.AttachClient(ws.ID, cid) }()
 		<-errCh
 
-		// Wait for any pending timer to settle.
-		time.Sleep(10 * time.Millisecond)
-
 		ws.clientsMu.Lock()
 		gotShutdown := shutdowns.Load() == 1
 		cs, present := ws.clients[cid]

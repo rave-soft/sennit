@@ -41,6 +41,8 @@ const numClients = 8
 // about is observable strictly within ensureServer.
 const clientTimeout = 15 * time.Second
 
+const healthyRunDuration = 500 * time.Millisecond
+
 func TestClientServerSpawnRace(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping client/server spawn race test in -short mode")
@@ -119,8 +121,11 @@ func TestClientServerSpawnRace(t *testing.T) {
 	// at least one /v1/health probe got a 2xx, which proves the
 	// spawn-and-readiness path actually produced a live server.
 	var sawHealthy atomic.Bool
+	healthy := make(chan struct{})
 	probeDone := make(chan struct{})
 	stopProbe := make(chan struct{})
+	clientsCtx, cancelClients := context.WithCancel(context.Background())
+	t.Cleanup(cancelClients)
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
@@ -137,6 +142,7 @@ func TestClientServerSpawnRace(t *testing.T) {
 			}
 			if err := pingHealth(socketPath); err == nil {
 				sawHealthy.Store(true)
+				close(healthy)
 				return
 			}
 			select {
@@ -144,6 +150,19 @@ func TestClientServerSpawnRace(t *testing.T) {
 				return
 			case <-time.After(50 * time.Millisecond):
 			}
+		}
+	}()
+	go func() {
+		select {
+		case <-healthy:
+			timer := time.NewTimer(healthyRunDuration)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				cancelClients()
+			case <-clientsCtx.Done():
+			}
+		case <-clientsCtx.Done():
 		}
 	}()
 
@@ -161,7 +180,7 @@ func TestClientServerSpawnRace(t *testing.T) {
 				return
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
+			ctx, cancel := context.WithTimeout(clientsCtx, clientTimeout)
 			defer cancel()
 
 			// `braid run` exercises connectToServer (which is where
@@ -286,6 +305,16 @@ func repoRootFromTest(t *testing.T) string {
 // the built artefact.
 func buildBraidBinary(t *testing.T, repoRoot string) string {
 	t.Helper()
+	if binPath := os.Getenv("BRAID_TEST_BINARY"); binPath != "" {
+		absPath, err := filepath.Abs(binPath)
+		if err != nil {
+			t.Fatalf("resolve BRAID_TEST_BINARY: %v", err)
+		}
+		if _, err := os.Stat(absPath); err != nil {
+			t.Fatalf("stat BRAID_TEST_BINARY: %v", err)
+		}
+		return absPath
+	}
 
 	binDir, err := os.MkdirTemp("", "braid-race-bin-")
 	if err != nil {

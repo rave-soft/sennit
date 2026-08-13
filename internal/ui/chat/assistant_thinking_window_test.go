@@ -80,7 +80,7 @@ func renderedThinkingHeight(t *testing.T, item *AssistantMessageItem, width int)
 }
 
 // TestThinkingWindow_CollapsedCapPreserved guards that F5 did not
-// regress the existing collapsed-mode behaviour: a 5000-line
+// regress the existing collapsed-mode behaviour: a long
 // thinking block in the default (collapsed) state still renders at
 // most a small bounded height — the last `maxCollapsedThinkingHeight`
 // lines plus the truncation hint. The thinking message keeps
@@ -90,7 +90,7 @@ func TestThinkingWindow_CollapsedCapPreserved(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	msg := thinkingMessageWithLines("collapsed", 5000)
+	msg := thinkingMessageWithLines("collapsed", maxExpandedThinkingTailLines+25)
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 
 	// Default state must be collapsed.
@@ -106,7 +106,7 @@ func TestThinkingWindow_CollapsedCapPreserved(t *testing.T) {
 	// 2-line hint prefix (hint + blank). Allow a small slack for
 	// any future style-driven padding so the test is robust to
 	// cosmetic tweaks while still being orders of magnitude below
-	// the 5000-line source.
+	// the source size.
 	const collapsedUpperBound = maxCollapsedThinkingHeight + 5
 	require.LessOrEqual(t, height, collapsedUpperBound,
 		"collapsed mode must remain bounded by the small cap; got %d", height)
@@ -169,7 +169,7 @@ func TestThinkingWindow_TailWindowed(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	const total = 5000
+	const total = maxExpandedThinkingTailLines + 25
 	const width = 95
 
 	// Tail-windowed render.
@@ -196,7 +196,7 @@ func TestThinkingWindow_TailWindowed(t *testing.T) {
 
 	require.Contains(t, tailPlain, "earlier lines hidden",
 		"tail-windowed render must include the affordance footer")
-	require.Contains(t, tailPlain, "ln5000",
+	require.Contains(t, tailPlain, "ln"+itoa(total),
 		"tail-windowed render must include the LAST source paragraph — we tailed, not headed")
 	require.NotContains(t, tailPlain, "ln1 ",
 		"tail-windowed render must elide early source paragraphs")
@@ -241,7 +241,7 @@ func TestThinkingWindow_PromoteToFull(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	const total = 1500
+	const total = maxExpandedThinkingTailLines + 25
 	msg := thinkingMessageWithLines("promote", total)
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 
@@ -263,7 +263,7 @@ func TestThinkingWindow_PromoteToFull(t *testing.T) {
 		"full expansion must drop the tail-window affordance")
 	require.Contains(t, fullPlain, "ln1 ",
 		"full expansion must include the first source paragraph")
-	require.Contains(t, fullPlain, "ln1500 ",
+	require.Contains(t, fullPlain, "ln"+itoa(total)+" ",
 		"full expansion must include the last source paragraph")
 
 	// Independent reference: a fresh item, rendered straight into
@@ -315,7 +315,7 @@ func TestThinkingWindow_ContentChangeKeepsThinkingCacheInTailWindow(t *testing.T
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	const total = 1000
+	const total = maxExpandedThinkingTailLines + 25
 
 	build := func(content string) *message.Message {
 		var b strings.Builder
@@ -380,7 +380,7 @@ func TestThinkingWindow_ToggleInvalidatesOnlyThinking(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	const total = 1500
+	const total = maxExpandedThinkingTailLines + 25
 	build := func() *message.Message {
 		var b strings.Builder
 		for i := 1; i <= total; i++ {
@@ -475,7 +475,7 @@ func TestThinkingWindow_BoxHeightTracksWindow(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	const total = 5000
+	const total = maxExpandedThinkingTailLines + 25
 	msg := thinkingMessageWithLines("box-height", total)
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 
