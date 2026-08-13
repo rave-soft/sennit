@@ -139,7 +139,7 @@ func newTestThreadStore(t *testing.T) thread.Store {
 // threadTestHarness wires a controllerV1 + httptest.Server around a
 // synthetic workspace whose App has a real *thread.Manager attached
 // (backed by a real git repo and a fake, LLM-free Spawner), mirroring how
-// internal/backend/threads.go's attachServerThreads wires production
+// thread.Attach wires production
 // workspaces.
 type threadTestHarness struct {
 	httpSrv *httptest.Server
@@ -213,8 +213,7 @@ func (h *threadTestHarness) do(t *testing.T, method, path string, body any) *htt
 }
 
 // TestHandleWorkspaceThreads_NoManager verifies that a workspace without a
-// thread manager (e.g. a non-git workspace, or one where attachServerThreads
-// / attachLocalThreads never ran) reports 409 rather than 404: the
+// thread manager (e.g. a non-git workspace, or one where thread.Attach never ran) reports 409 rather than 404: the
 // workspace itself is fine, it just doesn't support threads.
 func TestHandleWorkspaceThreads_NoManager(t *testing.T) {
 	t.Parallel()
@@ -322,7 +321,7 @@ func TestHandleWorkspaceThreads_CreateInvalid(t *testing.T) {
 
 // TestThreadEvent_DeliveredOverSSE verifies that a thread lifecycle event
 // published by the manager (via ForwardEvents, wired the same way
-// attachServerThreads wires production workspaces) reaches the
+// thread.Attach wires production workspaces) reaches the
 // workspace's SSE stream wrapped as pubsub.PayloadTypeThreadEvent with a
 // decodable proto.ThreadEvent payload.
 func TestThreadEvent_DeliveredOverSSE(t *testing.T) {

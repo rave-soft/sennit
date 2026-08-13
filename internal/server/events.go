@@ -168,8 +168,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 		})
 	case pubsub.Event[thread.Event]:
 		// This event was forwarded raw from Manager.Subscribe (see
-		// app.ForwardEvents in internal/backend/threads.go /
-		// internal/cmd/threads.go), so wrapEvent has no *thread.Manager
+		// app.ForwardEvents in thread.Attach), so wrapEvent has no *thread.Manager
 		// reference here to resolve a live WorkspaceID from — pass "" and
 		// let clients that need it re-GET the thread.
 		return envelope(pubsub.PayloadTypeThreadEvent, pubsub.Event[proto.ThreadEvent]{

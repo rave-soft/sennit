@@ -91,7 +91,7 @@ const threadTestConfig = `{
 
 // initThreadRepo creates a fresh git repository with one commit, so the
 // server auto-attaches a thread manager to a workspace rooted at it (see
-// internal/backend/threads.go's attachServerThreads, which requires the
+// thread.Attach, which requires the
 // workspace path to be exactly the git toplevel).
 func initThreadRepo(t *testing.T) string {
 	t.Helper()
@@ -183,7 +183,7 @@ func TestThreads_NonGitWorkspaceRejectsThreads(t *testing.T) {
 
 	// A bare temp dir with no git init: the server's workspace exists
 	// but never gets a thread manager attached (see
-	// internal/backend/threads.go's attachServerThreads), so thread
+	// thread.Attach), so thread
 	// endpoints answer 409.
 	ws, err := c.CreateWorkspace(ctx, proto.Workspace{Path: t.TempDir(), DataDir: t.TempDir()})
 	require.NoError(t, err)

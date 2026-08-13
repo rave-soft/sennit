@@ -22,6 +22,7 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/version"
 )
 
@@ -480,7 +481,10 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool, inhe
 	go forwardWorkspaceChanged(wsCtx, ws)
 
 	if attachThreads {
-		b.attachServerThreads(wsCtx, ws.App, args.Path)
+		thread.Attach(wsCtx, ws.App, args.Path, b.ThreadSpawner(
+			func() map[string]config.Agent { return ws.App.Config().UserAgents() },
+			func() bool { return ws.App.Store().Overrides().SkipPermissionRequests },
+		))
 	}
 
 	b.mu.Lock()

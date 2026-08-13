@@ -32,6 +32,7 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/server/supervisor"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 	ui "github.com/rave-soft/braid/internal/ui/model"
 	"github.com/rave-soft/braid/internal/version"
@@ -284,7 +285,10 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
-	attachLocalThreads(ctx, boot.App, cwd)
+	thread.Attach(ctx, boot.App, cwd, thread.NewLocalSpawner(
+		func() map[string]config.Agent { return boot.App.Config().UserAgents() },
+		func() bool { return boot.App.Store().Overrides().SkipPermissionRequests },
+	))
 
 	ws := workspace.NewAppWorkspace(boot.App, boot.Config)
 	cleanup := func() { boot.App.Shutdown() }
