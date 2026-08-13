@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/chat"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -83,7 +84,7 @@ func (m *UI) childSessionCurrentActivity() string {
 			}
 		}
 	}
-	return strings.Join(parts, " · ")
+	return presentation.JoinStatusParts(parts, -1)
 }
 
 // childSessionHeaderText renders row 1's breadcrumb — levels joined by
@@ -263,9 +264,9 @@ func childPanelTokensLine(session *session.Session) string {
 		return "0 tok"
 	}
 	return fmt.Sprintf("%s tok (%s in / %s out)",
-		childPanelTokenCount(total),
-		childPanelTokenCount(session.PromptTokens),
-		childPanelTokenCount(session.CompletionTokens))
+		presentation.FormatTokenCount(total),
+		presentation.FormatTokenCount(session.PromptTokens),
+		presentation.FormatTokenCount(session.CompletionTokens))
 }
 
 // childPanelContextPercent reports how full the child session's context
@@ -320,38 +321,10 @@ func (m *UI) childPanelContextWindow(frame sessionNavFrame) int64 {
 // policy of omitting a misleading/unknown duration rather than guessing.
 func (m *UI) childPanelElapsedText(frame sessionNavFrame) string {
 	if frame.delegationDuration > 0 {
-		return childPanelFormatElapsed(frame.delegationDuration)
+		return presentation.FormatElapsed(frame.delegationDuration)
 	}
 	if m.isAgentBusy() && !frame.delegationStart.IsZero() {
-		return childPanelFormatElapsed(time.Since(frame.delegationStart)) + " elapsed"
+		return presentation.FormatElapsed(time.Since(frame.delegationStart)) + " elapsed"
 	}
 	return ""
-}
-
-// childPanelFormatElapsed renders a duration the way the panel wants it —
-// "45s", "4m12s", "1h02m" — mirroring formatElapsed in chat/agent.go.
-func childPanelFormatElapsed(d time.Duration) string {
-	d = d.Round(time.Second)
-	h := d / time.Hour
-	d -= h * time.Hour
-	m := d / time.Minute
-	d -= m * time.Minute
-	s := d / time.Second
-	switch {
-	case h > 0:
-		return fmt.Sprintf("%dh%02dm", h, m)
-	case m > 0:
-		return fmt.Sprintf("%dm%02ds", m, s)
-	default:
-		return fmt.Sprintf("%ds", s)
-	}
-}
-
-// childPanelTokenCount renders large token counts compactly ("12.3k"),
-// mirroring formatTokenCount in chat/agent.go.
-func childPanelTokenCount(n int64) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }

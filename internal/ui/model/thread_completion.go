@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/util"
 )
 
@@ -99,24 +100,5 @@ func threadCompletionElapsedSuffix(t proto.Thread) string {
 	if t.CreatedAt <= 0 || t.CompletedAt <= 0 || t.CompletedAt < t.CreatedAt {
 		return ""
 	}
-	return " · " + formatThreadElapsed(time.Duration(t.CompletedAt-t.CreatedAt)*time.Second)
-}
-
-// formatThreadElapsed renders a duration the way the toast wants it:
-// "45s", "4m12s", "1h02m" — mirroring chat/agent.go's formatElapsed.
-func formatThreadElapsed(d time.Duration) string {
-	d = d.Round(time.Second)
-	h := d / time.Hour
-	d -= h * time.Hour
-	m := d / time.Minute
-	d -= m * time.Minute
-	s := d / time.Second
-	switch {
-	case h > 0:
-		return fmt.Sprintf("%dh%02dm", h, m)
-	case m > 0:
-		return fmt.Sprintf("%dm%02ds", m, s)
-	default:
-		return fmt.Sprintf("%ds", s)
-	}
+	return " · " + presentation.FormatElapsed(time.Duration(t.CompletedAt-t.CreatedAt)*time.Second)
 }

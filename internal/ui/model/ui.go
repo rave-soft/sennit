@@ -452,7 +452,7 @@ type UI struct {
 	panelThreads     []proto.Thread
 	// hoveredPanelDelegation/panelDelegationRects/panelDelegations mirror
 	// hoveredPanelThread/panelThreadRects/panelThreads for the delegations
-	// section — see runningDelegationBlocks/drawDelegationBlocks in
+	// section — see runningDelegationBlocks and drawPanelBlocks in
 	// session_panel.go.
 	hoveredPanelDelegation int
 	panelDelegationRects   []uv.Rectangle

@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
@@ -38,7 +39,7 @@ func TestFormatElapsed(t *testing.T) {
 		{time.Hour + 2*time.Minute, "1h02m"},
 	}
 	for _, tt := range tests {
-		require.Equal(t, tt.want, formatElapsed(tt.d))
+		require.Equal(t, tt.want, presentation.FormatElapsed(tt.d))
 	}
 }
 
@@ -619,24 +620,24 @@ func TestCapTodosForDelegation(t *testing.T) {
 
 	todos := []session.Todo{
 		{Content: "done 1", Status: session.TodoStatusCompleted},
+		{Content: "active 1", Status: session.TodoStatusInProgress},
+		{Content: "unknown", Status: "future"},
+		{Content: "pending", Status: session.TodoStatusPending},
+		{Content: "active 2", Status: session.TodoStatusInProgress},
 		{Content: "done 2", Status: session.TodoStatusCompleted},
-		{Content: "active", Status: session.TodoStatusInProgress},
-		{Content: "next 1", Status: session.TodoStatusPending},
-		{Content: "next 2", Status: session.TodoStatusPending},
-		{Content: "next 3", Status: session.TodoStatusPending},
+	}
+	names := func(todos []session.Todo) []string {
+		out := make([]string, len(todos))
+		for i, todo := range todos {
+			out[i] = todo.Content
+		}
+		return out
 	}
 
-	capped := capTodosForDelegation(todos, 3)
-	require.Len(t, capped, 3)
+	require.Equal(t, []string{"active 1", "active 2", "unknown"}, names(capTodosForDelegation(todos, 3)))
+	require.Equal(t, []string{"active 1", "active 2", "unknown", "pending", "done 1", "done 2"}, names(capTodosForDelegation(todos, len(todos))))
 
-	var contents []string
-	for _, td := range capped {
-		contents = append(contents, td.Content)
-	}
-	require.Contains(t, contents, "active", "the in-progress item must always be kept")
-	require.NotContains(t, contents, "done 1", "completed items are dropped first")
-	require.NotContains(t, contents, "done 2", "completed items are dropped first")
-
-	// Below the cap, nothing is dropped.
-	require.Equal(t, todos, capTodosForDelegation(todos, len(todos)))
+	// In-progress rows are never sacrificed to the cap, even when their count
+	// exceeds it.
+	require.Equal(t, []string{"active 1", "active 2"}, names(capTodosForDelegation(todos, 1)))
 }

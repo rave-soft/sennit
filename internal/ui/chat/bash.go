@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/stringext"
 	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -183,7 +184,7 @@ func bashDurationSummary(meta tools.BashResponseMetadata) string {
 	if meta.StartTime <= 0 || meta.EndTime <= meta.StartTime {
 		return ""
 	}
-	return formatElapsed(time.Duration(meta.EndTime-meta.StartTime) * time.Millisecond)
+	return presentation.FormatElapsed(time.Duration(meta.EndTime-meta.StartTime) * time.Millisecond)
 }
 
 // -----------------------------------------------------------------------------

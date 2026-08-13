@@ -319,7 +319,7 @@ no-op `event/all.go`.
 | 3.7 конкурентность | выполнено | repo-scoped workspace-lock покрывает local/backend/thread; `Recover` не стал распределённым протоколом |
 | 4.1 дедупликация TTL-кэшей | выполнено | `ttlCache[T]` покрывает value/timestamp/single-flight/generation; на него переведены indicator, dashboard, dock list/activity и bool-кэши workspace |
 | 4.2 диалоги | выполнено | `confirmDialog`, композиция `selectDialog` для Commands/Session, `Base` и `list.BaseItem` внедрены; намеренно не механизированы несовместимые многошаговые и нестандартно позиционируемые layouts |
-| 4.3–4.7 дедупликация/чистка | не начато | Исходные копии и мёртвый код остаются |
+| 4.3–4.7 дедупликация/чистка | частично | 4.3 выполнен; 4.4–4.7 остаются |
 | 5.1 VCR/`TestCoderAgent` | выполнено | — |
 | 5.2–5.3 golden/роутер Update | не начато | Command-driving есть, golden-сценариев и разреза `Update` нет |
 | 5.4 точечные тесты | частично | gc усилен; history и dialog остаются |
@@ -375,7 +375,7 @@ no-op `event/all.go`.
 |---|---|---|
 | 4.1 | `ttlCache[T]` в ui/model; перевести threadIndicator/threadsDock/threadsCache и bool-кэши workspace_cache | −220 строк, канон для будущих кэшей |
 | 4.2 | **Выполнено:** общий `confirmDialog` обслуживает quit и удаление thread; `selectDialog` выделяет переиспользуемые input/list/help/filter/navigation/layout hooks, которыми композиционно пользуются Commands и Session при сохранении их tabs/shortcuts/async и mode-specific state machines. `Base` применяется к centered framed Draw-путям с совместимой геометрией, включая Models; `list.BaseItem` заменяет item lifecycle boilerplate. Намеренные исключения: многошаговые формы, overlay/absolute cursor layouts и другие Draw-пути с отличающейся геометрией не мигрируются механически. | −500+ строк, преамбула Draw перестаёт тиражироваться |
-| 4.3 | Общие форматтеры делегаций/тредов: formatElapsed/formatTokenCount/статус-строка/todo-классификация/рендер строки todo — один пакет-хелпер; слить `drawThreadBlocks`/`drawDelegationBlocks` | −200 строк |
+| 4.3 | **Выполнено:** leaf-пакет `internal/ui/presentation` объединяет форматирование elapsed/token, join/truncate status parts, todo-классификацию и рендер строки; chat/model consumers сохранены через context options. Один параметризованный draw path сохраняет различия thread/delegation blocks, geometry, hover и footer. | дедупликация presentation-логики |
 | 4.4 | Один хелпер attach-threads с параметром-Spawner вместо близнецов в cmd и backend | −40 строк, один путь wiring |
 | 4.5 | `proto.Todo` → алиас `session.Todo`; `LSPClientInfo` → алиасы по образцу `proto/message.go` | Конверторы исчезают |
 | 4.6 | mcp/init.go: общий OAuth-блок для HTTP/SSE; `getOrRenewClient` переиспользует хвост `connectAndRegister`; починить `stdioCheck` argv; `oauthRoundTripper` — retry через `req.GetBody` (либо явный отказ от retry), закрытие исходного response body, не глотать ошибку `Authorize`; закрыть гонку `suppressLock`, cancel-без-unlock и восстановление `StateNeedsAuth` после отменённого auth-флоу | −100 строк + пачка мелких багов |
@@ -407,8 +407,8 @@ no-op `event/all.go`.
 ### Ожидаемый порядок исполнения открытых задач
 
 ```
-4.2 (диалоги, выполнено)
-  → 4.3–4.4 до дальнейшего расхождения оставшихся копий; затем 4.5–4.7
+4.2–4.3 (диалоги и presentation-логика, выполнено)
+  → 4.4 до дальнейшего расхождения оставшихся копий; затем 4.5–4.7
   → 5.2 (golden-снимки) поверх готовой command-driving обвязки;
      5.3 строго после 5.2; 5.5 можно выполнять независимо
   → Фаза 6 по отдельным продуктовым решениям
@@ -417,5 +417,5 @@ no-op `event/all.go`.
 4.2 закрыта: общая confirm/select/Base/BaseItem-инфраструктура покрыта
 регрессиями filter/selection/navigation/focus/cursor/narrow layout, tabs и
 async rebuild Commands, а также rename/delete/cancel/busy transitions Session.
-Ближайший пункт — 4.3: объединить форматтеры и presentation-логику
-делегаций/тредов, пока оставшиеся копии не разошлись.
+4.3 закрыт: общие presentation helpers и параметризованный draw path
+покрыты регрессиями; ближайший пункт — 4.4.

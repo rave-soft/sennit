@@ -28,6 +28,7 @@ import (
 	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -231,17 +232,8 @@ func delegationStatusLine(item chat.ToolMessageItem, sty *styles.Styles, width i
 // visible even while collapsed, without leaking pending rows too — see
 // sessionPanelPlan's todosInProgress/todosPending/todosDone.
 func splitTodosByStatus(todos []session.Todo) (inProgress, pending, completed []session.Todo) {
-	for _, t := range todos {
-		switch t.Status {
-		case session.TodoStatusCompleted:
-			completed = append(completed, t)
-		case session.TodoStatusInProgress:
-			inProgress = append(inProgress, t)
-		default:
-			pending = append(pending, t)
-		}
-	}
-	return inProgress, pending, completed
+	buckets := presentation.BucketTodos(todos)
+	return buckets.InProgress, buckets.Pending, buckets.Completed
 }
 
 // renderSessionTodoLine renders one todo row for the panel's expanded todos
@@ -252,29 +244,12 @@ func splitTodosByStatus(todos []session.Todo) (inProgress, pending, completed []
 // once, more than one can be in_progress simultaneously; the old pills.go
 // todoPill tracked only the first in-progress todo via a single
 // `currentTodo` variable and silently dropped the rest.
-func renderSessionTodoLine(t session.Todo, inProgressIcon string, sty *styles.Styles, width int) string {
-	var prefix string
-	textStyle := sty.Tool.TodoItem
-
-	switch t.Status {
-	case session.TodoStatusCompleted:
-		prefix = sty.Tool.TodoCompletedIcon.Render(styles.TodoCompletedIcon) + " "
-		// Muted + strikethrough: composed from the existing muted token
-		// (TodoCurrentTask) rather than a new style field, per
-		// internal/ui/AGENTS.md's "reuse tokens" guidance.
-		textStyle = sty.Pills.TodoCurrentTask.Strikethrough(true)
-	case session.TodoStatusInProgress:
-		prefix = sty.Tool.TodoInProgressIcon.Render(inProgressIcon + " ")
-	default:
-		prefix = sty.Tool.TodoPendingIcon.Render(styles.TodoPendingIcon) + " "
-	}
-
-	text := t.Content
-	if t.Status == session.TodoStatusInProgress && t.ActiveForm != "" {
-		text = t.ActiveForm
-	}
-	line := prefix + textStyle.Render(text)
-	return ansi.Truncate(line, width, "…")
+func renderSessionTodoLine(todo session.Todo, inProgressIcon string, sty *styles.Styles, width int) string {
+	return presentation.RenderTodoRow(todo, sty, width, presentation.TodoRowOptions{
+		InProgressIcon:         inProgressIcon,
+		CompletedMuted:         true,
+		CompletedStrikethrough: true,
+	})
 }
 
 // sessionPanelTodosHeaderText renders the todos header row's plain text:
@@ -546,8 +521,7 @@ func (m *UI) sessionPanelHeight(available int) int {
 // (which paints from it) and, via sessionPanelRowLayout, from the
 // click/hover hit-test, which must not wait for a Draw call to have
 // populated anything. Shared by the threads and delegations sections,
-// which use the identical two-line-block shape — see threadBlockGeometry
-// and drawDelegationBlocks.
+// which use the identical two-line-block shape.
 func panelBlockGeometry(area uv.Rectangle, n int) []uv.Rectangle {
 	if area.Dy() <= 0 || area.Dx() <= 0 || n == 0 {
 		return nil
@@ -628,121 +602,37 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 	return threadBlockRects, delegationBlockRects, todosHeaderRect, todosListRect
 }
 
-// drawThreadBlocks paints plan.threads as the panel's top section — one
-// two-line block per active thread (status text from threadDockStatusText, same as
-// the old drawThreadsDock) plus the "…and N more threads" footer — and
-// returns each block's on-screen rect (from threadBlockGeometry), in the
-// same order as plan.threads, for hover-highlight bookkeeping in Draw.
-// hoveredIdx (-1 for none) highlights the block under the pointer.
-func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPanelPlan, hoveredIdx int) []uv.Rectangle {
-	rects := threadBlockGeometry(area, plan.threads)
-	if len(rects) == 0 {
-		return nil
-	}
-
-	// Reuse ChildBanner's name/base styles rather than adding a new style
-	// group, matching the old drawThreadsDock.
-	sty := &m.com.Styles.ChildBanner
-	width := area.Dx()
-
-	for i, block := range rects {
-		t := plan.threads[i]
-		line1Row := uv.Rectangle{
-			Min: uv.Position{X: area.Min.X, Y: block.Min.Y},
-			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 1},
-		}
-
-		name := t.Name
-		if name == "" {
-			name = t.ID
-		}
-		goal := threadDockGoalFirstLine(t.Goal)
-
-		nameStyle := sty.Current
-		if i == hoveredIdx {
-			nameStyle = nameStyle.Underline(true)
-		}
-		styled := sty.Base.Render(fmt.Sprintf("%d ", i+1)) +
-			nameStyle.Render(name) +
-			sty.Base.Render(" — "+goal)
-		styled = ansi.Truncate(styled, width, "…")
-		if i == hoveredIdx {
-			styled = common.BlockBackground(styled, width, m.com.Styles.Tool.ClickableHoverBg)
-		}
-		uv.NewStyledString(styled).Draw(scr, line1Row)
-
-		if block.Max.Y-block.Min.Y < 2 {
-			continue // truncated by area's bottom edge: no room for line 2.
-		}
-		line2Row := uv.Rectangle{
-			Min: uv.Position{X: area.Min.X, Y: block.Min.Y + 1},
-			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 2},
-		}
-		// A pending thread isn't doing anything yet, so it keeps the
-		// static arrow; running/merging threads get the live spinner.
-		icon := sty.Base.Render("→")
-		switch thread.Status(t.Status) {
-		case thread.StatusRunning, thread.StatusMerging:
-			icon = m.panelActivityIcon()
-		}
-		status := threadDockStatusText(t, m.threadsDock.activity[t.ID].value)
-		line2 := "  " + icon + " " + sty.Base.Render(status)
-		line2 = ansi.Truncate(line2, width, "…")
-		if i == hoveredIdx {
-			line2 = common.BlockBackground(line2, width, m.com.Styles.Tool.ClickableHoverBg)
-		}
-		uv.NewStyledString(line2).Draw(scr, line2Row)
-	}
-
-	if plan.threadsMore > 0 {
-		footerY := rects[len(rects)-1].Max.Y
-		if footerY < area.Max.Y {
-			footer := fmt.Sprintf("…and %d more threads", plan.threadsMore)
-			footerRow := uv.Rectangle{
-				Min: uv.Position{X: area.Min.X, Y: footerY},
-				Max: uv.Position{X: area.Max.X, Y: footerY + 1},
-			}
-			uv.NewStyledString(sty.Base.Render(ansi.Truncate(footer, width, "…"))).Draw(scr, footerRow)
-		}
-	}
-
-	return rects
+// panelBlockDrawSpec supplies the context-specific content for the shared
+// two-line thread/delegation drawing path. Geometry, hover treatment,
+// truncation, and footer placement stay identical for both sections.
+type panelBlockDrawSpec struct {
+	count  int
+	more   int
+	footer string
+	name   func(index int) string
+	task   func(index int) string
+	line2  func(index int) string
 }
 
-// drawDelegationBlocks paints plan.delegations as the panel's second
-// section (between threads and todos) — the EXACT SAME two-line block
-// shape drawThreadBlocks uses (number/name bold — dash — task on line 1,
-// live status on line 2), via the shared panelBlockGeometry, rather than a
-// compressed one-liner: a running delegation is exactly as significant as
-// a running thread. Returns each block's on-screen rect for hover-
-// highlight bookkeeping in Draw, same contract as drawThreadBlocks.
-// hoveredIdx (-1 for none) highlights the block under the pointer.
-func (m *UI) drawDelegationBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPanelPlan, hoveredIdx int) []uv.Rectangle {
-	rects := panelBlockGeometry(area, len(plan.delegations))
+// drawPanelBlocks paints two-line panel blocks and returns their hit-test
+// rectangles. Callers provide only their distinct name/task/status content.
+func (m *UI) drawPanelBlocks(scr uv.Screen, area uv.Rectangle, hoveredIdx int, spec panelBlockDrawSpec) []uv.Rectangle {
+	rects := panelBlockGeometry(area, spec.count)
 	if len(rects) == 0 {
 		return nil
 	}
 
-	// Reuse ChildBanner's name/base styles, matching drawThreadBlocks —
-	// the whole point of the shared geometry is that these read as one
-	// visual family, not two different widgets bolted together.
 	sty := &m.com.Styles.ChildBanner
 	width := area.Dx()
-
 	for i, block := range rects {
-		d := plan.delegations[i]
-		line1Row := uv.Rectangle{
-			Min: uv.Position{X: area.Min.X, Y: block.Min.Y},
-			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 1},
-		}
-
+		line1Row := uv.Rectangle{Min: uv.Position{X: area.Min.X, Y: block.Min.Y}, Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 1}}
 		nameStyle := sty.Current
 		if i == hoveredIdx {
 			nameStyle = nameStyle.Underline(true)
 		}
 		styled := sty.Base.Render(fmt.Sprintf("%d ", i+1)) +
-			nameStyle.Render(delegationName(d.item)) +
-			sty.Base.Render(" — "+delegationTask(d.item))
+			nameStyle.Render(spec.name(i)) +
+			sty.Base.Render(" — "+spec.task(i))
 		styled = ansi.Truncate(styled, width, "…")
 		if i == hoveredIdx {
 			styled = common.BlockBackground(styled, width, m.com.Styles.Tool.ClickableHoverBg)
@@ -750,35 +640,23 @@ func (m *UI) drawDelegationBlocks(scr uv.Screen, area uv.Rectangle, plan session
 		uv.NewStyledString(styled).Draw(scr, line1Row)
 
 		if block.Max.Y-block.Min.Y < 2 {
-			continue // truncated by area's bottom edge: no room for line 2.
+			continue
 		}
-		line2Row := uv.Rectangle{
-			Min: uv.Position{X: area.Min.X, Y: block.Min.Y + 1},
-			Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 2},
-		}
-		// Delegations in this section are running by definition (see
-		// runningDelegationBlocks), so line 2 always leads with the live
-		// spinner, mirroring the running-thread blocks above.
-		line2 := "  " + m.panelActivityIcon() + " " + delegationStatusLine(d.item, m.com.Styles, width-4)
-		line2 = ansi.Truncate(line2, width, "…")
+		line2Row := uv.Rectangle{Min: uv.Position{X: area.Min.X, Y: block.Min.Y + 1}, Max: uv.Position{X: area.Max.X, Y: block.Min.Y + 2}}
+		line2 := ansi.Truncate(spec.line2(i), width, "…")
 		if i == hoveredIdx {
 			line2 = common.BlockBackground(line2, width, m.com.Styles.Tool.ClickableHoverBg)
 		}
 		uv.NewStyledString(line2).Draw(scr, line2Row)
 	}
 
-	if plan.delegationsMore > 0 {
+	if spec.more > 0 {
 		footerY := rects[len(rects)-1].Max.Y
 		if footerY < area.Max.Y {
-			footer := fmt.Sprintf("…and %d more delegations", plan.delegationsMore)
-			footerRow := uv.Rectangle{
-				Min: uv.Position{X: area.Min.X, Y: footerY},
-				Max: uv.Position{X: area.Max.X, Y: footerY + 1},
-			}
-			uv.NewStyledString(sty.Base.Render(ansi.Truncate(footer, width, "…"))).Draw(scr, footerRow)
+			footerRow := uv.Rectangle{Min: uv.Position{X: area.Min.X, Y: footerY}, Max: uv.Position{X: area.Max.X, Y: footerY + 1}}
+			uv.NewStyledString(sty.Base.Render(ansi.Truncate(fmt.Sprintf(spec.footer, spec.more), width, "…"))).Draw(scr, footerRow)
 		}
 	}
-
 	return rects
 }
 
@@ -813,7 +691,7 @@ func clampPanelTodosScrollOffset(offset int, plan sessionPanelPlan) int {
 // — all from sessionPanelPlan(area.Dy()), so it never paints a different
 // row count than sessionPanelHeight reserved for this exact area. Also
 // caches m.panelThreadRects/m.panelThreads/m.panelTodosHeaderRect for
-// hover-highlight rendering (drawThreadBlocks' underline, panelTodosHover's
+// hover-highlight rendering (block-name underline, panelTodosHover's
 // style swap) — cosmetic state that can tolerate one frame of staleness.
 // The click hit-test itself does NOT read these fields: it recomputes the
 // same rects on demand from sessionPanelRowLayout, since a click can arrive
@@ -845,7 +723,25 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		threadsArea := area
 		threadsArea.Min.Y = row.Min.Y
 		threadsArea.Max.Y = min(row.Min.Y+plan.threadsRows, area.Max.Y)
-		m.panelThreadRects = m.drawThreadBlocks(scr, threadsArea, plan, m.hoveredPanelThread)
+		m.panelThreadRects = m.drawPanelBlocks(scr, threadsArea, m.hoveredPanelThread, panelBlockDrawSpec{
+			count: len(plan.threads), more: plan.threadsMore, footer: "…and %d more threads",
+			name: func(i int) string {
+				name := plan.threads[i].Name
+				if name == "" {
+					return plan.threads[i].ID
+				}
+				return name
+			},
+			task: func(i int) string { return threadDockGoalFirstLine(plan.threads[i].Goal) },
+			line2: func(i int) string {
+				item := plan.threads[i]
+				icon := m.com.Styles.ChildBanner.Base.Render("→")
+				if status := thread.Status(item.Status); status == thread.StatusRunning || status == thread.StatusMerging {
+					icon = m.panelActivityIcon()
+				}
+				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.activity[item.ID].value))
+			},
+		})
 		m.panelThreads = plan.threads
 		row.Min.Y = threadsArea.Max.Y
 		row.Max.Y = row.Min.Y
@@ -859,7 +755,14 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		delegationsArea := area
 		delegationsArea.Min.Y = row.Min.Y
 		delegationsArea.Max.Y = min(row.Min.Y+plan.delegationsRows, area.Max.Y)
-		m.panelDelegationRects = m.drawDelegationBlocks(scr, delegationsArea, plan, m.hoveredPanelDelegation)
+		m.panelDelegationRects = m.drawPanelBlocks(scr, delegationsArea, m.hoveredPanelDelegation, panelBlockDrawSpec{
+			count: len(plan.delegations), more: plan.delegationsMore, footer: "…and %d more delegations",
+			name: func(i int) string { return delegationName(plan.delegations[i].item) },
+			task: func(i int) string { return delegationTask(plan.delegations[i].item) },
+			line2: func(i int) string {
+				return "  " + m.panelActivityIcon() + " " + delegationStatusLine(plan.delegations[i].item, m.com.Styles, width-4)
+			},
+		})
 		m.panelDelegations = plan.delegations
 		row.Min.Y = delegationsArea.Max.Y
 		row.Max.Y = row.Min.Y

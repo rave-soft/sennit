@@ -141,6 +141,7 @@ func TestSessionPanelPlan_TodosOrderingActiveFirstThenCompleted(t *testing.T) {
 		{Content: "done first", Status: session.TodoStatusCompleted},
 		{Content: "pending one", Status: session.TodoStatusPending},
 		{Content: "working now", Status: session.TodoStatusInProgress},
+		{Content: "unknown pending", Status: "future"},
 		{Content: "done second", Status: session.TodoStatusCompleted},
 	}
 
@@ -148,8 +149,9 @@ func TestSessionPanelPlan_TodosOrderingActiveFirstThenCompleted(t *testing.T) {
 	require.True(t, plan.todosExpanded)
 	require.Len(t, plan.todosInProgress, 1)
 	require.Equal(t, "working now", plan.todosInProgress[0].Content, "in-progress must lead")
-	require.Len(t, plan.todosPending, 1)
+	require.Len(t, plan.todosPending, 2)
 	require.Equal(t, "pending one", plan.todosPending[0].Content, "pending follows in-progress")
+	require.Equal(t, "unknown pending", plan.todosPending[1].Content, "unknown statuses fall back to pending")
 	require.Len(t, plan.todosDone, 2)
 	require.Equal(t, "done first", plan.todosDone[0].Content)
 	require.Equal(t, "done second", plan.todosDone[1].Content)

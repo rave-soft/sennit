@@ -3,13 +3,12 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -141,52 +140,16 @@ func FormatTodosList(sty *styles.Styles, todos []session.Todo, inProgressIcon st
 		return ""
 	}
 
-	sorted := make([]session.Todo, len(todos))
-	copy(sorted, todos)
-	sortTodos(sorted)
-
-	var lines []string
-	for _, todo := range sorted {
-		var prefix string
-		textStyle := sty.Tool.TodoItem
-
-		switch todo.Status {
-		case session.TodoStatusCompleted:
-			prefix = sty.Tool.TodoCompletedIcon.Render(styles.TodoCompletedIcon) + " "
-		case session.TodoStatusInProgress:
-			prefix = sty.Tool.TodoInProgressIcon.Render(inProgressIcon + " ")
-		default:
-			prefix = sty.Tool.TodoPendingIcon.Render(styles.TodoPendingIcon) + " "
-		}
-
-		text := todo.Content
-		if todo.Status == session.TodoStatusInProgress && todo.ActiveForm != "" {
-			text = todo.ActiveForm
-		}
-		line := prefix + textStyle.Render(text)
-		line = ansi.Truncate(line, width, "…")
-
-		lines = append(lines, line)
+	buckets := presentation.BucketTodos(todos)
+	ordered := make([]session.Todo, 0, len(todos))
+	ordered = append(ordered, buckets.Completed...)
+	ordered = append(ordered, buckets.InProgress...)
+	ordered = append(ordered, buckets.Pending...)
+	lines := make([]string, 0, len(ordered))
+	for _, todo := range ordered {
+		lines = append(lines, presentation.RenderTodoRow(todo, sty, width, presentation.TodoRowOptions{
+			InProgressIcon: inProgressIcon,
+		}))
 	}
-
 	return strings.Join(lines, "\n")
-}
-
-// sortTodos sorts todos by status: completed, in_progress, pending.
-func sortTodos(todos []session.Todo) {
-	slices.SortStableFunc(todos, func(a, b session.Todo) int {
-		return statusOrder(a.Status) - statusOrder(b.Status)
-	})
-}
-
-// statusOrder returns the sort order for a todo status.
-func statusOrder(s session.TodoStatus) int {
-	switch s {
-	case session.TodoStatusCompleted:
-		return 0
-	case session.TodoStatusInProgress:
-		return 1
-	default:
-		return 2
-	}
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/anim"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -811,15 +812,15 @@ func renderDelegationOutcomeLine(sty *styles.Styles, width int, status ToolStatu
 	}
 	parts := []string{fmt.Sprintf("step %d", steps)}
 	if duration > 0 {
-		parts = append(parts, formatElapsed(duration))
+		parts = append(parts, presentation.FormatElapsed(duration))
 	}
 	if total := promptTokens + completionTokens; total > 0 {
-		parts = append(parts, formatTokenCount(total)+" tok")
+		parts = append(parts, presentation.FormatTokenCount(total)+" tok")
 	}
 	if status == ToolStatusCanceled {
 		parts = append(parts, "canceled")
 	}
-	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(strings.Join(parts, " · "), width, "…"))
+	return sty.Tool.TodoStatusNote.Render(presentation.JoinStatusParts(parts, width))
 }
 
 // renderResultPreviewLine renders the collapsed block's third line: the
@@ -886,17 +887,17 @@ func renderAgentStatusLine(sty *styles.Styles, width int, startTime time.Time, n
 		return ""
 	}
 
-	parts := []string{formatElapsed(time.Since(startTime)), fmt.Sprintf("step %d", len(nestedTools))}
+	parts := []string{presentation.FormatElapsed(time.Since(startTime)), fmt.Sprintf("step %d", len(nestedTools))}
 	if len(nestedTools) > 0 {
 		if summary := LastToolSummary(nestedTools[len(nestedTools)-1].ToolCall()); summary != "" {
 			parts = append(parts, "→ "+summary)
 		}
 	}
 	if total := promptTokens + completionTokens; total > 0 {
-		parts = append(parts, formatTokenCount(total)+" tok")
+		parts = append(parts, presentation.FormatTokenCount(total)+" tok")
 	}
 
-	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(strings.Join(parts, " · "), width, "…"))
+	return sty.Tool.TodoStatusNote.Render(presentation.JoinStatusParts(parts, width))
 }
 
 // renderPanelStatusLine is renderAgentStatusLine's counterpart for the
@@ -911,7 +912,7 @@ func renderPanelStatusLine(sty *styles.Styles, width int, startTime time.Time, n
 		return ""
 	}
 
-	parts := []string{formatElapsed(time.Since(startTime)), fmt.Sprintf("step %d", len(nestedTools))}
+	parts := []string{presentation.FormatElapsed(time.Since(startTime)), fmt.Sprintf("step %d", len(nestedTools))}
 	switch {
 	case currentTodoActivity(todos) != "":
 		parts = append(parts, "→ "+currentTodoActivity(todos))
@@ -921,10 +922,10 @@ func renderPanelStatusLine(sty *styles.Styles, width int, startTime time.Time, n
 		}
 	}
 	if total := promptTokens + completionTokens; total > 0 {
-		parts = append(parts, formatTokenCount(total)+" tok")
+		parts = append(parts, presentation.FormatTokenCount(total)+" tok")
 	}
 
-	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(strings.Join(parts, " · "), width, "…"))
+	return sty.Tool.TodoStatusNote.Render(presentation.JoinStatusParts(parts, width))
 }
 
 // currentTodoActivity returns the in-progress todo's ActiveForm (falling
@@ -940,33 +941,6 @@ func currentTodoActivity(todos []session.Todo) string {
 		return t.Content
 	}
 	return ""
-}
-
-// formatElapsed renders a duration the way a status line wants it: "45s",
-// "4m12s", "1h02m" — never a raw time.Duration string.
-func formatElapsed(d time.Duration) string {
-	d = d.Round(time.Second)
-	h := d / time.Hour
-	d -= h * time.Hour
-	m := d / time.Minute
-	d -= m * time.Minute
-	s := d / time.Second
-	switch {
-	case h > 0:
-		return fmt.Sprintf("%dh%02dm", h, m)
-	case m > 0:
-		return fmt.Sprintf("%dm%02ds", m, s)
-	default:
-		return fmt.Sprintf("%ds", s)
-	}
-}
-
-// formatTokenCount renders large token counts compactly ("12.3k").
-func formatTokenCount(n int64) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
 // -----------------------------------------------------------------------------
@@ -1034,34 +1008,20 @@ func renderChildTodos(sty *styles.Styles, width int, todos []session.Todo) strin
 	return FormatTodosList(sty, capTodosForDelegation(todos, maxDelegationTodoLines), styles.ArrowRightIcon, width)
 }
 
-// capTodosForDelegation trims todos to at most maxLines entries, keeping
-// every in-progress item (there's normally just one — highlighted by
-// FormatTodosList) plus the earliest pending items: that's what a glance at
-// a running delegation wants to see next. Completed items are dropped
-// first since they're already done and least useful to a user checking in
-// on progress.
+// capTodosForDelegation keeps every in-progress item, then fills the
+// remaining line budget with pending and completed items in that order. This
+// intentionally lets in-progress rows exceed maxLines: hiding active work is
+// less useful than preserving the nominal compact-pane cap.
 func capTodosForDelegation(todos []session.Todo, maxLines int) []session.Todo {
-	if len(todos) <= maxLines {
-		return todos
-	}
-	var inProgress, pending, completed []session.Todo
-	for _, t := range todos {
-		switch t.Status {
-		case session.TodoStatusInProgress:
-			inProgress = append(inProgress, t)
-		case session.TodoStatusCompleted:
-			completed = append(completed, t)
-		default:
-			pending = append(pending, t)
-		}
-	}
-	out := append([]session.Todo{}, inProgress...)
-	for _, groups := range [][]session.Todo{pending, completed} {
-		for _, t := range groups {
+	buckets := presentation.BucketTodos(todos)
+	out := make([]session.Todo, 0, len(todos))
+	out = append(out, buckets.InProgress...)
+	for _, bucket := range [][]session.Todo{buckets.Pending, buckets.Completed} {
+		for _, todo := range bucket {
 			if len(out) >= maxLines {
 				return out
 			}
-			out = append(out, t)
+			out = append(out, todo)
 		}
 	}
 	return out

@@ -35,9 +35,9 @@ func TestSessionPanelPlan_RunningDelegationProducesBlock(t *testing.T) {
 
 // TestDrawSessionPanel_DelegationBlockRendersNameTaskAndStatus is the
 // end-to-end draw check: a running delegation's block must actually paint
-// its name, task, and a live status line via drawDelegationBlocks — the
-// same shared geometry (panelBlockGeometry) and block shape (number + bold
-// name — task on line 1, status on line 2) as drawThreadBlocks.
+// its name, task, and a live status line via the shared draw path — the
+// same geometry (panelBlockGeometry) and block shape (number + bold name —
+// task on line 1, status on line 2) as threads.
 func TestDrawSessionPanel_DelegationBlockRendersNameTaskAndStatus(t *testing.T) {
 	t.Parallel()
 
@@ -52,7 +52,14 @@ func TestDrawSessionPanel_DelegationBlockRendersNameTaskAndStatus(t *testing.T) 
 
 	scr := uv.NewScreenBuffer(u.width, 2)
 	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: 2}}
-	rects := u.drawDelegationBlocks(scr, area, plan, -1)
+	rects := u.drawPanelBlocks(scr, area, -1, panelBlockDrawSpec{
+		count: len(plan.delegations), more: plan.delegationsMore, footer: "…and %d more delegations",
+		name: func(i int) string { return delegationName(plan.delegations[i].item) },
+		task: func(i int) string { return delegationTask(plan.delegations[i].item) },
+		line2: func(i int) string {
+			return "  " + u.panelActivityIcon() + " " + delegationStatusLine(plan.delegations[i].item, u.com.Styles, u.width-4)
+		},
+	})
 	require.Len(t, rects, 1)
 	// Geometry must come from the exact function threads use for their own
 	// blocks, not a parallel reimplementation.

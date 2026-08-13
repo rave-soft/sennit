@@ -44,6 +44,7 @@ import (
 	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 )
 
 // threadsDockTTL bounds how long the memoized thread list may go without a
@@ -372,8 +373,8 @@ func threadDockStatusLine(status thread.Status, activity threadDockActivity, ela
 	if len(parts) == 0 {
 		parts = append(parts, threadDockStatusWord(status))
 	}
-	parts = append(parts, childPanelFormatElapsed(elapsed))
-	return strings.Join(parts, " · ")
+	parts = append(parts, presentation.FormatElapsed(elapsed))
+	return presentation.JoinStatusParts(parts, -1)
 }
 
 // threadDockStatusWord renders a thread's status as the terse, lowercase
