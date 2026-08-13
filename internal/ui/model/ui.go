@@ -5844,6 +5844,15 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		// error rather than a normal completion — surface it too instead of
 		// leaving the user to notice the failure on their own.
 		common.StopTurn()
+		// Report in-app as well as through the desktop notification
+		// below. The notification alone is not enough: sendNotification
+		// suppresses it while the terminal window is focused, which is
+		// exactly when the user is watching. A failure raised before
+		// streaming began (provider readiness, model resolution) also
+		// has no assistant message in the transcript carrying its
+		// FinishReasonError, so without this the only visible sign is
+		// the busy indicator switching off.
+		cmds = append(cmds, util.ReportError(errors.New(n.Message)))
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
 			Message: notificationBodyTaskFailed(n.Message),
