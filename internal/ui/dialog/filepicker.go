@@ -31,6 +31,7 @@ type FilePickerUpdateMsg struct {
 }
 
 type FilePicker struct {
+	Base
 	com *common.Common
 
 	fp   filepicker.Model
@@ -57,7 +58,7 @@ type FilePicker struct {
 var _ Dialog = (*FilePicker)(nil)
 
 func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
-	f := &FilePicker{com: com, instance: filePickerInstance.Add(1), cache: make(map[fimage.PreviewKey]string)}
+	f := &FilePicker{Base: NewBase(com, filePickerMinWidth), com: com, instance: filePickerInstance.Add(1), cache: make(map[fimage.PreviewKey]string)}
 	helpModel := help.New()
 	helpModel.Styles = com.Styles.DialogHelpStyles()
 	f.help = helpModel
@@ -277,9 +278,10 @@ const (
 
 func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := f.com.Styles
-	width := max(0, min(filePickerMinWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	f.Resize(area)
+	width := f.Width()
 	height := max(0, min(10, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := f.InnerWidth()
 	f.fp.SetHeight(height)
 	styles := t.FilePicker
 	styles.File = styles.File.Width(innerWidth)

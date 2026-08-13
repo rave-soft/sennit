@@ -4,10 +4,8 @@ import (
 	"os"
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/commands"
@@ -26,9 +24,7 @@ type CommandType uint
 // String returns the string representation of the CommandType.
 func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
 
-const (
-	sidebarCompactModeBreakpoint = 120
-)
+const sidebarCompactModeBreakpoint = 120
 
 const (
 	SystemCommands CommandType = iota
@@ -36,145 +32,80 @@ const (
 	MCPPrompts
 )
 
-// Commands represents a dialog that shows available commands.
-type dockerMCPAvailabilityCheckedMsg struct {
-	available bool
-}
+type dockerMCPAvailabilityCheckedMsg struct{ available bool }
 
+// Commands composes selectDialog's input, list, navigation, help and layout
+// with command-palette-specific tabs, shortcuts and asynchronous availability.
 type Commands struct {
-	com    *common.Common
-	keyMap struct {
-		Select,
-		UpDown,
-		Next,
-		Previous,
-		Tab,
-		ShiftTab,
-		Close key.Binding
-	}
-
-	sessionID  string
-	hasSession bool
-	hasTodos   bool
-	hasQueue   bool
-	selected   CommandType
-
-	spinner spinner.Model
-	loading bool
-
-	help  help.Model
-	input textinput.Model
-	list  *list.FilterableList
-
-	windowWidth int
-
-	customCommands []commands.CustomCommand
-	mcpPrompts     []commands.MCPPrompt
-
-	dockerMCPAvailable     *bool
-	dockerMCPCheckInFlight bool
+	*selectDialog
+	com                            *common.Common
+	sessionID                      string
+	hasSession, hasTodos, hasQueue bool
+	selected                       CommandType
+	spinner                        spinner.Model
+	loading                        bool
+	windowWidth                    int
+	customCommands                 []commands.CustomCommand
+	mcpPrompts                     []commands.MCPPrompt
+	dockerMCPAvailable             *bool
+	dockerMCPCheckInFlight         bool
+	tab, shiftTab                  key.Binding
 }
 
 var _ Dialog = (*Commands)(nil)
 
-// NewCommands creates a new commands dialog.
 func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
-	c := &Commands{
-		com:            com,
-		selected:       SystemCommands,
-		sessionID:      sessionID,
-		hasSession:     hasSession,
-		hasTodos:       hasTodos,
-		hasQueue:       hasQueue,
-		customCommands: customCommands,
-		mcpPrompts:     mcpPrompts,
-	}
-
-	help := help.New()
-	help.Styles = com.Styles.DialogHelpStyles()
-
-	c.help = help
-
-	c.list = list.NewFilterableList()
-	c.list.Focus()
-	c.list.SetSelected(0)
-
-	c.input = textinput.New()
-	c.input.SetVirtualCursor(false)
-	c.input.Placeholder = "Type to filter"
-	c.input.SetStyles(com.Styles.TextInput)
-	c.input.Focus()
-
-	c.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "confirm"),
-	)
-	c.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
-	c.keyMap.Next = key.NewBinding(
-		key.WithKeys("down"),
-		key.WithHelp("↓", "next item"),
-	)
-	c.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
-	)
-	c.keyMap.Tab = key.NewBinding(
-		key.WithKeys("tab"),
-		key.WithHelp("tab", "switch selection"),
-	)
-	c.keyMap.ShiftTab = key.NewBinding(
-		key.WithKeys("shift+tab"),
-		key.WithHelp("shift+tab", "switch selection prev"),
-	)
-	closeKey := CloseKey
-	closeKey.SetHelp("esc", "cancel")
-	c.keyMap.Close = closeKey
-
+	c := &Commands{com: com, sessionID: sessionID, hasSession: hasSession, hasTodos: hasTodos, hasQueue: hasQueue, customCommands: customCommands, mcpPrompts: mcpPrompts}
 	if available, known := config.DockerMCPAvailabilityCached(); known {
 		c.dockerMCPAvailable = &available
 	}
-
-	// Set initial commands
-	c.setCommandItems(c.selected)
-
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = com.Styles.Dialog.Spinner
-	c.spinner = s
-
+	sd, err := newSelectDialog(com, selectDialogConfig{id: CommandsID, title: "Commands", maxWidth: defaultDialogMaxWidth, maxHeight: defaultDialogHeight, buildItems: c.commandItems, onSelect: func(id string) Action {
+		for _, item := range c.list.FilteredItems() {
+			if command, ok := item.(*CommandItem); ok && command.ID() == id {
+				return command.Action()
+			}
+		}
+		return nil
+	}})
+	if err != nil {
+		return nil, err
+	}
+	c.selectDialog = sd
+	c.tab = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch selection"))
+	c.shiftTab = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "switch selection prev"))
+	c.spinner = spinner.New()
+	c.spinner.Spinner = spinner.Dot
+	c.spinner.Style = com.Styles.Dialog.Spinner
 	return c, nil
 }
 
-// ID implements Dialog.
-func (c *Commands) ID() string {
-	return CommandsID
+func (c *Commands) commandItems() ([]list.FilterableItem, int, error) {
+	var items []list.FilterableItem
+	switch c.selected {
+	case SystemCommands:
+		for _, item := range c.defaultCommands() {
+			items = append(items, item)
+		}
+	case UserCommands:
+		for _, command := range c.customCommands {
+			items = append(items, customCommandItem(c.com.Styles, command))
+		}
+	case MCPPrompts:
+		for _, prompt := range c.mcpPrompts {
+			items = append(items, mcpPromptItem(c.com.Styles, prompt))
+		}
+	}
+	return items, 0, nil
 }
 
-// HandleMsg implements [Dialog].
+func (c *Commands) ID() string { return CommandsID }
+
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case dockerMCPAvailabilityCheckedMsg:
-		c.dockerMCPAvailable = &msg.available
-		c.dockerMCPCheckInFlight = false
+		c.dockerMCPAvailable, c.dockerMCPCheckInFlight = &msg.available, false
 		if c.selected == SystemCommands {
-			// Preserve the current selection across the rebuild to avoid reset
-			var prevID string
-			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
-				prevID = item.id
-			}
-			c.setCommandItems(c.selected)
-			if prevID != "" {
-				for i, it := range c.list.FilteredItems() {
-					if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
-						c.list.SetSelected(i)
-						c.list.ScrollToSelected()
-						break
-					}
-				}
-			}
+			_ = c.replaceItems(c.commandItems)
 		}
 		return nil
 	case spinner.TickMsg:
@@ -185,56 +116,25 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		}
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, c.keyMap.Close):
-			return ActionClose{}
-		case key.Matches(msg, c.keyMap.Previous):
-			c.list.Focus()
-			if c.list.IsSelectedFirst() {
-				c.list.SelectLast()
-			} else {
-				c.list.SelectPrev()
-			}
-			c.list.ScrollToSelected()
-		case key.Matches(msg, c.keyMap.Next):
-			c.list.Focus()
-			if c.list.IsSelectedLast() {
-				c.list.SelectFirst()
-			} else {
-				c.list.SelectNext()
-			}
-			c.list.ScrollToSelected()
-		case key.Matches(msg, c.keyMap.Select):
-			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
-				if item, ok := selectedItem.(*CommandItem); ok && item != nil {
-					return item.Action()
-				}
-			}
-		case key.Matches(msg, c.keyMap.Tab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
-				c.selected = c.nextCommandType()
-				c.setCommandItems(c.selected)
-			}
-		case key.Matches(msg, c.keyMap.ShiftTab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
-				c.selected = c.previousCommandType()
-				c.setCommandItems(c.selected)
-			}
-		default:
-			var cmd tea.Cmd
-			for _, item := range c.list.FilteredItems() {
-				if item, ok := item.(*CommandItem); ok && item != nil {
-					if msg.String() == item.Shortcut() {
-						return item.Action()
-					}
-				}
-			}
-			c.input, cmd = c.input.Update(msg)
-			value := c.input.Value()
-			c.list.SetFilter(value)
-			c.list.ScrollToTop()
-			c.list.SetSelected(0)
-			return ActionCmd{cmd}
+		case key.Matches(msg, c.tab) && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0):
+			c.selected = c.nextCommandType()
+			_ = c.replaceItems(c.commandItems)
+			return nil
+		case key.Matches(msg, c.shiftTab) && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0):
+			c.selected = c.previousCommandType()
+			_ = c.replaceItems(c.commandItems)
+			return nil
 		}
+		selectAction := func(item ListItem) Action { return item.(*CommandItem).Action() }
+		if action, handled := c.handleSelect(msg, selectAction); handled {
+			return action
+		}
+		for _, item := range c.list.FilteredItems() {
+			if command, ok := item.(*CommandItem); ok && msg.String() == command.Shortcut() {
+				return command.Action()
+			}
+		}
+		return c.handleNavigation(msg, selectAction)
 	}
 	return nil
 }
@@ -253,102 +153,58 @@ func (c *Commands) InitialCmd() tea.Cmd {
 	return checkDockerMCPAvailabilityCmd()
 }
 
-// Cursor returns the cursor position relative to the dialog.
-func (c *Commands) Cursor() *tea.Cursor {
-	return InputCursor(c.com.Styles, c.input.Cursor())
-}
-
-// commandsRadioView generates the command type selector radio buttons.
-func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds bool, hasMCPPrompts bool) string {
+func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds, hasMCPPrompts bool) string {
 	if !hasUserCmds && !hasMCPPrompts {
 		return ""
 	}
-
 	selectedFn := func(t CommandType) string {
 		if t == selected {
 			return sty.Radio.On.Padding(0, 1).Render() + sty.Radio.Label.Render(t.String())
 		}
 		return sty.Radio.Off.Padding(0, 1).Render() + sty.Radio.Label.Render(t.String())
 	}
-
-	parts := []string{
-		selectedFn(SystemCommands),
-	}
-
+	parts := []string{selectedFn(SystemCommands)}
 	if hasUserCmds {
 		parts = append(parts, selectedFn(UserCommands))
 	}
 	if hasMCPPrompts {
 		parts = append(parts, selectedFn(MCPPrompts))
 	}
-
 	return strings.Join(parts, " ")
 }
 
-// Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	t := c.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
-		// since some items in the list depend on width (e.g. toggle sidebar command),
-		// we need to reset the command items when width changes
-		c.setCommandItems(c.selected)
+		_ = c.replaceItems(c.commandItems)
 	}
-
-	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-
-	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
-
-	c.list.SetSize(innerWidth, max(0, height-heightOffset))
-
-	// Hide the shortcut hints uniformly when the widest would crowd names.
-	applyInfoColumnVisibility(c.list.FilteredItems(), innerWidth, commandInfoMaxPercent)
-
+	t := c.com.Styles
+	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	layout := c.layout(area, height, false)
+	width, innerWidth := layout.width, layout.innerWidth
+	applyInfoColumnVisibility(c.list.FilteredItems(), layout.listWidth, commandInfoMaxPercent)
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
 	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
-	inputView := t.Dialog.InputPrompt.Render(c.input.View())
-	rc.AddPart(inputView)
-	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
-	rc.AddPart(listView)
+	rc.AddPart(t.Dialog.InputPrompt.Render(c.input.View()))
+	rc.AddPart(t.Dialog.List.Height(c.list.Height()).Render(c.list.Render()))
 	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
-
 	if c.loading {
 		rc.Help = t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt...")
 	}
-
-	view := rc.Render()
-
-	cur := c.Cursor()
+	view, cur := rc.Render(), c.Cursor()
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }
 
-// ShortHelp implements [help.KeyMap].
 func (c *Commands) ShortHelp() []key.Binding {
-	return []key.Binding{
-		c.keyMap.Tab,
-		c.keyMap.UpDown,
-		c.keyMap.Select,
-		c.keyMap.Close,
-	}
+	return []key.Binding{c.tab, c.keyMap.UpDown, c.keyMap.Select, c.keyMap.Close}
 }
 
-// FullHelp implements [help.KeyMap].
 func (c *Commands) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous, c.keyMap.Tab},
-		{c.keyMap.Close},
-	}
+	return [][]key.Binding{{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous, c.tab}, {c.keyMap.Close}}
 }
 
-// nextCommandType returns the next command type in the cycle.
 func (c *Commands) nextCommandType() CommandType {
 	switch c.selected {
 	case SystemCommands:
@@ -358,20 +214,15 @@ func (c *Commands) nextCommandType() CommandType {
 		if len(c.mcpPrompts) > 0 {
 			return MCPPrompts
 		}
-		fallthrough
 	case UserCommands:
 		if len(c.mcpPrompts) > 0 {
 			return MCPPrompts
 		}
-		fallthrough
 	case MCPPrompts:
-		return SystemCommands
-	default:
-		return SystemCommands
 	}
+	return SystemCommands
 }
 
-// previousCommandType returns the previous command type in the cycle.
 func (c *Commands) previousCommandType() CommandType {
 	switch c.selected {
 	case SystemCommands:
@@ -381,44 +232,19 @@ func (c *Commands) previousCommandType() CommandType {
 		if len(c.customCommands) > 0 {
 			return UserCommands
 		}
-		return SystemCommands
 	case UserCommands:
 		return SystemCommands
 	case MCPPrompts:
 		if len(c.customCommands) > 0 {
 			return UserCommands
 		}
-		return SystemCommands
-	default:
-		return SystemCommands
 	}
+	return SystemCommands
 }
 
-// setCommandItems sets the command items based on the specified command type.
 func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
-
-	commandItems := []list.FilterableItem{}
-	switch c.selected {
-	case SystemCommands:
-		for _, cmd := range c.defaultCommands() {
-			commandItems = append(commandItems, cmd)
-		}
-	case UserCommands:
-		for _, cmd := range c.customCommands {
-			commandItems = append(commandItems, customCommandItem(c.com.Styles, cmd))
-		}
-	case MCPPrompts:
-		for _, cmd := range c.mcpPrompts {
-			commandItems = append(commandItems, mcpPromptItem(c.com.Styles, cmd))
-		}
-	}
-
-	c.list.SetItems(commandItems...)
-	c.list.SetFilter("")
-	c.list.ScrollToTop()
-	c.list.SetSelected(0)
-	c.input.SetValue("")
+	_ = c.replaceItems(c.commandItems)
 }
 
 // customCommandItem builds a CommandItem for a user-defined (file-backed)

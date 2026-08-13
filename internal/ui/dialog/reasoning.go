@@ -7,7 +7,6 @@ import (
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -28,20 +27,11 @@ type Reasoning struct {
 
 // ReasoningItem represents a reasoning effort list item.
 type ReasoningItem struct {
-	*list.Versioned
+	list.BaseItem
 	effort    string
 	title     string
 	isCurrent bool
 	t         *styles.Styles
-	m         fuzzy.Match
-	cache     map[int]string
-	focused   bool
-}
-
-// Finished implements list.Item. Reasoning items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (r *ReasoningItem) Finished() bool {
-	return true
 }
 
 var (
@@ -98,7 +88,7 @@ func reasoningItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	selectedIndex := 0
 	for i, effort := range model.ReasoningLevels {
 		item := &ReasoningItem{
-			Versioned: list.NewVersioned(),
+			BaseItem:  list.NewBaseItem(),
 			effort:    effort,
 			title:     common.FormatReasoningEffort(effort),
 			isCurrent: effort == currentEffort,
@@ -123,30 +113,6 @@ func (r *ReasoningItem) ID() string {
 	return r.effort
 }
 
-// SetFocused sets the focus state of the reasoning item.
-func (r *ReasoningItem) SetFocused(focused bool) {
-	if r.focused == focused {
-		return
-	}
-	r.cache = nil
-	r.focused = focused
-	if r.Versioned != nil {
-		r.Bump()
-	}
-}
-
-// SetMatch sets the fuzzy match for the reasoning item.
-func (r *ReasoningItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(r.m, m) {
-		return
-	}
-	r.cache = nil
-	r.m = m
-	if r.Versioned != nil {
-		r.Bump()
-	}
-}
-
 // Render returns the string representation of the reasoning item.
 func (r *ReasoningItem) Render(width int) string {
 	info := ""
@@ -159,5 +125,5 @@ func (r *ReasoningItem) Render(width int) string {
 		InfoTextBlurred: r.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: r.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(styles, r.title, info, r.focused, width, r.cache, &r.m)
+	return renderItem(styles, r.title, info, r.Focused(), width, r.Cache(), r.Match())
 }

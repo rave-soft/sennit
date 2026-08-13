@@ -7,7 +7,6 @@ import (
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/sahilm/fuzzy"
 )
 
 // ModelGroup represents a group of model items.
@@ -51,22 +50,13 @@ func (m *ModelGroup) Render(width int) string {
 
 // ModelItem represents a list item for a model type.
 type ModelItem struct {
-	*list.Versioned
+	list.BaseItem
 
 	prov  catwalk.Provider
 	model catwalk.Model
 
-	cache        map[int]string
 	t            *styles.Styles
-	m            fuzzy.Match
-	focused      bool
 	showProvider bool
-}
-
-// Finished implements list.Item. Model items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (m *ModelItem) Finished() bool {
-	return true
 }
 
 // SelectedModel returns this model item as a [config.SelectedModel] instance.
@@ -84,11 +74,10 @@ var _ ListItem = &ModelItem{}
 // NewModelItem creates a new ModelItem.
 func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, showProvider bool) *ModelItem {
 	return &ModelItem{
-		Versioned:    list.NewVersioned(),
+		BaseItem:     list.NewBaseItem(),
 		prov:         prov,
 		model:        model,
 		t:            t,
-		cache:        make(map[int]string),
 		showProvider: showProvider,
 	}
 }
@@ -115,29 +104,5 @@ func (m *ModelItem) Render(width int) string {
 		InfoTextBlurred: m.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: m.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
-}
-
-// SetFocused implements ListItem.
-func (m *ModelItem) SetFocused(focused bool) {
-	if m.focused == focused {
-		return
-	}
-	m.cache = nil
-	m.focused = focused
-	if m.Versioned != nil {
-		m.Bump()
-	}
-}
-
-// SetMatch implements ListItem.
-func (m *ModelItem) SetMatch(fm fuzzy.Match) {
-	if sameFuzzyMatch(m.m, fm) {
-		return
-	}
-	m.cache = nil
-	m.m = fm
-	if m.Versioned != nil {
-		m.Bump()
-	}
+	return renderItem(styles, m.model.Name, providerInfo, m.Focused(), width, m.Cache(), m.Match())
 }

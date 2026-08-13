@@ -26,6 +26,7 @@ const defaultModelsDialogMaxWidth = 73
 
 // Models represents a model selection dialog.
 type Models struct {
+	Base
 	com *common.Common
 
 	providers []catwalk.Provider
@@ -48,7 +49,7 @@ var _ Dialog = (*Models)(nil)
 // NewModels creates a new Models dialog.
 func NewModels(com *common.Common) (*Models, error) {
 	t := com.Styles
-	m := &Models{}
+	m := &Models{Base: NewBase(com, defaultModelsDialogMaxWidth)}
 	m.com = com
 
 	help := help.New()
@@ -173,9 +174,10 @@ func (m *Models) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	m.Resize(area)
+	width := m.Width()
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := m.InnerWidth()
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
 	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)

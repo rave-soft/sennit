@@ -11,7 +11,6 @@ import (
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -89,16 +88,16 @@ func providerItems(com *common.Common) ([]list.FilterableItem, int, error) {
 
 	items := make([]list.FilterableItem, 0, len(sorted)+1)
 	items = append(items, &ProviderItem{
-		Versioned: list.NewVersioned(),
-		id:        customProviderItemID,
-		name:      "Custom provider…",
-		t:         t,
+		BaseItem: list.NewBaseItem(),
+		id:       customProviderItemID,
+		name:     "Custom provider…",
+		t:        t,
 	})
 
 	for _, p := range sorted {
 		_, configured := cfg.Providers.Get(string(p.ID))
 		items = append(items, &ProviderItem{
-			Versioned:  list.NewVersioned(),
+			BaseItem:   list.NewBaseItem(),
 			id:         string(p.ID),
 			name:       p.Name,
 			configured: configured,
@@ -111,23 +110,14 @@ func providerItems(com *common.Common) ([]list.FilterableItem, int, error) {
 
 // ProviderItem represents a provider list item.
 type ProviderItem struct {
-	*list.Versioned
+	list.BaseItem
 	id         string
 	name       string
 	configured bool
 	t          *styles.Styles
-	m          fuzzy.Match
-	cache      map[int]string
-	focused    bool
 }
 
 var _ ListItem = (*ProviderItem)(nil)
-
-// Finished implements list.Item. Provider items are render-stable outside
-// of explicit SetFocused / SetMatch.
-func (p *ProviderItem) Finished() bool {
-	return true
-}
 
 // Filter implements ListItem.
 func (p *ProviderItem) Filter() string {
@@ -137,30 +127,6 @@ func (p *ProviderItem) Filter() string {
 // ID implements ListItem.
 func (p *ProviderItem) ID() string {
 	return p.id
-}
-
-// SetFocused implements ListItem.
-func (p *ProviderItem) SetFocused(focused bool) {
-	if p.focused == focused {
-		return
-	}
-	p.cache = nil
-	p.focused = focused
-	if p.Versioned != nil {
-		p.Bump()
-	}
-}
-
-// SetMatch implements ListItem.
-func (p *ProviderItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(p.m, m) {
-		return
-	}
-	p.cache = nil
-	p.m = m
-	if p.Versioned != nil {
-		p.Bump()
-	}
 }
 
 // Render implements ListItem.
@@ -175,5 +141,5 @@ func (p *ProviderItem) Render(width int) string {
 		InfoTextBlurred: p.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: p.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(st, p.name, info, p.focused, width, p.cache, &p.m)
+	return renderItem(st, p.name, info, p.Focused(), width, p.Cache(), p.Match())
 }

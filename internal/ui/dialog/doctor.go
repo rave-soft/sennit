@@ -13,7 +13,6 @@ import (
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -48,6 +47,7 @@ type doctorShowDetail struct{ id string }
 // the dialog that fixes it.
 type Doctor struct {
 	*selectDialog
+	Base
 	com      *common.Common
 	mode     doctorMode
 	problems []config.Problem
@@ -68,7 +68,7 @@ var _ Dialog = (*Doctor)(nil)
 func NewDoctor(com *common.Common) *Doctor {
 	problems := DoctorProblems(com)
 
-	d := &Doctor{com: com, problems: problems}
+	d := &Doctor{Base: NewBase(com, doctorDialogMaxWidth), com: com, problems: problems}
 
 	// buildItems never fails for the doctor list, so the error from
 	// newSelectDialog is always nil here.
@@ -167,8 +167,9 @@ func (d *Doctor) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 // applies.
 func (d *Doctor) drawDetail(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := d.com.Styles
-	width := max(0, min(doctorDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := max(0, width-t.Dialog.View.GetHorizontalFrameSize())
+	d.Resize(area)
+	width := d.Width()
+	innerWidth := max(0, d.InnerWidth())
 
 	wrap := lipgloss.NewStyle().Width(innerWidth)
 	labelStyle := t.Dialog.ListItem.InfoBlurred
@@ -257,28 +258,19 @@ func doctorItemID(p config.Problem) string {
 func doctorItemsFrom(com *common.Common, problems []config.Problem) ([]list.FilterableItem, int, error) {
 	items := make([]list.FilterableItem, 0, len(problems))
 	for _, p := range problems {
-		items = append(items, &DoctorItem{Versioned: list.NewVersioned(), problem: p, t: com.Styles})
+		items = append(items, &DoctorItem{BaseItem: list.NewBaseItem(), problem: p, t: com.Styles})
 	}
 	return items, 0, nil
 }
 
 // DoctorItem renders one config.Problem as a list row.
 type DoctorItem struct {
-	*list.Versioned
+	list.BaseItem
 	problem config.Problem
 	t       *styles.Styles
-	m       fuzzy.Match
-	cache   map[int]string
-	focused bool
 }
 
 var _ ListItem = (*DoctorItem)(nil)
-
-// Finished implements list.Item. Doctor items are render-stable outside of
-// explicit SetFocused / SetMatch.
-func (d *DoctorItem) Finished() bool {
-	return true
-}
 
 // Filter returns the value used for filtering.
 func (d *DoctorItem) Filter() string {
@@ -292,30 +284,6 @@ func (d *DoctorItem) ID() string {
 	return doctorItemID(d.problem)
 }
 
-// SetFocused sets the focus state of the item.
-func (d *DoctorItem) SetFocused(focused bool) {
-	if d.focused == focused {
-		return
-	}
-	d.cache = nil
-	d.focused = focused
-	if d.Versioned != nil {
-		d.Bump()
-	}
-}
-
-// SetMatch sets the fuzzy match for the item.
-func (d *DoctorItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(d.m, m) {
-		return
-	}
-	d.cache = nil
-	d.m = m
-	if d.Versioned != nil {
-		d.Bump()
-	}
-}
-
 // Render returns the string representation of the problem. The message and
 // hint are shown truncated to fit the row; Enter opens the detail screen
 // for the untruncated text.
@@ -327,5 +295,5 @@ func (d *DoctorItem) Render(width int) string {
 		InfoTextFocused: d.t.Dialog.ListItem.InfoFocused,
 	}
 	title := fmt.Sprintf("[%s/%s] %s", d.problem.Severity, d.problem.Area, d.problem.Message)
-	return renderItem(st, title, d.problem.Hint, d.focused, width, d.cache, &d.m)
+	return renderItem(st, title, d.problem.Hint, d.Focused(), width, d.Cache(), d.Match())
 }

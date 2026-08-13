@@ -33,6 +33,7 @@ const APIKeyInputID = "api_key_input"
 
 // APIKeyInput represents a model selection dialog.
 type APIKeyInput struct {
+	Base
 	com          *common.Common
 	isOnboarding bool
 
@@ -43,7 +44,6 @@ type APIKeyInput struct {
 	// returns ActionProviderConfigured instead of ActionSelectModel.
 	model *config.SelectedModel
 
-	width int
 	state APIKeyInputState
 
 	keyMap struct {
@@ -66,12 +66,11 @@ func NewAPIKeyInput(
 ) (*APIKeyInput, tea.Cmd) {
 	t := com.Styles
 
-	m := APIKeyInput{}
+	m := APIKeyInput{Base: NewBase(com, 60)}
 	m.com = com
 	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
-	m.width = 0 // Set dynamically in Draw().
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
@@ -159,14 +158,14 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 
-	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize() - 2
+	m.Resize(area)
+	innerWidth := m.InnerWidth() - 2
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
 	textStyle := t.Dialog.SecondaryText
-	dialogStyle := t.Dialog.View.Width(m.width)
+	dialogStyle := t.Dialog.View.Width(m.Width())
 	inputStyle := t.Dialog.InputPrompt
-	helpView := renderDialogHelp(t, &m.help, m, m.width-dialogStyle.GetHorizontalFrameSize())
+	helpView := renderDialogHelp(t, &m.help, m, m.Width()-dialogStyle.GetHorizontalFrameSize())
 
 	m.input.Prompt = m.spinner.View()
 
@@ -197,7 +196,7 @@ func (m *APIKeyInput) headerView() string {
 		t           = m.com.Styles
 		titleStyle  = t.Dialog.Title
 		textStyle   = t.Dialog.PrimaryText
-		dialogStyle = t.Dialog.View.Width(m.width)
+		dialogStyle = t.Dialog.View.Width(m.Width())
 	)
 	if m.isOnboarding {
 		return textStyle.Render(m.dialogTitle())

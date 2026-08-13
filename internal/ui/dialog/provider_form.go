@@ -39,6 +39,7 @@ const (
 // back as [ActionCustomProviderResult] (see actions.go's doc comment on
 // that type for how the round-trip reaches HandleMsg below).
 type ProviderForm struct {
+	Base
 	com *common.Common
 
 	id      textinput.Model
@@ -56,8 +57,7 @@ type ProviderForm struct {
 	// rendered heights of the parts above it — see Draw() and Cursor().
 	fieldRow map[providerFormField]int
 
-	width int
-	help  help.Model
+	help help.Model
 
 	keyMap struct {
 		Next   key.Binding
@@ -73,7 +73,7 @@ var _ Dialog = (*ProviderForm)(nil)
 
 // NewProviderForm creates a new custom provider form dialog.
 func NewProviderForm(com *common.Common) *ProviderForm {
-	m := &ProviderForm{com: com}
+	m := &ProviderForm{Base: NewBase(com, providerFormMaxWidth), com: com}
 
 	m.id = textinput.New()
 	m.id.SetVirtualCursor(false)
@@ -273,8 +273,8 @@ func (m *ProviderForm) Cursor() *tea.Cursor {
 func (m *ProviderForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 
-	m.width = max(0, min(providerFormMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	m.Resize(area)
+	innerWidth := m.InnerWidth()
 
 	m.id.SetWidth(dialogInputTextWidth(t, m.id, innerWidth))
 	m.baseURL.SetWidth(dialogInputTextWidth(t, m.baseURL, innerWidth))
@@ -283,7 +283,7 @@ func (m *ProviderForm) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	labelStyle := t.Dialog.SecondaryText
 	inputStyle := t.Dialog.InputPrompt
 
-	rc := NewRenderContext(t, m.width)
+	rc := NewRenderContext(t, m.Width())
 	rc.Title = "Custom Provider"
 
 	// lines tracks the rendered height of the parts added so far (they all

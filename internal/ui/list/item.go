@@ -1,9 +1,11 @@
 package list
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/sahilm/fuzzy"
 )
 
 // Item represents a single item in the lazy-loaded list.
@@ -67,6 +69,67 @@ func (vc *Versioned) Version() uint64 {
 // harmless other than a single extra cache miss.
 func (vc *Versioned) Bump() {
 	vc.v++
+}
+
+// BaseItem provides the common lifecycle state for stable, filterable list
+// items. Embed it in an item and use SetFocused/SetMatch from the embedded
+// value; observable changes clear the per-width cache and bump Version.
+type BaseItem struct {
+	*Versioned
+	cache   map[int]string
+	focused bool
+	match   fuzzy.Match
+}
+
+// NewBaseItem creates an item lifecycle helper with a fresh version.
+func NewBaseItem() BaseItem {
+	return BaseItem{Versioned: NewVersioned(), cache: make(map[int]string)}
+}
+
+// Finished implements Item for static list rows.
+func (b *BaseItem) Finished() bool { return true }
+
+// SetFocused updates focus only when it changes.
+func (b *BaseItem) SetFocused(focused bool) {
+	if b.focused == focused {
+		return
+	}
+	b.focused = focused
+	b.invalidate()
+}
+
+// SetMatch updates the fuzzy match only when it changes.
+func (b *BaseItem) SetMatch(match fuzzy.Match) {
+	if sameMatch(b.match, match) {
+		return
+	}
+	b.match = match
+	b.invalidate()
+}
+
+// Focused reports the current focus state.
+func (b *BaseItem) Focused() bool { return b.focused }
+
+// Match reports the current fuzzy match.
+func (b *BaseItem) Match() *fuzzy.Match { return &b.match }
+
+// Cache returns the item's per-width render cache.
+func (b *BaseItem) Cache() map[int]string { return b.cache }
+
+// Invalidate clears cached renderings and advances the item version.
+func (b *BaseItem) Invalidate() { b.invalidate() }
+
+func (b *BaseItem) invalidate() {
+	b.cache = nil
+	if b.Versioned == nil {
+		b.Versioned = NewVersioned()
+	}
+	b.Bump()
+}
+
+func sameMatch(a, b fuzzy.Match) bool {
+	return a.Str == b.Str && a.Index == b.Index && a.Score == b.Score &&
+		slices.Equal(a.MatchedIndexes, b.MatchedIndexes)
 }
 
 // RawRenderable represents an item that can provide a raw rendering

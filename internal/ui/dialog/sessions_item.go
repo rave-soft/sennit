@@ -2,7 +2,6 @@ package dialog
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -18,19 +17,6 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-// sameFuzzyMatch reports whether two fuzzy.Match values are
-// observably equal. Because Match contains a slice (MatchedIndexes)
-// it is not directly comparable with ==; we compare the scalar
-// fields and then walk the indexes. The dialog list items use this
-// to skip gratuitous version bumps when SetMatch reapplies the same
-// match.
-func sameFuzzyMatch(a, b fuzzy.Match) bool {
-	return a.Str == b.Str &&
-		a.Index == b.Index &&
-		a.Score == b.Score &&
-		slices.Equal(a.MatchedIndexes, b.MatchedIndexes)
-}
-
 // ListItem represents a selectable and searchable item in a dialog list.
 type ListItem interface {
 	list.FilterableItem
@@ -43,22 +29,12 @@ type ListItem interface {
 
 // SessionItem wraps a [session.Session] to implement the [ListItem] interface.
 type SessionItem struct {
-	*list.Versioned
+	list.BaseItem
 	session.Session
 	t                *styles.Styles
 	sessionsMode     sessionsMode
-	m                fuzzy.Match
-	cache            map[int]string
 	updateTitleInput textinput.Model
-	focused          bool
 	hideInfo         bool
-}
-
-// Finished implements list.Item. Session items are render-stable
-// outside of explicit SetFocused / SetMatch calls, both of which
-// bump Version() and therefore invalidate the F6 frozen entry.
-func (s *SessionItem) Finished() bool {
-	return true
 }
 
 var _ ListItem = &SessionItem{}
@@ -73,18 +49,6 @@ func (s *SessionItem) ID() string {
 	return s.Session.ID
 }
 
-// SetMatch sets the fuzzy match for the session item.
-func (s *SessionItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(s.m, m) {
-		return
-	}
-	s.cache = nil
-	s.m = m
-	if s.Versioned != nil {
-		s.Bump()
-	}
-}
-
 // InputValue returns the updated title value
 func (s *SessionItem) InputValue() string {
 	return s.updateTitleInput.Value()
@@ -94,9 +58,7 @@ func (s *SessionItem) InputValue() string {
 func (s *SessionItem) HandleInput(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	s.updateTitleInput, cmd = s.updateTitleInput.Update(msg)
-	if s.Versioned != nil {
-		s.Bump()
-	}
+	s.Invalidate()
 	return cmd
 }
 
@@ -116,11 +78,8 @@ func (s *SessionItem) SetHideInfo(v bool) {
 	if s.hideInfo == v {
 		return
 	}
-	s.cache = nil
 	s.hideInfo = v
-	if s.Versioned != nil {
-		s.Bump()
-	}
+	s.Invalidate()
 }
 
 // Render returns the string representation of the session item.
@@ -143,7 +102,7 @@ func (s *SessionItem) Render(width int) string {
 	case sessionsModeUpdating:
 		styles.ItemBlurred = s.t.Dialog.Sessions.RenamingItemBlurred
 		styles.ItemFocused = s.t.Dialog.Sessions.RenamingingItemFocused
-		if s.focused {
+		if s.Focused() {
 			const cursorPadding = 1
 			inputWidth := max(0, width-styles.ItemFocused.GetHorizontalFrameSize()-cursorPadding)
 			s.updateTitleInput.SetWidth(inputWidth)
@@ -152,7 +111,7 @@ func (s *SessionItem) Render(width int) string {
 		}
 	}
 
-	return renderItem(styles, s.Title, info, s.focused, width, s.cache, &s.m)
+	return renderItem(styles, s.Title, info, s.Focused(), width, s.Cache(), s.Match())
 }
 
 type ListItemStyles struct {
@@ -239,24 +198,12 @@ func renderItem(t ListItemStyles, title string, info string, focused bool, width
 	return content
 }
 
-// SetFocused sets the focus state of the session item.
-func (s *SessionItem) SetFocused(focused bool) {
-	if s.focused == focused {
-		return
-	}
-	s.cache = nil
-	s.focused = focused
-	if s.Versioned != nil {
-		s.Bump()
-	}
-}
-
 // sessionItems takes a slice of [session.Session]s and convert them to a slice
 // of [ListItem]s.
 func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Session) []list.FilterableItem {
 	items := make([]list.FilterableItem, len(sessions))
 	for i, s := range sessions {
-		item := &SessionItem{Versioned: list.NewVersioned(), Session: s, t: t, sessionsMode: mode}
+		item := &SessionItem{BaseItem: list.NewBaseItem(), Session: s, t: t, sessionsMode: mode}
 		if mode == sessionsModeUpdating {
 			item.updateTitleInput = textinput.New()
 			item.updateTitleInput.SetVirtualCursor(false)

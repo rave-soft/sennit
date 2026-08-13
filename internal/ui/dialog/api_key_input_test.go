@@ -1,10 +1,13 @@
 package dialog
 
 import (
+	"image"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
@@ -35,6 +38,33 @@ func newAPIKeyTestCommon(t *testing.T) (*common.Common, *apiKeyTestWorkspace) {
 	s := styles.CharmtonePantera()
 	ws := &apiKeyTestWorkspace{}
 	return &common.Common{Styles: &s, Workspace: ws}, ws
+}
+
+// TestAPIKeyInput_DrawFramedFromConstructor guards constructor initialization
+// required by the shared framed-dialog layout.
+func TestAPIKeyInput_DrawFramedFromConstructor(t *testing.T) {
+	com, _ := newAPIKeyTestCommon(t)
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider("test-provider"), Name: "Test Provider"}
+	dlg, _ := NewAPIKeyInput(com, false, provider, nil)
+	area := image.Rect(0, 0, 80, 24)
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+
+	var cursor *tea.Cursor
+	require.NotPanics(t, func() {
+		cursor = dlg.Draw(scr, area)
+	})
+
+	require.Equal(t, 60, dlg.Width())
+	require.Positive(t, dlg.InnerWidth())
+	require.NotNil(t, cursor)
+	require.Contains(t, scr.String(), "Test Provider Key")
+	require.Contains(t, scr.String(), "Enter your API key")
+	require.Contains(t, scr.String(), "global configuration")
+	require.True(t, strings.ContainsAny(scr.String(), "┌╭╔"), "framed mode should render a dialog border")
+	require.GreaterOrEqual(t, cursor.X, area.Min.X)
+	require.Less(t, cursor.X, area.Max.X)
+	require.GreaterOrEqual(t, cursor.Y, area.Min.Y)
+	require.Less(t, cursor.Y, area.Max.Y)
 }
 
 // TestAPIKeyInput_WithModelReturnsActionSelectModel is a regression test

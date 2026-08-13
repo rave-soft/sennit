@@ -318,7 +318,7 @@ no-op `event/all.go`.
 | 3.6 | выполнено | — |
 | 3.7 конкурентность | выполнено | repo-scoped workspace-lock покрывает local/backend/thread; `Recover` не стал распределённым протоколом |
 | 4.1 дедупликация TTL-кэшей | выполнено | `ttlCache[T]` покрывает value/timestamp/single-flight/generation; на него переведены indicator, dashboard, dock list/activity и bool-кэши workspace |
-| 4.2 диалоги | частично | Нет общего `confirmDialog` и `BaseItem`, миграция инфраструктуры не завершена |
+| 4.2 диалоги | выполнено | `confirmDialog`, композиция `selectDialog` для Commands/Session, `Base` и `list.BaseItem` внедрены; намеренно не механизированы несовместимые многошаговые и нестандартно позиционируемые layouts |
 | 4.3–4.7 дедупликация/чистка | не начато | Исходные копии и мёртвый код остаются |
 | 5.1 VCR/`TestCoderAgent` | выполнено | — |
 | 5.2–5.3 golden/роутер Update | не начато | Command-driving есть, golden-сценариев и разреза `Update` нет |
@@ -374,7 +374,7 @@ no-op `event/all.go`.
 | # | Задача | Эффект |
 |---|---|---|
 | 4.1 | `ttlCache[T]` в ui/model; перевести threadIndicator/threadsDock/threadsCache и bool-кэши workspace_cache | −220 строк, канон для будущих кэшей |
-| 4.2 | `confirmDialog` (quit + thread_remove_confirm); домиграция commands/sessions на `selectDialog`, остальных диалогов на `Base`; `list.BaseItem` для item-boilerplate | −500+ строк, преамбула Draw перестаёт тиражироваться |
+| 4.2 | **Выполнено:** общий `confirmDialog` обслуживает quit и удаление thread; `selectDialog` выделяет переиспользуемые input/list/help/filter/navigation/layout hooks, которыми композиционно пользуются Commands и Session при сохранении их tabs/shortcuts/async и mode-specific state machines. `Base` применяется к centered framed Draw-путям с совместимой геометрией, включая Models; `list.BaseItem` заменяет item lifecycle boilerplate. Намеренные исключения: многошаговые формы, overlay/absolute cursor layouts и другие Draw-пути с отличающейся геометрией не мигрируются механически. | −500+ строк, преамбула Draw перестаёт тиражироваться |
 | 4.3 | Общие форматтеры делегаций/тредов: formatElapsed/formatTokenCount/статус-строка/todo-классификация/рендер строки todo — один пакет-хелпер; слить `drawThreadBlocks`/`drawDelegationBlocks` | −200 строк |
 | 4.4 | Один хелпер attach-threads с параметром-Spawner вместо близнецов в cmd и backend | −40 строк, один путь wiring |
 | 4.5 | `proto.Todo` → алиас `session.Todo`; `LSPClientInfo` → алиасы по образцу `proto/message.go` | Конверторы исчезают |
@@ -407,14 +407,15 @@ no-op `event/all.go`.
 ### Ожидаемый порядок исполнения открытых задач
 
 ```
-4.2 (диалоги)
+4.2 (диалоги, выполнено)
   → 4.3–4.4 до дальнейшего расхождения оставшихся копий; затем 4.5–4.7
   → 5.2 (golden-снимки) поверх готовой command-driving обвязки;
      5.3 строго после 5.2; 5.5 можно выполнять независимо
   → Фаза 6 по отдельным продуктовым решениям
 ```
 
-Ближайший рекомендуемый срез: выполнить 4.2. Критическая фаза, отзывчивость
-TUI и страховочная сетка 5.1 закрыты; следующий приоритет — остановить
-расхождение инфраструктуры диалогов, прежде чем продолжать дедупликацию и
-структурный разрез `Update`.
+4.2 закрыта: общая confirm/select/Base/BaseItem-инфраструктура покрыта
+регрессиями filter/selection/navigation/focus/cursor/narrow layout, tabs и
+async rebuild Commands, а также rename/delete/cancel/busy transitions Session.
+Ближайший пункт — 4.3: объединить форматтеры и presentation-логику
+делегаций/тредов, пока оставшиеся копии не разошлись.

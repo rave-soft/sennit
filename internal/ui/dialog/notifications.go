@@ -5,7 +5,6 @@ import (
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/notification"
 	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/sahilm/fuzzy"
 )
 
 const (
@@ -41,19 +40,10 @@ type Notifications struct {
 
 // NotificationItem represents a notification style list item.
 type NotificationItem struct {
-	*list.Versioned
+	list.BaseItem
 	style     NotificationStyle
 	isCurrent bool
 	t         *styles.Styles
-	m         fuzzy.Match
-	cache     map[int]string
-	focused   bool
-}
-
-// Finished implements list.Item. Notification items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (n *NotificationItem) Finished() bool {
-	return true
 }
 
 var (
@@ -97,7 +87,7 @@ func notificationItems(com *common.Common) ([]list.FilterableItem, int, error) {
 			continue
 		}
 		item := &NotificationItem{
-			Versioned: list.NewVersioned(),
+			BaseItem:  list.NewBaseItem(),
 			style:     style,
 			isCurrent: style.ID == currentStyle,
 			t:         com.Styles,
@@ -121,30 +111,6 @@ func (n *NotificationItem) ID() string {
 	return n.style.ID
 }
 
-// SetFocused sets the focus state of the notification item.
-func (n *NotificationItem) SetFocused(focused bool) {
-	if n.focused == focused {
-		return
-	}
-	n.cache = nil
-	n.focused = focused
-	if n.Versioned != nil {
-		n.Bump()
-	}
-}
-
-// SetMatch sets the fuzzy match for the notification item.
-func (n *NotificationItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(n.m, m) {
-		return
-	}
-	n.cache = nil
-	n.m = m
-	if n.Versioned != nil {
-		n.Bump()
-	}
-}
-
 // Render returns the string representation of the notification item.
 func (n *NotificationItem) Render(width int) string {
 	info := ""
@@ -157,5 +123,5 @@ func (n *NotificationItem) Render(width int) string {
 		InfoTextBlurred: n.t.Dialog.ListItem.InfoBlurred,
 		InfoTextFocused: n.t.Dialog.ListItem.InfoFocused,
 	}
-	return renderItem(st, n.style.Title, info, n.focused, width, n.cache, &n.m)
+	return renderItem(st, n.style.Title, info, n.Focused(), width, n.Cache(), n.Match())
 }

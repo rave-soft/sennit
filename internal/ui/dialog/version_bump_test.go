@@ -142,9 +142,9 @@ func TestSessionItem_MutatorsBumpVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	item := &SessionItem{
-		Versioned: list.NewVersioned(),
-		Session:   session.Session{ID: "sess-1", Title: "My Session"},
-		t:         &sty,
+		BaseItem: list.NewBaseItem(),
+		Session:  session.Session{ID: "sess-1", Title: "My Session"},
+		t:        &sty,
 	}
 
 	requireBump(t, "SetFocused[true]", item, func() {
@@ -183,10 +183,10 @@ func TestReasoningItem_MutatorsBumpVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	item := &ReasoningItem{
-		Versioned: list.NewVersioned(),
-		effort:    "medium",
-		title:     "Medium",
-		t:         &sty,
+		BaseItem: list.NewBaseItem(),
+		effort:   "medium",
+		title:    "Medium",
+		t:        &sty,
 	}
 
 	requireBump(t, "SetFocused[true]", item, func() {

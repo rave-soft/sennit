@@ -3,9 +3,7 @@ package dialog
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -15,234 +13,125 @@ import (
 	"github.com/rave-soft/braid/internal/ui/util"
 )
 
-// SessionsID is the identifier for the session selector dialog.
 const SessionsID = "session"
 
 type sessionsMode uint8
 
-// Possible modes a session item can be in
 const (
 	sessionsModeNormal sessionsMode = iota
 	sessionsModeDeleting
 	sessionsModeUpdating
 )
 
-// Session is a session selector dialog.
+// Session composes selectDialog's filter input, list, navigation, help and
+// centered layout with the session-specific delete and rename state machine.
 type Session struct {
-	com                *common.Common
-	help               help.Model
-	list               *list.FilterableList
-	input              textinput.Model
-	selectedSessionInx int
-	sessions           []session.Session
-
+	*selectDialog
+	com          *common.Common
+	sessions     []session.Session
 	sessionsMode sessionsMode
-
-	keyMap struct {
-		Select        key.Binding
-		Next          key.Binding
-		Previous      key.Binding
-		UpDown        key.Binding
-		Delete        key.Binding
-		Rename        key.Binding
-		ConfirmRename key.Binding
-		CancelRename  key.Binding
-		ConfirmDelete key.Binding
-		CancelDelete  key.Binding
-		Close         key.Binding
-	}
+	sessionKeys  struct{ Delete, Rename, ConfirmRename, CancelRename, ConfirmDelete, CancelDelete key.Binding }
 }
 
 var _ Dialog = (*Session)(nil)
 
-// NewSessions creates a new Session dialog from an already-fetched session
-// list. ListSessions can be a synchronous HTTP round-trip in client/server
-// mode, so callers load it off the Update goroutine first (see
-// UI.openSessionsDialog) rather than fetching it here.
 func NewSessions(com *common.Common, sessions []session.Session, selectedSessionID string) *Session {
-	s := new(Session)
-	s.sessionsMode = sessionsModeNormal
-	s.com = com
-	s.sessions = sessions
-	for i, sess := range sessions {
-		if sess.ID == selectedSessionID {
-			s.selectedSessionInx = i
+	s := &Session{com: com, sessions: sessions}
+	sd, err := newSelectDialog(com, selectDialogConfig{id: SessionsID, title: "Sessions", maxWidth: defaultDialogMaxWidth, inputPlaceholder: "Enter session name", selectKeys: []string{"enter", "tab", "ctrl+y"}, dynamicHeight: true, maxHeight: defaultDialogHeight, buildItems: s.sessionItems, onSelect: func(id string) Action {
+		for _, session := range s.sessions {
+			if session.ID == id {
+				return ActionSelectSession{Session: session}
+			}
+		}
+		return nil
+	}})
+	if err != nil {
+		panic(err)
+	} // sessionItems is in-memory and cannot fail.
+	s.selectDialog = sd
+	for i, item := range s.list.FilteredItems() {
+		if sessionItem, ok := item.(*SessionItem); ok && sessionItem.ID() == selectedSessionID {
+			s.list.SetSelected(i)
+			s.list.ScrollToSelected()
 			break
 		}
 	}
-
-	help := help.New()
-	help.Styles = com.Styles.DialogHelpStyles()
-
-	s.help = help
-	s.list = list.NewFilterableList(sessionItems(com.Styles, sessionsModeNormal, sessions...)...)
-	s.list.Focus()
-	s.list.SetSelected(s.selectedSessionInx)
-
-	s.input = textinput.New()
-	s.input.SetVirtualCursor(false)
-	s.input.Placeholder = "Enter session name"
-	s.input.SetStyles(com.Styles.TextInput)
-	s.input.Focus()
-
-	s.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "tab", "ctrl+y"),
-		key.WithHelp("enter", "choose"),
-	)
-	s.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "ctrl+n"),
-		key.WithHelp("↓", "next item"),
-	)
-	s.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
-	)
-	s.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑↓", "choose"),
-	)
-	s.keyMap.Delete = key.NewBinding(
-		key.WithKeys("ctrl+x"),
-		key.WithHelp("ctrl+x", "delete"),
-	)
-	s.keyMap.Rename = key.NewBinding(
-		key.WithKeys("ctrl+r"),
-		key.WithHelp("ctrl+r", "rename"),
-	)
-	s.keyMap.ConfirmRename = key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "confirm"),
-	)
-	s.keyMap.CancelRename = key.NewBinding(
-		key.WithKeys("esc"),
-		key.WithHelp("esc", "cancel"),
-	)
-	s.keyMap.ConfirmDelete = key.NewBinding(
-		key.WithKeys("y"),
-		key.WithHelp("y", "delete"),
-	)
-	s.keyMap.CancelDelete = key.NewBinding(
-		key.WithKeys("n", "esc"),
-		key.WithHelp("n", "cancel"),
-	)
-	s.keyMap.Close = CloseKey
-
+	s.sessionKeys.Delete = key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "delete"))
+	s.sessionKeys.Rename = key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "rename"))
+	s.sessionKeys.ConfirmRename = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm"))
+	s.sessionKeys.CancelRename = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel"))
+	s.sessionKeys.ConfirmDelete = key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "delete"))
+	s.sessionKeys.CancelDelete = key.NewBinding(key.WithKeys("n", "esc"), key.WithHelp("n", "cancel"))
 	return s
 }
-
-// ID implements Dialog.
-func (s *Session) ID() string {
-	return SessionsID
+func (s *Session) ID() string { return SessionsID }
+func (s *Session) sessionItems() ([]list.FilterableItem, int, error) {
+	return sessionItems(s.com.Styles, s.sessionsMode, s.sessions...), 0, nil
 }
+func (s *Session) rebuild() { _ = s.replaceItems(s.sessionItems) }
 
-// HandleMsg implements Dialog.
 func (s *Session) HandleMsg(msg tea.Msg) Action {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch s.sessionsMode {
-		case sessionsModeDeleting:
-			switch {
-			case key.Matches(msg, s.keyMap.ConfirmDelete):
-				action := s.confirmDeleteSession()
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
-				s.list.SelectFirst()
-				s.list.ScrollToSelected()
-				return action
-			case key.Matches(msg, s.keyMap.CancelDelete):
-				s.sessionsMode = sessionsModeNormal
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
-			}
-		case sessionsModeUpdating:
-			switch {
-			case key.Matches(msg, s.keyMap.ConfirmRename):
-				action := s.confirmRenameSession()
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
-				return action
-			case key.Matches(msg, s.keyMap.CancelRename):
-				s.sessionsMode = sessionsModeNormal
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
-			default:
-				item := s.list.SelectedItem()
-				if item == nil {
-					return nil
-				}
-				if sessionItem, ok := item.(*SessionItem); ok {
-					return sessionItem.HandleInput(msg)
-				}
-			}
-		default:
-			switch {
-			case key.Matches(msg, s.keyMap.Close):
-				return ActionClose{}
-			case key.Matches(msg, s.keyMap.Rename):
-				s.sessionsMode = sessionsModeUpdating
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
-			case key.Matches(msg, s.keyMap.Delete):
-				if s.isCurrentSessionBusy() {
-					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
-				}
-				s.sessionsMode = sessionsModeDeleting
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
-			case key.Matches(msg, s.keyMap.Previous):
-				s.list.Focus()
-				if s.list.IsSelectedFirst() {
-					s.list.SelectLast()
-				} else {
-					s.list.SelectPrev()
-				}
-				s.list.ScrollToSelected()
-			case key.Matches(msg, s.keyMap.Next):
-				s.list.Focus()
-				if s.list.IsSelectedLast() {
-					s.list.SelectFirst()
-				} else {
-					s.list.SelectNext()
-				}
-				s.list.ScrollToSelected()
-			case key.Matches(msg, s.keyMap.Select):
-				if item := s.list.SelectedItem(); item != nil {
-					sessionItem := item.(*SessionItem)
-					return ActionSelectSession{sessionItem.Session}
-				}
-			default:
-				var cmd tea.Cmd
-				s.input, cmd = s.input.Update(msg)
-				value := s.input.Value()
-				s.list.SetFilter(value)
-				s.list.ScrollToTop()
-				s.list.SetSelected(0)
-				return ActionCmd{cmd}
-			}
-		}
+	keyMsg, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return nil
 	}
-	return nil
+	switch s.sessionsMode {
+	case sessionsModeDeleting:
+		switch {
+		case key.Matches(keyMsg, s.sessionKeys.ConfirmDelete):
+			action := s.confirmDeleteSession()
+			s.rebuild()
+			return action
+		case key.Matches(keyMsg, s.sessionKeys.CancelDelete):
+			s.sessionsMode = sessionsModeNormal
+			s.rebuild()
+		}
+		return nil
+	case sessionsModeUpdating:
+		switch {
+		case key.Matches(keyMsg, s.sessionKeys.ConfirmRename):
+			action := s.confirmRenameSession()
+			s.rebuild()
+			return action
+		case key.Matches(keyMsg, s.sessionKeys.CancelRename):
+			s.sessionsMode = sessionsModeNormal
+			s.rebuild()
+			return nil
+		}
+		if item := s.selectedSessionItem(); item != nil {
+			return item.HandleInput(keyMsg)
+		}
+		return nil
+	}
+	switch {
+	case key.Matches(keyMsg, s.sessionKeys.Rename):
+		s.sessionsMode = sessionsModeUpdating
+		s.rebuild()
+		return nil
+	case key.Matches(keyMsg, s.sessionKeys.Delete):
+		if s.isCurrentSessionBusy() {
+			return ActionCmd{Cmd: util.ReportWarn("Agent is busy, please wait...")}
+		}
+		s.sessionsMode = sessionsModeDeleting
+		s.rebuild()
+		return nil
+	}
+	return s.handleNavigation(keyMsg, func(item ListItem) Action {
+		return ActionSelectSession{Session: item.(*SessionItem).Session}
+	})
 }
 
-// Cursor returns the cursor position relative to the dialog.
-func (s *Session) Cursor() *tea.Cursor {
-	return InputCursor(s.com.Styles, s.input.Cursor())
-}
-
-// Draw implements [Dialog].
 func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := s.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	s.input.SetWidth(dialogInputTextWidth(t, s.input, innerWidth))
-	listHeight, listTotalHeight, listWidth := sizeDialogList(t, s.list, innerWidth, height)
-
-	// Hide the timestamps uniformly when the widest would crowd the title.
-	applyInfoColumnVisibility(s.list.FilteredItems(), listWidth, sessionInfoMaxPercent)
-
-	// This makes it so we do not scroll the list if we don't have to
+	layout := s.layout(area, height, true)
+	width, innerWidth := layout.width, layout.innerWidth
+	listHeight, listTotalHeight := layout.listHeight, layout.listTotalHeight
+	applyInfoColumnVisibility(s.list.FilteredItems(), layout.listWidth, sessionInfoMaxPercent)
 	start, end := s.list.VisibleItemIndices()
-
-	// if selected index is outside visible range, scroll to it
-	if s.selectedSessionInx < start || s.selectedSessionInx > end {
+	if selected := s.list.Selected(); selected < start || selected > end {
 		s.list.ScrollToSelected()
 	}
-
 	var cur *tea.Cursor
 	rc := NewRenderContext(t, width)
 	rc.Title = "Sessions"
@@ -260,56 +149,26 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.ViewStyle = t.Dialog.Sessions.RenamingView
 		message := t.Dialog.Sessions.RenamingingMessage.Render("Rename this session?")
 		rc.AddPart(message)
-		item := s.selectedSessionItem()
-		if item == nil {
-			return nil
-		}
-		cur = item.Cursor()
-		if cur == nil {
-			break
-		}
-
-		start, end := s.list.VisibleItemIndices()
-		selectedIndex := s.list.Selected()
-
-		titleStyle := t.Dialog.Sessions.RenamingingTitle
-		dialogStyle := t.Dialog.Sessions.RenamingView
-		inputStyle := t.Dialog.InputPrompt
-
-		// Adjust cursor position to account for dialog layout + message
-		cur.X += inputStyle.GetBorderLeftSize() +
-			inputStyle.GetMarginLeft() +
-			inputStyle.GetPaddingLeft() +
-			dialogStyle.GetBorderLeftSize() +
-			dialogStyle.GetPaddingLeft() +
-			dialogStyle.GetMarginLeft()
-		cur.Y += titleStyle.GetVerticalFrameSize() +
-			inputStyle.GetBorderTopSize() +
-			inputStyle.GetMarginTop() +
-			inputStyle.GetPaddingTop() +
-			inputStyle.GetBorderBottomSize() +
-			inputStyle.GetMarginBottom() +
-			inputStyle.GetPaddingBottom() +
-			dialogStyle.GetPaddingTop() +
-			dialogStyle.GetBorderTopSize() +
-			lipgloss.Height(message) - 1
-
-		// move the cursor by one down until we see the selectedIndex
-		for ; start <= end && start != selectedIndex && selectedIndex > -1; start++ {
-			cur.Y += 1
+		if item := s.selectedSessionItem(); item != nil {
+			cur = item.Cursor()
+			if cur != nil {
+				inputStyle, titleStyle, dialogStyle := t.Dialog.InputPrompt, t.Dialog.Sessions.RenamingingTitle, t.Dialog.Sessions.RenamingView
+				cur.X += inputStyle.GetBorderLeftSize() + inputStyle.GetMarginLeft() + inputStyle.GetPaddingLeft() + dialogStyle.GetBorderLeftSize() + dialogStyle.GetPaddingLeft() + dialogStyle.GetMarginLeft()
+				cur.Y += titleStyle.GetVerticalFrameSize() + inputStyle.GetBorderTopSize() + inputStyle.GetMarginTop() + inputStyle.GetPaddingTop() + inputStyle.GetBorderBottomSize() + inputStyle.GetMarginBottom() + inputStyle.GetPaddingBottom() + dialogStyle.GetPaddingTop() + dialogStyle.GetBorderTopSize() + lipgloss.Height(message) - 1
+				start, end := s.list.VisibleItemIndices()
+				for selected := s.list.Selected(); start <= end && start != selected && selected > -1; start++ {
+					cur.Y++
+				}
+			}
 		}
 	default:
-		inputView := t.Dialog.InputPrompt.Render(s.input.View())
+		rc.AddPart(t.Dialog.InputPrompt.Render(s.input.View()))
 		cur = s.Cursor()
-		rc.AddPart(inputView)
 	}
 	listView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
-	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, s.list.Offset())
-	rc.AddPart(listView)
+	rc.AddPart(joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, s.list.Offset()))
 	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
-
 	view := rc.Render()
-
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }
@@ -395,7 +254,7 @@ func (s *Session) isCurrentSessionBusy() bool {
 		return false
 	}
 
-	if !s.com.Workspace.AgentIsReady() {
+	if s.com.Workspace == nil || !s.com.Workspace.AgentIsReady() {
 		return false
 	}
 
@@ -407,19 +266,19 @@ func (s *Session) ShortHelp() []key.Binding {
 	switch s.sessionsMode {
 	case sessionsModeDeleting:
 		return []key.Binding{
-			s.keyMap.ConfirmDelete,
-			s.keyMap.CancelDelete,
+			s.sessionKeys.ConfirmDelete,
+			s.sessionKeys.CancelDelete,
 		}
 	case sessionsModeUpdating:
 		return []key.Binding{
-			s.keyMap.ConfirmRename,
-			s.keyMap.CancelRename,
+			s.sessionKeys.ConfirmRename,
+			s.sessionKeys.CancelRename,
 		}
 	default:
 		return []key.Binding{
 			s.keyMap.UpDown,
-			s.keyMap.Rename,
-			s.keyMap.Delete,
+			s.sessionKeys.Rename,
+			s.sessionKeys.Delete,
 			s.keyMap.Select,
 			s.keyMap.Close,
 		}
@@ -431,8 +290,8 @@ func (s *Session) FullHelp() [][]key.Binding {
 	m := [][]key.Binding{}
 	slice := []key.Binding{
 		s.keyMap.UpDown,
-		s.keyMap.Rename,
-		s.keyMap.Delete,
+		s.sessionKeys.Rename,
+		s.sessionKeys.Delete,
 		s.keyMap.Select,
 		s.keyMap.Close,
 	}
@@ -440,13 +299,13 @@ func (s *Session) FullHelp() [][]key.Binding {
 	switch s.sessionsMode {
 	case sessionsModeDeleting:
 		slice = []key.Binding{
-			s.keyMap.ConfirmDelete,
-			s.keyMap.CancelDelete,
+			s.sessionKeys.ConfirmDelete,
+			s.sessionKeys.CancelDelete,
 		}
 	case sessionsModeUpdating:
 		slice = []key.Binding{
-			s.keyMap.ConfirmRename,
-			s.keyMap.CancelRename,
+			s.sessionKeys.ConfirmRename,
+			s.sessionKeys.CancelRename,
 		}
 	}
 	for i := 0; i < len(slice); i += 4 {
