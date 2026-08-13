@@ -360,6 +360,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err := ValidateCall(call); err != nil {
 		return nil, err
 	}
+	if call.Accepted != nil {
+		call.acceptSeq = call.Accepted.seq
+	}
 
 	// genCtx/cancel are the run context and its cancel func, created under
 	// the per-session dispatch mutex below so a concurrent Cancel can observe
@@ -647,13 +650,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		// If the agent wasn't done...
 		if len(t.currentAssistant.ToolCalls()) > 0 {
-			existing, ok := a.dispatch.messageQueue.Get(call.SessionID)
-			if !ok {
-				existing = []SessionAgentCall{}
-			}
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			existing = append(existing, call)
-			a.dispatch.messageQueue.Set(call.SessionID, existing)
+			a.dispatch.requeueContinuation(call, reporter.suppress)
 		}
 	}
 

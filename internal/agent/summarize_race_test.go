@@ -8,6 +8,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 
@@ -79,6 +82,179 @@ func (m *raceInjectModel) StreamObject(context.Context, fantasy.ObjectCall) (fan
 // production code solely for testing, so this drives the same map
 // mutation through the real Run call instead of trying to land two actual
 // goroutines in that window.
+type continuationRaceModel struct {
+	streams        atomic.Int32
+	summaryStarted chan struct{}
+	releaseSummary chan struct{}
+}
+
+func (m *continuationRaceModel) Provider() string { return "fake" }
+func (m *continuationRaceModel) Model() string    { return "fake-model" }
+
+func (m *continuationRaceModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{FinishReason: fantasy.FinishReasonStop}, nil
+}
+
+func (m *continuationRaceModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+	stream := m.streams.Add(1)
+	return func(yield func(fantasy.StreamPart) bool) {
+		switch stream {
+		case 1:
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputStart, ID: "tool", ToolCallName: "hold"}) {
+				return
+			}
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputDelta, ID: "tool", Delta: `{}`}) {
+				return
+			}
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolInputEnd, ID: "tool"}) {
+				return
+			}
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeToolCall, ID: "tool", ToolCallName: "hold", ToolCallInput: `{}`})
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonToolCalls})
+		case 2:
+			close(m.summaryStarted)
+			<-m.releaseSummary
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+		default:
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "text"})
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "text", Delta: "concurrent"})
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "text"})
+			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+		}
+	}, nil
+}
+
+func (m *continuationRaceModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *continuationRaceModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+type blockingNotificationPublisher struct {
+	published chan struct{}
+	release   chan struct{}
+}
+
+func (p *blockingNotificationPublisher) Publish(pubsub.EventType, notify.Notification) {
+	close(p.published)
+	<-p.release
+}
+
+func (*blockingNotificationPublisher) PublishMustDeliver(context.Context, pubsub.EventType, notify.Notification) {
+}
+
+func TestRun_AutoSummarizeContinuationClearQueueCompletesOnce(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &continuationRaceModel{summaryStarted: make(chan struct{}), releaseSummary: make(chan struct{})}
+	notifications := &blockingNotificationPublisher{published: make(chan struct{}), release: make(chan struct{})}
+	hold := fantasy.NewAgentTool("hold", "hold", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	})
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel: Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 1, DefaultMaxTokens: 10000}},
+		SmallModel: Model{Model: fastModel{}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Sessions:   env.sessions,
+		Messages:   env.messages,
+		Tools:      []fantasy.AgentTool{hold},
+		Notify:     notifications,
+	}).(*sessionAgent)
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	completion := make(chan notify.RunComplete, 2)
+	runDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{
+			SessionID: sess.ID,
+			RunID:     "original",
+			Prompt:    "original",
+			OnComplete: func(event notify.RunComplete) {
+				completion <- event
+			},
+		})
+		runDone <- runErr
+	}()
+
+	<-model.summaryStarted
+	close(model.releaseSummary)
+	<-notifications.published
+	require.Equal(t, 1, sa.QueuedPrompts(sess.ID))
+
+	sa.ClearQueue(sess.ID)
+	close(notifications.release)
+	require.NoError(t, <-runDone)
+
+	event := <-completion
+	require.Equal(t, "original", event.RunID)
+	require.True(t, event.Cancelled)
+	select {
+	case duplicate := <-completion:
+		t.Fatalf("expected exactly one RunComplete for original RunID, got duplicate: %+v", duplicate)
+	default:
+	}
+}
+
+func TestRun_AutoSummarizeContinuationPreservesAcceptedSequence(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	model := &continuationRaceModel{summaryStarted: make(chan struct{}), releaseSummary: make(chan struct{})}
+	hold := fantasy.NewAgentTool("hold", "hold", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	})
+	sa := NewSessionAgent(SessionAgentOptions{
+		LargeModel: Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 1, DefaultMaxTokens: 10000}},
+		SmallModel: Model{Model: fastModel{}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Sessions:   env.sessions,
+		Messages:   env.messages,
+		Tools:      []fantasy.AgentTool{hold},
+	}).(*sessionAgent)
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	original := sa.BeginAccepted(sess.ID)
+	completion := make(chan notify.RunComplete, 4)
+	runDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{
+			SessionID: sess.ID,
+			RunID:     "original",
+			Prompt:    "original",
+			Accepted:  original,
+			OnComplete: func(event notify.RunComplete) {
+				completion <- event
+			},
+		})
+		runDone <- runErr
+	}()
+	<-model.summaryStarted
+
+	cancelAnchor := sa.BeginAccepted(sess.ID)
+	active := &activeCancel{cancel: func() {}}
+	sa.dispatch.activeRequests.Set(sess.ID, active)
+	sa.dispatch.cancel(sess.ID)
+	concurrent := sa.BeginAccepted(sess.ID)
+	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "concurrent", Accepted: concurrent})
+	require.NoError(t, err)
+	csync.CompareAndDelete(sa.dispatch.activeRequests, sess.ID, active)
+
+	close(model.releaseSummary)
+	require.NoError(t, <-runDone)
+	cancelAnchor.Close()
+
+	require.Equal(t, int32(4), model.streams.Load(), "the post-cancel enqueue must run while the continuation is dropped")
+	event := <-completion
+	require.Equal(t, "original", event.RunID)
+	require.True(t, event.Cancelled)
+	select {
+	case duplicate := <-completion:
+		t.Fatalf("expected exactly one RunComplete for original RunID, got duplicate: %+v", duplicate)
+	default:
+	}
+}
+
 func TestRun_AutoSummarizeDoesNotClobberConcurrentActiveRequest(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

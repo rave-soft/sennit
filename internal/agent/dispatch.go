@@ -197,6 +197,19 @@ func (d *dispatcher) enqueueCall(call SessionAgentCall) {
 	d.messageQueue.Set(call.SessionID, existing)
 }
 
+func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func()) {
+	mu := d.sessionMu(call.SessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	existing, ok := d.messageQueue.Get(call.SessionID)
+	if !ok {
+		existing = []SessionAgentCall{}
+	}
+	d.messageQueue.Set(call.SessionID, append(existing, call))
+	onQueued()
+}
+
 // drainQueueForStep partitions the session's queued calls for the current
 // streaming step under the per-session dispatch mutex so the filtering is
 // atomic against a concurrent Cancel: canceledBySeq requires the caller to
@@ -401,6 +414,10 @@ func (d *dispatcher) cancel(sessionID string) []SessionAgentCall {
 // the caller can publish a terminal cancelled RunComplete for any that
 // carried a RunID.
 func (d *dispatcher) clearQueue(sessionID string) []SessionAgentCall {
+	mu := d.sessionMu(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	queued, ok := d.messageQueue.Get(sessionID)
 	if !ok || len(queued) == 0 {
 		return nil
