@@ -1582,7 +1582,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// threads dashboard — the badge rendered there (see header.go's
 		// renderHeaderDetails) is the only visible hint threads are running
 		// while on the main screen, so it doubles as a button.
-		if msg.Button == tea.MouseLeft && m.threadIndicator.count > 0 && image.Pt(msg.X, msg.Y).In(m.layout.header) {
+		if msg.Button == tea.MouseLeft && m.threadIndicator.cache.value > 0 && image.Pt(msg.X, msg.Y).In(m.layout.header) {
 			cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
 			return m, tea.Batch(cmds...)
 		}
@@ -3904,7 +3904,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.detailsOpen,
 		area.Dx(),
 		m.lspErrorCount(),
-		m.threadIndicator.count,
+		m.threadIndicator.cache.value,
 		bindingKey(m.keyMap.Chat.Details),
 	)
 }
@@ -4994,7 +4994,7 @@ func (m *UI) isAgentBusy() bool {
 	if m.editor.bangCancel != nil {
 		return true
 	}
-	return m.wsCache.agentBusyCache.val
+	return m.wsCache.agentBusyCache.value
 }
 
 // hasSession returns true if there is an active session with a valid ID.

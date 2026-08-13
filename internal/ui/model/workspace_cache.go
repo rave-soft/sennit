@@ -60,8 +60,8 @@ type workspaceCacheState struct {
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread.
-	agentBusyCache    ttlCache
-	yoloCache         ttlCache
+	agentBusyCache    ttlCache[bool]
+	yoloCache         ttlCache[bool]
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
 	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
@@ -74,29 +74,6 @@ type workspaceCacheState struct {
 	// like promptQueueGen it lets a stale in-flight probe result be
 	// discarded and re-fetched instead of clobbering newer state.
 	busyFetchGen uint64
-}
-
-// ttlCache memoizes one boolean workspace probe result.
-type ttlCache struct {
-	val bool
-	at  time.Time
-}
-
-// fresh reports whether the cached value is within its TTL.
-func (c *ttlCache) fresh(ttl time.Duration) bool {
-	return !c.at.IsZero() && time.Since(c.at) < ttl
-}
-
-// set writes a known-good value through the cache.
-func (c *ttlCache) set(val bool) {
-	c.val = val
-	c.at = time.Now()
-}
-
-// invalidate marks the value stale so the next Update-tail backstop
-// re-probes; the last value keeps being served in the meantime.
-func (c *ttlCache) invalidate() {
-	c.at = time.Time{}
 }
 
 // busyStateMsg delivers the result of an off-thread busy/permission probe.
@@ -349,8 +326,8 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 	if cmd := m.threadsDock.staleThreadsDockRefreshCmd(m.com, m.state == uiChat); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if m.state == uiChat && len(m.threadsDock.threads) > 0 {
-		visible, _ := visibleDockThreads(activeDockThreads(m.threadsDock.threads))
+	if m.state == uiChat && len(m.threadsDock.cache.value) > 0 {
+		visible, _ := visibleDockThreads(activeDockThreads(m.threadsDock.cache.value))
 		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds
@@ -375,5 +352,5 @@ func (m *UI) toggleYoloMode() tea.Cmd {
 // write through the cache; the Update-tail backstop keeps it bounded-stale
 // otherwise.
 func (m *UI) yoloModeCached() bool {
-	return m.wsCache.yoloCache.val
+	return m.wsCache.yoloCache.value
 }

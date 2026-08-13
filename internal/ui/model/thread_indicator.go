@@ -33,10 +33,7 @@ var threadIndicatorTTL = 5 * time.Second
 // threadIndicatorState holds the memoized active-thread count plus its
 // TTL-cache and in-flight/generation bookkeeping.
 type threadIndicatorState struct {
-	count     int
-	checkedAt time.Time
-	inFlight  bool
-	gen       uint64
+	cache ttlCache[int]
 }
 
 // threadIndicatorLoadedMsg delivers the result of an off-thread thread list
@@ -44,13 +41,10 @@ type threadIndicatorState struct {
 type threadIndicatorLoadedMsg struct {
 	gen   uint64
 	count int
+	err   error
 }
 
 // fresh reports whether the cached count is within its TTL.
-func (c *threadIndicatorState) fresh(ttl time.Duration) bool {
-	return !c.checkedAt.IsZero() && time.Since(c.checkedAt) < ttl
-}
-
 // activeThreadCount reports how many of threads are pending, running, or
 // merging — the states worth surfacing as "still working" in a badge.
 func activeThreadCount(threads []proto.Thread) int {
@@ -68,38 +62,39 @@ func activeThreadCount(threads []proto.Thread) int {
 // threadIndicatorLoadedMsg. Returns nil while a fetch is already in
 // flight, or if the workspace doesn't support threads.
 func (c *threadIndicatorState) dispatchRefresh(com *common.Common) tea.Cmd {
-	if c.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
+	if c.cache.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
 		return nil
 	}
-	c.inFlight = true
+	gen, started := c.cache.begin()
+	if !started {
+		return nil
+	}
 	ws := com.Workspace
-	gen := c.gen
 	return func() tea.Msg {
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
 			slog.Error("list threads for indicator", "error", err)
 		}
-		return threadIndicatorLoadedMsg{gen: gen, count: activeThreadCount(threads)}
+		return threadIndicatorLoadedMsg{gen: gen, count: activeThreadCount(threads), err: err}
 	}
 }
 
 // applyLoaded stores an off-thread fetch result. Runs on the Update
 // goroutine.
 func (c *threadIndicatorState) applyLoaded(com *common.Common, msg threadIndicatorLoadedMsg) tea.Cmd {
-	c.inFlight = false
-	if msg.gen != c.gen {
+	if !c.cache.complete(msg.gen) {
 		return c.dispatchRefresh(com)
 	}
-	c.count = msg.count
-	c.checkedAt = time.Now()
+	if msg.err == nil {
+		c.cache.set(msg.count)
+	}
 	return nil
 }
 
 // invalidate marks the cached count stale and bumps the generation, so an
 // in-flight fetch's result is discarded when it lands.
 func (c *threadIndicatorState) invalidate() {
-	c.checkedAt = time.Time{}
-	c.gen++
+	c.cache.invalidate()
 }
 
 // applyEvent reacts to a thread pubsub event: it invalidates the cache so
@@ -113,13 +108,13 @@ func (c *threadIndicatorState) applyEvent(_ pubsub.Event[proto.Thread]) {
 // staleRefreshCmd is the TTL backstop: schedules an off-thread re-probe
 // when the memoized count has outlived its TTL.
 func (c *threadIndicatorState) staleRefreshCmd(com *common.Common) tea.Cmd {
-	if c.fresh(threadIndicatorTTL) {
+	if c.cache.fresh(threadIndicatorTTL) {
 		return nil
 	}
 	// A fetched zero count stays zero until a thread event invalidates it
 	// (checkedAt is zeroed then) — don't re-poll ListThreads forever for
 	// projects that have no active threads.
-	if c.count == 0 && !c.checkedAt.IsZero() {
+	if c.cache.value == 0 && !c.cache.timestamp.IsZero() {
 		return nil
 	}
 	return c.dispatchRefresh(com)

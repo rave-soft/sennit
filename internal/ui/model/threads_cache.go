@@ -45,22 +45,10 @@ type threadsCacheState struct {
 	// threads mirrors the workspace's thread list. It is event-driven
 	// (applyThreadEvent upserts/removes rows optimistically) with a TTL
 	// backstop, fetched off-thread by dispatchThreadsRefresh.
-	threads []proto.Thread
-	// checkedAt is when threads was last confirmed fresh, either by a
-	// successful refresh or by write-through from a pubsub event.
-	checkedAt time.Time
-	inFlight  bool
-	// gen is bumped by every state transition (invalidation, event edge);
-	// an in-flight fetch captures it at dispatch and its result is
-	// discarded if the generation has moved on.
-	gen uint64
+	cache ttlCache[[]proto.Thread]
 }
 
 // fresh reports whether the cached thread list is within its TTL.
-func (c *threadsCacheState) fresh(ttl time.Duration) bool {
-	return !c.checkedAt.IsZero() && time.Since(c.checkedAt) < ttl
-}
-
 // threadsLoadedMsg delivers the result of an off-thread thread list fetch.
 type threadsLoadedMsg struct {
 	// gen is the generation captured when the fetch was dispatched. A
@@ -69,6 +57,7 @@ type threadsLoadedMsg struct {
 	// and is discarded, then re-fetched.
 	gen     uint64
 	threads []proto.Thread
+	err     error
 }
 
 // dispatchThreadsRefresh returns a command that lists threads off the
@@ -78,26 +67,27 @@ type threadsLoadedMsg struct {
 // it is safe off-thread; state is applied by applyThreadsLoaded on the
 // Update goroutine.
 func (c *threadsCacheState) dispatchThreadsRefresh(com *common.Common) tea.Cmd {
-	if c.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
+	if c.cache.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
 		return nil
 	}
-	c.inFlight = true
+	gen, started := c.cache.begin()
+	if !started {
+		return nil
+	}
 	ws := com.Workspace
-	gen := c.gen
 	return func() tea.Msg {
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
 			slog.Error("list threads", "error", err)
 		}
-		return threadsLoadedMsg{gen: gen, threads: threads}
+		return threadsLoadedMsg{gen: gen, threads: threads, err: err}
 	}
 }
 
 // applyThreadsLoaded stores an off-thread fetch result. Runs on the Update
 // goroutine.
 func (c *threadsCacheState) applyThreadsLoaded(com *common.Common, msg threadsLoadedMsg) []tea.Cmd {
-	c.inFlight = false
-	if msg.gen != c.gen {
+	if !c.cache.complete(msg.gen) {
 		// This fetch started before a newer state transition (invalidation,
 		// event edge). Discard its result and re-dispatch so the
 		// authoritative refresh is not lost merely because this older
@@ -107,8 +97,9 @@ func (c *threadsCacheState) applyThreadsLoaded(com *common.Common, msg threadsLo
 		}
 		return nil
 	}
-	c.threads = msg.threads
-	c.checkedAt = time.Now()
+	if msg.err == nil {
+		c.cache.set(msg.threads)
+	}
 	return nil
 }
 
@@ -117,8 +108,7 @@ func (c *threadsCacheState) applyThreadsLoaded(com *common.Common, msg threadsLo
 // pubsub events (via applyThreadEvent) and by any other handler that
 // changes thread state out of band.
 func (c *threadsCacheState) invalidateThreads() {
-	c.checkedAt = time.Time{}
-	c.gen++
+	c.cache.invalidate()
 }
 
 // applyThreadEvent reacts to a thread pubsub event: it upserts (Created,
@@ -129,23 +119,23 @@ func (c *threadsCacheState) invalidateThreads() {
 func (c *threadsCacheState) applyThreadEvent(evt pubsub.Event[proto.Thread]) {
 	switch evt.Type {
 	case pubsub.DeletedEvent:
-		for i := range c.threads {
-			if c.threads[i].ID == evt.Payload.ID {
-				c.threads = append(c.threads[:i], c.threads[i+1:]...)
+		for i := range c.cache.value {
+			if c.cache.value[i].ID == evt.Payload.ID {
+				c.cache.value = append(c.cache.value[:i], c.cache.value[i+1:]...)
 				break
 			}
 		}
 	default: // CreatedEvent, UpdatedEvent
 		found := false
-		for i := range c.threads {
-			if c.threads[i].ID == evt.Payload.ID {
-				c.threads[i] = evt.Payload
+		for i := range c.cache.value {
+			if c.cache.value[i].ID == evt.Payload.ID {
+				c.cache.value[i] = evt.Payload
 				found = true
 				break
 			}
 		}
 		if !found {
-			c.threads = append(c.threads, evt.Payload)
+			c.cache.value = append(c.cache.value, evt.Payload)
 		}
 	}
 	c.invalidateThreads()
@@ -157,7 +147,7 @@ func (c *threadsCacheState) applyThreadEvent(evt pubsub.Event[proto.Thread]) {
 // calls this from the Update tail, mirroring
 // UI.staleWorkspaceRefreshCmds.
 func (c *threadsCacheState) staleThreadsRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	if !active || c.fresh(threadsCacheTTL) {
+	if !active || c.cache.fresh(threadsCacheTTL) {
 		return nil
 	}
 	return c.dispatchThreadsRefresh(com)

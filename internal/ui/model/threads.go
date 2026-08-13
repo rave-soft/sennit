@@ -167,7 +167,7 @@ func (m *threadsDashboard) SetActive(active bool) tea.Cmd {
 	if !active {
 		return nil
 	}
-	if m.cache.fresh(threadsCacheTTL) {
+	if m.cache.cache.fresh(threadsCacheTTL) {
 		return nil
 	}
 	return m.cache.dispatchThreadsRefresh(m.com)
@@ -186,10 +186,10 @@ func (m *threadsDashboard) Draw(scr uv.Screen, area uv.Rectangle) {
 		layout.Len(threadsFooterHeight),
 	).Split(area).Assign(&headerRect, &listRect, &footerRect)
 
-	header := fmt.Sprintf("Threads (%d)", len(m.cache.threads))
+	header := fmt.Sprintf("Threads (%d)", len(m.cache.cache.value))
 	uv.NewStyledString(t.Status.Help.Render(header)).Draw(scr, headerRect)
 
-	if len(m.cache.threads) == 0 {
+	if len(m.cache.cache.value) == 0 {
 		empty := "No threads yet — press n to create one."
 		uv.NewStyledString(t.Status.Help.Render(empty)).Draw(scr, listRect)
 	} else {
@@ -253,8 +253,8 @@ func (m *threadsDashboard) Tick(active bool, com *common.Common) tea.Cmd {
 // rebuildItems converts the cached thread list into list.Items and applies
 // them to the wrapped list.
 func (m *threadsDashboard) rebuildItems() {
-	items := make([]list.Item, len(m.cache.threads))
-	for i, s := range m.cache.threads {
+	items := make([]list.Item, len(m.cache.cache.value))
+	for i, s := range m.cache.cache.value {
 		items[i] = newThreadItem(m.com.Styles, s)
 	}
 	m.list.SetItems(items...)

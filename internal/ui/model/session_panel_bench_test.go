@@ -98,7 +98,7 @@ func newSessionPanelBenchUI() *UI {
 	u.chat.SetMessages(items...)
 
 	// Three active threads, mirroring mkDockThreads.
-	u.threadsDock.threads = mkDockThreads(3)
+	u.threadsDock.cache.value = mkDockThreads(3)
 
 	// Nine todos: a few in-progress (exercises the spinner path), some
 	// pending, some completed.

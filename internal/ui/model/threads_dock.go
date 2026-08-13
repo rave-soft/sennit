@@ -72,7 +72,6 @@ type threadDockActivity struct {
 	// right now" at a finer grain than the in-progress todo.
 	LastTool     string
 	MessageCount int64
-	FetchedAt    time.Time
 }
 
 // threadsDockState holds the memoized thread list plus per-thread live
@@ -84,19 +83,10 @@ type threadsDockState struct {
 	// subset itself at render time (activeDockThreads/visibleDockThreads)
 	// rather than storing a pre-filtered list, matching the "just relist"
 	// idiom used elsewhere in this package.
-	threads   []proto.Thread
-	checkedAt time.Time
-	inFlight  bool
-	// gen is bumped by every state transition to the thread list; an
-	// in-flight list fetch captures it at dispatch and its result is
-	// discarded if the generation has moved on.
-	gen uint64
+	cache ttlCache[[]proto.Thread]
 
 	// activity holds the last known live snapshot per thread ID.
-	activity map[string]threadDockActivity
-	// activityInFlight guards concurrent per-thread fetches, keyed by
-	// thread ID.
-	activityInFlight map[string]bool
+	activity map[string]ttlCache[threadDockActivity]
 	// activityGen is bumped whenever threads changes, so a per-thread
 	// fetch that started before the thread list moved on (e.g. the thread
 	// was removed) is discarded when it lands, mirroring gen but scoped to
@@ -105,10 +95,6 @@ type threadsDockState struct {
 }
 
 // fresh reports whether the cached thread list is within its TTL.
-func (c *threadsDockState) fresh(ttl time.Duration) bool {
-	return !c.checkedAt.IsZero() && time.Since(c.checkedAt) < ttl
-}
-
 // threadsDockLoadedMsg delivers the result of an off-thread thread list
 // fetch for the dock.
 type threadsDockLoadedMsg struct {
@@ -116,6 +102,7 @@ type threadsDockLoadedMsg struct {
 	// threadsDockState.gen.
 	gen     uint64
 	threads []proto.Thread
+	err     error
 }
 
 // dispatchThreadsDockRefresh returns a command that lists threads off the
@@ -123,41 +110,42 @@ type threadsDockLoadedMsg struct {
 // a fetch is already in flight, or if the workspace doesn't support
 // threads.
 func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cmd {
-	if c.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
+	if c.cache.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
 		return nil
 	}
-	c.inFlight = true
+	gen, started := c.cache.begin()
+	if !started {
+		return nil
+	}
 	ws := com.Workspace
-	gen := c.gen
 	return func() tea.Msg {
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
 			slog.Error("list threads for dock", "error", err)
 		}
-		return threadsDockLoadedMsg{gen: gen, threads: threads}
+		return threadsDockLoadedMsg{gen: gen, threads: threads, err: err}
 	}
 }
 
 // applyThreadsDockLoaded stores an off-thread fetch result. Runs on the
 // Update goroutine.
 func (c *threadsDockState) applyThreadsDockLoaded(com *common.Common, msg threadsDockLoadedMsg) tea.Cmd {
-	c.inFlight = false
-	if msg.gen != c.gen {
+	if !c.cache.complete(msg.gen) {
 		// Started before a newer state transition; discard and re-dispatch
 		// so the authoritative refresh isn't lost.
 		return c.dispatchThreadsDockRefresh(com)
 	}
-	c.threads = msg.threads
-	c.checkedAt = time.Now()
-	c.activityGen++
+	if msg.err == nil {
+		c.cache.set(msg.threads)
+		c.activityGen++
+	}
 	return nil
 }
 
 // invalidateThreadsDock marks the cached list stale and bumps the
 // generation so any in-flight fetch result is discarded when it lands.
 func (c *threadsDockState) invalidateThreadsDock() {
-	c.checkedAt = time.Time{}
-	c.gen++
+	c.cache.invalidate()
 }
 
 // applyThreadEvent reacts to a thread pubsub event by invalidating the
@@ -175,13 +163,13 @@ func (c *threadsDockState) applyThreadEvent(_ pubsub.Event[proto.Thread]) {
 // currently visible) and the memoized list has outlived its TTL, it
 // schedules an off-thread re-probe. It never does IO itself.
 func (c *threadsDockState) staleThreadsDockRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	if !active || c.fresh(threadsDockTTL) {
+	if !active || c.cache.fresh(threadsDockTTL) {
 		return nil
 	}
 	// A fetched-and-empty list stays empty until a thread event
 	// invalidates it (checkedAt is zeroed then) — don't re-poll
 	// ListThreads forever for projects that have no threads at all.
-	if len(c.threads) == 0 && !c.checkedAt.IsZero() {
+	if len(c.cache.value) == 0 && !c.cache.timestamp.IsZero() {
 		return nil
 	}
 	return c.dispatchThreadsDockRefresh(com)
@@ -221,6 +209,7 @@ type threadDockActivityLoadedMsg struct {
 	// gen is the activityGen captured when the fetch was dispatched; see
 	// threadsDockState.activityGen.
 	gen      uint64
+	entryGen uint64
 	activity threadDockActivity
 	err      error
 }
@@ -237,26 +226,32 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 	}
 	ws := com.Workspace
 	gen := c.activityGen
-	prev, hasPrev := c.activity[threadID]
+	if c.activity == nil {
+		c.activity = make(map[string]ttlCache[threadDockActivity])
+	}
+	entry := c.activity[threadID]
+	entryGen, started := entry.begin()
+	if !started {
+		return nil
+	}
+	c.activity[threadID] = entry
+	prev, hasPrev := entry.value, !entry.timestamp.IsZero()
 	return func() tea.Msg {
 		ctx := context.Background()
 		attached, detach, err := ws.AttachThread(ctx, threadID)
 		if err != nil {
 			slog.Error("attach thread for dock activity", "thread", threadID, "error", err)
-			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, err: err}
+			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
 		}
 		defer detach()
 
 		sess, err := attached.GetSession(ctx, sessionID)
 		if err != nil {
 			slog.Error("get session for dock activity", "thread", threadID, "error", err)
-			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, err: err}
+			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
 		}
 
-		activity := threadDockActivity{
-			MessageCount: sess.MessageCount,
-			FetchedAt:    time.Now(),
-		}
+		activity := threadDockActivity{MessageCount: sess.MessageCount}
 		for _, todo := range sess.Todos {
 			if todo.Status != session.TodoStatusInProgress {
 				continue
@@ -284,7 +279,7 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 		} else {
 			activity.LastTool = lastToolSummary(msgs)
 		}
-		return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, activity: activity}
+		return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, activity: activity}
 	}
 }
 
@@ -293,16 +288,17 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 // generation (the activityGen check), and always clearing the per-thread
 // inFlight flag. Runs on the Update goroutine.
 func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoadedMsg) {
-	if c.activityInFlight != nil {
-		delete(c.activityInFlight, msg.threadID)
-	}
-	if msg.gen != c.activityGen || msg.err != nil {
+	entry, ok := c.activity[msg.threadID]
+	if !ok {
 		return
 	}
-	if c.activity == nil {
-		c.activity = make(map[string]threadDockActivity)
+	matchingEntry := entry.complete(msg.entryGen)
+	c.activity[msg.threadID] = entry
+	if !matchingEntry || msg.gen != c.activityGen || msg.err != nil {
+		return
 	}
-	c.activity[msg.threadID] = msg.activity
+	entry.set(msg.activity)
+	c.activity[msg.threadID] = entry
 }
 
 // staleThreadActivityRefreshCmds schedules off-thread activity refreshes
@@ -314,21 +310,19 @@ func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoade
 func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, visible []proto.Thread) []tea.Cmd {
 	var cmds []tea.Cmd
 	for _, t := range visible {
-		if t.SessionID == "" || c.activityInFlight[t.ID] {
+		if t.SessionID == "" {
 			continue
 		}
-		if activity, ok := c.activity[t.ID]; ok && time.Since(activity.FetchedAt) < threadsDockActivityTTL {
+		if c.activity == nil {
+			c.activity = make(map[string]ttlCache[threadDockActivity])
+		}
+		activity := c.activity[t.ID]
+		if activity.inFlight || activity.fresh(threadsDockActivityTTL) {
 			continue
 		}
-		cmd := c.dispatchThreadActivityRefresh(com, t.ID, t.SessionID)
-		if cmd == nil {
-			continue
+		if cmd := c.dispatchThreadActivityRefresh(com, t.ID, t.SessionID); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
-		if c.activityInFlight == nil {
-			c.activityInFlight = make(map[string]bool)
-		}
-		c.activityInFlight[t.ID] = true
-		cmds = append(cmds, cmd)
 	}
 	return cmds
 }

@@ -68,7 +68,7 @@ func TestThreadsDashboardHandleKeyEnter(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.threads = []proto.Thread{{ID: "s1", Name: "one"}}
+	m.cache.cache.value = []proto.Thread{{ID: "s1", Name: "one"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -98,7 +98,7 @@ func TestThreadsDashboardHandleKeyMerge(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.threads = []proto.Thread{{ID: "s1", Status: "completed"}}
+	m.cache.cache.value = []proto.Thread{{ID: "s1", Status: "completed"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -115,7 +115,7 @@ func TestThreadsDashboardHandleKeyMergeSkipsAlreadyMerging(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.threads = []proto.Thread{{ID: "s1", Status: "merging"}}
+	m.cache.cache.value = []proto.Thread{{ID: "s1", Status: "merging"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -129,7 +129,7 @@ func TestThreadsDashboardHandleKeyRemove(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.threads = []proto.Thread{{ID: "s1"}}
+	m.cache.cache.value = []proto.Thread{{ID: "s1"}}
 	m.rebuildItems()
 	m.list.SelectFirst()
 
@@ -146,7 +146,7 @@ func TestThreadsDashboardHandleKeyReload(t *testing.T) {
 
 	ws := &threadsTestWorkspace{supported: true}
 	m := newTestThreadsDashboard(t, ws)
-	m.cache.checkedAt = time.Now() // fresh cache would normally skip a refresh
+	m.cache.cache.timestamp = time.Now() // fresh cache would normally skip a refresh
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "r", Code: 'r'})
 	require.True(t, handled)
@@ -182,7 +182,7 @@ func TestThreadsDashboardApplyThreadsLoadedRebuildsItems(t *testing.T) {
 	m := newTestThreadsDashboard(t, ws)
 
 	threads := []proto.Thread{{ID: "s1", Name: "one"}, {ID: "s2", Name: "two"}}
-	cmds := m.ApplyThreadsLoaded(threadsLoadedMsg{gen: m.cache.gen, threads: threads})
+	cmds := m.ApplyThreadsLoaded(threadsLoadedMsg{gen: m.cache.cache.generation, threads: threads})
 	require.Nil(t, cmds)
 	require.Equal(t, 2, m.list.Len())
 }

@@ -71,15 +71,15 @@ func TestSessionPanelPlan_ThreadsRows(t *testing.T) {
 	u := sessionUI()
 	require.Zero(t, u.sessionPanelPlan(100).threadsRows, "no threads at all")
 
-	u.threadsDock.threads = []proto.Thread{{ID: "x", Status: "merged"}}
+	u.threadsDock.cache.value = []proto.Thread{{ID: "x", Status: "merged"}}
 	require.Zero(t, u.sessionPanelPlan(100).threadsRows, "no active threads")
 
 	for n := 1; n <= threadsDockVisibleCap; n++ {
-		u.threadsDock.threads = mkDockThreads(n)
+		u.threadsDock.cache.value = mkDockThreads(n)
 		require.Equal(t, n*2, u.sessionPanelPlan(100).threadsRows, "n=%d", n)
 	}
 
-	u.threadsDock.threads = mkDockThreads(threadsDockVisibleCap + 2)
+	u.threadsDock.cache.value = mkDockThreads(threadsDockVisibleCap + 2)
 	plan := u.sessionPanelPlan(100)
 	require.Equal(t, threadsDockVisibleCap*2+1, plan.threadsRows,
 		"overflow must add exactly one footer row")
@@ -94,7 +94,7 @@ func TestDrawSessionPanel_RendersThreadBlocksAndMoreFooter(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadsDock.threads = mkDockThreads(threadsDockVisibleCap + 1)
+	u.threadsDock.cache.value = mkDockThreads(threadsDockVisibleCap + 1)
 
 	height := u.sessionPanelPlan(100).totalRows
 	// threadsDockVisibleCap*2+1 block/footer rows, plus 1 for the
@@ -121,7 +121,7 @@ func TestDrawSessionPanel_NoOpOnZeroArea(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadsDock.threads = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockThreads(1)
 
 	scr := uv.NewScreenBuffer(u.width, u.height)
 	require.NotPanics(t, func() {
@@ -257,7 +257,7 @@ func TestSessionPanelPlan_BudgetCapAndPriorityOrder(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadsDock.threads = mkDockThreads(2) // 4 rows
+	u.threadsDock.cache.value = mkDockThreads(2) // 4 rows
 	u.panel.expanded = true
 	u.session.Todos = []session.Todo{
 		{Status: session.TodoStatusInProgress, Content: "active 1"},
@@ -345,7 +345,7 @@ func TestSessionPanelHeight_ZeroContentMatchesBaseline(t *testing.T) {
 
 	u := sessionUI()
 	u.session.Todos = nil
-	u.threadsDock.threads = nil
+	u.threadsDock.cache.value = nil
 	u.wsCache.promptQueueItems = nil
 	u.updateLayoutAndSize()
 
@@ -477,7 +477,7 @@ func TestMouseClick_ThreadBlockEntersThread(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.threadsDock.threads = []proto.Thread{
+	u.threadsDock.cache.value = []proto.Thread{
 		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
 	}
 	u.updateLayoutAndSize()
@@ -543,7 +543,7 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.threadsDock.threads = []proto.Thread{
+	u.threadsDock.cache.value = []proto.Thread{
 		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
 	}
 	u.updateLayoutAndSize()
@@ -596,7 +596,7 @@ func TestSessionPanelPlan_SmallTerminalNeverDropsTodosOnlyWindows(t *testing.T) 
 	u.dialog = dialog.NewOverlay()
 	u.width, u.height = 80, 24
 	u.panel.expanded = true
-	u.threadsDock.threads = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockThreads(1)
 	u.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
@@ -625,7 +625,7 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 	u.dialog = dialog.NewOverlay()
 	u.width, u.height = 80, 24
 	u.panel.expanded = true
-	u.threadsDock.threads = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockThreads(1)
 	u.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
@@ -688,7 +688,7 @@ func TestRenderSessionTodoLine_CompletedStyleSurvivesBudgetConstrainedPlan(t *te
 	u.dialog = dialog.NewOverlay()
 	u.width, u.height = 80, 24
 	u.panel.expanded = true
-	u.threadsDock.threads = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockThreads(1)
 	u.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
@@ -725,7 +725,7 @@ func allFourSectionsUI(t *testing.T) *UI {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.threadsDock.threads = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockThreads(1)
 
 	item := chat.NewAgentToolMessageItem(u.com.Styles,
 		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"fix the auth bug"}`, Finished: false}, nil, false, nil)
@@ -822,7 +822,7 @@ func TestSessionPanelPlan_HeaderRowsContributeToTotalRows(t *testing.T) {
 
 	// Emptying the threads section must drop its header row to 0, not just
 	// its content rows.
-	u.threadsDock.threads = nil
+	u.threadsDock.cache.value = nil
 	empty := u.sessionPanelPlan(100)
 	require.Zero(t, empty.threadsRows)
 	require.Zero(t, empty.threadsHeaderRows, "an empty section's header must contribute 0 rows")
@@ -865,7 +865,7 @@ func TestMouseClick_ThreadBlockEntersThreadWithDelegationsAboveTodos(t *testing.
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.threadsDock.threads = []proto.Thread{
+	u.threadsDock.cache.value = []proto.Thread{
 		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
 	}
 	item := chat.NewAgentToolMessageItem(u.com.Styles,
@@ -903,7 +903,7 @@ func TestMouseClick_TodosHeaderTogglesWithHeaderStyling(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.threadsDock.threads = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockThreads(1)
 	u.session.Todos = []session.Todo{
 		{Content: "write tests", Status: session.TodoStatusPending},
 	}
@@ -933,7 +933,7 @@ func TestDrawSessionPanel_TodosScrollWithThreadsAndDelegationsAbove(t *testing.T
 	u.dialog = dialog.NewOverlay()
 	u.width, u.height = 80, 30
 	u.panel.expanded = true
-	u.threadsDock.threads = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockThreads(1)
 	item := chat.NewAgentToolMessageItem(u.com.Styles,
 		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"do the thing"}`, Finished: false}, nil, false, nil)
 	item.SetMessageID("m1")

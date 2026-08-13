@@ -59,7 +59,7 @@ func (m *UI) panelSpinnerWanted() bool {
 	if m.chat != nil && len(m.chat.RunningDelegations()) > 0 {
 		return true
 	}
-	for _, t := range m.threadsDock.threads {
+	for _, t := range m.threadsDock.cache.value {
 		switch thread.Status(t.Status) {
 		case thread.StatusRunning, thread.StatusMerging:
 			return true
@@ -401,7 +401,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		return plan
 	}
 
-	active := activeDockThreads(m.threadsDock.threads)
+	active := activeDockThreads(m.threadsDock.cache.value)
 	visible, more := visibleDockThreads(active)
 	plan.threads = visible
 	plan.threadsMore = more
@@ -685,7 +685,7 @@ func (m *UI) drawThreadBlocks(scr uv.Screen, area uv.Rectangle, plan sessionPane
 		case thread.StatusRunning, thread.StatusMerging:
 			icon = m.panelActivityIcon()
 		}
-		status := threadDockStatusText(t, m.threadsDock.activity[t.ID])
+		status := threadDockStatusText(t, m.threadsDock.activity[t.ID].value)
 		line2 := "  " + icon + " " + sty.Base.Render(status)
 		line2 = ansi.Truncate(line2, width, "…")
 		if i == hoveredIdx {
