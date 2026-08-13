@@ -746,10 +746,32 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	return a.summarize(ctx, sessionID, opts, onAuthRefresh, a.largeModel.Get(), a.systemPromptPrefix.Get(), nil)
 }
 
-func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, runtime Model, systemPromptPrefix string, active *activeRuntime) error {
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, runtime Model, systemPromptPrefix string, active *activeRuntime) (retErr error) {
+	sessMu := a.dispatch.sessionMu(sessionID)
+	sessMu.Lock()
 	if a.IsSessionBusy(sessionID) {
+		sessMu.Unlock()
 		return ErrSessionBusy
 	}
+	genCtx, cancel := context.WithCancel(ctx)
+	ac := &activeCancel{cancel: cancel}
+	a.dispatch.activeRequests.Set(sessionID, ac)
+	sessMu.Unlock()
+
+	defer func() {
+		csync.CompareAndDelete(a.dispatch.activeRequests, sessionID, ac)
+		cancel()
+
+		_, next, canceledRunIDDrops := a.dispatch.drainNext(sessionID)
+		a.publishCanceledQueueDrops(canceledRunIDDrops)
+		if next == nil {
+			return
+		}
+		_, handoffErr := a.Run(context.WithoutCancel(ctx), *next)
+		if retErr == nil {
+			retErr = handoffErr
+		}
+	}()
 
 	largeModel := runtime
 
@@ -768,11 +790,6 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatalogCfg.SupportsImages)
 
-	genCtx, cancel := context.WithCancel(ctx)
-	ac := &activeCancel{cancel: cancel}
-	a.dispatch.activeRequests.Set(sessionID, ac)
-	defer csync.CompareAndDelete(a.dispatch.activeRequests, sessionID, ac)
-	defer cancel()
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after summarize", "error", flushErr)
@@ -883,24 +900,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	// Release the active request before processing queued messages so that
-	// Run() does not see the session as busy. Conditional release, like the
-	// defer above: only clear our own entry so a newer run that raced in
-	// and won the session is not erased.
-	csync.CompareAndDelete(a.dispatch.activeRequests, sessionID, ac)
-	cancel()
-
-	// Process any messages that were queued while summarizing. drainNext
-	// filters the queue against the session's cancel mark, the same check
-	// Run's own end-of-turn handoff applies: a prompt queued during
-	// summarization and then canceled must not run afterward.
-	_, next, canceledRunIDDrops := a.dispatch.drainNext(sessionID)
-	a.publishCanceledQueueDrops(canceledRunIDDrops)
-	if next == nil {
-		return nil
-	}
-	_, qErr := a.Run(ctx, *next)
-	return qErr
+	return nil
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
