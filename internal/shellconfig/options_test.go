@@ -67,6 +67,33 @@ option notifications osc`
 	require.Equal(t, "osc", opts["notifications"])
 }
 
+func TestOption_UIKeybinding(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "braidrc")
+	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`option ui keybinding commands super+p
+option ui keybinding editor.newline shift+enter super+j`))
+	require.NoError(t, err)
+
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(jsonBytes, &result))
+	ui := result["options"].(map[string]any)["tui"].(map[string]any)
+	bindings := ui["keybindings"].(map[string]any)
+	require.Equal(t, []any{"super+p"}, bindings["commands"])
+	require.Equal(t, []any{"shift+enter", "super+j"}, bindings["editor.newline"])
+}
+
+func TestOption_UIKeybindingRequiresKey(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "braidrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui keybinding commands`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "keybinding <action> <key>")
+}
+
 func TestOption_List(t *testing.T) {
 	t.Parallel()
 

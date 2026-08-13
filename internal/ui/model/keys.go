@@ -1,6 +1,11 @@
 package model
 
-import "charm.land/bubbles/v2/key"
+import (
+	"runtime"
+	"strings"
+
+	"charm.land/bubbles/v2/key"
+)
 
 type KeyMap struct {
 	Editor struct {
@@ -74,6 +79,14 @@ type KeyMap struct {
 }
 
 func DefaultKeyMap() KeyMap {
+	return keyMapForPlatform("", nil)
+}
+
+func configuredKeyMap(goos string, overrides map[string][]string) KeyMap {
+	return keyMapForPlatform(goos, overrides)
+}
+
+func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 	km := KeyMap{
 		Quit: key.NewBinding(
 			key.WithKeys("ctrl+c"),
@@ -292,5 +305,151 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("enter", "select"),
 	)
 
+	bindings := km.bindings()
+	if goos == "darwin" {
+		for _, binding := range bindings {
+			keys := binding.Keys()
+			for i, value := range keys {
+				keys[i] = strings.Replace(value, "ctrl+", "super+", 1)
+			}
+			binding.SetKeys(uniqueStrings(keys)...)
+			help := binding.Help()
+			binding.SetHelp(strings.ReplaceAll(help.Key, "ctrl+", "super+"), help.Desc)
+		}
+	}
+	for action, keys := range overrides {
+		binding := bindings[action]
+		if binding == nil || len(keys) == 0 {
+			continue
+		}
+		keys = uniqueStrings(keys)
+		binding.SetKeys(keys...)
+		help := binding.Help()
+		binding.SetHelp(formatShortcut(keys[0]), help.Desc)
+	}
+	deleteModeKey := bindingKey(km.Editor.AttachmentDeleteMode)
+	if deleteModeKey != "" {
+		help := km.Editor.AttachmentDeleteMode.Help()
+		km.Editor.AttachmentDeleteMode.SetHelp(deleteModeKey+"+{i}", help.Desc)
+		if deleteAllKey := bindingKey(km.Editor.DeleteAllAttachments); deleteAllKey != "" {
+			help = km.Editor.DeleteAllAttachments.Help()
+			km.Editor.DeleteAllAttachments.SetHelp(deleteModeKey+"+"+deleteAllKey, help.Desc)
+		}
+	}
+
 	return km
+}
+
+func (k *KeyMap) bindings() map[string]*key.Binding {
+	return map[string]*key.Binding{
+		"quit":                          &k.Quit,
+		"help":                          &k.Help,
+		"commands":                      &k.Commands,
+		"models":                        &k.Models,
+		"suspend":                       &k.Suspend,
+		"sessions":                      &k.Sessions,
+		"tab":                           &k.Tab,
+		"toggle_yolo":                   &k.ToggleYolo,
+		"threads":                       &k.Threads,
+		"editor.send_message":           &k.Editor.SendMessage,
+		"editor.open_editor":            &k.Editor.OpenEditor,
+		"editor.newline":                &k.Editor.Newline,
+		"editor.add_image":              &k.Editor.AddImage,
+		"editor.paste_image":            &k.Editor.PasteImage,
+		"editor.mention_file":           &k.Editor.MentionFile,
+		"editor.commands":               &k.Editor.Commands,
+		"editor.attachment_delete_mode": &k.Editor.AttachmentDeleteMode,
+		"editor.escape":                 &k.Editor.Escape,
+		"editor.delete_all_attachments": &k.Editor.DeleteAllAttachments,
+		"editor.history_prev":           &k.Editor.HistoryPrev,
+		"editor.history_next":           &k.Editor.HistoryNext,
+		"chat.new_session":              &k.Chat.NewSession,
+		"chat.add_attachment":           &k.Chat.AddAttachment,
+		"chat.cancel":                   &k.Chat.Cancel,
+		"chat.tab":                      &k.Chat.Tab,
+		"chat.details":                  &k.Chat.Details,
+		"chat.toggle_pills":             &k.Chat.TogglePills,
+		"chat.down":                     &k.Chat.Down,
+		"chat.up":                       &k.Chat.Up,
+		"chat.up_down":                  &k.Chat.UpDown,
+		"chat.down_one_item":            &k.Chat.DownOneItem,
+		"chat.up_one_item":              &k.Chat.UpOneItem,
+		"chat.up_down_one_item":         &k.Chat.UpDownOneItem,
+		"chat.page_down":                &k.Chat.PageDown,
+		"chat.page_up":                  &k.Chat.PageUp,
+		"chat.half_page_down":           &k.Chat.HalfPageDown,
+		"chat.half_page_up":             &k.Chat.HalfPageUp,
+		"chat.home":                     &k.Chat.Home,
+		"chat.end":                      &k.Chat.End,
+		"chat.copy":                     &k.Chat.Copy,
+		"chat.clear_highlight":          &k.Chat.ClearHighlight,
+		"chat.expand":                   &k.Chat.Expand,
+		"chat.scroll_left":              &k.Chat.ScrollLeft,
+		"chat.scroll_right":             &k.Chat.ScrollRight,
+		"chat.enter_child_session":      &k.Chat.EnterChildSession,
+		"chat.exit_child_session":       &k.Chat.ExitChildSession,
+		"chat.prev_child_session":       &k.Chat.PrevChildSession,
+		"chat.next_child_session":       &k.Chat.NextChildSession,
+		"initialize.yes":                &k.Initialize.Yes,
+		"initialize.no":                 &k.Initialize.No,
+		"initialize.enter":              &k.Initialize.Enter,
+		"initialize.switch":             &k.Initialize.Switch,
+	}
+}
+
+func uniqueStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func formatShortcut(value string) string {
+	parts := strings.Split(value, "+")
+	for i, part := range parts {
+		switch part {
+		case "up":
+			parts[i] = "↑"
+		case "down":
+			parts[i] = "↓"
+		case "left":
+			parts[i] = "←"
+		case "right":
+			parts[i] = "→"
+		}
+	}
+	return strings.Join(parts, "+")
+}
+
+func bindingShortcut(binding key.Binding) string {
+	keys := binding.Keys()
+	if len(keys) == 0 {
+		return ""
+	}
+	return formatShortcut(keys[0])
+}
+
+func bindingKey(binding key.Binding) string {
+	keys := binding.Keys()
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}
+
+func (m *UI) exitChildSessionShortcut() string {
+	shortcut := bindingKey(m.keyMap.Chat.ExitChildSession)
+	if shortcut != "" {
+		return shortcut
+	}
+	return bindingKey(configuredKeyMap(runtime.GOOS, nil).Chat.ExitChildSession)
 }

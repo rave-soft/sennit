@@ -830,6 +830,16 @@
           ],
           "description": "Chat scrollbar visibility",
           "default": "default"
+        },
+        "keybindings": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object",
+          "description": "Keyboard shortcuts keyed by action name. Each value replaces the default shortcuts for that action"
         }
       },
       "additionalProperties": false,

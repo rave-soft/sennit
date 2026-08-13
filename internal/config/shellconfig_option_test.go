@@ -53,6 +53,15 @@ option ui completions-max-items 200`)
 	require.Equal(t, 200, *ui.Completions.MaxItems)
 }
 
+func TestShellConfigOptionUIKeybindings(t *testing.T) {
+	store := loadBraidSh(t, `option ui keybinding commands super+p
+option ui keybinding chat.exit_child_session super+up alt+up`)
+
+	bindings := store.Config().Options.TUI.Keybindings
+	require.Equal(t, []string{"super+p"}, bindings["commands"])
+	require.Equal(t, []string{"super+up", "alt+up"}, bindings["chat.exit_child_session"])
+}
+
 func TestShellConfigOptionUIRejectsInvalidValue(t *testing.T) {
 	_, err := loadBraidShErr(t, `option ui diff side-by-side`)
 	require.Error(t, err)

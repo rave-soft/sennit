@@ -516,7 +516,8 @@ Available Keys:
 
 #### `option ui`
 
-Configure terminal UI presentation and completion-list limits.
+Configure terminal UI presentation, keyboard shortcuts, and completion-list
+limits. On macOS, default `ctrl+` shortcuts use `super+` (Command) instead.
 
 ```text
 Usage:
@@ -530,6 +531,7 @@ Available Keys:
                                 always, or never
   completions-max-depth int     maximum directory depth shown by completions
   completions-max-items int     maximum items returned to completions
+  keybinding action key...      replace all shortcuts for an action
 ```
 
 ```bash
@@ -539,7 +541,15 @@ option ui transparent true
 option ui scrollbar always
 option ui completions-max-depth 4
 option ui completions-max-items 200
+option ui keybinding commands super+p
+option ui keybinding editor.newline shift+enter super+j
 ```
+
+Keybinding action names use the groups `editor.*`, `chat.*`, and
+`initialize.*`; global actions have no prefix. Examples include `quit`,
+`commands`, `editor.send_message`, `chat.page_up`, and
+`initialize.switch`. JSON configs use the equivalent
+`options.tui.keybindings` object whose values are arrays of keys.
 
 > [!IMPORTANT]
 > These skill paths load by default — you do NOT need `skill-path`

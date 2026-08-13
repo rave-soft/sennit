@@ -20,7 +20,9 @@ const childSessionPanelHeight = 3
 
 // childPanelButtonLabel is the explicit, clickable "go back up" affordance
 // on the child-session panel (see drawChildSessionPanel).
-const childPanelButtonLabel = "↑ back (ctrl+up)"
+func (m *UI) childPanelButtonLabel() string {
+	return "↑ back (" + m.exitChildSessionShortcut() + ")"
+}
 
 // delegationInfo resolves a delegation tool item's display name,
 // model/effort override, and timing (see chat.DelegationInfoProvider) for
@@ -176,7 +178,7 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	if m.childPanelHover {
 		buttonSty = sty.ButtonHover
 	}
-	button := buttonSty.Render(childPanelButtonLabel)
+	button := buttonSty.Render(m.childPanelButtonLabel())
 	buttonWidth := ansi.StringWidth(button)
 
 	const gap = 1

@@ -264,7 +264,11 @@ option reset <list-key>    # clear a list option back to empty
   `assisted-by`) and `attribution-generated-with` (boolean).
 - **UI settings**: `option ui compact BOOL`, `option ui diff unified|split`,
   `option ui transparent BOOL`, `option ui scrollbar default|always|never`,
-  `option ui completions-max-depth N`, `option ui completions-max-items N`.
+  `option ui completions-max-depth N`, `option ui completions-max-items N`,
+  `option ui keybinding ACTION KEY...`. Keybinding actions are global names
+  such as `commands` or grouped names such as `editor.newline` and
+  `chat.page_up`; each declaration replaces that action's defaults. macOS
+  defaults use `super+` (Command) where other platforms use `ctrl+`.
 - **List keys** (singular, one value per call, repeatable): `context-path`,
   `global-context-path`, `skill-path`, `disable-skill`. Use `option reset <key>`
   to wipe inherited values (e.g. after `source`).
@@ -277,6 +281,7 @@ option attribution-trailer-style assisted-by
 option attribution-generated-with true
 option ui compact true
 option ui diff unified
+option ui keybinding commands super+p
 ```
 
 > [!IMPORTANT] `.braid/skills` is loaded by default and does NOT need

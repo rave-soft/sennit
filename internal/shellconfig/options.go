@@ -220,13 +220,31 @@ var optionSpecs = map[string]optionSpec{
 // optionUI implements "option ui <key> <value>" for TUI-specific settings
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
-	if len(args) != 4 {
-		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|completions-max-depth|completions-max-items> <value>")
+	if len(args) < 4 {
+		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|completions-max-depth|completions-max-items|keybinding> <value>")
 	}
 
 	key := args[2]
 	value := args[3]
 	ui := childMap(options, "tui")
+	if key == "keybinding" {
+		if len(args) < 5 {
+			return usage(stderr, "usage: option ui keybinding <action> <key> [key ...]")
+		}
+		keys := make([]any, 0, len(args)-4)
+		for _, value := range args[4:] {
+			if value == "" {
+				return usage(stderr, "option ui keybinding keys must not be empty")
+			}
+			keys = append(keys, value)
+		}
+		childMap(ui, "keybindings")[value] = keys
+		slog.Info("UI keybinding set in shell config", "action", value, "keys", args[4:])
+		return nil
+	}
+	if len(args) != 4 {
+		return usage(stderr, "usage: option ui <compact|diff|transparent|scrollbar|completions-max-depth|completions-max-items> <value>")
+	}
 
 	switch key {
 	case "compact", "transparent":

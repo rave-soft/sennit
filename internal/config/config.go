@@ -299,9 +299,10 @@ type TUIOptions struct {
 	// Here we can add themes later or any TUI related options
 	//
 
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
-	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	Completions Completions         `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent *bool               `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Scrollbar   string              `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	Keybindings map[string][]string `json:"keybindings,omitempty" jsonschema:"description=Keyboard shortcuts keyed by action name. Each value replaces the default shortcuts for that action"`
 }
 
 // Completions defines options for the completions UI.
@@ -816,6 +817,10 @@ func (c *Config) cloneForWrite() *Config {
 		opts := *c.Options
 		if c.Options.TUI != nil {
 			tui := *c.Options.TUI
+			tui.Keybindings = make(map[string][]string, len(c.Options.TUI.Keybindings))
+			for action, keys := range c.Options.TUI.Keybindings {
+				tui.Keybindings[action] = slices.Clone(keys)
+			}
 			opts.TUI = &tui
 		}
 		nc.Options = &opts

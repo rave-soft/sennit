@@ -66,6 +66,7 @@ func (h *header) drawHeader(
 	width int,
 	lspErrorCount int,
 	activeThreads int,
+	detailsShortcut string,
 ) {
 	t := h.com.Styles
 	if width != h.width || compact != h.compact {
@@ -95,6 +96,7 @@ func (h *header) drawHeader(
 		activeThreads,
 		detailsOpen,
 		availDetailWidth,
+		detailsShortcut,
 	)
 
 	remainingWidth := width -
@@ -127,6 +129,7 @@ func renderHeaderDetails(
 	activeThreads int,
 	detailsOpen bool,
 	availWidth int,
+	detailsShortcut string,
 ) string {
 	t := com.Styles
 
@@ -157,11 +160,10 @@ func renderHeaderDetails(
 		parts = append(parts, formattedPercentage)
 	}
 
-	const keystroke = "ctrl+d"
 	if detailsOpen {
-		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" close"))
+		parts = append(parts, t.Header.Keystroke.Render(detailsShortcut)+t.Header.KeystrokeTip.Render(" close"))
 	} else {
-		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" open "))
+		parts = append(parts, t.Header.Keystroke.Render(detailsShortcut)+t.Header.KeystrokeTip.Render(" open "))
 	}
 
 	dot := t.Header.Separator.Render(" • ")

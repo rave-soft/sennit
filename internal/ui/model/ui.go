@@ -545,7 +545,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	}
 	ch := NewChat(com, scrollbarMode)
 
-	keyMap := DefaultKeyMap()
+	cfg := com.Config()
+	var keybindings map[string][]string
+	if cfg.Options != nil && cfg.Options.TUI != nil {
+		keybindings = cfg.Options.TUI.Keybindings
+	}
+	keyMap := configuredKeyMap(runtime.GOOS, keybindings)
 
 	// Completions component
 	comp := completions.New(completions.PopupStyles{
@@ -1515,8 +1520,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
-			m.keyMap.Models.SetHelp("ctrl+m", "models")
-			m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+			if slices.Contains(m.keyMap.Models.Keys(), "ctrl+m") {
+				m.keyMap.Models.SetHelp("ctrl+m", "models")
+			} else if slices.Contains(m.keyMap.Models.Keys(), "super+m") {
+				m.keyMap.Models.SetHelp("super+m", "models")
+			}
+			if slices.Contains(m.keyMap.Editor.Newline.Keys(), "shift+enter") {
+				m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+			}
 		}
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
@@ -2100,7 +2111,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiFocusEditor:
 		// Textarea placeholder logic
 		if m.viewingChildSession() {
-			m.editor.textarea.Placeholder = "viewing subagent session · ctrl+up to return"
+			m.editor.textarea.Placeholder = "viewing subagent session · " + m.exitChildSessionShortcut() + " to return"
 		} else if m.editor.bangMode {
 			m.editor.textarea.Placeholder = "Run a shell command"
 		} else if m.isAgentBusy() {
@@ -3876,6 +3887,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		area.Dx(),
 		m.lspErrorCount(),
 		m.threadIndicator.count,
+		bindingKey(m.keyMap.Chat.Details),
 	)
 }
 
@@ -4115,7 +4127,7 @@ func (m *UI) ShortHelp() []key.Binding {
 
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.editor.textarea.Value() == "" {
-		commands.SetHelp("/ or ctrl+p", "commands")
+		commands.SetHelp("/ or "+bindingShortcut(k.Commands), "commands")
 	}
 
 	switch m.state {
@@ -4198,12 +4210,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 	var binds [][]key.Binding
 	k := &m.keyMap
 	help := k.Help
-	help.SetHelp("ctrl+g", "less")
+	help.SetHelp(bindingShortcut(k.Help), "less")
 	hasAttachments := len(m.editor.attachments.List()) > 0
 	hasSession := m.hasSession()
 	commands := k.Commands
 	if m.focus == uiFocusEditor && m.editor.textarea.Value() == "" {
-		commands.SetHelp("/ or ctrl+p", "commands")
+		commands.SetHelp("/ or "+bindingShortcut(k.Commands), "commands")
 	}
 
 	switch m.state {
@@ -5072,7 +5084,7 @@ func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 // so that the Update goroutine is never blocked.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
 	if m.viewingChildSession() {
-		return util.ReportWarn("viewing subagent session · ctrl+up to return")
+		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
 	}
 	if m.session != nil && m.sessionLoadExpectedID != "" && m.sessionLoadExpectedID != m.session.ID {
 		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
@@ -5183,7 +5195,7 @@ type bangSessionCreatedMsg struct {
 // the LLM. The result is displayed as a tool-style item in the chat.
 func (m *UI) runShellCommand(command string) tea.Cmd {
 	if m.viewingChildSession() {
-		return util.ReportWarn("viewing subagent session · ctrl+up to return")
+		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
 	}
 	if m.session != nil {
 		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
