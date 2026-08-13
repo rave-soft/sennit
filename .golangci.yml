@@ -32,6 +32,14 @@ linters:
     generated: lax
     presets:
       - common-false-positives
+    paths:
+      # Git worktrees created inside the repo (Claude Code puts them in
+      # .claude/worktrees/). Go's own tooling skips dot-directories, so
+      # `go build ./...` never sees them, but golangci-lint does: it
+      # would lint a second copy of every package, report issues against
+      # paths that vanish when the worktree is removed, and poison its
+      # cache with them.
+      - '\.claude/'
     rules:
       - text: '(slog|log)\.\w+'
         linters:
@@ -55,3 +63,5 @@ formatters:
     - goimports
   exclusions:
     generated: lax
+    paths:
+      - '\.claude/'
