@@ -29,7 +29,15 @@ var (
 	// ErrBranchCheckedOut is returned when git refuses to update a branch
 	// because it is checked out in some worktree.
 	ErrBranchCheckedOut = errors.New("git: branch is checked out in another worktree")
+	// ErrNotRepository means git definitively reported that the target is not
+	// in a repository. It deliberately excludes command, context, permission,
+	// and other operational failures so callers can fail closed.
+	ErrNotRepository = errors.New("git: not a repository")
 )
+
+// commandContext is the git command construction seam. Tests replace it to
+// verify operational failures without changing PATH or invoking a shell.
+var commandContext = exec.CommandContext
 
 // run executes git with the given args in dir and returns trimmed stdout.
 // On failure the returned error wraps git's stderr so callers get an
@@ -40,7 +48,7 @@ func run(ctx context.Context, dir string, args ...string) (string, error) {
 }
 
 func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := commandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	// Force a C locale so error-message matching (see FastForward) doesn't
 	// depend on the user's system locale.
@@ -51,15 +59,54 @@ func runRaw(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if isNotRepository(err, stderr.String()) {
+			return "", fmt.Errorf("%w: git %s: %w: %s", ErrNotRepository, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		}
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
 }
 
 // IsRepo reports whether dir is inside a git working tree (or repo dir).
+// isNotRepository recognizes git's stable fatal diagnostic for rev-parse.
+// Git emits this only after successfully running and examining dir; all other
+// errors remain operational failures. The C locale set by runRaw keeps this
+// classification independent of the user's locale.
+func isNotRepository(err error, stderr string) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && strings.Contains(stderr, "not a git repository")
+}
+
 func IsRepo(ctx context.Context, dir string) bool {
 	out, err := run(ctx, dir, "rev-parse", "--is-inside-work-tree")
 	return err == nil && out == "true"
+}
+
+// CommonDir returns the canonical absolute path to the git directory shared by
+// every worktree in the repository containing dir.
+func CommonDir(ctx context.Context, dir string) (string, error) {
+	out, err := run(ctx, dir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("git: common dir: %w", err)
+	}
+	return canonicalCommonDir(dir, out)
+}
+
+// canonicalCommonDir resolves rev-parse's relative --git-common-dir output
+// relative to the working directory supplied to git, then canonicalizes it.
+func canonicalCommonDir(workingDir, commonDir string) (string, error) {
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(workingDir, commonDir)
+	}
+	commonDir, err := filepath.Abs(filepath.Clean(commonDir))
+	if err != nil {
+		return "", fmt.Errorf("git: absolute common dir: %w", err)
+	}
+	commonDir, err = filepath.EvalSymlinks(commonDir)
+	if err != nil {
+		return "", fmt.Errorf("git: canonical common dir: %w", err)
+	}
+	return filepath.Clean(commonDir), nil
 }
 
 // TopLevel returns the absolute path to the top-level directory of the

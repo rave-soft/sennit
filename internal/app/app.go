@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -127,11 +128,19 @@ type App struct {
 	shutdownHooks        []func(context.Context) error // stop resources used by critical cleanup
 	cleanupFuncs         []func(context.Context) error
 	criticalCleanupFuncs []func(context.Context) error // only after all hooks finish
+	finalCleanupFuncs    []func(context.Context) error // only after every repo user has stopped
 	mcpInitCancel        context.CancelFunc
 	mcpInitWG            sync.WaitGroup
 	mcpClose             func(context.Context) error
 	mainDBRelease        func(context.Context) error
-	agentNotifications   *pubsub.Broker[notify.Notification]
+	// stopBackgroundShells and stopLSP are test seams for the final-resource
+	// ordering; production leaves them nil and uses the concrete managers.
+	stopBackgroundShells func(context.Context) error
+	stopLSP              func(context.Context) error
+	// agentWorkStopped is a test seam for shutdown dependency ordering.
+	// Production leaves it nil and queries AgentCoordinator after CancelAll.
+	agentWorkStopped   func() bool
+	agentNotifications *pubsub.Broker[notify.Notification]
 	// runCompletions is the authoritative per-run completion signal,
 	// emitted once per top-level agent turn after all message
 	// updates have been flushed. Bridged into app.events so SSE
@@ -395,6 +404,21 @@ func (app *App) AddCriticalCleanup(fn func(context.Context) error) error {
 		return ErrAppShutdownBlocked
 	}
 	app.criticalCleanupFuncs = append(app.criticalCleanupFuncs, fn)
+	return nil
+}
+
+// AddFinalCleanup registers fn to run only after background shells and LSP
+// clients have stopped successfully. It is for resources, such as a workspace
+// lock, that must outlive every repository user during shutdown. If a user
+// times out or fails to stop, final cleanups are retained rather than released
+// unsafely.
+func (app *App) AddFinalCleanup(fn func(context.Context) error) error {
+	app.shutdownMu.Lock()
+	defer app.shutdownMu.Unlock()
+	if app.shutdownState >= shutdownStateShuttingDown {
+		return ErrAppShutdownBlocked
+	}
+	app.finalCleanupFuncs = append(app.finalCleanupFuncs, fn)
 	return nil
 }
 
@@ -723,6 +747,9 @@ func (app *App) Shutdown() {
 	criticalCleanups := make([]func(context.Context) error, len(app.criticalCleanupFuncs))
 	copy(criticalCleanups, app.criticalCleanupFuncs)
 	app.criticalCleanupFuncs = nil
+	finalCleanups := make([]func(context.Context) error, len(app.finalCleanupFuncs))
+	copy(finalCleanups, app.finalCleanupFuncs)
+	app.finalCleanupFuncs = nil
 	app.shutdownMu.Unlock()
 
 	start := time.Now()
@@ -759,7 +786,12 @@ func (app *App) Shutdown() {
 	// still use. CancelAll bounds its own wait; retain dependencies when active
 	// work or coordinator readiness work does not stop.
 	agentWorkStopped := true
-	if app.AgentCoordinator != nil {
+	if app.agentWorkStopped != nil {
+		agentWorkStopped = app.agentWorkStopped()
+		if !agentWorkStopped {
+			slog.Error("Agent work did not stop before shutdown deadline")
+		}
+	} else if app.AgentCoordinator != nil {
 		app.AgentCoordinator.CancelAll()
 		if app.AgentCoordinator.IsBusy() {
 			agentWorkStopped = false
@@ -837,17 +869,23 @@ func (app *App) Shutdown() {
 
 	// 6. Parallel independent teardown.
 	var wg sync.WaitGroup
+	var repoUsersStopped atomic.Bool
+	repoUsersStopped.Store(true)
 
 	wg.Go(func() {
 		event.AppExited()
 	})
 
 	wg.Go(func() {
-		if app.BackgroundShells == nil {
-			return
+		stop := app.stopBackgroundShells
+		if stop == nil && app.BackgroundShells != nil {
+			stop = app.BackgroundShells.Shutdown
 		}
-		if err := app.runShutdownCallback(app.BackgroundShells.Shutdown); err != nil {
-			slog.Error("Failed to stop background shells", "error", err)
+		if stop != nil {
+			if err := app.runShutdownCallback(stop); err != nil {
+				repoUsersStopped.Store(false)
+				slog.Error("Failed to stop background shells", "error", err)
+			}
 		}
 	})
 
@@ -856,17 +894,33 @@ func (app *App) Shutdown() {
 	}
 
 	wg.Go(func() {
-		if app.LSPManager != nil {
-			if err := app.runShutdownCallback(func(ctx context.Context) error {
+		stop := app.stopLSP
+		if stop == nil && app.LSPManager != nil {
+			stop = func(ctx context.Context) error {
 				app.LSPManager.KillAll(ctx)
 				return nil
-			}); err != nil {
+			}
+		}
+		if stop != nil {
+			if err := app.runShutdownCallback(stop); err != nil {
+				repoUsersStopped.Store(false)
 				slog.Error("Failed to stop LSP clients", "error", err)
 			}
 		}
 	})
 
 	wg.Wait()
+	if hooksSucceeded && dependenciesStopped && repoUsersStopped.Load() {
+		for _, cleanup := range finalCleanups {
+			if cleanup != nil {
+				if err := app.runShutdownCallback(cleanup); err != nil {
+					slog.Error("Failed to run final app cleanup on shutdown", "error", err)
+				}
+			}
+		}
+	} else if len(finalCleanups) > 0 {
+		slog.Error("Retaining final resources because repository-dependent subsystems did not stop", "hooksSucceeded", hooksSucceeded, "dependenciesStopped", dependenciesStopped, "repoUsersStopped", repoUsersStopped.Load())
+	}
 
 	app.shutdownMu.Lock()
 	app.shutdownState = shutdownStateDone

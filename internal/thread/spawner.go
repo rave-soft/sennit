@@ -46,7 +46,7 @@ func (h *localHandle) App() *app.App { return h.app }
 
 // LocalSpawner spawns thread workspaces by bootstrapping a plain
 // in-process app.App directly, for the single-process CLI. Each spawned
-// app owns its own workspace lock (WorkspaceLock) but does not mirror
+// app joins the repository workspace lock (WorkspaceLock) but does not mirror
 // its skills into the process-wide globals (GlobalSkillsMirror is off),
 // matching how the backend hosts multiple concurrent workspaces.
 type LocalSpawner struct {

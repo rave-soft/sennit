@@ -40,7 +40,8 @@ type dataDirOwnerInfo struct {
 // *WorkspaceLock is a no-op, so callers that skip locking can hold a
 // nil lock and release it unconditionally.
 type WorkspaceLock struct {
-	dir string
+	dir  string
+	once sync.Once
 }
 
 // workspaceLockEntry is the process-local, refcounted OS lock backing
@@ -67,20 +68,21 @@ func (l *WorkspaceLock) Release() {
 	if l == nil {
 		return
 	}
+	l.once.Do(func() {
+		workspaceLockPoolMu.Lock()
+		defer workspaceLockPoolMu.Unlock()
 
-	workspaceLockPoolMu.Lock()
-	defer workspaceLockPoolMu.Unlock()
-
-	entry, ok := workspaceLockPool[l.dir]
-	if !ok {
-		return
-	}
-	entry.refCount--
-	if entry.refCount > 0 {
-		return
-	}
-	delete(workspaceLockPool, l.dir)
-	entry.release()
+		entry, ok := workspaceLockPool[l.dir]
+		if !ok {
+			return
+		}
+		entry.refCount--
+		if entry.refCount > 0 {
+			return
+		}
+		delete(workspaceLockPool, l.dir)
+		entry.release()
+	})
 }
 
 // AcquireWorkspaceLock takes an exclusive non-blocking lock on
@@ -96,9 +98,9 @@ func (l *WorkspaceLock) Release() {
 // as an escape hatch for hostile filesystems that do not implement
 // advisory locking; it should not be used in normal operation.
 func AcquireWorkspaceLock(dir string) (*WorkspaceLock, error) {
-	absDir, err := filepath.Abs(dir)
+	absDir, err := canonicalWorkspaceLockDir(dir)
 	if err != nil {
-		absDir = dir
+		return nil, err
 	}
 
 	workspaceLockPoolMu.Lock()
@@ -114,7 +116,7 @@ func AcquireWorkspaceLock(dir string) (*WorkspaceLock, error) {
 		return &WorkspaceLock{dir: absDir}, nil
 	}
 
-	path := filepath.Join(dir, workspaceLockFile)
+	path := filepath.Join(absDir, workspaceLockFile)
 	release, err := lock.TryFile(path)
 	if err != nil {
 		if errors.Is(err, lock.ErrContended) {
@@ -141,8 +143,23 @@ func AcquireWorkspaceLock(dir string) (*WorkspaceLock, error) {
 	return &WorkspaceLock{dir: absDir}, nil
 }
 
-// skipWorkspaceLock reports whether the workspace lock should be
-// bypassed.
+// canonicalWorkspaceLockDir returns an absolute, symlink-canonical directory
+// identity so aliases share one in-process lock entry.
+func canonicalWorkspaceLockDir(dir string) (string, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("failed to make workspace lock directory absolute %q: %w", dir, err)
+	}
+	canonicalDir, err := filepath.EvalSymlinks(absDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return filepath.Clean(absDir), nil
+		}
+		return "", fmt.Errorf("failed to canonicalize workspace lock directory %q: %w", dir, err)
+	}
+	return filepath.Clean(canonicalDir), nil
+}
+
 func skipWorkspaceLock() bool {
 	v, _ := strconv.ParseBool(os.Getenv("BRAID_SKIP_DATADIR_LOCK"))
 	return v

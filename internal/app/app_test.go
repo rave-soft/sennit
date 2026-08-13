@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -484,6 +485,103 @@ func TestApp_Shutdown_ManagerBeforeDB(t *testing.T) {
 			require.True(t, found, "manager-shutdown must appear before db-release")
 		}
 	}
+}
+
+func TestApp_Shutdown_FinalCleanupRunsAfterRepositoryUsers(t *testing.T) {
+	a := NewForTest(t.Context())
+	var order []string
+	var mu sync.Mutex
+	add := func(name string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, name)
+	}
+	a.stopBackgroundShells = func(context.Context) error {
+		add("shells")
+		return nil
+	}
+	a.stopLSP = func(context.Context) error {
+		add("lsp")
+		return nil
+	}
+	require.NoError(t, a.AddFinalCleanup(func(context.Context) error {
+		add("lock")
+		return nil
+	}))
+
+	a.Shutdown()
+	a.Shutdown() // Final cleanups, like the lock release, remain idempotent.
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.ElementsMatch(t, []string{"shells", "lsp", "lock"}, order)
+	require.Equal(t, "lock", order[len(order)-1])
+}
+
+func TestApp_Shutdown_FinalCleanupRetainedAfterShutdownHookFailure(t *testing.T) {
+	a := NewForTest(t.Context())
+	var released atomic.Bool
+	require.NoError(t, a.AddShutdownHook(func(context.Context) error {
+		return errors.New("thread manager did not stop")
+	}))
+	require.NoError(t, a.AddFinalCleanup(func(context.Context) error {
+		released.Store(true)
+		return nil
+	}))
+
+	a.Shutdown()
+	require.False(t, released.Load())
+}
+
+func TestApp_Shutdown_FinalCleanupRetainedAfterShutdownHookTimeout(t *testing.T) {
+	a := NewForTest(t.Context())
+	a.shutdownTimeout = 20 * time.Millisecond
+	block := make(chan struct{})
+	var released atomic.Bool
+	require.NoError(t, a.AddShutdownHook(func(context.Context) error {
+		<-block
+		return nil
+	}))
+	require.NoError(t, a.AddFinalCleanup(func(context.Context) error {
+		released.Store(true)
+		return nil
+	}))
+
+	a.Shutdown()
+	require.False(t, released.Load())
+	close(block)
+}
+
+func TestApp_Shutdown_FinalCleanupRetainedWhileAgentWorkRemains(t *testing.T) {
+	a := NewForTest(t.Context())
+	a.agentWorkStopped = func() bool { return false }
+	var released atomic.Bool
+	require.NoError(t, a.AddFinalCleanup(func(context.Context) error {
+		released.Store(true)
+		return nil
+	}))
+
+	a.Shutdown()
+	require.False(t, released.Load())
+}
+
+func TestApp_Shutdown_FinalCleanupRetainedAfterRepositoryUserTimeout(t *testing.T) {
+	a := NewForTest(t.Context())
+	a.shutdownTimeout = 20 * time.Millisecond
+	block := make(chan struct{})
+	var released atomic.Bool
+	a.stopBackgroundShells = func(context.Context) error {
+		<-block
+		return nil
+	}
+	require.NoError(t, a.AddFinalCleanup(func(context.Context) error {
+		released.Store(true)
+		return nil
+	}))
+
+	a.Shutdown()
+	require.False(t, released.Load())
+	close(block)
 }
 
 func testNConsumers(t *testing.T, n int) {

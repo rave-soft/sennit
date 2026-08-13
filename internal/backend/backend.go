@@ -434,8 +434,8 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool, inhe
 	}()
 
 	id := uuid.New().String()
-	// The backend hosts multiple workspaces concurrently, so it locks each
-	// workspace's data directory (guarding against a second braid process
+	// The backend hosts multiple workspaces concurrently, so Bootstrap
+	// locks each repository (guarding against a second braid process
 	// racing the same project) and builds the skills manager WITHOUT
 	// WithGlobalMirror, to prevent last-writer-wins cross-talk between
 	// workspaces. It also leaves the DB connection open on an app.New

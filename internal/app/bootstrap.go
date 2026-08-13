@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
+	gitpkg "github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/skills"
 )
 
@@ -28,11 +31,9 @@ type BootstrapOptions struct {
 	// The child workspace's own definitions take precedence.
 	InheritedAgents map[string]config.Agent
 
-	// WorkspaceLock enables db.AcquireWorkspaceLock on the workspace's
-	// .braid data directory. The backend sets this (it hosts multiple
-	// concurrent workspaces and must guard each one's data directory
-	// against a second braid process racing it); local mode leaves it
-	// off.
+	// WorkspaceLock enables a repository-scoped workspace lock. Git
+	// workspaces lock their canonical common directory; non-git
+	// workspaces lock their data directory.
 	WorkspaceLock bool
 
 	// GlobalSkillsMirror enables skills.WithGlobalMirror. Local mode
@@ -41,11 +42,6 @@ type BootstrapOptions struct {
 	// hosts multiple workspaces concurrently and leaves it off to avoid
 	// last-writer-wins cross-talk between them.
 	GlobalSkillsMirror bool
-
-	// CloseDBOnAppFailure closes the DB connection if app.New fails.
-	// Local mode does this (it owns the only reference to the
-	// connection); the backend does not.
-	CloseDBOnAppFailure bool
 
 	// PostDataDir, if set, runs after the .braid data directory has
 	// been created and before the DB connection is opened. Local mode
@@ -61,6 +57,8 @@ type BootstrapOptions struct {
 	// fails. Local mode uses this to log the failure; the backend
 	// reports it to its caller instead.
 	OnAppInitFailure func(err error)
+
+	newApp func(context.Context, *sql.DB, *config.ConfigStore, *skills.Manager) (*App, error)
 }
 
 // BootstrapResult holds the pieces Bootstrap assembles, for callers that
@@ -73,7 +71,8 @@ type BootstrapResult struct {
 
 // Bootstrap runs the workspace bootstrap sequence shared by every place
 // that starts an in-process app.App: initialize config, ensure the
-// workspace's .braid data directory exists, connect its database,
+// workspace's .braid data directory exists, acquire its workspace lock,
+// connect its database,
 // discover its skills, then construct the App. Callers differ only in
 // the details captured by BootstrapOptions; see its field comments.
 func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*BootstrapResult, error) {
@@ -94,29 +93,44 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		return nil, err
 	}
 
+	var wsLock *db.WorkspaceLock
+	if opts.WorkspaceLock {
+		lockDir, err := workspaceLockDir(ctx, cfg.WorkingDir(), cfg.Config().Options.DataDirectory)
+		if err != nil {
+			return nil, err
+		}
+		wsLock, err = db.AcquireWorkspaceLock(lockDir)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if wsLock != nil {
+				wsLock.Release()
+			}
+		}()
+	}
+
 	if opts.PostDataDir != nil {
 		if err := opts.PostDataDir(cfg); err != nil {
 			return nil, err
 		}
 	}
 
-	// The workspace lock guards a project's .braid directory against a
-	// second braid process racing it; it is unrelated to which database
-	// file Connect opens (that's now always the shared global one), so
-	// it is acquired independently, before Connect.
-	var wsLock *db.WorkspaceLock
-	if opts.WorkspaceLock {
-		wsLock, err = db.AcquireWorkspaceLock(cfg.Config().Options.DataDirectory)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	conn, err := db.Connect(ctx, config.GlobalDBDir())
+	globalDBDir := config.GlobalDBDir()
+	conn, err := db.Connect(ctx, globalDBDir)
 	if err != nil {
-		wsLock.Release()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
+	// Connect returns a pooled reference. Every error below must release this
+	// reference rather than closing the shared *sql.DB directly.
+	dbConnected := true
+	defer func() {
+		if dbConnected {
+			if err := db.Release(globalDBDir); err != nil {
+				slog.Error("Failed to release database after bootstrap error", "error", err)
+			}
+		}
+	}()
 
 	// One-time, best-effort import of this project's legacy per-project
 	// database (from before every project moved to one shared database).
@@ -144,26 +158,50 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	}
 	skillsMgr := skills.NewManager(allSkills, activeSkills, skillStates, skillOpts...)
 
-	appInstance, err := New(ctx, conn, cfg, skillsMgr)
+	newApp := opts.newApp
+	if newApp == nil {
+		newApp = New
+	}
+	appInstance, err := newApp(ctx, conn, cfg, skillsMgr)
 	if err != nil {
-		wsLock.Release()
-		if opts.CloseDBOnAppFailure {
-			_ = conn.Close()
-		}
 		if opts.OnAppInitFailure != nil {
 			opts.OnAppInitFailure(err)
 		}
 		return nil, fmt.Errorf("failed to create app workspace: %w", err)
 	}
 
-	// Release the workspace lock (if any) on the same schedule as the
-	// rest of the workspace's resources.
-	_ = appInstance.AddCleanup(func(context.Context) error {
+	// Keep the workspace lock through all repo-dependent teardown. In
+	// particular, it must outlive background shells and LSP clients.
+	if err := appInstance.AddFinalCleanup(func(context.Context) error {
 		wsLock.Release()
 		return nil
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("failed to register workspace lock cleanup: %w", err)
+	}
+	wsLock = nil
+	dbConnected = false // App owns this pooled reference through mainDBRelease.
 
 	return &BootstrapResult{App: appInstance, Config: cfg, Skills: skillsMgr}, nil
+}
+
+func workspaceLockDir(ctx context.Context, workspaceDir, dataDir string) (string, error) {
+	// A path that does not exist cannot be a repository. This preserves the
+	// backend's ability to create a workspace at a new path without treating
+	// git's chdir failure as a non-repository signal.
+	if _, err := os.Stat(workspaceDir); errors.Is(err, os.ErrNotExist) {
+		return dataDir, nil
+	} else if err != nil {
+		return "", fmt.Errorf("failed to inspect workspace for repository lock: %w", err)
+	}
+
+	commonDir, err := gitpkg.CommonDir(ctx, workspaceDir)
+	if err == nil {
+		return commonDir, nil
+	}
+	if errors.Is(err, gitpkg.ErrNotRepository) {
+		return dataDir, nil
+	}
+	return "", fmt.Errorf("failed to resolve repository workspace lock: %w", err)
 }
 
 // ensureDotBraidDir creates the workspace's .braid data directory and,

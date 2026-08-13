@@ -316,7 +316,7 @@ no-op `event/all.go`.
 | 2.1–2.6 отзывчивость | не начато | Весь синхронный I/O и N+1 из исходного плана остаются |
 | 3.1–3.5 конкурентность и workspace config merge | выполнено | `86a88178`, `bbef925d`, актуальный `clearQueue`, `19c34333` и текущая работа |
 | 3.6 | выполнено | — |
-| 3.7 конкурентность | не начато | Остаётся repo-scoped workspace-lock |
+| 3.7 конкурентность | выполнено | repo-scoped workspace-lock покрывает local/backend/thread; `Recover` не стал распределённым протоколом |
 | 4.1 дедупликация TTL-кэшей | не начато | Есть только специализированный bool-кэш |
 | 4.2 диалоги | частично | Нет общего `confirmDialog` и `BaseItem`, миграция инфраструктуры не завершена |
 | 4.3–4.7 дедупликация/чистка | не начато | Исходные копии и мёртвый код остаются |
@@ -367,7 +367,7 @@ no-op `event/all.go`.
 | 3.4 | **Выполнено:** миграции повторно читают данные под `lock.File` и безопасны для retry | `19c34333` |
 | 3.5 | **Выполнено:** общий merge workspace-конфига для Load и reload применяет одинаковую совместимость `recent_models`; type error сохраняет опубликованную базовую конфигурацию, не добавляет workspace path и пишет warn | текущая работа |
 | 3.6 | **Выполнено:** каждый App владеет отдельным менеджером background shell; Bash/JobOutput/JobKill получают его как зависимость, лимит и shutdown атомарны | `shell/background.go`, `app/app.go`, `workspace/` |
-| 3.7 | Локальный режим берёт **repo-scoped** workspace-lock, закрывающий один git-репозиторий даже при разных `--data-dir`; существующий data-dir lock подходит только при явно зафиксированном инварианте «один repo → один data dir». Простого owner ID для `Recover` недостаточно: альтернатива потребует lease/heartbeat/epoch и является отдельным распределённым протоколом, не точечным фиксом | `cmd/root.go:263-283`, `thread/manager.go:554-576`, `db/datadirlock.go` |
+| 3.7 | **Выполнено:** local/backend/thread берут repo-scoped workspace-lock до подключения БД. Canonical identity — абсолютный canonical git common dir: root/subdir, symlink и linked worktree одного репозитория конфликтуют и при разных `--data-dir`; независимые репозитории не конфликтуют. Для non-git workspace сохранён data-dir fallback. In-process refcount не допускает self-deadlock parent/worktree и не снимает parent lock при release child. `Recover` не использует owner ID как замену lease/heartbeat/epoch и не менялся в распределённый протокол. | `app/bootstrap.go`, `git/git.go`, `db/datadirlock.go`, `cmd/root.go` |
 
 ### Фаза 4 — дедупликация (пока копии не разошлись)
 
@@ -410,7 +410,6 @@ no-op `event/all.go`.
 2.1 (убрать постоянный HTTP probe)
   → 2.2 (async session load) → 2.6 (убрать N+1)
   → 2.3–2.4 (остальной синхронный I/O из Update)
-  → 3.7 точечным PR
   → 2.5 после фиксации карты зависимостей кэша инструментов/агентов
   → 4.1–4.4 до дальнейшего расхождения копий; затем 4.5–4.7
   → 5.2 уже можно делать поверх готового 2.0;

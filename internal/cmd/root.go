@@ -258,15 +258,14 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 
 	// Local mode hosts a single workspace per process, so it enables
 	// WithGlobalMirror (keeps the package globals the TUI reads via
-	// skills.GetLatestStates in sync with the manager) and closes the DB
-	// connection if app.New fails, since it owns the only reference to it.
+	// skills.GetLatestStates in sync with the manager).
 	boot, err := app.Bootstrap(ctx, cwd, app.BootstrapOptions{
-		DataDir:             dataDir,
-		Debug:               debug,
-		YOLO:                yolo,
-		Channels:            channels,
-		GlobalSkillsMirror:  true,
-		CloseDBOnAppFailure: true,
+		DataDir:            dataDir,
+		Debug:              debug,
+		YOLO:               yolo,
+		Channels:           channels,
+		WorkspaceLock:      true,
+		GlobalSkillsMirror: true,
 		PostDataDir: func(cfg *config.ConfigStore) error {
 			if err := projects.Register(cwd, cfg.Config().Options.DataDirectory); err != nil {
 				slog.Warn("Failed to register project", "error", err)

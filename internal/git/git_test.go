@@ -59,6 +59,57 @@ func TestIsRepo(t *testing.T) {
 	require.False(t, IsRepo(ctx, t.TempDir()))
 }
 
+func TestCanonicalCommonDir_Relative(t *testing.T) {
+	workingDir := t.TempDir()
+	gitDir := filepath.Join(workingDir, ".git")
+	require.NoError(t, os.Mkdir(gitDir, 0o755))
+
+	got, err := canonicalCommonDir(filepath.Join(workingDir, "subdir"), "../.git")
+	require.NoError(t, err)
+	want, err := filepath.EvalSymlinks(gitDir)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestCommonDir_NotRepositorySentinel(t *testing.T) {
+	requireGit(t)
+	_, err := CommonDir(t.Context(), t.TempDir())
+	require.ErrorIs(t, err, ErrNotRepository)
+}
+
+func TestCommonDir_CommandUnavailableIsNotNotRepository(t *testing.T) {
+	oldCommandContext := commandContext
+	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, filepath.Join(t.TempDir(), "missing-git"), args...)
+	}
+	t.Cleanup(func() { commandContext = oldCommandContext })
+
+	_, err := CommonDir(t.Context(), t.TempDir())
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrNotRepository)
+}
+
+func TestCommonDir(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	sub := filepath.Join(repo, "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+
+	commonDir, err := CommonDir(ctx, sub)
+	require.NoError(t, err)
+
+	want, err := filepath.EvalSymlinks(filepath.Join(repo, ".git"))
+	require.NoError(t, err)
+	require.Equal(t, want, commonDir)
+
+	worktree := filepath.Join(t.TempDir(), "worktree")
+	require.NoError(t, WorktreeAdd(ctx, repo, worktree, "worktree", "main"))
+	worktreeCommonDir, err := CommonDir(ctx, worktree)
+	require.NoError(t, err)
+	require.Equal(t, commonDir, worktreeCommonDir)
+}
+
 func TestTopLevel(t *testing.T) {
 	repo := initRepo(t)
 	ctx := context.Background()
