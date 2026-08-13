@@ -35,8 +35,8 @@ import (
 func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	env := testEnv(t)
 
-	// Minimal hermetic config: one openai-typed provider with selected large
-	// and small models so buildAgentModels and the system-prompt build both
+	// Minimal hermetic config: one openai-typed provider with a selected
+	// model so buildAgentModel and the system-prompt build both
 	// succeed. No MCP servers are configured, so initialization would complete
 	// instantly if we let it — we deliberately do not, so WaitForInit stays
 	// blocked for the duration of the assertion.

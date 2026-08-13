@@ -39,6 +39,9 @@ func (m *gatedStreamModel) Generate(ctx context.Context, call fantasy.Call) (*fa
 }
 
 func (m *gatedStreamModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	if isTitleCall(call) {
+		return titleStream()
+	}
 	if m.calls.Add(1) == 1 {
 		close(m.entered)
 		select {
@@ -82,16 +85,14 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	broker := pubsub.NewBroker[notify.RunComplete]()
 	t.Cleanup(broker.Shutdown)
 
-	large := &gatedStreamModel{
+	gated := &gatedStreamModel{
 		text:    "done",
 		gate:    make(chan struct{}),
 		entered: make(chan struct{}),
 	}
-	small := &finishStreamModel{text: "title"}
 
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel:  Model{Model: large, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
-		SmallModel:  Model{Model: small, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Model:       Model{Model: gated, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 		Sessions:    env.sessions,
 		Messages:    env.messages,
 		RunComplete: broker,
@@ -117,7 +118,7 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 
 	// Wait until the main turn is active (inside Stream).
 	select {
-	case <-large.entered:
+	case <-gated.entered:
 	case <-time.After(5 * time.Second):
 		t.Fatal("main run never entered Stream")
 	}
@@ -134,7 +135,7 @@ func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.
 	require.Equal(t, 1, sa.QueuedPrompts(sess.ID), "the follow-up must be queued, not folded")
 
 	// Release the main turn so it completes and hands off to the queue.
-	close(large.gate)
+	close(gated.gate)
 	require.NoError(t, <-mainDone)
 
 	// Both turns must publish their own terminal RunComplete.

@@ -7,7 +7,6 @@ import (
 
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
-	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/shell"
@@ -232,16 +231,6 @@ func (b *Backend) QueuedPromptsList(workspaceID, sessionID string) ([]string, er
 	}
 
 	return ws.AgentCoordinator.QueuedPromptsList(sessionID), nil
-}
-
-// GetDefaultSmallModel returns the default small model for a provider.
-func (b *Backend) GetDefaultSmallModel(workspaceID, providerID string) (config.SelectedModel, error) {
-	ws, err := b.GetWorkspace(workspaceID)
-	if err != nil {
-		return config.SelectedModel{}, err
-	}
-
-	return ws.GetDefaultSmallModel(providerID), nil
 }
 
 // RunShellCommand runs a shell command in the workspace directory and

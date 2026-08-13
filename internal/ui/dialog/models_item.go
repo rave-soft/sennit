@@ -79,13 +79,6 @@ func (m *ModelItem) SelectedModel() config.SelectedModel {
 	}
 }
 
-// SelectedModelType returns the type of model represented by this item.
-// There is only one configurable model slot now, so this is always
-// [config.SelectedModelTypeLarge].
-func (m *ModelItem) SelectedModelType() config.SelectedModelType {
-	return config.SelectedModelTypeLarge
-}
-
 var _ ListItem = &ModelItem{}
 
 // NewModelItem creates a new ModelItem.

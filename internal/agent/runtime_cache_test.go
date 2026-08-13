@@ -77,10 +77,10 @@ func TestRuntimeCacheRetriesStaleHitUntilStable(t *testing.T) {
 func TestActiveRuntimeOnlyReplacesMatchingModelCredentials(t *testing.T) {
 	originalModel := Model{ModelCfg: config.SelectedModel{Provider: "provider", Model: "model"}}
 	refreshedModel := Model{ModelCfg: config.SelectedModel{Provider: "provider", Model: "model"}}
-	active := newActiveRuntime(&compiledRuntime{large: originalModel})
-	active.store(&compiledRuntime{large: refreshedModel})
-	require.Equal(t, "provider", active.load().large.ModelCfg.Provider)
-	require.Equal(t, "model", active.load().large.ModelCfg.Model)
+	active := newActiveRuntime(&compiledRuntime{model: originalModel})
+	active.store(&compiledRuntime{model: refreshedModel})
+	require.Equal(t, "provider", active.load().model.ModelCfg.Provider)
+	require.Equal(t, "model", active.load().model.ModelCfg.Model)
 }
 
 func TestRuntimeCacheDoesNotCacheFailures(t *testing.T) {

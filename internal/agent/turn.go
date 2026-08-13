@@ -38,7 +38,10 @@ type runTurn struct {
 	// cancel() or by Cancel()/ctx cancellation).
 	genCtx context.Context
 
-	largeModel           Model
+	// model is the turn's snapshot of the run's model, taken once in Run
+	// and never re-read, so a concurrent SetModel or config reload cannot
+	// change this turn's identity mid-stream.
+	model                Model
 	tools                []fantasy.AgentTool
 	promptPrefix         string
 	disableAutoSummarize bool
@@ -68,7 +71,7 @@ func newRunTurn(
 	a *sessionAgent,
 	call SessionAgentCall,
 	ctx, genCtx context.Context,
-	largeModel Model,
+	model Model,
 	tools []fantasy.AgentTool,
 	promptPrefix string,
 	disableAutoSummarize bool,
@@ -80,7 +83,7 @@ func newRunTurn(
 		call:                 call,
 		ctx:                  ctx,
 		genCtx:               genCtx,
-		largeModel:           largeModel,
+		model:                model,
 		tools:                tools,
 		promptPrefix:         promptPrefix,
 		disableAutoSummarize: disableAutoSummarize,
@@ -122,7 +125,7 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 		prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
 	}
 
-	prepared.Messages = t.agent.workaroundProviderMediaLimitations(prepared.Messages, t.largeModel)
+	prepared.Messages = t.agent.workaroundProviderMediaLimitations(prepared.Messages, t.model)
 
 	lastSystemRoleInx := 0
 	systemMessageUpdated := false
@@ -152,15 +155,15 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	assistantMsg, err = t.agent.messages.Create(callContext, t.call.SessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
 		Parts:    []message.ContentPart{},
-		Model:    t.largeModel.ModelCfg.Model,
-		Provider: t.largeModel.ModelCfg.Provider,
+		Model:    t.model.ModelCfg.Model,
+		Provider: t.model.ModelCfg.Provider,
 	})
 	if err != nil {
 		return callContext, prepared, err
 	}
 	callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.largeModel.CatalogCfg.SupportsImages)
-	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.largeModel.CatalogCfg.Name)
+	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.model.CatalogCfg.SupportsImages)
+	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.model.CatalogCfg.Name)
 	t.currentAssistant = &assistantMsg
 	return callContext, prepared, err
 }
@@ -238,10 +241,10 @@ func (t *runTurn) onRetry(err *fantasy.ProviderError, delay time.Duration) {
 // model rather than the coordinator's mutable agent model. A config reload or
 // credential rebuild therefore cannot switch an in-flight turn's identity.
 func (t *runTurn) modelProvider() fantasy.LanguageModel {
-	m := t.largeModel
+	m := t.model
 	if t.call.ActiveRuntime != nil {
-		if runtime := t.call.ActiveRuntime.load(); runtime != nil && runtime.large.ModelCfg.Provider == m.ModelCfg.Provider && runtime.large.ModelCfg.Model == m.ModelCfg.Model {
-			m = runtime.large
+		if runtime := t.call.ActiveRuntime.load(); runtime != nil && runtime.model.ModelCfg.Provider == m.ModelCfg.Provider && runtime.model.ModelCfg.Model == m.ModelCfg.Model {
+			m = runtime.model
 		}
 	}
 	slog.Info("ModelProvider called",
@@ -330,7 +333,7 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 		return getSessionErr
 	}
 	usage, estimated := fallbackStepUsage(t.stepMessages, stepResult)
-	t.agent.updateSessionUsage(t.largeModel, &updatedSession, usage, t.agent.openrouterCost(stepResult.ProviderMetadata), estimated)
+	t.agent.updateSessionUsage(t.model, &updatedSession, usage, t.agent.openrouterCost(stepResult.ProviderMetadata), estimated)
 	_, sessionErr := t.agent.sessions.Save(t.ctx, updatedSession)
 	if sessionErr != nil {
 		return sessionErr
@@ -343,7 +346,7 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 // the turn once the session's token usage crosses the context-window
 // threshold, so Run's tail can kick off a summarize pass.
 func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
-	cw := int64(t.largeModel.CatalogCfg.ContextWindow)
+	cw := int64(t.model.CatalogCfg.ContextWindow)
 	// If context window is unknown (0), skip auto-summarize
 	// to avoid immediately truncating custom/local models.
 	if cw == 0 {
@@ -468,7 +471,7 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 			// message content.
 			quotaErr := &ProviderQuotaError{
 				Provider:    "copilot",
-				Model:       t.largeModel.CatalogCfg.Name,
+				Model:       t.model.CatalogCfg.Name,
 				SettingsURL: "https://github.com/settings/copilot/features",
 			}
 			t.currentAssistant.AddFinish(

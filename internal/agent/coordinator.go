@@ -36,15 +36,11 @@ import (
 
 // Coordinator errors.
 var (
-	errCoderAgentNotConfigured         = errors.New("coder agent not configured")
-	errModelProviderNotConfigured      = errors.New("model provider not configured")
-	errLargeModelNotSelected           = errors.New("model not selected")
-	errSmallModelNotSelected           = errors.New("no default model available for summarization")
-	errLargeModelProviderNotConfigured = errors.New("model provider not configured")
-	errSmallModelProviderNotConfigured = errors.New("provider not configured for the summarization model")
-	errLargeModelNotFound              = errors.New("model not found in provider config")
-	errSmallModelNotFound              = errors.New("summarization model not found in provider config")
-	errBackgroundShellsRequired        = errors.New("background shell manager is required")
+	errCoderAgentNotConfigured    = errors.New("coder agent not configured")
+	errModelProviderNotConfigured = errors.New("model provider not configured")
+	errModelNotSelected           = errors.New("model not selected")
+	errModelNotFound              = errors.New("model not found in provider config")
+	errBackgroundShellsRequired   = errors.New("background shell manager is required")
 )
 
 type Coordinator interface {
@@ -443,17 +439,17 @@ func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderO
 }
 
 func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool) (SessionAgent, error) {
-	large, small, err := c.buildAgentModels(ctx, isSubAgent)
+	model, err := c.buildAgentModel(ctx, isSubAgent)
 	if err != nil {
 		return nil, err
 	}
 
-	// An empty agent.Model means "inherit the app's main model", which
-	// internally is still the large model built above. A non-empty value is
-	// a "provider/model-id" string naming a specific model of its own.
+	// An empty agent.Model means "inherit the app's main model", which is
+	// the model built above. A non-empty value is a "provider/model-id"
+	// string naming a specific model of its own.
 	var primary Model
 	if agent.Model == "" {
-		primary = large
+		primary = model
 	} else {
 		primary, err = c.buildCustomAgentModel(ctx, agent, isSubAgent)
 		if err != nil {
@@ -469,11 +465,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		primary.ModelCfg.ReasoningEffort = agent.ReasoningEffort
 	}
 
-	largeProviderCfg, _ := c.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
+	providerCfg, _ := c.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		LargeModel:           primary,
-		SmallModel:           small,
-		SystemPromptPrefix:   largeProviderCfg.SystemPromptPrefix,
+		Model:                primary,
+		SystemPromptPrefix:   providerCfg.SystemPromptPrefix,
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
@@ -784,123 +779,48 @@ func (c *coordinator) webSearchBackend() (tools.SearchBackend, error) {
 }
 
 // TODO: when we support multiple agents we need to change this so that we pass in the agent specific model config
-func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Model, Model, error) {
-	largeModelCfg := c.cfg.Config().Model
-	if largeModelCfg.Model == "" {
-		return Model{}, Model{}, errLargeModelNotSelected
-	}
-	smallModelCfg := c.defaultSmallModel(largeModelCfg)
-	if smallModelCfg.Model == "" {
-		return Model{}, Model{}, errSmallModelNotSelected
+func (c *coordinator) buildAgentModel(ctx context.Context, isSubAgent bool) (Model, error) {
+	modelCfg := c.cfg.Config().Model
+	if modelCfg.Model == "" {
+		return Model{}, errModelNotSelected
 	}
 
-	largeProviderCfg, ok := c.cfg.Config().Providers.Get(largeModelCfg.Provider)
+	providerCfg, ok := c.cfg.Config().Providers.Get(modelCfg.Provider)
 	if !ok {
-		return Model{}, Model{}, errLargeModelProviderNotConfigured
+		return Model{}, errModelProviderNotConfigured
 	}
 
-	largeProvider, err := c.buildProvider(largeProviderCfg, largeModelCfg, isSubAgent)
+	provider, err := c.buildProvider(providerCfg, modelCfg, isSubAgent)
 	if err != nil {
-		return Model{}, Model{}, err
+		return Model{}, err
 	}
 
-	smallProviderCfg, ok := c.cfg.Config().Providers.Get(smallModelCfg.Provider)
-	if !ok {
-		return Model{}, Model{}, errSmallModelProviderNotConfigured
-	}
-
-	smallProvider, err := c.buildProvider(smallProviderCfg, smallModelCfg, true)
-	if err != nil {
-		return Model{}, Model{}, err
-	}
-
-	var largeCatwalkModel *catwalk.Model
-	var smallCatwalkModel *catwalk.Model
-
-	for _, m := range largeProviderCfg.Models {
-		if m.ID == largeModelCfg.Model {
-			largeCatwalkModel = &m
+	var catalogModel *catwalk.Model
+	for _, m := range providerCfg.Models {
+		if m.ID == modelCfg.Model {
+			catalogModel = &m
 		}
 	}
-	for _, m := range smallProviderCfg.Models {
-		if m.ID == smallModelCfg.Model {
-			smallCatwalkModel = &m
-		}
+	if catalogModel == nil {
+		return Model{}, errModelNotFound
 	}
 
-	if largeCatwalkModel == nil {
-		return Model{}, Model{}, errLargeModelNotFound
+	modelID := modelCfg.Model
+	if modelCfg.Provider == openrouter.Name && isExactoSupported(modelID) {
+		modelID += ":exacto"
 	}
 
-	if smallCatwalkModel == nil {
-		return Model{}, Model{}, errSmallModelNotFound
-	}
-
-	largeModelID := largeModelCfg.Model
-	smallModelID := smallModelCfg.Model
-
-	if largeModelCfg.Provider == openrouter.Name && isExactoSupported(largeModelID) {
-		largeModelID += ":exacto"
-	}
-
-	if smallModelCfg.Provider == openrouter.Name && isExactoSupported(smallModelID) {
-		smallModelID += ":exacto"
-	}
-
-	largeModel, err := largeProvider.LanguageModel(ctx, largeModelID)
+	languageModel, err := provider.LanguageModel(ctx, modelID)
 	if err != nil {
-		return Model{}, Model{}, err
-	}
-	smallModel, err := smallProvider.LanguageModel(ctx, smallModelID)
-	if err != nil {
-		return Model{}, Model{}, err
+		return Model{}, err
 	}
 
 	return Model{
-			Model:      largeModel,
-			CatalogCfg: *largeCatwalkModel,
-			ModelCfg:   largeModelCfg,
-			FlatRate:   largeProviderCfg.FlatRate,
-		}, Model{
-			Model:      smallModel,
-			CatalogCfg: *smallCatwalkModel,
-			ModelCfg:   smallModelCfg,
-			FlatRate:   smallProviderCfg.FlatRate,
-		}, nil
-}
-
-// defaultSmallModel derives the auto-selected "small" model Braid uses
-// internally for cheap session tasks like title generation and
-// summarization. It always stays on the main model's own provider,
-// preferring that provider's catwalk-declared default small model and
-// falling back to the main model itself when no such default is known
-// (unknown/local providers, or a catalog missing the hint). This mirrors
-// App.GetDefaultSmallModel, which does the same resolution for the
-// model-selection UI; it is duplicated here rather than shared because
-// internal/agent must not import internal/app.
-func (c *coordinator) defaultSmallModel(main config.SelectedModel) config.SelectedModel {
-	var knownProvider *catwalk.Provider
-	for _, p := range c.cfg.KnownProviders() {
-		if string(p.ID) == main.Provider {
-			knownProvider = &p
-			break
-		}
-	}
-	if knownProvider == nil {
-		return main
-	}
-
-	model := c.cfg.Config().GetModel(main.Provider, knownProvider.DefaultSmallModelID)
-	if model == nil {
-		return main
-	}
-
-	return config.SelectedModel{
-		Provider:        main.Provider,
-		Model:           knownProvider.DefaultSmallModelID,
-		MaxTokens:       model.DefaultMaxTokens,
-		ReasoningEffort: model.DefaultReasoningEffort,
-	}
+		Model:      languageModel,
+		CatalogCfg: *catalogModel,
+		ModelCfg:   modelCfg,
+		FlatRate:   providerCfg.FlatRate,
+	}, nil
 }
 
 // buildCustomAgentModel builds the Model for an agent whose Model field
@@ -1067,7 +987,7 @@ func (c *coordinator) runtimeFor(ctx context.Context) (*compiledRuntime, error) 
 		}
 	}
 	return c.runtime.getOrBuild(ctx, c.runtimeKey, func(ctx context.Context, key runtimeKey) (*compiledRuntime, error) {
-		large, small, err := c.buildAgentModels(ctx, false)
+		model, err := c.buildAgentModel(ctx, false)
 		if err != nil {
 			return nil, err
 		}
@@ -1083,24 +1003,24 @@ func (c *coordinator) runtimeFor(ctx context.Context) (*compiledRuntime, error) 
 		if err != nil {
 			return nil, err
 		}
-		systemPrompt, err := runtimePrompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		systemPrompt, err := runtimePrompt.Build(ctx, model.Model.Provider(), model.Model.Model(), c.cfg)
 		if err != nil {
 			return nil, err
 		}
 		if len(builtTools) > 0 {
 			builtTools[len(builtTools)-1].SetProviderOptions(cacheControlOptions())
 		}
-		providerCfg, ok := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+		providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 		if !ok {
 			return nil, errModelProviderNotConfigured
 		}
-		options, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(large, providerCfg)
-		maxTokens := large.CatalogCfg.DefaultMaxTokens
-		if large.ModelCfg.MaxTokens != 0 {
-			maxTokens = large.ModelCfg.MaxTokens
+		options, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
+		maxTokens := model.CatalogCfg.DefaultMaxTokens
+		if model.ModelCfg.MaxTokens != 0 {
+			maxTokens = model.ModelCfg.MaxTokens
 		}
 		return &compiledRuntime{
-			key: key, large: large, small: small, tools: builtTools, systemPrompt: systemPrompt,
+			key: key, model: model, tools: builtTools, systemPrompt: systemPrompt,
 			providerCfg: providerCfg, providerOptions: options,
 			temperature: temp, topP: topP, topK: topK,
 			frequencyPenalty: freqPenalty, presencePenalty: presPenalty,
@@ -1119,7 +1039,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	c.currentAgent.SetModels(runtime.large, runtime.small)
+	c.currentAgent.SetModel(runtime.model)
 	c.currentAgent.SetTools(runtime.tools)
 	c.currentAgent.SetSystemPrompt(runtime.systemPrompt)
 	return nil
@@ -1149,7 +1069,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	active := newActiveRuntime(runtime)
 
 	if agent, ok := c.currentAgent.(*sessionAgent); ok {
-		return agent.summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active), runtime.large, runtime.systemPromptPrefix, active)
+		return agent.summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active), runtime.model, runtime.systemPromptPrefix, active)
 	}
 	return c.currentAgent.Summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active))
 }
@@ -1165,7 +1085,7 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 		return
 	}
 	if agent, ok := c.currentAgent.(*sessionAgent); ok {
-		agent.generateTitle(ctx, sessionID, prompt, runtime.small, runtime.large, runtime.systemPromptPrefix)
+		agent.generateTitle(ctx, sessionID, prompt, runtime.model, runtime.systemPromptPrefix)
 		return
 	}
 	c.currentAgent.GenerateTitle(ctx, sessionID, prompt)

@@ -262,10 +262,6 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 	return w.app.InitCoderAgentNonInteractive(ctx)
 }
 
-func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	return w.app.GetDefaultSmallModel(providerID)
-}
-
 // AgentRunStream starts a non-interactive turn against the local
 // agent coordinator and streams it to completion. This is the
 // run-loop body that used to live in app.App.RunNonInteractive,

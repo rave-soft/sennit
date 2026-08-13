@@ -101,7 +101,7 @@ func TestUpdatePreferredModel_PublishesConfigChanged(t *testing.T) {
 	if raceEnabled {
 		// UpdatePreferredModel writes config.Models concurrently
 		// with the agent coordinator's async sub-agent builder
-		// that reads it via buildAgentModels. That race is
+		// that reads it via buildAgentModel. That race is
 		// pre-existing in the codebase and unrelated to this
 		// item; ConfigStore mutations are not currently
 		// synchronized against background readers in [app.App].

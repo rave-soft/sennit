@@ -167,7 +167,6 @@ type AgentController interface {
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
-	GetDefaultSmallModel(providerID string) config.SelectedModel
 	// AgentRunStream sends prompt as a new turn on the already-resolved
 	// sessionID (see ResolveSession) and streams the turn to
 	// completion. The returned channel is closed after the terminal

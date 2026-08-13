@@ -57,8 +57,8 @@ func newThreadsTestCoordinator(t *testing.T, threads tools.ThreadManager) (*coor
 	t.Helper()
 	env := testEnv(t)
 
-	// Minimal hermetic config: one openai-typed provider with selected
-	// large and small models, so buildAgentModels (reached through the
+	// Minimal hermetic config: one openai-typed provider with a selected
+	// model, so buildAgentModel (reached through the
 	// "agent" delegation tool that buildTools always tries to build)
 	// succeeds without any real network access.
 	braidJSON := `{

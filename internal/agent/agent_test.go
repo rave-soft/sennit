@@ -98,9 +98,9 @@ func setupAgentWithVCR(t *testing.T, cfg testVCRConfig, cassetteBasename, worksp
 	}
 
 	recorder := newTestRecorder(t, cfg, cassetteBasename)
-	large, small := getModels(t, recorder, cfg.BaseURL, cfg.Model)
+	model := getModel(t, recorder, cfg.BaseURL, cfg.Model)
 	createSimpleGoProject(t, env.workingDir)
-	agent, err := coderAgent(recorder.GetDefaultClient(), env, large, small)
+	agent, err := coderAgent(recorder.GetDefaultClient(), env, model)
 	require.NoError(t, err)
 	return agent, env
 }
@@ -699,7 +699,7 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 
 func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	env := testEnv(t)
-	sa := testSessionAgent(env, nil, nil, "test prompt")
+	sa := testSessionAgent(env, nil, "test prompt")
 	agent := sa.(*sessionAgent)
 
 	ctx := t.Context()
@@ -756,7 +756,7 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 
 func TestCreateUserMessage_RetainsAllAttachments(t *testing.T) {
 	env := testEnv(t)
-	sa := testSessionAgent(env, nil, nil, "test prompt")
+	sa := testSessionAgent(env, nil, "test prompt")
 	agent := sa.(*sessionAgent)
 
 	ctx := t.Context()
@@ -794,7 +794,7 @@ func TestCreateUserMessage_RetainsAllAttachments(t *testing.T) {
 
 func TestPreparePrompt_OrphanedToolUse(t *testing.T) {
 	env := testEnv(t)
-	sa := testSessionAgent(env, nil, nil, "test prompt")
+	sa := testSessionAgent(env, nil, "test prompt")
 	agent := sa.(*sessionAgent)
 
 	ctx := t.Context()
@@ -861,7 +861,7 @@ func TestPreparePrompt_OrphanedToolUse(t *testing.T) {
 
 func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	env := testEnv(t)
-	sa := testSessionAgent(env, nil, nil, "test prompt")
+	sa := testSessionAgent(env, nil, "test prompt")
 	agent := sa.(*sessionAgent)
 
 	ctx := t.Context()
@@ -933,7 +933,7 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 
 func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 	env := testEnv(t)
-	sa := testSessionAgent(env, nil, nil, "test prompt")
+	sa := testSessionAgent(env, nil, "test prompt")
 	agent := sa.(*sessionAgent)
 
 	pngBase64 := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
@@ -955,14 +955,14 @@ func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 
 	// Non-Anthropic provider, no image support — should replace media with
 	// a text placeholder and not create a synthetic user message.
-	largeModel := Model{
+	model := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
 		CatalogCfg: catwalk.Model{
 			SupportsImages: false,
 		},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel)
+	result := agent.workaroundProviderMediaLimitations(messages, model)
 
 	// Should produce exactly one message: the tool message with a text
 	// placeholder. No synthetic user message with FilePart.
@@ -977,7 +977,7 @@ func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 
 func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
 	env := testEnv(t)
-	sa := testSessionAgent(env, nil, nil, "test prompt")
+	sa := testSessionAgent(env, nil, "test prompt")
 	agent := sa.(*sessionAgent)
 
 	pngBase64 := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
@@ -999,14 +999,14 @@ func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
 
 	// Non-Anthropic provider, image support — should create a synthetic
 	// user message with FilePart.
-	largeModel := Model{
+	model := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
 		CatalogCfg: catwalk.Model{
 			SupportsImages: true,
 		},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel)
+	result := agent.workaroundProviderMediaLimitations(messages, model)
 
 	// Should produce two messages: tool message with placeholder text,
 	// and synthetic user message with FilePart.
@@ -1030,7 +1030,7 @@ func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
 
 func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 	env := testEnv(t)
-	sa := testSessionAgent(env, nil, nil, "test prompt")
+	sa := testSessionAgent(env, nil, "test prompt")
 	agent := sa.(*sessionAgent)
 
 	pngBase64 := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
@@ -1052,14 +1052,14 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 
 	// Anthropic provider — should return messages unchanged regardless of
 	// SupportsImages, since Anthropic handles media in tool results natively.
-	largeModel := Model{
+	model := Model{
 		ModelCfg: config.SelectedModel{Provider: string(catwalk.InferenceProviderAnthropic)},
 		CatalogCfg: catwalk.Model{
 			SupportsImages: true,
 		},
 	}
 
-	result := agent.workaroundProviderMediaLimitations(messages, largeModel)
+	result := agent.workaroundProviderMediaLimitations(messages, model)
 	require.Len(t, result, 1)
 	require.Equal(t, fantasy.MessageRoleTool, result[0].Role)
 

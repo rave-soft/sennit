@@ -360,52 +360,6 @@
                 }
             }
         },
-        "/workspaces/{id}/agent/default-small-model": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "agent"
-                ],
-                "summary": "Get default small model",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "provider_id",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            }
-        },
         "/workspaces/{id}/agent/init": {
             "post": {
                 "tags": [
@@ -1379,6 +1333,49 @@
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/git/uncommitted": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "git"
+                ],
+                "summary": "List uncommitted files",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/git.FileChange"
+                            }
                         }
                     },
                     "404": {
@@ -3838,6 +3835,10 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "bypass": {
+                    "description": "Bypass, when true, skips every permission prompt from process start —\nequivalent to always-on yolo mode. It is the persistent counterpart to\nthe session-only --yolo flag / ctrl+y toggle (see permission.Service.\nSetSkipRequests), which continue to work as a runtime override on top\nof this.",
+                    "type": "boolean"
                 }
             }
         },
@@ -3897,6 +3898,15 @@
                 },
                 "diff_mode": {
                     "type": "string"
+                },
+                "keybindings": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
                 },
                 "scrollbar": {
                     "type": "string"
@@ -3993,6 +4003,20 @@
         "csync.Map-string-config_ProviderConfig": {
             "type": "object"
         },
+        "git.FileChange": {
+            "type": "object",
+            "properties": {
+                "additions": {
+                    "type": "integer"
+                },
+                "deletions": {
+                    "type": "integer"
+                },
+                "path": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_rave-soft_braid_internal_config.Config": {
             "type": "object",
             "properties": {
@@ -4000,7 +4024,7 @@
                     "type": "string"
                 },
                 "agents": {
-                    "description": "Agents holds both the built-in agents and any the user defines. User\ndefinitions are read from this field on load; SetupAgents then merges\nthem with the built-ins and writes the result back here.",
+                    "description": "Agents holds both the built-in agents and any the user defines.\nSetupAgents populates this from .braid/agents/*.md files (via\ndiscoverMarkdownAgents) plus the two built-ins; nothing decodes user\nagents into this field from JSON anymore (see loadFromBytes in\nload.go), so it is hidden from the generated config schema.",
                     "type": "object",
                     "additionalProperties": {
                         "$ref": "#/definitions/config.Agent"
@@ -4078,7 +4102,7 @@
                     }
                 },
                 "data_directory": {
-                    "description": "DataDirectory is where Braid keeps per-project state such as\nthe SQLite database and workspace overrides. Relative paths are\nresolved against the working directory; absolute paths are used\nverbatim. After defaulting the stored value is always absolute.",
+                    "description": "DataDirectory is a project-local directory (\".braid\" by default) for\nworkspace-scoped state that is NOT part of the shared global database:\nthe single-instance lock file, workspace config overrides, and (until\nimported) a pre-shared-database project's legacy braid.db. Session and\nmessage history now live in the single global database (see\nconfig.GlobalDBDir()), not here. Relative paths are resolved against\nthe working directory; absolute paths are used verbatim. After\ndefaulting the stored value is always absolute.",
                     "type": "string"
                 },
                 "debug": {
@@ -4113,6 +4137,10 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "history_retention_days": {
+                    "description": "HistoryRetentionDays is read by `braid gc`, not enforced automatically:\nnothing purges history on its own. A pointer distinguishes \"unset\"\n(defaults to 90) from an explicit 0, which means keep history forever.",
+                    "type": "integer"
                 },
                 "initialize_as": {
                     "type": "string"
@@ -4451,6 +4479,9 @@
         "proto.CurrentSession": {
             "type": "object",
             "properties": {
+                "generation": {
+                    "type": "integer"
+                },
                 "session_id": {
                     "type": "string"
                 }
@@ -5154,6 +5185,10 @@
                     "items": {
                         "$ref": "#/definitions/proto.SkillState"
                     }
+                },
+                "threads_supported": {
+                    "description": "ThreadsSupported reports whether this workspace has a thread\nmanager attached (i.e. it is rooted at a git repository and not\nitself a thread's nested workspace). The server sets this field\nbased on attachServerThreads; the client seeds its local cache\nfrom it, avoiding a live probe at construction time. A nil value\nmeans the server predates this field and the client must perform\na single fallback probe in a controlled point (not the hot path).",
+                    "type": "boolean"
                 },
                 "version": {
                     "type": "string"

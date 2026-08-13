@@ -376,14 +376,6 @@ func (w *ClientWorkspace) InitCoderAgentNonInteractive(ctx context.Context) erro
 	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), false)
 }
 
-func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	model, err := w.client.GetDefaultSmallModel(context.Background(), w.workspaceID(), providerID)
-	if err != nil {
-		return config.SelectedModel{}
-	}
-	return *model
-}
-
 // AgentRunStream sends prompt as a new turn over the client SDK and
 // streams the SSE event feed to completion. This is the run-loop body
 // that used to live in cmd's runNonInteractive/runStream, moved here

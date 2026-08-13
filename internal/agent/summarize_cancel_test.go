@@ -33,8 +33,7 @@ func TestSummarize_RegistersBeforeSessionRead(t *testing.T) {
 	defer completionCancel()
 	completionCh := runCompleteBroker.Subscribe(completionCtx)
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel:   Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
-		SmallModel:   Model{Model: fastModel{}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Model:        Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 		RunComplete:  runCompleteBroker,
 		SystemPrompt: "system",
 		Sessions: blockingSessionService{Service: env.sessions, get: func(ctx context.Context, id string) (session.Session, error) {
@@ -108,8 +107,7 @@ func TestSummarize_CanceledParentHandsOffQueuedRuns(t *testing.T) {
 	defer completionCancel()
 	completionCh := runCompleteBroker.Subscribe(completionCtx)
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel:   Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
-		SmallModel:   Model{Model: fastModel{}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Model:        Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 		RunComplete:  runCompleteBroker,
 		SystemPrompt: "system",
 		Sessions: blockingSessionService{Service: env.sessions, get: func(ctx context.Context, id string) (session.Session, error) {
@@ -161,7 +159,7 @@ func TestSummarize_CleansUpActiveEntryOnEarlyError(t *testing.T) {
 	releaseRead := make(chan struct{})
 	const sessionID = "missing"
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel:   Model{Model: &raceInjectModel{}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Model:        Model{Model: &raceInjectModel{}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 		SystemPrompt: "system",
 		Sessions: blockingSessionService{Service: env.sessions, get: func(context.Context, string) (session.Session, error) {
 			close(readStarted)
@@ -233,7 +231,7 @@ func TestSummarize_QueuedThenCanceledDoesNotRun(t *testing.T) {
 
 	model := &raceInjectModel{text: "summary"}
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel: Model{
+		Model: Model{
 			Model:      model,
 			CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000},
 		},

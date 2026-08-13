@@ -28,7 +28,7 @@ func TestCoordinatorCloseRaceWithBuildAgent(t *testing.T) {
 	env := testEnv(t)
 
 	// Minimal hermetic config: buildAgent only needs a resolvable
-	// large/small model to get past buildAgentModels; no real network
+	// model to get past buildAgentModel; no real network
 	// call happens before the readiness goroutines are already spawned.
 	braidJSON := `{
   "options": {"disable_default_providers": true},

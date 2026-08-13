@@ -255,10 +255,6 @@ func (w *readOnlyWorkspace) InitCoderAgentNonInteractive(ctx context.Context) er
 	return w.readOnlyError("InitCoderAgentNonInteractive")
 }
 
-func (w *readOnlyWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	return w.underlying.GetDefaultSmallModel(providerID)
-}
-
 func (w *readOnlyWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
 	return nil, w.readOnlyError("AgentRunStream")
 }

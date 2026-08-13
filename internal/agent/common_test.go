@@ -82,28 +82,43 @@ func testEnvAt(t *testing.T, workingDir string) fakeEnv {
 	}
 }
 
+// titleCallMaxTokens is the output-token budget generateTitle sets for a
+// non-reasoning model. It is the only marker a fake model has to tell the
+// detached title stream apart from the turn's own stream.
+const titleCallMaxTokens = 40
+
+// isTitleCall reports whether call comes from the detached title goroutine.
+// Titles used to run on a separate small model; now that an agent carries one
+// model, fakes that count or block their turn's streams answer the title call
+// out of band through titleStream instead.
+func isTitleCall(call fantasy.Call) bool {
+	return call.MaxOutputTokens != nil && *call.MaxOutputTokens == titleCallMaxTokens
+}
+
+// titleStream is the trivial finished response a fake model returns for the
+// title call.
+func titleStream() (fantasy.StreamResponse, error) {
+	return func(yield func(fantasy.StreamPart) bool) {
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "title"})
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "title", Delta: "title"})
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "title"})
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Agent construction
 // ---------------------------------------------------------------------------
 
-func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
-	largeModel := Model{
-		Model: large,
-		CatalogCfg: catwalk.Model{
-			ContextWindow:    200000,
-			DefaultMaxTokens: 10000,
-		},
-	}
-	smallModel := Model{
-		Model: small,
-		CatalogCfg: catwalk.Model{
-			ContextWindow:    200000,
-			DefaultMaxTokens: 10000,
-		},
-	}
+func testSessionAgent(env fakeEnv, model fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
 	agent := NewSessionAgent(SessionAgentOptions{
-		LargeModel:   largeModel,
-		SmallModel:   smallModel,
+		Model: Model{
+			Model: model,
+			CatalogCfg: catwalk.Model{
+				ContextWindow:    200000,
+				DefaultMaxTokens: 10000,
+			},
+		},
 		SystemPrompt: systemPrompt,
 		Sessions:     env.sessions,
 		Messages:     env.messages,
@@ -112,7 +127,7 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 	return agent
 }
 
-func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
+func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (SessionAgent, error) {
 	fixedTime := func() time.Time {
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
@@ -144,15 +159,15 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 	cfg.Config().Options.GlobalContextPaths = nil
 	cfg.Config().LSP = nil
 
-	systemPrompt, err := p.Build(context.TODO(), large.Provider(), large.Model(), cfg)
+	systemPrompt, err := p.Build(context.TODO(), model.Provider(), model.Model(), cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	// Get the model name for the bash tool
-	modelName := large.Model() // fallback to ID if Name not available
-	if model := cfg.Config().GetModel(large.Provider(), large.Model()); model != nil {
-		modelName = model.Name
+	modelName := model.Model() // fallback to ID if Name not available
+	if cfgModel := cfg.Config().GetModel(model.Provider(), model.Model()); cfgModel != nil {
+		modelName = cfgModel.Name
 	}
 
 	allTools := []fantasy.AgentTool{
@@ -168,5 +183,5 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 	}
 
-	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil
+	return testSessionAgent(env, model, systemPrompt, allTools...), nil
 }

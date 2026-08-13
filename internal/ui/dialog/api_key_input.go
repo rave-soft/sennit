@@ -41,8 +41,7 @@ type APIKeyInput struct {
 	// the model-switch flow (see NewProviders/ActionConfigureProvider) —
 	// there's no model selection to carry forward, so saveKeyAndContinue
 	// returns ActionProviderConfigured instead of ActionSelectModel.
-	model     *config.SelectedModel
-	modelType config.SelectedModelType
+	model *config.SelectedModel
 
 	width int
 	state APIKeyInputState
@@ -64,7 +63,6 @@ func NewAPIKeyInput(
 	isOnboarding bool,
 	provider catwalk.Provider,
 	model *config.SelectedModel,
-	modelType config.SelectedModelType,
 ) (*APIKeyInput, tea.Cmd) {
 	t := com.Styles
 
@@ -73,7 +71,6 @@ func NewAPIKeyInput(
 	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
-	m.modelType = modelType
 	m.width = 0 // Set dynamically in Draw().
 
 	m.input = textinput.New()
@@ -321,8 +318,7 @@ func (m *APIKeyInput) saveKeyAndContinue() Action {
 	}
 
 	return ActionSelectModel{
-		Provider:  m.provider,
-		Model:     *m.model,
-		ModelType: m.modelType,
+		Provider: m.provider,
+		Model:    *m.model,
 	}
 }
