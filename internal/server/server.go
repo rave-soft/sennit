@@ -161,6 +161,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("POST /v1/workspaces/{id}/threads", c.handlePostWorkspaceThreads)
 	mux.HandleFunc("GET /v1/workspaces/{id}/threads/{threadID}", c.handleGetWorkspaceThread)
 	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/send", c.handlePostWorkspaceThreadSend)
+	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/activate", c.handlePostWorkspaceThreadActivate)
 	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/merge", c.handlePostWorkspaceThreadMerge)
 	mux.HandleFunc("DELETE /v1/workspaces/{id}/threads/{threadID}", c.handleDeleteWorkspaceThread)
 	mux.Handle("/v1/docs/", httpswagger.WrapHandler)

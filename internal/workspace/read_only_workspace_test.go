@@ -501,6 +501,10 @@ func (s *stubWorkspace) CreateThread(ctx context.Context, req proto.CreateThread
 	return proto.Thread{}, nil
 }
 func (s *stubWorkspace) SendThread(ctx context.Context, id, message string) error { return nil }
+func (s *stubWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
+	return proto.Thread{}, nil
+}
+
 func (s *stubWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
 	return proto.Thread{}, nil
 }

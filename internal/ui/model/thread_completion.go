@@ -30,8 +30,14 @@ import (
 // state — anything outside the active set (pending, running, merging).
 // Deliberately !Active rather than Terminal: for a toast, an unknown
 // status from a newer build reads as "no longer running" too.
+//
+// Idle is the one non-active status excluded: a thread created without a
+// goal transitions pending -> idle, and a reactivated one goes
+// completed -> idle. Neither is work finishing, so neither should raise a
+// "thread finished" toast.
 func isTerminalThreadStatus(status string) bool {
-	return !thread.Status(status).Active()
+	s := thread.Status(status)
+	return !s.Active() && s != thread.StatusIdle
 }
 
 // notifyThreadCompletion detects a thread's edge transition into a

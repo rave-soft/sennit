@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 
@@ -107,6 +108,18 @@ func (w *AppWorkspace) SendThread(ctx context.Context, id, message string) error
 	return mgr.Send(ctx, id, message)
 }
 
+func (w *AppWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
+	mgr, ok := w.threadManager()
+	if !ok {
+		return proto.Thread{}, ErrThreadsNotSupported
+	}
+	st, err := mgr.Activate(ctx, id)
+	if err != nil {
+		return proto.Thread{}, err
+	}
+	return mgr.ToProto(st), nil
+}
+
 func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
 	mgr, ok := w.threadManager()
 	if !ok {
@@ -165,9 +178,23 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 	if err != nil {
 		return nil, nil, err
 	}
-	// Return a read-only workspace bound to the main app with the
-	// thread's worktree as WorkingDir, so the caller can inspect
-	// persisted session data but cannot mutate anything.
+	// Reactivate it so attaching lands in a writable session: the
+	// worktree and branch are still on disk, so the workspace can simply
+	// be respawned, and a thread whose run is over is exactly the one a
+	// user wants to open and keep working in by hand.
+	if _, err := mgr.Activate(ctx, id); err == nil {
+		if h := mgr.Handle(id); h != nil {
+			a := h.App()
+			return NewAppWorkspace(a, a.Store()), func() {}, nil
+		}
+	} else {
+		slog.Debug("attach thread: reactivation unavailable, falling back to read-only", "thread", id, "error", err)
+	}
+	// Reactivation is not always possible — threads in the merge flow
+	// are deliberately refused, and the worktree may be gone. Fall back
+	// to a read-only workspace bound to the main app with the thread's
+	// worktree as WorkingDir, so the caller can still inspect persisted
+	// session data.
 	aw := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
 	return aw, func() {}, nil
 }
@@ -387,6 +414,14 @@ func (w *ClientWorkspace) SendThread(ctx context.Context, id, message string) er
 	return w.client.SendThread(ctx, w.workspaceID(), id, message)
 }
 
+func (w *ClientWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
+	st, err := w.client.ActivateThread(ctx, w.workspaceID(), id)
+	if err != nil {
+		return proto.Thread{}, err
+	}
+	return *st, nil
+}
+
 func (w *ClientWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
 	st, err := w.client.MergeThread(ctx, w.workspaceID(), id)
 	if err != nil {
@@ -419,11 +454,28 @@ func (w *ClientWorkspace) AttachThread(ctx context.Context, id string) (Workspac
 		return nil, nil, err
 	}
 	if st.WorkspaceID == "" {
-		// Thread is not currently spawned (completed, interrupted, failed).
-		// Return a read-only workspace over the parent so the caller
-		// can still inspect persisted session data.
-		ro := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
-		return ro, func() {}, nil
+		// Thread is not currently spawned (completed, interrupted,
+		// failed). Ask the server to reactivate it so attaching lands in
+		// a writable session, mirroring local mode.
+		activated, err := w.client.ActivateThread(ctx, w.workspaceID(), id)
+		if err != nil {
+			// Reactivation is refused for threads in the merge flow and
+			// fails if the worktree is gone. Fall back to a read-only
+			// workspace over the parent so the caller can still inspect
+			// persisted session data.
+			slog.Debug("attach thread: reactivation unavailable, falling back to read-only", "thread", id, "error", err)
+			ro := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
+			return ro, func() {}, nil
+		}
+		st = activated
+		if st.WorkspaceID == "" {
+			// Activation reported success without a live workspace.
+			// There is nothing to attach to, so stay read-only rather
+			// than requesting an empty workspace ID.
+			slog.Warn("attach thread: activated thread reported no workspace", "thread", id)
+			ro := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
+			return ro, func() {}, nil
+		}
 	}
 	derived := w.client.WithClientID(uuid.NewString())
 	ws, err := derived.GetWorkspace(ctx, st.WorkspaceID)

@@ -80,6 +80,24 @@ func (c *Client) SendThread(ctx context.Context, id, threadID, message string) e
 	return nil
 }
 
+// ActivateThread respawns a thread's workspace so it can be attached to
+// and driven by hand, without dispatching an agent run.
+func (c *Client) ActivateThread(ctx context.Context, id, threadID string) (*proto.Thread, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/threads/%s/activate", id, threadID), nil, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to activate thread: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return nil, fmt.Errorf("failed to activate thread: %w", err)
+	}
+	var st proto.Thread
+	if err := json.NewDecoder(rsp.Body).Decode(&st); err != nil {
+		return nil, fmt.Errorf("failed to decode thread: %w", err)
+	}
+	return &st, nil
+}
+
 // MergeThread merges (or retries merging) a thread.
 func (c *Client) MergeThread(ctx context.Context, id, threadID string) (*proto.Thread, error) {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/threads/%s/merge", id, threadID), nil, nil, nil)

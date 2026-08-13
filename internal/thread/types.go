@@ -4,8 +4,16 @@ package thread
 type Status string
 
 const (
-	StatusPending      Status = "pending"
-	StatusRunning      Status = "running"
+	StatusPending Status = "pending"
+	StatusRunning Status = "running"
+	// StatusIdle is a thread whose worktree, branch, and workspace are
+	// live but which has no agent run in flight: created without a goal
+	// to isolate work the user drives themselves, or reactivated by
+	// [Manager.Activate] after an earlier run finished. It is neither
+	// active (nothing is running) nor terminal (the thread is not
+	// finished), so destructive consumers such as braid gc leave it
+	// alone.
+	StatusIdle         Status = "idle"
 	StatusCompleted    Status = "completed"
 	StatusMerging      Status = "merging"
 	StatusMerged       Status = "merged"
@@ -16,7 +24,8 @@ const (
 )
 
 // Active reports whether the thread still has work in flight: pending,
-// running, or merging.
+// running, or merging. Idle threads are deliberately excluded: their
+// workspace is live, but nothing is executing in it.
 func (s Status) Active() bool {
 	switch s {
 	case StatusPending, StatusRunning, StatusMerging:
@@ -29,7 +38,9 @@ func (s Status) Active() bool {
 // Terminal reports whether the thread is known to be finished. This is
 // deliberately not !Active(): a status this build doesn't know (from a
 // newer version sharing the database) is neither active nor terminal, so
-// destructive consumers (braid gc) leave it alone.
+// destructive consumers (braid gc) leave it alone. StatusIdle is
+// likewise neither, for the same reason: an idle thread is work in
+// progress that simply has no run of its own in flight.
 func (s Status) Terminal() bool {
 	switch s {
 	case StatusCompleted, StatusMerged, StatusConflict,

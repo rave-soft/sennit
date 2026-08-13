@@ -314,6 +314,10 @@ type ThreadController interface {
 	GetThread(ctx context.Context, id string) (proto.Thread, error)
 	CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error)
 	SendThread(ctx context.Context, id, message string) error
+	// ActivateThread respawns id's isolated workspace without dispatching
+	// an agent run, so a thread whose run has finished can be attached to
+	// and worked in by hand instead of only viewed read-only.
+	ActivateThread(ctx context.Context, id string) (proto.Thread, error)
 	MergeThread(ctx context.Context, id string) (proto.Thread, error)
 	RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error
 	// AttachThread connects to id's own spawned workspace and returns a
