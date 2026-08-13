@@ -41,15 +41,11 @@
 
   Baseline запущен 2026-08-13T19:17:21+05:00 на commit
   `19c34333e630d216661a989c68304e735c75a2c6` (`main`): `go test ./...`
-  завершился с кодом 1. Единственное существующее падение:
-
-  - `github.com/rave-soft/braid/internal/agent` —
-    `TestCoderAgent/glm-5.1/grep_tool`: VCR не нашёл interaction для
-    `POST http://vcr.test/v1/chat/completions` (`requested interaction not found`,
-    `internal/agent/agent_test.go:426`).
-
-  Остальные пакеты прошли либо не содержат тестов; это падение не относится к
-  последующему single-model рефакторингу.
+  завершился с кодом 1 из-за `TestCoderAgent/glm-5.1/grep_tool`: fixture
+  передавала grep явный `path: "."`, поэтому tool обходил временный workingDir
+  и VCR не находил interaction для изменившегося результата. Падение устранено:
+  fixture теперь полагается на workingDir агента, а cassette обновлена штатным
+  fixture-режимом. Это не относится к последующему single-model рефакторингу.
 - [ ] Добавить или скорректировать тесты, фиксирующие целевую семантику:
   основной run, title, summarize и `agentic_fetch` получают одну и ту же
   модель, если у агента нет собственного `Agent.Model`.

@@ -306,7 +306,7 @@ func fixtureScenarios() map[string]FixtureScenario {
 		},
 		"grep_tool": {
 			Turns: []FixtureTurn{
-				{ToolCalls: []FixtureToolCall{{ID: "call_grep_1", Type: "function", Name: "grep", Args: `{"pattern":"package","path":".","include":"*.go"}`}}},
+				{ToolCalls: []FixtureToolCall{{ID: "call_grep_1", Type: "function", Name: "grep", Args: `{"pattern":"package","include":"*.go"}`}}},
 				{Text: "I found the package declaration in main.go."},
 			},
 		},
