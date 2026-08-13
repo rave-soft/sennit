@@ -5,10 +5,8 @@ import (
 	"errors"
 	"os"
 
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/shell"
 )
 
@@ -32,91 +30,22 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
-	if ws.AgentCoordinator == nil {
+	// dispatcher is nil only for a workspace that bypassed createWorkspace
+	// (a hand-built test double) and never got one back-filled either;
+	// treat it the same as an uninitialized coordinator rather than
+	// dereferencing a nil pointer.
+	if ws.dispatcher == nil {
 		return ErrAgentNotInitialized
 	}
 
-	if err := agent.ValidateCall(agent.SessionAgentCall{
-		SessionID:   msg.SessionID,
-		Prompt:      msg.Prompt,
-		Attachments: proto.AttachmentsToMessage(msg.Attachments),
-	}); err != nil {
-		return err
-	}
-
-	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
-
-	ws.runMu.Lock()
-	if ws.closing {
-		ws.runMu.Unlock()
-		accept.Close()
+	err = ws.dispatcher.Send(msg.SessionID, msg.RunID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments))
+	switch {
+	case errors.Is(err, app.ErrCoordinatorNotInitialized):
+		return ErrAgentNotInitialized
+	case errors.Is(err, app.ErrDispatcherClosed):
 		return ErrWorkspaceClosing
-	}
-	ws.runWG.Add(1)
-	ws.runMu.Unlock()
-
-	go b.runAgent(ws, msg, accept)
-	return nil
-}
-
-// runAgent executes an accepted agent run for the workspace. It owns the
-// accept reservation (releasing it on return) and the runWG ticket added
-// by SendMessage. The run is bound to the workspace context so its
-// lifetime is independent of any client's HTTP request.
-//
-// On a non-cancel error it surfaces the failure to observers via a
-// notify.TypeAgentError notification (lossy, best-effort). That alone is
-// not a reliable terminal signal: the agent-event fan-in uses lossy
-// subscribers, so a `braid run` caller blocking on its RunID could hang
-// if the event is dropped. To guarantee termination, when msg.RunID is
-// non-empty and the coordinator did not already publish the run's
-// authoritative terminal RunComplete (e.g. the error was returned before
-// sessionAgent.Run executed, such as a readyWg or UpdateModels failure),
-// runAgent emits an errored RunComplete on the must-deliver
-// runCompletions broker so the waiter observes a deterministic terminal
-// event. context.Canceled is expected (sessionAgent.Run already
-// publishes the cancelled terminal marker) and produces no error
-// terminal event.
-//
-// When msg.RunID is non-empty it is attached to the context via
-// agent.WithRunID so the coordinator can stamp the terminal
-// notify.RunComplete event with that correlator. A run-complete marker
-// is also attached so the coordinator can report whether it published
-// the terminal event, letting runAgent avoid a duplicate fallback.
-func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun) {
-	defer ws.runWG.Done()
-	defer accept.Close()
-
-	ctx := ws.ctx
-	if msg.RunID != "" {
-		ctx = agent.WithRunID(ctx, msg.RunID)
-	}
-	ctx = agent.WithRunCompleteMarker(ctx)
-
-	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
-	if err == nil || errors.Is(err, context.Canceled) {
-		return
-	}
-
-	ws.AgentNotifications().Publish(pubsub.CreatedEvent, notify.Notification{
-		SessionID: msg.SessionID,
-		RunID:     msg.RunID,
-		Type:      notify.TypeAgentError,
-		Message:   err.Error(),
-	})
-
-	// Reliable terminal fallback. Only needed when a RunID waiter
-	// exists and the coordinator has not already emitted the run's
-	// terminal RunComplete; otherwise this would be a duplicate.
-	if msg.RunID == "" || agent.RunCompletePublished(ctx) {
-		return
-	}
-	if rc := ws.RunCompletions(); rc != nil {
-		rc.PublishMustDeliver(ctx, pubsub.UpdatedEvent, notify.RunComplete{
-			SessionID: msg.SessionID,
-			RunID:     msg.RunID,
-			Error:     err.Error(),
-		})
+	default:
+		return err
 	}
 }
 
@@ -140,7 +69,10 @@ func (b *Backend) GetAgentInfo(workspaceID string) (proto.AgentInfo, error) {
 	return agentInfo, nil
 }
 
-// InitAgent initializes the coder agent for the workspace.
+// InitAgent initializes the coder agent for the workspace. The
+// workspace's dispatcher (built once in createWorkspace) resolves
+// AgentCoordinator lazily, so SendMessage picks up whatever this call
+// (re)initializes without any further wiring here.
 func (b *Backend) InitAgent(ctx context.Context, workspaceID string, interactive bool) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {

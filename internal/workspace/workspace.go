@@ -146,6 +146,12 @@ type SessionStore interface {
 // busy/ready probes, the queued-prompt list, and the model the coordinator
 // is currently using.
 type AgentController interface {
+	// AgentRun accepts prompt as a fire-and-forget turn and returns once
+	// it is accepted, not once the turn completes. ctx governs only
+	// delivery of the request (e.g. the client/server HTTP call), not
+	// the lifetime of the dispatched turn: cancelling it does not stop
+	// an already-accepted run in either mode. The turn is owned by the
+	// workspace/App and is stopped with AgentCancel instead.
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)

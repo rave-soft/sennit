@@ -108,16 +108,17 @@ func TestSendMessage_AcceptedCancelRace_RealMachinery(t *testing.T) {
 	// sessionAgent.Run, which drives cancel-on-entry.
 	close(coord.gate)
 
-	// The dispatched run returns nil (cancel-on-entry), so runWG drains.
+	// The dispatched run returns nil (cancel-on-entry), so the
+	// dispatcher's wait group drains.
 	waited := make(chan struct{})
 	go func() {
-		ws.runWG.Wait()
+		ws.dispatcher.Wait()
 		close(waited)
 	}()
 	select {
 	case <-waited:
 	case <-time.After(5 * time.Second):
-		t.Fatal("runWG.Wait did not complete after the canceled run returned")
+		t.Fatal("dispatcher.Wait did not complete after the canceled run returned")
 	}
 
 	// The accepted-but-not-yet-active cancel persisted a canceled turn
