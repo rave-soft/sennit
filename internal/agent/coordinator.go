@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -98,6 +99,12 @@ type coordinator struct {
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
 	mcp         *mcp.Registry
+
+	localVersion atomic.Uint64
+	runtime      *runtimeCache
+	// toolsCache remains a compatibility alias for coordinators assembled by
+	// focused tests; runtime owns the actual compiled cache.
+	toolsCache *runtimeCache
 
 	// threadsMu guards threads, which SetThreads may set after
 	// construction (thread managers are wired in post-bootstrap; see
@@ -273,6 +280,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:  opts.Interactive,
 		mcp:          opts.MCP,
 		threads:      opts.Threads,
+		runtime:      newRuntimeCache(),
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -324,29 +332,22 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
 	}
 
-	// refresh models before each run
-	if err := c.UpdateModels(ctx); err != nil {
-		return nil, fmt.Errorf("failed to update models: %w", err)
+	runtime, err := c.runtimeFor(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare agent runtime: %w", err)
 	}
 
-	model := c.currentAgent.Model()
-	maxTokens := model.CatalogCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
-	}
-
-	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
-	if !ok {
-		return nil, errModelProviderNotConfigured
-	}
-
-	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
-
-	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
+	if err := c.refreshTokenIfExpired(ctx, runtime.providerCfg); err != nil {
 		// NOTE(@andreynering): We don't return here because the event handling to ask the user to reauthenticate
 		// depends on the flow below. If refresh fails, proceed with the token we have.
 		slog.Error("Failed to refresh OAuth2 token. Proceeding with existing token.", "error", err)
+	} else if c.runtimeKey() != runtime.key {
+		runtime, err = c.runtimeFor(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare refreshed agent runtime: %w", err)
+		}
 	}
+	active := newActiveRuntime(runtime)
 
 	// Coalesce per-attempt RunComplete payloads so only the final
 	// outcome reaches subscribers. Without this, the first attempt's
@@ -374,20 +375,22 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	runID := RunIDFromContext(ctx)
 	run := func() (*fantasy.AgentResult, error) {
 		return c.currentAgent.Run(ctx, SessionAgentCall{
+			Runtime:          runtime,
+			ActiveRuntime:    active,
 			SessionID:        sessionID,
 			RunID:            runID,
 			Prompt:           prompt,
 			Attachments:      attachments,
-			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  mergedOptions,
-			Temperature:      temp,
-			TopP:             topP,
-			TopK:             topK,
-			FrequencyPenalty: freqPenalty,
-			PresencePenalty:  presPenalty,
+			MaxOutputTokens:  runtime.maxOutputTokens,
+			ProviderOptions:  runtime.providerOptions,
+			Temperature:      runtime.temperature,
+			TopP:             runtime.topP,
+			TopK:             runtime.topK,
+			FrequencyPenalty: runtime.frequencyPenalty,
+			PresencePenalty:  runtime.presencePenalty,
 			OnComplete:       onComplete,
 			Accepted:         accept,
-			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+			OnAuthRefresh:    c.makeAuthRefreshCallback(runtime.providerCfg, active),
 		})
 	}
 	_, activeSkillsSnapshot, skillTrackerSnapshot := c.skillsSnapshot()
@@ -984,6 +987,7 @@ func (c *coordinator) SetThreads(threads tools.ThreadManager) {
 	c.threadsMu.Lock()
 	c.threads = threads
 	c.threadsMu.Unlock()
+	c.invalidateRuntime()
 }
 
 // RefreshSkills implements Coordinator.RefreshSkills.
@@ -997,6 +1001,7 @@ func (c *coordinator) RefreshSkills(allSkills, activeSkills []*skills.Skill) {
 	tracker := c.skillTracker
 	c.skillsMu.Unlock()
 	tracker.UpdateActiveSkills(activeSkills)
+	c.invalidateRuntime()
 }
 
 // skillsSnapshot returns the coordinator's current skill discovery
@@ -1027,24 +1032,87 @@ func (c *coordinator) Model() Model {
 	return c.currentAgent.Model()
 }
 
+func (c *coordinator) runtimeKey() runtimeKey {
+	key := runtimeKey{local: c.localVersion.Load()}
+	if c.cfg != nil {
+		key.config = c.cfg.Version()
+	}
+	if c.mcp != nil {
+		key.mcp = c.mcp.Version()
+	}
+	return key
+}
+
+func (c *coordinator) invalidateRuntime() {
+	c.localVersion.Add(1)
+	if c.runtime != nil {
+		c.runtime.invalidate()
+	}
+}
+
+func (c *coordinator) runtimeFor(ctx context.Context) (*compiledRuntime, error) {
+	if c.runtime == nil {
+		c.runtime = c.toolsCache
+		if c.runtime == nil {
+			c.runtime = newRuntimeCache()
+		}
+	}
+	return c.runtime.getOrBuild(ctx, c.runtimeKey, func(ctx context.Context, key runtimeKey) (*compiledRuntime, error) {
+		large, small, err := c.buildAgentModels(ctx, false)
+		if err != nil {
+			return nil, err
+		}
+		agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+		if !ok {
+			return nil, errCoderAgentNotConfigured
+		}
+		builtTools, err := c.buildTools(ctx, agentCfg, false)
+		if err != nil {
+			return nil, err
+		}
+		runtimePrompt, err := coderPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+		if err != nil {
+			return nil, err
+		}
+		systemPrompt, err := runtimePrompt.Build(ctx, large.Model.Provider(), large.Model.Model(), c.cfg)
+		if err != nil {
+			return nil, err
+		}
+		if len(builtTools) > 0 {
+			builtTools[len(builtTools)-1].SetProviderOptions(cacheControlOptions())
+		}
+		providerCfg, ok := c.cfg.Config().Providers.Get(large.ModelCfg.Provider)
+		if !ok {
+			return nil, errModelProviderNotConfigured
+		}
+		options, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(large, providerCfg)
+		maxTokens := large.CatalogCfg.DefaultMaxTokens
+		if large.ModelCfg.MaxTokens != 0 {
+			maxTokens = large.ModelCfg.MaxTokens
+		}
+		return &compiledRuntime{
+			key: key, large: large, small: small, tools: builtTools, systemPrompt: systemPrompt,
+			providerCfg: providerCfg, providerOptions: options,
+			temperature: temp, topP: topP, topK: topK,
+			frequencyPenalty: freqPenalty, presencePenalty: presPenalty,
+			maxOutputTokens:      maxTokens,
+			systemPromptPrefix:   providerCfg.SystemPromptPrefix,
+			disableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+		}, nil
+	})
+}
+
 func (c *coordinator) UpdateModels(ctx context.Context) error {
-	// build the models again so we make sure we get the latest config
-	large, small, err := c.buildAgentModels(ctx, false)
+	runtime, err := c.runtimeFor(ctx)
+	if errors.Is(err, errRuntimeChanged) {
+		runtime, err = c.runtimeFor(ctx)
+	}
 	if err != nil {
 		return err
 	}
-	c.currentAgent.SetModels(large, small)
-
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
-	if !ok {
-		return errCoderAgentNotConfigured
-	}
-
-	tools, err := c.buildTools(ctx, agentCfg, false)
-	if err != nil {
-		return err
-	}
-	c.currentAgent.SetTools(tools)
+	c.currentAgent.SetModels(runtime.large, runtime.small)
+	c.currentAgent.SetTools(runtime.tools)
+	c.currentAgent.SetSystemPrompt(runtime.systemPrompt)
 	return nil
 }
 
@@ -1057,23 +1125,38 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 }
 
 func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
-	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
-	if !ok {
-		return errModelProviderNotConfigured
+	runtime, err := c.runtimeFor(ctx)
+	if err != nil {
+		return err
 	}
-
-	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
+	if err := c.refreshTokenIfExpired(ctx, runtime.providerCfg); err != nil {
 		slog.Error("Failed to refresh OAuth2 token before summarize. Proceeding with existing token.", "error", err)
+	} else if c.runtimeKey() != runtime.key {
+		runtime, err = c.runtimeFor(ctx)
+		if err != nil {
+			return err
+		}
 	}
+	active := newActiveRuntime(runtime)
 
-	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
-	// the same path used by regular turns.
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
+	if agent, ok := c.currentAgent.(*sessionAgent); ok {
+		return agent.summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active), runtime.large, runtime.systemPromptPrefix, active)
+	}
+	return c.currentAgent.Summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active))
 }
 
 // GenerateTitle generates a session title using the current agent.
 func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt string) {
 	if c.currentAgent == nil {
+		return
+	}
+	runtime, err := c.runtimeFor(ctx)
+	if err != nil {
+		slog.Error("Failed to prepare agent runtime for title", "error", err)
+		return
+	}
+	if agent, ok := c.currentAgent.(*sessionAgent); ok {
+		agent.generateTitle(ctx, sessionID, prompt, runtime.small, runtime.large, runtime.systemPromptPrefix)
 		return
 	}
 	c.currentAgent.GenerateTitle(ctx, sessionID, prompt)

@@ -38,8 +38,10 @@ type runTurn struct {
 	// cancel() or by Cancel()/ctx cancellation).
 	genCtx context.Context
 
-	largeModel   Model
-	promptPrefix string
+	largeModel           Model
+	tools                []fantasy.AgentTool
+	promptPrefix         string
+	disableAutoSummarize bool
 
 	// userMsgCreated records whether Run already created the turn's user
 	// message before entering Stream, for the error path's
@@ -67,20 +69,24 @@ func newRunTurn(
 	call SessionAgentCall,
 	ctx, genCtx context.Context,
 	largeModel Model,
+	tools []fantasy.AgentTool,
 	promptPrefix string,
+	disableAutoSummarize bool,
 	currentSession session.Session,
 	userMsgCreated bool,
 ) *runTurn {
 	return &runTurn{
-		agent:              a,
-		call:               call,
-		ctx:                ctx,
-		genCtx:             genCtx,
-		largeModel:         largeModel,
-		promptPrefix:       promptPrefix,
-		userMsgCreated:     userMsgCreated,
-		currentSession:     currentSession,
-		sanitizedToolCalls: make(map[string]bool),
+		agent:                a,
+		call:                 call,
+		ctx:                  ctx,
+		genCtx:               genCtx,
+		largeModel:           largeModel,
+		tools:                tools,
+		promptPrefix:         promptPrefix,
+		disableAutoSummarize: disableAutoSummarize,
+		userMsgCreated:       userMsgCreated,
+		currentSession:       currentSession,
+		sanitizedToolCalls:   make(map[string]bool),
 	}
 }
 
@@ -93,8 +99,7 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 		prepared.Messages[i].ProviderOptions = nil
 	}
 
-	// Use latest tools (updated by SetTools when MCP tools change).
-	prepared.Tools = t.agent.tools.Copy()
+	prepared.Tools = t.tools
 
 	// Drain queued follow-up prompts for this step. Calls covered
 	// by a cancel recorded while they sat in the queue are dropped:
@@ -229,10 +234,16 @@ func (t *runTurn) onRetry(err *fantasy.ProviderError, delay time.Duration) {
 }
 
 // modelProvider is the turn's fantasy.AgentStreamCall.ModelProvider. It is
-// called on each retry attempt so a refreshed model (e.g. after
-// OnAuthRefresh) is picked up.
+// called on each retry attempt, but deliberately returns this turn's runtime
+// model rather than the coordinator's mutable agent model. A config reload or
+// credential rebuild therefore cannot switch an in-flight turn's identity.
 func (t *runTurn) modelProvider() fantasy.LanguageModel {
-	m := t.agent.largeModel.Get()
+	m := t.largeModel
+	if t.call.ActiveRuntime != nil {
+		if runtime := t.call.ActiveRuntime.load(); runtime != nil && runtime.large.ModelCfg.Provider == m.ModelCfg.Provider && runtime.large.ModelCfg.Model == m.ModelCfg.Model {
+			m = runtime.large
+		}
+	}
 	slog.Info("ModelProvider called",
 		"provider", m.ModelCfg.Provider,
 		"model", m.ModelCfg.Model)
@@ -346,7 +357,7 @@ func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
 	} else {
 		threshold = int64(float64(cw) * smallContextWindowRatio)
 	}
-	if (remaining <= threshold) && !t.agent.disableAutoSummarize {
+	if (remaining <= threshold) && !t.disableAutoSummarize {
 		t.shouldSummarize = true
 		return true
 	}

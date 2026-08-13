@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
@@ -49,6 +50,10 @@ type Registry struct {
 	// server's generation; an init goroutine captures it at launch and only
 	// commits its session if the generation is still current.
 	gens *csync.Map[string, uint64]
+
+	// catalogMu makes the three catalogs and their version a single snapshot.
+	catalogMu sync.RWMutex
+	version   atomic.Uint64
 
 	// suppressMus serializes browser-suppression per server so only one
 	// remote (server-driven) OAuth flow is active for a server at a time.
@@ -143,6 +148,29 @@ func (r *Registry) markInitStarted() {
 // startup), there is nothing to wait for and this returns nil immediately
 // rather than blocking until ctx is cancelled.
 func WaitForInit(ctx context.Context) error { return defaultRegistry.WaitForInit(ctx) }
+
+func (r *Registry) Version() uint64 {
+	return r.version.Load()
+}
+
+func (r *Registry) catalogChanged() { r.version.Add(1) }
+
+// CatalogSnapshot is a consistent view of every advertised MCP capability.
+type CatalogSnapshot struct {
+	Version   uint64
+	Tools     map[string][]*Tool
+	Resources map[string][]*Resource
+	Prompts   map[string][]*Prompt
+}
+
+func (r *Registry) CatalogSnapshot() CatalogSnapshot {
+	r.catalogMu.RLock()
+	defer r.catalogMu.RUnlock()
+	return CatalogSnapshot{
+		Version: r.version.Load(), Tools: r.allTools.Copy(),
+		Resources: r.allResources.Copy(), Prompts: r.allPrompts.Copy(),
+	}
+}
 
 func (r *Registry) WaitForInit(ctx context.Context) error {
 	r.initMu.Lock()

@@ -696,9 +696,7 @@ func (r *Registry) updateState(name string, state State, err error, client *Clie
 		// resources behind lets a disconnected server keep advertising
 		// capabilities the agent can no longer fulfil, the same divergence the
 		// tool clear prevents.
-		r.allTools.Del(name)
-		r.allPrompts.Del(name)
-		r.allResources.Del(name)
+		r.clearCatalog(name)
 	}
 	r.states.Set(name, info)
 
@@ -1108,10 +1106,17 @@ func (r *Registry) clearOAuthToken(cfg *config.ConfigStore, name string) {
 // clearMCPData removes a stale MCP server's tools, prompts,
 // resources, and auth handlers from global state so they are not
 // served to the agent.
-func (r *Registry) clearMCPData(name string) {
+func (r *Registry) clearCatalog(name string) {
+	r.catalogMu.Lock()
 	r.allTools.Del(name)
 	r.allPrompts.Del(name)
 	r.allResources.Del(name)
+	r.catalogChanged()
+	r.catalogMu.Unlock()
+}
+
+func (r *Registry) clearMCPData(name string) {
+	r.clearCatalog(name)
 	if h, ok := r.authURLs.Get(name); ok {
 		h.Close()
 		r.authURLs.Del(name)

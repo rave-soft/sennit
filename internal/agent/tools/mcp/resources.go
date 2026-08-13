@@ -19,7 +19,14 @@ type ResourceContents = mcp.ResourceContents
 func Resources() iter.Seq2[string, []*Resource] { return defaultRegistry.Resources() }
 
 func (r *Registry) Resources() iter.Seq2[string, []*Resource] {
-	return r.allResources.Seq2()
+	snapshot := r.CatalogSnapshot()
+	return func(yield func(string, []*Resource) bool) {
+		for name, resources := range snapshot.Resources {
+			if !yield(name, resources) {
+				return
+			}
+		}
+	}
 }
 
 // ListResources returns the current resources for an MCP server.
@@ -109,10 +116,14 @@ func isMethodNotFoundError(err error) bool {
 }
 
 func (r *Registry) updateResources(name string, resources []*Resource) int {
+	r.catalogMu.Lock()
+	defer r.catalogMu.Unlock()
 	if len(resources) == 0 {
 		r.allResources.Del(name)
+		r.catalogChanged()
 		return 0
 	}
 	r.allResources.Set(name, resources)
+	r.catalogChanged()
 	return len(resources)
 }

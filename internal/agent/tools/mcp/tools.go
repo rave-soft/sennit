@@ -28,7 +28,14 @@ type ToolResult struct {
 func Tools() iter.Seq2[string, []*Tool] { return defaultRegistry.Tools() }
 
 func (r *Registry) Tools() iter.Seq2[string, []*Tool] {
-	return r.allTools.Seq2()
+	snapshot := r.CatalogSnapshot()
+	return func(yield func(string, []*Tool) bool) {
+		for name, tools := range snapshot.Tools {
+			if !yield(name, tools) {
+				return
+			}
+		}
+	}
 }
 
 // RunTool runs an MCP tool with the given input parameters.
@@ -163,15 +170,19 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 }
 
 func (r *Registry) updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
+	r.catalogMu.Lock()
+	defer r.catalogMu.Unlock()
 	mcpCfg, ok := cfg.Config().MCP[name]
 	if ok {
 		tools = filterTools(mcpCfg, tools)
 	}
 	if len(tools) == 0 {
 		r.allTools.Del(name)
+		r.catalogChanged()
 		return 0
 	}
 	r.allTools.Set(name, tools)
+	r.catalogChanged()
 	return len(tools)
 }
 

@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -120,6 +121,12 @@ type SessionAgentCall struct {
 	// fantasy retries the stream transparently. Returning an error
 	// surfaces the original auth error without retry.
 	OnAuthRefresh func(ctx context.Context, err *fantasy.ProviderError) error
+	// Runtime carries the model pair selected by the coordinator for this
+	// lifecycle. It is preserved across queued continuations.
+	Runtime       *compiledRuntime
+	ActiveRuntime *activeRuntime
+	RuntimeModel  *Model // compatibility override for direct callers
+	RuntimeTools  []fantasy.AgentTool
 }
 
 type SessionAgent interface {
@@ -194,6 +201,11 @@ type SessionAgentOptions struct {
 func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
+	// SessionAgentOptions builds an uncached runtime. Apply the fixed policy
+	// before publishing its tools to any Run.
+	if len(opts.Tools) > 0 {
+		opts.Tools[len(opts.Tools)-1].SetProviderOptions(cacheControlOptions())
+	}
 	return &sessionAgent{
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
@@ -441,8 +453,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
+	if call.Runtime != nil {
+		largeModel = call.Runtime.large
+		agentTools = slices.Clone(call.Runtime.tools)
+	} else if call.RuntimeModel != nil {
+		largeModel = *call.RuntimeModel
+		agentTools = slices.Clone(call.RuntimeTools)
+	}
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
+	disableAutoSummarize := a.disableAutoSummarize
+	if call.Runtime != nil {
+		systemPrompt = call.Runtime.systemPrompt
+		promptPrefix = call.Runtime.systemPromptPrefix
+		disableAutoSummarize = call.Runtime.disableAutoSummarize
+	}
 	var instructions strings.Builder
 
 	// a.mcp is nil for session agents built outside app.New (a handful of
@@ -462,11 +487,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if s := instructions.String(); s != "" {
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
-	}
-
-	if len(agentTools) > 0 {
-		// Add Anthropic caching to the last tool.
-		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
 	}
 
 	agent := fantasy.NewAgent(
@@ -492,7 +512,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// goroutine survives Run's cancel.
 	if !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
-		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
+		go a.generateTitle(titleCtx, call.SessionID, call.Prompt, runtimeSmall(call.Runtime, a.smallModel.Get()), largeModel, promptPrefix)
 	}
 
 	// Add the user message to the session.
@@ -520,7 +540,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// t.currentAssistant, which PrepareStep will (re)assign once per
 	// streaming step. The final assistant message of the turn is the
 	// value reachable through that field when the defer runs.
-	t := newRunTurn(a, call, ctx, genCtx, largeModel, promptPrefix, currentSession, userMsgCreated)
+	t := newRunTurn(a, call, ctx, genCtx, largeModel, agentTools, promptPrefix, disableAutoSummarize, currentSession, userMsgCreated)
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -622,7 +642,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// run's entry if one raced in and won the session in the window
 		// this release opens up before Summarize does its own busy check.
 		csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, runtimeLarge(call.Runtime, largeModel), promptPrefix, call.ActiveRuntime); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -723,13 +743,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+	return a.summarize(ctx, sessionID, opts, onAuthRefresh, a.largeModel.Get(), a.systemPromptPrefix.Get(), nil)
+}
+
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, runtime Model, systemPromptPrefix string, active *activeRuntime) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
 
-	// Copy mutable fields under lock to avoid races with SetModels.
-	largeModel := a.largeModel.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
+	largeModel := runtime
 
 	currentSession, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -781,7 +803,12 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		ProviderOptions: opts,
 		OnAuthRefresh:   onAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
-			return a.largeModel.Get().Model
+			if active != nil {
+				if activeRuntime := active.load(); activeRuntime != nil && activeRuntime.large.ModelCfg.Provider == largeModel.ModelCfg.Provider && activeRuntime.large.ModelCfg.Model == largeModel.ModelCfg.Model {
+					return activeRuntime.large.Model
+				}
+			}
+			return largeModel.Model
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
@@ -877,6 +904,10 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
+	return cacheControlOptions()
+}
+
+func cacheControlOptions() fantasy.ProviderOptions {
 	if t, _ := strconv.ParseBool(os.Getenv("BRAID_DISABLE_ANTHROPIC_CACHE")); t {
 		return fantasy.ProviderOptions{}
 	}
@@ -1125,6 +1156,24 @@ func hasUserTextMessage(msgs []message.Message) bool {
 
 // GenerateTitle generates a session title based on the initial prompt.
 func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, userPrompt string) {
+	a.generateTitle(ctx, sessionID, userPrompt, a.smallModel.Get(), a.largeModel.Get(), a.systemPromptPrefix.Get())
+}
+
+func runtimeSmall(runtime *compiledRuntime, fallback Model) Model {
+	if runtime != nil {
+		return runtime.small
+	}
+	return fallback
+}
+
+func runtimeLarge(runtime *compiledRuntime, fallback Model) Model {
+	if runtime != nil {
+		return runtime.large
+	}
+	return fallback
+}
+
+func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, userPrompt string, smallModel, largeModel Model, systemPromptPrefix string) {
 	if userPrompt == "" {
 		return
 	}
@@ -1141,10 +1190,6 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			}
 		}
 	}()
-
-	smallModel := a.smallModel.Get()
-	largeModel := a.largeModel.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
 		return fantasy.NewAgent(

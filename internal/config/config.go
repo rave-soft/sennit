@@ -813,6 +813,24 @@ func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.RecentModels = slices.Clone(c.RecentModels)
 	nc.MCP = maps.Clone(c.MCP)
+	if c.Providers != nil {
+		nc.Providers = csync.NewMap[string, ProviderConfig]()
+		for id, provider := range c.Providers.Seq2() {
+			provider.ExtraHeaders = maps.Clone(provider.ExtraHeaders)
+			provider.ExtraBody = maps.Clone(provider.ExtraBody)
+			provider.ProviderOptions = maps.Clone(provider.ProviderOptions)
+			provider.ExtraParams = maps.Clone(provider.ExtraParams)
+			if provider.OAuthToken != nil {
+				token := *provider.OAuthToken
+				if token.Client != nil {
+					client := *token.Client
+					token.Client = &client
+				}
+				provider.OAuthToken = &token
+			}
+			nc.Providers.Set(id, provider)
+		}
+	}
 	if c.Options != nil {
 		opts := *c.Options
 		if c.Options.TUI != nil {

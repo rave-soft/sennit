@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -125,7 +127,9 @@ type ConfigStore struct {
 	// protects the pointer word only; the pointed-to Config is treated
 	// as immutable once published, since both reloads and typed mutators
 	// build a fresh Config rather than mutating the live one.
-	configMu sync.RWMutex
+	configMu          sync.RWMutex
+	version           atomic.Uint64
+	credentialVersion atomic.Uint64
 
 	mu       sync.Mutex   // serialises config file writes
 	writeMu  sync.RWMutex // serialises in-memory config production (mutators + the reload swap); RLock for readers
@@ -185,8 +189,48 @@ func (s *ConfigStore) Config() *Config {
 // untouched and run under mu instead.
 func (s *ConfigStore) setConfig(cfg *Config) {
 	s.configMu.Lock()
-	defer s.configMu.Unlock()
 	s.config = cfg
+	s.version.Add(1)
+	s.configMu.Unlock()
+}
+
+func (s *ConfigStore) Version() uint64 {
+	return s.version.Load()
+}
+
+func (s *ConfigStore) CredentialVersion() uint64 {
+	return s.credentialVersion.Load()
+}
+
+// UpdateProviderCredentials publishes a credential-only provider update. It
+// is the sole runtime mutation path for provider credentials: callers must not
+// mutate Config().Providers directly, because a runtime compiled before the
+// mutation would otherwise remain cache-valid and continue using old clients.
+// The provider's model identity is preserved by the caller; incrementing the
+// store version forces future runtime compilation to construct a provider with
+// the newly published credentials.
+func (s *ConfigStore) UpdateProviderCredentials(providerID, apiKey string, token *oauth.Token) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	current := s.Config()
+	if current == nil || current.Providers == nil {
+		return fmt.Errorf("provider %s not found", providerID)
+	}
+	cfg := current.cloneForWrite()
+	provider, ok := cfg.Providers.Get(providerID)
+	if !ok {
+		return fmt.Errorf("provider %s not found", providerID)
+	}
+	provider.APIKey = apiKey
+	provider.OAuthToken = token
+	if providerID == string(catwalk.InferenceProviderCopilot) {
+		provider.SetupGitHubCopilot()
+	}
+	cfg.Providers.Set(providerID, provider)
+	s.credentialVersion.Add(1)
+	s.setConfig(cfg)
+	return nil
 }
 
 // WorkingDir returns the current working directory.
@@ -643,13 +687,26 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		fields[ProviderFieldKey(providerID, "name")] = providerConfig.Name
 	}
 
-	// Providers is a shared, thread-safe map (csync.Map) referenced by
-	// every Config generation, so setting it here is immediately visible
-	// without going through the clone-and-swap mutators. update() below
-	// only needs to persist fields, not restate the in-memory change.
 	persist := func() error {
-		cfg.Providers.Set(providerID, providerConfig)
-		return s.update(scope, func(*Config) map[string]any { return fields })
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+		err := s.updateLocked(scope, func(cfg *Config) map[string]any {
+			current, ok := cfg.Providers.Get(providerID)
+			if !ok {
+				current = providerConfig
+			}
+			current.APIKey = providerConfig.APIKey
+			current.OAuthToken = providerConfig.OAuthToken
+			if providerID == string(catwalk.InferenceProviderCopilot) {
+				current.SetupGitHubCopilot()
+			}
+			cfg.Providers.Set(providerID, current)
+			return fields
+		})
+		if err == nil {
+			s.credentialVersion.Add(1)
+		}
+		return err
 	}
 
 	if isToken {
@@ -953,13 +1010,12 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 }
 
 // applyToken updates the in-memory provider config with the given token.
-func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) {
-	providerConfig.OAuthToken = token
-	providerConfig.APIKey = token.AccessToken
-	if providerID == string(catwalk.InferenceProviderCopilot) {
-		providerConfig.SetupGitHubCopilot()
+func (s *ConfigStore) applyToken(_ ProviderConfig, token *oauth.Token, providerID string) {
+	// Keep all credential publication versioned so consumers can invalidate
+	// compiled providers without changing the selected model identity.
+	if err := s.UpdateProviderCredentials(providerID, token.AccessToken, token); err != nil {
+		slog.Error("Failed to publish refreshed provider credentials", "provider", providerID, "error", err)
 	}
-	s.Config().Providers.Set(providerID, providerConfig)
 }
 
 // loadTokenFromDisk reads the OAuth token for the given provider from the
@@ -1279,6 +1335,10 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// Migrate deprecated disable_notifications before reloading config.
 	migrateDisableNotifications()
 
+	s.writeMu.RLock()
+	startCredentialVersion := s.CredentialVersion()
+	startConfig := s.Config()
+	s.writeMu.RUnlock()
 	configPaths := lookupConfigs(s.workingDir)
 	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
 	if err != nil {
@@ -1400,6 +1460,28 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		// mutated in place: SetupAgents is called on cfg (the not-yet-
 		// published clone) and only then is cfg swapped into the store.
 		cfg.SetupAgentsWithInherited(s.inheritedAgents)
+	}
+
+	if s.CredentialVersion() != startCredentialVersion {
+		current := s.Config()
+		if startConfig != nil && current != nil && startConfig.Providers != nil && current.Providers != nil && cfg.Providers != nil {
+			for id, currentProvider := range current.Providers.Seq2() {
+				startProvider, existed := startConfig.Providers.Get(id)
+				if existed && startProvider.APIKey == currentProvider.APIKey && reflect.DeepEqual(startProvider.OAuthToken, currentProvider.OAuthToken) {
+					continue
+				}
+				provider, ok := cfg.Providers.Get(id)
+				if !ok {
+					continue
+				}
+				provider.APIKey = currentProvider.APIKey
+				provider.OAuthToken = currentProvider.OAuthToken
+				if id == string(catwalk.InferenceProviderCopilot) {
+					provider.SetupGitHubCopilot()
+				}
+				cfg.Providers.Set(id, provider)
+			}
+		}
 	}
 
 	s.setConfig(cfg)

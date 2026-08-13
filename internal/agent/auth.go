@@ -104,14 +104,24 @@ func isUnauthorized(err error) bool {
 // makeAuthRefreshCallback returns an OnAuthRefresh callback for fantasy that
 // delegates to the coordinator's existing credential refresh logic. Returns
 // nil if no refresh mechanism is configured for the provider.
-func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
+func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig, active ...*activeRuntime) func(context.Context, *fantasy.ProviderError) error {
 	if providerCfg.OAuthToken == nil &&
 		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
 	return func(ctx context.Context, _ *fantasy.ProviderError) error {
-		return c.retryAfterUnauthorized(ctx, providerCfg)
+		if err := c.retryAfterUnauthorized(ctx, providerCfg); err != nil {
+			return err
+		}
+		if len(active) > 0 && active[0] != nil {
+			runtime, err := c.runtimeFor(ctx)
+			if err != nil {
+				return err
+			}
+			active[0].store(runtime)
+		}
+		return nil
 	}
 }
 
@@ -133,8 +143,9 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 
-	providerCfg.APIKey = newAPIKey
-	c.cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
+	if err := c.cfg.UpdateProviderCredentials(providerCfg.ID, newAPIKey, providerCfg.OAuthToken); err != nil {
+		return err
+	}
 
 	if err := c.UpdateModels(ctx); err != nil {
 		return err

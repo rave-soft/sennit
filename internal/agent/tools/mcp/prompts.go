@@ -15,7 +15,14 @@ type Prompt = mcp.Prompt
 func Prompts() iter.Seq2[string, []*Prompt] { return defaultRegistry.Prompts() }
 
 func (r *Registry) Prompts() iter.Seq2[string, []*Prompt] {
-	return r.allPrompts.Seq2()
+	snapshot := r.CatalogSnapshot()
+	return func(yield func(string, []*Prompt) bool) {
+		for name, prompts := range snapshot.Prompts {
+			if !yield(name, prompts) {
+				return
+			}
+		}
+	}
 }
 
 // GetPromptMessages retrieves the content of an MCP prompt with the given arguments.
@@ -85,9 +92,13 @@ func getPrompts(ctx context.Context, c *ClientSession) ([]*Prompt, error) {
 
 // updatePrompts updates the registry's prompt catalog for one MCP server.
 func (r *Registry) updatePrompts(mcpName string, prompts []*Prompt) {
+	r.catalogMu.Lock()
+	defer r.catalogMu.Unlock()
 	if len(prompts) == 0 {
 		r.allPrompts.Del(mcpName)
+		r.catalogChanged()
 		return
 	}
 	r.allPrompts.Set(mcpName, prompts)
+	r.catalogChanged()
 }
