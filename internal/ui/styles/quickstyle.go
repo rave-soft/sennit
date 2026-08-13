@@ -638,7 +638,6 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	// Content rendering - prepared styles that accept width parameter
 	s.Tool.ContentLine = base.Background(o.bgMarkdown)
-	s.Tool.ContentLineHover = base.Background(o.bgHover)
 	s.Tool.ContentTruncation = muted.Background(o.bgMarkdown)
 	s.Tool.ContentTruncationHover = muted.Background(o.bgHover)
 	s.Tool.ContentCodeLine = base.Background(o.bgBase).PaddingLeft(2)

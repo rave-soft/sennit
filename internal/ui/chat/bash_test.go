@@ -12,21 +12,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestExpandableBodyHoverHighlightsWholeBlock(t *testing.T) {
+func TestExpandableBodyHoverHighlightsOnlyHint(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
 	normal := expandableBodyContent(&sty, "l1\nl2\nl3\nl4\nl5", 40, false, false)
 	hovered := expandableBodyContent(&sty, "l1\nl2\nl3\nl4\nl5", 40, false, true)
 
-	require.Equal(t, 5, strings.Count(hovered, "\n")+1)
-	require.NotEqual(t, normal, hovered)
-	hoverSequence := lipgloss.NewStyle().Background(sty.Tool.ContentLineHover.GetBackground()).Render("x")
+	normalLines := strings.Split(normal, "\n")
+	hoveredLines := strings.Split(hovered, "\n")
+	require.Len(t, hoveredLines, 5)
+	require.Equal(t, normalLines[:4], hoveredLines[:4])
+	require.NotEqual(t, normalLines[4], hoveredLines[4])
+	hoverSequence := lipgloss.NewStyle().Background(sty.Tool.ContentTruncationHover.GetBackground()).Render("x")
 	hoverPrefix, _, ok := strings.Cut(hoverSequence, "x")
 	require.True(t, ok)
-	for _, line := range strings.Split(hovered, "\n") {
-		require.Contains(t, line, hoverPrefix)
-	}
+	require.Contains(t, hoveredLines[4], hoverPrefix)
+}
+
+func TestExpandableDiffHoverHighlightsOnlyHint(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	oldContent := "l1\nl2\nl3\nl4\nl5\nl6"
+	newContent := "n1\nn2\nn3\nn4\nn5\nn6"
+	normal := expandableDiffContent(&sty, "file.txt", oldContent, newContent, 80, false, false)
+	hovered := expandableDiffContent(&sty, "file.txt", oldContent, newContent, 80, false, true)
+
+	normalLines := strings.Split(normal, "\n")
+	hoveredLines := strings.Split(hovered, "\n")
+	require.Equal(t, normalLines[:len(normalLines)-1], hoveredLines[:len(hoveredLines)-1])
+	require.NotEqual(t, normalLines[len(normalLines)-1], hoveredLines[len(hoveredLines)-1])
 }
 
 func bashToolCall(t *testing.T) message.ToolCall {

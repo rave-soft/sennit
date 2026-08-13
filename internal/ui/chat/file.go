@@ -3,14 +3,12 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"image/color"
 	"strings"
 
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/diffview"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -427,10 +425,6 @@ func expandableDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 		After(file, newContent).
 		Width(bodyWidth).
 		WrapLines(true)
-	if hovered {
-		hoverBackground := sty.Tool.DiffTruncationHover.GetBackground()
-		formatter = formatter.Style(diffStyleBackground(sty.Diff, hoverBackground))
-	}
 	// Use split view for wide terminals.
 	if width > maxTextWidth {
 		formatter = formatter.Split()
@@ -463,21 +457,4 @@ func expandableDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	}
 
 	return sty.Tool.Body.Render(strings.Join(out, "\n"))
-}
-
-func diffStyleBackground(style diffview.Style, background color.Color) diffview.Style {
-	lines := []*diffview.LineStyle{
-		&style.DividerLine,
-		&style.MissingLine,
-		&style.EqualLine,
-		&style.InsertLine,
-		&style.DeleteLine,
-		&style.Filename,
-	}
-	for _, line := range lines {
-		line.LineNumber = line.LineNumber.Background(background)
-		line.Symbol = line.Symbol.Background(background)
-		line.Code = line.Code.Background(background)
-	}
-	return style
 }

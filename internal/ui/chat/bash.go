@@ -141,9 +141,6 @@ func expandableBodyContent(sty *styles.Styles, content string, width int, expand
 
 	out := make([]string, 0, maxLines+1)
 	lineStyle := sty.Tool.ContentLine
-	if hovered {
-		lineStyle = sty.Tool.ContentLineHover
-	}
 	for _, ln := range lines[:maxLines] {
 		ln = " " + ln
 		if lipgloss.Width(ln) > width {

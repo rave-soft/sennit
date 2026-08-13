@@ -350,7 +350,6 @@ type Styles struct {
 
 		// Content rendering styles
 		ContentLine            lipgloss.Style // Individual content line with background and width
-		ContentLineHover       lipgloss.Style // Content line while its expandable block is hovered
 		ContentTruncation      lipgloss.Style // Truncation message "… (N lines)"
 		ContentTruncationHover lipgloss.Style // Truncation message while its expandable area is hovered
 		ContentCodeLine        lipgloss.Style // Code line with background and width
