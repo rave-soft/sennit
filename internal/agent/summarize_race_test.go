@@ -35,7 +35,10 @@ func (m *raceInjectModel) Generate(context.Context, fantasy.Call) (*fantasy.Resp
 	}, nil
 }
 
-func (m *raceInjectModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+func (m *raceInjectModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	if isTitleCall(call) {
+		return titleStream()
+	}
 	text := m.text
 	return func(yield func(fantasy.StreamPart) bool) {
 		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "1"}) {
@@ -95,7 +98,10 @@ func (m *continuationRaceModel) Generate(context.Context, fantasy.Call) (*fantas
 	return &fantasy.Response{FinishReason: fantasy.FinishReasonStop}, nil
 }
 
-func (m *continuationRaceModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
+func (m *continuationRaceModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	if isTitleCall(call) {
+		return titleStream()
+	}
 	stream := m.streams.Add(1)
 	return func(yield func(fantasy.StreamPart) bool) {
 		switch stream {
@@ -154,12 +160,11 @@ func TestRun_AutoSummarizeContinuationClearQueueCompletesOnce(t *testing.T) {
 		return fantasy.NewTextResponse("ok"), nil
 	})
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel: Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 1, DefaultMaxTokens: 10000}},
-		SmallModel: Model{Model: fastModel{}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
-		Sessions:   env.sessions,
-		Messages:   env.messages,
-		Tools:      []fantasy.AgentTool{hold},
-		Notify:     notifications,
+		Model:    Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 1, DefaultMaxTokens: 10000}},
+		Sessions: env.sessions,
+		Messages: env.messages,
+		Tools:    []fantasy.AgentTool{hold},
+		Notify:   notifications,
 	}).(*sessionAgent)
 	sess, err := env.sessions.Create(t.Context(), "session")
 	require.NoError(t, err)
@@ -205,11 +210,10 @@ func TestRun_AutoSummarizeContinuationPreservesAcceptedSequence(t *testing.T) {
 		return fantasy.NewTextResponse("ok"), nil
 	})
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel: Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 1, DefaultMaxTokens: 10000}},
-		SmallModel: Model{Model: fastModel{}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
-		Sessions:   env.sessions,
-		Messages:   env.messages,
-		Tools:      []fantasy.AgentTool{hold},
+		Model:    Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 1, DefaultMaxTokens: 10000}},
+		Sessions: env.sessions,
+		Messages: env.messages,
+		Tools:    []fantasy.AgentTool{hold},
 	}).(*sessionAgent)
 	sess, err := env.sessions.Create(t.Context(), "session")
 	require.NoError(t, err)
@@ -267,13 +271,9 @@ func TestRun_AutoSummarizeDoesNotClobberConcurrentActiveRequest(t *testing.T) {
 
 	model := &raceInjectModel{text: "done"}
 	sa := NewSessionAgent(SessionAgentOptions{
-		LargeModel: Model{
+		Model: Model{
 			Model:      model,
 			CatalogCfg: catwalk.Model{ContextWindow: 1, DefaultMaxTokens: 10000},
-		},
-		SmallModel: Model{
-			Model:      fastModel{},
-			CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000},
 		},
 		SystemPrompt: "system",
 		Sessions:     env.sessions,

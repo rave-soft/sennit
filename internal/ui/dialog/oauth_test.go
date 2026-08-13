@@ -18,7 +18,7 @@ func TestOAuth_WithoutModelReturnsActionProviderConfigured(t *testing.T) {
 	com := &common.Common{Styles: &s}
 
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderCopilot, Name: "GitHub Copilot"}
-	dlg, _ := NewOAuthCopilot(com, false, provider, nil, "")
+	dlg, _ := NewOAuthCopilot(com, false, provider, nil)
 
 	dlg.State = OAuthStateSuccess
 

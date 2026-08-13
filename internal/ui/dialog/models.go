@@ -149,7 +149,6 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 			return ActionSelectModel{
 				Provider:       modelItem.prov,
 				Model:          modelItem.SelectedModel(),
-				ModelType:      modelItem.SelectedModelType(),
 				ReAuthenticate: isEdit,
 			}
 		default:

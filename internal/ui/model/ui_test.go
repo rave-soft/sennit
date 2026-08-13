@@ -39,7 +39,10 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 		cfg := &config.Config{
 			Providers: csync.NewMap[string, config.ProviderConfig](),
 			Agents: map[string]config.Agent{
-				config.AgentCoder: {Model: string(config.SelectedModelTypeLarge)},
+				// Deliberately the legacy "large" slot name: agents from
+				// older configs still carry it, and the coder must keep
+				// inheriting cfg.Model regardless.
+				config.AgentCoder: {Model: "large"},
 			},
 		}
 		ui := newTestUIWithConfig(t, cfg)
@@ -64,7 +67,10 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 			},
 			Providers: providers,
 			Agents: map[string]config.Agent{
-				config.AgentCoder: {Model: string(config.SelectedModelTypeLarge)},
+				// Deliberately the legacy "large" slot name: agents from
+				// older configs still carry it, and the coder must keep
+				// inheriting cfg.Model regardless.
+				config.AgentCoder: {Model: "large"},
 			},
 		}
 

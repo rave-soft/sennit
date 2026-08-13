@@ -1433,7 +1433,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelOperationLoading = false
 			m.dialog.CloseDialog(dialog.ModelsID)
 			provider := catwalk.Provider{ID: catwalk.InferenceProvider(msg.providerID)}
-			if cmd := m.openAuthenticationDialog(provider, msg.model, ""); cmd != nil {
+			if cmd := m.openAuthenticationDialog(provider, msg.model); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return m, tea.Batch(cmds...)
@@ -3302,7 +3302,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	if !isConfigured() || msg.ReAuthenticate {
 		m.dialog.CloseDialog(dialog.ModelsID)
-		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
+		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return tea.Batch(cmds...)
@@ -3354,7 +3354,7 @@ func (m *UI) initAgentAndReportModel(isOnboarding bool, model config.SelectedMod
 	})
 }
 
-func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
+func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.SelectedModel) tea.Cmd {
 	var (
 		dlg dialog.Dialog
 		cmd tea.Cmd
@@ -3364,9 +3364,9 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 
 	switch provider.ID {
 	case catwalk.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, &model, modelType)
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, &model)
 	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, &model, modelType)
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, &model)
 	}
 
 	if m.dialog.ContainsDialog(dlg.ID()) {
@@ -4380,7 +4380,7 @@ func (m *UI) currentModelSupportsImages() bool {
 	}
 	// The coder agent leaves Model unset (it inherits the app's configured
 	// model), so the model it actually runs on is always cfg.Model.
-	model := cfg.GetModelByType(config.SelectedModelTypeLarge)
+	model := cfg.SelectedCatalogModel()
 	return model != nil && model.SupportsImages
 }
 
@@ -5589,9 +5589,9 @@ func (m *UI) configureProvider(providerID string) tea.Cmd {
 	)
 	switch provider.ID {
 	case catwalk.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, nil, "")
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, nil)
 	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, nil, "")
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, nil)
 	}
 
 	if m.dialog.ContainsDialog(dlg.ID()) {
@@ -5886,7 +5886,7 @@ func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
 	}
 	// The coder agent leaves Model unset (it inherits the app's configured
 	// model), so the model it actually runs on is always cfg.Model.
-	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Model, config.SelectedModelTypeLarge)
+	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Model)
 }
 
 // handleAWSSSOAuth opens the AWS SSO progress dialog (or updates the SSO URL

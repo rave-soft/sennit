@@ -19,12 +19,11 @@ type runtimeKey struct {
 
 type compiledRuntime struct {
 	key          runtimeKey
-	large        Model
-	small        Model
+	model        Model
 	tools        []fantasy.AgentTool
 	systemPrompt string
 
-	// These values are captured with the models and tools. A Run must not
+	// These values are captured with the model and tools. A Run must not
 	// consult the live ConfigStore after runtimeFor returns: config reloads and
 	// credential rotation are allowed to publish a new runtime while the old
 	// one is still executing.

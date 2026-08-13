@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/agent/tools"
@@ -477,44 +476,6 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 		return fmt.Errorf("agent configuration is missing")
 	}
 	return app.AgentCoordinator.UpdateModels(ctx)
-}
-
-// GetDefaultSmallModel returns the default small model for the given
-// provider. Falls back to the large model if no default is found.
-func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	cfg := app.config.Config()
-	largeModelCfg := cfg.Model
-
-	// Find the provider in the known providers list to get its default small model.
-	knownProviders := app.config.KnownProviders()
-	var knownProvider *catwalk.Provider
-	for _, p := range knownProviders {
-		if string(p.ID) == providerID {
-			knownProvider = &p
-			break
-		}
-	}
-
-	// For unknown/local providers, use the large model as small.
-	if knownProvider == nil {
-		slog.Warn("Using large model as small model for unknown provider", "provider", providerID, "model", largeModelCfg.Model)
-		return largeModelCfg
-	}
-
-	defaultSmallModelID := knownProvider.DefaultSmallModelID
-	model := cfg.GetModel(providerID, defaultSmallModelID)
-	if model == nil {
-		slog.Warn("Default small model not found, using large model", "provider", providerID, "model", largeModelCfg.Model)
-		return largeModelCfg
-	}
-
-	slog.Info("Using provider default small model", "provider", providerID, "model", defaultSmallModelID)
-	return config.SelectedModel{
-		Provider:        providerID,
-		Model:           defaultSmallModelID,
-		MaxTokens:       model.DefaultMaxTokens,
-		ReasoningEffort: model.DefaultReasoningEffort,
-	}
 }
 
 func (app *App) setupEvents() {

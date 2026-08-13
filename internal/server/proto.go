@@ -1062,28 +1062,6 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseW
 	jsonEncode(w, prompts)
 }
 
-// handleGetWorkspaceAgentDefaultSmallModel returns the default small model for a provider.
-//
-//	@Summary		Get default small model
-//	@Tags			agent
-//	@Produce		json
-//	@Param			id			path		string	true	"Workspace ID"
-//	@Param			provider_id	query		string	false	"Provider ID"
-//	@Success		200			{object}	object
-//	@Failure		404			{object}	proto.Error
-//	@Failure		500			{object}	proto.Error
-//	@Router			/workspaces/{id}/agent/default-small-model [get]
-func (c *controllerV1) handleGetWorkspaceAgentDefaultSmallModel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	providerID := r.URL.Query().Get("provider_id")
-	model, err := c.backend.GetDefaultSmallModel(id, providerID)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, model)
-}
-
 // handlePostWorkspacePermissionsGrant grants a permission request.
 //
 //	@Summary		Grant permission

@@ -44,18 +44,6 @@ var defaultContextPaths = []string{
 	"Agents.md",
 }
 
-type SelectedModelType string
-
-// String returns the string representation of the [SelectedModelType].
-func (s SelectedModelType) String() string {
-	return string(s)
-}
-
-const (
-	SelectedModelTypeLarge SelectedModelType = "large"
-	SelectedModelTypeSmall SelectedModelType = "small"
-)
-
 const (
 	AgentCoder string = "coder"
 	AgentTask  string = "task"
@@ -894,26 +882,17 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 	return nil
 }
 
-// GetProviderForModel returns the provider configured for c.Model. The
-// modelType parameter is retained (rather than dropped) purely so callers
-// that still pass SelectedModelTypeLarge/Small compile unchanged; there is
-// only one configured model now, so the argument is ignored.
-func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
+// GetProviderForModel returns the provider configured for c.Model.
+func (c *Config) GetProviderForModel() *ProviderConfig {
 	if providerConfig, ok := c.Providers.Get(c.Model.Provider); ok {
 		return &providerConfig
 	}
 	return nil
 }
 
-// GetModelByType returns the catalog entry for c.Model. See
-// GetProviderForModel for why modelType is still accepted but ignored.
-func (c *Config) GetModelByType(modelType SelectedModelType) *catwalk.Model {
-	return c.GetModel(c.Model.Provider, c.Model.Model)
-}
-
-// LargeModel returns the catalog entry for the one model Braid is
-// configured to use.
-func (c *Config) LargeModel() *catwalk.Model {
+// SelectedCatalogModel returns the catalog entry for c.Model, the one model
+// Braid is configured to use.
+func (c *Config) SelectedCatalogModel() *catwalk.Model {
 	return c.GetModel(c.Model.Provider, c.Model.Model)
 }
 

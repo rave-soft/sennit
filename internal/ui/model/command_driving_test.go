@@ -292,9 +292,6 @@ func (w *cmdDrivingWorkspace) InitCoderAgentNonInteractive(ctx context.Context) 
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) GetDefaultSmallModel(string) config.SelectedModel {
-	return config.SelectedModel{}
-}
 func (w *cmdDrivingWorkspace) LSPStart(ctx context.Context, path string) { w.lspStartCalls++ }
 func (w *cmdDrivingWorkspace) LSPStopAll(ctx context.Context)            {}
 func (w *cmdDrivingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {

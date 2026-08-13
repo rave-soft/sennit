@@ -48,7 +48,7 @@ func TestAPIKeyInput_WithModelReturnsActionSelectModel(t *testing.T) {
 
 	provider := catwalk.Provider{ID: catwalk.InferenceProvider("test-provider"), Name: "Test Provider"}
 	model := config.SelectedModel{Provider: "test-provider", Model: "test-model"}
-	dlg, _ := NewAPIKeyInput(com, false, provider, &model, config.SelectedModelTypeLarge)
+	dlg, _ := NewAPIKeyInput(com, false, provider, &model)
 
 	dlg.HandleMsg(ActionChangeAPIKeyState{State: APIKeyInputStateVerified})
 	for _, r := range "sk-test-key" {
@@ -60,7 +60,6 @@ func TestAPIKeyInput_WithModelReturnsActionSelectModel(t *testing.T) {
 	require.True(t, ok, "expected ActionSelectModel, got %#v", action)
 	require.Equal(t, provider, selectAction.Provider)
 	require.Equal(t, model, selectAction.Model)
-	require.Equal(t, config.SelectedModelTypeLarge, selectAction.ModelType)
 	require.Equal(t, "test-provider", ws.savedProviderID)
 	require.Equal(t, "sk-test-key", ws.savedAPIKey)
 }
@@ -73,7 +72,7 @@ func TestAPIKeyInput_WithoutModelReturnsActionProviderConfigured(t *testing.T) {
 	com, ws := newAPIKeyTestCommon(t)
 
 	provider := catwalk.Provider{ID: catwalk.InferenceProvider("test-provider"), Name: "Test Provider"}
-	dlg, _ := NewAPIKeyInput(com, false, provider, nil, "")
+	dlg, _ := NewAPIKeyInput(com, false, provider, nil)
 
 	dlg.HandleMsg(ActionChangeAPIKeyState{State: APIKeyInputStateVerified})
 	for _, r := range "sk-test-key" {

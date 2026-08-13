@@ -128,13 +128,13 @@ type modelPair struct{ name string }
 
 var modelPairs = []modelPair{{name: defaultFixtureModel}}
 
-func getModels(t *testing.T, transport http.RoundTripper, baseURL, model string) (fantasy.LanguageModel, fantasy.LanguageModel) {
+func getModel(t *testing.T, transport http.RoundTripper, baseURL, model string) fantasy.LanguageModel {
 	t.Helper()
 	provider, err := openaicompat.New(openaicompat.WithBaseURL(baseURL), openaicompat.WithHTTPClient(&http.Client{Transport: transport}))
 	require.NoError(t, err)
-	large, err := provider.LanguageModel(t.Context(), model)
+	lm, err := provider.LanguageModel(t.Context(), model)
 	require.NoError(t, err)
-	return large, large
+	return lm
 }
 
 func TestTestVCRConfig(t *testing.T) {

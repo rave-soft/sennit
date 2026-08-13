@@ -266,6 +266,14 @@ definitions:
         items:
           type: string
         type: array
+      bypass:
+        description: |-
+          Bypass, when true, skips every permission prompt from process start —
+          equivalent to always-on yolo mode. It is the persistent counterpart to
+          the session-only --yolo flag / ctrl+y toggle (see permission.Service.
+          SetSkipRequests), which continue to work as a runtime override on top
+          of this.
+        type: boolean
     type: object
   config.SelectedModel:
     properties:
@@ -313,6 +321,12 @@ definitions:
         $ref: '#/definitions/config.Completions'
       diff_mode:
         type: string
+      keybindings:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        type: object
       scrollbar:
         type: string
       transparent:
@@ -395,6 +409,15 @@ definitions:
     type: object
   csync.Map-string-config_ProviderConfig:
     type: object
+  git.FileChange:
+    properties:
+      additions:
+        type: integer
+      deletions:
+        type: integer
+      path:
+        type: string
+    type: object
   github_com_rave-soft_braid_internal_config.Config:
     properties:
       $schema:
@@ -403,9 +426,11 @@ definitions:
         additionalProperties:
           $ref: '#/definitions/config.Agent'
         description: |-
-          Agents holds both the built-in agents and any the user defines. User
-          definitions are read from this field on load; SetupAgents then merges
-          them with the built-ins and writes the result back here.
+          Agents holds both the built-in agents and any the user defines.
+          SetupAgents populates this from .braid/agents/*.md files (via
+          discoverMarkdownAgents) plus the two built-ins; nothing decodes user
+          agents into this field from JSON anymore (see loadFromBytes in
+          load.go), so it is hidden from the generated config schema.
         type: object
       env:
         additionalProperties:
@@ -456,10 +481,14 @@ definitions:
         type: array
       data_directory:
         description: |-
-          DataDirectory is where Braid keeps per-project state such as
-          the SQLite database and workspace overrides. Relative paths are
-          resolved against the working directory; absolute paths are used
-          verbatim. After defaulting the stored value is always absolute.
+          DataDirectory is a project-local directory (".braid" by default) for
+          workspace-scoped state that is NOT part of the shared global database:
+          the single-instance lock file, workspace config overrides, and (until
+          imported) a pre-shared-database project's legacy braid.db. Session and
+          message history now live in the single global database (see
+          config.GlobalDBDir()), not here. Relative paths are resolved against
+          the working directory; absolute paths are used verbatim. After
+          defaulting the stored value is always absolute.
         type: string
       debug:
         type: boolean
@@ -483,6 +512,12 @@ definitions:
         items:
           type: string
         type: array
+      history_retention_days:
+        description: |-
+          HistoryRetentionDays is read by `braid gc`, not enforced automatically:
+          nothing purges history on its own. A pointer distinguishes "unset"
+          (defaults to 90) from an explicit 0, which means keep history forever.
+        type: integer
       initialize_as:
         type: string
       notifications:
@@ -708,6 +743,8 @@ definitions:
     type: object
   proto.CurrentSession:
     properties:
+      generation:
+        type: integer
       session_id:
         type: string
     type: object
@@ -1186,6 +1223,16 @@ definitions:
         items:
           $ref: '#/definitions/proto.SkillState'
         type: array
+      threads_supported:
+        description: |-
+          ThreadsSupported reports whether this workspace has a thread
+          manager attached (i.e. it is rooted at a git repository and not
+          itself a thread's nested workspace). The server sets this field
+          based on attachServerThreads; the client seeds its local cache
+          from it, avoiding a live probe at construction time. A nil value
+          means the server predates this field and the client must perform
+          a single fallback probe in a controlled point (not the hot path).
+        type: boolean
       version:
         type: string
       yolo:
@@ -1446,36 +1493,6 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Send message to agent
-      tags:
-      - agent
-  /workspaces/{id}/agent/default-small-model:
-    get:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Provider ID
-        in: query
-        name: provider_id
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Get default small model
       tags:
       - agent
   /workspaces/{id}/agent/init:
@@ -2127,6 +2144,34 @@ paths:
       summary: Record file read
       tags:
       - filetracker
+  /workspaces/{id}/git/uncommitted:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/git.FileChange'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List uncommitted files
+      tags:
+      - git
   /workspaces/{id}/lsps:
     get:
       parameters:

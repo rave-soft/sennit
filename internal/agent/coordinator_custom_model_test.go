@@ -12,7 +12,7 @@ import (
 )
 
 // buildCustomModelCoordinator writes a hermetic config with one provider
-// ("mock") offering the large/small slot model plus a third model
+// ("mock") offering the selected model plus a second model
 // ("custom-model") that no slot points at, and returns a coordinator and the
 // coder agent's prompt built against it. It follows the same
 // dial-a-loopback-address-that-nothing-listens-on approach as

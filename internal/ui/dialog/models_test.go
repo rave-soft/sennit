@@ -188,10 +188,10 @@ func TestModels_NoTabToggle(t *testing.T) {
 	require.Equal(t, groupsBefore, m.list.groups, "tab must not rebuild the list around a different model type")
 }
 
-// TestModels_SelectAlwaysTargetsLargeSlot covers that choosing a model from
-// this dialog always reports [config.SelectedModelTypeLarge], the only
-// model type the dialog operates on.
-func TestModels_SelectAlwaysTargetsLargeSlot(t *testing.T) {
+// TestModels_SelectReportsChosenModel covers that choosing a model from
+// this dialog reports the item's provider and model, and does not ask for
+// re-authentication on a plain select.
+func TestModels_SelectReportsChosenModel(t *testing.T) {
 	cfg := newModelsTestConfig()
 	cfg.Providers.Set(string(catwalk.InferenceProviderAnthropic), config.ProviderConfig{
 		ID: string(catwalk.InferenceProviderAnthropic),
@@ -208,5 +208,7 @@ func TestModels_SelectAlwaysTargetsLargeSlot(t *testing.T) {
 	action := m.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	selectAction, ok := action.(ActionSelectModel)
 	require.True(t, ok, "expected ActionSelectModel, got %T", action)
-	require.Equal(t, config.SelectedModelTypeLarge, selectAction.ModelType)
+	require.Equal(t, items[0].prov, selectAction.Provider)
+	require.Equal(t, items[0].SelectedModel(), selectAction.Model)
+	require.False(t, selectAction.ReAuthenticate)
 }

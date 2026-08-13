@@ -80,7 +80,7 @@ func reasoningItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	// The coder agent leaves Model unset (it inherits the app's configured
 	// model), so the model it actually runs on is always cfg.Model.
 	selectedModel := cfg.Model
-	model := cfg.GetModelByType(config.SelectedModelTypeLarge)
+	model := cfg.SelectedCatalogModel()
 	if model == nil {
 		return nil, 0, errors.New("model configuration not found")
 	}

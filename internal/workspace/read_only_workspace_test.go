@@ -383,10 +383,6 @@ func (s *stubWorkspace) AgentSummarize(ctx context.Context, sessionID string) er
 func (s *stubWorkspace) UpdateAgentModel(ctx context.Context) error                 { return nil }
 func (s *stubWorkspace) InitCoderAgent(ctx context.Context) error                   { return nil }
 func (s *stubWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error     { return nil }
-func (s *stubWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	return config.SelectedModel{}
-}
-
 func (s *stubWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
 	return nil, nil
 }

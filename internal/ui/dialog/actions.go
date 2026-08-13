@@ -36,7 +36,6 @@ type ActionSelectSession struct {
 type ActionSelectModel struct {
 	Provider       catwalk.Provider
 	Model          config.SelectedModel
-	ModelType      config.SelectedModelType
 	ReAuthenticate bool
 }
 

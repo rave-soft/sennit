@@ -519,8 +519,8 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 	// The coder agent leaves Model unset (it inherits the app's configured
 	// model), so the model it actually runs on is always cfg.Model.
 	if _, ok := cfg.Agents[config.AgentCoder]; ok {
-		providerCfg := cfg.GetProviderForModel(config.SelectedModelTypeLarge)
-		model := cfg.GetModelByType(config.SelectedModelTypeLarge)
+		providerCfg := cfg.GetProviderForModel()
+		model := cfg.SelectedCatalogModel()
 		if providerCfg != nil && model != nil && model.CanReason {
 			selectedModel := cfg.Model
 
@@ -550,7 +550,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 	if hasSession {
 		// See the reasoning-toggle block above: the coder inherits the
 		// configured model.
-		model := cfg.GetModelByType(config.SelectedModelTypeLarge)
+		model := cfg.SelectedCatalogModel()
 		if model != nil && model.SupportsImages {
 			commands = append(commands, NewCommandItem(sty, "file_picker", "files", "ctrl+f", ActionOpenDialog{
 				DialogID: FilePickerID,

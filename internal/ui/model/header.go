@@ -7,7 +7,6 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/common"
@@ -149,7 +148,7 @@ func renderHeaderDetails(
 
 	// The coder agent leaves Model unset (it inherits the app's configured
 	// model), so the model it actually runs on is always cfg.Model.
-	model := com.Config().GetModelByType(config.SelectedModelTypeLarge)
+	model := com.Config().SelectedCatalogModel()
 	if model != nil && model.ContextWindow > 0 {
 		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
 		percentageText := fmt.Sprintf("%d%%", int(percentage))
