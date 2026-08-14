@@ -1617,6 +1617,7 @@ func protoToMessage(m proto.Message) message.Message {
 		Parts:     m.Parts,
 		Model:     m.Model,
 		Provider:  m.Provider,
+		Origin:    m.Origin,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}

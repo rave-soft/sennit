@@ -172,6 +172,7 @@ type fakeRun struct {
 	prompt     string
 	runID      string
 	delegation permission.DelegationRef
+	origin     message.Origin
 }
 
 func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
@@ -182,6 +183,7 @@ func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ .
 		prompt:     prompt,
 		runID:      agent.RunIDFromContext(ctx),
 		delegation: permission.DelegationFromContext(ctx),
+		origin:     agent.PromptOriginFromContext(ctx),
 	})
 	return nil, f.runErr
 }
@@ -195,6 +197,7 @@ func (f *fakeCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun,
 		prompt:     prompt,
 		runID:      agent.RunIDFromContext(ctx),
 		delegation: permission.DelegationFromContext(ctx),
+		origin:     agent.PromptOriginFromContext(ctx),
 	})
 	err := f.runErr
 	f.mu.Unlock()
@@ -386,6 +389,29 @@ func TestNewManager_WorktreeDirResolution(t *testing.T) {
 	})
 }
 
+// TestManager_CreateDispatchesGoalWithAgentOrigin guards the wire/UI
+// half of the origin feature: a thread's goal is dispatched as a plain
+// message.User prompt (see agent.WithPromptOrigin), tagged
+// message.OriginAgent so the transcript can mark it as not the person's
+// own words, without changing Role or reaching the model differently.
+func TestManager_CreateDispatchesGoalWithAgentOrigin(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{
+		Name:        "origin-goal",
+		Goal:        "implement the thing",
+		MergePolicy: MergeManual,
+	})
+	require.NoError(t, err)
+
+	coord := spawner.coordFor(st.WorktreePath)
+	require.NotNil(t, coord)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
+
+	require.Equal(t, message.OriginAgent, coord.runs[0].origin)
+}
+
 func TestManager_CreateHappyPath(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
@@ -479,6 +505,8 @@ func TestManager_SendIntoIdleThread(t *testing.T) {
 
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
+	require.Equal(t, message.OriginAgent, coord.runs[0].origin,
+		"a thread_send follow-up must be dispatched as agent-origin")
 
 	// The run completes normally, which means the RunComplete watcher was
 	// installed when the idle workspace was created, not only by startRun.

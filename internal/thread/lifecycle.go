@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/pubsub"
 )
 
@@ -354,7 +355,16 @@ func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner S
 //
 // Callers must hold no locks: send acquires id's own opMu for its
 // duration, the same admission ordering [Manager.Send] always used.
-func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, message string) error {
+func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string) error {
+	// Tag bgCtx so coordinator.run persists this dispatch's user message
+	// with Origin: message.OriginAgent instead of the default
+	// message.OriginPerson — a thread_send/task_send follow-up was not
+	// typed by the person, even though it is (and must remain) an
+	// ordinary message.User turn like any other. Both branches below
+	// (queue into the live runtime, and respawn-then-dispatch) read
+	// bgCtx, so tagging it once here covers both.
+	bgCtx = agent.WithPromptOrigin(bgCtx, message.OriginAgent)
+
 	c := l.control(id)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
@@ -385,7 +395,7 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		rt.runID = runID
 		c.mu.Unlock()
 		l.goWorker(func() {
-			if _, err := rt.handle.App().AgentCoordinator.Run(agent.WithRunID(bgCtx, runID), sessionID, message); err != nil {
+			if _, err := rt.handle.App().AgentCoordinator.Run(agent.WithRunID(bgCtx, runID), sessionID, msg); err != nil {
 				slog.Error("Queued agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 				// Mirror startRun's fallback for pre-execution failures so
 				// the workspace is not stranded on a run that never
@@ -416,7 +426,7 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
 		return err
 	}
-	l.startRun(bgCtx, handle, spawner, id, sessionID, message)
+	l.startRun(bgCtx, handle, spawner, id, sessionID, msg)
 	owned = false // Ownership transferred to the shared runtime state.
 	return nil
 }

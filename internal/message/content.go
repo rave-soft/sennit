@@ -43,6 +43,23 @@ func (r *MessageRole) UnmarshalText(data []byte) error {
 	return nil
 }
 
+// Origin identifies who produced a message: the person actually typed
+// it, or another agent dispatched it on their behalf (a delegation's
+// initial goal, or a thread_send/task_send follow-up). It is metadata
+// about authorship only — it never changes Role or what reaches the
+// model; see [Message.ToAIMessage].
+type Origin string
+
+const (
+	// OriginPerson is the default: the person using Braid typed this
+	// message themselves. Every existing row and every message
+	// created without an explicit origin is OriginPerson.
+	OriginPerson Origin = "person"
+	// OriginAgent marks a message another agent produced on the
+	// person's behalf, rather than something the person typed.
+	OriginAgent Origin = "agent"
+)
+
 // mediaLoadFailedPlaceholder is the text substituted for image data that
 // cannot be decoded during session replay.
 const mediaLoadFailedPlaceholder = "[Image data could not be loaded]"
@@ -206,6 +223,7 @@ type Message struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	IsSummaryMessage bool
+	Origin           Origin
 }
 
 func (m *Message) Content() TextContent {

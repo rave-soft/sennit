@@ -27,6 +27,7 @@ type CreateMessageParams struct {
 	Model            string
 	Provider         string
 	IsSummaryMessage bool
+	Origin           Origin
 }
 
 // Service is the public interface to the message store.
@@ -180,6 +181,10 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	if params.IsSummaryMessage {
 		isSummary = 1
 	}
+	origin := params.Origin
+	if origin == "" {
+		origin = OriginPerson
+	}
 	dbMessage, err := s.q.CreateMessage(ctx, db.CreateMessageParams{
 		ID:               uuid.New().String(),
 		SessionID:        sessionID,
@@ -188,6 +193,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 		Model:            sql.NullString{String: string(params.Model), Valid: true},
 		Provider:         sql.NullString{String: params.Provider, Valid: params.Provider != ""},
 		IsSummaryMessage: isSummary,
+		Origin:           string(origin),
 	})
 	if err != nil {
 		return Message{}, err
@@ -577,6 +583,7 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		CreatedAt:        item.CreatedAt,
 		UpdatedAt:        item.UpdatedAt,
 		IsSummaryMessage: item.IsSummaryMessage != 0,
+		Origin:           Origin(item.Origin),
 	}, nil
 }
 

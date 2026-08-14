@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/git"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
 )
@@ -292,7 +294,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, err
 	}
-	m.lc.startRun(m.ctx, handle, m.spawner, st.ID, st.SessionID, args.Goal)
+	m.lc.startRun(agent.WithPromptOrigin(m.ctx, message.OriginAgent), handle, m.spawner, st.ID, st.SessionID, args.Goal)
 
 	return st, nil
 }
