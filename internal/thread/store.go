@@ -146,19 +146,21 @@ func (s *store) Delete(ctx context.Context, id string) error {
 
 func fromDBItem(item db.Thread) Thread {
 	return Thread{
-		ID:            item.ID,
-		Name:          item.Name,
-		Goal:          item.Goal,
-		BaseBranch:    item.BaseBranch,
-		Branch:        item.Branch,
-		WorktreePath:  item.WorktreePath,
-		SessionID:     item.SessionID,
-		Status:        Status(item.Status),
-		MergePolicy:   MergePolicy(item.MergePolicy),
-		ResultSummary: item.ResultSummary,
-		Error:         item.Error,
-		CreatedAt:     item.CreatedAt,
-		UpdatedAt:     item.UpdatedAt,
-		CompletedAt:   item.CompletedAt.Int64,
+		Delegation: Delegation{
+			ID:            item.ID,
+			Name:          item.Name,
+			Goal:          item.Goal,
+			SessionID:     item.SessionID,
+			Status:        Status(item.Status),
+			ResultSummary: item.ResultSummary,
+			Error:         item.Error,
+			CreatedAt:     item.CreatedAt,
+			UpdatedAt:     item.UpdatedAt,
+			CompletedAt:   item.CompletedAt.Int64,
+		},
+		BaseBranch:   item.BaseBranch,
+		Branch:       item.Branch,
+		WorktreePath: item.WorktreePath,
+		MergePolicy:  MergePolicy(item.MergePolicy),
 	}
 }

@@ -9,20 +9,22 @@ import (
 
 func testThread() Thread {
 	return Thread{
-		ID:            "thread-1",
-		Name:          "alpha",
-		Goal:          "implement the thing",
-		BaseBranch:    "main",
-		Branch:        "thread/alpha",
-		WorktreePath:  "/tmp/repo-threads/alpha",
-		SessionID:     "sess-1",
-		Status:        StatusRunning,
-		MergePolicy:   MergeAuto,
-		ResultSummary: "",
-		Error:         "",
-		CreatedAt:     100,
-		UpdatedAt:     200,
-		CompletedAt:   0,
+		Delegation: Delegation{
+			ID:            "thread-1",
+			Name:          "alpha",
+			Goal:          "implement the thing",
+			SessionID:     "sess-1",
+			Status:        StatusRunning,
+			ResultSummary: "",
+			Error:         "",
+			CreatedAt:     100,
+			UpdatedAt:     200,
+			CompletedAt:   0,
+		},
+		BaseBranch:   "main",
+		Branch:       "thread/alpha",
+		WorktreePath: "/tmp/repo-threads/alpha",
+		MergePolicy:  MergeAuto,
 	}
 }
 

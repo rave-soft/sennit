@@ -144,14 +144,16 @@ func (s *fakeStore) Create(_ context.Context, p thread.CreateParams) (thread.Thr
 		mergePolicy = thread.MergeAuto
 	}
 	st := thread.Thread{
-		ID:           fmt.Sprintf("id-%d", s.seq),
-		Name:         p.Name,
-		Goal:         p.Goal,
+		Delegation: thread.Delegation{
+			ID:        fmt.Sprintf("id-%d", s.seq),
+			Name:      p.Name,
+			Goal:      p.Goal,
+			SessionID: p.SessionID,
+			Status:    thread.StatusPending,
+		},
 		BaseBranch:   p.BaseBranch,
 		Branch:       p.Branch,
 		WorktreePath: p.WorktreePath,
-		SessionID:    p.SessionID,
-		Status:       thread.StatusPending,
 		MergePolicy:  mergePolicy,
 	}
 	s.byID[st.ID] = st

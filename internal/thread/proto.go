@@ -53,20 +53,22 @@ func (m *Manager) EventToProto(e Event) proto.ThreadEvent {
 // read proto.Thread.WorkspaceID directly before converting.
 func FromProto(s proto.Thread) Thread {
 	return Thread{
-		ID:            s.ID,
-		Name:          s.Name,
-		Goal:          s.Goal,
-		BaseBranch:    s.BaseBranch,
-		Branch:        s.Branch,
-		WorktreePath:  s.WorktreePath,
-		SessionID:     s.SessionID,
-		Status:        Status(s.Status),
-		MergePolicy:   MergePolicy(s.MergePolicy),
-		ResultSummary: s.ResultSummary,
-		Error:         s.Error,
-		CreatedAt:     s.CreatedAt,
-		UpdatedAt:     s.UpdatedAt,
-		CompletedAt:   s.CompletedAt,
+		Delegation: Delegation{
+			ID:            s.ID,
+			Name:          s.Name,
+			Goal:          s.Goal,
+			SessionID:     s.SessionID,
+			Status:        Status(s.Status),
+			ResultSummary: s.ResultSummary,
+			Error:         s.Error,
+			CreatedAt:     s.CreatedAt,
+			UpdatedAt:     s.UpdatedAt,
+			CompletedAt:   s.CompletedAt,
+		},
+		BaseBranch:   s.BaseBranch,
+		Branch:       s.Branch,
+		WorktreePath: s.WorktreePath,
+		MergePolicy:  MergePolicy(s.MergePolicy),
 	}
 }
 
