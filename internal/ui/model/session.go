@@ -173,14 +173,6 @@ func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	}
 }
 
-func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
-	files, err := m.com.Workspace.ListSessionHistory(context.Background(), sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return sessionFilesFromHistory(files), nil
-}
-
 func sessionFilesFromHistory(files []history.File) []SessionFile {
 	filesByPath := make(map[string][]history.File)
 	for _, f := range files {

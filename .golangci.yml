@@ -42,7 +42,6 @@ linters:
     # - wrapcheck
   disable:
     - ineffassign
-    - unused
   exclusions:
     generated: lax
     presets:

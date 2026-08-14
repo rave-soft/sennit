@@ -46,33 +46,6 @@ func (s *sidebarState) scrollByWheel(lines int) int {
 	return s.scrollbarSeq
 }
 
-// pageUp scrolls the sidebar up by n lines (keyboard navigation).
-func (s *sidebarState) pageUp(n int) {
-	s.offset = max(0, s.offset-n)
-	s.scrollbarSeq++
-}
-
-// pageDown scrolls the sidebar down by n lines, clamped to maxOffset
-// (keyboard navigation).
-func (s *sidebarState) pageDown(n int) {
-	if s.offset < s.maxOffset {
-		s.offset = min(s.offset+n, s.maxOffset)
-		s.scrollbarSeq++
-	}
-}
-
-// toHome scrolls the sidebar to the top.
-func (s *sidebarState) toHome() {
-	s.offset = 0
-	s.scrollbarSeq++
-}
-
-// toEnd scrolls the sidebar to the bottom.
-func (s *sidebarState) toEnd() {
-	s.offset = s.maxOffset
-	s.scrollbarSeq++
-}
-
 // hideScrollbar hides the sidebar scrollbar.
 func (s *sidebarState) hideScrollbar() {
 	s.scrollbarVisible = false

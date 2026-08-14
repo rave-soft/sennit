@@ -227,11 +227,6 @@ func newChannelGate() *channelGate {
 	return g
 }
 
-// isOpen reports whether the gate has been resolved to open.
-func (g *channelGate) isOpen() bool {
-	return channelGateState(g.state.Load()) == stateGateOpen
-}
-
 // resolve transitions the gate from undecided to its final state. If open,
 // buffered messages are returned for the caller to publish; if closed, the
 // buffer is discarded. Calling resolve on an already-resolved gate is a

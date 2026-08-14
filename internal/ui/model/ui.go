@@ -144,12 +144,6 @@ type sendQueueItem struct {
 	isFirstMessage bool
 }
 
-// configMutationMsg carries the result of a config-mutation cmd.
-type configMutationMsg struct {
-	Err error
-	Msg tea.Msg
-}
-
 // Compact mode breakpoints.
 const (
 	compactModeWidthBreakpoint  = 120

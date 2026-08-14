@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -67,7 +66,6 @@ type OAuth struct {
 	expiresIn       int
 	interval        int
 	token           *oauth.Token
-	cancelFunc      context.CancelFunc
 }
 
 var _ Dialog = (*OAuth)(nil)

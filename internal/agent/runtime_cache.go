@@ -76,10 +76,6 @@ func newRuntimeCache() *runtimeCache {
 	return &runtimeCache{entries: make(map[runtimeKey]*compiledRuntime), flight: make(map[runtimeKey]*runtimeFlight)}
 }
 
-// newToolsCache is retained for package tests that construct a coordinator
-// directly. The cache now stores the complete runtime rather than tools alone.
-func newToolsCache(_ ...int) *runtimeCache { return newRuntimeCache() }
-
 // getOrBuild returns a runtime only after its key remains current. A catalog or
 // config update may race either a cache hit or an in-flight build, so every
 // completion path validates the key and retries until it observes a stable

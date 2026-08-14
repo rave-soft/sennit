@@ -98,16 +98,3 @@ func getPrompts(ctx context.Context, c *ClientSession) ([]*Prompt, error) {
 	}
 	return result.Prompts, nil
 }
-
-// updatePrompts updates the registry's prompt catalog for one MCP server.
-func (r *Registry) updatePrompts(mcpName string, prompts []*Prompt) {
-	r.catalogMu.Lock()
-	defer r.catalogMu.Unlock()
-	if len(prompts) == 0 {
-		r.allPrompts.Del(mcpName)
-		r.catalogChanged()
-		return
-	}
-	r.allPrompts.Set(mcpName, prompts)
-	r.catalogChanged()
-}

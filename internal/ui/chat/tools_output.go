@@ -240,22 +240,6 @@ func hookDetail(sty *styles.Styles, hi hooks.HookInfo) string {
 	}
 }
 
-// getDigits returns the number of digits in a number.
-func getDigits(n int) int {
-	if n == 0 {
-		return 1
-	}
-	if n < 0 {
-		n = -n
-	}
-	digits := 0
-	for n > 0 {
-		n /= 10
-		digits++
-	}
-	return digits
-}
-
 // formatSize formats byte size into human readable format.
 func formatSize(bytes int) string {
 	const (
@@ -279,14 +263,6 @@ func formatTimeout(timeout int) string {
 		return ""
 	}
 	return fmt.Sprintf("%ds", timeout)
-}
-
-// formatNonZero returns string representation of non-zero integers, empty string for zero.
-func formatNonZero(value int) string {
-	if value == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d", value)
 }
 
 // roundedEnumerator creates a tree enumerator with rounded corners.

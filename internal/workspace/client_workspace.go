@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/browser"
 	"github.com/rave-soft/braid/internal/agent/notify"
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
@@ -1538,21 +1537,6 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 	default:
 		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
 		return nil
-	}
-}
-
-func protoToMCPEventType(t proto.MCPEventType) mcp.EventType {
-	switch t {
-	case proto.MCPEventStateChanged:
-		return mcp.EventStateChanged
-	case proto.MCPEventToolsListChanged:
-		return mcp.EventToolsListChanged
-	case proto.MCPEventPromptsListChanged:
-		return mcp.EventPromptsListChanged
-	case proto.MCPEventResourcesListChanged:
-		return mcp.EventResourcesListChanged
-	default:
-		return mcp.EventStateChanged
 	}
 }
 

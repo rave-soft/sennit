@@ -137,16 +137,3 @@ func isMethodNotFoundError(err error) bool {
 	var rpcErr *jsonrpc.Error
 	return errors.As(err, &rpcErr) && rpcErr != nil && rpcErr.Code == jsonrpc.CodeMethodNotFound
 }
-
-func (r *Registry) updateResources(name string, resources []*Resource) int {
-	r.catalogMu.Lock()
-	defer r.catalogMu.Unlock()
-	if len(resources) == 0 {
-		r.allResources.Del(name)
-		r.catalogChanged()
-		return 0
-	}
-	r.allResources.Set(name, resources)
-	r.catalogChanged()
-	return len(resources)
-}

@@ -209,13 +209,6 @@ func (s *fakeThreadSpawner) Release(ctx context.Context, id string) error {
 	return nil
 }
 
-// appFor returns the spawned app.App for the given worktree path.
-func (s *fakeThreadSpawner) appFor(path string) *app.App {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.byPath[path].app
-}
-
 // newTestThreadAppWorkspace wires an AppWorkspace whose App has a real
 // *thread.Manager attached over a real git repo, a real store, and the
 // fakeThreadSpawner defined above.
