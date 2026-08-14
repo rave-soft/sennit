@@ -459,6 +459,16 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
 }
 
+// maxOutputTokens is the largest reply this turn's model may produce: the
+// explicit per-model setting when there is one, otherwise the catalog
+// default. Zero means unknown.
+func (t *runTurn) maxOutputTokens() int64 {
+	if t.model.ModelCfg.MaxTokens > 0 {
+		return t.model.ModelCfg.MaxTokens
+	}
+	return t.model.CatalogCfg.DefaultMaxTokens
+}
+
 // stopOnContextWindow is the auto-summarize StopWhen condition: it stops
 // the turn once the session's token usage crosses the context-window
 // threshold, so Run's tail can kick off a summarize pass.
@@ -471,12 +481,7 @@ func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
 	}
 	tokens := t.currentSession.CompletionTokens + t.currentSession.PromptTokens
 	remaining := cw - tokens
-	var threshold int64
-	if cw > largeContextWindowThreshold {
-		threshold = largeContextWindowBuffer
-	} else {
-		threshold = int64(float64(cw) * smallContextWindowRatio)
-	}
+	threshold := summarizeBuffer(cw, t.maxOutputTokens())
 	if (remaining <= threshold) && !t.disableAutoSummarize {
 		t.shouldSummarize = true
 		return true
