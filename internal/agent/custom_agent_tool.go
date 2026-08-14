@@ -98,6 +98,7 @@ func (c *coordinator) buildCustomAgentTool(ctx context.Context, id string, agent
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
 				SessionTitle:   agentCfg.Name,
+				AgentID:        id,
 			})
 		},
 	), nil

@@ -64,6 +64,31 @@ A thread can be cancelled without being torn down — its worktree and branch
 stay on disk, so you can still inspect or resume the work — or removed
 outright once you're done with it.
 
+## Named agents remember
+
+A named agent — anything defined in `.claude/agents`, or any `agents` entry
+in the config other than `coder` and `task` — is a continuing counterpart,
+not a stranger on every call. Delegating to `developer` twice under the same
+session replays the first exchange into the second: you can send it review
+findings and it knows what it wrote.
+
+Continuity is scoped by *who* and *where*. Two named agents under one parent
+keep separate conversations, and the same agent keeps separate conversations
+under different parents — which is what makes a thread's delegations stay
+inside that thread, since a thread runs on its own session.
+
+Each delegation still gets its own session, so each call remains its own
+block in the transcript and drills into just that call. The memory lives in
+what the agent is shown, not in where the messages are stored, and it is
+bounded: once the carried transcript grows past the budget
+(`maxCarriedSubAgentChars`), the oldest whole delegations are shed, newest
+kept.
+
+The anonymous delegations — the built-in `agent` and `agentic_fetch` tools —
+stay stateless on purpose. They are one-off, often run several at a time on
+unrelated work, and stitching those calls into one growing conversation
+would cost context without buying continuity anyone asked for.
+
 ## Choosing
 
 - Work needs isolation, or would otherwise collide with something else →

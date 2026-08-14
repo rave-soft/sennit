@@ -85,7 +85,19 @@ type SessionAgentCall struct {
 	// message.User regardless of PromptOrigin — origin is authorship
 	// metadata only and has zero effect on what reaches the model (see
 	// Message.ToAIMessage).
-	PromptOrigin     message.Origin
+	PromptOrigin message.Origin
+	// PriorMessages is conversation history from *other* sessions that
+	// this call should see ahead of its own. Only a named sub-agent
+	// delegation sets it: each delegation gets a fresh session (the UI
+	// addresses a delegation block by its session id), so without this
+	// the same named agent would start from nothing every time it is
+	// called. See coordinator.carryOverMessages.
+	//
+	// These messages are prepended to the model's view of history and
+	// nothing else: they are not persisted into this session, not
+	// counted when deciding whether to generate a title, and never
+	// summarized - the sessions they came from own them.
+	PriorMessages    []message.Message
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
@@ -825,7 +837,11 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		reporter.publish(ctx, complete)
 	}()
 
-	history, files := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages, call.Attachments...)
+	// Carried-over history goes in front of this session's own messages
+	// and is deliberately not folded into msgs above: msgs drives the
+	// title decision and this session's summarize bookkeeping, neither
+	// of which owns messages that belong to earlier sessions.
+	history, files := a.preparePrompt(withPriorMessages(call.PriorMessages, msgs), model.CatalogCfg.SupportsImages, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -1391,26 +1407,49 @@ func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs 
 	}, true
 }
 
+// withPriorMessages returns prior followed by own without writing into
+// either backing array - msgs comes straight from the message store's
+// slice and callers below still read it.
+func withPriorMessages(prior, own []message.Message) []message.Message {
+	if len(prior) == 0 {
+		return own
+	}
+	combined := make([]message.Message, 0, len(prior)+len(own))
+	combined = append(combined, prior...)
+	combined = append(combined, own...)
+	return combined
+}
+
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
 	msgs, err := a.messages.List(ctx, session.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list messages: %w", err)
 	}
+	return trimToSummary(session, msgs), nil
+}
 
-	if session.SummaryMessageID != "" {
-		summaryMsgIndex := -1
-		for i, msg := range msgs {
-			if msg.ID == session.SummaryMessageID {
-				summaryMsgIndex = i
-				break
-			}
-		}
-		if summaryMsgIndex != -1 {
-			msgs = msgs[summaryMsgIndex:]
-			msgs[0].Role = message.User
+// trimToSummary drops everything a session has already summarized away,
+// leaving the summary itself as the leading user message. Shared by the
+// live session's own history and by carried-over history from a named
+// sub-agent's earlier sessions, so a summarized past turn is replayed
+// the same way whichever side reads it.
+func trimToSummary(session session.Session, msgs []message.Message) []message.Message {
+	if session.SummaryMessageID == "" {
+		return msgs
+	}
+	summaryMsgIndex := -1
+	for i, msg := range msgs {
+		if msg.ID == session.SummaryMessageID {
+			summaryMsgIndex = i
+			break
 		}
 	}
-	return msgs, nil
+	if summaryMsgIndex == -1 {
+		return msgs
+	}
+	msgs = msgs[summaryMsgIndex:]
+	msgs[0].Role = message.User
+	return msgs
 }
 
 // hasUserTextMessage reports whether msgs already contains a

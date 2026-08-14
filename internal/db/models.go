@@ -51,6 +51,7 @@ type Session struct {
 	SummaryMessageID sql.NullString `json:"summary_message_id"`
 	Todos            sql.NullString `json:"todos"`
 	ProjectPath      string         `json:"project_path"`
+	AgentID          string         `json:"agent_id"`
 }
 
 type Thread struct {

@@ -21,6 +21,7 @@ INSERT INTO sessions (
     cost,
     summary_message_id,
     project_path,
+    agent_id,
     updated_at,
     created_at
 ) VALUES (
@@ -33,9 +34,10 @@ INSERT INTO sessions (
     ?,
     null,
     ?,
+    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path
+) RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id
 `
 
 type CreateSessionParams struct {
@@ -47,6 +49,7 @@ type CreateSessionParams struct {
 	CompletionTokens int64          `json:"completion_tokens"`
 	Cost             float64        `json:"cost"`
 	ProjectPath      string         `json:"project_path"`
+	AgentID          string         `json:"agent_id"`
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
@@ -59,6 +62,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.CompletionTokens,
 		arg.Cost,
 		arg.ProjectPath,
+		arg.AgentID,
 	)
 	var i Session
 	err := row.Scan(
@@ -74,6 +78,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.SummaryMessageID,
 		&i.Todos,
 		&i.ProjectPath,
+		&i.AgentID,
 	)
 	return i, err
 }
@@ -89,7 +94,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 }
 
 const getLastSession = `-- name: GetLastSession :one
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id
 FROM sessions
 WHERE project_path = ?
 ORDER BY updated_at DESC
@@ -112,12 +117,13 @@ func (q *Queries) GetLastSession(ctx context.Context, projectPath string) (Sessi
 		&i.SummaryMessageID,
 		&i.Todos,
 		&i.ProjectPath,
+		&i.AgentID,
 	)
 	return i, err
 }
 
 const getSessionByID = `-- name: GetSessionByID :one
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id
 FROM sessions
 WHERE id = ? LIMIT 1
 `
@@ -138,12 +144,13 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 		&i.SummaryMessageID,
 		&i.Todos,
 		&i.ProjectPath,
+		&i.AgentID,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id
 FROM sessions
 WHERE parent_session_id is NULL AND project_path = ?
 ORDER BY updated_at DESC
@@ -171,6 +178,7 @@ func (q *Queries) ListSessions(ctx context.Context, projectPath string) ([]Sessi
 			&i.SummaryMessageID,
 			&i.Todos,
 			&i.ProjectPath,
+			&i.AgentID,
 		); err != nil {
 			return nil, err
 		}
@@ -229,6 +237,63 @@ func (q *Queries) ListSessionsForGC(ctx context.Context) ([]ListSessionsForGCRow
 	return items, nil
 }
 
+const listSubAgentSessions = `-- name: ListSubAgentSessions :many
+SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id
+FROM sessions
+WHERE parent_session_id = ?
+  AND agent_id = ?
+  AND agent_id != ''
+  AND id != ?
+ORDER BY created_at ASC, id ASC
+`
+
+type ListSubAgentSessionsParams struct {
+	ParentSessionID sql.NullString `json:"parent_session_id"`
+	AgentID         string         `json:"agent_id"`
+	ID              string         `json:"id"`
+}
+
+// The sessions a named sub-agent has already had under one parent, oldest
+// first: every prior turn of the same continuing conversation. agent_id is
+// empty for sessions that are not a named delegation, and the caller must
+// never pass ” here - that would sweep up every unrelated child session.
+func (q *Queries) ListSubAgentSessions(ctx context.Context, arg ListSubAgentSessionsParams) ([]Session, error) {
+	rows, err := q.query(ctx, q.listSubAgentSessionsStmt, listSubAgentSessions, arg.ParentSessionID, arg.AgentID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Session{}
+	for rows.Next() {
+		var i Session
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentSessionID,
+			&i.Title,
+			&i.MessageCount,
+			&i.PromptTokens,
+			&i.CompletionTokens,
+			&i.Cost,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.SummaryMessageID,
+			&i.Todos,
+			&i.ProjectPath,
+			&i.AgentID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renameSession = `-- name: RenameSession :exec
 UPDATE sessions
 SET
@@ -256,7 +321,7 @@ SET
     cost = ?,
     todos = ?
 WHERE id = ?
-RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id
 `
 
 type UpdateSessionParams struct {
@@ -293,6 +358,7 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		&i.SummaryMessageID,
 		&i.Todos,
 		&i.ProjectPath,
+		&i.AgentID,
 	)
 	return i, err
 }

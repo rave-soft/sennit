@@ -16,6 +16,15 @@ type subAgentParams struct {
 	ToolCallID     string
 	Prompt         string
 	SessionTitle   string
+	// AgentID is the configured id of a *named* agent (a `.claude/agents`
+	// entry, or any config.Agents key other than coder/task). Setting it
+	// is what makes this delegation part of that agent's continuing
+	// conversation under this parent: the session is stamped with it and
+	// the agent's earlier sessions are replayed ahead of this one.
+	//
+	// Left empty by the anonymous delegations - the built-in `agent` and
+	// `agentic_fetch` tools - which stay stateless, one call to the next.
+	AgentID string
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -27,9 +36,25 @@ type subAgentParams struct {
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
 	// Create sub-session
 	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
-	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
+	session, err := c.sessions.CreateSubAgentSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle, params.AgentID)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
+	}
+
+	// What this named agent already knows, from its earlier delegations
+	// under the same parent. Collected after the session exists so the
+	// query can exclude it by id, and treated as best-effort: a
+	// delegation that has lost its memory is worse than one that
+	// remembers, but far better than one that refuses to run.
+	priorMessages, err := c.carryOverMessages(ctx, params.SessionID, params.AgentID, session.ID)
+	if err != nil {
+		slog.Warn(
+			"Failed to carry over sub-agent history; running without it",
+			"agent", params.AgentID,
+			"parent_session", params.SessionID,
+			"child_session", session.ID,
+			"error", err,
+		)
 	}
 
 	// Call session setup function if provided
@@ -54,6 +79,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return params.Agent.Run(ctx, SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
+			PriorMessages:    priorMessages,
 			MaxOutputTokens:  maxTokens,
 			ProviderOptions:  getProviderOptions(model, providerCfg),
 			Temperature:      model.ModelCfg.Temperature,

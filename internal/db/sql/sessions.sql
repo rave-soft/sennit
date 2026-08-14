@@ -9,6 +9,7 @@ INSERT INTO sessions (
     cost,
     summary_message_id,
     project_path,
+    agent_id,
     updated_at,
     created_at
 ) VALUES (
@@ -21,9 +22,23 @@ INSERT INTO sessions (
     ?,
     null,
     ?,
+    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
 ) RETURNING *;
+
+-- name: ListSubAgentSessions :many
+-- The sessions a named sub-agent has already had under one parent, oldest
+-- first: every prior turn of the same continuing conversation. agent_id is
+-- empty for sessions that are not a named delegation, and the caller must
+-- never pass '' here - that would sweep up every unrelated child session.
+SELECT *
+FROM sessions
+WHERE parent_session_id = ?
+  AND agent_id = ?
+  AND agent_id != ''
+  AND id != ?
+ORDER BY created_at ASC, id ASC;
 
 -- name: GetSessionByID :one
 SELECT *

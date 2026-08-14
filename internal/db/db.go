@@ -135,6 +135,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listSkillLoadsSinceStmt, err = db.PrepareContext(ctx, listSkillLoadsSince); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSkillLoadsSince: %w", err)
 	}
+	if q.listSubAgentSessionsStmt, err = db.PrepareContext(ctx, listSubAgentSessions); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSubAgentSessions: %w", err)
+	}
 	if q.listThreadsStmt, err = db.PrepareContext(ctx, listThreads); err != nil {
 		return nil, fmt.Errorf("error preparing query ListThreads: %w", err)
 	}
@@ -364,6 +367,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listSkillLoadsSinceStmt: %w", cerr)
 		}
 	}
+	if q.listSubAgentSessionsStmt != nil {
+		if cerr := q.listSubAgentSessionsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSubAgentSessionsStmt: %w", cerr)
+		}
+	}
 	if q.listThreadsStmt != nil {
 		if cerr := q.listThreadsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listThreadsStmt: %w", cerr)
@@ -505,6 +513,7 @@ type Queries struct {
 	listSessionsForGCStmt             *sql.Stmt
 	listSessionsSinceStmt             *sql.Stmt
 	listSkillLoadsSinceStmt           *sql.Stmt
+	listSubAgentSessionsStmt          *sql.Stmt
 	listThreadsStmt                   *sql.Stmt
 	listThreadsAllStmt                *sql.Stmt
 	listThreadsForGCStmt              *sql.Stmt
@@ -561,6 +570,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSessionsForGCStmt:             q.listSessionsForGCStmt,
 		listSessionsSinceStmt:             q.listSessionsSinceStmt,
 		listSkillLoadsSinceStmt:           q.listSkillLoadsSinceStmt,
+		listSubAgentSessionsStmt:          q.listSubAgentSessionsStmt,
 		listThreadsStmt:                   q.listThreadsStmt,
 		listThreadsAllStmt:                q.listThreadsAllStmt,
 		listThreadsForGCStmt:              q.listThreadsForGCStmt,

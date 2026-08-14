@@ -48,8 +48,16 @@ func HasIncompleteTodos(todos []Todo) bool {
 }
 
 type Session struct {
-	ID               string
-	ParentSessionID  string
+	ID              string
+	ParentSessionID string
+	// AgentID names the configured agent whose delegation this session
+	// is, and is empty for every session that is not one: top-level
+	// sessions, title sessions, thread and task sessions, and the
+	// anonymous `agent`/`agentic_fetch` tool's children. It exists so a
+	// named agent's successive delegations under one parent can be
+	// recognised as turns of a single continuing conversation - see
+	// [Service.ListSubAgentSessions].
+	AgentID          string
 	Title            string
 	MessageCount     int64
 	PromptTokens     int64
@@ -67,6 +75,17 @@ type Service interface {
 	Create(ctx context.Context, title string) (Session, error)
 	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
+	// CreateSubAgentSession creates a delegation's child session and
+	// stamps it with the delegating agent's id, which is what later
+	// makes [Service.ListSubAgentSessions] able to find it. agentID
+	// must be non-empty; use CreateTaskSession for an anonymous
+	// delegation.
+	CreateSubAgentSession(ctx context.Context, toolCallID, parentSessionID, title, agentID string) (Session, error)
+	// ListSubAgentSessions returns agentID's earlier sessions under
+	// parentSessionID, oldest first, excluding excludeSessionID (the
+	// session being started now). Returns nothing when agentID is
+	// empty rather than matching every anonymous child session.
+	ListSubAgentSessions(ctx context.Context, parentSessionID, agentID, excludeSessionID string) ([]Session, error)
 	Get(ctx context.Context, id string) (Session, error)
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
@@ -111,11 +130,16 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 }
 
 func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error) {
+	return s.CreateSubAgentSession(ctx, toolCallID, parentSessionID, title, "")
+}
+
+func (s *service) CreateSubAgentSession(ctx context.Context, toolCallID, parentSessionID, title, agentID string) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
 		ID:              toolCallID,
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           title,
 		ProjectPath:     s.projectPath,
+		AgentID:         agentID,
 	})
 	if err != nil {
 		return Session{}, err
@@ -123,6 +147,29 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.CreatedEvent, session)
 	return session, nil
+}
+
+func (s *service) ListSubAgentSessions(ctx context.Context, parentSessionID, agentID, excludeSessionID string) ([]Session, error) {
+	// The SQL guards against this too, but an empty agentID reaching the
+	// database at all means a caller lost track of which delegations are
+	// named; refuse it here where the mistake is still legible.
+	if agentID == "" {
+		return nil, nil
+	}
+	dbSessions, err := s.q.ListSubAgentSessions(ctx, db.ListSubAgentSessionsParams{
+		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
+		AgentID:         agentID,
+		ID:              excludeSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]Session, len(dbSessions))
+	for i, dbSession := range dbSessions {
+		sessions[i] = s.fromDBItem(dbSession)
+		s.applyEstimatedUsageState(&sessions[i])
+	}
+	return sessions, nil
 }
 
 func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error) {
@@ -323,6 +370,7 @@ func (s *service) fromDBItem(item db.Session) Session {
 	return Session{
 		ID:               item.ID,
 		ParentSessionID:  item.ParentSessionID.String,
+		AgentID:          item.AgentID,
 		Title:            item.Title,
 		MessageCount:     item.MessageCount,
 		PromptTokens:     item.PromptTokens,

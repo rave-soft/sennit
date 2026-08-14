@@ -61,6 +61,11 @@ type Querier interface {
 	// attribution for multi-model sessions, see internal/cmd/stat.go).
 	ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error)
 	ListSkillLoadsSince(ctx context.Context, arg ListSkillLoadsSinceParams) ([]ListSkillLoadsSinceRow, error)
+	// The sessions a named sub-agent has already had under one parent, oldest
+	// first: every prior turn of the same continuing conversation. agent_id is
+	// empty for sessions that are not a named delegation, and the caller must
+	// never pass '' here - that would sweep up every unrelated child session.
+	ListSubAgentSessions(ctx context.Context, arg ListSubAgentSessionsParams) ([]Session, error)
 	// Thread-facing: thread_list, the dashboard, and any other caller that
 	// means "threads" specifically. Scoped to kind = 'thread' so a caller
 	// asking for threads never sees another delegation kind sharing this
