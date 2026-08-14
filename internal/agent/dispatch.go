@@ -64,6 +64,15 @@ type dispatcher struct {
 	// actual consumption always happens in PrepareStep, so the mid-turn
 	// and wake paths can never record the same event differently.
 	completionInbox *csync.Map[string, []TaskCompletion]
+	// delegationParents maps a running delegation's own (child) session
+	// id to where its mid-run asks (SendToParent) should be delivered.
+	// Registered once, at delegation-create time, by internal/thread -
+	// separate from completionInbox because a parent target must be
+	// resolvable from *inside* the delegation's own turn, on demand,
+	// unlike a terminal completion's target, which is resolved once,
+	// externally, and handed straight to DeliverTaskCompletion. See
+	// DelegationParent and RegisterDelegationParent.
+	delegationParents *csync.Map[string, DelegationParent]
 	// cancelledSessions marks a session as "the user explicitly canceled
 	// this" until the next turn actually starts (see run's idle branch,
 	// which clears it). It exists solely to gate auto-waking a
@@ -119,6 +128,26 @@ type dispatcher struct {
 	onQueueChanged func(sessionID string)
 }
 
+// DelegationParent describes where a running delegation should send an
+// ask, and how to attribute it. Registered once, at delegation-create
+// time, by internal/thread (a later change - not part of this step),
+// keyed by the delegation's own (child) session id.
+type DelegationParent struct {
+	// Parent is the Coordinator owning the parent session's completion
+	// inbox. For a task this is the delegation's own Coordinator (a
+	// task shares its parent's App/coordinator); for a thread with a
+	// parent it is a different Coordinator entirely (the thread spawns
+	// its own isolated App) - see internal/thread's
+	// resolveDeliveryTarget for the existing analogous split on the
+	// terminal-completion path.
+	Parent          Coordinator
+	ParentSessionID string
+	DelegationID    string
+	Kind            string
+	Name            string
+	Depth           int
+}
+
 func newDispatcher() *dispatcher {
 	return &dispatcher{
 		messageQueue:      csync.NewMap[string, []SessionAgentCall](),
@@ -128,7 +157,17 @@ func newDispatcher() *dispatcher {
 		cancelMark:        csync.NewMap[string, uint64](),
 		completionInbox:   csync.NewMap[string, []TaskCompletion](),
 		cancelledSessions: csync.NewMap[string, struct{}](),
+		delegationParents: csync.NewMap[string, DelegationParent](),
 	}
+}
+
+// RegisterDelegationParent records where sessionID (a delegation's own
+// child session) should deliver a mid-run ask - see DelegationParent and
+// SendToParent. A plain Set: a later registration for the same session
+// id simply replaces the earlier one, which is fine since a session only
+// ever has one parent for its lifetime.
+func (d *dispatcher) RegisterDelegationParent(sessionID string, parent DelegationParent) {
+	d.delegationParents.Set(sessionID, parent)
 }
 
 // AcceptedRun owns exactly one accept reservation taken by

@@ -208,6 +208,21 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
+	// Register the parent here, right where sess.ID becomes durably
+	// associated with the task record: a task shares its parent's own
+	// App/Coordinator (see DelegationParent's doc comment), so this is
+	// the same coordinator instance startRun will later dispatch the
+	// task's turns through. Placing it before setStatus/startRun means
+	// no later error path in this function can leave a half-registered
+	// parent pointing at a session that never actually runs.
+	handle.App().AgentCoordinator.RegisterDelegationParent(sess.ID, agent.DelegationParent{
+		Parent:          handle.App().AgentCoordinator,
+		ParentSessionID: args.ParentSessionID,
+		DelegationID:    st.ID,
+		Kind:            string(KindTask),
+		Name:            st.Name,
+		Depth:           args.Depth,
+	})
 
 	st, err = t.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 	if err != nil {

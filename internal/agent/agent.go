@@ -221,6 +221,17 @@ type SessionAgent interface {
 	// dispatcher's completionInbox field, runTurn.prepareStep (the
 	// mid-turn delivery path), and startContinuation (the wake path).
 	DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion)
+	// RegisterDelegationParent records where sessionID (a running
+	// delegation's own child session) should deliver a mid-run ask via
+	// SendToParent. See DelegationParent.
+	RegisterDelegationParent(sessionID string, parent DelegationParent)
+	// SendToParent delivers a mid-run ask from sessionID to its
+	// registered parent (see RegisterDelegationParent), riding the same
+	// completion-inbox delivery path DeliverTaskCompletion uses - at-
+	// most-once, non-blocking, and folded into the parent's next step or
+	// an idle-wake continuation. Returns an error, delivering nothing,
+	// if sessionID has no registered parent.
+	SendToParent(ctx context.Context, sessionID, message string) error
 }
 
 type Model struct {
@@ -388,6 +399,37 @@ func (a *sessionAgent) DeliverTaskCompletion(ctx context.Context, sessionID stri
 		return
 	}
 	a.startContinuation(ctx, sessionID, "completion arrived while session was idle")
+}
+
+// RegisterDelegationParent records where sessionID should deliver a
+// mid-run ask. See dispatcher.RegisterDelegationParent.
+func (a *sessionAgent) RegisterDelegationParent(sessionID string, parent DelegationParent) {
+	a.dispatch.RegisterDelegationParent(sessionID, parent)
+}
+
+// SendToParent delivers a mid-run ask from sessionID to its registered
+// parent, riding the exact same delivery path DeliverTaskCompletion
+// uses (enqueue, at-most-once, idle-wake) via the registered parent's
+// own Coordinator - never this sessionAgent's, since a thread's parent
+// may live in an entirely different Coordinator/App. Non-blocking: it
+// enqueues and returns without waiting for a reply, exactly like
+// DeliverTaskCompletion.
+func (a *sessionAgent) SendToParent(ctx context.Context, sessionID, message string) error {
+	parent, ok := a.dispatch.delegationParents.Get(sessionID)
+	if !ok {
+		return fmt.Errorf("agent: session %q has no registered parent to message", sessionID)
+	}
+	parent.Parent.DeliverTaskCompletion(ctx, parent.ParentSessionID, TaskCompletion{
+		DelegationID:   parent.DelegationID,
+		Kind:           parent.Kind,
+		Name:           parent.Name,
+		ChildSessionID: sessionID,
+		Depth:          parent.Depth,
+		TerminalAt:     time.Now(),
+		IsMessage:      true,
+		Message:        message,
+	})
+	return nil
 }
 
 // drainCompletionsForStep removes and returns every completion queued for

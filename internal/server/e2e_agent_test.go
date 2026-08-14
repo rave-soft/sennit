@@ -219,19 +219,35 @@ func (c *scriptedCoordinator) CancelAll() {
 	}
 }
 
-func (c *scriptedCoordinator) IsBusy() bool                                                        { return false }
-func (c *scriptedCoordinator) IsSessionBusy(string) bool                                           { return false }
-func (c *scriptedCoordinator) QueuedPrompts(string) int                                            { return 0 }
-func (c *scriptedCoordinator) QueuedPromptsList(string) []string                                   { return nil }
-func (c *scriptedCoordinator) ClearQueue(string)                                                   {}
-func (c *scriptedCoordinator) Summarize(context.Context, string) error                             { return nil }
-func (c *scriptedCoordinator) Model() agent.Model                                                  { return agent.Model{} }
-func (c *scriptedCoordinator) UpdateModels(context.Context) error                                  { return nil }
-func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string)                       {}
-func (c *scriptedCoordinator) SetThreads(tools.ThreadManager)                                      {}
-func (c *scriptedCoordinator) SetTasks(tools.TaskManager)                                          {}
+func (c *scriptedCoordinator) IsBusy() bool { return false }
+
+func (c *scriptedCoordinator) IsSessionBusy(string) bool { return false }
+
+func (c *scriptedCoordinator) QueuedPrompts(string) int { return 0 }
+
+func (c *scriptedCoordinator) QueuedPromptsList(string) []string { return nil }
+
+func (c *scriptedCoordinator) ClearQueue(string) {}
+
+func (c *scriptedCoordinator) Summarize(context.Context, string) error { return nil }
+
+func (c *scriptedCoordinator) Model() agent.Model { return agent.Model{} }
+
+func (c *scriptedCoordinator) UpdateModels(context.Context) error { return nil }
+
+func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string) {}
+
+func (c *scriptedCoordinator) SetThreads(tools.ThreadManager) {}
+
+func (c *scriptedCoordinator) SetTasks(tools.TaskManager) {}
+
 func (c *scriptedCoordinator) DeliverTaskCompletion(context.Context, string, agent.TaskCompletion) {}
-func (c *scriptedCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)                      {}
+
+func (c *scriptedCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
+
+func (c *scriptedCoordinator) RegisterDelegationParent(string, agent.DelegationParent) {}
+
+func (c *scriptedCoordinator) SendToParent(context.Context, string, string) error { return nil }
 
 // agentE2EHarness extends the SSE harness with a scripted coordinator
 // wired into the workspace's embedded app.App, so POST /agent drives a

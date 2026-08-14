@@ -110,6 +110,14 @@ func (c *coordinatorOverSessionAgent) DeliverTaskCompletion(context.Context, str
 
 func (c *coordinatorOverSessionAgent) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
 
+func (c *coordinatorOverSessionAgent) RegisterDelegationParent(sessionID string, parent agent.DelegationParent) {
+	c.sa.RegisterDelegationParent(sessionID, parent)
+}
+
+func (c *coordinatorOverSessionAgent) SendToParent(ctx context.Context, sessionID, message string) error {
+	return c.sa.SendToParent(ctx, sessionID, message)
+}
+
 // -- fake model --
 
 // titleCallMaxTokens mirrors the fixed budget generateTitle sets for a

@@ -164,6 +164,10 @@ func (f *fakeThreadCoordinator) SetThreads(tools.ThreadManager) {}
 
 func (f *fakeThreadCoordinator) SetTasks(tools.TaskManager) {}
 
+func (f *fakeThreadCoordinator) RegisterDelegationParent(string, agent.DelegationParent) {}
+
+func (f *fakeThreadCoordinator) SendToParent(context.Context, string, string) error { return nil }
+
 type fakeThreadHandle struct {
 	id  string
 	app *app.App

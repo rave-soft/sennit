@@ -70,7 +70,9 @@ func (c *stubDispatchCoordinator) SetThreads(tools.ThreadManager)               
 func (c *stubDispatchCoordinator) SetTasks(tools.TaskManager)                    {}
 func (c *stubDispatchCoordinator) DeliverTaskCompletion(context.Context, string, agent.TaskCompletion) {
 }
-func (c *stubDispatchCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
+func (c *stubDispatchCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)          {}
+func (c *stubDispatchCoordinator) RegisterDelegationParent(string, agent.DelegationParent) {}
+func (c *stubDispatchCoordinator) SendToParent(context.Context, string, string) error      { return nil }
 
 // TestAgentDispatcher_SendRefusedAfterMarkClosing asserts that once
 // MarkClosing has been called, Send refuses synchronously with

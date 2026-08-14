@@ -48,6 +48,9 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.TaskCancelToolName,
 	tools.TaskSendToolName,
 	tools.TaskOutputToolName,
+	// ask_parent (internal/agent/tools/ask_parent.go), same story: no
+	// dedicated renderer yet.
+	tools.AskParentToolName,
 }
 
 // TestToolMessageItemFactories_MatchExpectedNames checks

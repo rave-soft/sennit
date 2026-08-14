@@ -1011,6 +1011,7 @@ func allToolNames() []string {
 		"task_cancel",
 		"task_send",
 		"task_output",
+		"ask_parent",
 	}
 }
 

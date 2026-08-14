@@ -57,13 +57,16 @@ func (s *stubCoordinator) Summarize(context.Context, string) error {
 	return nil
 }
 
-func (s *stubCoordinator) Model() agent.Model                                                  { return agent.Model{} }
+func (s *stubCoordinator) Model() agent.Model { return agent.Model{} }
+
 func (s *stubCoordinator) UpdateModels(context.Context) error                                  { return nil }
 func (s *stubCoordinator) GenerateTitle(context.Context, string, string)                       {}
 func (s *stubCoordinator) SetThreads(tools.ThreadManager)                                      {}
 func (s *stubCoordinator) SetTasks(tools.TaskManager)                                          {}
 func (s *stubCoordinator) DeliverTaskCompletion(context.Context, string, agent.TaskCompletion) {}
 func (s *stubCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)                      {}
+func (s *stubCoordinator) RegisterDelegationParent(string, agent.DelegationParent)             {}
+func (s *stubCoordinator) SendToParent(context.Context, string, string) error                  { return nil }
 
 // stubSessions is a minimal session.Service that returns a fixed list
 // (and supports Get by ID). All other methods return zero values; the

@@ -56,6 +56,10 @@ func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOp
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
 func (m *mockSessionAgent) DeliverTaskCompletion(ctx context.Context, sessionID string, c TaskCompletion) {
 }
+func (m *mockSessionAgent) RegisterDelegationParent(sessionID string, parent DelegationParent) {}
+func (m *mockSessionAgent) SendToParent(ctx context.Context, sessionID, message string) error {
+	return nil
+}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderConfig) *coordinator {

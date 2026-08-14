@@ -126,3 +126,65 @@ func TestTaskCompletionsMessage_ReachesGoogleRequest(t *testing.T) {
 	require.Contains(t, string(srv.body), "system-generated delegation report",
 		"the completion's self-identifying label must travel with it onto the wire")
 }
+
+// TestTaskCompletionsMessage_MessageVariantReachesAnthropicRequest proves
+// a mid-run ask (IsMessage true) rides the exact same safe user-role
+// delivery path a terminal completion does - not a system message, which
+// this same Anthropic adapter would silently drop once folded in after
+// other turns (see TestTaskCompletionsMessage_ReachesAnthropicRequest).
+func TestTaskCompletionsMessage_MessageVariantReachesAnthropicRequest(t *testing.T) {
+	t.Parallel()
+
+	srv := newCaptureBodyServer(t, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}`)
+
+	provider, err := anthropic.New(anthropic.WithBaseURL(srv.url), anthropic.WithAPIKey("test-key"))
+	require.NoError(t, err)
+	lm, err := provider.LanguageModel(t.Context(), "claude-sonnet-4-5")
+	require.NoError(t, err)
+
+	msg := TaskCompletion{
+		DelegationID:   "task-1",
+		Kind:           "task",
+		Name:           "task-name",
+		ChildSessionID: "child-session",
+		IsMessage:      true,
+		Message:        "anthropic-message-wire-marker",
+	}
+
+	_, _ = lm.Generate(t.Context(), fantasy.Call{Prompt: lateCompletionPrompt(msg)})
+
+	require.Contains(t, string(srv.body), "anthropic-message-wire-marker",
+		"a mid-run ask must reach the actual Anthropic request body; a system-role message here would be silently dropped by toPrompt's late-system-block skip")
+	require.Contains(t, string(srv.body), "system-generated delegation report",
+		"the message's self-identifying label must travel with it onto the wire")
+}
+
+// TestTaskCompletionsMessage_MessageVariantReachesGoogleRequest is the
+// same regression test for the Google adapter's identical late-system-
+// block skip. See TestTaskCompletionsMessage_ReachesGoogleRequest.
+func TestTaskCompletionsMessage_MessageVariantReachesGoogleRequest(t *testing.T) {
+	t.Parallel()
+
+	srv := newCaptureBodyServer(t, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`)
+
+	provider, err := google.New(google.WithBaseURL(srv.url), google.WithGeminiAPIKey("test-key"))
+	require.NoError(t, err)
+	lm, err := provider.LanguageModel(t.Context(), "gemini-2.5-flash")
+	require.NoError(t, err)
+
+	msg := TaskCompletion{
+		DelegationID:   "task-1",
+		Kind:           "task",
+		Name:           "task-name",
+		ChildSessionID: "child-session",
+		IsMessage:      true,
+		Message:        "google-message-wire-marker",
+	}
+
+	_, _ = lm.Generate(t.Context(), fantasy.Call{Prompt: lateCompletionPrompt(msg)})
+
+	require.Contains(t, string(srv.body), "google-message-wire-marker",
+		"a mid-run ask must reach the actual Google/Gemini request body; a system-role message here would be silently dropped by toGooglePrompt's late-system-block skip")
+	require.Contains(t, string(srv.body), "system-generated delegation report",
+		"the message's self-identifying label must travel with it onto the wire")
+}

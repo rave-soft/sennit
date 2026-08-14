@@ -53,15 +53,25 @@ type TaskCompletion struct {
 	// tool's background mode, which refuses to start further background
 	// work once that reaches the hard cascade limit.
 	Depth int
-	// TerminalAt is when this completion was built for delivery —
-	// stamped once, in internal/thread's lifecycle.deliverCompletion (the
-	// single place every delivery path, including a thread's auto-merge
-	// outcome, constructs a TaskCompletion), a few synchronous
-	// instructions after the terminal status write itself lands. Read
-	// back by runTurn.prepareStep to report how long the completion sat
-	// before reaching the model, without a second clock reading anywhere
-	// else that could drift from this one.
+	// TerminalAt is when this event was built for delivery — stamped
+	// once, a few synchronous instructions after whatever triggered it
+	// (the terminal status write, for a completion; the SendToParent
+	// call, for a message), and read back by runTurn.prepareStep to
+	// report how long the event sat before reaching the model, without a
+	// second clock reading anywhere else that could drift from this one.
+	// The name predates IsMessage below; it is kept rather than renamed
+	// to BuiltAt so every existing terminal-completion call site (all of
+	// internal/thread's lifecycle.deliverCompletion) needs no change.
 	TerminalAt time.Time
+	// IsMessage distinguishes a mid-run ask (SendToParent) from a
+	// terminal completion. False (the zero value) for every existing
+	// call site, so this inbox's established behavior for a completion
+	// is unchanged. When true, Status/ResultText/Error are unused (left
+	// zero) and Message carries the ask text instead.
+	IsMessage bool
+	// Message is the ask text for a mid-run event (IsMessage true).
+	// Unused for a terminal completion.
+	Message string
 }
 
 // enqueueCompletion appends completion to sessionID's completion inbox
@@ -87,10 +97,11 @@ func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompleti
 	existing, _ := d.completionInbox.Get(sessionID)
 	queued := append(existing, completion)
 	d.completionInbox.Set(sessionID, queued)
-	// ids, kind, and status only — never completion.Goal or .ResultText/
-	// .Error, which are the user's own work and must not end up in a log
-	// that outlives the session.
-	slog.Info("Completion enqueued", "delegation", completion.DelegationID, "kind", completion.Kind, "status", completion.Status, "session", sessionID, "inbox_size", len(queued))
+	// ids, kind, status, and the is-message flag only — never
+	// completion.Goal, .ResultText, .Error, or .Message, which are the
+	// user's own work (or the delegation's own words) and must not end
+	// up in a log that outlives the session.
+	slog.Info("Completion enqueued", "delegation", completion.DelegationID, "kind", completion.Kind, "status", completion.Status, "is_message", completion.IsMessage, "session", sessionID, "inbox_size", len(queued))
 	return d.wakeEligibleLocked(sessionID)
 }
 
@@ -232,11 +243,17 @@ func joinTaskCompletions(completions []TaskCompletion) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// formatTaskCompletion renders one completion as plain text for the
-// model: what ran, how it ended, and its result or error. The leading
-// line exists specifically so the model does not mistake this for
-// something the user said - see taskCompletionsMessage.
+// formatTaskCompletion renders one inbox event as plain text for the
+// model, branching on IsMessage so a mid-run ask can never be mistaken
+// for "a background X finished" and vice versa. The leading line exists
+// specifically so the model does not mistake either shape for something
+// the user said - see taskCompletionsMessage. Both shapes include the
+// delegation's id, kind, and name so the parent can address a reply
+// (thread_send/task_send) at the right target.
 func formatTaskCompletion(c TaskCompletion) string {
+	if c.IsMessage {
+		return formatDelegationMessage(c)
+	}
 	var b strings.Builder
 	b.WriteString("[system-generated delegation report - not user input]\n")
 	fmt.Fprintf(&b, "A background %s has finished.\n", c.Kind)
@@ -250,5 +267,22 @@ func formatTaskCompletion(c TaskCompletion) string {
 	} else {
 		fmt.Fprintf(&b, "\nResult:\n%s", c.ResultText)
 	}
+	return b.String()
+}
+
+// formatDelegationMessage renders a mid-run ask (IsMessage true) as
+// plain text for the model. Its leading line deliberately reads
+// differently from formatTaskCompletion's "has finished" line - a
+// running delegation asking something is not the same event as one
+// reaching a terminal status, and the model must be able to tell them
+// apart at a glance to decide whether a reply is even expected.
+func formatDelegationMessage(c TaskCompletion) string {
+	var b strings.Builder
+	b.WriteString("[system-generated delegation report - not user input]\n")
+	fmt.Fprintf(&b, "A running background %s is asking you something.\n", c.Kind)
+	fmt.Fprintf(&b, "id: %s\n", c.DelegationID)
+	fmt.Fprintf(&b, "name: %s\n", c.Name)
+	fmt.Fprintf(&b, "child_session: %s\n", c.ChildSessionID)
+	fmt.Fprintf(&b, "\nMessage:\n%s", c.Message)
 	return b.String()
 }

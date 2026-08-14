@@ -192,6 +192,61 @@ func TestManager_ParentlessThreadDeliversNothing(t *testing.T) {
 		"a thread created with no parent session must deliver nothing")
 }
 
+// TestManager_CreateWithParentRegistersDelegationParent proves a thread
+// created with a ParentSessionID (and a Manager built with ParentApp set)
+// registers its child session on its OWN coordinator (whose dispatcher
+// runs the thread's own turns), but with Parent resolving to the
+// Manager's parentApp coordinator — never the thread's own, wholly
+// isolated one — mirroring resolveDeliveryTarget's KindThread branch.
+func TestManager_CreateWithParentRegistersDelegationParent(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{
+		Name:            "with-parent",
+		Goal:            "do the thing",
+		MergePolicy:     MergeManual,
+		ParentSessionID: "parent-sess",
+	})
+	require.NoError(t, err)
+
+	ownCoord := spawner.appFor(st.WorktreePath).AgentCoordinator.(*fakeCoordinator)
+	registered := ownCoord.registeredDelegationParents()
+	require.Len(t, registered, 1)
+	got := registered[0]
+
+	require.Equal(t, st.SessionID, got.sessionID,
+		"a thread's parent must be registered under its own child session id")
+	require.Equal(t, parentApp.AgentCoordinator, got.parent.Parent,
+		"a thread's Parent must resolve to the Manager's parentApp coordinator, not its own isolated one")
+	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
+	require.Equal(t, st.ID, got.parent.DelegationID)
+	require.Equal(t, string(KindThread), got.parent.Kind)
+	require.Equal(t, st.Name, got.parent.Name)
+	require.Equal(t, 0, got.parent.Depth)
+}
+
+// TestManager_CreateWithoutParentRegistersNothing proves a thread created
+// with no ParentSessionID (the CLI's default, no-parent case) registers
+// no delegation parent at all — the parentless case a later ask_parent
+// tool must fail cleanly on.
+func TestManager_CreateWithoutParentRegistersNothing(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner, _ := newTestManagerWithParentApp(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{
+		Name:        "no-parent",
+		Goal:        "do the thing",
+		MergePolicy: MergeManual,
+		// No ParentSessionID.
+	})
+	require.NoError(t, err)
+
+	ownCoord := spawner.appFor(st.WorktreePath).AgentCoordinator.(*fakeCoordinator)
+	require.Empty(t, ownCoord.registeredDelegationParents(),
+		"a thread created with no parent session must register nothing")
+}
+
 // TestManager_ResolveDeliveryTarget_ThreadEdgeCases is a focused unit
 // test of resolveDeliveryTarget's KindThread branch, independent of a
 // full run/merge flow: no ParentApp configured, an entity with no known

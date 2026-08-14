@@ -164,6 +164,35 @@ func TestTaskManager_CompletionDeliveredToParentNotChild(t *testing.T) {
 	require.Empty(t, got.completion.Error)
 }
 
+// TestTaskManager_CreateRegistersDelegationParent proves Create wires up
+// where a running task's own mid-run ask (a later ask_parent tool, not
+// part of this step) should be delivered: registered on the task's own
+// coordinator (the same shared parent coordinator here — see
+// DelegationParent's doc comment), keyed by the task's own child session
+// id, pointing back at the caller's session.
+func TestTaskManager_CreateRegistersDelegationParent(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess", Depth: 2})
+	require.NoError(t, err)
+
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	registered := coord.registeredDelegationParents()
+	require.Len(t, registered, 1)
+	got := registered[0]
+
+	require.Equal(t, st.SessionID, got.sessionID,
+		"a task's parent must be registered under its own child session id")
+	require.Equal(t, coord, got.parent.Parent,
+		"a task shares its parent's own coordinator")
+	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
+	require.Equal(t, st.ID, got.parent.DelegationID)
+	require.Equal(t, string(KindTask), got.parent.Kind)
+	require.Equal(t, st.Name, got.parent.Name)
+	require.Equal(t, 2, got.parent.Depth)
+}
+
 // TestTaskManager_CompletionCarriesTerminalAtStamp proves
 // deliverCompletion stamps TaskCompletion.TerminalAt at delivery time —
 // the one place internal/agent's own "Completion delivered" log measures

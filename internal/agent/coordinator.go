@@ -93,6 +93,14 @@ type Coordinator interface {
 	// having resolved sessionID as the task's *parent* session - never
 	// the task's own child session.
 	DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion)
+	// RegisterDelegationParent records where sessionID (a running
+	// delegation's own child session) should deliver a mid-run ask via
+	// SendToParent. internal/thread calls this once, at delegation-
+	// create time (a later change - not part of this step).
+	RegisterDelegationParent(sessionID string, parent DelegationParent)
+	// SendToParent delivers a mid-run ask from sessionID to its
+	// registered parent. See SessionAgent.SendToParent.
+	SendToParent(ctx context.Context, sessionID, message string) error
 	// RefreshSkills replaces the coordinator's cached skill discovery
 	// results — called by the backend after its skills-directory watcher
 	// detects a SKILL.md added, edited, or removed outside this process,
@@ -740,6 +748,25 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
+	// ask_parent lets a delegation's own agent send a non-blocking
+	// mid-run message to whichever session created it (see
+	// Coordinator.SendToParent). Gated the same way as thread/task tools
+	// (!isSubAgent) but for a different, weaker reason: buildTools runs
+	// once per coordinator/App, not once per session — a task shares its
+	// parent's exact coordinator and tool list (only a thread gets a
+	// wholly separate coordinator/App), so there is currently no way to
+	// build a different tool list for a delegation's own session versus
+	// its parent's. That means ask_parent ends up offered to every
+	// top-level turn of a coordinator that has it in AllowedTools,
+	// including the parent's own top-level session, where invoking it
+	// will simply fail cleanly (SendToParent finds no registered parent)
+	// rather than being unavailable. It is therefore gated at runtime,
+	// via SendToParent's own lookup, rather than at build time the way
+	// thread/task tools are gated by manager presence.
+	if !isSubAgent {
+		allTools = append(allTools, tools.NewAskParentTool(c))
+	}
+
 	// Question tool is interactive-only and not available to sub-agents.
 	if !isSubAgent && c.interactive {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
@@ -994,6 +1021,16 @@ func (c *coordinator) SetTasks(tasks tools.TaskManager) {
 // DeliverTaskCompletion implements Coordinator.
 func (c *coordinator) DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion) {
 	c.currentAgent.DeliverTaskCompletion(ctx, sessionID, completion)
+}
+
+// RegisterDelegationParent implements Coordinator.
+func (c *coordinator) RegisterDelegationParent(sessionID string, parent DelegationParent) {
+	c.currentAgent.RegisterDelegationParent(sessionID, parent)
+}
+
+// SendToParent implements Coordinator.
+func (c *coordinator) SendToParent(ctx context.Context, sessionID, message string) error {
+	return c.currentAgent.SendToParent(ctx, sessionID, message)
 }
 
 // RefreshSkills implements Coordinator.RefreshSkills.

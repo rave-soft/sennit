@@ -107,6 +107,10 @@ func (f *fakeThreadCoordinator) CancelAll() {}
 
 func (f *fakeThreadCoordinator) Cancel(sessionID string) {}
 
+func (f *fakeThreadCoordinator) RegisterDelegationParent(string, agent.DelegationParent) {}
+
+func (f *fakeThreadCoordinator) SendToParent(context.Context, string, string) error { return nil }
+
 type fakeThreadHandle struct {
 	id  string
 	app *app.App

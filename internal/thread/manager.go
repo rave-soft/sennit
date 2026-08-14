@@ -274,6 +274,28 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
+	// Register the parent on the thread's own coordinator - its
+	// dispatcher is what the thread's own turns run through, so that is
+	// where a mid-run ask must be looked up by session id - but with
+	// Parent pointing at m.parentApp's coordinator, mirroring
+	// resolveDeliveryTarget's KindThread branch: a thread's own App is
+	// wholly isolated, so its coordinator is not where a completion (or
+	// an ask) is ever delivered to. A thread's parent is optional
+	// (unlike a task's), and guarded on m.parentApp the same way
+	// resolveDeliveryTarget is, since a Manager built without one (see
+	// ManagerOptions.ParentApp) must not panic. Placed here so both the
+	// idle (empty-Goal) and dispatched-Goal paths below register it - an
+	// idle thread activated by hand later must still be able to ask.
+	if args.ParentSessionID != "" && m.parentApp != nil {
+		handle.App().AgentCoordinator.RegisterDelegationParent(sess.ID, agent.DelegationParent{
+			Parent:          m.parentApp.AgentCoordinator,
+			ParentSessionID: args.ParentSessionID,
+			DelegationID:    st.ID,
+			Kind:            string(KindThread),
+			Name:            st.Name,
+			Depth:           0, // deliverCompletion is always called with depth 0 for a thread; see its onAutoMerge call above.
+		})
+	}
 
 	if args.Goal == "" {
 		st, err = m.lc.setStatus(ctx, st.ID, StatusIdle, "", "", 0)

@@ -145,6 +145,31 @@ type fakeCoordinator struct {
 	// completion-inbox tests can assert both which session an event
 	// targeted and that it was never the task's own child session.
 	delivered []deliveredCompletion
+	// registeredParents records every RegisterDelegationParent call, in
+	// order, keyed by the child session id it was registered for, so a
+	// delegation-create test can assert who a mid-run ask would resolve
+	// to without needing a full SendToParent delivery path.
+	registeredParents []registeredParent
+}
+
+// registeredParent pairs a RegisterDelegationParent call's child session
+// id with the DelegationParent it recorded.
+type registeredParent struct {
+	sessionID string
+	parent    agent.DelegationParent
+}
+
+// RegisterDelegationParent implements agent.Coordinator.
+func (f *fakeCoordinator) RegisterDelegationParent(sessionID string, parent agent.DelegationParent) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.registeredParents = append(f.registeredParents, registeredParent{sessionID: sessionID, parent: parent})
+}
+
+func (f *fakeCoordinator) registeredDelegationParents() []registeredParent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]registeredParent(nil), f.registeredParents...)
 }
 
 // deliveredCompletion pairs a DeliverTaskCompletion call's target session
