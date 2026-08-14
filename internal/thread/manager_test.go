@@ -116,6 +116,19 @@ func (f *fakeSessions) CreateTaskSession(_ context.Context, id, parentSessionID,
 	return f.createdSession, nil
 }
 
+// Get returns the one session CreateTaskSession fabricated, if id
+// matches it. deliverTaskCompletion (lifecycle.go) calls this to resolve
+// a task's parent session, so completion-inbox tests over fakeSessions
+// need it wired the same way CreateTaskSession already is.
+func (f *fakeSessions) Get(_ context.Context, id string) (session.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.createdSession.ID == id {
+		return f.createdSession, nil
+	}
+	return session.Session{}, fmt.Errorf("thread: fakeSessions: session %q not found", id)
+}
+
 // fakeCoordinator implements agent.Coordinator, recording Run calls and
 // CancelAll invocations. It does not publish RunComplete itself — tests
 // drive that explicitly through the owning app's RunCompletions broker, so
@@ -128,6 +141,30 @@ type fakeCoordinator struct {
 	cancelAllCalled bool
 	canceled        []string // sessionIDs passed to Cancel, in call order
 	runErr          error
+	// delivered records every DeliverTaskCompletion call, in order, so
+	// completion-inbox tests can assert both which session an event
+	// targeted and that it was never the task's own child session.
+	delivered []deliveredCompletion
+}
+
+// deliveredCompletion pairs a DeliverTaskCompletion call's target session
+// with the event it carried.
+type deliveredCompletion struct {
+	sessionID  string
+	completion agent.TaskCompletion
+}
+
+// DeliverTaskCompletion implements agent.Coordinator.
+func (f *fakeCoordinator) DeliverTaskCompletion(sessionID string, completion agent.TaskCompletion) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delivered = append(f.delivered, deliveredCompletion{sessionID: sessionID, completion: completion})
+}
+
+func (f *fakeCoordinator) deliveredCompletions() []deliveredCompletion {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]deliveredCompletion(nil), f.delivered...)
 }
 
 type fakeRun struct {

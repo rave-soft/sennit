@@ -85,6 +85,12 @@ type Coordinator interface {
 	// configured; only its background branch's availability depends on
 	// this), so it takes effect immediately with no rebuild needed.
 	SetTasks(tasks tools.TaskManager)
+	// DeliverTaskCompletion enqueues completion into sessionID's
+	// completion inbox for delivery on that session's next step (see
+	// runTurn.prepareStep). internal/thread calls this once a task
+	// reaches a terminal status, having resolved sessionID as the
+	// task's *parent* session - never the task's own child session.
+	DeliverTaskCompletion(sessionID string, completion TaskCompletion)
 	// RefreshSkills replaces the coordinator's cached skill discovery
 	// results — called by the backend after its skills-directory watcher
 	// detects a SKILL.md added, edited, or removed outside this process,
@@ -975,6 +981,11 @@ func (c *coordinator) SetTasks(tasks tools.TaskManager) {
 	c.tasksMu.Lock()
 	c.tasks = tasks
 	c.tasksMu.Unlock()
+}
+
+// DeliverTaskCompletion implements Coordinator.
+func (c *coordinator) DeliverTaskCompletion(sessionID string, completion TaskCompletion) {
+	c.currentAgent.DeliverTaskCompletion(sessionID, completion)
 }
 
 // RefreshSkills implements Coordinator.RefreshSkills.

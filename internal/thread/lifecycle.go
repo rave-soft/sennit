@@ -379,6 +379,11 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 // onRunSuccess is unset, or declines to handle it) completed with
 // rc.Text. Anything beyond that reaction — Manager's auto-merge follow-up
 // is the example — is onRunSuccess's job.
+//
+// Once a terminal status is actually recorded, a task (never a thread —
+// see deliverTaskCompletion) also gets pushed into its parent session's
+// completion inbox: threads still rest at their terminal status for
+// task_result-equivalent polling only, unchanged by this step.
 func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.RunComplete) {
 	c := l.existingControl(id)
 	if c == nil {
@@ -409,26 +414,73 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 		return
 	}
 
-	if rc.Cancelled {
-		if _, err := l.setStatus(ctx, id, StatusInterrupted, "", "", 0); err != nil {
+	var finalSt Thread
+	switch {
+	case rc.Cancelled:
+		finalSt, err = l.setStatus(ctx, id, StatusInterrupted, "", "", 0)
+		if err != nil {
 			slog.Error("thread: recording run cancellation failed", "thread", id, "error", err)
+			return
 		}
-		return
-	}
-	if rc.Error != "" {
-		if _, err := l.setStatus(ctx, id, StatusFailed, rc.Error, "", 0); err != nil {
+	case rc.Error != "":
+		finalSt, err = l.setStatus(ctx, id, StatusFailed, rc.Error, "", 0)
+		if err != nil {
 			slog.Error("thread: recording run failure failed", "thread", id, "error", err)
+			return
 		}
-		return
+	default:
+		if l.onRunSuccess != nil && l.onRunSuccess(ctx, c, st, rc.Text) {
+			return
+		}
+		finalSt, err = l.setStatus(ctx, id, StatusCompleted, "", rc.Text, time.Now().Unix())
+		if err != nil {
+			slog.Error("thread: recording run completion failed", "thread", id, "error", err)
+			return
+		}
 	}
 
-	if l.onRunSuccess != nil && l.onRunSuccess(ctx, c, st, rc.Text) {
+	if finalSt.Kind == KindTask {
+		l.deliverTaskCompletion(ctx, rt.handle, finalSt)
+	}
+}
+
+// deliverTaskCompletion pushes st (a task that just reached a terminal
+// status) into its parent session's completion inbox, so the parent's
+// next step sees the outcome ahead of any steering message queued at the
+// same time — see agent.TaskCompletion and runTurn.prepareStep.
+//
+// handle is rt.handle from the caller: a task's workspace is its parent
+// App (see ParentAppSpawner), so handle.App() is the same App whose
+// AgentCoordinator owns the parent session's completion inbox. The
+// parent link itself lives on the session record, not the delegation —
+// resolved here via Sessions.Get(st.SessionID).ParentSessionID — so a
+// task with no resolvable parent (should not happen: Create requires
+// one) is silently skipped rather than delivered nowhere useful; the
+// task's own terminal status is still recorded and still pollable via
+// task_result regardless.
+func (l *lifecycle) deliverTaskCompletion(ctx context.Context, handle Handle, st Thread) {
+	a := handle.App()
+	if a == nil || a.AgentCoordinator == nil || a.Sessions == nil {
 		return
 	}
-
-	if _, err := l.setStatus(ctx, id, StatusCompleted, "", rc.Text, time.Now().Unix()); err != nil {
-		slog.Error("thread: recording run completion failed", "thread", id, "error", err)
+	sess, err := a.Sessions.Get(ctx, st.SessionID)
+	if err != nil {
+		slog.Error("thread: resolve task's parent session failed", "task", st.ID, "error", err)
+		return
 	}
+	if sess.ParentSessionID == "" {
+		return
+	}
+	a.AgentCoordinator.DeliverTaskCompletion(sess.ParentSessionID, agent.TaskCompletion{
+		DelegationID:   st.ID,
+		Kind:           string(st.Kind),
+		Name:           st.Name,
+		Goal:           st.Goal,
+		Status:         string(st.Status),
+		ChildSessionID: st.SessionID,
+		ResultText:     st.ResultSummary,
+		Error:          st.Error,
+	})
 }
 
 // recover reconciles store state against reality after a process restart:

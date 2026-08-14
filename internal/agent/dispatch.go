@@ -37,6 +37,31 @@ type dispatcher struct {
 	// leak justifies: the map is bounded by the number of distinct
 	// sessions touched over the process lifetime, not by request volume.
 	dispatchMu *csync.Map[string, *sync.Mutex]
+	// completionInbox holds per-session TaskCompletion events - internal
+	// notifications that a background task finished, kept separate from
+	// messageQueue because a completion is not a steering follow-up and
+	// must never be folded in as if the user had typed it. It lives here
+	// rather than in a new type specifically so it inherits dispatcher's
+	// existing shape (in-memory, per-session, no persistence, no
+	// pubsub): a completion is durably recorded in internal/thread's
+	// store first (that row is what task_result polls), and this inbox
+	// only carries the lossy, at-most-once-delivery copy of it that
+	// prepareStep drains - if the process dies with an event still
+	// queued here, the underlying task is still terminal and can still
+	// be polled, so nothing but the (already best-effort) push
+	// notification is lost.
+	//
+	// See enqueueCompletion/drainCompletionsForStep/requeueCompletions
+	// in completion_inbox.go for the operations, and
+	// runTurn.prepareStep for the drain-before-steering ordering this
+	// exists to support.
+	//
+	// Enqueuing never distinguishes a busy session from an idle one:
+	// today both cases just leave the event queued (a busy session's
+	// active turn drains it on its own next step). Waking an idle
+	// session to deliver one immediately - via IsSessionBusy - is a
+	// deliberately unbuilt follow-up, not a gap in this map.
+	completionInbox *csync.Map[string, []TaskCompletion]
 	// acceptedRuns counts dispatched-but-not-yet-active runs per
 	// session. A counter > 0 means a dispatched prompt is in flight
 	// and has not yet completed the dispatch handoff in Run. Only
@@ -82,11 +107,12 @@ type dispatcher struct {
 
 func newDispatcher() *dispatcher {
 	return &dispatcher{
-		messageQueue:   csync.NewMap[string, []SessionAgentCall](),
-		activeRequests: csync.NewMap[string, *activeCancel](),
-		dispatchMu:     csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:   csync.NewMap[string, int](),
-		cancelMark:     csync.NewMap[string, uint64](),
+		messageQueue:    csync.NewMap[string, []SessionAgentCall](),
+		activeRequests:  csync.NewMap[string, *activeCancel](),
+		dispatchMu:      csync.NewMap[string, *sync.Mutex](),
+		acceptedRuns:    csync.NewMap[string, int](),
+		cancelMark:      csync.NewMap[string, uint64](),
+		completionInbox: csync.NewMap[string, []TaskCompletion](),
 	}
 }
 

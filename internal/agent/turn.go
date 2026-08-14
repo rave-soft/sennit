@@ -104,6 +104,42 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 
 	prepared.Tools = t.tools
 
+	// Drain the completion inbox before touching the steering queue, so
+	// a turn that has both sees a task's finished work ahead of a
+	// follow-up that may refer to it. Completions travel as a user-role
+	// message (see taskCompletionsMessage for why: a system-role message
+	// here is silently dropped by the Anthropic and Google adapters once
+	// any other message has come before it), but the message text plainly
+	// labels it as a system-generated report - not something the user
+	// typed - and it is never persisted via createUserMessage/
+	// message.Service the way a real steering follow-up is.
+	//
+	// At-most-once mirrors the steering drain immediately below: if
+	// this step fails before the completions are actually appended, put
+	// them back at the front of the inbox rather than lose them - and,
+	// critically, never re-drain and re-append ones already folded in
+	// successfully. A completion delivered twice would tell the model a
+	// task finished twice, which is worse than delivering it late.
+	completions := t.agent.drainCompletionsForStep(t.call.SessionID)
+	if len(completions) > 0 {
+		// Nothing below this point persists a completion anywhere durable
+		// (unlike a folded steering prompt, which is written via
+		// createUserMessage before it's appended): a completion lives
+		// only in the inbox and, once appended here, in this step's
+		// in-memory prepared.Messages. So "delivered" can only be
+		// declared once prepareStep itself returns successfully - any
+		// error from here on (including one unrelated to completions,
+		// e.g. the steering fold below, or the assistant-message create
+		// at the bottom) means this step never actually reached the
+		// model, and the drained batch must go back rather than vanish.
+		defer func() {
+			if err != nil {
+				t.agent.requeueCompletions(t.call.SessionID, completions)
+			}
+		}()
+		prepared.Messages = append(prepared.Messages, taskCompletionsMessage(completions))
+	}
+
 	// Drain queued follow-up prompts for this step. Calls covered
 	// by a cancel recorded while they sat in the queue are dropped:
 	// a cancel that arrived after a prompt was queued must not let

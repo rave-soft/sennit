@@ -175,6 +175,10 @@ type SessionAgent interface {
 	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
+	// DeliverTaskCompletion enqueues completion into sessionID's
+	// completion inbox. See dispatcher's completionInbox field and
+	// runTurn.prepareStep for delivery.
+	DeliverTaskCompletion(sessionID string, completion TaskCompletion)
 }
 
 type Model struct {
@@ -327,6 +331,25 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 // dispatcher.clearPendingCancel.
 func (a *sessionAgent) clearPendingCancel(sessionID string) {
 	a.dispatch.clearPendingCancel(sessionID)
+}
+
+// DeliverTaskCompletion enqueues completion into sessionID's completion
+// inbox. See dispatcher.enqueueCompletion.
+func (a *sessionAgent) DeliverTaskCompletion(sessionID string, completion TaskCompletion) {
+	a.dispatch.enqueueCompletion(sessionID, completion)
+}
+
+// drainCompletionsForStep removes and returns every completion queued for
+// sessionID. See dispatcher.drainCompletionsForStep.
+func (a *sessionAgent) drainCompletionsForStep(sessionID string) []TaskCompletion {
+	return a.dispatch.drainCompletionsForStep(sessionID)
+}
+
+// requeueCompletions puts a suffix of a drainCompletionsForStep batch back
+// at the front of sessionID's completion inbox. See
+// dispatcher.requeueCompletions.
+func (a *sessionAgent) requeueCompletions(sessionID string, remainder []TaskCompletion) {
+	a.dispatch.requeueCompletions(sessionID, remainder)
 }
 
 // publishQueueChanged is wired as dispatch.onQueueChanged (see

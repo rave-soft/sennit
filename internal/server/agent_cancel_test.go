@@ -86,12 +86,13 @@ func (s *runCoordinator) ClearQueue(string)                 {}
 func (s *runCoordinator) Summarize(context.Context, string) error {
 	return nil
 }
-func (s *runCoordinator) Model() agent.Model                             { return agent.Model{} }
-func (s *runCoordinator) UpdateModels(context.Context) error             { return nil }
-func (s *runCoordinator) GenerateTitle(context.Context, string, string)  {}
-func (s *runCoordinator) SetThreads(tools.ThreadManager)                 {}
-func (s *runCoordinator) SetTasks(tools.TaskManager)                     {}
-func (s *runCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
+func (s *runCoordinator) Model() agent.Model                                 { return agent.Model{} }
+func (s *runCoordinator) UpdateModels(context.Context) error                 { return nil }
+func (s *runCoordinator) GenerateTitle(context.Context, string, string)      {}
+func (s *runCoordinator) SetThreads(tools.ThreadManager)                     {}
+func (s *runCoordinator) SetTasks(tools.TaskManager)                         {}
+func (s *runCoordinator) DeliverTaskCompletion(string, agent.TaskCompletion) {}
+func (s *runCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)     {}
 
 func (s *runCoordinator) capturedCtx() context.Context {
 	s.mu.Lock()

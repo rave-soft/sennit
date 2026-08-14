@@ -121,6 +121,47 @@ func TestTaskManager_CreateRunsToCompletion(t *testing.T) {
 	require.Equal(t, "finished", got.ResultSummary)
 }
 
+// TestTaskManager_CompletionDeliveredToParentNotChild proves the
+// completion-inbox delivery target: once a task's run finishes, the
+// structured completion goes to its *parent* session (the one that
+// created it), resolved via the child session's ParentSessionID — never
+// to the task's own child session, which is the one thing a delivery
+// bug here could plausibly get backwards (both ids are available at the
+// call site, and st.SessionID is far closer at hand than the parent
+// link).
+func TestTaskManager_CompletionDeliveredToParentNotChild(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	publishSuccess(t, parentApp, st.SessionID)
+
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
+
+	delivered := coord.deliveredCompletions()
+	require.Len(t, delivered, 1)
+	got := delivered[0]
+
+	require.Equal(t, "parent-sess", got.sessionID,
+		"the completion must be delivered to the parent session, not the task's own")
+	require.NotEqual(t, st.SessionID, got.sessionID,
+		"the completion must never land in the task's own child session")
+
+	require.Equal(t, st.ID, got.completion.DelegationID)
+	require.Equal(t, string(KindTask), got.completion.Kind)
+	require.Equal(t, st.Name, got.completion.Name)
+	require.Equal(t, "do the thing", got.completion.Goal)
+	require.Equal(t, string(StatusCompleted), got.completion.Status)
+	require.Equal(t, st.SessionID, got.completion.ChildSessionID,
+		"the child session id travels inside the event for the model's benefit, even though delivery targets the parent")
+	require.Equal(t, "finished", got.completion.ResultText)
+	require.Empty(t, got.completion.Error)
+}
+
 // TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable is the
 // failure mode that matters most for this delegation kind: a task must
 // never get its own isolated App (that is the entire reason it is

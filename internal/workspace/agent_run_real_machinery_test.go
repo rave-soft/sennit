@@ -104,7 +104,8 @@ func (c *coordinatorOverSessionAgent) GenerateTitle(context.Context, string, str
 
 func (c *coordinatorOverSessionAgent) SetThreads(tools.ThreadManager) {}
 
-func (c *coordinatorOverSessionAgent) SetTasks(tools.TaskManager) {}
+func (c *coordinatorOverSessionAgent) SetTasks(tools.TaskManager)                         {}
+func (c *coordinatorOverSessionAgent) DeliverTaskCompletion(string, agent.TaskCompletion) {}
 
 func (c *coordinatorOverSessionAgent) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
 
