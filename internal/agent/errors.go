@@ -6,10 +6,9 @@ import (
 )
 
 var (
-	ErrRequestCancelled = errors.New("request canceled by user")
-	ErrSessionBusy      = errors.New("session is currently processing another request")
-	ErrEmptyPrompt      = errors.New("prompt is empty")
-	ErrSessionMissing   = errors.New("session id is missing")
+	ErrSessionBusy    = errors.New("session is currently processing another request")
+	ErrEmptyPrompt    = errors.New("prompt is empty")
+	ErrSessionMissing = errors.New("session id is missing")
 )
 
 // ProviderQuotaError reports that a provider rejected a request because

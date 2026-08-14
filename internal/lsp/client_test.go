@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/braid/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +24,7 @@ func TestClient(t *testing.T) {
 
 	// Test creating a powernap client - this will likely fail with echo
 	// but we can still test the basic structure
-	client, err := New("test", cfg, config.NewShellVariableResolver(env.NewFromMap(map[string]string{
+	client, err := New("test", cfg, config.NewShellVariableResolver(testenv.New(map[string]string{
 		"THE_CMD": "echo",
 	})), ".", false)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestNew_ExpansionFailure_Args(t *testing.T) {
 		Command: "echo",
 		Args:    []string{"--root", "$(false)"},
 	}
-	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
 
 	client, err := New("test-args-fail", cfg, resolver, ".", false)
 	require.Error(t, err)
@@ -87,7 +87,7 @@ func TestNew_ExpansionFailure_Env(t *testing.T) {
 		Command: "echo",
 		Env:     map[string]string{"BAD": "$(false)"},
 	}
-	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
 
 	client, err := New("test-env-fail", cfg, resolver, ".", false)
 	require.Error(t, err)

@@ -280,6 +280,7 @@ func messageToProto(m message.Message) proto.Message {
 		Parts:     m.Parts,
 		Model:     m.Model,
 		Provider:  m.Provider,
+		Origin:    m.Origin,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}

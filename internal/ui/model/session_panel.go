@@ -114,6 +114,12 @@ const sessionPanelBudgetFraction = 0.4
 type sessionPanelState struct {
 	expanded     bool
 	autoExpanded bool
+	// threadsCollapsed hides the threads section's blocks, leaving its
+	// header. Default false, so threads keep showing as they always have
+	// until someone collapses them; the todos section defaults the other
+	// way because its collapsed form still shows what is in progress,
+	// whereas a collapsed threads section shows nothing but its count.
+	threadsCollapsed bool
 }
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
@@ -263,6 +269,45 @@ func sessionPanelTodosHeaderText(completed, total int, expanded bool) string {
 	return fmt.Sprintf("todos %d/%d %s", completed, total, chevron)
 }
 
+// shedThreadBlocks drops whole two-row thread blocks until the plan fits
+// the budget, returning the surviving blocks, the updated hidden count,
+// and the rows they occupy. Blocks are dropped from the end, so the
+// oldest (first-created) threads are the ones that stay visible, and
+// every dropped block is added to the "…and N more" count rather than
+// disappearing unannounced.
+func shedThreadBlocks(threads []proto.Thread, more, over int) ([]proto.Thread, int, int) {
+	drop := (over + 1) / 2 // round up: one row over still costs a block
+	if drop > len(threads) {
+		drop = len(threads)
+	}
+	kept := threads[:len(threads)-drop]
+	more += drop
+	if len(kept) == 0 {
+		// Nothing survived: the section disappears entirely, header and
+		// footer included. The budget has to be able to reclaim every
+		// row it lent — a section that always keeps one line to say how
+		// much is hidden could never be shed to zero, which is exactly
+		// what a pathological terminal height needs.
+		return nil, more, 0
+	}
+	rows := len(kept) * 2
+	if more > 0 {
+		rows++ // the footer row that reports what is hidden
+	}
+	return kept, more, rows
+}
+
+// sessionPanelThreadsHeaderText renders the threads header row's plain
+// text: "threads <active>" plus the same disclosure triangle the todos
+// header uses — ▸ collapsed, ▾ expanded.
+func sessionPanelThreadsHeaderText(active int, expanded bool) string {
+	chevron := "▸"
+	if expanded {
+		chevron = "▾"
+	}
+	return fmt.Sprintf("threads %d %s", active, chevron)
+}
+
 // renderSessionQueueLines renders one truncated line per queued prompt,
 // mirroring pills.go's old queueList — same prefix/text styling and
 // per-item truncation — but with no border or focus gating: the queue is
@@ -297,6 +342,12 @@ type sessionPanelPlan struct {
 	// time) so sessionPanelRowLayout and drawSessionPanel agree on
 	// exactly how many rows the header consumes without recomputing it.
 	threadsHeaderRows int
+	// threadsExpanded is m.panel.threadsCollapsed inverted; when false the
+	// section keeps its header (and its count) but paints no blocks.
+	threadsExpanded bool
+	// threadsActive is how many active delegations exist regardless of
+	// the visible cap or the collapse state — what the header reports.
+	threadsActive int
 
 	// delegations are currently-running (no result yet) top-level
 	// sub-agent tool calls in this session's own chat, rendered with the
@@ -377,12 +428,16 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	}
 
 	active := activeDockThreads(m.threadsDock.cache.value)
-	visible, more := visibleDockThreads(active)
-	plan.threads = visible
-	plan.threadsMore = more
-	plan.threadsRows = len(visible) * 2
-	if more > 0 {
-		plan.threadsRows++
+	plan.threadsActive = len(active)
+	plan.threadsExpanded = !m.panel.threadsCollapsed
+	if plan.threadsExpanded {
+		visible, more := visibleDockThreads(active)
+		plan.threads = visible
+		plan.threadsMore = more
+		plan.threadsRows = len(visible) * 2
+		if more > 0 {
+			plan.threadsRows++
+		}
 	}
 
 	todos := m.session.Todos
@@ -433,7 +488,11 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	// section is shed to zero, which shrinks over() by exactly the row it
 	// would otherwise still be charging for.
 	threadsHeaderRows := func() int {
-		if plan.threadsRows > 0 {
+		// A collapsed section keeps its header: it is the only thing left
+		// to click to get the threads back, and it still reports how many
+		// are active. Shedding to zero rows still drops it, since that is
+		// the budget reclaiming space rather than a user hiding content.
+		if plan.threadsRows > 0 || (!plan.threadsExpanded && plan.threadsActive > 0) {
 			return 1
 		}
 		return 0
@@ -481,7 +540,12 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.delegationsRows = max(0, plan.delegationsRows-o)
 	}
 	if o := over(); o > 0 {
-		plan.threadsRows = max(0, plan.threadsRows-o)
+		// Shed whole blocks, not rows. A thread block is two rows, so
+		// subtracting an odd count used to leave half a block painted —
+		// a name with no status line under it — and the hidden threads
+		// vanished silently, with the "…and N more" footer still
+		// reporting only what the visible cap had dropped.
+		plan.threads, plan.threadsMore, plan.threadsRows = shedThreadBlocks(plan.threads, plan.threadsMore, o)
 	}
 	if over() > 0 {
 		// budget < 1: even the one-line todos header doesn't fit. The todo
@@ -562,16 +626,25 @@ func threadBlockGeometry(area uv.Rectangle, threads []proto.Thread) []uv.Rectang
 // call this instead of duplicating the row-advancing math. todosListRect is
 // the area of the (possibly scrollable) todo rows below the header, for the
 // mouse-wheel hit-test that adjusts m.panelTodosScrollOffset.
-func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects, delegationBlockRects []uv.Rectangle, todosHeaderRect, todosListRect uv.Rectangle) {
+func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects, delegationBlockRects []uv.Rectangle, todosHeaderRect, todosListRect, threadsHeaderRect uv.Rectangle) {
 	if area.Dy() <= 0 || area.Dx() <= 0 {
-		return nil, nil, uv.Rectangle{}, uv.Rectangle{}
+		return nil, nil, uv.Rectangle{}, uv.Rectangle{}, uv.Rectangle{}
 	}
 
 	row := area
 	row.Max.Y = row.Min.Y
 
+	// The header is laid out independently of the blocks: a collapsed
+	// section has no blocks but still owns its header row, and that row
+	// is the only hit target left for expanding it again.
+	if plan.threadsHeaderRows > 0 {
+		threadsHeaderRect = row
+		threadsHeaderRect.Min.Y = row.Min.Y
+		threadsHeaderRect.Max.Y = min(row.Min.Y+1, area.Max.Y)
+		row.Min.Y = min(row.Min.Y+plan.threadsHeaderRows, area.Max.Y)
+		row.Max.Y = row.Min.Y
+	}
 	if plan.threadsRows > 0 {
-		row.Min.Y = min(row.Min.Y+plan.threadsHeaderRows, area.Max.Y) // "threads" section-separator line, not hit-tested.
 		threadsArea := area
 		threadsArea.Min.Y = row.Min.Y
 		threadsArea.Max.Y = min(row.Min.Y+plan.threadsRows, area.Max.Y)
@@ -599,7 +672,7 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 		todosListRect.Max.Y = min(todosListRect.Min.Y+plan.todosViewportRows, area.Max.Y)
 	}
 
-	return threadBlockRects, delegationBlockRects, todosHeaderRect, todosListRect
+	return threadBlockRects, delegationBlockRects, todosHeaderRect, todosListRect, threadsHeaderRect
 }
 
 // panelBlockDrawSpec supplies the context-specific content for the shared
@@ -703,6 +776,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	m.panelDelegationRects = nil
 	m.panelDelegations = nil
 	m.panelTodosHeaderRect = uv.Rectangle{}
+	m.panelThreadsHeaderRect = uv.Rectangle{}
 	m.panelTodosListRect = uv.Rectangle{}
 	if area.Dy() <= 0 || area.Dx() <= 0 {
 		return
@@ -711,13 +785,26 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	plan := m.sessionPanelPlan(area.Dy())
 	t := m.com.Styles
 	width := area.Dx()
-	_, _, todosHeaderRect, todosListRect := sessionPanelRowLayout(area, plan)
+	_, _, todosHeaderRect, todosListRect, _ := sessionPanelRowLayout(area, plan)
 	row := area
 	row.Max.Y = row.Min.Y
 
-	if plan.threadsRows > 0 {
+	if plan.threadsHeaderRows > 0 || plan.threadsRows > 0 {
 		if plan.threadsHeaderRows > 0 {
-			row.Min.Y = drawPanelLine(scr, area, row.Min.Y, common.Section(t, "threads", width))
+			// Styled and hover-lit like the todos header rather than a
+			// plain separator: this row is clickable now, and a row that
+			// responds to a click has to look like it does.
+			headerView := common.SectionStyled(t, t.Section.Title,
+				sessionPanelThreadsHeaderText(plan.threadsActive, plan.threadsExpanded), width)
+			if m.panelThreadsHover {
+				headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
+			}
+			headerRow := area
+			headerRow.Min.Y = row.Min.Y
+			headerRow.Max.Y = row.Min.Y + 1
+			uv.NewStyledString(headerView).Draw(scr, headerRow)
+			m.panelThreadsHeaderRect = headerRow
+			row.Min.Y++
 			row.Max.Y = row.Min.Y
 		}
 		threadsArea := area
@@ -914,4 +1001,12 @@ func (m *UI) toggleTodosExpanded() tea.Cmd {
 		m.chat.ScrollToBottom()
 	}
 	return nil
+}
+
+// toggleThreadsCollapsed flips the threads section between showing its
+// blocks and showing only its header. It mirrors toggleTodosExpanded, but
+// needs no relayout command of its own: the row budget is recomputed from
+// the plan on the next draw, and the plan reads this flag directly.
+func (m *UI) toggleThreadsCollapsed() {
+	m.panel.threadsCollapsed = !m.panel.threadsCollapsed
 }

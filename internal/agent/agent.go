@@ -74,8 +74,18 @@ type SessionAgentCall struct {
 	// reliable completion contract (e.g. `braid run` against a
 	// session that may be busy) MUST set it; SessionID alone is
 	// ambiguous when concurrent turns share the same session.
-	RunID            string
-	Prompt           string
+	RunID  string
+	Prompt string
+	// PromptOrigin is the message.Origin Prompt should be persisted
+	// under by createUserMessage. Empty means the default,
+	// message.OriginPerson — set only by coordinator.run reading
+	// PromptOriginFromContext(ctx), which in turn is set by thread/task
+	// dispatch (a delegation's goal, or a thread_send/task_send
+	// follow-up; see agent.WithPromptOrigin). Role is always
+	// message.User regardless of PromptOrigin — origin is authorship
+	// metadata only and has zero effect on what reaches the model (see
+	// Message.ToAIMessage).
+	PromptOrigin     message.Origin
 	ProviderOptions  fantasy.ProviderOptions
 	Attachments      []message.Attachment
 	MaxOutputTokens  int64
@@ -1167,8 +1177,9 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	}
 	parts = append(parts, attachmentParts...)
 	msg, err := a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
-		Role:  message.User,
-		Parts: parts,
+		Role:   message.User,
+		Parts:  parts,
+		Origin: call.PromptOrigin,
 	})
 	if err != nil {
 		return message.Message{}, fmt.Errorf("failed to create user message: %w", err)
@@ -1360,8 +1371,13 @@ func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.S
 	return msgs, nil
 }
 
-// hasUserTextMessage reports whether any user message in msgs contains
-// text content (as opposed to only shell commands or other non-text parts).
+// hasUserTextMessage reports whether msgs already contains a
+// message.User message with text — either something the user typed
+// themselves or a delegation's goal/follow-up dispatched with
+// message.OriginAgent (Role is always message.User regardless of
+// origin; see SessionAgentCall.PromptOrigin). Either way generateTitle
+// already ran once for this session and must not run again and clobber
+// that title with a shorter follow-up prompt.
 func hasUserTextMessage(msgs []message.Message) bool {
 	for _, msg := range msgs {
 		if msg.Role != message.User {

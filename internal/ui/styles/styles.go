@@ -295,6 +295,7 @@ type Styles struct {
 		NoContent        lipgloss.Style
 		Thinking         lipgloss.Style
 		ErrorTag         lipgloss.Style
+		OriginAgentTag   lipgloss.Style // Muted caption marking a message an agent authored, not the person.
 		ErrorTitle       lipgloss.Style
 		ErrorDetails     lipgloss.Style
 		ToolCallFocused  lipgloss.Style

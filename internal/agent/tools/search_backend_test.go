@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/braid/internal/testenv"
 )
 
 // TestNewSearchBackendDefaultsToDuckDuckGo verifies that an empty
@@ -181,7 +181,7 @@ func TestTavilyBackendRequiresAPIKey(t *testing.T) {
 // runs through shell expansion, the same as provider api_key.
 func TestNewSearchBackendExpandsAPIKey(t *testing.T) {
 	t.Setenv("BRAID_TEST_TAVILY_KEY", "expanded-key")
-	resolver := config.NewShellVariableResolver(env.NewFromMap(map[string]string{
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{
 		"BRAID_TEST_TAVILY_KEY": "expanded-key",
 	}))
 

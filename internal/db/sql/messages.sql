@@ -18,10 +18,11 @@ INSERT INTO messages (
     model,
     provider,
     is_summary_message,
+    origin,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
 RETURNING *;
 
@@ -49,7 +50,7 @@ WHERE session_id = ?;
 -- name: ListUserMessagesBySession :many
 SELECT *
 FROM messages
-WHERE session_id = ? AND role = 'user'
+WHERE session_id = ? AND role = 'user' AND origin = 'person'
 ORDER BY created_at DESC;
 
 -- name: ListAllUserMessages :many
@@ -59,6 +60,7 @@ SELECT messages.*
 FROM messages
 JOIN sessions ON sessions.id = messages.session_id
 WHERE messages.role = 'user'
+  AND messages.origin = 'person'
   AND sessions.parent_session_id IS NULL
   AND NOT EXISTS (
       SELECT 1

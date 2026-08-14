@@ -411,6 +411,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// the coalesce closure publishes the final outcome under that
 	// same correlator.
 	runID := RunIDFromContext(ctx)
+	promptOrigin := PromptOriginFromContext(ctx)
 	run := func() (*fantasy.AgentResult, error) {
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			Runtime:          runtime,
@@ -418,6 +419,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			SessionID:        sessionID,
 			RunID:            runID,
 			Prompt:           prompt,
+			PromptOrigin:     promptOrigin,
 			Attachments:      attachments,
 			MaxOutputTokens:  runtime.maxOutputTokens,
 			ProviderOptions:  runtime.providerOptions,

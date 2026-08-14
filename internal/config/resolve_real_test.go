@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/braid/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +25,7 @@ import (
 func realShellResolver(vars map[string]string) VariableResolver {
 	m := map[string]string{"PATH": os.Getenv("PATH")}
 	maps.Copy(m, vars)
-	return NewShellVariableResolver(env.NewFromMap(m))
+	return NewShellVariableResolver(testenv.New(m))
 }
 
 func writeTempFile(t *testing.T, content string) string {
