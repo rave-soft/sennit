@@ -41,17 +41,59 @@ type Service interface {
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 }
 
-type service struct {
-	*pubsub.Broker[File]
+type fileVersionTransaction interface {
+	NextFileVersion(ctx context.Context, path string) (int64, error)
+	CreateFile(ctx context.Context, params db.CreateFileParams) (db.File, error)
+	Commit() error
+	Rollback() error
+}
+
+type fileVersionStore interface {
+	NextFileVersion(ctx context.Context, path string) (int64, error)
+	Begin(ctx context.Context) (fileVersionTransaction, error)
+}
+
+type sqlFileVersionStore struct {
 	db *sql.DB
 	q  *db.Queries
 }
 
-func NewService(q *db.Queries, db *sql.DB) Service {
+func (s sqlFileVersionStore) NextFileVersion(ctx context.Context, path string) (int64, error) {
+	return s.q.NextFileVersion(ctx, path)
+}
+
+func (s sqlFileVersionStore) Begin(ctx context.Context) (fileVersionTransaction, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &sqlFileVersionTransaction{Tx: tx, q: s.q.WithTx(tx)}, nil
+}
+
+type sqlFileVersionTransaction struct {
+	*sql.Tx
+	q *db.Queries
+}
+
+func (tx *sqlFileVersionTransaction) NextFileVersion(ctx context.Context, path string) (int64, error) {
+	return tx.q.NextFileVersion(ctx, path)
+}
+
+func (tx *sqlFileVersionTransaction) CreateFile(ctx context.Context, params db.CreateFileParams) (db.File, error) {
+	return tx.q.CreateFile(ctx, params)
+}
+
+type service struct {
+	*pubsub.Broker[File]
+	q        *db.Queries
+	versions fileVersionStore
+}
+
+func NewService(q *db.Queries, sqlDB *sql.DB) Service {
 	return &service{
-		Broker: pubsub.NewBroker[File](),
-		q:      q,
-		db:     db,
+		Broker:   pubsub.NewBroker[File](),
+		q:        q,
+		versions: sqlFileVersionStore{db: sqlDB, q: q},
 	}
 }
 
@@ -80,20 +122,18 @@ func (s *service) Create(ctx context.Context, sessionID, path, content string) (
 // is computed inside the same transaction as the insert to avoid a
 // read-then-write race between concurrent callers.
 func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.versions.Begin(ctx)
 	if err != nil {
 		return File{}, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	qtx := s.q.WithTx(tx)
-
-	nextVersion, err := qtx.NextFileVersion(ctx, path)
+	nextVersion, err := tx.NextFileVersion(ctx, path)
 	if err != nil {
 		return File{}, fmt.Errorf("failed to determine next file version: %w", err)
 	}
 
-	dbFile, err := qtx.CreateFile(ctx, db.CreateFileParams{
+	dbFile, err := tx.CreateFile(ctx, db.CreateFileParams{
 		ID:        uuid.New().String(),
 		SessionID: sessionID,
 		Path:      path,

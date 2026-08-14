@@ -1,10 +1,15 @@
 package history
 
 import (
+	"context"
+	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +17,7 @@ import (
 // newTestService sets up an isolated on-disk SQLite DB (with migrations) and
 // a session to attach files to, mirroring the pattern used in
 // internal/session/session_test.go.
-func newTestService(t *testing.T) (Service, session.Service, string) {
+func newTestService(t *testing.T) (Service, session.Service, string, string) {
 	t.Helper()
 
 	dataDir := t.TempDir()
@@ -28,11 +33,26 @@ func newTestService(t *testing.T) (Service, session.Service, string) {
 	sess, err := sessions.Create(t.Context(), "test")
 	require.NoError(t, err)
 
-	return NewService(db.New(conn), conn), sessions, sess.ID
+	return NewService(db.New(conn), conn), sessions, sess.ID, dataDir
+}
+
+// receiveOrContext waits for a test phase to complete or fails when the test's
+// overall watchdog context expires.
+func receiveOrContext[T any](t *testing.T, ctx context.Context, ch <-chan T) T {
+	t.Helper()
+
+	select {
+	case value := <-ch:
+		return value
+	case <-ctx.Done():
+		t.Fatalf("test context expired while waiting for phase: %v", ctx.Err())
+		var zero T
+		return zero
+	}
 }
 
 func TestCreateVersionSequentialVersions(t *testing.T) {
-	files, _, sessionID := newTestService(t)
+	files, _, sessionID, _ := newTestService(t)
 
 	first, err := files.CreateVersion(t.Context(), sessionID, "foo.go", "v0")
 	require.NoError(t, err)
@@ -43,45 +63,245 @@ func TestCreateVersionSequentialVersions(t *testing.T) {
 	require.Equal(t, int64(1), second.Version)
 }
 
-// TestCreateVersionConcurrent creates many versions of the same path from
-// concurrent goroutines and asserts every call succeeds and the resulting
-// versions form a contiguous, gap-free, duplicate-free sequence. This
-// guards against the historical TOCTOU bug where the next version was
-// computed outside the insert transaction.
+type serializedVersionStore struct {
+	permit       chan struct{}
+	beginAttempt chan struct{}
+	outsideRead  chan struct{}
+	firstRead    chan struct{}
+	releaseFirst chan struct{}
+
+	mu       sync.Mutex
+	files    []db.File
+	beginSeq int
+}
+
+func newSerializedVersionStore() *serializedVersionStore {
+	store := &serializedVersionStore{
+		permit:       make(chan struct{}, 1),
+		beginAttempt: make(chan struct{}, 2),
+		outsideRead:  make(chan struct{}, 2),
+		firstRead:    make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	store.permit <- struct{}{}
+	return store
+}
+
+func (s *serializedVersionStore) NextFileVersion(_ context.Context, path string) (int64, error) {
+	s.outsideRead <- struct{}{}
+	return s.nextFileVersion(path), nil
+}
+
+func (s *serializedVersionStore) Begin(ctx context.Context) (fileVersionTransaction, error) {
+	s.beginAttempt <- struct{}{}
+	select {
+	case <-s.permit:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	s.mu.Lock()
+	sequence := s.beginSeq
+	s.beginSeq++
+	s.mu.Unlock()
+	return &serializedVersionTransaction{store: s, sequence: sequence}, nil
+}
+
+type serializedVersionTransaction struct {
+	store    *serializedVersionStore
+	sequence int
+	pending  *db.File
+	closed   bool
+}
+
+func (s *serializedVersionStore) nextFileVersion(path string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := int64(0)
+	for _, file := range s.files {
+		if file.Path == path && file.Version >= next {
+			next = file.Version + 1
+		}
+	}
+	return next
+}
+
+func (tx *serializedVersionTransaction) NextFileVersion(ctx context.Context, path string) (int64, error) {
+	next := tx.store.nextFileVersion(path)
+	if tx.sequence == 0 {
+		close(tx.store.firstRead)
+		select {
+		case <-tx.store.releaseFirst:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	return next, nil
+}
+
+func (tx *serializedVersionTransaction) CreateFile(_ context.Context, params db.CreateFileParams) (db.File, error) {
+	file := db.File{
+		ID:        params.ID,
+		SessionID: params.SessionID,
+		Path:      params.Path,
+		Content:   params.Content,
+		Version:   params.Version,
+	}
+	tx.pending = &file
+	return file, nil
+}
+
+func (tx *serializedVersionTransaction) Commit() error {
+	if tx.pending != nil {
+		tx.store.mu.Lock()
+		tx.store.files = append(tx.store.files, *tx.pending)
+		tx.store.mu.Unlock()
+	}
+	tx.close()
+	return nil
+}
+
+func (tx *serializedVersionTransaction) Rollback() error {
+	tx.close()
+	return nil
+}
+
+func (tx *serializedVersionTransaction) close() {
+	if tx.closed {
+		return
+	}
+	tx.closed = true
+	tx.store.permit <- struct{}{}
+}
+
+// TestCreateVersionAllocatesInsideSerializedTransaction forces a second call
+// to attempt its transaction while the first is paused after reading. The
+// store models BEGIN IMMEDIATE ownership, making every ordering edge an
+// explicit channel handshake rather than a scheduler timing assumption.
+func TestCreateVersionAllocatesInsideSerializedTransaction(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	store := newSerializedVersionStore()
+	files := &service{Broker: pubsub.NewBroker[File](), versions: store}
+
+	type result struct {
+		file File
+		err  error
+	}
+	firstResult := make(chan result, 1)
+	secondResult := make(chan result, 1)
+	go func() {
+		file, err := files.CreateVersion(ctx, "first-session", "serialized.go", "first")
+		firstResult <- result{file: file, err: err}
+	}()
+
+	select {
+	case <-store.beginAttempt:
+	case <-store.outsideRead:
+		t.Fatal("version was read before opening its transaction")
+	case <-ctx.Done():
+		t.Fatalf("test context expired while waiting for first operation: %v", ctx.Err())
+	}
+	receiveOrContext(t, ctx, store.firstRead)
+
+	go func() {
+		file, err := files.CreateVersion(ctx, "second-session", "serialized.go", "second")
+		secondResult <- result{file: file, err: err}
+	}()
+	receiveOrContext(t, ctx, store.beginAttempt)
+
+	close(store.releaseFirst)
+	first := receiveOrContext(t, ctx, firstResult)
+	second := receiveOrContext(t, ctx, secondResult)
+
+	require.NoError(t, first.err)
+	require.NoError(t, second.err)
+	require.Equal(t, int64(0), first.file.Version)
+	require.Equal(t, int64(1), second.file.Version)
+	require.Equal(t, "first", first.file.Content)
+	require.Equal(t, "second", second.file.Content)
+
+	store.mu.Lock()
+	persisted := append([]db.File(nil), store.files...)
+	store.mu.Unlock()
+	require.Len(t, persisted, 2)
+	require.Equal(t, []int64{0, 1}, []int64{persisted[0].Version, persisted[1].Version})
+}
+
+// TestCreateVersionConcurrent stress-tests version allocation through
+// independent SQLite connections and verifies all resulting content persists.
 func TestCreateVersionConcurrent(t *testing.T) {
-	files, _, sessionID := newTestService(t)
+	files, sessions, sessionID, dataDir := newTestService(t)
+	secondSession, err := sessions.CreateTaskSession(t.Context(), "concurrent-child", sessionID, "test")
+	require.NoError(t, err)
 
 	const n = 20
+	services := make([]Service, n)
+	services[0] = files
+	for i := 1; i < n; i++ {
+		conn, openErr := db.OpenDB(t.Context(), filepath.Join(dataDir, "braid.db"))
+		require.NoError(t, openErr)
+		t.Cleanup(func() { require.NoError(t, conn.Close()) })
+		services[i] = NewService(db.New(conn), conn)
+	}
+
 	var wg sync.WaitGroup
+	start := make(chan struct{})
 	versions := make([]int64, n)
+	contents := make([]string, n)
 	errs := make([]error, n)
 
 	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			f, err := files.CreateVersion(t.Context(), sessionID, "concurrent.go", "content")
-			errs[i] = err
-			if err == nil {
+			<-start
+			content := fmt.Sprintf("content-%d", i)
+			id := sessionID
+			if i%2 != 0 {
+				id = secondSession.ID
+			}
+			f, createErr := services[i].CreateVersion(t.Context(), id, "concurrent.go", content)
+			errs[i] = createErr
+			if createErr == nil {
 				versions[i] = f.Version
+				contents[i] = f.Content
 			}
 		}(i)
 	}
+	close(start)
 	wg.Wait()
 
-	seen := make(map[int64]bool, n)
-	for i, err := range errs {
-		require.NoError(t, err)
-		require.False(t, seen[versions[i]], "duplicate version %d", versions[i])
-		seen[versions[i]] = true
+	seenVersions := make(map[int64]bool, n)
+	seenContents := make(map[string]bool, n)
+	for i, createErr := range errs {
+		require.NoError(t, createErr)
+		require.False(t, seenVersions[versions[i]], "duplicate version %d", versions[i])
+		seenVersions[versions[i]] = true
+		require.False(t, seenContents[contents[i]], "lost content %q", contents[i])
+		seenContents[contents[i]] = true
 	}
 	for v := range int64(n) {
-		require.True(t, seen[v], "missing version %d", v)
+		require.True(t, seenVersions[v], "missing version %d", v)
 	}
+
+	persisted, err := files.ListBySessionTree(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, persisted, n)
+	persistedVersions := make(map[int64]bool, n)
+	persistedContents := make(map[string]bool, n)
+	for _, file := range persisted {
+		persistedVersions[file.Version] = true
+		persistedContents[file.Content] = true
+	}
+	require.Equal(t, seenVersions, persistedVersions)
+	require.Equal(t, seenContents, persistedContents)
 }
 
 func TestListBySessionTreeSharesFilesAcrossAgents(t *testing.T) {
-	files, sessions, rootID := newTestService(t)
+	files, sessions, rootID, _ := newTestService(t)
 	child, err := sessions.CreateTaskSession(t.Context(), "child", rootID, "child")
 	require.NoError(t, err)
 	sibling, err := sessions.CreateTaskSession(t.Context(), "sibling", rootID, "sibling")
