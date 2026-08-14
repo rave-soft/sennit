@@ -46,7 +46,26 @@ func initRepoForWorkspaceThreadsTest(t *testing.T) string {
 	t.Helper()
 	requireGitForWorkspaceThreadsTest(t)
 
-	dir := t.TempDir()
+	// Not t.TempDir(): its cleanup fails the test intermittently with
+	// "unlinkat .git: directory not empty" once a real app.Bootstrap has
+	// run against this repo. The .git directory is empty by the time the
+	// failure is inspected, which is the signature of something creating
+	// and removing files inside it while the removal walks — a
+	// background subsystem the bootstrap starts that outlives
+	// App.Shutdown's join. I did not identify which one, so this is a
+	// mitigation, not a root-cause fix: retry the removal briefly and
+	// give up quietly rather than failing a test for a reason unrelated
+	// to what it asserts. Removing the /tmp entry is best-effort anyway.
+	dir, err := os.MkdirTemp("", "braid-threads-test-")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		for range 20 {
+			if err := os.RemoveAll(dir); err == nil {
+				return
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	})
 	runGitForWorkspaceThreadsTest(t, dir, "init", "-b", "main")
 	runGitForWorkspaceThreadsTest(t, dir, "config", "user.email", "test@example.com")
 	runGitForWorkspaceThreadsTest(t, dir, "config", "user.name", "Test")

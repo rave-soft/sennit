@@ -6,10 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -279,6 +281,170 @@ func TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork(t *testing.T)
 		"shutdown must never call CancelAll on a coordinator shared with the parent's own work")
 	require.Equal(t, []string{st.SessionID}, coord.canceledSessions(),
 		"shutdown must cancel only the task's own session — the foreground session must never appear here")
+}
+
+// publishSuccessForSession is publishSuccess's multi-run-safe sibling:
+// publishSuccess assumes the most recently dispatched run is the one to
+// complete, which does not hold once several tasks are active
+// concurrently (the concurrency-cap tests below routinely are) - it looks
+// up sessionID's own run by id instead of assuming it is the last one.
+func publishSuccessForSession(t *testing.T, a *app.App, sessionID string) {
+	t.Helper()
+	coord := a.AgentCoordinator.(*fakeCoordinator)
+	var runID string
+	require.Eventually(t, func() bool {
+		coord.mu.Lock()
+		defer coord.mu.Unlock()
+		for _, r := range coord.runs {
+			if r.sessionID == sessionID {
+				runID = r.runID
+				return true
+			}
+		}
+		return false
+	}, time.Second, time.Millisecond)
+	a.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: sessionID, RunID: runID, Text: "finished"})
+}
+
+// TestTaskManager_CreateRefusedAtWorkspaceCap proves maxActiveTasksPerWorkspace:
+// once that many tasks are active, a further Create is refused with a
+// clear message naming the count and the limit, and finishing one of the
+// existing tasks frees a slot for the next Create to succeed. Each task
+// gets its own ParentSessionID, so this exercises the workspace cap alone
+// — every one of them is well under the per-parent cap individually.
+func TestTaskManager_CreateRefusedAtWorkspaceCap(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	var created []Thread
+	for i := range maxActiveTasksPerWorkspace {
+		st, err := tasks.Create(t.Context(), TaskCreateArgs{
+			Goal:            fmt.Sprintf("task %d", i),
+			ParentSessionID: fmt.Sprintf("parent-%d", i),
+		})
+		require.NoError(t, err)
+		created = append(created, st)
+	}
+	require.Eventually(t, func() bool { return coord.runCount() == maxActiveTasksPerWorkspace }, time.Second, time.Millisecond)
+
+	_, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "one too many", ParentSessionID: "parent-overflow"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), fmt.Sprintf("%d background tasks already running", maxActiveTasksPerWorkspace))
+	require.Contains(t, err.Error(), fmt.Sprintf("limit %d", maxActiveTasksPerWorkspace))
+	require.Equal(t, maxActiveTasksPerWorkspace, coord.runCount(), "the refused call must never dispatch a run")
+
+	// Finish one of the existing tasks - its slot is freed for the next
+	// Create.
+	publishSuccessForSession(t, parentApp, created[0].SessionID)
+	require.Eventually(t, func() bool {
+		got, err := store.Get(t.Context(), created[0].ID)
+		return err == nil && got.Status == StatusCompleted
+	}, time.Second, time.Millisecond)
+
+	_, err = tasks.Create(t.Context(), TaskCreateArgs{Goal: "now it fits", ParentSessionID: "parent-overflow"})
+	require.NoError(t, err, "completing one task must free a slot for the next Create")
+}
+
+// TestTaskManager_PerParentCapIndependentOfWorkspaceCap proves
+// maxActiveTasksPerParentTurn is its own, tighter limit: one parent
+// session can be refused for having too many of its own tasks active
+// while the workspace as a whole is nowhere near maxActiveTasksPerWorkspace,
+// and a *different* parent is unaffected by the first one's refusal.
+func TestTaskManager_PerParentCapIndependentOfWorkspaceCap(t *testing.T) {
+	require.Less(t, maxActiveTasksPerParentTurn, maxActiveTasksPerWorkspace,
+		"this test only proves something if the per-parent cap is reached well before the workspace cap")
+
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	for i := range maxActiveTasksPerParentTurn {
+		_, err := tasks.Create(t.Context(), TaskCreateArgs{
+			Goal:            fmt.Sprintf("task %d", i),
+			ParentSessionID: "busy-parent",
+		})
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return coord.runCount() == maxActiveTasksPerParentTurn }, time.Second, time.Millisecond)
+
+	_, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "one too many for this turn", ParentSessionID: "busy-parent"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), fmt.Sprintf("this turn already has %d background tasks running", maxActiveTasksPerParentTurn))
+	require.Contains(t, err.Error(), fmt.Sprintf("limit %d", maxActiveTasksPerParentTurn))
+
+	// A different parent, with none of its own tasks active yet, is
+	// unaffected - the workspace cap has plenty of headroom left.
+	_, err = tasks.Create(t.Context(), TaskCreateArgs{Goal: "unrelated turn's own task", ParentSessionID: "idle-parent"})
+	require.NoError(t, err, "the per-parent cap must not leak across different parent sessions")
+}
+
+// TestTaskManager_InFlightTaskStillHoldsSlot proves the state the plan
+// deliberately preserves: a task waiting on something mid-run - most
+// notably a permission prompt the user has not yet answered - is still
+// StatusRunning, not some other status the cap could be tempted to
+// exclude, and it must keep holding its slot for exactly as long as that
+// status holds. This never publishes a RunComplete for the task it
+// creates - the same "run left in flight" shape
+// TestTaskManager_ShutdownJoinsInFlightRun and the permission-attribution
+// tests use for a task blocked mid-run - and shows that in-flight task
+// alone is enough to exhaust maxActiveTasksPerWorkspace.
+func TestTaskManager_InFlightTaskStillHoldsSlot(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	// One task, left running indefinitely (e.g. blocked on a permission
+	// prompt the user has not answered yet) - never completed.
+	blocked, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "waiting on a prompt", ParentSessionID: "parent-blocked"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	got, err := store.Get(t.Context(), blocked.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusRunning, got.Status, "blocked mid-run is still StatusRunning, not a distinct 'waiting' status")
+
+	// Fill every remaining slot with other, distinct-parent tasks.
+	for i := range maxActiveTasksPerWorkspace - 1 {
+		_, err := tasks.Create(t.Context(), TaskCreateArgs{
+			Goal:            fmt.Sprintf("filler %d", i),
+			ParentSessionID: fmt.Sprintf("parent-filler-%d", i),
+		})
+		require.NoError(t, err)
+	}
+
+	// The workspace is now at its cap purely because of one still-blocked
+	// task plus the filler - the blocked one never finished and never
+	// stopped counting.
+	_, err = tasks.Create(t.Context(), TaskCreateArgs{Goal: "over the cap", ParentSessionID: "parent-overflow"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "background tasks already running")
+}
+
+// TestTaskManager_TerminalTasksDoNotOccupySlots proves the other half of
+// "active, not rows": maxActiveTasksPerWorkspace many tasks that have all
+// since finished do not, together, block a new one - only tasks still
+// Status.Active() count.
+func TestTaskManager_TerminalTasksDoNotOccupySlots(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	for i := range maxActiveTasksPerWorkspace {
+		st, err := tasks.Create(t.Context(), TaskCreateArgs{
+			Goal:            fmt.Sprintf("task %d", i),
+			ParentSessionID: fmt.Sprintf("parent-%d", i),
+		})
+		require.NoError(t, err)
+		publishSuccessForSession(t, parentApp, st.SessionID)
+		require.Eventually(t, func() bool {
+			got, err := store.Get(t.Context(), st.ID)
+			return err == nil && got.Status == StatusCompleted
+		}, time.Second, time.Millisecond)
+	}
+	require.Equal(t, maxActiveTasksPerWorkspace, coord.runCount())
+
+	_, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "workspace is actually idle", ParentSessionID: "parent-fresh"})
+	require.NoError(t, err, "maxActiveTasksPerWorkspace terminal tasks must not occupy any slots")
 }
 
 // seedThreadRow inserts a bare kind = KindThread row directly through

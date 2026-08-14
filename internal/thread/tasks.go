@@ -4,10 +4,45 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
+)
+
+// maxActiveTasksPerWorkspace and maxActiveTasksPerParentTurn bound
+// concurrent task delegations. Both are hard constants, not configuration:
+// unlike options.background_agents (an explicit, permanent product
+// choice), these are a defensive width limit, and a value someone could
+// misconfigure upward would defeat the reason they exist.
+//
+// Every task runs inside the *same* parent App as the turn that created it
+// (see ParentAppSpawner) — the same working directory, and the same
+// permission.Service the visible turn itself uses. Permission prompts are
+// answered one at a time, so beyond a small number, extra concurrent tasks
+// do not get more done in parallel; they just queue behind the same
+// permission gate and contend for the same files, while making the
+// workspace harder to reason about. The cascade depth limit
+// (maxTaskCascadeDepth, internal/agent) already bounds how *deep* a chain
+// of delegations may run; these bound how *wide* it may get at any one
+// level, which depth does nothing to prevent.
+//
+// maxActiveTasksPerWorkspace is the total across every parent turn in the
+// workspace. maxActiveTasksPerParentTurn is deliberately smaller than that
+// total — half — so one turn's fan-out can never claim the entire budget
+// and starve a second turn (the user's own foreground turn, or another
+// session) of the ability to delegate anything at all.
+//
+// Threads do not count toward either limit: a thread spawns its own
+// isolated App with its own worktree (LocalSpawner), so it never touches
+// the parent App's working directory or its permission.Service - neither
+// of the two resources these limits protect. This is enforced simply by
+// scope: the counts below are computed from List, which is already
+// Kind-scoped to tasks.
+const (
+	maxActiveTasksPerWorkspace  = 4
+	maxActiveTasksPerParentTurn = 2
 )
 
 // TaskCreateArgs holds the inputs to [TaskManager.Create].
@@ -51,6 +86,15 @@ type TaskManager struct {
 	messages message.Service
 	ctx      context.Context
 	lc       *lifecycle
+
+	// createMu serializes Create end to end (see Create's own comment on
+	// it): the concurrency caps must check the active count and act on it
+	// as one atomic step, or two Create calls racing each other could both
+	// pass the check before either is counted and together exceed it.
+	// Task creation is not a hot path, so serializing all of it - not just
+	// the check - trades away nothing that matters for a correctness
+	// guarantee that does.
+	createMu sync.Mutex
 }
 
 // NewTaskManager constructs a TaskManager. lc and ctx must be an existing
@@ -78,6 +122,12 @@ func NewTaskManager(store Store, spawner Spawner, messages message.Service, lc *
 // The task's Name is generated (task-<uuid>), not caller-supplied: unlike
 // a thread, a task has no user-chosen name, and several nameless tasks
 // would otherwise collide on the store's UNIQUE(project_path, name).
+//
+// Create refuses over maxActiveTasksPerWorkspace or
+// maxActiveTasksPerParentTurn active tasks (see checkActiveCaps) rather
+// than queuing the request: a caller told "started" when the work was
+// actually deferred would go on to reason about a delegation that does
+// not exist yet.
 func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, error) {
 	done, err := t.lc.beginOp()
 	if err != nil {
@@ -89,6 +139,15 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	}
 	if args.ParentSessionID == "" {
 		return Thread{}, fmt.Errorf("thread: task requires a parent session")
+	}
+
+	// Held for the rest of this call - see createMu's own doc comment for
+	// why the check and the create that acts on it must be one atomic
+	// step, not two.
+	t.createMu.Lock()
+	defer t.createMu.Unlock()
+	if err := t.checkActiveCaps(ctx, args.ParentSessionID); err != nil {
+		return Thread{}, err
 	}
 
 	st, err := t.store.Create(ctx, CreateParams{
@@ -113,8 +172,13 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	removed := c.removed
 	// Stash the creating turn's cascade depth on the control now, while
 	// nothing else can be reading it yet - deliverTaskCompletion reads it
-	// back through this same control once the task finishes.
+	// back through this same control once the task finishes. parentSessionID
+	// is stashed the same way Manager.Create stashes it for a thread (see
+	// threadControl.parentSessionID) - checkActiveCaps reads it back to
+	// count this task against its own parent turn's budget while it is
+	// active.
 	c.depth = args.Depth
+	c.parentSessionID = args.ParentSessionID
 	c.mu.Unlock()
 	if removed {
 		return Thread{}, fmt.Errorf("thread: task %q was removed during creation", st.ID)
@@ -169,6 +233,60 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	slog.Info("Task dispatched", "task", st.ID, "session", st.SessionID, "parent_session", args.ParentSessionID, "depth", args.Depth)
 
 	return st, nil
+}
+
+// checkActiveCaps refuses Create with a clear, model-visible error once
+// either concurrency cap (maxActiveTasksPerWorkspace,
+// maxActiveTasksPerParentTurn) is already at its limit. Callers must hold
+// t.createMu across this call and whatever create it gates - see that
+// field's doc comment for why the check alone is not enough.
+//
+// "Active" is Status.Active(): pending or running. A task blocked on a
+// permission prompt mid-run is still StatusRunning - it does not stop
+// holding its slot while it waits, by design, the same way it does not
+// stop counting as "in flight" anywhere else in this package. A completed,
+// failed, or interrupted task holds no slot at all.
+//
+// parentSessionID is read back from each active task's own control (see
+// Create's parentSessionID stash) rather than resolved through Sessions,
+// since it is already in memory and this runs under createMu on every
+// dispatch - a DB round trip per active task on every Create would be a
+// needless cost for something already sitting in the controls map.
+func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID string) error {
+	tasks, err := t.List(ctx)
+	if err != nil {
+		return fmt.Errorf("thread: check active task count: %w", err)
+	}
+
+	var total, forParent int
+	for _, tk := range tasks {
+		if !tk.Status.Active() {
+			continue
+		}
+		total++
+		if c := t.lc.existingControl(tk.ID); c != nil {
+			c.mu.Lock()
+			match := c.parentSessionID == parentSessionID
+			c.mu.Unlock()
+			if match {
+				forParent++
+			}
+		}
+	}
+
+	if total >= maxActiveTasksPerWorkspace {
+		return fmt.Errorf(
+			"thread: %d background tasks already running in this workspace (limit %d); wait for one to finish or run this in the foreground",
+			total, maxActiveTasksPerWorkspace,
+		)
+	}
+	if forParent >= maxActiveTasksPerParentTurn {
+		return fmt.Errorf(
+			"thread: this turn already has %d background tasks running (limit %d); wait for one to finish or run this in the foreground",
+			forParent, maxActiveTasksPerParentTurn,
+		)
+	}
+	return nil
 }
 
 // failCreate records cause as the task's terminal failure and returns it
