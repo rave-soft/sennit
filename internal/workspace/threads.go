@@ -137,6 +137,14 @@ func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread
 	return mgr.ToProto(st), nil
 }
 
+func (w *AppWorkspace) CancelThread(ctx context.Context, id, reason string) error {
+	mgr, ok := w.threadManager()
+	if !ok {
+		return ErrThreadsNotSupported
+	}
+	return mgr.Cancel(ctx, id, reason)
+}
+
 func (w *AppWorkspace) RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error {
 	mgr, ok := w.threadManager()
 	if !ok {
@@ -428,6 +436,10 @@ func (w *ClientWorkspace) MergeThread(ctx context.Context, id string) (proto.Thr
 		return proto.Thread{}, err
 	}
 	return *st, nil
+}
+
+func (w *ClientWorkspace) CancelThread(ctx context.Context, id, reason string) error {
+	return w.client.CancelThread(ctx, w.workspaceID(), id, reason)
 }
 
 func (w *ClientWorkspace) RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error {

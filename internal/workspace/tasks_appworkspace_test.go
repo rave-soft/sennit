@@ -91,7 +91,7 @@ func TestAppWorkspace_CancelTask(t *testing.T) {
 
 	got, err := tm.Get(ctx, created.ID)
 	require.NoError(t, err)
-	require.Equal(t, thread.StatusInterrupted, got.Status)
+	require.Equal(t, thread.StatusCancelled, got.Status)
 	require.Equal(t, "no longer needed", got.Error)
 }
 

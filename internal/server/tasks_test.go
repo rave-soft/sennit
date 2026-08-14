@@ -105,7 +105,7 @@ func TestHandleWorkspaceTasks_List(t *testing.T) {
 }
 
 // TestHandleWorkspaceTaskCancel_Success cancels a live task over HTTP and
-// checks the returned state: interrupted, with the request's reason
+// checks the returned state: cancelled, with the request's reason
 // recorded as its terminal error — the same outcome
 // TaskManager.Cancel produces locally.
 func TestHandleWorkspaceTaskCancel_Success(t *testing.T) {
@@ -116,13 +116,13 @@ func TestHandleWorkspaceTaskCancel_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusRunning, created.Status)
 
-	resp := doTaskRequest(t, h, http.MethodPost, "/"+created.ID+"/cancel", proto.CancelTaskRequest{Reason: "no longer needed"})
+	resp := doTaskRequest(t, h, http.MethodPost, "/"+created.ID+"/cancel", proto.CancelDelegationRequest{Reason: "no longer needed"})
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var got proto.Thread
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
 	require.Equal(t, created.ID, got.ID)
-	require.Equal(t, "interrupted", got.Status)
+	require.Equal(t, "cancelled", got.Status)
 	require.Equal(t, "no longer needed", got.Error)
 }
 
@@ -132,7 +132,7 @@ func TestHandleWorkspaceTaskCancel_UnknownID(t *testing.T) {
 	t.Parallel()
 	h, _ := newTaskTestHarness(t)
 
-	resp := doTaskRequest(t, h, http.MethodPost, "/does-not-exist/cancel", proto.CancelTaskRequest{Reason: "x"})
+	resp := doTaskRequest(t, h, http.MethodPost, "/does-not-exist/cancel", proto.CancelDelegationRequest{Reason: "x"})
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
@@ -157,7 +157,7 @@ func TestHandleWorkspaceTaskCancel_WrongKind(t *testing.T) {
 	th, err := h.mgr.Create(t.Context(), thread.CreateArgs{Name: "a-thread"})
 	require.NoError(t, err)
 
-	resp := doTaskRequest(t, h, http.MethodPost, "/"+th.ID+"/cancel", proto.CancelTaskRequest{Reason: "x"})
+	resp := doTaskRequest(t, h, http.MethodPost, "/"+th.ID+"/cancel", proto.CancelDelegationRequest{Reason: "x"})
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusConflict, resp.StatusCode)
 }
@@ -198,7 +198,7 @@ func TestTaskEvent_DeliveredOverSSE(t *testing.T) {
 			if decoded.Payload.Thread.ID != created.ID {
 				continue
 			}
-			if decoded.Payload.Thread.Status != "interrupted" {
+			if decoded.Payload.Thread.Status != "cancelled" {
 				continue // the "created"/"running" events for this id arrive first
 			}
 			require.Equal(t, "task", decoded.Payload.Thread.Kind)
@@ -250,6 +250,6 @@ func TestClientWorkspace_TasksRoundTrip(t *testing.T) {
 	list, err = ws.ListTasks(t.Context())
 	require.NoError(t, err)
 	require.Len(t, list, 1)
-	require.Equal(t, "interrupted", list[0].Status)
+	require.Equal(t, "cancelled", list[0].Status)
 	require.Equal(t, "done over http", list[0].Error)
 }

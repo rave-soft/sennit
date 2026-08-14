@@ -507,6 +507,10 @@ func (w *readOnlyWorkspace) MergeThread(ctx context.Context, id string) (proto.T
 	return proto.Thread{}, w.readOnlyError("MergeThread")
 }
 
+func (w *readOnlyWorkspace) CancelThread(ctx context.Context, id, reason string) error {
+	return w.readOnlyError("CancelThread")
+}
+
 func (w *readOnlyWorkspace) RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error {
 	return w.readOnlyError("RemoveThread")
 }

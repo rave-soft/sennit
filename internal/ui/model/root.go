@@ -23,6 +23,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
 	"github.com/rave-soft/braid/internal/ui/util"
@@ -210,8 +211,8 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, r.mergeThreadCmd(msg.id)
 	case removeThreadMsg:
 		return r, r.removeThreadCmd(msg.id)
-	case cancelTaskMsg:
-		return r, r.cancelTaskCmd(msg.id)
+	case cancelDelegationMsg:
+		return r, r.cancelDelegationCmd(msg.id, msg.kind)
 	case openThreadCreateMsg:
 		r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
 		return r, nil
@@ -478,14 +479,19 @@ func (r *Root) removeThreadCmd(id string) tea.Cmd {
 	}
 }
 
-// cancelTaskCmd calls CancelTask off-thread. Task-only (see cancelTaskMsg's
-// doc comment) — reuses threadActionDoneMsg so a successful cancel gets the
-// same dashboard refresh merge/remove already trigger.
-func (r *Root) cancelTaskCmd(id string) tea.Cmd {
+// cancelDelegationCmd calls CancelTask or CancelThread off-thread,
+// depending on kind — reuses threadActionDoneMsg so a successful cancel
+// gets the same dashboard refresh merge/remove already trigger.
+func (r *Root) cancelDelegationCmd(id, kind string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
 	return func() tea.Msg {
-		err := ws.CancelTask(ctx, id, "cancelled from panel")
+		var err error
+		if thread.Kind(kind) == thread.KindThread {
+			err = ws.CancelThread(ctx, id, "cancelled from panel")
+		} else {
+			err = ws.CancelTask(ctx, id, "cancelled from panel")
+		}
 		return threadActionDoneMsg{err: err}
 	}
 }

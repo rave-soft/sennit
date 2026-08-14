@@ -267,6 +267,62 @@ func (c *controllerV1) handlePostWorkspaceThreadMerge(w http.ResponseWriter, r *
 	jsonEncode(w, mgr.ToProto(st))
 }
 
+// handlePostWorkspaceThreadCancel cancels a thread's in-flight run,
+// leaving its worktree and branch on disk — unlike delete, which tears
+// everything down. Mirrors handlePostWorkspaceTaskCancel.
+//
+//	@Summary		Cancel thread
+//	@Tags			threads
+//	@Accept			json
+//	@Produce		json
+//	@Param			id			path		string						true	"Workspace ID"
+//	@Param			threadID	path		string						true	"Thread ID or name"
+//	@Param			request		body		proto.CancelDelegationRequest	false	"Cancel reason"
+//	@Success		200			{object}	proto.Thread
+//	@Failure		400			{object}	proto.Error
+//	@Failure		404			{object}	proto.Error
+//	@Failure		409			{object}	proto.Error
+//	@Failure		500			{object}	proto.Error
+//	@Router			/workspaces/{id}/threads/{threadID}/cancel [post]
+func (c *controllerV1) handlePostWorkspaceThreadCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	threadID := r.PathValue("threadID")
+	mgr, ok := c.requireThreadManager(w, r, id)
+	if !ok {
+		return
+	}
+
+	if _, err := mgr.Get(r.Context(), threadID); err != nil {
+		jsonError(w, http.StatusNotFound, "thread not found")
+		return
+	}
+
+	var req proto.CancelDelegationRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			c.server.logError(r, "Failed to decode request", "error", err)
+			jsonError(w, http.StatusBadRequest, "failed to decode request")
+			return
+		}
+	}
+
+	// Refusing to cancel a thread in the merge flow is a statement about
+	// the thread's state, not a server fault, so it reads as a conflict
+	// rather than a 500 — mirroring handlePostWorkspaceThreadActivate's
+	// identical call.
+	if err := mgr.Cancel(r.Context(), threadID, req.Reason); err != nil {
+		c.server.logError(r, "Failed to cancel thread", "error", err)
+		jsonError(w, http.StatusConflict, err.Error())
+		return
+	}
+	st, err := mgr.Get(r.Context(), threadID)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, mgr.ToProto(st))
+}
+
 // handleDeleteWorkspaceThread removes a thread.
 //
 //	@Summary		Remove thread

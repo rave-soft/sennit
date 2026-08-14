@@ -555,6 +555,96 @@ func TestManager_ActivateRefusesMergeFlow(t *testing.T) {
 	}
 }
 
+// TestManager_CancelLeavesTerminalWithReasonAndKeepsWorktree is Cancel's
+// core contract: a running thread stops and rests at StatusCancelled with
+// reason recorded as its Error — a real status transition, not merely a
+// released runtime — while its worktree and branch stay on disk, unlike
+// Remove. Mirrors TaskManager's own
+// TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched.
+func TestManager_CancelLeavesTerminalWithReasonAndKeepsWorktree(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "stoppable", Goal: "do the thing", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
+	// Deliberately no RunComplete published: the run is left in flight.
+
+	require.NoError(t, mgr.Cancel(t.Context(), st.ID, "no longer needed"))
+
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusCancelled, got.Status)
+	require.Equal(t, "no longer needed", got.Error)
+	require.Nil(t, mgr.Handle(st.ID), "the runtime must be released")
+
+	// The worktree and branch are exactly what Cancel exists to preserve
+	// (Remove would have deleted both).
+	require.DirExists(t, st.WorktreePath)
+	require.Contains(t, runGit(t, repo, "branch", "--list", "thread/stoppable"), "thread/stoppable")
+
+	require.False(t, coord.cancelAllWasCalled())
+	require.Equal(t, []string{st.SessionID}, coord.canceledSessions(),
+		"cancel must reach only the thread's own session")
+}
+
+// TestManager_CancelDefaultsReasonWhenEmpty mirrors TaskManager's
+// TestTaskManager_CancelDefaultsReasonWhenEmpty: an empty reason still
+// records a real one, not a blank Error field.
+func TestManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "unreasoned", Goal: "do the thing", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
+
+	require.NoError(t, mgr.Cancel(t.Context(), st.ID, ""))
+
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusCancelled, got.Status)
+	require.Equal(t, "cancelled", got.Error)
+}
+
+// TestManager_CancelRefusesMergeFlow proves the decision this step made
+// explicit: cancelling a thread already in the merge flow is refused, the
+// same way Activate refuses to reactivate one (TestManager_
+// ActivateRefusesMergeFlow) — by the time a thread has reached one of
+// these statuses there is either nothing left running to stop, or a merge
+// actively folding a branch back that is not a step to interrupt partway.
+func TestManager_CancelRefusesMergeFlow(t *testing.T) {
+	repo := initRepo(t)
+	store := newTestStoreDB(t)
+	mgr := NewManager(ManagerOptions{
+		Store:       store,
+		Spawner:     newFakeSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+
+	for _, status := range []Status{StatusMerging, StatusMerged, StatusConflict, StatusMergeBlocked} {
+		t.Run(string(status), func(t *testing.T) {
+			st, err := store.Create(t.Context(), CreateParams{
+				Name: "cancel-" + string(status), Goal: "x", BaseBranch: "main",
+				Branch: "thread/cancel-" + string(status), WorktreePath: t.TempDir(),
+			})
+			require.NoError(t, err)
+			_, err = store.SetStatus(t.Context(), st.ID, SetStatusParams{Status: status})
+			require.NoError(t, err)
+
+			err = mgr.Cancel(t.Context(), st.ID, "stop")
+			require.Error(t, err)
+
+			got, err := store.Get(t.Context(), st.ID)
+			require.NoError(t, err)
+			require.Equal(t, status, got.Status, "a refused cancel must not change status")
+		})
+	}
+}
+
 // A vanished worktree cannot be reopened, and the failure must not leave
 // a half-installed runtime behind.
 func TestManager_ActivateRejectsMissingWorktree(t *testing.T) {

@@ -336,52 +336,18 @@ func (t *TaskManager) Get(ctx context.Context, id string) (Thread, error) {
 	return st, nil
 }
 
-// Cancel stops id's in-flight run and leaves it at a terminal
-// StatusInterrupted with reason recorded as its Error — a real status
-// transition, not merely releasing the runtime and leaving whatever
-// status happened to be last recorded. reason defaults to "cancelled"
-// when empty.
-//
-// If the task has no live runtime (already finished, or never started),
-// Cancel is a no-op: an already-terminal task cannot be "more cancelled",
-// and overwriting a real outcome (completed, failed) with "cancelled"
-// would destroy it.
-//
-// Cancelling reaches only this task's own session
-// (AgentCoordinator.Cancel(st.SessionID)), never the whole coordinator:
-// a task's App is its parent's, so anything broader would reach the
-// user's own foreground turn too.
+// Cancel stops id's in-flight run and leaves it at the terminal
+// [StatusCancelled] with reason recorded as its Error. A task has no
+// merge flow or other kind-specific state to refuse this for — every
+// task is cancellable in any non-terminal status — so this is a thin
+// Get-then-delegate wrapper; see [lifecycle.cancel] for the mechanics
+// shared with [Manager.Cancel].
 func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 	st, err := t.Get(ctx, id)
 	if err != nil {
 		return err
 	}
-
-	c := t.lc.control(st.ID)
-	c.opMu.Lock()
-	defer c.opMu.Unlock()
-	c.mu.Lock()
-	rt := c.runtime
-	c.runtime = nil
-	c.mu.Unlock()
-
-	if rt == nil {
-		return nil
-	}
-
-	rt.watchCancel()
-	if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
-		a.AgentCoordinator.Cancel(st.SessionID)
-	}
-	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
-		slog.Error("thread: release cancelled task workspace failed", "task", st.ID, "error", err)
-	}
-
-	if reason == "" {
-		reason = "cancelled"
-	}
-	_, err = t.lc.setStatus(ctx, st.ID, StatusInterrupted, reason, "", 0)
-	return err
+	return t.lc.cancel(ctx, st, reason)
 }
 
 // Send dispatches message into id's session, reactivating it first if its
@@ -414,15 +380,17 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) error {
 	return t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message)
 }
 
-// wasCancelled reports whether st's Interrupted status came from an
-// explicit [TaskManager.Cancel] rather than an incidental interruption
-// (process restart via lifecycle.recover, Manager.Shutdown, or the run's
-// own RunComplete reporting Cancelled): Cancel is the only path that
-// records a non-empty Error alongside StatusInterrupted — recover and
-// Shutdown's status writes, and the RunComplete-cancelled path in
-// handleRunComplete, all leave Error empty.
+// wasCancelled reports whether st was explicitly stopped via
+// [TaskManager.Cancel] or [Manager.Cancel], as opposed to reaching a
+// terminal status some other way (completing normally, failing, or an
+// incidental interruption — see [StatusCancelled]'s own doc comment for
+// the distinction). A plain status check now; it used to infer this from
+// StatusInterrupted plus a non-empty Error, which held only because every
+// other writer of that status happened to leave Error empty — nothing
+// enforced that, so a status of its own replaces the inference rather
+// than sitting alongside it.
 func wasCancelled(st Thread) bool {
-	return st.Status == StatusInterrupted && st.Error != ""
+	return st.Status == StatusCancelled
 }
 
 // defaultOutputLimit and maxOutputLimit bound how many of a task's child

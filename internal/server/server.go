@@ -163,6 +163,7 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/send", c.handlePostWorkspaceThreadSend)
 	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/activate", c.handlePostWorkspaceThreadActivate)
 	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/merge", c.handlePostWorkspaceThreadMerge)
+	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/cancel", c.handlePostWorkspaceThreadCancel)
 	mux.HandleFunc("DELETE /v1/workspaces/{id}/threads/{threadID}", c.handleDeleteWorkspaceThread)
 	mux.HandleFunc("GET /v1/workspaces/{id}/tasks", c.handleGetWorkspaceTasks)
 	mux.HandleFunc("POST /v1/workspaces/{id}/tasks/{taskID}/cancel", c.handlePostWorkspaceTaskCancel)

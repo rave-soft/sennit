@@ -38,7 +38,7 @@ func (c *Client) ListTasks(ctx context.Context, id string) ([]proto.Thread, erro
 // than waiting on the next list refresh.
 func (c *Client) CancelTask(ctx context.Context, id, taskID, reason string) (*proto.Thread, error) {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/tasks/%s/cancel", id, taskID), nil,
-		jsonBody(proto.CancelTaskRequest{Reason: reason}),
+		jsonBody(proto.CancelDelegationRequest{Reason: reason}),
 		http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return nil, fmt.Errorf("failed to cancel task: %w", err)

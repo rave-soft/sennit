@@ -115,6 +115,23 @@ func (c *Client) MergeThread(ctx context.Context, id, threadID string) (*proto.T
 	return &st, nil
 }
 
+// CancelThread cancels a thread's in-flight run, recording reason as its
+// terminal error, and returns the resulting state. Mirrors CancelTask's
+// shape.
+func (c *Client) CancelThread(ctx context.Context, id, threadID, reason string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/threads/%s/cancel", id, threadID), nil,
+		jsonBody(proto.CancelDelegationRequest{Reason: reason}),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to cancel thread: %w", err)
+	}
+	defer rsp.Body.Close()
+	if err := checkStatus(rsp); err != nil {
+		return fmt.Errorf("failed to cancel thread: %w", err)
+	}
+	return nil
+}
+
 // RemoveThread removes a thread from a workspace.
 func (c *Client) RemoveThread(ctx context.Context, id, threadID string, opts proto.RemoveThreadOptions) error {
 	q := url.Values{}

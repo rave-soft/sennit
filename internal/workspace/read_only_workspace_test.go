@@ -509,6 +509,10 @@ func (s *stubWorkspace) MergeThread(ctx context.Context, id string) (proto.Threa
 	return proto.Thread{}, nil
 }
 
+func (s *stubWorkspace) CancelThread(ctx context.Context, id, reason string) error {
+	return nil
+}
+
 func (s *stubWorkspace) RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error {
 	return nil
 }

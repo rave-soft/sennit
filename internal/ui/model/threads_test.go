@@ -175,7 +175,7 @@ func TestThreadsDashboardHandleKeyRemove(t *testing.T) {
 }
 
 // TestThreadsDashboardHandleKeyCancelTask proves the cancel key emits
-// cancelTaskMsg for a non-terminal task row.
+// cancelDelegationMsg for a non-terminal task row.
 func TestThreadsDashboardHandleKeyCancelTask(t *testing.T) {
 	t.Parallel()
 
@@ -188,16 +188,18 @@ func TestThreadsDashboardHandleKeyCancelTask(t *testing.T) {
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
 	require.True(t, handled)
 	require.NotNil(t, cmd)
-	msg, ok := cmd().(cancelTaskMsg)
+	msg, ok := cmd().(cancelDelegationMsg)
 	require.True(t, ok)
 	require.Equal(t, "t1", msg.id)
+	require.Equal(t, "task", msg.kind)
 }
 
-// TestThreadsDashboardHandleKeyCancelSkipsThread proves cancel is a no-op
-// for a thread row: single-thread cancel-without-teardown has no primitive
-// on internal/thread.Manager yet (out of scope this step — see
-// cancelTaskMsg's doc comment).
-func TestThreadsDashboardHandleKeyCancelSkipsThread(t *testing.T) {
+// TestThreadsDashboardHandleKeyCancelThread proves the cancel key also
+// emits cancelDelegationMsg for a non-terminal thread row: unlike a task,
+// cancelling a thread leaves its worktree and branch on disk rather than
+// tearing it down (see Manager.Cancel), so there is no reason to withhold
+// the key from a thread row the way an earlier step did.
+func TestThreadsDashboardHandleKeyCancelThread(t *testing.T) {
 	t.Parallel()
 
 	ws := &threadsTestWorkspace{supported: true}
@@ -208,7 +210,11 @@ func TestThreadsDashboardHandleKeyCancelSkipsThread(t *testing.T) {
 
 	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
 	require.True(t, handled)
-	require.Nil(t, cmd, "cancel should be a no-op on a thread row")
+	require.NotNil(t, cmd)
+	msg, ok := cmd().(cancelDelegationMsg)
+	require.True(t, ok)
+	require.Equal(t, "s1", msg.id)
+	require.Equal(t, "thread", msg.kind)
 }
 
 // TestThreadsDashboardHandleKeyCancelSkipsTerminalTask proves cancel is a
@@ -227,18 +233,36 @@ func TestThreadsDashboardHandleKeyCancelSkipsTerminalTask(t *testing.T) {
 	require.Nil(t, cmd, "an already-terminal task should not re-trigger a cancel")
 }
 
-// TestCancelTaskCmdCallsWorkspaceOnce drives the router end to end: a
-// cancelTaskMsg for one task's id must call Workspace.CancelTask exactly
-// once with that id — never any other delegation's id, and nothing about
-// this path touches Escape/the foreground-turn cancel.
-func TestCancelTaskCmdCallsWorkspaceOnce(t *testing.T) {
+// TestThreadsDashboardHandleKeyCancelSkipsTerminalThread is
+// TestThreadsDashboardHandleKeyCancelSkipsTerminalTask's thread-kind
+// sibling.
+func TestThreadsDashboardHandleKeyCancelSkipsTerminalThread(t *testing.T) {
+	t.Parallel()
+
+	ws := &threadsTestWorkspace{supported: true}
+	m := newTestThreadsDashboard(t, ws)
+	m.cache.cache.value = []proto.Thread{{ID: "s1", Kind: "thread", Status: "merged"}}
+	m.rebuildItems()
+	m.list.SelectFirst()
+
+	handled, cmd := m.HandleKey(tea.KeyPressMsg{Text: "c", Code: 'c'})
+	require.True(t, handled)
+	require.Nil(t, cmd, "an already-terminal thread should not re-trigger a cancel")
+}
+
+// TestCancelDelegationCmdCallsWorkspaceOnce drives the router end to end
+// for a task: a cancelDelegationMsg for one task's id must call
+// Workspace.CancelTask exactly once with that id — never any other
+// delegation's id, never CancelThread, and nothing about this path
+// touches Escape/the foreground-turn cancel.
+func TestCancelDelegationCmdCallsWorkspaceOnce(t *testing.T) {
 	t.Parallel()
 
 	ws := &threadsTestWorkspace{supported: true}
 	com := &common.Common{Workspace: ws, Styles: testStyles()}
 	r := &Root{com: com, dashboardDialog: nil}
 
-	_, cmd := r.Update(cancelTaskMsg{id: "t1"})
+	_, cmd := r.Update(cancelDelegationMsg{id: "t1", kind: "task"})
 	require.NotNil(t, cmd)
 
 	msg := cmd()
@@ -247,6 +271,30 @@ func TestCancelTaskCmdCallsWorkspaceOnce(t *testing.T) {
 	require.NoError(t, done.err)
 
 	require.Equal(t, []string{"t1"}, ws.cancelTaskCalls, "CancelTask must be called exactly once, with the selected task's id")
+	require.Empty(t, ws.cancelThreadCalls, "a task cancel must never call CancelThread")
+}
+
+// TestCancelDelegationCmdRoutesThreadKindToCancelThread is
+// TestCancelDelegationCmdCallsWorkspaceOnce's thread-kind sibling: a
+// cancelDelegationMsg for a thread must call Workspace.CancelThread, not
+// CancelTask.
+func TestCancelDelegationCmdRoutesThreadKindToCancelThread(t *testing.T) {
+	t.Parallel()
+
+	ws := &threadsTestWorkspace{supported: true}
+	com := &common.Common{Workspace: ws, Styles: testStyles()}
+	r := &Root{com: com, dashboardDialog: nil}
+
+	_, cmd := r.Update(cancelDelegationMsg{id: "s1", kind: "thread"})
+	require.NotNil(t, cmd)
+
+	msg := cmd()
+	done, ok := msg.(threadActionDoneMsg)
+	require.True(t, ok)
+	require.NoError(t, done.err)
+
+	require.Equal(t, []string{"s1"}, ws.cancelThreadCalls, "CancelThread must be called exactly once, with the selected thread's id")
+	require.Empty(t, ws.cancelTaskCalls, "a thread cancel must never call CancelTask")
 }
 
 func TestThreadsDashboardHandleKeyReload(t *testing.T) {

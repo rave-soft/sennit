@@ -42,7 +42,7 @@ func NewTaskResultTool(manager TaskManager) fantasy.AgentTool {
 			switch ti.Status {
 			case "completed":
 				text = fmt.Sprintf("Task %s finished.\n\n%s", ti.ID, ti.ResultSummary)
-			case "failed", "interrupted":
+			case "failed", "interrupted", "cancelled":
 				text = fmt.Sprintf("Task %s did not complete (status=%s): %s", ti.ID, ti.Status, ti.Error)
 			default:
 				text = fmt.Sprintf("Task %s is still %s; no result yet.", ti.ID, ti.Status)

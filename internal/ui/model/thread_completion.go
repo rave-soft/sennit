@@ -87,6 +87,8 @@ func threadCompletionToast(t proto.Thread) tea.Cmd {
 		return util.ReportWarn(fmt.Sprintf("thread %s is merge-blocked", name))
 	case thread.StatusInterrupted:
 		return util.ReportWarn(fmt.Sprintf("thread %s was interrupted", name))
+	case thread.StatusCancelled:
+		return util.ReportWarn(fmt.Sprintf("thread %s was cancelled", name))
 	default:
 		return util.ReportInfo(fmt.Sprintf("thread %s finished (%s)", name, t.Status))
 	}

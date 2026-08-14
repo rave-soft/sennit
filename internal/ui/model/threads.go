@@ -65,16 +65,13 @@ type confirmRemoveThreadMsg struct {
 	id, name string
 }
 
-// cancelTaskMsg requests cancelling a task's in-flight run. Consumed by the
-// router (root.go), which calls Workspace.CancelTask.
-//
-// Task-only: threads have no single-thread "interrupt without tearing down
-// the worktree/branch" primitive on internal/thread.Manager yet (only
-// Remove, which is a full teardown), so a thread row is not cancelable via
-// this message — that's scoped-out follow-up work, not an oversight. See
-// HandleKey's Cancel case below.
-type cancelTaskMsg struct {
-	id string
+// cancelDelegationMsg requests cancelling a delegation's (task or thread)
+// in-flight run. Consumed by the router (root.go), which calls
+// Workspace.CancelTask or Workspace.CancelThread depending on kind — a
+// thread's cancel leaves its worktree and branch on disk, unlike Remove's
+// full teardown.
+type cancelDelegationMsg struct {
+	id, kind string
 }
 
 // threadsKeyMap holds the key bindings local to the threads dashboard. It
@@ -314,13 +311,13 @@ func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea
 		if !ok {
 			return true, nil
 		}
-		// Thread cancel is out of scope this step (see cancelTaskMsg's doc
-		// comment); an already-terminal task has nothing left to cancel.
-		if thread.Kind(item.thread.Kind) != thread.KindTask || thread.Status(item.thread.Status).Terminal() {
+		// An already-terminal delegation (of either kind) has nothing left
+		// to cancel.
+		if thread.Status(item.thread.Status).Terminal() {
 			return true, nil
 		}
-		id := item.thread.ID
-		return true, func() tea.Msg { return cancelTaskMsg{id: id} }
+		id, kind := item.thread.ID, item.thread.Kind
+		return true, func() tea.Msg { return cancelDelegationMsg{id: id, kind: kind} }
 	case key.Matches(msg, m.keyMap.Reload):
 		return true, m.cache.dispatchThreadsRefresh(m.com)
 	}
@@ -389,7 +386,7 @@ func threadBadge(sty *styles.Styles, status string) string {
 	switch thread.Status(status) {
 	case thread.StatusCompleted, thread.StatusMerged:
 		style = sty.Status.SuccessMessage
-	case thread.StatusMerging, thread.StatusInterrupted:
+	case thread.StatusMerging, thread.StatusInterrupted, thread.StatusCancelled:
 		style = sty.Status.WarnMessage
 	case thread.StatusConflict, thread.StatusMergeBlocked, thread.StatusFailed:
 		style = sty.Status.ErrorMessage

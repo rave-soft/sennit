@@ -531,7 +531,7 @@ func TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched(t *testing
 
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, got.Status)
+	require.Equal(t, StatusCancelled, got.Status)
 	require.Equal(t, "no longer needed", got.Error)
 
 	require.False(t, coord.cancelAllWasCalled())
@@ -553,7 +553,7 @@ func TestTaskManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, got.Status)
+	require.Equal(t, StatusCancelled, got.Status)
 	require.Equal(t, "cancelled", got.Error)
 }
 

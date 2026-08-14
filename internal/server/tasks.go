@@ -121,7 +121,7 @@ func (c *controllerV1) handleGetWorkspaceTasks(w http.ResponseWriter, r *http.Re
 //	@Produce		json
 //	@Param			id		path		string					true	"Workspace ID"
 //	@Param			taskID	path		string					true	"Task ID"
-//	@Param			request	body		proto.CancelTaskRequest	false	"Cancel reason"
+//	@Param			request	body		proto.CancelDelegationRequest	false	"Cancel reason"
 //	@Success		200		{object}	proto.Thread
 //	@Failure		400		{object}	proto.Error
 //	@Failure		404		{object}	proto.Error
@@ -139,7 +139,7 @@ func (c *controllerV1) handlePostWorkspaceTaskCancel(w http.ResponseWriter, r *h
 		return
 	}
 
-	var req proto.CancelTaskRequest
+	var req proto.CancelDelegationRequest
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			c.server.logError(r, "Failed to decode request", "error", err)

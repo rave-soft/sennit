@@ -322,6 +322,12 @@ type ThreadController interface {
 	// and worked in by hand instead of only viewed read-only.
 	ActivateThread(ctx context.Context, id string) (proto.Thread, error)
 	MergeThread(ctx context.Context, id string) (proto.Thread, error)
+	// CancelThread stops id's in-flight run and rests it at
+	// StatusCancelled, leaving its worktree and branch on disk — unlike
+	// RemoveThread, which tears everything down. Mirrors TaskController's
+	// CancelTask; see internal/thread.Manager.Cancel for the refusal a
+	// thread mid-merge gets that a task never can.
+	CancelThread(ctx context.Context, id, reason string) error
 	RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error
 	// AttachThread connects to id's own spawned workspace and returns a
 	// Workspace bound to it, plus a detach func to release that

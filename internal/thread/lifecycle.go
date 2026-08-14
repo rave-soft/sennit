@@ -421,6 +421,60 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	return nil
 }
 
+// cancel is the generic body behind [TaskManager.Cancel] and
+// [Manager.Cancel]: it stops st's in-flight run and rests it at
+// [StatusCancelled] with reason recorded as its Error — a real status
+// transition, not merely releasing the runtime and leaving whatever
+// status happened to be last recorded. reason defaults to "cancelled"
+// when empty.
+//
+// If st has no live runtime (already finished, or never started), this is
+// a no-op: an already-terminal entity cannot be "more cancelled", and
+// overwriting a real outcome (completed, failed, merged, ...) with
+// "cancelled" would destroy it.
+//
+// Cancelling reaches only st's own session (AgentCoordinator.Cancel(st.
+// SessionID)), never the whole coordinator. This is load-bearing for a
+// task, whose App is its parent's — anything broader would reach the
+// user's own foreground turn too — and merely redundant-but-harmless for
+// a thread, whose isolated App has nothing else running in it regardless.
+//
+// Callers must have already resolved and kind-checked st via their own
+// Get/resolve (TaskManager.Get rejects a thread's id and vice versa); any
+// kind-specific refusal (Manager.Cancel's mid-merge check) is the
+// caller's job, decided before reaching here — this method itself has no
+// notion of Kind.
+func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error {
+	c := l.control(st.ID)
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	c.mu.Lock()
+	rt := c.runtime
+	c.runtime = nil
+	c.mu.Unlock()
+
+	if rt == nil {
+		return nil
+	}
+
+	rt.watchCancel()
+	if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
+		a.AgentCoordinator.Cancel(st.SessionID)
+	}
+	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
+		slog.Error("thread: release cancelled workspace failed", "id", st.ID, "kind", st.Kind, "error", err)
+	}
+
+	if reason == "" {
+		reason = "cancelled"
+	}
+	if _, err := l.setStatus(ctx, st.ID, StatusCancelled, reason, "", 0); err != nil {
+		return err
+	}
+	slog.Info("Delegation reached terminal status", "id", st.ID, "kind", st.Kind, "status", StatusCancelled)
+	return nil
+}
+
 // handleRunComplete is the generic reaction to a RunComplete notification
 // for entity id: it matches the completion to the run currently owning the
 // entity's workspace, releases the workspace, and records the terminal

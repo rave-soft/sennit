@@ -62,7 +62,7 @@ func (f *fakeTaskManager) Cancel(_ context.Context, id, reason string) error {
 	if reason == "" {
 		reason = "cancelled"
 	}
-	ti.Status = "interrupted"
+	ti.Status = "cancelled"
 	ti.Error = reason
 	f.tasks[id] = ti
 	return nil
@@ -172,7 +172,7 @@ func TestTaskCancelTool_CancelsRunningTask(t *testing.T) {
 
 	resp := callTaskTool(t, tool, TaskCancelParams{ID: "t1", Reason: "no longer needed"})
 	require.False(t, resp.IsError)
-	require.Contains(t, resp.Content, "interrupted")
+	require.Contains(t, resp.Content, "cancelled")
 
 	require.Len(t, manager.cancelCalls, 1)
 	require.Equal(t, "t1", manager.cancelCalls[0].id)

@@ -468,6 +468,47 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	return st, nil
 }
 
+// Cancel stops a thread's in-flight run and rests it at [StatusCancelled]
+// with reason recorded as its Error, leaving its worktree and branch on
+// disk for the user to inspect or resume by hand later (via Activate or
+// Send) — unlike Remove, which tears everything down. See
+// [lifecycle.cancel] for the mechanics, shared with [TaskManager.Cancel]:
+// a thread's own runtime lives in its own isolated App (LocalSpawner),
+// never a parent's, so cancelling never risks reaching anyone else's
+// work — the same safety TaskManager.Cancel gets from scoping to the
+// task's own session, just for a different structural reason (a thread's
+// App genuinely has nothing else in it, rather than a task sharing its
+// parent's).
+//
+// Refuses a thread already in the merge flow (merging, merged, conflict,
+// merge_blocked) the same way Activate refuses to reactivate one:
+// mergeAttempt holds the thread's opMu for its entire duration (see
+// onAutoMerge's doc comment), so by the time this call's own status read
+// can matter the merge has either not started (an active run is exactly
+// what Cancel exists to stop) or has already landed on one of its own
+// terminal outcomes — at which point there is no run left in flight to
+// cancel, and folding a branch back into its base is not a step to
+// interrupt partway.
+func (m *Manager) Cancel(ctx context.Context, idOrName, reason string) error {
+	done, err := m.lc.beginOp()
+	if err != nil {
+		return err
+	}
+	defer done()
+	st, err := m.resolve(ctx, idOrName)
+	if err != nil {
+		return err
+	}
+	if st.Kind != KindThread {
+		return fmt.Errorf("thread: %q is not a thread", idOrName)
+	}
+	switch st.Status {
+	case StatusMerging, StatusMerged, StatusConflict, StatusMergeBlocked:
+		return fmt.Errorf("thread: %q is in the merge flow (%s) and cannot be cancelled", idOrName, st.Status)
+	}
+	return m.lc.cancel(ctx, st, reason)
+}
+
 // Send re-dispatches message into a thread's session, resuming it if its
 // workspace is not currently spawned (e.g. after an interrupted run — the
 // worktree is still on disk, so the workspace is simply respawned).

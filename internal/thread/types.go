@@ -23,6 +23,17 @@ const (
 	StatusCompleted   Status = "completed"
 	StatusFailed      Status = "failed"
 	StatusInterrupted Status = "interrupted"
+	// StatusCancelled is a terminal status reached only through an
+	// explicit Cancel call (TaskManager.Cancel or Manager.Cancel) — the
+	// user (or the model, via task_cancel) deliberately stopped this
+	// delegation, as opposed to StatusInterrupted, which covers every
+	// incidental way a run stops without anyone choosing to (a process
+	// restart reconciled by lifecycle.recover, Manager.Shutdown releasing
+	// live runtimes, or the run itself reporting RunComplete.Cancelled).
+	// Core, not overlay: both a task and a thread can be cancelled this
+	// way, unlike the git-worktree/merge statuses below which only a
+	// thread ever reaches.
+	StatusCancelled Status = "cancelled"
 )
 
 // Overlay statuses: reachable only by a [Thread], as part of its
@@ -55,7 +66,7 @@ func (s Status) Active() bool {
 func (s Status) Terminal() bool {
 	switch s {
 	case StatusCompleted, StatusMerged, StatusConflict,
-		StatusMergeBlocked, StatusFailed, StatusInterrupted:
+		StatusMergeBlocked, StatusFailed, StatusInterrupted, StatusCancelled:
 		return true
 	default:
 		return false

@@ -41,6 +41,12 @@ type threadsTestWorkspace struct {
 	// right id, not some other delegation's".
 	cancelTaskCalls []string
 	cancelTaskErr   error
+
+	// cancelThreadCalls is CancelTask's sibling for CancelThread, kept
+	// separate so a test can assert the router picked the *right* one of
+	// the two for a given delegation's kind.
+	cancelThreadCalls []string
+	cancelThreadErr   error
 }
 
 func (w *threadsTestWorkspace) SupportsThreads() bool { return w.supported }
@@ -60,6 +66,11 @@ func (w *threadsTestWorkspace) ListTasks(context.Context) ([]proto.Thread, error
 func (w *threadsTestWorkspace) CancelTask(_ context.Context, id, _ string) error {
 	w.cancelTaskCalls = append(w.cancelTaskCalls, id)
 	return w.cancelTaskErr
+}
+
+func (w *threadsTestWorkspace) CancelThread(_ context.Context, id, _ string) error {
+	w.cancelThreadCalls = append(w.cancelThreadCalls, id)
+	return w.cancelThreadErr
 }
 
 // The following ThreadController methods round out threadsTestWorkspace for
