@@ -369,6 +369,12 @@ func (s *fakeSpawner) appFor(path string) *app.App {
 	return s.byPath[path].app
 }
 
+func (s *fakeSpawner) handleFor(path string) *fakeHandle {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.byPath[path]
+}
+
 func (s *fakeSpawner) coordFor(path string) *fakeCoordinator {
 	s.mu.Lock()
 	defer s.mu.Unlock()

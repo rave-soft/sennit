@@ -287,7 +287,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 
 	thread.Attach(ctx, boot.App, cwd, thread.NewLocalSpawner(
 		func() map[string]config.Agent { return boot.App.Config().UserAgents() },
-		func() bool { return boot.App.Store().Overrides().SkipPermissionRequests },
+		boot.App.PermissionsSkipFunc(),
 	))
 
 	ws := workspace.NewAppWorkspace(boot.App, boot.Config)

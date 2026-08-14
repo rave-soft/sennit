@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1133,4 +1134,156 @@ func TestPermissionService_QueuePriority(t *testing.T) {
 		}
 		wg.Wait()
 	})
+}
+
+// TestPermissionService_RequestSurvivesASlowSubscriber is the regression
+// test for a hang with no visible cause. A permission request used to be
+// announced with the broker's lossy Publish: if the subscriber's buffer
+// was momentarily full the event was dropped on the spot, while the
+// caller stayed blocked in Request waiting for an answer that could no
+// longer come.
+//
+// Buffers are per-subscriber, so the subscriber that loses the event is
+// the one that is behind — the TUI, exactly when it is struggling. Every
+// other event in this system is corrected by the next one; a lost request
+// is corrected by nothing, and surfaces as a tool call that stopped for
+// no reason.
+//
+// The buffer here is shrunk to one and pre-filled so "behind" is a
+// certainty rather than a race. The subscriber then drains, as a
+// recovering UI would: bounded-blocking delivery waits out that moment,
+// the lossy publish it replaced would already have thrown the event away.
+func TestPermissionService_RequestSurvivesASlowSubscriber(t *testing.T) {
+	t.Parallel()
+
+	svc := NewPermissionService(t.TempDir(), false, nil)
+	broker := pubsub.NewBrokerWithOptions[PermissionRequest](1)
+	// Widened so the test measures the semantics, not the clock: the
+	// production window is 50ms, which would make "is the subscriber
+	// still behind when the publish happens" a race with the drain below.
+	broker.SetMustDeliverTimeout(10 * time.Second)
+	svc.(*permissionService).Broker = broker
+
+	watching := svc.Subscribe(t.Context())
+	// Fill the subscriber's only slot, putting it behind.
+	svc.(*permissionService).Publish(pubsub.CreatedEvent, PermissionRequest{ID: "filler"})
+
+	go func() {
+		_, _ = svc.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  "sess-1",
+			ToolCallID: "call-1",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       t.TempDir(),
+		})
+	}()
+
+	// Let the publish actually happen while the subscriber is still
+	// behind — ActiveRequest flips just before it, so this waits for the
+	// publish to be underway rather than guessing.
+	require.Eventually(t, func() bool {
+		_, ok := svc.ActiveRequest()
+		return ok
+	}, 5*time.Second, time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+
+	// Catch up, the way a UI that was momentarily busy would.
+	filler := <-watching
+	require.Equal(t, "filler", filler.Payload.ID)
+
+	select {
+	case ev := <-watching:
+		require.Equal(t, "bash", ev.Payload.ToolName,
+			"the request must survive a subscriber that was briefly behind")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the permission request never reached the subscriber")
+	}
+}
+
+// TestPermissionService_ActiveRequestRecoversAMissedPublish covers the
+// other half: bounded-blocking delivery still permits a drop after its
+// timeout, and a subscriber that attaches later missed the publish
+// outright — a subscription only carries future events. Without a way to
+// ask what is currently pending, either case is an unrecoverable hang.
+func TestPermissionService_ActiveRequestRecoversAMissedPublish(t *testing.T) {
+	t.Parallel()
+
+	svc := NewPermissionService(t.TempDir(), false, nil)
+
+	_, ok := svc.ActiveRequest()
+	require.False(t, ok, "nothing is pending yet")
+
+	granted := make(chan bool, 1)
+	go func() {
+		ok, _ := svc.Request(t.Context(), CreatePermissionRequest{
+			SessionID:  "sess-1",
+			ToolCallID: "call-1",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       t.TempDir(),
+		})
+		granted <- ok
+	}()
+
+	// Nobody was subscribed when this was published: exactly the case
+	// that used to be unrecoverable.
+	var pending PermissionRequest
+	require.Eventually(t, func() bool {
+		var ok bool
+		pending, ok = svc.ActiveRequest()
+		return ok
+	}, 5*time.Second, 5*time.Millisecond,
+		"a pending request must remain discoverable after its publish has gone by")
+
+	require.Equal(t, "bash", pending.ToolName)
+	require.NotEmpty(t, pending.ID, "the recovered request must be answerable, so it needs its id")
+
+	require.True(t, svc.Grant(pending), "the recovered request must be the real one")
+	select {
+	case ok := <-granted:
+		require.True(t, ok)
+	case <-time.After(5 * time.Second):
+		t.Fatal("granting the recovered request did not release its caller")
+	}
+
+	_, ok = svc.ActiveRequest()
+	require.False(t, ok, "a resolved request must stop being reported as pending")
+}
+
+// TestPermissionService_ActiveRequestFollowsTheQueue: only the request
+// actually on screen is recoverable, since only it has been published.
+// Reporting a queued one would invite an answer to a prompt the user was
+// never shown.
+func TestPermissionService_ActiveRequestFollowsTheQueue(t *testing.T) {
+	t.Parallel()
+
+	svc := NewPermissionService(t.TempDir(), false, nil)
+	dir := t.TempDir()
+
+	for _, id := range []string{"call-1", "call-2"} {
+		go func() {
+			_, _ = svc.Request(t.Context(), CreatePermissionRequest{
+				SessionID:  "sess-1",
+				ToolCallID: id,
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       dir,
+			})
+		}()
+	}
+
+	var first PermissionRequest
+	require.Eventually(t, func() bool {
+		var ok bool
+		first, ok = svc.ActiveRequest()
+		return ok
+	}, 5*time.Second, 5*time.Millisecond)
+
+	require.True(t, svc.Deny(first))
+
+	require.Eventually(t, func() bool {
+		next, ok := svc.ActiveRequest()
+		return ok && next.ID != first.ID
+	}, 5*time.Second, 5*time.Millisecond,
+		"once the current request resolves, the next one becomes the recoverable one")
 }

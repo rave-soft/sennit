@@ -84,6 +84,10 @@ type Service interface {
 	Request(ctx context.Context, opts CreatePermissionRequest) (bool, error)
 	AutoApproveSession(sessionID string)
 	SetSkipRequests(skip bool)
+	// ActiveRequest returns the request currently awaiting an answer,
+	// for subscribers that need to recover one they did not see
+	// published. See the implementation for why this is needed at all.
+	ActiveRequest() (PermissionRequest, bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
 }
@@ -119,6 +123,12 @@ type permissionService struct {
 	// current is the ID of the request currently published to the UI,
 	// or "" if none is outstanding.
 	current string
+	// currentReq is the request current identifies, retained so a
+	// subscriber that missed its publish can recover it - see
+	// ActiveRequest. Publishing a request is the only announcement it
+	// ever gets, and a missed one blocks its caller forever, so the
+	// value has to stay readable after the event has gone by.
+	currentReq PermissionRequest
 	// queue holds requests that have arrived while another request is
 	// current, in FIFO order.
 	queue []PermissionRequest
@@ -150,7 +160,7 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 		onResolve()
 	}
 
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+	s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: permission.ToolCallID,
 		Granted:    granted,
 		Denied:     denied,
@@ -179,12 +189,34 @@ func (s *permissionService) enqueue(permission PermissionRequest) {
 	s.dialogMu.Lock()
 	if s.current == "" {
 		s.current = permission.ID
+		s.currentReq = permission
 		s.dialogMu.Unlock()
-		s.Publish(pubsub.CreatedEvent, permission)
+		s.publishRequest(permission)
 		return
 	}
 	s.insertQueued(permission)
 	s.dialogMu.Unlock()
+}
+
+// publishRequest announces a request to whoever is watching, with
+// bounded-blocking delivery rather than the lossy default.
+//
+// A dropped request is not a missed update that the next one corrects:
+// this publish is the request's only announcement, and its caller is
+// already blocked in Request waiting for an answer that now cannot come.
+// The tool call hangs with nothing on screen to explain it.
+//
+// Bounded-blocking still permits a drop after the per-subscriber timeout,
+// which is why ActiveRequest exists: delivery is made as reliable as the
+// broker allows, and what is left over is made recoverable.
+//
+// The context is deliberately not the requester's: this is called from
+// Request (whose ctx may end at any moment) and from dispatchNext on the
+// cancellation path, where the ctx that reached it is already done.
+// Handing either to a bounded-blocking publish would abandon the fan-out
+// immediately and lose exactly the event this is here to deliver.
+func (s *permissionService) publishRequest(permission PermissionRequest) {
+	s.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, permission)
 }
 
 // insertQueued inserts permission into s.queue so that every foreground
@@ -234,6 +266,7 @@ func (s *permissionService) dispatchNext(id string) {
 
 	if len(s.queue) == 0 {
 		s.current = ""
+		s.currentReq = PermissionRequest{}
 		s.dialogMu.Unlock()
 		return
 	}
@@ -241,8 +274,9 @@ func (s *permissionService) dispatchNext(id string) {
 	next := s.queue[0]
 	s.queue = s.queue[1:]
 	s.current = next.ID
+	s.currentReq = next
 	s.dialogMu.Unlock()
-	s.Publish(pubsub.CreatedEvent, next)
+	s.publishRequest(next)
 }
 
 func (s *permissionService) GrantPersistent(permission PermissionRequest) bool {
@@ -284,7 +318,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	// prompt entirely. We still publish a granted notification so the UI
 	// and audit subscribers see the outcome.
 	if hookApproved(ctx, opts.ToolCallID) {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -292,7 +326,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	}
 
 	// tell the UI that a permission was requested
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+	s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: opts.ToolCallID,
 	})
 
@@ -301,7 +335,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	s.autoApproveSessionsMu.RUnlock()
 
 	if autoApprove {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -339,7 +373,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Action:    permission.Action,
 		Path:      permission.Path,
 	}); ok {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, PermissionNotification{
 			ToolCallID: opts.ToolCallID,
 			Granted:    true,
 		})
@@ -369,6 +403,24 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	case granted := <-respCh:
 		return granted, nil
 	}
+}
+
+// ActiveRequest returns the request currently awaiting an answer, if
+// any. It is the recovery path for a subscriber that was not listening
+// when the request was published, or whose delivery was dropped after
+// the bounded-blocking timeout.
+//
+// This matters because a permission request is announced exactly once
+// and its caller blocks on the answer indefinitely. Every other event in
+// this system is corrected by the next one; a lost request is corrected
+// by nothing, and shows up as work that stopped for no visible reason.
+func (s *permissionService) ActiveRequest() (PermissionRequest, bool) {
+	s.dialogMu.Lock()
+	defer s.dialogMu.Unlock()
+	if s.current == "" {
+		return PermissionRequest{}, false
+	}
+	return s.currentReq, true
 }
 
 func (s *permissionService) AutoApproveSession(sessionID string) {

@@ -117,3 +117,7 @@ func TestNewHTTPClientAppliesTimeout(t *testing.T) {
 	require.Equal(t, 10, transport.MaxIdleConnsPerHost)
 	require.Equal(t, 90*time.Second, transport.IdleConnTimeout)
 }
+
+func (s *stubPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
+	return permission.PermissionRequest{}, false
+}

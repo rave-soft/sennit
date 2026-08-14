@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/braid/internal/config"
@@ -250,10 +251,64 @@ func TestLeaveThreadToMain(t *testing.T) {
 	cmd := r.leaveThreadToMain()
 	require.Equal(t, screenMain, r.active)
 	require.Nil(t, r.thread)
-	require.True(t, stopped, "stop must run synchronously")
+	require.False(t, stopped, "stop must run inside the returned cmd, not on the event loop")
 	require.False(t, detached, "detach must run inside the returned cmd, not synchronously")
 
 	require.NotNil(t, cmd)
 	cmd()
+	require.True(t, stopped)
 	require.True(t, detached)
+}
+
+// TestDetachThreadDoesNotJoinTheEventPumpOnTheEventLoop is the regression
+// test for a total TUI freeze: leaving a thread used to join its event pump
+// synchronously, from inside Update. The pump delivers through
+// tea.Program.Send, which parks until the event loop accepts the message,
+// so a pump with a message in flight and an event loop waiting for that
+// pump to exit is a cycle neither side can break — the whole UI stops
+// responding while the threads behind it keep running.
+//
+// Here stop() stands in for that parked pump: it cannot return until the
+// caller has moved on. Teardown must therefore not happen on the caller's
+// goroutine.
+func TestDetachThreadDoesNotJoinTheEventPumpOnTheEventLoop(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	threadUI := New(common.DefaultCommon(context.Background(), &rootTestWorkspace{}), "", false, WithEmbedded())
+
+	release := make(chan struct{})
+	stopReturned := make(chan struct{})
+	r.thread = &threadAttachment{
+		threadID: "s1",
+		ui:       threadUI,
+		stop: func() {
+			<-release
+			close(stopReturned)
+		},
+	}
+	r.active = screenThread
+
+	left := make(chan tea.Cmd, 1)
+	go func() { left <- r.leaveThreadToMain() }()
+
+	var cmd tea.Cmd
+	select {
+	case cmd = <-left:
+	case <-time.After(5 * time.Second):
+		t.Fatal("leaving a thread blocked the event loop on its own event pump")
+	}
+	require.Equal(t, screenMain, r.active)
+	require.Nil(t, r.thread)
+
+	// The teardown itself is allowed to block; it just may not do so where
+	// the event loop can see it.
+	require.NotNil(t, cmd)
+	go cmd()
+	close(release)
+	select {
+	case <-stopReturned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the event pump was never stopped")
+	}
 }

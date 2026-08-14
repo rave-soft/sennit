@@ -405,26 +405,38 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 }
 
 // detachThread stops the attached thread's event pump and releases its
-// workspace (detach may do IO, e.g. shutting down a client connection, so it
-// runs inside the returned tea.Cmd rather than synchronously here), leaving
-// r.active for the caller to set. Shared by leaveThread and
-// leaveThreadToMain, which differ only in where they land and whether the
-// dashboard needs a refresh.
+// workspace, leaving r.active for the caller to set. Shared by leaveThread
+// and leaveThreadToMain, which differ only in where they land and whether
+// the dashboard needs a refresh.
+//
+// Both halves of the teardown run inside the returned tea.Cmd rather than
+// here, because this runs on the Bubble Tea event loop, inside Update.
+// detach may do IO (e.g. shutting down a client connection), and stop waits
+// for the SubscribeWith pump goroutine to exit — which deadlocks the whole
+// TUI if done here: that goroutine delivers its events through
+// tea.Program.Send, which parks until the event loop takes the message, and
+// the event loop is precisely what is waiting for it. Cancelling the
+// subscription does not break the cycle, since the pump is parked in the
+// send rather than at its select. Dropping r.thread now is what makes this
+// safe to defer: any event the pump still delivers no longer matches an
+// attachment and is discarded (see the threadEventMsg case in Update).
 func (r *Root) detachThread() tea.Cmd {
 	if r.thread == nil {
 		return nil
 	}
 	thread := r.thread
-	if thread.stop != nil {
-		thread.stop()
-	}
 	r.thread = nil
 
-	if thread.detach == nil {
+	if thread.stop == nil && thread.detach == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		thread.detach()
+		if thread.stop != nil {
+			thread.stop()
+		}
+		if thread.detach != nil {
+			thread.detach()
+		}
 		return nil
 	}
 }
