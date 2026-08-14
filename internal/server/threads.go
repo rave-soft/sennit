@@ -254,14 +254,12 @@ func (c *controllerV1) handlePostWorkspaceThreadMerge(w http.ResponseWriter, r *
 	// internal/thread.Manager.mergeAttempt. A non-nil error here means
 	// something more fundamental went wrong (e.g. a git command itself
 	// failed to run), which is a server-side failure, not a client one.
-	if err := mgr.Merge(r.Context(), threadID); err != nil {
+	// Merge returns the outcome directly: a thread that merged cleanly is
+	// discarded, so there is no row left to re-read here.
+	st, err := mgr.Merge(r.Context(), threadID)
+	if err != nil {
 		c.server.logError(r, "Failed to merge thread", "error", err)
 		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	st, err := mgr.Get(r.Context(), threadID)
-	if err != nil {
-		c.handleError(w, r, err)
 		return
 	}
 	jsonEncode(w, mgr.ToProto(st))

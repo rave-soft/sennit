@@ -386,6 +386,10 @@ func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, 
 		// pending. Deliver once mergeAttempt has landed on whichever of
 		// those three it reached instead.
 		m.deliverMergeOutcome(ctx, st.ID)
+		// Strictly after delivery: discardMerged deletes the store row,
+		// and deliverMergeOutcome re-reads that row to learn which of the
+		// three outcomes the attempt reached.
+		m.discardMerged(ctx, st.ID)
 	})
 	return true
 }
@@ -604,18 +608,25 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 // Merge runs (or retries) the merge flow for a thread. Manual-policy
 // threads are merged this way once their run completes; auto-policy
 // threads use this to retry after a conflict has been resolved.
-func (m *Manager) Merge(ctx context.Context, idOrName string) error {
+//
+// It returns the thread as the attempt left it. Conflict and
+// merge_blocked are outcomes, not errors (see mergeAttempt), so the
+// returned status is how a caller tells them from a clean landing — and
+// the value is returned rather than re-read afterwards because a thread
+// that merged cleanly has already been discarded by the time this
+// returns, and there is no row left to read.
+func (m *Manager) Merge(ctx context.Context, idOrName string) (Thread, error) {
 	done, err := m.lc.beginOp()
 	if err != nil {
-		return err
+		return Thread{}, err
 	}
 	defer done()
 	st, err := m.resolve(ctx, idOrName)
 	if err != nil {
-		return err
+		return Thread{}, err
 	}
 	if st.Kind != KindThread {
-		return fmt.Errorf("thread: %q is not a thread", idOrName)
+		return Thread{}, fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
 	// Empty resultSummary tells mergeAttempt to keep whatever is already
 	// on the row (e.g. from the run that led to the current conflict or
@@ -623,7 +634,23 @@ func (m *Manager) Merge(ctx context.Context, idOrName string) error {
 	c := m.lc.control(st.ID)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
-	return m.mergeAttempt(ctx, st.ID, true, "")
+	if err := m.mergeAttempt(ctx, st.ID, true, ""); err != nil {
+		return Thread{}, err
+	}
+	// Read the outcome before discarding: this is the caller's only
+	// chance to see it.
+	final, err := m.store.Get(ctx, st.ID)
+	if err != nil {
+		return Thread{}, err
+	}
+	// A hand-merged thread is as spent as an auto-merged one, so it is
+	// discarded on the same terms. Nothing about who triggered the merge
+	// changes what is left behind. Not folded into mergeAttempt itself:
+	// that is also the retry path, and only a merge that actually
+	// concluded may discard anything — discardMerged's own status check
+	// is what makes a conflict or a block survive this call untouched.
+	m.discardMerged(ctx, st.ID)
+	return final, nil
 }
 
 // mergeAttempt folds a thread's branch back into its base branch.
@@ -728,6 +755,94 @@ func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary strin
 	}
 	m.lc.publish(EventMerged, st)
 	return nil
+}
+
+// discardMerged clears away a thread whose branch has landed: its work is
+// in the base branch, so the worktree and branch are duplicates and the
+// row is a row about nothing. Both merge paths call it — the automatic one
+// and Manager.Merge — and it leaves a note in the parent session's history
+// so the thread's disappearance from the panel is something the user can
+// read about rather than something they have to notice.
+//
+// Callers must hold the thread's opMu; both do. Every step is best-effort
+// and only reports through the log: the merge itself has already
+// succeeded and been delivered by the time this runs, so nothing here may
+// turn a landed merge into a failure. If the worktree cannot be removed,
+// the row deliberately stays — a thread still visible as merged is a far
+// better outcome than a row-less directory nothing knows how to clean up.
+//
+// The thread's own session and its messages are untouched. They are the
+// record of how the work was done, and dropping them would make the
+// history entry point at nothing.
+func (m *Manager) discardMerged(ctx context.Context, threadID string) {
+	st, err := m.store.Get(ctx, threadID)
+	if err != nil {
+		slog.Error("Failed to re-fetch merged thread for discard", "component", "thread", "thread", threadID, "error", err)
+		return
+	}
+	// Only a merge that landed. A conflict or a block still owns its
+	// worktree — that is exactly where the user resolves it.
+	if st.Kind != KindThread || st.Status != StatusMerged {
+		return
+	}
+
+	if err := git.WorktreeRemove(ctx, m.repoRoot, st.WorktreePath, true); err != nil {
+		slog.Error("Failed to remove merged worktree", "component", "thread", "thread", threadID, "error", err)
+		return
+	}
+	// Verify the branch really is contained in the base before deleting
+	// it, and only then force. "git branch -d" is not that check: it asks
+	// whether the branch is merged into HEAD, so it refuses a properly
+	// merged branch whenever the repo has something else checked out —
+	// which for a thread's base branch is the normal case, not the
+	// exception. Ask about the two branches that matter, then act on the
+	// answer.
+	branchKept := true
+	merged, err := git.IsAncestor(ctx, m.repoRoot, st.Branch, st.BaseBranch)
+	switch {
+	case err != nil:
+		slog.Error("Failed to verify merged branch before delete", "component", "thread", "thread", threadID, "branch", st.Branch, "error", err)
+	case !merged:
+		slog.Error("Refusing to delete a branch not contained in its base", "component", "thread", "thread", threadID, "branch", st.Branch, "base", st.BaseBranch)
+	default:
+		if err := git.DeleteBranch(ctx, m.repoRoot, st.Branch, true); err != nil {
+			slog.Error("Failed to delete merged branch", "component", "thread", "thread", threadID, "branch", st.Branch, "error", err)
+		} else {
+			branchKept = false
+		}
+	}
+	if err := m.store.Delete(ctx, st.ID); err != nil {
+		slog.Error("Failed to delete merged thread record", "component", "thread", "thread", threadID, "error", err)
+		return
+	}
+	m.lc.publish(EventRemoved, st)
+	m.recordDiscardNotice(ctx, st, branchKept)
+}
+
+// recordDiscardNotice writes the merged-and-removed note into the parent
+// session's history.
+//
+// It is a system-role message on purpose: that role is dropped when the
+// prompt is built (see message.Message conversion), so this is a record
+// for the user only. The model has already been told the thread finished,
+// through the completion inbox — telling it a second time, in a different
+// voice, would be the kind of duplicate that makes an agent repeat itself.
+func (m *Manager) recordDiscardNotice(ctx context.Context, st Thread, branchKept bool) {
+	a, sessionID, ok := m.resolveDeliveryTarget(ctx, nil, st)
+	if !ok || a == nil || a.Messages == nil {
+		return
+	}
+	text := fmt.Sprintf("Thread %q merged into %s and removed.", st.Name, st.BaseBranch)
+	if branchKept {
+		text = fmt.Sprintf("Thread %q merged into %s and removed; branch %s kept (git declined to delete it).",
+			st.Name, st.BaseBranch, st.Branch)
+	}
+	if _, err := a.Messages.Create(ctx, sessionID, message.CreateMessageParams{
+		Role:  message.System,
+		Parts: []message.ContentPart{message.TextContent{Text: text}},
+	}); err != nil {
+		slog.Error("Failed to record thread removal in history", "component", "thread", "thread", st.ID, "error", err)
+	}
 }
 
 func (m *Manager) setConflict(ctx context.Context, threadID, resultSummary string, conflicts []string) error {

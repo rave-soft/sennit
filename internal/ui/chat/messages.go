@@ -414,6 +414,13 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			))
 		}
 		return items
+	case message.System:
+		// A record of something Braid did, not something either party
+		// said. See NoticeItem.
+		if strings.TrimSpace(msg.Content().Text) == "" {
+			return nil
+		}
+		return []MessageItem{NewNoticeItem(sty, msg)}
 	}
 	return []MessageItem{}
 }

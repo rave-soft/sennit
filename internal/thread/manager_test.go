@@ -819,12 +819,11 @@ func TestManager_ManualPolicyCompleted(t *testing.T) {
 	require.NotZero(t, st.CompletedAt)
 	require.NoFileExists(t, filepath.Join(repo, "output.txt"))
 
-	require.NoError(t, mgr.Merge(t.Context(), st.ID))
+	_, mergeErr := mgr.Merge(t.Context(), st.ID)
+	require.NoError(t, mergeErr)
 
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusMerged, st.Status)
 	require.FileExists(t, filepath.Join(repo, "output.txt"))
+	requireDiscarded(t, mgr, repo, st)
 }
 
 func TestManager_RunCompleteSuccessAutoMerge(t *testing.T) {
@@ -841,14 +840,10 @@ func TestManager_RunCompleteSuccessAutoMerge(t *testing.T) {
 
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
 
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusMerged, st.Status)
 	require.FileExists(t, filepath.Join(repo, "output.txt"))
-
-	threadTip := runGit(t, repo, "rev-parse", "thread/gamma")
-	mainTip := runGit(t, repo, "rev-parse", "main")
-	require.Equal(t, threadTip, mainTip)
+	require.Equal(t, "auto merged\n", runGit(t, repo, "show", "main:output.txt"),
+		"the thread's work must be on the base branch")
+	requireDiscardedEventually(t, mgr, repo, st)
 }
 
 func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
@@ -868,7 +863,8 @@ func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
 
-	require.NoError(t, mgr.Merge(t.Context(), st.ID))
+	_, mergeErr := mgr.Merge(t.Context(), st.ID)
+	require.NoError(t, mergeErr)
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusConflict, st.Status)
@@ -879,10 +875,11 @@ func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
 	writeFile(t, st.WorktreePath, "README.md", "resolved version\n")
 	runGit(t, st.WorktreePath, "add", "README.md")
 
-	require.NoError(t, mgr.Merge(t.Context(), st.ID))
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusMerged, st.Status)
+	merged, mergeErr := mgr.Merge(t.Context(), st.ID)
+	require.NoError(t, mergeErr)
+	require.Equal(t, StatusMerged, merged.Status,
+		"Merge must report the outcome itself; the row is gone by the time it returns")
+	requireDiscarded(t, mgr, repo, st)
 
 	content, err := os.ReadFile(filepath.Join(repo, "README.md"))
 	require.NoError(t, err)
@@ -905,7 +902,8 @@ func TestManager_MergeBlockedWhenBaseCheckedOutAndDirty(t *testing.T) {
 
 	writeFile(t, repo, "dirty.txt", "uncommitted\n")
 
-	require.NoError(t, mgr.Merge(t.Context(), st.ID))
+	_, mergeErr := mgr.Merge(t.Context(), st.ID)
+	require.NoError(t, mergeErr)
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusMergeBlocked, st.Status)
@@ -934,14 +932,12 @@ func TestManager_FastForwardWhenBaseNotCheckedOut(t *testing.T) {
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
 
-	require.NoError(t, mgr.Merge(t.Context(), st.ID))
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusMerged, st.Status)
+	_, mergeErr := mgr.Merge(t.Context(), st.ID)
+	require.NoError(t, mergeErr)
 
-	threadTip := runGit(t, repo, "rev-parse", "thread/zeta")
-	baseTip := runGit(t, repo, "rev-parse", "other-base")
-	require.Equal(t, threadTip, baseTip)
+	require.Equal(t, "content\n", runGit(t, repo, "show", "other-base:output.txt"),
+		"the thread's work must be on its own base branch, not on main")
+	requireDiscarded(t, mgr, repo, st)
 }
 
 func TestManager_WaitWakesOnCompletion(t *testing.T) {
@@ -1304,7 +1300,8 @@ func TestManager_ConcurrentShutdownClosesMutations(t *testing.T) {
 	_, err := mgr.Create(t.Context(), CreateArgs{Name: "closed", Goal: "go"})
 	require.ErrorIs(t, err, ErrManagerClosed)
 	require.ErrorIs(t, mgr.Send(t.Context(), "missing", "go"), ErrManagerClosed)
-	require.ErrorIs(t, mgr.Merge(t.Context(), "missing"), ErrManagerClosed)
+	_, mergeErr := mgr.Merge(t.Context(), "missing")
+	require.ErrorIs(t, mergeErr, ErrManagerClosed)
 	require.ErrorIs(t, mgr.Remove(t.Context(), "missing", true, false), ErrManagerClosed)
 	require.ErrorIs(t, mgr.Recover(t.Context()), ErrManagerClosed)
 }
@@ -1404,7 +1401,7 @@ func TestManager_ShutdownBlocksAdmission(t *testing.T) {
 	require.ErrorIs(t, err, ErrManagerClosed)
 	err = mgr.Send(t.Context(), "missing", "x")
 	require.ErrorIs(t, err, ErrManagerClosed)
-	err = mgr.Merge(t.Context(), "missing")
+	_, err = mgr.Merge(t.Context(), "missing")
 	require.ErrorIs(t, err, ErrManagerClosed)
 	err = mgr.Remove(t.Context(), "missing", true, false)
 	require.ErrorIs(t, err, ErrManagerClosed)

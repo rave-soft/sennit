@@ -173,3 +173,19 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	msg.ResetStreamedContent()
 	require.Empty(t, msg.Parts)
 }
+
+// TestToAIMessage_SystemRoleIsNotSentToTheModel pins the property the
+// thread-removal note in the chat history depends on: a system-role
+// message is a record for the person reading the transcript, and must
+// contribute nothing to the prompt. The model already learns that a
+// delegation finished through the completion inbox; a second telling, in
+// a different voice, would invite it to report the same event twice.
+func TestToAIMessage_SystemRoleIsNotSentToTheModel(t *testing.T) {
+	t.Parallel()
+
+	m := Message{
+		Role:  System,
+		Parts: []ContentPart{TextContent{Text: `Thread "tidy-up" merged into main and removed.`}},
+	}
+	require.Empty(t, m.ToAIMessage(), "a system-role message must not reach the provider")
+}

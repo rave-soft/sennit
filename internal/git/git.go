@@ -268,6 +268,27 @@ func DeleteBranch(ctx context.Context, repo, name string, force bool) error {
 	return nil
 }
 
+// IsAncestor reports whether ref is reachable from other — i.e. whether
+// everything on ref is already contained in other.
+//
+// This is the check "git branch -d" only appears to make: that one asks
+// whether the branch is merged into HEAD (or its upstream), so it refuses
+// a branch that is fully merged into some other branch while an unrelated
+// one happens to be checked out. Ask about the two branches that actually
+// matter instead.
+func IsAncestor(ctx context.Context, repo, ref, other string) (bool, error) {
+	_, err := run(ctx, repo, "merge-base", "--is-ancestor", ref, other)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	// Exit code 1 is the answer "no", not a failure to answer.
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git: is-ancestor: %w", err)
+}
+
 // CommitAll stages all changes in worktree (git add -A) and commits them
 // with message. If there is nothing to commit, it returns (false, nil)
 // rather than treating an empty commit as an error.

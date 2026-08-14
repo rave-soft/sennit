@@ -296,6 +296,7 @@ type Styles struct {
 		Thinking         lipgloss.Style
 		ErrorTag         lipgloss.Style
 		OriginAgentTag   lipgloss.Style // Muted caption marking a message an agent authored, not the person.
+		Notice           lipgloss.Style // Muted one-line record of something the system did (see chat.NoticeItem).
 		ErrorTitle       lipgloss.Style
 		ErrorDetails     lipgloss.Style
 		ToolCallFocused  lipgloss.Style

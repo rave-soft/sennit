@@ -90,9 +90,6 @@ func TestManager_AutoMergeThreadDeliversOnceAcrossRunAndMerge(t *testing.T) {
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusMerged, st.Status)
 
 	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
 	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
@@ -150,11 +147,9 @@ func TestManager_AutoMergeThreadConflictDeliversOnceNotAgainOnManualRetry(t *tes
 	// outcome directly from its return value.
 	writeFile(t, st.WorktreePath, "README.md", "resolved version\n")
 	runGit(t, st.WorktreePath, "add", "README.md")
-	require.NoError(t, mgr.Merge(t.Context(), st.ID))
-
-	st, err = mgr.Get(t.Context(), st.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusMerged, st.Status)
+	_, mergeErr := mgr.Merge(t.Context(), st.ID)
+	require.NoError(t, mergeErr)
+	requireDiscarded(t, mgr, repo, st)
 
 	time.Sleep(50 * time.Millisecond)
 	require.Len(t, parentCoord.deliveredCompletions(), 1,
