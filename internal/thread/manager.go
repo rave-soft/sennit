@@ -22,6 +22,7 @@ import (
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
 )
@@ -132,7 +133,7 @@ func NewManager(opts ManagerOptions) *Manager {
 	// TaskManager sharing this lifecycle (see NewTaskManager) must be
 	// constructed with this same m.lc and m.ctx, not fresh ones, or
 	// recovery and shutdown would only ever see threads.
-	m.lc = newLifecycle(opts.Store, m.onAutoMerge, m.recoverWorktree, m.resolveDeliveryTarget)
+	m.lc = newLifecycle(opts.Store, m.onAutoMerge, m.recoverWorktree, m.resolveDeliveryTarget, opts.ParentApp)
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	return m
 }
@@ -855,6 +856,39 @@ func (m *Manager) WorkspaceID(threadID string) string {
 // internal/cmd/root.go and internal/backend/backend.go.
 func (m *Manager) SetPermissionsSkip(skip bool) {
 	m.lc.setPermissionsSkip(skip)
+}
+
+// PermissionsFor returns the permission service holding delegationID's
+// pending requests, or nil when it names nothing live under this manager.
+//
+// A thread's prompts are raised against its own isolated workspace's
+// service and relayed to the parent for display (see
+// lifecycle.forwardPermissions), so the parent must answer them where they
+// are actually waiting. Answering against the parent's own service would
+// find no such request and silently do nothing — leaving the thread
+// blocked on exactly the prompt the user just answered.
+//
+// nil for a task, whose handle wraps the parent's own App: there is
+// nothing to route, and the caller's own service is already correct.
+func (m *Manager) PermissionsFor(delegationID string) permission.Service {
+	if delegationID == "" {
+		return nil
+	}
+	c := m.lc.existingControl(delegationID)
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	rt := c.runtime
+	c.mu.Unlock()
+	if rt == nil {
+		return nil
+	}
+	a := rt.handle.App()
+	if a == nil || a == m.parentApp {
+		return nil
+	}
+	return a.Permissions
 }
 
 func (m *Manager) Shutdown(ctx context.Context) error {

@@ -389,16 +389,37 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 
 // -- Permissions --
 
+// permissionsFor resolves the service actually holding perm, which is not
+// always this workspace's own: a thread's prompts are raised inside its
+// isolated workspace and relayed here for display (see
+// lifecycle.forwardPermissions), so the answer has to travel back to the
+// service that is still blocking on it. Falls back to this workspace's own
+// service for everything else — the user's own turn, and tasks, which run
+// in this very App.
+func (w *AppWorkspace) permissionsFor(perm permission.PermissionRequest) permission.Service {
+	if perm.Delegation.ID == "" {
+		return w.app.Permissions
+	}
+	mgr, ok := w.threadManager()
+	if !ok {
+		return w.app.Permissions
+	}
+	if svc := mgr.PermissionsFor(perm.Delegation.ID); svc != nil {
+		return svc
+	}
+	return w.app.Permissions
+}
+
 func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
-	return w.app.Permissions.Grant(perm)
+	return w.permissionsFor(perm).Grant(perm)
 }
 
 func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
-	return w.app.Permissions.GrantPersistent(perm)
+	return w.permissionsFor(perm).GrantPersistent(perm)
 }
 
 func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
-	return w.app.Permissions.Deny(perm)
+	return w.permissionsFor(perm).Deny(perm)
 }
 
 func (w *AppWorkspace) PermissionSkipRequests() bool {
