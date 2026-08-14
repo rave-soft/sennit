@@ -31,6 +31,12 @@ type BootstrapOptions struct {
 	// The child workspace's own definitions take precedence.
 	InheritedAgents map[string]config.Agent
 
+	// ConfineWrites keeps this workspace's file writes inside its own
+	// working directory (see permission.Service.ConfinedDir). Set for a
+	// thread, whose isolation in a git worktree is the whole point of it
+	// and must not depend on a permission prompt nobody will see.
+	ConfineWrites bool
+
 	// WorkspaceLock enables a repository-scoped workspace lock. Git
 	// workspaces lock their canonical common directory; non-git
 	// workspaces lock their data directory.
@@ -168,6 +174,9 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 			opts.OnAppInitFailure(err)
 		}
 		return nil, fmt.Errorf("failed to create app workspace: %w", err)
+	}
+	if opts.ConfineWrites {
+		appInstance.Permissions.ConfineToWorkingDir()
 	}
 
 	// Keep the workspace lock through all repo-dependent teardown. In

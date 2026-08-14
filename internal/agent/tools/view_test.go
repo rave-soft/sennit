@@ -358,3 +358,6 @@ func TestSniffImageMimeType(t *testing.T) {
 func (m *mockViewPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }
+
+func (*mockViewPermissionService) ConfineToWorkingDir() {}
+func (*mockViewPermissionService) ConfinedDir() string  { return "" }

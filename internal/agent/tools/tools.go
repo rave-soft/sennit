@@ -216,3 +216,38 @@ func renderTemplate(tmpl *template.Template, data any) string {
 	}
 	return out.String()
 }
+
+// confinementRefusal reports whether filePath falls outside the boundary a
+// confined workspace may write within, and the message to return if it
+// does.
+//
+// A thread works in its own git worktree on its own branch so that its
+// changes stay its own until they are merged. An absolute path is all it
+// takes to step outside that: the file tools join a relative path onto the
+// working directory but pass an absolute one straight through, so a model
+// that has learned the project's real path — from a goal, a log line, its
+// own earlier session — writes into the main checkout and the thread's
+// branch stays empty. That is not a permission question, and under yolo
+// (which threads inherit) no question would be asked anyway. So a confined
+// workspace refuses outright, and says where the file should have gone.
+//
+// Returns ok=false when there is nothing to refuse: an unconfined
+// workspace, or a path already inside the boundary.
+func confinementRefusal(permissions permission.Service, filePath string) (message string, ok bool) {
+	if permissions == nil {
+		return "", false
+	}
+	dir := permissions.ConfinedDir()
+	if dir == "" {
+		return "", false
+	}
+	abs, outside, err := resolveWithinWorkdir(dir, filePath)
+	if err != nil || !outside {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"refusing to write outside this workspace: %s is not inside %s. "+
+			"This workspace is isolated — write to the copy of the file under %s instead.",
+		abs, dir, dir,
+	), true
+}
