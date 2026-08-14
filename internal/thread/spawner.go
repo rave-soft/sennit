@@ -97,3 +97,48 @@ func (s *LocalSpawner) Release(ctx context.Context, id string) error {
 	a.Shutdown()
 	return nil
 }
+
+// parentHandle is the [Handle] [ParentAppSpawner] returns: it wraps the
+// caller's own App instead of building one.
+type parentHandle struct {
+	id  string
+	app *app.App
+}
+
+func (h *parentHandle) ID() string    { return h.id }
+func (h *parentHandle) App() *app.App { return h.app }
+
+// ParentAppSpawner is the Spawner for tasks: unlike LocalSpawner, it does
+// not bootstrap a second isolated App per delegation. A task shares its
+// parent workspace's own working directory, so bootstrapping a second App
+// over it would take the same WorkspaceLock and open the same SQLite file
+// the parent already holds — redundant at best, and it would throw away
+// the point of a task being cheap to start. Spawn returns a Handle
+// wrapping the given App directly (ignoring path — a task has no
+// worktree of its own).
+//
+// Release is deliberately a no-op: the parent App outlives every task run
+// inside it and is torn down by its own owner, never by this Spawner.
+// Getting this backwards — having Release call App.Shutdown — would tear
+// the user's own workspace down out from under them the moment a task's
+// run ends or the process shuts down.
+type ParentAppSpawner struct {
+	app *app.App
+}
+
+// NewParentAppSpawner returns a Spawner whose every Spawn call returns a
+// Handle wrapping a, the caller's own already-running App.
+func NewParentAppSpawner(a *app.App) *ParentAppSpawner {
+	return &ParentAppSpawner{app: a}
+}
+
+// Spawn implements Spawner.
+func (s *ParentAppSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
+	return &parentHandle{id: uuid.New().String(), app: s.app}, nil
+}
+
+// Release implements Spawner. See [ParentAppSpawner]'s doc comment for why
+// this must stay a no-op.
+func (s *ParentAppSpawner) Release(ctx context.Context, id string) error {
+	return nil
+}

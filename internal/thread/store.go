@@ -68,13 +68,18 @@ func NewStore(q db.Querier, projectPath string) Store {
 }
 
 func (s *store) Create(ctx context.Context, params CreateParams) (Thread, error) {
-	mergePolicy := params.MergePolicy
-	if mergePolicy == "" {
-		mergePolicy = MergeAuto
-	}
 	kind := params.Kind
 	if kind == "" {
 		kind = KindThread
+	}
+	// MergePolicy is a Thread-overlay concept: defaulting it for every
+	// kind would leave a non-thread row reading MergeAuto, which used to
+	// be enough on its own to send a task into Manager's merge flow (see
+	// onAutoMerge, which now also guards on Kind directly). Only a thread
+	// gets the default; every other kind's column stays "".
+	mergePolicy := params.MergePolicy
+	if mergePolicy == "" && kind == KindThread {
+		mergePolicy = MergeAuto
 	}
 
 	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{

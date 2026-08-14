@@ -139,8 +139,12 @@ func (s *fakeStore) Create(_ context.Context, p thread.CreateParams) (thread.Thr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seq++
+	kind := p.Kind
+	if kind == "" {
+		kind = thread.KindThread
+	}
 	mergePolicy := p.MergePolicy
-	if mergePolicy == "" {
+	if mergePolicy == "" && kind == thread.KindThread {
 		mergePolicy = thread.MergeAuto
 	}
 	st := thread.Thread{
@@ -150,6 +154,7 @@ func (s *fakeStore) Create(_ context.Context, p thread.CreateParams) (thread.Thr
 			Goal:      p.Goal,
 			SessionID: p.SessionID,
 			Status:    thread.StatusPending,
+			Kind:      kind,
 		},
 		BaseBranch:   p.BaseBranch,
 		Branch:       p.Branch,

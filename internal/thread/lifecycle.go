@@ -7,15 +7,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/pubsub"
 )
 
 // runtimeState tracks the in-memory bookkeeping for an entity whose
-// workspace is currently spawned: the handle to release on removal, and
+// workspace is currently spawned: the handle to release on removal, the
+// Spawner that produced it (kept per-runtime rather than per-lifecycle,
+// since threads and tasks share one lifecycle but use different Spawners —
+// releasing via the wrong one is exactly the kind of mistake that would
+// either leak a workspace or, for a task, tear down its parent App), and
 // the cancel function for its RunComplete watcher goroutine.
 type runtimeState struct {
 	handle      Handle
+	spawner     Spawner
 	watchCancel context.CancelFunc
 	runID       string
 }
@@ -55,13 +62,16 @@ type recoverHook func(ctx context.Context, st Thread) (handled bool, err error)
 
 // lifecycle is the generic delegation-lifecycle machinery shared by every
 // kind of background delegation this package drives: admission control,
-// per-entity serialization, worker tracking, workspace release, and event
-// plumbing. It has no notion of git worktrees or merge policy — those live
-// in the onRunSuccess/onRecover hooks an overlay such as [Manager] supplies
-// at construction, the same way it supplies a [Spawner].
+// per-entity serialization, worker tracking, run dispatch, workspace
+// release, and event plumbing. It has no notion of git worktrees or merge
+// policy — those live in the onRunSuccess/onRecover hooks an overlay such
+// as [Manager] supplies at construction. It also has no notion of a single
+// Spawner: unlike store, which every kind shares, each entity carries its
+// own Spawner in its runtimeState, since [Manager]'s threads and a
+// [TaskManager]'s tasks are spawned (and released) differently even
+// though both share this one lifecycle.
 type lifecycle struct {
 	store        Store
-	spawner      Spawner
 	onRunSuccess runCompleteHook
 	onRecover    recoverHook
 	broker       *pubsub.Broker[Event]
@@ -77,14 +87,16 @@ type lifecycle struct {
 	changeCh chan struct{}
 }
 
-// newLifecycle constructs a ready-to-use lifecycle backed by store and
-// spawner. onRunSuccess and onRecover are optional (nil means no overlay:
-// runs always rest at StatusCompleted, and recover never reclassifies
-// beyond the generic active-status sweep).
-func newLifecycle(store Store, spawner Spawner, onRunSuccess runCompleteHook, onRecover recoverHook) *lifecycle {
+// newLifecycle constructs a ready-to-use lifecycle backed by store.
+// onRunSuccess and onRecover are optional (nil means no overlay: runs
+// always rest at StatusCompleted, and recover never reclassifies beyond
+// the generic active-status sweep). Share one lifecycle between every
+// delegation kind driven over the same store — see [Manager] and
+// [TaskManager] — rather than constructing one per kind, or admission,
+// recovery, and shutdown will each only ever see one kind.
+func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHook) *lifecycle {
 	return &lifecycle{
 		store:        store,
-		spawner:      spawner,
 		onRunSuccess: onRunSuccess,
 		onRecover:    onRecover,
 		broker:       pubsub.NewBroker[Event](),
@@ -199,6 +211,81 @@ func (l *lifecycle) snapshotControls() map[string]*threadControl {
 	return controls
 }
 
+// startRun registers handle as the running workspace for id and starts its
+// RunComplete watcher goroutine, then dispatches prompt against sessionID
+// as a fire-and-forget run whose completion this lifecycle picks up via
+// handleRunComplete. The subscription is established synchronously, before
+// startRun returns: callers ([Manager.Create], [Manager.Send],
+// [TaskManager.Create]) dispatch the run right after startRun returns, and
+// a RunComplete published before the subscription is registered would
+// otherwise be silently missed by the broker's fan-out.
+//
+// ctx is the long-lived background context the run and the watcher
+// goroutine are bound to (Manager's and TaskManager's own m.ctx/t.ctx, not
+// a caller's short-lived request context) — cancelling it is what lets a
+// shared shutdown reach every kind's in-flight work. spawner is recorded
+// on the resulting runtime so it, not any other kind's Spawner, is what
+// eventually releases handle.
+//
+// Callers must hold the entity's opMu: installing c.runtime is a lifecycle
+// transition, and without the lock a concurrent teardown could observe "no
+// runtime", delete the entity, and leave this runtime stranded on one that
+// no longer exists.
+func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner, id, sessionID, prompt string) {
+	rt := l.installRuntime(ctx, handle, spawner, id)
+	c := l.control(id)
+	runID := uuid.NewString()
+	c.mu.Lock()
+	rt.runID = runID
+	c.mu.Unlock()
+
+	// Reserve acceptance before dispatch so cancellation cannot leave a run
+	// unaccounted for between goroutine scheduling and coordinator admission.
+	accept := handle.App().AgentCoordinator.BeginAccepted(sessionID)
+	l.goWorker(func() {
+		if _, err := handle.App().AgentCoordinator.RunAccepted(agent.WithRunID(ctx, runID), accept, sessionID, prompt); err != nil {
+			slog.Error("thread: agent run returned an error", "session_id", sessionID, "error", err)
+			// backend.runAgent documents this fallback for pre-execution
+			// failures. Local coordinators do not provide that wrapper.
+			l.handleRunComplete(ctx, id, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
+		}
+	})
+}
+
+// installRuntime binds handle to id as the entity's live workspace and
+// starts the RunComplete watcher for it, without dispatching any run. The
+// returned runtime carries an empty runID: nothing is in flight yet, and
+// handleRunComplete ignores completions that do not match the current
+// runID, so a stray event cannot tear the workspace down.
+//
+// This is the state an idle entity rests in — a live workspace with no
+// run of its own in flight — and the first half of what startRun does.
+// Callers must hold the entity's opMu, for the reason startRun documents.
+func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner Spawner, id string) *runtimeState {
+	c := l.control(id)
+	watchCtx, cancel := context.WithCancel(ctx)
+	sub := handle.App().RunCompletions().Subscribe(watchCtx)
+	rt := &runtimeState{handle: handle, spawner: spawner, watchCancel: cancel}
+	c.mu.Lock()
+	c.runtime = rt
+	c.mu.Unlock()
+
+	l.goWorker(func() {
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case ev, ok := <-sub:
+				if !ok {
+					return
+				}
+				l.handleRunComplete(ctx, id, ev.Payload)
+			}
+		}
+	})
+	return rt
+}
+
 // handleRunComplete is the generic reaction to a RunComplete notification
 // for entity id: it matches the completion to the run currently owning the
 // entity's workspace, releases the workspace, and records the terminal
@@ -222,7 +309,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 	c.runtime = nil
 	c.mu.Unlock()
 	rt.watchCancel()
-	if err := l.spawner.Release(ctx, rt.handle.ID()); err != nil {
+	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
 		slog.Error("thread: release completed workspace failed", "thread", id, "error", err)
 	}
 	st, err := l.store.Get(ctx, id)

@@ -111,8 +111,10 @@ func NewManager(opts ManagerOptions) *Manager {
 	}
 	// onAutoMerge/recoverWorktree are this package's git/merge overlay on
 	// the generic lifecycle; a lighter, worktree-less delegation kind
-	// would pass nil for both.
-	m.lc = newLifecycle(opts.Store, opts.Spawner, m.onAutoMerge, m.recoverWorktree)
+	// would pass nil for both. A TaskManager sharing this lifecycle (see
+	// NewTaskManager) must be constructed with this same m.lc and m.ctx,
+	// not fresh ones, or recovery and shutdown would only ever see threads.
+	m.lc = newLifecycle(opts.Store, m.onAutoMerge, m.recoverWorktree)
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	return m
 }
@@ -258,7 +260,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		// writable session rather than the read-only view reserved for
 		// unspawned threads. Shutdown and Remove release it like any
 		// other runtime.
-		m.installRuntime(handle, st.ID)
+		m.lc.installRuntime(m.ctx, handle, m.spawner, st.ID)
 		return st, nil
 	}
 
@@ -267,7 +269,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, err
 	}
-	m.startRun(handle, st.ID, st.SessionID, args.Goal)
+	m.lc.startRun(m.ctx, handle, m.spawner, st.ID, st.SessionID, args.Goal)
 
 	return st, nil
 }
@@ -294,80 +296,6 @@ func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error 
 	return cause
 }
 
-// startRun registers handle as the running workspace for threadID and
-// starts its RunComplete watcher goroutine. The subscription itself is
-// established synchronously, before startRun returns: callers (Create,
-// Send) dispatch the agent run right after startRun returns, and a
-// RunComplete published before the subscription is registered would
-// otherwise be silently missed by the broker's fan-out.
-//
-// Callers must hold the thread's opMu: installing c.runtime is a
-// lifecycle transition, and without the lock a concurrent Remove could
-// observe "no runtime", delete the thread, and leave this runtime
-// stranded on a thread that no longer exists.
-func (m *Manager) startRun(handle Handle, threadID, sessionID, prompt string) {
-	rt := m.installRuntime(handle, threadID)
-	c := m.lc.control(threadID)
-	runID := uuid.NewString()
-	c.mu.Lock()
-	rt.runID = runID
-	c.mu.Unlock()
-
-	// Reserve acceptance before dispatch so cancellation cannot leave a run
-	// unaccounted for between goroutine scheduling and coordinator admission.
-	accept := handle.App().AgentCoordinator.BeginAccepted(sessionID)
-	m.lc.goWorker(func() {
-		if _, err := handle.App().AgentCoordinator.RunAccepted(agent.WithRunID(m.ctx, runID), accept, sessionID, prompt); err != nil {
-			slog.Error("thread: agent run returned an error", "session_id", sessionID, "error", err)
-			// backend.runAgent documents this fallback for pre-execution
-			// failures. Local coordinators do not provide that wrapper.
-			m.onRunComplete(threadID, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
-		}
-	})
-}
-
-// installRuntime binds handle to threadID as the thread's live workspace
-// and starts the RunComplete watcher for it, without dispatching any run.
-// The returned runtime carries an empty runID: nothing is in flight yet,
-// and onRunComplete ignores completions that do not match the current
-// runID, so a stray event cannot tear the workspace down.
-//
-// This is the state an idle thread rests in — a live, isolated workspace
-// with no agent run of its own — and the first half of what startRun
-// does. Callers must hold the thread's opMu, for the reason startRun
-// documents.
-func (m *Manager) installRuntime(handle Handle, threadID string) *runtimeState {
-	c := m.lc.control(threadID)
-	watchCtx, cancel := context.WithCancel(m.ctx)
-	sub := handle.App().RunCompletions().Subscribe(watchCtx)
-	rt := &runtimeState{handle: handle, watchCancel: cancel}
-	c.mu.Lock()
-	c.runtime = rt
-	c.mu.Unlock()
-
-	m.lc.goWorker(func() {
-		for {
-			select {
-			case <-watchCtx.Done():
-				return
-			case ev, ok := <-sub:
-				if !ok {
-					return
-				}
-				m.onRunComplete(threadID, ev.Payload)
-			}
-		}
-	})
-	return rt
-}
-
-// onRunComplete is the RunComplete handler: it reacts to the authoritative
-// end-of-run signal for a thread's session by recording the outcome and,
-// on success with an auto merge policy, kicking off the merge flow.
-func (m *Manager) onRunComplete(threadID string, rc notify.RunComplete) {
-	m.lc.handleRunComplete(m.ctx, threadID, rc)
-}
-
 // onAutoMerge is the [runCompleteHook] that gives MergeAuto threads their
 // merge-instead-of-completed treatment: on a successful run it folds the
 // thread's branch back into its base branch rather than letting the
@@ -387,7 +315,12 @@ func (m *Manager) onRunComplete(threadID string, rc notify.RunComplete) {
 // observes anything but an active status between the run finishing and
 // mergeAttempt setting StatusMerging.
 func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, resultText string) bool {
-	if st.MergePolicy != MergeAuto {
+	// Merging makes no sense for a delegation kind with no worktree.
+	// store.Create never defaults a non-thread's MergePolicy to
+	// MergeAuto, so this should not be reachable for a task today, but
+	// checking Kind directly — the same defense recoverWorktree applies —
+	// means this hook stays correct even if that changes.
+	if st.Kind != KindThread || st.MergePolicy != MergeAuto {
 		return false
 	}
 	m.lc.goWorker(func() {
@@ -421,6 +354,9 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	st, err := m.resolve(ctx, idOrName)
 	if err != nil {
 		return Thread{}, err
+	}
+	if st.Kind != KindThread {
+		return Thread{}, fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
 
 	c := m.lc.control(st.ID)
@@ -462,7 +398,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 		_ = m.spawner.Release(ctx, handle.ID())
 		return Thread{}, err
 	}
-	m.installRuntime(handle, st.ID)
+	m.lc.installRuntime(m.ctx, handle, m.spawner, st.ID)
 	return st, nil
 }
 
@@ -478,6 +414,9 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 	st, err := m.resolve(ctx, idOrName)
 	if err != nil {
 		return err
+	}
+	if st.Kind != KindThread {
+		return fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
 
 	c := m.lc.control(st.ID)
@@ -517,7 +456,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 				// Mirror startRun's fallback for pre-execution failures
 				// so the workspace is not stranded on a run that never
 				// published its own RunComplete.
-				m.onRunComplete(st.ID, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
+				m.lc.handleRunComplete(m.ctx, st.ID, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
 			}
 		})
 		return nil
@@ -544,7 +483,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 	if err != nil {
 		return err
 	}
-	m.startRun(handle, st.ID, st.SessionID, message)
+	m.lc.startRun(m.ctx, handle, m.spawner, st.ID, st.SessionID, message)
 	owned = false // Ownership transferred to the manager runtime state.
 	return nil
 }
@@ -561,6 +500,9 @@ func (m *Manager) Merge(ctx context.Context, idOrName string) error {
 	st, err := m.resolve(ctx, idOrName)
 	if err != nil {
 		return err
+	}
+	if st.Kind != KindThread {
+		return fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
 	// Empty resultSummary tells mergeAttempt to keep whatever is already
 	// on the row (e.g. from the run that led to the current conflict or
@@ -659,7 +601,7 @@ func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary strin
 			if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
 				a.AgentCoordinator.CancelAll()
 			}
-			if err := m.spawner.Release(ctx, rt.handle.ID()); err != nil {
+			if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
 				slog.Error("thread: release merged workspace failed", "thread", threadID, "error", err)
 			}
 		}
@@ -692,6 +634,9 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 	if err != nil {
 		return err
 	}
+	if st.Kind != KindThread {
+		return fmt.Errorf("thread: %q is not a thread", idOrName)
+	}
 
 	if (st.Status == StatusRunning || st.Status == StatusMerging) && !force {
 		return fmt.Errorf("thread: %q is active (status=%s); use force to remove", st.Name, st.Status)
@@ -718,7 +663,7 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 				a.AgentCoordinator.CancelAll()
 			}
 		}
-		if err := m.spawner.Release(ctx, rt.handle.ID()); err != nil {
+		if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
 			slog.Error("thread: release spawner handle on remove failed", "thread", st.ID, "error", err)
 		}
 	}
@@ -771,6 +716,12 @@ func (m *Manager) WorkspaceID(threadID string) string {
 
 // Shutdown stops admission, cancels manager work, releases live runtimes, and
 // waits for manager-owned goroutines. It is idempotent and safe concurrently.
+//
+// m.cancel cancels m.ctx, the base context every runtime's watch loop and
+// in-flight run derive from — including a [TaskManager]'s, if one was
+// constructed sharing this Manager's lifecycle and ctx (see NewManager),
+// since m.lc.snapshotControls below walks that same shared controls map
+// regardless of which kind registered each entry.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.shutdownOnce.Do(func() {
 		m.lc.closeAdmission()
@@ -793,7 +744,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 					if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
 						a.AgentCoordinator.CancelAll()
 					}
-					if err := m.spawner.Release(context.Background(), rt.handle.ID()); err != nil {
+					if err := rt.spawner.Release(context.Background(), rt.handle.ID()); err != nil {
 						slog.Error("thread: release workspace on shutdown failed", "error", err)
 					}
 					// The workspace DB remains live until this method returns to
