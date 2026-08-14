@@ -59,7 +59,7 @@ var threadsDockActivityTTL = 8 * time.Second
 
 // threadsDockVisibleCap is the maximum number of active threads the dock
 // renders (and therefore the maximum it ever fetches live activity for).
-const threadsDockVisibleCap = 5
+const threadsDockVisibleCap = 3
 
 // threadDockActivity is a per-thread live snapshot fetched from the
 // thread's own session via AttachThread + GetSession.
@@ -413,28 +413,4 @@ func threadDockStatusWord(status thread.Status) string {
 	default:
 		return string(status)
 	}
-}
-
-// hasRunningThread reports whether any delegation is a thread with work
-// actually in flight. The session panel uses it to drop its todos section
-// while that is true: a thread takes work away from the main agent, so
-// the todo list stops describing what is happening, while a task runs
-// alongside it and leaves the list meaningful.
-//
-// Idle deliberately does not count, even though activeDockThreads keeps
-// idle rows in its list so they do not read as finished. An idle thread
-// is a parked workspace with nothing running — most often a finished one
-// that someone opened, since attaching reactivates it — and treating
-// that as "a thread is working" would hide the main agent's todos for
-// the rest of the session.
-func hasRunningThread(delegations []proto.Thread) bool {
-	for _, t := range delegations {
-		if thread.Kind(t.Kind) == thread.KindTask {
-			continue
-		}
-		if thread.Status(t.Status).Active() {
-			return true
-		}
-	}
-	return false
 }

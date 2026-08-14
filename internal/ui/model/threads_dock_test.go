@@ -106,10 +106,9 @@ func TestVisibleDockThreadsCapsAndReportsMore(t *testing.T) {
 		wantMoreCount int
 	}{
 		{0, 0, 0},
-		{threadsDockVisibleCap - 2, threadsDockVisibleCap - 2, 0},
-		{threadsDockVisibleCap, threadsDockVisibleCap, 0},
-		{threadsDockVisibleCap + 1, threadsDockVisibleCap, 1},
-		{threadsDockVisibleCap + 5, threadsDockVisibleCap, 5},
+		{3, 3, 0},
+		{4, 3, 1},
+		{10, 3, 7},
 	}
 	for _, tc := range cases {
 		visible, more := visibleDockThreads(mk(tc.n))
