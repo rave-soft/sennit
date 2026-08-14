@@ -979,7 +979,14 @@ func allToolNames() []string {
 		"thread_list",
 		"thread_status",
 		"thread_send",
-		"thread_wait",
+		// thread_wait is deliberately absent from the default set: a
+		// thread's completion now arrives on its own (the completion
+		// inbox), so the blocking wait is no longer the model's only way
+		// to learn a thread finished. The tool itself still exists for
+		// the "wait for several threads before merging" case — see
+		// tools.NewThreadWaitTool — and remains fully usable by any
+		// agent config that explicitly lists it in AllowedTools; only the
+		// default membership here changes.
 		"thread_merge",
 		"thread_remove",
 		"task_list",

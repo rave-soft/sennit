@@ -82,6 +82,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner Spawne
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,
 		Context:     ctx,
+		ParentApp:   a,
 	})
 	if err := deps.addShutdownHook(a, func(context.Context) error {
 		return deps.shutdown(mgr, context.Background())

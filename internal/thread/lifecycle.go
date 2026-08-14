@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/pubsub"
 )
 
@@ -41,6 +42,19 @@ type threadControl struct {
 	// — only tasks set this to anything nonzero today). handleRunComplete
 	// reads it back to compute an auto-woken continuation's depth.
 	depth int
+	// parentSessionID is the session this entity's own session nests
+	// under, stamped once at Create (see Manager.Create/TaskManager.Create)
+	// and never touched again. It exists here — in memory, not persisted —
+	// for the same reason depth does: a task can resolve its parent via
+	// Sessions.Get(childSessionID).ParentSessionID because it shares its
+	// parent's own App and session store (ParentAppSpawner), but a thread
+	// spawns its own isolated App with a completely separate database
+	// (LocalSpawner) — its child session's row has no reachable path back
+	// to a parent session living in a different store, so the link has to
+	// be captured directly instead. Empty means no parent (a thread
+	// created with no ParentSessionID — CreateArgs.ParentSessionID is
+	// optional, unlike a task's) — see Manager.resolveDeliveryTarget.
+	parentSessionID string
 }
 
 // ErrManagerClosed is returned by mutating manager operations once shutdown
@@ -66,6 +80,25 @@ type runCompleteHook func(ctx context.Context, c *threadControl, st Thread, resu
 // own if needed) and the generic path should leave it alone.
 type recoverHook func(ctx context.Context, st Thread) (handled bool, err error)
 
+// deliveryResolver finds where a delegation's terminal completion should
+// be delivered once handleRunComplete (or, for a thread's auto-merge
+// flow, Manager.deliverMergeOutcome) has a final st to report: the App
+// whose AgentCoordinator owns the parent session's completion inbox, and
+// the parent session id within it. ok=false means there is nowhere to
+// deliver — no overlay claims st.Kind, or the specific entity has no
+// resolvable parent (a task always has one; a thread may not, since
+// CreateArgs.ParentSessionID is optional) — and is a clean no-op, not an
+// error: st's own terminal status is already recorded and pollable
+// regardless of whether anything is listening for it.
+//
+// handle is the entity's own workspace handle, passed through for a kind
+// (a task) whose delivery target is reachable through it (ParentAppSpawner
+// means handle.App() *is* the parent App). A kind that delivers into a
+// different App than its own workspace (a thread, whose LocalSpawner
+// gives it a wholly separate App/database) resolves independently of
+// handle and may receive nil — see Manager.resolveDeliveryTarget.
+type deliveryResolver func(ctx context.Context, handle Handle, st Thread) (target *app.App, parentSessionID string, ok bool)
+
 // lifecycle is the generic delegation-lifecycle machinery shared by every
 // kind of background delegation this package drives: admission control,
 // per-entity serialization, worker tracking, run dispatch, workspace
@@ -77,10 +110,11 @@ type recoverHook func(ctx context.Context, st Thread) (handled bool, err error)
 // [TaskManager]'s tasks are spawned (and released) differently even
 // though both share this one lifecycle.
 type lifecycle struct {
-	store        Store
-	onRunSuccess runCompleteHook
-	onRecover    recoverHook
-	broker       *pubsub.Broker[Event]
+	store           Store
+	onRunSuccess    runCompleteHook
+	onRecover       recoverHook
+	resolveDelivery deliveryResolver
+	broker          *pubsub.Broker[Event]
 
 	mu       sync.Mutex
 	controls map[string]*threadControl
@@ -96,18 +130,22 @@ type lifecycle struct {
 // newLifecycle constructs a ready-to-use lifecycle backed by store.
 // onRunSuccess and onRecover are optional (nil means no overlay: runs
 // always rest at StatusCompleted, and recover never reclassifies beyond
-// the generic active-status sweep). Share one lifecycle between every
+// the generic active-status sweep). resolveDelivery is also optional
+// (nil means nothing ever delivers), but [Manager] always supplies one
+// that covers both kinds sharing this lifecycle — see
+// [Manager.resolveDeliveryTarget]. Share one lifecycle between every
 // delegation kind driven over the same store — see [Manager] and
 // [TaskManager] — rather than constructing one per kind, or admission,
 // recovery, and shutdown will each only ever see one kind.
-func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHook) *lifecycle {
+func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHook, resolveDelivery deliveryResolver) *lifecycle {
 	return &lifecycle{
-		store:        store,
-		onRunSuccess: onRunSuccess,
-		onRecover:    onRecover,
-		broker:       pubsub.NewBroker[Event](),
-		controls:     make(map[string]*threadControl),
-		changeCh:     make(chan struct{}),
+		store:           store,
+		onRunSuccess:    onRunSuccess,
+		onRecover:       onRecover,
+		resolveDelivery: resolveDelivery,
+		broker:          pubsub.NewBroker[Event](),
+		controls:        make(map[string]*threadControl),
+		changeCh:        make(chan struct{}),
 	}
 }
 
@@ -385,10 +423,15 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 // rc.Text. Anything beyond that reaction — Manager's auto-merge follow-up
 // is the example — is onRunSuccess's job.
 //
-// Once a terminal status is actually recorded, a task (never a thread —
-// see deliverTaskCompletion) also gets pushed into its parent session's
-// completion inbox: threads still rest at their terminal status for
-// task_result-equivalent polling only, unchanged by this step.
+// Once a terminal status is actually recorded, this also delivers to the
+// entity's parent session (see deliverCompletion) — for every kind
+// resolveDelivery covers. The one deliberate exception is a thread whose
+// successful run onRunSuccess (Manager's auto-merge overlay) takes over:
+// that returns before reaching the delivery call below, because an
+// auto-merge thread's useful terminal event is the merge outcome, not the
+// run finishing mid-flight — see Manager.onAutoMerge and
+// Manager.deliverMergeOutcome, which deliver that event once mergeAttempt
+// concludes instead.
 func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.RunComplete) {
 	c := l.existingControl(id)
 	if c == nil {
@@ -445,46 +488,41 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 		}
 	}
 
-	if finalSt.Kind == KindTask {
-		l.deliverTaskCompletion(ctx, rt.handle, finalSt, depth)
-	}
+	l.deliverCompletion(ctx, rt.handle, finalSt, depth)
 }
 
-// deliverTaskCompletion pushes st (a task that just reached a terminal
+// deliverCompletion pushes st (a delegation that just reached a terminal
 // status) into its parent session's completion inbox, so the parent's
 // next step sees the outcome ahead of any steering message queued at the
 // same time — see agent.TaskCompletion and runTurn.prepareStep.
 //
-// handle is rt.handle from the caller: a task's workspace is its parent
-// App (see ParentAppSpawner), so handle.App() is the same App whose
-// AgentCoordinator owns the parent session's completion inbox. The
-// parent link itself lives on the session record, not the delegation —
-// resolved here via Sessions.Get(st.SessionID).ParentSessionID — so a
-// task with no resolvable parent (should not happen: Create requires
-// one) is silently skipped rather than delivered nowhere useful; the
-// task's own terminal status is still recorded and still pollable via
-// task_result regardless.
+// Where to deliver is entirely resolveDelivery's call — see
+// Manager.resolveDeliveryTarget for how a task (which shares its
+// parent's own App via ParentAppSpawner) and a thread (which spawns a
+// wholly separate one via LocalSpawner) resolve differently. ok=false
+// (no resolver configured, no overlay claims st.Kind, or no resolvable
+// parent) is a clean no-op: st's own terminal status is already recorded
+// and still pollable regardless of whether anything is listening for it.
 //
-// depth is the cascade depth the creating turn stamped on this task at
+// depth is the cascade depth the creating turn stamped on this entity at
 // Create (threadControl.depth, read by the caller before releasing
 // c.mu) — carried onto the event so an auto-woken continuation can run
 // one level deeper, and refuse to cascade further once the hard limit
 // is reached (see agent.TaskCompletion.Depth and the "agent" tool's
-// background mode).
-func (l *lifecycle) deliverTaskCompletion(ctx context.Context, handle Handle, st Thread, depth int) {
-	a := handle.App()
-	if a == nil || a.AgentCoordinator == nil || a.Sessions == nil {
+// background mode). Always 0 for a thread today: the cascade limiter
+// only ever applies to tasks created through the "agent" tool.
+func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thread, depth int) {
+	if l.resolveDelivery == nil {
 		return
 	}
-	sess, err := a.Sessions.Get(ctx, st.SessionID)
-	if err != nil {
-		slog.Error("thread: resolve task's parent session failed", "task", st.ID, "error", err)
+	target, parentSessionID, ok := l.resolveDelivery(ctx, handle, st)
+	if !ok {
 		return
 	}
-	if sess.ParentSessionID == "" {
+	if target == nil || target.AgentCoordinator == nil {
 		return
 	}
-	a.AgentCoordinator.DeliverTaskCompletion(ctx, sess.ParentSessionID, agent.TaskCompletion{
+	target.AgentCoordinator.DeliverTaskCompletion(ctx, parentSessionID, agent.TaskCompletion{
 		DelegationID:   st.ID,
 		Kind:           string(st.Kind),
 		Name:           st.Name,

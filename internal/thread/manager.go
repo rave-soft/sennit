@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
@@ -60,6 +61,17 @@ type ManagerOptions struct {
 	// runs, RunComplete watchers) are bound to. Defaults to
 	// context.Background().
 	Context context.Context
+	// ParentApp is the workspace App this Manager is attached to (see
+	// Attach) — the one a thread's own CreateArgs.ParentSessionID refers
+	// to a session in. A thread spawns its own isolated App (Spawner),
+	// completely separate from this one, so its terminal-completion
+	// delivery target has to be captured explicitly here rather than
+	// derived from the thread's own workspace the way a task's is (see
+	// Manager.resolveDeliveryTarget). Optional: nil disables thread
+	// delivery without otherwise affecting the manager (Attach always
+	// supplies it in production; a test building a bare Manager may not
+	// need thread delivery at all).
+	ParentApp *app.App
 }
 
 // Manager is the core of the threads feature: it drives thread creation,
@@ -75,6 +87,9 @@ type Manager struct {
 	worktreeDir string
 	ctx         context.Context
 	cancel      context.CancelFunc
+	// parentApp is the workspace App this Manager is attached to — see
+	// ManagerOptions.ParentApp and resolveDeliveryTarget.
+	parentApp *app.App
 
 	lc *lifecycle
 
@@ -104,15 +119,18 @@ func NewManager(opts ManagerOptions) *Manager {
 		repoRoot:        opts.RepoRoot,
 		worktreeDir:     worktreeDir,
 		ctx:             ctx,
+		parentApp:       opts.ParentApp,
 		shutdownStarted: make(chan struct{}),
 		shutdownDone:    make(chan struct{}),
 	}
-	// onAutoMerge/recoverWorktree are this package's git/merge overlay on
-	// the generic lifecycle; a lighter, worktree-less delegation kind
-	// would pass nil for both. A TaskManager sharing this lifecycle (see
-	// NewTaskManager) must be constructed with this same m.lc and m.ctx,
-	// not fresh ones, or recovery and shutdown would only ever see threads.
-	m.lc = newLifecycle(opts.Store, m.onAutoMerge, m.recoverWorktree)
+	// onAutoMerge/recoverWorktree/resolveDeliveryTarget are this package's
+	// git/merge overlay on the generic lifecycle; a lighter, worktree-less
+	// delegation kind would pass nil for the first two (see TaskManager,
+	// which supplies neither — it shares this same lifecycle instead). A
+	// TaskManager sharing this lifecycle (see NewTaskManager) must be
+	// constructed with this same m.lc and m.ctx, not fresh ones, or
+	// recovery and shutdown would only ever see threads.
+	m.lc = newLifecycle(opts.Store, m.onAutoMerge, m.recoverWorktree, m.resolveDeliveryTarget)
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	return m
 }
@@ -212,6 +230,13 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	defer c.opMu.Unlock()
 	c.mu.Lock()
 	removed := c.removed
+	// Stash the parent link now, while nothing else can be reading it yet
+	// - resolveDeliveryTarget reads it back once this thread reaches a
+	// terminal status. Empty when args.ParentSessionID is empty (a thread
+	// created with no parent, unlike a task's required one), which
+	// resolveDeliveryTarget then correctly treats as "nobody to deliver
+	// to" rather than an error.
+	c.parentSessionID = args.ParentSessionID
 	c.mu.Unlock()
 	if removed {
 		return Thread{}, fmt.Errorf("thread: %q was removed during creation", name)
@@ -327,8 +352,51 @@ func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, 
 		if err := m.mergeAttempt(ctx, st.ID, true, resultText); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Error("thread: auto-merge failed", "thread", st.ID, "error", err)
 		}
+		// The run finishing is not this thread's useful terminal event —
+		// an auto-merge thread hands straight from running into the merge
+		// flow (see this method's own doc comment), and the parent can't
+		// act on "the run finished" when the outcome that actually matters
+		// (merged cleanly, hit a conflict, or got blocked) is still
+		// pending. Deliver once mergeAttempt has landed on whichever of
+		// those three it reached instead.
+		m.deliverMergeOutcome(ctx, st.ID)
 	})
 	return true
+}
+
+// deliverMergeOutcome delivers an auto-merge thread's own terminal event —
+// merged, conflict, or merge_blocked — to its parent session, once,
+// right after mergeAttempt concludes from onAutoMerge. It is deliberately
+// not wired into mergeAttempt/finishMerge/setConflict/blockMerge
+// themselves: those four are shared with Manager.Merge's manual retry
+// path (resolving a conflict, or retrying after merge_blocked), and a
+// manually-triggered retry must not re-deliver an event its caller
+// already observes synchronously through Merge's own return value — only
+// the original, automatic attempt this method is called from should ever
+// notify the parent. That is also what keeps delivery at-most-once
+// across a thread's two terminal moments: handleRunComplete's own
+// delivery call only ever reaches a thread that failed or was cancelled,
+// or a manual-policy thread that completed — never one whose
+// onAutoMerge just returned true, which is precisely the case that
+// lands here instead.
+func (m *Manager) deliverMergeOutcome(ctx context.Context, threadID string) {
+	st, err := m.store.Get(ctx, threadID)
+	if err != nil {
+		slog.Error("thread: re-fetch thread for merge-outcome delivery failed", "thread", threadID, "error", err)
+		return
+	}
+	if !st.Status.Terminal() {
+		// mergeAttempt returned without ever reaching a terminal write —
+		// a pure infrastructure error (e.g. the initial store.Get inside
+		// mergeAttempt itself failing) before the merge flow properly
+		// started. Nothing to report yet.
+		return
+	}
+	// handle is nil: a thread's delivery target never comes from its own
+	// workspace handle (see resolveDeliveryTarget's KindThread branch),
+	// and by the time an auto-merge lands on Merged the workspace may
+	// already be released (finishMerge's own teardown) regardless.
+	m.lc.deliverCompletion(ctx, nil, st, 0)
 }
 
 // Activate makes a thread's isolated workspace live again without
@@ -759,6 +827,66 @@ func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) 
 		return false, err
 	}
 	return true, nil
+}
+
+// resolveDeliveryTarget is the lifecycle's deliveryResolver hook (see
+// lifecycle.deliverCompletion, the only caller): it finds where a
+// delegation's terminal completion should go, branching on Kind the same
+// way onAutoMerge and recoverWorktree do, since both kinds sharing this
+// lifecycle resolve their delivery target completely differently.
+//
+// A task shares its parent's own App and session store (ParentAppSpawner
+// — see internal/thread/spawner.go), so handle.App() already *is* the
+// parent App, and its parent session is just a row away via
+// Sessions.Get(st.SessionID).ParentSessionID.
+//
+// A thread spawns its own isolated App with a wholly separate database
+// (LocalSpawner), so neither of those holds: handle.App() is the
+// thread's own App, whose Sessions has never heard of a session living
+// in a different database, and by the time an auto-merge thread's
+// workspace is queried it may already be released. The parent link is
+// instead captured once, directly, at Create (threadControl.
+// parentSessionID), and the delivery target is m.parentApp — the
+// workspace this Manager itself was attached to, not the thread's own —
+// see ManagerOptions.ParentApp.
+func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st Thread) (*app.App, string, bool) {
+	switch st.Kind {
+	case KindTask:
+		a := handle.App()
+		if a == nil || a.Sessions == nil {
+			return nil, "", false
+		}
+		sess, err := a.Sessions.Get(ctx, st.SessionID)
+		if err != nil {
+			slog.Error("thread: resolve task's parent session failed", "task", st.ID, "error", err)
+			return nil, "", false
+		}
+		if sess.ParentSessionID == "" {
+			return nil, "", false
+		}
+		return a, sess.ParentSessionID, true
+	case KindThread:
+		if m.parentApp == nil {
+			return nil, "", false
+		}
+		c := m.lc.existingControl(st.ID)
+		if c == nil {
+			return nil, "", false
+		}
+		c.mu.Lock()
+		parentSessionID := c.parentSessionID
+		c.mu.Unlock()
+		if parentSessionID == "" {
+			// A thread created with no ParentSessionID (optional, unlike
+			// a task's — see CreateArgs and the CLI's own thread create
+			// path). Nobody to deliver to; the thread's own terminal
+			// status is still recorded and pollable via thread_status.
+			return nil, "", false
+		}
+		return m.parentApp, parentSessionID, true
+	default:
+		return nil, "", false
+	}
 }
 
 // Wait blocks until none of the threads named by ids (all threads, when

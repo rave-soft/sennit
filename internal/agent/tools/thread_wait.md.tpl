@@ -1,9 +1,11 @@
 Block until the given threads settle: none of them are pending, running, or
 merging anymore.
 
-Use this after creating or sending work to one or more threads, when you
-need their results before continuing (e.g. before merging or reviewing
-their output).
+A thread's result now arrives on its own once it finishes — you do not need
+this tool just to learn that a single thread is done. Reach for it only when
+you specifically need to block until several threads have all settled
+together before continuing (e.g. before merging or reviewing their combined
+output).
 
 Parameters:
 - `ids` (optional): thread IDs or names to wait for. Omit to wait for every

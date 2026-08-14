@@ -28,6 +28,13 @@ type ThreadWaitParams struct {
 // pending/running/merging states, honoring both the params timeout and the
 // tool call's own context cancellation. See [NewThreadCreateTool] for the
 // manager nil-safety note.
+//
+// Deliberately absent from the default AllowedTools set (see
+// internal/config's allToolNames) now that a thread's completion is
+// delivered on its own through the completion inbox: the tool still
+// exists, and buildTools still constructs and offers it, for the "wait
+// for several threads to settle together" case an agent config can opt
+// into explicitly.
 func NewThreadWaitTool(manager ThreadManager) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ThreadWaitToolName,

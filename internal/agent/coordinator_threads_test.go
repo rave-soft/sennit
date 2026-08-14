@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -40,12 +41,18 @@ func (noopThreadManager) Remove(context.Context, string, bool, bool) error {
 	return nil
 }
 
+// threadToolNames lists the thread_* tools expected under the coder
+// agent's *default* AllowedTools. tools.ThreadWaitToolName is
+// deliberately excluded: it is no longer in the default set (a thread's
+// completion now arrives on its own — see internal/config's
+// allToolNames), though it is still constructed and offered to any
+// agent config that explicitly allows it — see
+// TestBuildTools_ThreadWaitAbsentByDefaultButAvailableWhenExplicitlyAllowed.
 var threadToolNames = []string{
 	tools.ThreadCreateToolName,
 	tools.ThreadListToolName,
 	tools.ThreadStatusToolName,
 	tools.ThreadSendToolName,
-	tools.ThreadWaitToolName,
 	tools.ThreadMergeToolName,
 	tools.ThreadRemoveToolName,
 }
@@ -135,6 +142,29 @@ func TestBuildTools_ThreadToolsAbsentForSubAgent(t *testing.T) {
 	for _, absent := range threadToolNames {
 		require.NotContains(t, names, absent)
 	}
+}
+
+// TestBuildTools_ThreadWaitAbsentByDefaultButAvailableWhenExplicitlyAllowed
+// covers the removal side of the "allowed-tools list is where a tool
+// silently stops existing" trap: dropping thread_wait from the default
+// set (internal/config's allToolNames) must not make it uninstallable -
+// buildTools still constructs it unconditionally and offers it to any
+// agent config whose own AllowedTools names it explicitly, exactly like
+// any other tool not in the default set.
+func TestBuildTools_ThreadWaitAbsentByDefaultButAvailableWhenExplicitlyAllowed(t *testing.T) {
+	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
+
+	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	require.NoError(t, err)
+	require.NotContains(t, toolNames(t, built), tools.ThreadWaitToolName,
+		"thread_wait must not be offered under the default AllowedTools")
+
+	allowed := agentCfg
+	allowed.AllowedTools = append(slices.Clone(agentCfg.AllowedTools), tools.ThreadWaitToolName)
+	built, err = coord.buildTools(t.Context(), allowed, false)
+	require.NoError(t, err)
+	require.Contains(t, toolNames(t, built), tools.ThreadWaitToolName,
+		"thread_wait must still be constructible/registerable when an agent config explicitly allows it")
 }
 
 func TestCoordinator_SetThreadsTakesEffectOnNextBuild(t *testing.T) {
