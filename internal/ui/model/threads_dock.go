@@ -59,7 +59,7 @@ var threadsDockActivityTTL = 8 * time.Second
 
 // threadsDockVisibleCap is the maximum number of active threads the dock
 // renders (and therefore the maximum it ever fetches live activity for).
-const threadsDockVisibleCap = 3
+const threadsDockVisibleCap = 5
 
 // threadDockActivity is a per-thread live snapshot fetched from the
 // thread's own session via AttachThread + GetSession.
