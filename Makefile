@@ -6,7 +6,7 @@ GO       ?= go
 BINARY   ?= braid
 SCRATCH  ?= /tmp/braid-fresh
 
-.PHONY: all build install run dev fresh test race lint fmt tidy vet \
+.PHONY: all build install run dev fresh test race client-server lint fmt tidy vet \
         schema schema-check swag check ci hooks clean help
 
 all: build
@@ -49,6 +49,9 @@ race:
 	$(GO) build -o "$$test_binary" .; \
 	BRAID_TEST_BINARY="$$test_binary" $(GO) test -race -failfast ./...
 
+client-server:
+	$(GO) test -count=1 ./internal/cmd/clientserverrace -run TestClientServerThreadLifecycle
+
 ## lint: golangci-lint with the CI config
 lint:
 	golangci-lint run --timeout 10m
@@ -85,7 +88,7 @@ swag:
 check: tidy build lint schema-check
 
 ## ci: full local equivalent of the CI matrix job + lint
-ci: check race
+ci: check client-server race
 
 ## hooks: enable the versioned pre-commit hook
 hooks:
