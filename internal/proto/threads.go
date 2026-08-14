@@ -49,6 +49,17 @@ type RemoveThreadOptions struct {
 	DeleteBranch bool `json:"delete_branch,omitempty"`
 }
 
+// CancelTaskRequest is the request body for cancelling a task. Tasks reuse
+// the Thread wire type (discriminated by Kind — see internal/thread.
+// TaskManager) for listing, but cancellation is task-specific: a thread has
+// no single-delegation cancel over HTTP yet (see Merge/Remove instead).
+type CancelTaskRequest struct {
+	// Reason is recorded as the task's terminal Error, mirroring
+	// internal/thread.TaskManager.Cancel's reason parameter. Empty
+	// defaults to "cancelled" there.
+	Reason string `json:"reason,omitempty"`
+}
+
 // ThreadEventType identifies the kind of lifecycle change carried by a
 // ThreadEvent, mirroring internal/thread.EventType.
 type ThreadEventType string

@@ -226,6 +226,16 @@ func (w *Workspace) ThreadManagerSupported() bool {
 	return w.ThreadManager() != nil
 }
 
+// TaskManagerSupported reports whether this workspace has a task manager
+// attached, mirroring ThreadManagerSupported for workspaceToProto's
+// TasksSupported field.
+func (w *Workspace) TaskManagerSupported() bool {
+	if w.App == nil {
+		return false
+	}
+	return w.TaskManager() != nil
+}
+
 // invokeShutdown calls the workspace shutdown hook if set, falling
 // back to the workspace [Workspace.Shutdown] wrapper when not.
 func (w *Workspace) invokeShutdown() {
@@ -1136,6 +1146,7 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 		Env:              ws.Env,
 		Version:          version.Version,
 		ThreadsSupported: boolPtr(ws.ThreadManagerSupported()),
+		TasksSupported:   boolPtr(ws.TaskManagerSupported()),
 	}
 	if ws.Skills != nil {
 		out.Skills = skillStatesToProto(ws.Skills.States())

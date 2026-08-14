@@ -77,6 +77,14 @@ func (f *fakeThreadSessions) Create(_ context.Context, title string) (session.Se
 	return session.Session{ID: uuid.New().String(), Title: title}, nil
 }
 
+// CreateTaskSession backs tasks.go's TaskManager.Create, which always
+// nests a task's child session under a ParentSessionID.
+func (f *fakeThreadSessions) CreateTaskSession(_ context.Context, id, parentSessionID, title string) (session.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return session.Session{ID: id, ParentSessionID: parentSessionID, Title: title}, nil
+}
+
 // fakeThreadCoordinator records Run calls and returns immediately instead
 // of dispatching a real agent turn, so Manager.Create's background
 // dispatch goroutine cannot hang or panic against a workspace with no

@@ -164,6 +164,8 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/activate", c.handlePostWorkspaceThreadActivate)
 	mux.HandleFunc("POST /v1/workspaces/{id}/threads/{threadID}/merge", c.handlePostWorkspaceThreadMerge)
 	mux.HandleFunc("DELETE /v1/workspaces/{id}/threads/{threadID}", c.handleDeleteWorkspaceThread)
+	mux.HandleFunc("GET /v1/workspaces/{id}/tasks", c.handleGetWorkspaceTasks)
+	mux.HandleFunc("POST /v1/workspaces/{id}/tasks/{taskID}/cancel", c.handlePostWorkspaceTaskCancel)
 	mux.Handle("/v1/docs/", httpswagger.WrapHandler)
 	s.h = &http.Server{
 		Protocols: &p,

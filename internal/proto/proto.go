@@ -36,6 +36,13 @@ type Workspace struct {
 	// means the server predates this field and the client must perform
 	// a single fallback probe in a controlled point (not the hot path).
 	ThreadsSupported *bool `json:"threads_supported,omitempty"`
+	// TasksSupported reports whether this workspace has a task manager
+	// attached, mirroring ThreadsSupported. Unlike threads, tasks have no
+	// legacy fallback probe: this field (and the /tasks routes it
+	// describes) is new, so there is no older server to be compatible
+	// with — a nil value is simply treated as unsupported by the client
+	// rather than triggering a probe.
+	TasksSupported *bool `json:"tasks_supported,omitempty"`
 }
 
 // Error represents an error response.

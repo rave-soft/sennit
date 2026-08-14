@@ -1,12 +1,12 @@
 package workspace
 
 import (
-	"context"
 	"testing"
 
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/thread"
 	"github.com/stretchr/testify/require"
 )
@@ -106,12 +106,34 @@ func TestAppWorkspace_Tasks_NotSupported(t *testing.T) {
 	require.ErrorIs(t, aw.CancelTask(t.Context(), "id", ""), ErrTasksNotSupported)
 }
 
-// -- ClientWorkspace: Tasks (deliberately unsupported in this step) --
+// -- ClientWorkspace: Tasks --
+//
+// SupportsTasks/ListTasks/CancelTask's actual wire behavior against a real
+// server (list, cancel, unknown id, wrong kind) is covered by
+// internal/server's TestClientWorkspace_TasksRoundTrip and the
+// TestHandleWorkspaceTask* route tests it sits alongside — this package
+// has no in-process access to a *thread.TaskManager to seed one against
+// (task creation is deliberately not exposed over HTTP; see that test's
+// doc comment). What belongs here is SupportsTasks' own capability-flag
+// logic, which needs no server at all.
 
-func TestClientWorkspace_Tasks_NotSupported(t *testing.T) {
-	cw := &ClientWorkspace{}
-	require.False(t, cw.SupportsTasks())
-	_, err := cw.ListTasks(context.Background())
-	require.ErrorIs(t, err, ErrTasksNotSupported)
-	require.ErrorIs(t, cw.CancelTask(context.Background(), "id", ""), ErrTasksNotSupported)
+// TestClientWorkspace_SupportsTasksReflectsAdvertisedFlag proves
+// SupportsTasks reads the workspace snapshot's TasksSupported field
+// directly — true when the server advertises it, false when it
+// advertises "no", and false (not an "unknown, must probe" state) when
+// the field is absent entirely, since tasks have no legacy server to be
+// compatible with, unlike threads' own tri-state probe.
+func TestClientWorkspace_SupportsTasksReflectsAdvertisedFlag(t *testing.T) {
+	t.Parallel()
+
+	supported := true
+	cw := NewClientWorkspace(nil, proto.Workspace{ID: "ws1", TasksSupported: &supported})
+	require.True(t, cw.SupportsTasks())
+
+	unsupported := false
+	cw2 := NewClientWorkspace(nil, proto.Workspace{ID: "ws2", TasksSupported: &unsupported})
+	require.False(t, cw2.SupportsTasks())
+
+	cw3 := NewClientWorkspace(nil, proto.Workspace{ID: "ws3"})
+	require.False(t, cw3.SupportsTasks(), "an absent TasksSupported field must default to unsupported")
 }

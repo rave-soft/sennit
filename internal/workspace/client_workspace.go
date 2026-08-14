@@ -67,6 +67,12 @@ type ClientWorkspace struct {
 	threadsProbes            sync.WaitGroup
 	threadsProbeAdmissionOff bool
 
+	// supportsTasks is set from each workspace snapshot's TasksSupported
+	// field (see setTasksSupported) — a plain bool, not the tri-state
+	// probe machinery threads use above: there is no older server
+	// predating this field to fall back to a live probe for.
+	supportsTasks bool
+
 	// subCtx bounds the lifetime of the event subscription (and its
 	// reconnect loop). Shutdown cancels it so Subscribe stops
 	// reconnecting instead of racing the teardown.
@@ -119,6 +125,7 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 	}
 
 	ws_.setThreadsSupported(ws.ThreadsSupported)
+	ws_.setTasksSupported(ws.TasksSupported)
 
 	return ws_
 }
@@ -141,6 +148,7 @@ func (w *ClientWorkspace) refreshWorkspace() {
 	w.threadsProbeComplete = false
 	w.threadsProbeErr = nil
 	w.setThreadsSupported(updated.ThreadsSupported)
+	w.setTasksSupported(updated.TasksSupported)
 	w.mu.Unlock()
 	w.startThreadsProbe()
 }
@@ -1242,6 +1250,7 @@ func (w *ClientWorkspace) recoverWorkspace() error {
 	w.threadsProbeErr = nil
 	newID := created.ID
 	w.setThreadsSupported(created.ThreadsSupported)
+	w.setTasksSupported(created.TasksSupported)
 	w.mu.Unlock()
 	w.startThreadsProbe()
 	slog.Info("Re-registered workspace after server-side loss",

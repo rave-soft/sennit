@@ -38,6 +38,8 @@ var (
 	ErrConflict = errors.New("conflict")
 
 	ErrThreadsUnsupported = errors.New("threads unsupported")
+
+	ErrTasksUnsupported = errors.New("tasks unsupported")
 )
 
 // checkStatus returns nil when rsp's status code is one of ok

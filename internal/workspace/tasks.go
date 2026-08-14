@@ -51,16 +51,29 @@ func (w *AppWorkspace) CancelTask(ctx context.Context, id, reason string) error 
 
 // -- ClientWorkspace: Tasks --
 
-// SupportsTasks, ListTasks, and CancelTask have no server-side route yet
-// (out of scope for this step — this is the read/wrapper plumbing on the
-// AppWorkspace side only), so ClientWorkspace deliberately reports no task
-// support rather than attempting HTTP calls that don't exist.
-func (w *ClientWorkspace) SupportsTasks() bool { return false }
+// SupportsTasks returns the cached capability advertised by the server at
+// registration (see setTasksSupported). Unlike SupportsThreads, this never
+// needs a live fallback probe: TasksSupported (and the /tasks routes it
+// describes) is new, so there is no older server predating the field to be
+// compatible with — a workspace snapshot that omits it (nil) is simply
+// unsupported, not "unknown".
+func (w *ClientWorkspace) SupportsTasks() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.supportsTasks
+}
+
+// setTasksSupported updates the cached capability from a workspace
+// snapshot's TasksSupported field. Callers must hold w.mu.
+func (w *ClientWorkspace) setTasksSupported(supported *bool) {
+	w.supportsTasks = supported != nil && *supported
+}
 
 func (w *ClientWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
-	return nil, ErrTasksNotSupported
+	return w.client.ListTasks(ctx, w.workspaceID())
 }
 
 func (w *ClientWorkspace) CancelTask(ctx context.Context, id, reason string) error {
-	return ErrTasksNotSupported
+	_, err := w.client.CancelTask(ctx, w.workspaceID(), id, reason)
+	return err
 }
