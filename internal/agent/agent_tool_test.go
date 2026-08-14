@@ -35,6 +35,18 @@ func (f *fakeTaskManager) Create(_ context.Context, args tools.TaskCreateArgs) (
 	return f.info, nil
 }
 
+// List, Get, and Cancel are unused by these tests (which only exercise
+// the "agent" tool's background-create path) and exist solely to satisfy
+// tools.TaskManager; see internal/agent/tools' own tests for the task_*
+// tools these back.
+func (f *fakeTaskManager) List(context.Context) ([]tools.TaskInfo, error) { return nil, nil }
+
+func (f *fakeTaskManager) Get(context.Context, string) (tools.TaskInfo, error) {
+	return tools.TaskInfo{}, nil
+}
+
+func (f *fakeTaskManager) Cancel(context.Context, string, string) error { return nil }
+
 // newAgentToolTestCoordinator builds a coordinator with the minimal
 // hermetic config buildAgent needs to construct the "agent" tool's own
 // sub-agent target — the same config shape newThreadsTestCoordinator uses

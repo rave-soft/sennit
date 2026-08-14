@@ -7,9 +7,9 @@ import (
 )
 
 // agentToolTaskManager adapts a [TaskManager] to [tools.TaskManager], the
-// interface the built-in agent tool's background mode is built against.
-// Exists for the same import-cycle reason [agentToolManager] does — see
-// its doc comment.
+// interface the built-in agent tool's background mode and the task_*
+// tools are built against. Exists for the same import-cycle reason
+// [agentToolManager] does — see its doc comment.
 type agentToolTaskManager struct {
 	t *TaskManager
 }
@@ -29,9 +29,43 @@ func (a *agentToolTaskManager) Create(ctx context.Context, args tools.TaskCreate
 	if err != nil {
 		return tools.TaskInfo{}, err
 	}
+	return toTaskInfo(st), nil
+}
+
+func (a *agentToolTaskManager) List(ctx context.Context) ([]tools.TaskInfo, error) {
+	tasks, err := a.t.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tools.TaskInfo, len(tasks))
+	for i, st := range tasks {
+		out[i] = toTaskInfo(st)
+	}
+	return out, nil
+}
+
+func (a *agentToolTaskManager) Get(ctx context.Context, id string) (tools.TaskInfo, error) {
+	st, err := a.t.Get(ctx, id)
+	if err != nil {
+		return tools.TaskInfo{}, err
+	}
+	return toTaskInfo(st), nil
+}
+
+func (a *agentToolTaskManager) Cancel(ctx context.Context, id, reason string) error {
+	return a.t.Cancel(ctx, id, reason)
+}
+
+func toTaskInfo(st Thread) tools.TaskInfo {
 	return tools.TaskInfo{
-		ID:        st.ID,
-		SessionID: st.SessionID,
-		Status:    string(st.Status),
-	}, nil
+		ID:            st.ID,
+		Goal:          st.Goal,
+		SessionID:     st.SessionID,
+		Status:        string(st.Status),
+		ResultSummary: st.ResultSummary,
+		Error:         st.Error,
+		CreatedAt:     st.CreatedAt,
+		UpdatedAt:     st.UpdatedAt,
+		CompletedAt:   st.CompletedAt,
+	}
 }

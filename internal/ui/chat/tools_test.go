@@ -41,6 +41,11 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.ThreadWaitToolName,
 	tools.ThreadMergeToolName,
 	tools.ThreadRemoveToolName,
+	// Task tools (internal/agent/tools/task_*.go), same story: no
+	// dedicated renderer yet.
+	tools.TaskListToolName,
+	tools.TaskResultToolName,
+	tools.TaskCancelToolName,
 }
 
 // TestToolMessageItemFactories_MatchExpectedNames checks

@@ -158,3 +158,89 @@ func (t *TaskManager) failCreate(ctx context.Context, st Thread, cause error) er
 	}
 	return cause
 }
+
+// List returns every known task (kind = KindTask), across the whole
+// workspace — the same scope [Manager.List] uses for threads. Store.List
+// is kind = 'thread'-scoped, so this goes through ListAll and filters in
+// Go instead, rather than adding a second SQL query for one caller.
+func (t *TaskManager) List(ctx context.Context) ([]Thread, error) {
+	all, err := t.store.ListAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]Thread, 0, len(all))
+	for _, st := range all {
+		if st.Kind == KindTask {
+			tasks = append(tasks, st)
+		}
+	}
+	return tasks, nil
+}
+
+// Get resolves id to a task. Unlike [Manager.Get], there is no
+// resolve-by-name fallback: a task's Name is generated, not user-chosen
+// (see Create), so nothing ever addresses one by name.
+//
+// Rejects a thread's id with a clear error rather than returning it: one
+// table means every id is reachable through Store.Get regardless of kind,
+// and a task-facing caller asking for a task must never be handed a
+// thread — the same guard [Manager.Merge]/[Manager.Remove] apply in the
+// other direction.
+func (t *TaskManager) Get(ctx context.Context, id string) (Thread, error) {
+	st, err := t.store.Get(ctx, id)
+	if err != nil {
+		return Thread{}, err
+	}
+	if st.Kind != KindTask {
+		return Thread{}, fmt.Errorf("thread: %q is not a task", id)
+	}
+	return st, nil
+}
+
+// Cancel stops id's in-flight run and leaves it at a terminal
+// StatusInterrupted with reason recorded as its Error — a real status
+// transition, not merely releasing the runtime and leaving whatever
+// status happened to be last recorded. reason defaults to "cancelled"
+// when empty.
+//
+// If the task has no live runtime (already finished, or never started),
+// Cancel is a no-op: an already-terminal task cannot be "more cancelled",
+// and overwriting a real outcome (completed, failed) with "cancelled"
+// would destroy it.
+//
+// Cancelling reaches only this task's own session
+// (AgentCoordinator.Cancel(st.SessionID)), never the whole coordinator:
+// a task's App is its parent's, so anything broader would reach the
+// user's own foreground turn too.
+func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
+	st, err := t.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	c := t.lc.control(st.ID)
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	c.mu.Lock()
+	rt := c.runtime
+	c.runtime = nil
+	c.mu.Unlock()
+
+	if rt == nil {
+		return nil
+	}
+
+	rt.watchCancel()
+	if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
+		a.AgentCoordinator.Cancel(st.SessionID)
+	}
+	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
+		slog.Error("thread: release cancelled task workspace failed", "task", st.ID, "error", err)
+	}
+
+	if reason == "" {
+		reason = "cancelled"
+	}
+	_, err = t.lc.setStatus(ctx, st.ID, StatusInterrupted, reason, "", 0)
+	return err
+}

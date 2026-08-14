@@ -10,22 +10,34 @@ type TaskCreateArgs struct {
 	ParentSessionID string
 }
 
-// TaskInfo is the minimal shape a background delegation returns
-// immediately: enough to reference the task later (poll it or be
-// notified), not the full delegation record. Mirrors the fields of
-// internal/thread.Thread the built-in agent tool's background mode
-// actually needs.
+// TaskInfo mirrors the fields of internal/thread.Thread the task_* tools
+// need: enough to list, report on, and reference a task later, but none
+// of the git-worktree fields Thread carries for the thread overlay (a
+// task has no worktree, branch, or merge policy).
 type TaskInfo struct {
-	ID        string
-	SessionID string
-	Status    string
+	ID            string
+	Goal          string
+	SessionID     string
+	Status        string
+	ResultSummary string
+	Error         string
+	CreatedAt     int64
+	UpdatedAt     int64
+	CompletedAt   int64
 }
 
 // TaskManager is the subset of internal/thread.TaskManager's API the
-// built-in agent tool's background mode needs: create a task and learn
-// its id, child session, and status. Kept deliberately narrower than
-// ThreadManager — no list/get/cancel yet, since nothing here consumes
-// them and their shape may differ once something does.
+// built-in agent tool's background mode and the task_* tools need.
 type TaskManager interface {
+	// Create starts a new task, as the "agent" tool's background mode
+	// uses.
 	Create(ctx context.Context, args TaskCreateArgs) (TaskInfo, error)
+	// List returns every task in the workspace, for task_list.
+	List(ctx context.Context) ([]TaskInfo, error)
+	// Get resolves id to a task, for task_result (and task_cancel's
+	// after-the-fact status report).
+	Get(ctx context.Context, id string) (TaskInfo, error)
+	// Cancel stops id's in-flight run, recording reason as its terminal
+	// error, for task_cancel.
+	Cancel(ctx context.Context, id, reason string) error
 }

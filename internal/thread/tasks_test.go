@@ -196,3 +196,153 @@ func TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork(t *testing.T)
 	require.Equal(t, []string{st.SessionID}, coord.canceledSessions(),
 		"shutdown must cancel only the task's own session — the foreground session must never appear here")
 }
+
+// seedThreadRow inserts a bare kind = KindThread row directly through
+// store, bypassing Manager.Create's git machinery entirely: these tests
+// only need a thread's id to exist in the shared table, to prove the
+// task_* guards reject it.
+func seedThreadRow(t *testing.T, store Store) Thread {
+	t.Helper()
+	st, err := store.Create(t.Context(), CreateParams{
+		Name:         "a-thread",
+		Goal:         "x",
+		BaseBranch:   "main",
+		Branch:       "thread/a-thread",
+		WorktreePath: t.TempDir(),
+		Kind:         KindThread,
+	})
+	require.NoError(t, err)
+	return st
+}
+
+func TestTaskManager_ListReturnsOnlyTasks(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, _ := newTestTaskManager(t, store)
+
+	task1, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "a", ParentSessionID: "p1"})
+	require.NoError(t, err)
+	task2, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "b", ParentSessionID: "p2"})
+	require.NoError(t, err)
+	threadRow := seedThreadRow(t, store)
+
+	got, err := tasks.List(t.Context())
+	require.NoError(t, err)
+	ids := make([]string, len(got))
+	for i, st := range got {
+		ids[i] = st.ID
+	}
+	require.ElementsMatch(t, []string{task1.ID, task2.ID}, ids)
+	require.NotContains(t, ids, threadRow.ID, "a thread row must never appear in a task listing")
+}
+
+func TestTaskManager_GetHappyPath(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, _ := newTestTaskManager(t, store)
+
+	created, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "look into it", ParentSessionID: "p1"})
+	require.NoError(t, err)
+
+	got, err := tasks.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, created.ID, got.ID)
+	require.Equal(t, "look into it", got.Goal)
+	require.Equal(t, KindTask, got.Kind)
+}
+
+func TestTaskManager_GetRejectsThreadID(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, _ := newTestTaskManager(t, store)
+	threadRow := seedThreadRow(t, store)
+
+	_, err := tasks.Get(t.Context(), threadRow.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is not a task")
+}
+
+// TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched is the
+// sharp test for task_cancel: it must produce a real terminal status
+// transition (not merely stop a goroutine), and — since a task's App is
+// its parent's — it must reach only the task's own session, never the
+// foreground work sharing that same App and coordinator.
+func TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched(t *testing.T) {
+	store := newTestStoreDB(t)
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	_, err := coord.Run(t.Context(), "foreground-session", "the user's own prompt")
+	require.NoError(t, err)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	// Deliberately no RunComplete published: the run is left in flight.
+
+	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "no longer needed"))
+
+	got, err := store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusInterrupted, got.Status)
+	require.Equal(t, "no longer needed", got.Error)
+
+	require.False(t, coord.cancelAllWasCalled())
+	require.Equal(t, []string{st.SessionID}, coord.canceledSessions(),
+		"cancel must reach only the task's own session, not the foreground one sharing its App")
+	require.Nil(t, mgr.Handle(st.ID), "the runtime must be released")
+}
+
+func TestTaskManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+
+	require.NoError(t, tasks.Cancel(t.Context(), st.ID, ""))
+
+	got, err := store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusInterrupted, got.Status)
+	require.Equal(t, "cancelled", got.Error)
+}
+
+// TestTaskManager_CancelAlreadyFinishedIsNoop proves a finished task's
+// real outcome is never clobbered by a Cancel call that arrives too late.
+func TestTaskManager_CancelAlreadyFinishedIsNoop(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	publishSuccess(t, parentApp, st.SessionID)
+	require.Eventually(t, func() bool {
+		got, err := store.Get(t.Context(), st.ID)
+		return err == nil && got.Status == StatusCompleted
+	}, time.Second, time.Millisecond)
+
+	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "too late"))
+
+	got, err := store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusCompleted, got.Status, "a finished task's real outcome must not be overwritten")
+	require.Empty(t, coord.canceledSessions(), "no live runtime means nothing to cancel")
+}
+
+func TestTaskManager_CancelRejectsThreadID(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, _ := newTestTaskManager(t, store)
+	threadRow := seedThreadRow(t, store)
+	_, err := store.SetStatus(t.Context(), threadRow.ID, SetStatusParams{Status: StatusRunning})
+	require.NoError(t, err)
+
+	err = tasks.Cancel(t.Context(), threadRow.ID, "nope")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is not a task")
+
+	got, err := store.Get(t.Context(), threadRow.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusRunning, got.Status, "a rejected call must not touch the thread's row")
+}

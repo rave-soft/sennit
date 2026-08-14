@@ -708,6 +708,22 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
+	// Task tools observe and steer background task delegations (see the
+	// "agent" tool's background mode, which creates them). Same
+	// restriction as thread tools, for the same reason: only the
+	// top-level agent of the workspace that owns the task manager gets
+	// them, and there is no manager for a workspace that doesn't own one.
+	if !isSubAgent {
+		if taskManager := c.tasksManager(); taskManager != nil {
+			allTools = append(
+				allTools,
+				tools.NewTaskListTool(taskManager),
+				tools.NewTaskResultTool(taskManager),
+				tools.NewTaskCancelTool(taskManager, c.permissions),
+			)
+		}
+	}
+
 	// Question tool is interactive-only and not available to sub-agents.
 	if !isSubAgent && c.interactive {
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))

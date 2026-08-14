@@ -982,6 +982,9 @@ func allToolNames() []string {
 		"thread_wait",
 		"thread_merge",
 		"thread_remove",
+		"task_list",
+		"task_result",
+		"task_cancel",
 	}
 }
 

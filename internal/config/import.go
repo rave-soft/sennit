@@ -455,6 +455,7 @@ var importKnownTools = map[string]bool{
 	"job_output": true, "job_kill": true,
 	"thread_create": true, "thread_list": true, "thread_merge": true,
 	"thread_remove": true, "thread_send": true, "thread_status": true, "thread_wait": true,
+	"task_list": true, "task_result": true, "task_cancel": true,
 	"lsp_definition": true, "lsp_references": true, "lsp_rename": true,
 	"lsp_symbols": true, "lsp_call_hierarchy": true, "lsp_diagnostics": true,
 	"lsp_restart": true, "lsp_replace_symbol": true,
