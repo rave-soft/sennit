@@ -126,6 +126,7 @@ type fakeCoordinator struct {
 	mu              sync.Mutex
 	runs            []fakeRun
 	cancelAllCalled bool
+	canceled        []string // sessionIDs passed to Cancel, in call order
 	runErr          error
 }
 
@@ -169,10 +170,31 @@ func (f *fakeCoordinator) CancelAll() {
 	f.cancelAllCalled = true
 }
 
+// Cancel records sessionID rather than acting on it: these tests care
+// about which session a teardown site targeted (its own, not the whole
+// coordinator), not about actually interrupting a fake run.
+func (f *fakeCoordinator) Cancel(sessionID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.canceled = append(f.canceled, sessionID)
+}
+
 func (f *fakeCoordinator) runCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.runs)
+}
+
+func (f *fakeCoordinator) canceledSessions() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.canceled...)
+}
+
+func (f *fakeCoordinator) cancelAllWasCalled() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.cancelAllCalled
 }
 
 // SetThreads and IsBusy are no-ops beyond what fakeCoordinator already
@@ -1143,6 +1165,25 @@ func TestManager_RemoveAndCompletionReleaseOnce(t *testing.T) {
 	})
 	wg.Wait()
 	require.Equal(t, 1, spawner.releases(st.WorktreePath))
+}
+
+// TestManager_RemoveForceCancelsThreadOwnSession guards the switch from
+// CancelAll to a session-scoped Cancel at Remove's force-teardown site:
+// for a thread, whose App is its own, this must still stop the thread's
+// own run exactly as CancelAll used to.
+func TestManager_RemoveForceCancelsThreadOwnSession(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "force-cancel", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+
+	require.NoError(t, mgr.Remove(t.Context(), st.ID, true, true))
+
+	require.Equal(t, []string{st.SessionID}, coord.canceledSessions(),
+		"force-removing a running thread must still cancel its own session")
 }
 
 // TestManager_ShutdownBlocksAdmission verifies that Manager.Shutdown blocks

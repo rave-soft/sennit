@@ -96,6 +96,7 @@ func (f *fakeCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun,
 }
 
 func (f *fakeCoordinator) CancelAll()                     {}
+func (f *fakeCoordinator) Cancel(sessionID string)        {}
 func (f *fakeCoordinator) SetThreads(tools.ThreadManager) {}
 
 // fakeHandle/fakeSpawner spawn a real (network/db-free) app.App per thread

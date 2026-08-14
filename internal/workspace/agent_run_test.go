@@ -42,6 +42,8 @@ func (c *blockingAgentRunCoordinator) Run(ctx context.Context, sessionID, prompt
 
 func (c *blockingAgentRunCoordinator) CancelAll() {}
 
+func (c *blockingAgentRunCoordinator) Cancel(sessionID string) {}
+
 // IsBusy is queried by App.Shutdown's agent-work phase right after
 // CancelAll, independently of whether anything is actually
 // dispatched.

@@ -165,3 +165,34 @@ func TestTaskManager_CreateAttributesRunToDelegation(t *testing.T) {
 	require.Equal(t, permission.DelegationRef{ID: st.ID, Name: st.Name, Kind: "task"}, got,
 		"a permission request raised by this run must be attributable to the task, not the parent's own turn")
 }
+
+// TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork is the
+// sharp test for the CancelAll-vs-Cancel(sessionID) fix: a task's App is
+// its parent's, so tearing a task's runtime down must never cancel other
+// work already running in that same App. Before the fix, Shutdown's
+// per-runtime teardown called AgentCoordinator.CancelAll() — harmless for
+// a thread (its App is its own) but, for a task, indistinguishable from
+// cancelling the user's own foreground turn.
+func TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork(t *testing.T) {
+	store := newTestStoreDB(t)
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	// The user's own foreground turn, running in the same App a task
+	// shares. This is the work a blunt CancelAll would have caught.
+	_, err := coord.Run(t.Context(), "foreground-session", "the user's own prompt")
+	require.NoError(t, err)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	// Deliberately no RunComplete published for the task: its run is left
+	// in flight, so Shutdown's teardown has something live to cancel.
+
+	require.NoError(t, mgr.Shutdown(context.Background()))
+
+	require.False(t, coord.cancelAllWasCalled(),
+		"shutdown must never call CancelAll on a coordinator shared with the parent's own work")
+	require.Equal(t, []string{st.SessionID}, coord.canceledSessions(),
+		"shutdown must cancel only the task's own session — the foreground session must never appear here")
+}

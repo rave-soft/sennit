@@ -97,6 +97,8 @@ func (f *fakeThreadCoordinator) RunAccepted(ctx context.Context, _ *agent.Accept
 
 func (f *fakeThreadCoordinator) CancelAll() {}
 
+func (f *fakeThreadCoordinator) Cancel(sessionID string) {}
+
 type fakeThreadHandle struct {
 	id  string
 	app *app.App

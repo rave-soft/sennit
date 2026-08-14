@@ -136,6 +136,8 @@ func (f *fakeThreadCoordinator) RunAccepted(_ context.Context, _ *agent.Accepted
 
 func (f *fakeThreadCoordinator) CancelAll() {}
 
+func (f *fakeThreadCoordinator) Cancel(sessionID string) {}
+
 type fakeThreadHandle struct {
 	id  string
 	app *app.App

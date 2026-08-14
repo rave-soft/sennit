@@ -598,8 +598,15 @@ func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary strin
 		c.mu.Unlock()
 		if rt != nil {
 			rt.watchCancel()
+			// Cancel this thread's own session, not the whole App's
+			// coordinator. Merge is guarded to threads only (see Merge's
+			// Kind check), whose App is their own, so this is equivalent
+			// to CancelAll today — but CancelAll on a kind that shares its
+			// App with something else (a task's parent) would cancel
+			// unrelated work, so this stays correct if that guard is ever
+			// loosened.
 			if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
-				a.AgentCoordinator.CancelAll()
+				a.AgentCoordinator.Cancel(st.SessionID)
 			}
 			if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
 				slog.Error("thread: release merged workspace failed", "thread", threadID, "error", err)
@@ -659,8 +666,10 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 	if rt != nil {
 		rt.watchCancel()
 		if force {
+			// Cancel this delegation's own session, not the whole App's
+			// coordinator — see finishMerge's identical comment.
 			if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
-				a.AgentCoordinator.CancelAll()
+				a.AgentCoordinator.Cancel(st.SessionID)
 			}
 		}
 		if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
@@ -741,8 +750,18 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 				c.mu.Unlock()
 				if rt != nil {
 					rt.watchCancel()
-					if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
-						a.AgentCoordinator.CancelAll()
+					// Fetched up front, before Cancel: this entity's own
+					// SessionID is what Cancel needs (a task's App is its
+					// parent's, so CancelAll here would cancel unrelated
+					// work), and the status check below reuses the same
+					// row instead of reading it twice. If the row can't be
+					// read, skip both — there is no unrelated-work-safe
+					// fallback for "cancel something, we don't know what".
+					st, getErr := m.store.Get(context.Background(), threadID)
+					if getErr == nil {
+						if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
+							a.AgentCoordinator.Cancel(st.SessionID)
+						}
 					}
 					if err := rt.spawner.Release(context.Background(), rt.handle.ID()); err != nil {
 						slog.Error("thread: release workspace on shutdown failed", "error", err)
@@ -750,7 +769,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 					// The workspace DB remains live until this method returns to
 					// its cleanup caller, so record the interrupted terminal
 					// state before the connection is released.
-					if st, err := m.store.Get(context.Background(), threadID); err == nil && st.Status == StatusRunning {
+					if getErr == nil && st.Status == StatusRunning {
 						_, _ = m.lc.setStatus(context.Background(), st.ID, StatusInterrupted, "", "", 0)
 					}
 				}
