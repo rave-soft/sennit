@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
 )
 
@@ -131,6 +132,14 @@ type lifecycle struct {
 	// giving Wait a broadcast condition to select on without polling.
 	changeMu sync.Mutex
 	changeCh chan struct{}
+
+	// parentApp is the workspace App this lifecycle's delegations belong
+	// to, and the event stream a user is actually watching. A thread runs
+	// in an isolated App whose events nobody outside it sees unless the
+	// user has drilled into that thread, so permission traffic raised
+	// there is relayed here — see forwardPermissions. Nil in tests that
+	// construct a lifecycle without one; forwarding is then skipped.
+	parentApp *app.App
 }
 
 // newLifecycle constructs a ready-to-use lifecycle backed by store.
@@ -143,7 +152,7 @@ type lifecycle struct {
 // delegation kind driven over the same store — see [Manager] and
 // [TaskManager] — rather than constructing one per kind, or admission,
 // recovery, and shutdown will each only ever see one kind.
-func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHook, resolveDelivery deliveryResolver) *lifecycle {
+func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHook, resolveDelivery deliveryResolver, parentApp *app.App) *lifecycle {
 	return &lifecycle{
 		store:           store,
 		onRunSuccess:    onRunSuccess,
@@ -152,6 +161,7 @@ func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHo
 		broker:          pubsub.NewBroker[Event](),
 		controls:        make(map[string]*threadControl),
 		changeCh:        make(chan struct{}),
+		parentApp:       parentApp,
 	}
 }
 
@@ -282,6 +292,7 @@ func (l *lifecycle) snapshotControls() map[string]*threadControl {
 // runtime", delete the entity, and leave this runtime stranded on one that
 // no longer exists.
 func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner, id, sessionID, prompt string) {
+	ctx = l.withDelegation(ctx, id)
 	rt := l.installRuntime(ctx, handle, spawner, id)
 	c := l.control(id)
 	runID := uuid.NewString()
@@ -333,7 +344,98 @@ func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner S
 			}
 		}
 	})
+	l.forwardPermissions(watchCtx, handle)
 	return rt
+}
+
+// forwardPermissions relays a delegation workspace's permission traffic
+// into the parent workspace's event stream, for as long as that workspace
+// is live.
+//
+// A thread runs in an isolated app.App with its own permission service and
+// its own event broker. The user's TUI is subscribed to the parent
+// workspace, so without this relay a prompt raised inside a thread reaches
+// nobody: permission.Service.Request blocks on its response channel with
+// no timeout, and the thread hangs there forever with no visible sign of
+// why. Anything that needs approval - bash, above all - stops the thread
+// dead.
+//
+// Requests carry their delegation's identity (see withDelegation), which
+// is what lets the parent both label the prompt and route the answer back
+// to the service that is actually waiting for it - see
+// [Manager.PermissionsFor].
+//
+// Bound to the runtime's watch context, so the relay stops when the
+// workspace is released. A task needs none of this: its handle wraps the
+// parent's own App, so its prompts are already on the stream the user is
+// watching.
+func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
+	if l.parentApp == nil {
+		return
+	}
+	a := handle.App()
+	if a == nil || a == l.parentApp {
+		return
+	}
+	forwardInto(ctx, l, a.Permissions.Subscribe)
+	forwardInto(ctx, l, a.Permissions.SubscribeNotifications)
+
+	// A request already waiting when the relay starts was published
+	// before anything was listening, and a request is announced exactly
+	// once - so without this it would sit there unanswerable, which is
+	// the failure this whole relay exists to prevent. Reachable whenever
+	// a workspace is re-installed under a delegation that still has a
+	// prompt outstanding.
+	if req, ok := a.Permissions.ActiveRequest(); ok {
+		l.parentApp.SendEvent(pubsub.Event[permission.PermissionRequest]{
+			Type:    pubsub.CreatedEvent,
+			Payload: req,
+		})
+	}
+}
+
+// forwardInto pumps one of a delegation workspace's event sources onto the
+// parent App's fan-in, republishing each event unchanged so a subscriber
+// cannot tell it apart from one the parent raised itself - which is the
+// point: the TUI's permission handling should not need to know that the
+// asking workspace is somewhere else.
+//
+// A free function rather than a method because Go has no generic methods.
+func forwardInto[T any](ctx context.Context, l *lifecycle, subscribe func(context.Context) <-chan pubsub.Event[T]) {
+	sub := subscribe(ctx)
+	l.goWorker(func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-sub:
+				if !ok {
+					return
+				}
+				l.parentApp.SendEvent(ev)
+			}
+		}
+	})
+}
+
+// withDelegation tags ctx with id's identity so every permission request
+// raised by its run is attributed to it rather than to the user's own
+// visible turn. Applied to every dispatch path (see startRun and send), so
+// no path can forget: the parent needs the tag both to label a forwarded
+// prompt and to route the answer back to the right permission service.
+func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Context {
+	st, err := l.store.Get(ctx, id)
+	if err != nil {
+		// Tagging is best-effort: losing the label degrades a prompt,
+		// refusing the dispatch would lose the work.
+		slog.Warn("Failed to tag run with its delegation", "component", "thread", "thread", id, "error", err)
+		return ctx
+	}
+	return permission.WithDelegation(ctx, permission.DelegationRef{
+		ID:   st.ID,
+		Name: st.Name,
+		Kind: string(st.Kind),
+	})
 }
 
 // send dispatches message into id's session, respawning its workspace
@@ -363,6 +465,9 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	// (queue into the live runtime, and respawn-then-dispatch) read
 	// bgCtx, so tagging it once here covers both.
 	bgCtx = agent.WithPromptOrigin(bgCtx, message.OriginAgent)
+	// Same reasoning for the delegation tag: both branches below dispatch
+	// a run, and a prompt raised by either has to be attributable.
+	bgCtx = l.withDelegation(bgCtx, id)
 
 	c := l.control(id)
 	c.opMu.Lock()
@@ -647,4 +752,31 @@ func (l *lifecycle) recover(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// setPermissionsSkip applies the parent workspace's permission-bypass
+// ("yolo") state to every delegation workspace that is live right now.
+//
+// A thread runs in an isolated app.App with its own permission service, so
+// it only learns the parent's bypass state when it is spawned. Without
+// this, toggling yolo in the main window leaves a running thread on
+// whatever the state was when it started: turned on, the thread still
+// blocks on a prompt nobody is positioned to answer; turned off, the
+// thread keeps skipping prompts the user has just decided they want back.
+// The second direction is the one with consequences, which is why this
+// propagates in both.
+//
+// A task's handle wraps the parent's own App, so setting the flag through
+// it is the same idempotent write the caller already made - harmless, and
+// cheaper to allow than to special-case.
+func (l *lifecycle) setPermissionsSkip(skip bool) {
+	for _, c := range l.snapshotControls() {
+		c.mu.Lock()
+		rt := c.runtime
+		c.mu.Unlock()
+		if rt == nil {
+			continue
+		}
+		rt.handle.App().Permissions.SetSkipRequests(skip)
+	}
 }

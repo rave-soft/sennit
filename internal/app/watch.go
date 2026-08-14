@@ -98,7 +98,7 @@ func (app *App) applyConfigPermissionsBypass() {
 	if bypass == app.lastConfigBypass {
 		return
 	}
-	app.Permissions.SetSkipRequests(bypass)
+	app.SetPermissionsSkip(bypass)
 	app.lastConfigBypass = bypass
 }
 

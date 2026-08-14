@@ -324,3 +324,7 @@ func TestProcessMultiEditWithCreationPartialFailure(t *testing.T) {
 	require.Equal(t, "", meta.OldContent)
 	require.Equal(t, "one\nTWO\nthree\n", meta.NewContent)
 }
+
+func (m *mockPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
+	return permission.PermissionRequest{}, false
+}

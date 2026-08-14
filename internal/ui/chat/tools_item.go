@@ -1,0 +1,272 @@
+package chat
+
+import (
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/ui/anim"
+	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/styles"
+)
+
+// SetCompact implements the Compactable interface.
+func (t *baseToolMessageItem) SetCompact(compact bool) {
+	if t.isCompact == compact {
+		return
+	}
+	t.isCompact = compact
+	t.clearCache()
+	t.Bump()
+}
+
+// ID returns the unique identifier for this tool message item.
+func (t *baseToolMessageItem) ID() string {
+	return t.toolCall.ID
+}
+
+// StartAnimation starts the assistant message animation if it should be spinning.
+func (t *baseToolMessageItem) StartAnimation() tea.Cmd {
+	if !t.isSpinning() {
+		return nil
+	}
+	return t.anim.Start()
+}
+
+// Animate progresses the assistant message animation if it should be spinning.
+//
+// Bumps the F6 list-cache version so the next draw re-renders this
+// item: a spinner tick mutates anim's internal frame counter, which
+// changes the rendered output but is invisible to the per-item
+// caches. Without the bump the list cache would serve the previously
+// rendered frame indefinitely and the spinner would appear frozen.
+// The ID gate keeps unrelated ticks (routed here by a future change
+// to chat.Animate's dispatch) from churning the cache.
+func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
+	if !t.isSpinning() {
+		return nil
+	}
+	if msg.ID != t.toolCall.ID {
+		return nil
+	}
+	t.Bump()
+	return t.anim.Animate(msg)
+}
+
+// RawRender implements [MessageItem].
+func (t *baseToolMessageItem) RawRender(width int) string {
+	toolItemWidth := width - MessageLeftPaddingTotal
+	if t.hasCappedWidth {
+		toolItemWidth = cappedMessageWidth(width)
+	}
+
+	content, height, ok := t.getCachedRender(toolItemWidth)
+	// if we are spinning or there is no cache rerender
+	if !ok || t.isSpinning() {
+		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
+			ToolCall:   t.toolCall,
+			Result:     t.result,
+			Anim:       t.anim,
+			Compact:    t.isCompact,
+			IsSpinning: t.isSpinning(),
+			Status:     t.computeStatus(),
+			Expanded:   t.expanded,
+			Hovered:    t.hovered,
+		})
+
+		// Prepend hook indicator if hooks ran for this tool call.
+		if t.result != nil {
+			if hookLine := toolOutputHookIndicator(t.sty, t.result.Metadata, toolItemWidth); hookLine != "" {
+				content = hookLine + "\n\n" + content
+			}
+		}
+
+		height = lipgloss.Height(content)
+		// cache the rendered content
+		t.setCachedRender(content, toolItemWidth, height)
+	}
+
+	return t.renderHighlighted(content, toolItemWidth, height)
+}
+
+// Render renders the tool message item at the given width.
+func (t *baseToolMessageItem) Render(width int) string {
+	// Cache the prefixed output keyed by (width, prefix variant).
+	// Bypass the cache while spinning (RawRender output is
+	// frame-dependent) or while a highlight range is active.
+	useCache := !t.isSpinning() && !t.isHighlighted()
+	var key uint64
+	switch {
+	case t.isCompact:
+		key = 2
+	case t.focused:
+		key = 1
+	default:
+		key = 0
+	}
+	if useCache {
+		if cached, ok := t.getCachedPrefixedRender(width, key); ok {
+			return cached
+		}
+	}
+	var prefix string
+	if t.isCompact {
+		prefix = t.sty.Messages.ToolCallCompact.Render()
+	} else if t.focused {
+		prefix = t.sty.Messages.ToolCallFocused.Render()
+	} else {
+		prefix = t.sty.Messages.ToolCallBlurred.Render()
+	}
+	lines := strings.Split(t.RawRender(width), "\n")
+	for i, ln := range lines {
+		lines[i] = prefix + ln
+	}
+	out := strings.Join(lines, "\n")
+	if useCache {
+		t.setCachedPrefixedRender(out, width, key)
+	}
+	return out
+}
+
+// ToolCall returns the tool call associated with this message item.
+func (t *baseToolMessageItem) ToolCall() message.ToolCall {
+	return t.toolCall
+}
+
+// SetToolCall sets the tool call associated with this message item.
+func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
+	t.toolCall = tc
+	t.clearCache()
+	t.Bump()
+}
+
+// SetResult sets the tool result associated with this message item.
+func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
+	t.result = res
+	t.clearCache()
+	t.Bump()
+}
+
+// MessageID returns the ID of the message containing this tool call.
+func (t *baseToolMessageItem) MessageID() string {
+	return t.messageID
+}
+
+// SetMessageID sets the ID of the message containing this tool call.
+// MessageID is metadata only and does not affect the rendered output,
+// so we deliberately do not bump the version here.
+func (t *baseToolMessageItem) SetMessageID(id string) {
+	t.messageID = id
+}
+
+// SetStatus sets the tool status.
+func (t *baseToolMessageItem) SetStatus(status ToolStatus) {
+	if t.status == status {
+		return
+	}
+	t.status = status
+	t.clearCache()
+	t.Bump()
+}
+
+// Status returns the current tool status.
+func (t *baseToolMessageItem) Status() ToolStatus {
+	return t.status
+}
+
+// computeStatus computes the effective status considering the result.
+func (t *baseToolMessageItem) computeStatus() ToolStatus {
+	if t.result != nil {
+		if t.result.IsError {
+			return ToolStatusError
+		}
+		return ToolStatusSuccess
+	}
+	return t.status
+}
+
+// isSpinning returns true if the tool should show animation.
+func (t *baseToolMessageItem) isSpinning() bool {
+	if t.spinningFunc != nil {
+		return t.spinningFunc(SpinningState{
+			ToolCall: t.toolCall,
+			Result:   t.result,
+			Status:   t.status,
+		})
+	}
+	return !t.toolCall.Finished && t.status != ToolStatusCanceled
+}
+
+// SetSpinningFunc sets a custom function to determine if the tool should spin.
+func (t *baseToolMessageItem) SetSpinningFunc(fn SpinningFunc) {
+	t.spinningFunc = fn
+}
+
+// Finished implements list.Item. A tool call is freezable once the
+// tool call itself is marked finished AND a result has been recorded
+// (or it has been canceled). Tools that override the spinning logic
+// via spinningFunc would short-circuit live ticks; we still gate
+// freezing on isSpinning to keep the contract conservative.
+func (t *baseToolMessageItem) Finished() bool {
+	if t.isSpinning() {
+		return false
+	}
+	if t.status == ToolStatusCanceled {
+		return true
+	}
+	return t.toolCall.Finished && t.result != nil
+}
+
+// HandleMouseClick implements MouseClickable. A left click is reported as
+// handled so a click on an agent/agentic_fetch delegation still drills into
+// its child session (see NestedToolContainer in model/chat.go's
+// HandleDelayedClick). For item types that additionally implement
+// Expandable (e.g. Bash), the click then toggles their body expansion;
+// for the rest it is inert.
+func (t *baseToolMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
+	return btn == ansi.MouseLeft
+}
+
+// toggleExpanded flips the click-to-expand state and invalidates the
+// render caches. Concrete item types expose it through the Expandable
+// interface (see BashToolMessageItem.ToggleExpanded).
+func (t *baseToolMessageItem) toggleExpanded() bool {
+	t.expanded = !t.expanded
+	t.clearCache()
+	t.Bump()
+	return t.expanded
+}
+
+// HoverableAt reports whether the pointer is over the expandable block below
+// the tool header.
+func (t *baseToolMessageItem) HoverableAt(x, y, width int) bool {
+	return x >= MessageLeftPaddingTotal && y > 0 && y < lipgloss.Height(t.Render(width))
+}
+
+func clickableItemHover(sty *styles.Styles, content string, width int, hovered bool) string {
+	if !hovered {
+		return content
+	}
+	return common.BlockBackground(content, width, sty.Tool.ClickableHoverBg)
+}
+
+// SetHovered updates hover feedback for expandable tool renderers.
+func (t *baseToolMessageItem) SetHovered(hovered bool) {
+	if t.hovered == hovered {
+		return
+	}
+	t.hovered = hovered
+	t.clearCache()
+	t.Bump()
+}
+
+// HandleKeyEvent implements KeyEventHandler.
+func (t *baseToolMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
+	if k := key.String(); k == "c" || k == "y" {
+		text := t.formatToolForCopy()
+		return true, common.CopyToClipboard(text, "Tool content copied to clipboard")
+	}
+	return false, nil
+}
