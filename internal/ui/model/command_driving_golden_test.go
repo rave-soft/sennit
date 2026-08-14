@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/golden"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
@@ -34,6 +35,18 @@ func newCmdDrivenGoldenUI(ws *cmdDrivingWorkspace) *UI {
 func renderCmdDrivenUI(m *UI) []byte {
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	m.Draw(canvas, canvas.Bounds())
+	return []byte(canvas.Render())
+}
+
+// renderDashboardScreen snapshots the threads dashboard screen straight
+// from a uv.ScreenBuffer, mirroring Root.dashboardView's buffer draw (the
+// test needs the raw buffer, not the normalized View string).
+func renderDashboardScreen(r *Root) []byte {
+	canvas := uv.NewScreenBuffer(r.width, r.height)
+	r.dashboard.Draw(canvas, canvas.Bounds())
+	if r.dashboardDialog.HasDialogs() {
+		r.dashboardDialog.Draw(canvas, canvas.Bounds())
+	}
 	return []byte(canvas.Render())
 }
 
@@ -114,6 +127,37 @@ func TestCmdDrivingGolden(t *testing.T) {
 		require.False(t, m.dialog.ContainsDialog(dialog.PermissionsID))
 	})
 
+	t.Run("load_session", func(t *testing.T) {
+		// Session state transition: loading a session populates the chat
+		// and the header from workspace results, which the updateSession
+		// router slice of S1 will own.
+		ws := &cmdDrivingWorkspace{
+			agentReady: true,
+			sessionsBySessionID: map[string]session.Session{
+				"s-loaded": {ID: "s-loaded", Title: "Loaded Session"},
+			},
+			messagesBySessionID: map[string][]message.Message{
+				"s-loaded": {
+					{ID: "m1", Role: message.User, SessionID: "s-loaded", Parts: []message.ContentPart{
+						message.TextContent{Text: "What does the status line show?"},
+					}},
+					{ID: "m2", Role: message.Assistant, SessionID: "s-loaded", Parts: []message.ContentPart{
+						message.TextContent{Text: "Focus, agent state, and keybindings."},
+					}},
+				},
+			},
+		}
+		m := newCmdDrivenGoldenUI(ws)
+
+		_, cmd := m.Update(requestSessionLoad{sessionID: "s-loaded"})
+		runCmdTree(m, cmd, nil)
+
+		require.Equal(t, "s-loaded", m.session.ID)
+		require.Equal(t, "Loaded Session", m.session.Title)
+		require.Equal(t, 2, m.chat.Len())
+		golden.RequireEqual(t, renderCmdDrivenUI(m))
+	})
+
 	t.Run("threads_panel", func(t *testing.T) {
 		ws := &cmdDrivingWorkspace{
 			agentReady:      true,
@@ -142,6 +186,6 @@ func TestCmdDrivingGolden(t *testing.T) {
 
 		require.Equal(t, screenDashboard, r.active)
 		require.Positive(t, ws.listThreadsCalls)
-		golden.RequireEqual(t, []byte(r.View().Content))
+		golden.RequireEqual(t, renderDashboardScreen(r))
 	})
 }

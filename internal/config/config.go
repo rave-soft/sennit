@@ -311,7 +311,7 @@ const (
 )
 
 type Permissions struct {
-	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=read"`
 	// Bypass, when true, skips every permission prompt from process start —
 	// equivalent to always-on yolo mode. It is the persistent counterpart to
 	// the session-only --yolo flag / ctrl+y toggle (see permission.Service.
@@ -990,7 +990,7 @@ func allToolNames() []string {
 		"ls",
 		"question",
 		"todos",
-		"view",
+		"read",
 		"write",
 		"list_mcp_resources",
 		"read_mcp_resource",
@@ -1029,7 +1029,7 @@ func resolveReadOnlyTools(tools []string) []string {
 	// fetch, web_fetch, and web_search don't modify local state, so they're
 	// read-only in the same sense as glob/grep/view; the network calls they
 	// make still go through the real permission.Service like the coder's.
-	readOnlyTools := []string{"glob", "grep", "ripgrep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "view", "fetch", "web_fetch", "web_search"}
+	readOnlyTools := []string{"glob", "grep", "ripgrep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "read", "fetch", "web_fetch", "web_search"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }

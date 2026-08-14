@@ -135,8 +135,8 @@ func unmarshalToolParams(toolName string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return params, nil
-	case ViewToolName:
-		var params ViewPermissionsParams
+	case ReadToolName:
+		var params ReadPermissionsParams
 		if err := json.Unmarshal(raw, &params); err != nil {
 			return nil, err
 		}

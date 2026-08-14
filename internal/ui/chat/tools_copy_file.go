@@ -11,13 +11,13 @@ import (
 	tools "github.com/rave-soft/braid/internal/proto"
 )
 
-// formatViewResultForCopy formats view tool results for clipboard.
-func (t *baseToolMessageItem) formatViewResultForCopy() string {
+// formatReadResultForCopy formats view tool results for clipboard.
+func (t *baseToolMessageItem) formatReadResultForCopy() string {
 	if t.result == nil {
 		return ""
 	}
 
-	var meta tools.ViewResponseMetadata
+	var meta tools.ReadResponseMetadata
 	if t.result.Metadata != "" {
 		if err := json.Unmarshal([]byte(t.result.Metadata), &meta); err != nil {
 			return t.result.Content

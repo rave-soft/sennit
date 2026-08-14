@@ -639,9 +639,9 @@ func extractSkillsFromMessages(msgs []*message.Message) []sessionShowSkill {
 	for _, msg := range msgs {
 		for _, part := range msg.Parts {
 			if tr, ok := part.(message.ToolResult); ok && tr.Metadata != "" {
-				var meta tools.ViewResponseMetadata
+				var meta tools.ReadResponseMetadata
 				if err := json.Unmarshal([]byte(tr.Metadata), &meta); err == nil {
-					if meta.ResourceType == tools.ViewResourceSkill && meta.ResourceName != "" {
+					if meta.ResourceType == tools.ReadResourceSkill && meta.ResourceName != "" {
 						if !seen[meta.ResourceName] {
 							seen[meta.ResourceName] = true
 							skills = append(skills, sessionShowSkill{

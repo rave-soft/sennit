@@ -100,13 +100,41 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	// this catches dead renderer registrations for tools that no longer
 	// exist, the same kind of debris a previously removed built-in tool
 	// left behind elsewhere in the repo.
+	//
+	// A renamed tool's old name is not debris: sessions recorded before
+	// the rename still hold calls under it and must keep rendering, so a
+	// registration is also legitimate when the name folds onto a known
+	// tool (see config.CanonicalToolName).
 	known := make(map[string]bool, len(config.AllToolNames()))
 	for _, name := range config.AllToolNames() {
 		known[name] = true
 	}
 	for name := range toolMessageItemFactories {
-		require.Truef(t, known[name], "tool %q has a registered factory but is not in config.AllToolNames()", name)
+		require.Truef(t, known[name] || known[config.CanonicalToolName(name)],
+			"tool %q has a registered factory but is neither in config.AllToolNames() nor a legacy name of a tool that is", name)
 	}
+}
+
+// TestNewToolMessageItem_RendersALegacyToolName covers reopening a session
+// recorded before the read tool was renamed: its calls are stored under the
+// old name, and a name the renderer no longer knows would fall through to
+// the generic renderer — the history would visibly degrade just by having
+// been recorded a version earlier.
+func TestNewToolMessageItem_RendersALegacyToolName(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
+		ID:       "tc-1",
+		Name:     tools.LegacyReadToolName,
+		Input:    `{"file_path":"internal/foo.go"}`,
+		Finished: true,
+	}, nil, false, nil)
+
+	registered, ok := item.(*baseToolMessageItem)
+	require.Truef(t, ok, "a legacy tool name must reach a registered renderer, got %T", item)
+	require.IsType(t, &ReadToolRenderContext{}, registered.toolRenderer,
+		"a legacy read call must render through the read renderer, not the generic one")
 }
 
 func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {

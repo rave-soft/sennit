@@ -17,7 +17,7 @@ name: reviewer
 description: Reviews Go code for correctness and idiom.
 model: anthropic/claude-sonnet-4   # optional; provider/model-id. Omit to use the app's main model.
 reasoning_effort: low     # low | medium | high
-tools: [view, grep, glob]
+tools: [read, grep, glob]
 ---
 
 You are a Go code reviewer. Report real defects, not style opinions.

@@ -59,6 +59,11 @@ type runTurn struct {
 
 	sanitizedToolCalls map[string]bool
 	shouldSummarize    bool
+	// historyTokens is the part of the prompt a summary would replace:
+	// this session's own history as it stood when the run started,
+	// excluding everything a summary cannot touch (system prompt, skills,
+	// carried sub-agent history). See stopOnContextWindow.
+	historyTokens int64
 	// currentAssistant is the in-flight step's assistant message;
 	// PrepareStep (re)assigns it once per streaming step. It's the turn's
 	// final assistant message once streaming ends.
@@ -459,6 +464,16 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
 }
 
+// maxOutputTokens is the largest reply this turn's model may produce: the
+// explicit per-model setting when there is one, otherwise the catalog
+// default. Zero means unknown.
+func (t *runTurn) maxOutputTokens() int64 {
+	if t.model.ModelCfg.MaxTokens > 0 {
+		return t.model.ModelCfg.MaxTokens
+	}
+	return t.model.CatalogCfg.DefaultMaxTokens
+}
+
 // stopOnContextWindow is the auto-summarize StopWhen condition: it stops
 // the turn once the session's token usage crosses the context-window
 // threshold, so Run's tail can kick off a summarize pass.
@@ -471,17 +486,40 @@ func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
 	}
 	tokens := t.currentSession.CompletionTokens + t.currentSession.PromptTokens
 	remaining := cw - tokens
-	var threshold int64
-	if cw > largeContextWindowThreshold {
-		threshold = largeContextWindowBuffer
-	} else {
-		threshold = int64(float64(cw) * smallContextWindowRatio)
+	threshold := summarizeBuffer(cw, t.maxOutputTokens())
+	if remaining > threshold || t.disableAutoSummarize {
+		return false
 	}
-	if (remaining <= threshold) && !t.disableAutoSummarize {
-		t.shouldSummarize = true
-		return true
+	// Summarizing only helps if what it reclaims is big enough to matter.
+	// A summary replaces this session's history and nothing else: the
+	// system prompt, the skills, any carried sub-agent history and the
+	// summary a previous pass already wrote all come back untouched. When
+	// the history is itself smaller than the buffer we are trying to
+	// free, another pass reads the whole context to write a summary that
+	// cannot change the outcome, and the next continuation trips at once
+	// — the session summarizes on a loop instead of working. Run on
+	// instead and let the provider's own limit speak.
+	if t.historyTokens > 0 && t.historyTokens < threshold {
+		slog.Warn(
+			"Skipping auto-summarize: the session history is smaller than the room a summary would need to free",
+			"session_id", t.call.SessionID,
+			"context_window", cw,
+			"tokens", tokens,
+			"history_tokens", t.historyTokens,
+			"threshold", threshold,
+		)
+		return false
 	}
-	return false
+	slog.Info(
+		"Auto-summarize threshold reached",
+		"session_id", t.call.SessionID,
+		"context_window", cw,
+		"tokens", tokens,
+		"history_tokens", t.historyTokens,
+		"threshold", threshold,
+	)
+	t.shouldSummarize = true
+	return true
 }
 
 // handleStreamError implements Run's post-Stream error path: it finalizes

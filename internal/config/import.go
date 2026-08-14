@@ -448,7 +448,7 @@ func normalizeReasoningEffort(v string) (mapped string, adjusted bool, ok bool) 
 // internal/agent/tools for its name constants: that package already imports
 // internal/config, and config importing it back would cycle.
 var importKnownTools = map[string]bool{
-	"view": true, "write": true, "edit": true, "multiedit": true, "bash": true,
+	"read": true, "write": true, "edit": true, "multiedit": true, "bash": true,
 	"grep": true, "ripgrep": true, "glob": true, "ls": true, "fetch": true, "web_fetch": true,
 	"web_search": true, "download": true, "todos": true, "agent": true,
 	"question": true, "braid_info": true, "braid_logs": true,
@@ -482,6 +482,10 @@ func translateAgentTools(names []string) (mapped []string, dropped []string) {
 			name = ClaudeToolNames[lower]
 		case importKnownTools[lower]:
 			name = lower
+		case legacyToolNames[lower] != "":
+			// One of Braid's own older names — fold it forward rather
+			// than dropping it. See [CanonicalToolName].
+			name = legacyToolNames[lower]
 		default:
 			dropped = append(dropped, name)
 			continue

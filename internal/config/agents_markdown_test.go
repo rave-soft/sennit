@@ -31,7 +31,7 @@ func TestDiscoverBraidAgent(t *testing.T) {
 name: reviewer
 description: Reviews Go code
 reasoning_effort: low
-tools: [view, grep]
+tools: [read, grep]
 ---
 You review Go code.`)
 
@@ -42,7 +42,7 @@ You review Go code.`)
 	require.Equal(t, "Reviews Go code", agent.Description)
 	require.Empty(t, agent.Model)
 	require.Equal(t, "low", agent.ReasoningEffort)
-	require.Equal(t, []string{"view", "grep"}, agent.AllowedTools)
+	require.Equal(t, []string{"read", "grep"}, agent.AllowedTools)
 	require.Equal(t, "You review Go code.", agent.Prompt)
 }
 
@@ -216,10 +216,10 @@ func TestSetupAgentsDoesNotTrustPreexistingAgentsField(t *testing.T) {
 
 func TestStringListAcceptsBothForms(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "a.md", "---\nname: a\ntools: view, grep\n---\nbody")
-	writeAgent(t, root, ".braid/agents", "b.md", "---\nname: b\ntools: [view, grep]\n---\nbody")
+	writeAgent(t, root, ".braid/agents", "a.md", "---\nname: a\ntools: read, grep\n---\nbody")
+	writeAgent(t, root, ".braid/agents", "b.md", "---\nname: b\ntools: [read, grep]\n---\nbody")
 
 	got := discoverMarkdownAgents(root, nil)
-	require.Equal(t, []string{"view", "grep"}, got["a"].AllowedTools)
-	require.Equal(t, []string{"view", "grep"}, got["b"].AllowedTools)
+	require.Equal(t, []string{"read", "grep"}, got["a"].AllowedTools)
+	require.Equal(t, []string{"read", "grep"}, got["b"].AllowedTools)
 }

@@ -55,6 +55,7 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, e
 		GlobalSkillsMirror: false,
 		InheritedAgents:    inheritedAgents,
 		YOLO:               yolo,
+		ConfineWrites:      true,
 	})
 	if err != nil {
 		return nil, err

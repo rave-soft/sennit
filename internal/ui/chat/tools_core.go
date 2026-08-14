@@ -209,10 +209,13 @@ func newBaseToolMessageItem(
 }
 
 var toolMessageItemFactories = map[string]ToolRenderer{
-	tools.BashToolName:          &BashToolRenderContext{},
-	tools.JobOutputToolName:     &JobOutputToolRenderContext{},
-	tools.JobKillToolName:       &JobKillToolRenderContext{},
-	tools.ViewToolName:          &ViewToolRenderContext{},
+	tools.BashToolName:      &BashToolRenderContext{},
+	tools.JobOutputToolName: &JobOutputToolRenderContext{},
+	tools.JobKillToolName:   &JobKillToolRenderContext{},
+	tools.ReadToolName:      &ReadToolRenderContext{},
+	// Sessions recorded before the rename still hold calls under the old
+	// name; render them the same way. See [tools.LegacyReadToolName].
+	tools.LegacyReadToolName:    &ReadToolRenderContext{},
 	tools.WriteToolName:         &WriteToolRenderContext{},
 	tools.EditToolName:          &EditToolRenderContext{},
 	tools.MultiEditToolName:     &MultiEditToolRenderContext{},

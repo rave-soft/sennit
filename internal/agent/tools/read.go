@@ -23,64 +23,71 @@ import (
 	"github.com/rave-soft/braid/internal/skills"
 )
 
-//go:embed view.md.tpl
-var viewDescriptionTmpl []byte
+//go:embed read.md.tpl
+var readDescriptionTmpl []byte
 
-var viewDescriptionTpl = template.Must(
-	template.New("viewDescription").
-		Parse(string(viewDescriptionTmpl)),
+var readDescriptionTpl = template.Must(
+	template.New("readDescription").
+		Parse(string(readDescriptionTmpl)),
 )
 
-type viewDescriptionData struct {
+type readDescriptionData struct {
 	DefaultReadLimit int
-	MaxViewSizeKB    int
+	MaxReadSizeKB    int
 }
 
-func viewDescription() string {
-	return renderTemplate(viewDescriptionTpl, viewDescriptionData{
+func readDescription() string {
+	return renderTemplate(readDescriptionTpl, readDescriptionData{
 		DefaultReadLimit: DefaultReadLimit,
-		MaxViewSizeKB:    MaxViewSize / 1024,
+		MaxReadSizeKB:    MaxReadSize / 1024,
 	})
 }
 
-type ViewParams struct {
+type ReadParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
 	Offset   int    `json:"offset,omitempty" description:"The line number to start reading from (0-based)"`
 	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 2000)"`
 }
 
-type ViewPermissionsParams struct {
+type ReadPermissionsParams struct {
 	FilePath string `json:"file_path"`
 	Offset   int    `json:"offset"`
 	Limit    int    `json:"limit"`
 }
 
-type ViewResourceType string
+type ReadResourceType string
 
 const (
-	ViewResourceUnset ViewResourceType = ""
-	ViewResourceSkill ViewResourceType = "skill"
+	ReadResourceUnset ReadResourceType = ""
+	ReadResourceSkill ReadResourceType = "skill"
 )
 
-type ViewResponseMetadata struct {
+type ReadResponseMetadata struct {
 	FilePath            string           `json:"file_path"`
 	Content             string           `json:"content"`
-	ResourceType        ViewResourceType `json:"resource_type,omitempty"`
+	ResourceType        ReadResourceType `json:"resource_type,omitempty"`
 	ResourceName        string           `json:"resource_name,omitempty"`
 	ResourceDescription string           `json:"resource_description,omitempty"`
 }
 
 const (
-	ViewToolName = "view"
-	MaxViewSize  = 200 * 1024 // 200KB
+	ReadToolName = "read"
+	// LegacyReadToolName is what this tool was called before it took the
+	// name the UI had always shown for it ("Read"), which is also the
+	// name every other agent in the ecosystem uses. Sessions recorded
+	// before the rename still hold tool calls under the old name and user
+	// configs still list it, so the history renderers and the config
+	// loader both keep accepting it.
+	LegacyReadToolName = "view"
+	MaxReadSize        = 200 * 1024 // 200KB
 	// DefaultReadLimit matches Claude Code's Read default; 200 (inherited
 	// from Crush) made models page through files in tiny chunks, wasting
-	// steps. MaxViewSize and MaxLineLength still bound the worst case.
+	// steps. MaxReadSize and MaxLineLength still bound the worst case.
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
 )
 
-func NewViewTool(
+func NewReadTool(
 	lspManager *lsp.Manager,
 	permissions permission.Service,
 	filetracker filetracker.Service,
@@ -89,9 +96,9 @@ func NewViewTool(
 	skillsPaths ...string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		ViewToolName,
-		viewDescription(),
-		func(ctx context.Context, params ViewParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		ReadToolName,
+		readDescription(),
+		func(ctx context.Context, params ReadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
@@ -122,10 +129,10 @@ func NewViewTool(
 					SessionID:   sessionID,
 					Path:        absFilePath,
 					ToolCallID:  call.ID,
-					ToolName:    ViewToolName,
+					ToolName:    ReadToolName,
 					Action:      "read",
 					Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
-					Params:      ViewPermissionsParams(params),
+					Params:      ReadPermissionsParams(params),
 				})
 				if err != nil {
 					return fantasy.ToolResponse{}, err
@@ -183,9 +190,9 @@ func NewViewTool(
 
 			isSupportedImage, mimeType := getImageMimeType(filePath)
 			if isSupportedImage {
-				if fileInfo.Size() > MaxViewSize {
+				if fileInfo.Size() > MaxReadSize {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Image file is too large (%d bytes). Maximum size is %d bytes",
-						fileInfo.Size(), MaxViewSize)), nil
+						fileInfo.Size(), MaxReadSize)), nil
 				}
 				if !GetSupportsImagesFromContext(ctx) {
 					modelName := GetModelNameFromContext(ctx)
@@ -209,7 +216,7 @@ func NewViewTool(
 			}
 
 			// Read the file content
-			maxContentSize := MaxViewSize
+			maxContentSize := MaxReadSize
 			if isSkillFile {
 				maxContentSize = 0
 			}
@@ -234,13 +241,13 @@ func NewViewTool(
 			output += getDiagnostics(filePath, lspManager)
 			filetracker.RecordRead(ctx, sessionID, filePath)
 
-			meta := ViewResponseMetadata{
+			meta := ReadResponseMetadata{
 				FilePath: filePath,
 				Content:  content,
 			}
 			if isSkillFile {
 				if skill, err := skills.Parse(filePath); err == nil {
-					meta.ResourceType = ViewResourceSkill
+					meta.ResourceType = ReadResourceSkill
 					meta.ResourceName = skill.Name
 					meta.ResourceDescription = skill.Description
 					skillTracker.MarkLoaded(skill.Name)
@@ -420,7 +427,7 @@ func isInSkillsPath(filePath string, skillsPaths []string) bool {
 }
 
 // readBuiltinFile reads a file from the embedded builtin skills filesystem.
-func readBuiltinFile(params ViewParams, skillTracker *skills.Tracker) fantasy.ToolResponse {
+func readBuiltinFile(params ReadParams, skillTracker *skills.Tracker) fantasy.ToolResponse {
 	embeddedPath := "builtin/" + strings.TrimPrefix(params.FilePath, skills.BuiltinPrefix)
 	builtinFS := skills.BuiltinFS()
 
@@ -456,12 +463,12 @@ func readBuiltinFile(params ViewParams, skillTracker *skills.Tracker) fantasy.To
 	}
 	output += "\n</file>\n"
 
-	meta := ViewResponseMetadata{
+	meta := ReadResponseMetadata{
 		FilePath: params.FilePath,
 		Content:  strings.Join(lines, "\n"),
 	}
 	if skill, err := skills.ParseContent(data); err == nil {
-		meta.ResourceType = ViewResourceSkill
+		meta.ResourceType = ReadResourceSkill
 		meta.ResourceName = skill.Name
 		meta.ResourceDescription = skill.Description
 		skillTracker.MarkLoaded(skill.Name)

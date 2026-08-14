@@ -60,7 +60,7 @@ func TestConvertToToolResult_ValidMediaNoText(t *testing.T) {
 
 	result := fantasy.ToolResultContent{
 		ToolCallID: "call_789",
-		ToolName:   "view",
+		ToolName:   "read",
 		Result: fantasy.ToolResultOutputContentMedia{
 			Data:      validData,
 			MediaType: "image/jpeg",

@@ -61,7 +61,7 @@ provider add anthropic --api-key "$ANTHROPIC_API_KEY"
 model anthropic/claude-sonnet-4-20250514 --max-tokens 16384
 
 option skill-path ./skills
-permissions allow view ls grep edit
+permissions allow read ls grep edit
 ```
 
 Values are ordinary Bash — quote and expand normally (`"$VAR"`, `$(cmd)`,
@@ -445,7 +445,7 @@ name: reviewer
 description: Reviews Go code for correctness and idiom.
 model: anthropic/claude-sonnet-4   # optional; provider/model-id
 reasoning_effort: low              # optional; low | medium | high
-tools: [view, grep, glob]
+tools: [read, grep, glob]
 ---
 
 You are a Go code reviewer. Report real defects, not style opinions.
@@ -457,7 +457,7 @@ You are a Go code reviewer. Report real defects, not style opinions.
   among configured providers; an unresolvable value is dropped with a
   warning and the agent falls back to the app's main model.
 - `.braid/agents` files are expected to already name Braid's own tools
-  (`view`, `grep`, `bash`, ...) — regular discovery does not translate
+  (`read`, `grep`, `bash`, ...) — regular discovery does not translate
   Claude Code names anymore. `braid import` does that translation once, at
   import time, and reports any tool name it couldn't map.
 - opencode's `permission:` blocks are **not enforced**, imported or not —
@@ -594,7 +594,7 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `mcp add gh --type http --url U`     | `mcp.gh = {"type":"http","url":"U"}`                   |
 | `lsp add go --command gopls`         | `lsp.go = {"command":"gopls"}`                         |
 | `hook add PreToolUse --command C`    | append to `hooks.PreToolUse[]`                         |
-| `permissions allow view ls`          | `permissions.allowed_tools = ["view","ls"]`            |
+| `permissions allow read ls`          | `permissions.allowed_tools = ["read","ls"]`            |
 | `permissions deny bash`              | `options.disabled_tools = ["bash"]`                    |
 | `permissions bypass on`              | `permissions.bypass = true`                            |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |

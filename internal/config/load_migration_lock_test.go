@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/braid/internal/config/migrate"
 	"github.com/rave-soft/braid/internal/lock"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -47,7 +48,7 @@ func TestMigrateBloatedModelCache_RereadsAfterLockAndIsIdempotent(t *testing.T) 
 	require.False(t, gjson.GetBytes(data, "providers.custom.models").Exists())
 	cached, ok := loadCachedModels(path, "custom")
 	require.True(t, ok)
-	require.Len(t, cached, modelCacheMigrationThreshold+1)
+	require.Len(t, cached, migrate.ModelCacheMigrationThreshold+1)
 
 	beforeRetry := string(data)
 	migrateBloatedModelCache(path, nil)
@@ -66,12 +67,12 @@ func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing
 	require.NoError(t, os.WriteFile(path, []byte(config), 0o600))
 
 	failure := errors.New("cache write failed")
-	migrateBloatedModelCacheWithSave(path, nil, func(globalDataPath, providerID string, models []catwalk.Model) error {
+	migrate.BloatedModelCache(path, nil, func(globalDataPath, providerID string, models []catwalk.Model) error {
 		if providerID == "failed" {
 			return failure
 		}
 		return saveCachedModelsWithError(globalDataPath, providerID, models)
-	})
+	}, atomicWriteFile)
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -84,7 +85,7 @@ func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing
 	require.False(t, ok)
 	saved, ok := loadCachedModels(path, "saved")
 	require.True(t, ok)
-	require.Len(t, saved, modelCacheMigrationThreshold+1)
+	require.Len(t, saved, migrate.ModelCacheMigrationThreshold+1)
 
 	migrateBloatedModelCache(path, nil)
 
@@ -97,7 +98,7 @@ func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing
 	require.False(t, gjson.GetBytes(data, "providers.saved.models").Exists())
 	failed, ok := loadCachedModels(path, "failed")
 	require.True(t, ok)
-	require.Len(t, failed, modelCacheMigrationThreshold+1)
+	require.Len(t, failed, migrate.ModelCacheMigrationThreshold+1)
 }
 
 func TestMigrateDisableNotifications_RereadsBothFilesAndPreservesNotifications(t *testing.T) {
@@ -161,7 +162,7 @@ func TestMigrateDisableNotifications_DestinationWriteFailureRetriesWithoutLosing
 	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
 	require.NoError(t, os.WriteFile(globalPath, []byte(`{"options":{"notification_style":"bell"}}`), 0o600))
 
-	migrateDisableNotificationsWithWrite(func(path string, data []byte, perm os.FileMode) error {
+	migrate.DisableNotifications(globalPath, dataPath, func(path string, data []byte, perm os.FileMode) error {
 		if path == dataPath {
 			return errors.New("destination write failed")
 		}
@@ -195,7 +196,7 @@ func TestMigrateDisableNotifications_CleanupFailureRetriesWithExistingNotificati
 	require.NoError(t, os.WriteFile(globalPath, []byte(`{"options":{"notification_style":"bell"}}`), 0o600))
 	require.NoError(t, os.WriteFile(dataPath, []byte(`{"options":{"notifications":"osc","disable_notifications":true}}`), 0o600))
 
-	migrateDisableNotificationsWithWrite(func(path string, data []byte, perm os.FileMode) error {
+	migrate.DisableNotifications(globalPath, dataPath, func(path string, data []byte, perm os.FileMode) error {
 		if path == globalPath {
 			return errors.New("cleanup write failed")
 		}
@@ -291,7 +292,7 @@ func TestLockConfigMigrationFiles_UsesFixedOrder(t *testing.T) {
 	releaseFirst := make(chan struct{})
 	firstDone := make(chan error, 1)
 	go func() {
-		unlock, err := lockConfigMigrationFiles(second, first)
+		unlock, err := migrate.LockFiles(second, first)
 		if err != nil {
 			firstDone <- err
 			return
@@ -305,7 +306,7 @@ func TestLockConfigMigrationFiles_UsesFixedOrder(t *testing.T) {
 
 	secondDone := make(chan error, 1)
 	go func() {
-		unlock, err := lockConfigMigrationFiles(first, second)
+		unlock, err := migrate.LockFiles(first, second)
 		if err == nil {
 			unlock()
 		}
@@ -332,7 +333,7 @@ func bloatedModelConfig(field string) string {
 
 func bloatedModelsJSON(prefix string) string {
 	models := "["
-	for i := 0; i <= modelCacheMigrationThreshold; i++ {
+	for i := 0; i <= migrate.ModelCacheMigrationThreshold; i++ {
 		if i > 0 {
 			models += ","
 		}

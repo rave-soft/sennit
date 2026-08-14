@@ -29,7 +29,7 @@ internal/
     hooked_tool.go                 Decorator that runs PreToolUse hooks before tool execution
     prompts.go                     Loads Go-template system prompts
     templates/                     System prompt templates (coder.md.tpl, task.md.tpl, etc.)
-    tools/                         All built-in tools (bash, edit, view, grep, glob, etc.)
+    tools/                         All built-in tools (bash, edit, read, grep, glob, etc.)
       mcp/                         MCP client integration
   hooks/                           Hook engine: runs user shell commands on hook events
     hooks.go                       Decision types, aggregation logic, event constants

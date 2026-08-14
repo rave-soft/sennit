@@ -45,3 +45,16 @@ func TestLocalSpawnerInheritsParentYOLO(t *testing.T) {
 	require.True(t, lh.app.Store().Overrides().SkipPermissionRequests)
 	require.True(t, lh.app.Permissions().SkipRequests())
 }
+
+func TestLocalSpawnerConfinesWritesToWorktree(t *testing.T) {
+	repo := initRepo(t)
+	spawner := NewLocalSpawner(nil, nil)
+
+	handle, err := spawner.Spawn(t.Context(), repo)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
+
+	local, ok := handle.(*localHandle)
+	require.True(t, ok)
+	require.Equal(t, repo, local.app.Permissions().ConfinedDir())
+}

@@ -108,17 +108,17 @@ func TestReadTextFileLineExceeding1MB(t *testing.T) {
 	require.Equal(t, strings.Repeat("A", MaxLineLength)+"...", content)
 }
 
-func TestViewToolAllowsSmallSectionsOfLargeFiles(t *testing.T) {
+func TestReadToolAllowsSmallSectionsOfLargeFiles(t *testing.T) {
 	t.Parallel()
 
 	workingDir := t.TempDir()
 	filePath := filepath.Join(workingDir, "large.txt")
-	lines := []string{strings.Repeat("a", MaxViewSize+1), "target line", "after target"}
+	lines := []string{strings.Repeat("a", MaxReadSize+1), "target line", "after target"}
 	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644))
 
-	tool := newViewToolForTest(workingDir)
+	tool := newReadToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
-	resp := runViewTool(t, tool, ctx, ViewParams{
+	resp := runReadTool(t, tool, ctx, ReadParams{
 		FilePath: filePath,
 		Offset:   1,
 		Limit:    1,
@@ -128,12 +128,12 @@ func TestViewToolAllowsSmallSectionsOfLargeFiles(t *testing.T) {
 	require.Contains(t, resp.Content, "     2|target line")
 	require.NotContains(t, resp.Content, "File is too large")
 
-	var meta ViewResponseMetadata
+	var meta ReadResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Equal(t, "target line", meta.Content)
 }
 
-func TestViewToolTruncatesOversizedReturnedSections(t *testing.T) {
+func TestReadToolTruncatesOversizedReturnedSections(t *testing.T) {
 	t.Parallel()
 
 	workingDir := t.TempDir()
@@ -144,9 +144,9 @@ func TestViewToolTruncatesOversizedReturnedSections(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644))
 
-	tool := newViewToolForTest(workingDir)
+	tool := newReadToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
-	resp := runViewTool(t, tool, ctx, ViewParams{
+	resp := runReadTool(t, tool, ctx, ReadParams{
 		FilePath: filePath,
 	})
 
@@ -156,17 +156,17 @@ func TestViewToolTruncatesOversizedReturnedSections(t *testing.T) {
 	require.Contains(t, resp.Content, "Use 'offset' parameter")
 }
 
-func TestViewToolBlocksOversizedImages(t *testing.T) {
+func TestReadToolBlocksOversizedImages(t *testing.T) {
 	t.Parallel()
 
 	workingDir := t.TempDir()
 	filePath := filepath.Join(workingDir, "large.png")
-	require.NoError(t, os.WriteFile(filePath, []byte(strings.Repeat("a", MaxViewSize+1)), 0o644))
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Repeat("a", MaxReadSize+1)), 0o644))
 
-	tool := newViewToolForTest(workingDir)
+	tool := newReadToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 	ctx = context.WithValue(ctx, SupportsImagesContextKey, true)
-	resp := runViewTool(t, tool, ctx, ViewParams{
+	resp := runReadTool(t, tool, ctx, ReadParams{
 		FilePath: filePath,
 	})
 
@@ -212,31 +212,31 @@ func TestReadTextFileAllowsExactMaxContentSize(t *testing.T) {
 	require.False(t, hasMore)
 }
 
-type mockViewPermissionService struct {
+type mockReadPermissionService struct {
 	*pubsub.Broker[permission.PermissionRequest]
 }
 
-func (m *mockViewPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
+func (m *mockReadPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
 	return true, nil
 }
 
-func (m *mockViewPermissionService) Grant(req permission.PermissionRequest) bool { return true }
+func (m *mockReadPermissionService) Grant(req permission.PermissionRequest) bool { return true }
 
-func (m *mockViewPermissionService) Deny(req permission.PermissionRequest) bool { return true }
+func (m *mockReadPermissionService) Deny(req permission.PermissionRequest) bool { return true }
 
-func (m *mockViewPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
+func (m *mockReadPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
 	return true
 }
 
-func (m *mockViewPermissionService) AutoApproveSession(sessionID string) {}
+func (m *mockReadPermissionService) AutoApproveSession(sessionID string) {}
 
-func (m *mockViewPermissionService) SetSkipRequests(skip bool) {}
+func (m *mockReadPermissionService) SetSkipRequests(skip bool) {}
 
-func (m *mockViewPermissionService) SkipRequests() bool {
+func (m *mockReadPermissionService) SkipRequests() bool {
 	return false
 }
 
-func (m *mockViewPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
+func (m *mockReadPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
 	return make(<-chan pubsub.Event[permission.PermissionNotification])
 }
 
@@ -252,12 +252,12 @@ func (m mockFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([
 	return nil, nil
 }
 
-func newViewToolForTest(workingDir string) fantasy.AgentTool {
-	permissions := &mockViewPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
-	return NewViewTool(nil, permissions, mockFileTracker{}, nil, workingDir)
+func newReadToolForTest(workingDir string) fantasy.AgentTool {
+	permissions := &mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	return NewReadTool(nil, permissions, mockFileTracker{}, nil, workingDir)
 }
 
-func runViewTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params ViewParams) fantasy.ToolResponse {
+func runReadTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params ReadParams) fantasy.ToolResponse {
 	t.Helper()
 
 	input, err := json.Marshal(params)
@@ -265,7 +265,7 @@ func runViewTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 
 	call := fantasy.ToolCall{
 		ID:    "test-call",
-		Name:  ViewToolName,
+		Name:  ReadToolName,
 		Input: string(input),
 	}
 
@@ -282,7 +282,7 @@ func TestReadBuiltinFile(t *testing.T) {
 	t.Run("reads braid-config skill", func(t *testing.T) {
 		t.Parallel()
 
-		resp := readBuiltinFile(ViewParams{
+		resp := readBuiltinFile(ReadParams{
 			FilePath: "braid://skills/braid-config/SKILL.md",
 		}, nil)
 		require.NotEmpty(t, resp.Content)
@@ -292,7 +292,7 @@ func TestReadBuiltinFile(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
 
-		resp := readBuiltinFile(ViewParams{
+		resp := readBuiltinFile(ReadParams{
 			FilePath: "braid://skills/nonexistent/SKILL.md",
 		}, nil)
 		require.True(t, resp.IsError)
@@ -301,13 +301,13 @@ func TestReadBuiltinFile(t *testing.T) {
 	t.Run("metadata has skill info", func(t *testing.T) {
 		t.Parallel()
 
-		resp := readBuiltinFile(ViewParams{
+		resp := readBuiltinFile(ReadParams{
 			FilePath: "braid://skills/braid-config/SKILL.md",
 		}, nil)
 
-		var meta ViewResponseMetadata
+		var meta ReadResponseMetadata
 		require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
-		require.Equal(t, ViewResourceSkill, meta.ResourceType)
+		require.Equal(t, ReadResourceSkill, meta.ResourceType)
 		require.Equal(t, "braid-config", meta.ResourceName)
 		require.NotEmpty(t, meta.ResourceDescription)
 	})
@@ -315,7 +315,7 @@ func TestReadBuiltinFile(t *testing.T) {
 	t.Run("respects offset", func(t *testing.T) {
 		t.Parallel()
 
-		resp := readBuiltinFile(ViewParams{
+		resp := readBuiltinFile(ReadParams{
 			FilePath: "braid://skills/braid-config/SKILL.md",
 			Offset:   5,
 		}, nil)
@@ -355,6 +355,9 @@ func TestSniffImageMimeType(t *testing.T) {
 	}
 }
 
-func (m *mockViewPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
+func (m *mockReadPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }
+
+func (*mockReadPermissionService) ConfineToWorkingDir() {}
+func (*mockReadPermissionService) ConfinedDir() string  { return "" }

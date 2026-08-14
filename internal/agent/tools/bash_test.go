@@ -216,3 +216,9 @@ func (m *mockBashPermissionService) ActiveRequest() (permission.PermissionReques
 func (m *recordingPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }
+
+func (*recordingPermissionService) ConfineToWorkingDir() {}
+func (*recordingPermissionService) ConfinedDir() string  { return "" }
+
+func (*mockBashPermissionService) ConfineToWorkingDir() {}
+func (*mockBashPermissionService) ConfinedDir() string  { return "" }

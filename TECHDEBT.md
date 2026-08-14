@@ -193,7 +193,7 @@ BRAID_TEST_VCR_MODE=record BRAID_TEST_CASSETTE_ROOT=$(pwd)/internal/agent/testda
 - Имена инструментов, которым нет соответствия (например, `WebSearch`),
   при импорте не отбрасываются молча — репортятся как предупреждение с
   именем инструмента. При обычной загрузке `.braid/agents` трансляция имён
-  Claude Code (`Read`→`view` и т.д., `ClaudeToolNames` в
+  Claude Code (`Read`→`read` и т.д., `ClaudeToolNames` в
   `agents_markdown.go`) больше не применяется вообще: файлы в собственном
   каталоге Braid должны уже называть инструменты по-своему. Транслятор не
   удалён — он используется только импортом.

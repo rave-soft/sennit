@@ -1106,7 +1106,7 @@ func toolKeyArgument(tc message.ToolCall) string {
 			return fmt.Sprintf("%q %s", p.Pattern, p.Path)
 		}
 		return fmt.Sprintf("%q", p.Pattern)
-	case tools.ViewToolName, tools.EditToolName, tools.MultiEditToolName, tools.WriteToolName:
+	case tools.ReadToolName, tools.LegacyReadToolName, tools.EditToolName, tools.MultiEditToolName, tools.WriteToolName:
 		var p struct {
 			FilePath string `json:"file_path"`
 		}

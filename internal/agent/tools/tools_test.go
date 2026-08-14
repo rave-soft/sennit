@@ -121,3 +121,6 @@ func TestNewHTTPClientAppliesTimeout(t *testing.T) {
 func (s *stubPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }
+
+func (*stubPermissionService) ConfineToWorkingDir() {}
+func (*stubPermissionService) ConfinedDir() string  { return "" }

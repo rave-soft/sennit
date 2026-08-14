@@ -169,8 +169,8 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 
 	// A skill load: a tool_result message part shaped like the `view`
 	// tool's response when it reads a skill file.
-	meta := tools.ViewResponseMetadata{
-		ResourceType: tools.ViewResourceSkill,
+	meta := tools.ReadResponseMetadata{
+		ResourceType: tools.ReadResourceSkill,
 		ResourceName: "some-skill",
 	}
 	metaJSON, err := json.Marshal(meta)

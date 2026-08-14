@@ -31,7 +31,7 @@ func (fakeFileTracker) ListReadFiles(context.Context, string) ([]string, error) 
 // TestAgenticFetchSubAgentView_OutsideWorkdirRequiresPermission guards the
 // fix for the agentic_fetch permission hole: the sub-agent's session used
 // to be auto-approved (c.permissions.AutoApproveSession), which let its
-// NewViewTool silently read any file on disk outside the fetch tmpDir. The
+// NewReadTool silently read any file on disk outside the fetch tmpDir. The
 // sub-agent's session must now go through the normal permission flow, same
 // as any other agent-as-tool sub-agent, so a view outside the sandboxed
 // tmpDir surfaces a real request instead of being nodded through.
@@ -47,15 +47,15 @@ func TestAgenticFetchSubAgentView_OutsideWorkdirRequiresPermission(t *testing.T)
 	// permission.Service, with no AutoApproveSession call for the child
 	// session.
 	perms := permission.NewPermissionService(tmpDir, false, nil)
-	viewTool := tools.NewViewTool(nil, perms, fakeFileTracker{}, nil, tmpDir)
+	viewTool := tools.NewReadTool(nil, perms, fakeFileTracker{}, nil, tmpDir)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "fetch-child-session")
 
 	sub := perms.Subscribe(ctx)
 
-	input, err := json.Marshal(tools.ViewParams{FilePath: outsideFile})
+	input, err := json.Marshal(tools.ReadParams{FilePath: outsideFile})
 	require.NoError(t, err)
-	call := fantasy.ToolCall{ID: "call-1", Name: tools.ViewToolName, Input: string(input)}
+	call := fantasy.ToolCall{ID: "call-1", Name: tools.ReadToolName, Input: string(input)}
 
 	done := make(chan struct{})
 	var deniedResp bool

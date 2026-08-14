@@ -20,7 +20,46 @@ const (
 	largeContextWindowThreshold = 200_000
 	largeContextWindowBuffer    = 20_000
 	smallContextWindowRatio     = 0.2
+	// summarizeOutputHeadroom is the extra slack kept on top of a model's
+	// own maximum reply, for the summarize request's system prompt and
+	// for the usual drift between what a provider counts and what we
+	// counted a step ago.
+	summarizeOutputHeadroom = 0.25
 )
+
+// summarizeBuffer is how much of the context window must stay free before
+// a turn stops to summarize.
+//
+// The base figure keeps the original intent: a flat 20k for large windows,
+// so a million-token window is not squandered on headroom, and a fifth of
+// a small one, where a flat number would be either useless or ruinous.
+//
+// What the base alone gets wrong is that the turn which summarizes has to
+// fit its own reply in what is left. A model configured to write up to
+// 32k tokens cannot produce a summary into 20k of remaining window, so
+// summarization would trip only to fail — and the flat buffer applies to
+// every window above 200k, which is exactly where generous max-reply
+// settings live. Observed on a 262k local model with a 32k reply limit:
+// the buffer (20k) was smaller than a single reply, so the pass had
+// nowhere to write. Hence the floor at the model's own reply size plus
+// slack.
+//
+// Capped at half the window so a model configured with an outsized reply
+// limit relative to its context does not summarize on its first step.
+// maxOut of 0 (unknown) leaves the base untouched.
+func summarizeBuffer(contextWindow, maxOut int64) int64 {
+	buffer := int64(largeContextWindowBuffer)
+	if contextWindow <= largeContextWindowThreshold {
+		buffer = int64(float64(contextWindow) * smallContextWindowRatio)
+	}
+	if need := maxOut + int64(float64(maxOut)*summarizeOutputHeadroom); need > buffer {
+		buffer = need
+	}
+	if half := contextWindow / 2; buffer > half {
+		buffer = half
+	}
+	return buffer
+}
 
 //go:embed templates/summary.md
 var summaryPrompt []byte

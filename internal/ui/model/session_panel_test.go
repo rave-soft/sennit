@@ -560,7 +560,7 @@ func TestMouseClick_TodosHeaderTogglesWithoutPriorDraw(t *testing.T) {
 	// Derive the header's expected coordinates the same way the fixed click
 	// handler does, independently of any cached Draw-time field.
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	_, _, headerRect, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	_, headerRect, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.NotZero(t, headerRect, "expected a non-empty todos header rect")
 
 	_, cmd := u.Update(tea.MouseClickMsg{X: headerRect.Min.X, Y: headerRect.Min.Y, Button: tea.MouseLeft})
@@ -584,7 +584,7 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	require.Empty(t, u.panelThreadRects, "must not have been populated by any Draw call yet")
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	threadRects, _, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	threadRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.Len(t, threadRects, 1)
 
 	rect := threadRects[0]
@@ -675,7 +675,7 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 	// would hit-test it, then drive enough wheel-down events through
 	// Update to reach the bottom of the section.
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	_, _, _, todosListRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	_, _, todosListRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.NotZero(t, todosListRect, "expected a non-empty todos list rect to scroll")
 
 	maxOffset := plan.todosContentRows - plan.todosViewportRows
@@ -750,21 +750,16 @@ func TestRenderSessionTodoLine_CompletedStyleSurvivesBudgetConstrainedPlan(t *te
 	require.True(t, found, "expected to find the rendered \"done 1\" row")
 }
 
-// allFourSectionsUI builds a UI with every visible section populated: an
-// active thread, a running delegation, an expanded todos list with both
-// incomplete and completed items, and a queued prompt — the fixture the
-// section-separator-header tests below share.
-func allFourSectionsUI(t *testing.T) *UI {
+// allSectionsUI builds a UI with every visible section populated: an
+// active thread, an expanded todos list with both incomplete and completed
+// items, and a queued prompt — the fixture the section-separator-header
+// tests below share.
+func allSectionsUI(t *testing.T) *UI {
 	t.Helper()
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
 	u.threadsDock.cache.value = mkDockThreads(1)
-
-	item := chat.NewAgentToolMessageItem(u.com.Styles,
-		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"fix the auth bug"}`, Finished: false}, nil, false, nil)
-	item.SetMessageID("m1")
-	u.chat.SetMessages(item)
 
 	u.panel.expanded = true
 	u.session.Todos = []session.Todo{
@@ -777,16 +772,16 @@ func allFourSectionsUI(t *testing.T) *UI {
 	return u
 }
 
-// TestDrawSessionPanel_AllFourSectionsGetSeparatorHeaders covers the panel
+// TestDrawSessionPanel_AllSectionsGetSeparatorHeaders covers the panel
 // with every section populated: each visible section must paint its own
 // section-separator header line ("threads"/"agents"/the todos header
 // text/"queue"), in that top-to-bottom order, each immediately above its
 // own section's content — see the Section-styled header lines
 // drawSessionPanel now paints via common.Section/common.SectionStyled.
-func TestDrawSessionPanel_AllFourSectionsGetSeparatorHeaders(t *testing.T) {
+func TestDrawSessionPanel_AllSectionsGetSeparatorHeaders(t *testing.T) {
 	t.Parallel()
 
-	u := allFourSectionsUI(t)
+	u := allSectionsUI(t)
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
 	scr := uv.NewScreenBuffer(u.width, plan.totalRows)
@@ -808,48 +803,41 @@ func TestDrawSessionPanel_AllFourSectionsGetSeparatorHeaders(t *testing.T) {
 
 	threadsHeaderIdx := indexOf("threads ")
 	threadsContentIdx := indexOf("fix-auth — Refactor login flow to OAuth2")
-	agentsHeaderIdx := indexOf("agents ")
-	agentsContentIdx := indexOf("fix the auth bug")
 	todosHeaderIdx := indexOf(todosHeaderText)
 	todosContentIdx := indexOf("in flight")
 	queueHeaderIdx := indexOf("queue ")
 	queueContentIdx := indexOf("queued prompt")
 
 	require.NotEqual(t, -1, threadsHeaderIdx, "expected a \"threads\" section header")
-	require.NotEqual(t, -1, agentsHeaderIdx, "expected an \"agents\" section header")
 	require.NotEqual(t, -1, todosHeaderIdx, "expected the todos header line")
 	require.NotEqual(t, -1, queueHeaderIdx, "expected a \"queue\" section header")
 
 	// Each header must sit immediately above its own section's content —
 	// no gap, and never two headers back to back with nothing between.
 	require.Equal(t, threadsHeaderIdx+1, threadsContentIdx, "threads header must precede thread block text")
-	require.Equal(t, agentsHeaderIdx+1, agentsContentIdx, "agents header must precede delegation block text")
 	require.Equal(t, todosHeaderIdx+1, todosContentIdx, "todos header must precede the in-progress row")
 	require.Equal(t, queueHeaderIdx+1, queueContentIdx, "queue header must precede the queue line")
 
 	// Sections paint top to bottom in a fixed order.
-	require.Less(t, threadsHeaderIdx, agentsHeaderIdx)
-	require.Less(t, agentsHeaderIdx, todosHeaderIdx)
+	require.Less(t, threadsHeaderIdx, todosHeaderIdx)
 	require.Less(t, todosHeaderIdx, queueHeaderIdx)
 }
 
 // TestSessionPanelPlan_HeaderRowsContributeToTotalRows is the row-math
 // counterpart to the rendering test above: with all four sections
-// populated, threadsHeaderRows/delegationsHeaderRows/queueHeaderRows must
+// populated, threadsHeaderRows/queueHeaderRows must
 // each be 1 and sum into totalRows; with a section emptied, its header
 // row must drop back to 0 for free (see sessionPanelPlan's over()
 // closures).
 func TestSessionPanelPlan_HeaderRowsContributeToTotalRows(t *testing.T) {
 	t.Parallel()
 
-	u := allFourSectionsUI(t)
+	u := allSectionsUI(t)
 	plan := u.sessionPanelPlan(100)
 	require.Equal(t, 1, plan.threadsHeaderRows)
-	require.Equal(t, 1, plan.delegationsHeaderRows)
 	require.Equal(t, 1, plan.queueHeaderRows)
 	require.Equal(t,
 		plan.threadsHeaderRows+plan.threadsRows+
-			plan.delegationsHeaderRows+plan.delegationsRows+
 			1 /* todos header */ +plan.todosViewportRows+
 			plan.queueHeaderRows+len(plan.queue),
 		plan.totalRows)
@@ -876,7 +864,6 @@ func TestDrawSessionPanel_EmptySectionRendersNoHeader(t *testing.T) {
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
 	require.Zero(t, plan.threadsHeaderRows)
-	require.Zero(t, plan.delegationsHeaderRows)
 	require.Equal(t, 1, plan.queueHeaderRows)
 
 	scr := uv.NewScreenBuffer(u.width, plan.totalRows)
@@ -892,9 +879,8 @@ func TestDrawSessionPanel_EmptySectionRendersNoHeader(t *testing.T) {
 
 // TestMouseClick_ThreadBlockEntersThreadWithDelegationsAboveTodos covers the
 // click hit-test with headers AND a preceding delegations section in the
-// mix — a case the pre-existing thread-block click tests didn't exercise,
-// since they never had a section above the thread block to shift it down.
-func TestMouseClick_ThreadBlockEntersThreadWithDelegationsAboveTodos(t *testing.T) {
+// its own section-separator header above it.
+func TestMouseClick_ThreadBlockEntersThreadBelowItsHeader(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
@@ -902,20 +888,14 @@ func TestMouseClick_ThreadBlockEntersThreadWithDelegationsAboveTodos(t *testing.
 	u.threadsDock.cache.value = []proto.Thread{
 		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
 	}
-	item := chat.NewAgentToolMessageItem(u.com.Styles,
-		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"do the thing"}`, Finished: false}, nil, false, nil)
-	item.SetMessageID("m1")
-	u.chat.SetMessages(item)
 	u.updateLayoutAndSize()
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
 	require.Equal(t, 1, plan.threadsHeaderRows)
-	threadRects, delegationRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	threadRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.Len(t, threadRects, 1)
-	require.Len(t, delegationRects, 1)
-	// The thread block sits above the delegations block; its rect must not
-	// overlap the "threads" header row directly above it.
-	require.Less(t, threadRects[0].Max.Y, delegationRects[0].Min.Y)
+	// The block must sit below the "threads" header row, not overlap it.
+	require.Greater(t, threadRects[0].Min.Y, u.layout.panel.Min.Y)
 
 	rect := threadRects[0]
 	_, cmd := u.Update(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseLeft})
@@ -983,8 +963,7 @@ func TestDrawSessionPanel_TodosScrollWithThreadsAndDelegationsAbove(t *testing.T
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
 	require.Equal(t, 1, plan.threadsHeaderRows)
-	require.Equal(t, 1, plan.delegationsHeaderRows)
-	_, _, _, todosListRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	_, _, todosListRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.NotZero(t, todosListRect, "expected a non-empty todos list rect to scroll")
 
 	maxOffset := plan.todosContentRows - plan.todosViewportRows

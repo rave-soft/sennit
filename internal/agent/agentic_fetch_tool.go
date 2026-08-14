@@ -116,7 +116,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				}
 
 				if filePath != "" {
-					fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the view and grep tools to analyze this file and extract the requested information.", params.Prompt, params.URL, filePath)
+					fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the read and grep tools to analyze this file and extract the requested information.", params.Prompt, params.URL, filePath)
 				} else {
 					fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
 				}
@@ -164,7 +164,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				webSearchTool,
 				tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob),
 				tools.NewSearchTool(tmpDir, c.cfg.Config().Tools.Grep),
-				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
+				tools.NewReadTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
 			}
 
 			// Sub-agent tools run without hook interception. The top-level
@@ -184,12 +184,12 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			// The child session is NOT auto-approved: the fetch/search/glob/
 			// grep tools above don't touch permissions at all, but
-			// NewViewTool does when asked to read a path outside tmpDir.
+			// NewReadTool does when asked to read a path outside tmpDir.
 			// The top-level `agentic_fetch` call already required
 			// permission (above); auto-approving the child session on top
 			// of that used to let the sub-agent read arbitrary files
 			// anywhere on disk without ever prompting the user. Leaving
-			// SessionSetup unset routes those view requests through the
+			// SessionSetup unset routes those read requests through the
 			// normal per-session permission flow, same as any other
 			// agent-as-tool sub-agent (see coordinator.buildTools).
 			return c.runSubAgent(ctx, subAgentParams{

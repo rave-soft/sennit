@@ -85,7 +85,7 @@ func (s *stringList) UnmarshalYAML(value *yaml.Node) error {
 // translates foreign tool names — regular discovery only reads
 // .braid/agents, whose files are expected to already name Braid's own tools.
 var ClaudeToolNames = map[string]string{
-	"read":      "view",
+	"read":      "read",
 	"write":     "write",
 	"edit":      "edit",
 	"bash":      "bash",
@@ -206,14 +206,15 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 	return id, agent, nil
 }
 
-// normalizeToolNames trims and drops duplicate tool names. Unlike the
-// importer (see import.go), it does not translate foreign tool names:
-// .braid/agents is Braid's own directory, so its files are expected to
-// already name Braid's tools directly.
+// normalizeToolNames trims and drops duplicate tool names, folding names
+// Braid has since renamed onto their current ones. Unlike the importer
+// (see import.go), it does not translate foreign tool names: .braid/agents
+// is Braid's own directory, so its files are expected to already name
+// Braid's tools directly — only Braid's own older names are accepted.
 func normalizeToolNames(names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		name = strings.TrimSpace(name)
+		name = CanonicalToolName(strings.TrimSpace(name))
 		if name == "" {
 			continue
 		}
