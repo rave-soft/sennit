@@ -63,6 +63,10 @@ func (c *coordinatorOverSessionAgent) RunAccepted(ctx context.Context, accept *a
 	return c.sa.Run(ctx, agent.SessionAgentCall{SessionID: sessionID, Prompt: prompt, Attachments: attachments, Accepted: accept})
 }
 
+func (c *coordinatorOverSessionAgent) Steer(ctx context.Context, call agent.SessionAgentCall) (agent.SteerOutcome, *fantasy.AgentResult, error) {
+	return c.sa.Steer(ctx, call)
+}
+
 func (c *coordinatorOverSessionAgent) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return c.sa.BeginAccepted(sessionID)
 }

@@ -5863,6 +5863,16 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
 	case notify.TypeAWSSSOAuthResult:
 		return m.handleAWSSSOAuthResult(n.Message)
+	case notify.TypeQueueChanged:
+		// Not a busy→idle edge (the session may still be busy, or may
+		// never have been) - only the queue pill is stale, so refresh
+		// just that instead of also re-probing busy state. This is the
+		// same machinery the terminal cases below use, reused rather
+		// than duplicated: it exists precisely so an enqueue/drain/
+		// cancel/clear shows up immediately instead of waiting out the
+		// TTL backstop.
+		m.invalidatePromptQueue()
+		return m.dispatchPromptQueueRefresh()
 	default:
 		return nil
 	}

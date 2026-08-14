@@ -55,6 +55,11 @@ type Coordinator interface {
 	// consumed under dispatchMu once the accepted -> (cancel-on-entry |
 	// queued | active) transition is chosen.
 	RunAccepted(ctx context.Context, accept *AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
+	// Steer passes call straight to the current agent's Steer, giving
+	// callers an explicit "this is a steering follow-up" entry point
+	// that reports whether the call was enqueued or ran. See
+	// SessionAgent.Steer.
+	Steer(ctx context.Context, call SessionAgentCall) (SteerOutcome, *fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
 	Cancel(sessionID string)
 	CancelAll()
@@ -897,6 +902,11 @@ func isExactoSupported(modelID string) bool {
 // lost.
 func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
 	return c.currentAgent.BeginAccepted(sessionID)
+}
+
+// Steer implements Coordinator.
+func (c *coordinator) Steer(ctx context.Context, call SessionAgentCall) (SteerOutcome, *fantasy.AgentResult, error) {
+	return c.currentAgent.Steer(ctx, call)
 }
 
 func (c *coordinator) Cancel(sessionID string) {

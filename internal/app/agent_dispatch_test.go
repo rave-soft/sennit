@@ -35,6 +35,10 @@ func (c *stubDispatchCoordinator) Run(ctx context.Context, sessionID, prompt str
 	return nil, nil
 }
 
+func (c *stubDispatchCoordinator) Steer(ctx context.Context, call agent.SessionAgentCall) (agent.SteerOutcome, *fantasy.AgentResult, error) {
+	return agent.SteerRan, nil, nil
+}
+
 func (c *stubDispatchCoordinator) RunAccepted(ctx context.Context, accept *agent.AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	c.runCount.Add(1)
 	if c.entered != nil {

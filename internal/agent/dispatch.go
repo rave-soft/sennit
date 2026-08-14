@@ -68,6 +68,16 @@ type dispatcher struct {
 	// across the agent. Cancel uses its current value as the per-session
 	// high-water mark.
 	acceptSeqGen uint64
+	// onQueueChanged, when non-nil, is called (with the per-session
+	// dispatch mutex already released - see notifyQueueChanged) whenever
+	// a mutation actually changes what's queued for a session: enqueue,
+	// drain, requeue, cancel, or clear. It exists so an owner
+	// (sessionAgent) can publish a lossy "the queue changed" signal - the
+	// UI's queued-prompt pill refreshes off it - without this type
+	// depending on pubsub itself, preserving the doc comment above. Set
+	// once at construction; not guarded by a lock since it never changes
+	// after that.
+	onQueueChanged func(sessionID string)
 }
 
 func newDispatcher() *dispatcher {
@@ -172,6 +182,20 @@ func (d *dispatcher) sessionMu(sessionID string) *sync.Mutex {
 	return mu
 }
 
+// notifyQueueChanged invokes onQueueChanged if one is set. Every caller
+// - internal (the self-locking methods below, via a defer registered
+// before the mutex's own so it runs after the mutex's Unlock) and
+// external (run's busy-enqueue branch, after its own explicit Unlock) -
+// must call this only once the per-session dispatch mutex has been
+// released: onQueueChanged ultimately reaches a pubsub broker, whose
+// subscriber callbacks are unbounded work that must never run under a
+// lock documented as covering a brief, I/O-free handoff.
+func (d *dispatcher) notifyQueueChanged(sessionID string) {
+	if d.onQueueChanged != nil {
+		d.onQueueChanged(sessionID)
+	}
+}
+
 // enqueueCall appends call to the session's message queue. The
 // OnComplete hook is stripped: the caller that supplied it (typically
 // coordinator.Run) has its own retry/coalesce scope that ends when it
@@ -179,6 +203,12 @@ func (d *dispatcher) sessionMu(sessionID string) *sync.Mutex {
 // buffered terminal event. The recursive Run falls back to the default
 // broker publish, which is what existing subscribers expect for queued
 // turns.
+//
+// Unlike the methods below, enqueueCall does not call notifyQueueChanged
+// itself: its only caller (run's busy branch) already holds the
+// per-session dispatch mutex when it calls this, so notifying here would
+// violate the "never under the lock" rule. run calls notifyQueueChanged
+// explicitly, right after its own Unlock.
 func (d *dispatcher) enqueueCall(call SessionAgentCall) {
 	existing, ok := d.messageQueue.Get(call.SessionID)
 	if !ok {
@@ -199,6 +229,9 @@ func (d *dispatcher) enqueueCall(call SessionAgentCall) {
 
 func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func()) {
 	mu := d.sessionMu(call.SessionID)
+	// Registered before the Unlock defer below so it runs after it (defers
+	// run LIFO): this always appends, so the queue always changes.
+	defer d.notifyQueueChanged(call.SessionID)
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -230,6 +263,16 @@ func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func())
 // lock held.
 func (d *dispatcher) drainQueueForStep(sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
 	dispatchLock := d.sessionMu(sessionID)
+	// Registered before the Unlock defer below so it runs after it (defers
+	// run LIFO), reading the named returns once they're final. Only
+	// notify when something actually left the queue - drainQueueForStep
+	// runs on every step of every turn, most of which find nothing
+	// queued.
+	defer func() {
+		if len(fold) > 0 || len(canceledWithRunID) > 0 {
+			d.notifyQueueChanged(sessionID)
+		}
+	}()
 	dispatchLock.Lock()
 	defer dispatchLock.Unlock()
 	queuedCalls, _ := d.messageQueue.Get(sessionID)
@@ -271,10 +314,22 @@ func (d *dispatcher) drainQueueForStep(sessionID string) (fold, canceledWithRunI
 // the caller.
 func (d *dispatcher) drainNext(sessionID string) (queued []SessionAgentCall, next *SessionAgentCall, canceledWithRunID []SessionAgentCall) {
 	mu := d.sessionMu(sessionID)
+	// changed tracks whether the queue held anything to begin with:
+	// every branch below either drops entries (cancel-mark filtering) or
+	// pops one (the handoff), so a non-empty starting queue always ends
+	// up different. Registered before the Unlock defer so it runs after
+	// it (defers run LIFO).
+	var changed bool
+	defer func() {
+		if changed {
+			d.notifyQueueChanged(sessionID)
+		}
+	}()
 	mu.Lock()
 	defer mu.Unlock()
 
 	queuedMessages, _ := d.messageQueue.Get(sessionID)
+	changed = len(queuedMessages) > 0
 	if mark, ok := d.cancelMark.Get(sessionID); ok && mark > 0 && len(queuedMessages) > 0 {
 		// A cancel was recorded for this session (e.g. it arrived while
 		// this run was active and follow-ups had been queued). Drop the
@@ -324,6 +379,62 @@ func (d *dispatcher) drainNext(sessionID string) (queued []SessionAgentCall, nex
 	return queuedMessages, &first, canceledWithRunID
 }
 
+// requeueDrained merges a suffix of a previously drained fold batch back
+// into the session's queue by accept order. It exists for
+// drainQueueForStep's caller: if persisting a folded call fails partway
+// through, the calls not yet persisted must not be lost, and they must
+// come back in their original accept-sequence position - not just ahead
+// of everything - with their original acceptSeq intact, since
+// drainQueueForStep never mutates it.
+//
+// drainQueueForStep only removes the RunID-less calls it folds; any
+// RunID-bearing calls interleaved with them stay in the queue (see
+// "keep" there). So the queue left behind after a drain, and remainder
+// itself, are each already ascending by acceptSeq (the queue's standing
+// invariant - the same one drainNext relies on to pop index 0 as the
+// earliest-accepted call), and merging them back is a linear merge of
+// two sorted runs rather than a blind prepend, or a later RunID-bearing
+// call could end up behind a steering message typed after it.
+//
+// A call with acceptSeq == 0 (an in-process enqueue with no accept
+// reservation - see enqueueCall) has no real sequence to compare; it
+// sorts first, i.e. as the oldest, matching canceledBySeq's treatment of
+// untracked calls as always-covered by a pending cancel. Ties (only
+// possible between two untracked calls) favor remainder, since fold
+// preserves the front-to-back order those calls held in the queue and
+// remainder is drained from further toward the front of that order than
+// what's left in existing.
+//
+// Locking mirrors requeueContinuation.
+func (d *dispatcher) requeueDrained(sessionID string, remainder []SessionAgentCall) {
+	if len(remainder) == 0 {
+		return
+	}
+	mu := d.sessionMu(sessionID)
+	// Registered before the Unlock defer below so it runs after it
+	// (defers run LIFO): remainder is non-empty here (checked above), so
+	// this always changes the queue.
+	defer d.notifyQueueChanged(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	existing, _ := d.messageQueue.Get(sessionID)
+	merged := make([]SessionAgentCall, 0, len(remainder)+len(existing))
+	ri, ei := 0, 0
+	for ri < len(remainder) && ei < len(existing) {
+		if remainder[ri].acceptSeq <= existing[ei].acceptSeq {
+			merged = append(merged, remainder[ri])
+			ri++
+		} else {
+			merged = append(merged, existing[ei])
+			ei++
+		}
+	}
+	merged = append(merged, remainder[ri:]...)
+	merged = append(merged, existing[ei:]...)
+	d.messageQueue.Set(sessionID, merged)
+}
+
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
 // takes the per-session dispatch lock so it is ordered against Cancel
 // and the dispatch handoff.
@@ -365,6 +476,15 @@ func (d *dispatcher) cancel(sessionID string) []SessionAgentCall {
 	// queue entry it then clears. If none of those hold, an idle Escape
 	// is a true no-op and must not poison the next prompt.
 	mu := d.sessionMu(sessionID)
+	// changed is set only once the tail below actually clears a
+	// non-empty queue. Registered before the Unlock defer so it runs
+	// after it (defers run LIFO).
+	var changed bool
+	defer func() {
+		if changed {
+			d.notifyQueueChanged(sessionID)
+		}
+	}()
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -407,6 +527,7 @@ func (d *dispatcher) cancel(sessionID string) []SessionAgentCall {
 	}
 	slog.Debug("Clearing queued prompts", "session_id", sessionID)
 	d.messageQueue.Del(sessionID)
+	changed = true
 	return queued
 }
 
@@ -415,6 +536,15 @@ func (d *dispatcher) cancel(sessionID string) []SessionAgentCall {
 // carried a RunID.
 func (d *dispatcher) clearQueue(sessionID string) []SessionAgentCall {
 	mu := d.sessionMu(sessionID)
+	// changed is set only once the tail below actually clears a
+	// non-empty queue. Registered before the Unlock defer so it runs
+	// after it (defers run LIFO).
+	var changed bool
+	defer func() {
+		if changed {
+			d.notifyQueueChanged(sessionID)
+		}
+	}()
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -424,6 +554,7 @@ func (d *dispatcher) clearQueue(sessionID string) []SessionAgentCall {
 	}
 	slog.Debug("Clearing queued prompts", "session_id", sessionID)
 	d.messageQueue.Del(sessionID)
+	changed = true
 	return queued
 }
 

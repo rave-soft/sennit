@@ -66,6 +66,11 @@ func (s *runCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepted
 	return s.Run(ctx, sessionID, prompt, attachments...)
 }
 
+func (s *runCoordinator) Steer(ctx context.Context, call agent.SessionAgentCall) (agent.SteerOutcome, *fantasy.AgentResult, error) {
+	res, err := s.Run(ctx, call.SessionID, call.Prompt, call.Attachments...)
+	return agent.SteerRan, res, err
+}
+
 func (s *runCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }

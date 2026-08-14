@@ -117,9 +117,15 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	// RunComplete) via the recursive run path below.
 	fold, canceledRunIDs := t.agent.drainQueueForStep(t.call.SessionID)
 	t.agent.publishCanceledQueueDrops(canceledRunIDs)
-	for _, queued := range fold {
+	for i, queued := range fold {
 		userMessage, createErr := t.agent.createUserMessage(callContext, queued)
 		if createErr != nil {
+			// Persisting this follow-up failed. Put it and everything
+			// after it (never persisted, never delivered) back at the
+			// front of the queue instead of dropping them: they are
+			// user-typed steering messages, and losing them silently is
+			// worse than leaving them queued for the next step to retry.
+			t.agent.requeueDrained(t.call.SessionID, fold[i:])
 			return callContext, prepared, createErr
 		}
 		prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)

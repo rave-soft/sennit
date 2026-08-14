@@ -25,6 +25,15 @@ const (
 	// finished. Message carries the error text when it failed, empty on
 	// success.
 	TypeAWSSSOAuthResult Type = "aws_sso_auth_result"
+	// TypeQueueChanged indicates a session's queued-follow-up count may
+	// have changed (a call was enqueued, drained, requeued, canceled, or
+	// cleared). It carries no payload beyond SessionID; observers re-probe
+	// the queue rather than trust an embedded count. This is a lossy,
+	// best-effort signal for refreshing a UI immediately instead of
+	// waiting on a TTL backstop - it is not the source of truth for the
+	// queue's contents, and a dropped event must still self-heal from
+	// that backstop.
+	TypeQueueChanged Type = "queue_changed"
 )
 
 // Notification represents a domain event published by the agent.
