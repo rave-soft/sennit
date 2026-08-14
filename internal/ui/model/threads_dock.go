@@ -414,3 +414,17 @@ func threadDockStatusWord(status thread.Status) string {
 		return string(status)
 	}
 }
+
+// hasActiveThread reports whether any of the active delegations is a
+// thread rather than a task. The session panel uses it to drop its todos
+// section while threads are running: a thread takes work away from the
+// main agent, so the todo list stops describing what is happening, while
+// a task runs alongside it and leaves the list meaningful.
+func hasActiveThread(active []proto.Thread) bool {
+	for _, t := range active {
+		if thread.Kind(t.Kind) != thread.KindTask {
+			return true
+		}
+	}
+	return false
+}

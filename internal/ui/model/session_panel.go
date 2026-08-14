@@ -393,7 +393,16 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	// todo is completed, at which point the chat transcript (always
 	// rendering the full list — see chat.TodosToolRenderContext) becomes
 	// the permanent record instead, so nothing is actually lost.
-	plan.todosVisible = hasIncompleteTodos(todos)
+	//
+	// While a thread is running the panel shows threads only. Once work
+	// is delegated to threads, the main agent's own todo list describes
+	// what it handed off rather than what is happening, and the threads
+	// are the live status. Nothing is lost here either: the transcript
+	// keeps the full list, and the todos come back as soon as no thread
+	// is running. Tasks deliberately do not suppress it — a background
+	// task runs alongside the main agent's own work, so its todos are
+	// still describing something live.
+	plan.todosVisible = hasIncompleteTodos(todos) && !hasActiveThread(active)
 	if plan.todosVisible {
 		plan.todosExpanded = m.panel.expanded
 		// Collapsing the panel is never total: whatever is actively in

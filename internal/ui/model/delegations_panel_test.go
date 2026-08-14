@@ -131,7 +131,9 @@ func TestSessionPanelPlan_ShedPriority_ThreadsThenDelegationsThenTodosViewportTh
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadsDock.cache.value = mkDockThreads(1) // 2 rows
+	// A task, not a thread: this test needs the todos section present, and
+	// a running thread deliberately replaces it (see sessionPanelPlan).
+	u.threadsDock.cache.value = mkDockTasks(1) // 2 rows
 	item := chat.NewAgentToolMessageItem(u.com.Styles,
 		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"do the thing"}`, Finished: false}, nil, false, nil)
 	item.SetMessageID("m1")

@@ -11,12 +11,27 @@ import (
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
+
+// mkDockTasks builds n synthetic running *task* delegations. Panel tests
+// that need the delegations section populated while the todos section is
+// also visible must use these rather than mkDockThreads: a running thread
+// deliberately replaces the todos section (see sessionPanelPlan), so
+// threads and todos can never appear together, while a task leaves the
+// todos alone.
+func mkDockTasks(n int) []proto.Thread {
+	tasks := mkDockThreads(n)
+	for i := range tasks {
+		tasks[i].Kind = string(thread.KindTask)
+	}
+	return tasks
+}
 
 // mkDockThreads builds n synthetic "running" threads, old enough to have a
 // non-zero elapsed time, for exercising sessionPanelPlan/drawSessionPanel
@@ -291,7 +306,7 @@ func TestSessionPanelPlan_BudgetCapAndPriorityOrder(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadsDock.cache.value = mkDockThreads(2) // 4 rows
+	u.threadsDock.cache.value = mkDockTasks(2) // 4 rows
 	u.panel.expanded = true
 	u.session.Todos = []session.Todo{
 		{Status: session.TodoStatusInProgress, Content: "active 1"},
@@ -630,7 +645,7 @@ func TestSessionPanelPlan_SmallTerminalNeverDropsTodosOnlyWindows(t *testing.T) 
 	u.dialog = dialog.NewOverlay()
 	u.width, u.height = 80, 24
 	u.panel.expanded = true
-	u.threadsDock.cache.value = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockTasks(1)
 	u.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
@@ -659,7 +674,7 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 	u.dialog = dialog.NewOverlay()
 	u.width, u.height = 80, 24
 	u.panel.expanded = true
-	u.threadsDock.cache.value = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockTasks(1)
 	u.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
@@ -722,7 +737,7 @@ func TestRenderSessionTodoLine_CompletedStyleSurvivesBudgetConstrainedPlan(t *te
 	u.dialog = dialog.NewOverlay()
 	u.width, u.height = 80, 24
 	u.panel.expanded = true
-	u.threadsDock.cache.value = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockTasks(1)
 	u.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
@@ -759,7 +774,7 @@ func allFourSectionsUI(t *testing.T) *UI {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.threadsDock.cache.value = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockTasks(1)
 
 	item := chat.NewAgentToolMessageItem(u.com.Styles,
 		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"fix the auth bug"}`, Finished: false}, nil, false, nil)
@@ -937,7 +952,7 @@ func TestMouseClick_TodosHeaderTogglesWithHeaderStyling(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.threadsDock.cache.value = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockTasks(1)
 	u.session.Todos = []session.Todo{
 		{Content: "write tests", Status: session.TodoStatusPending},
 	}
@@ -967,7 +982,7 @@ func TestDrawSessionPanel_TodosScrollWithThreadsAndDelegationsAbove(t *testing.T
 	u.dialog = dialog.NewOverlay()
 	u.width, u.height = 80, 30
 	u.panel.expanded = true
-	u.threadsDock.cache.value = mkDockThreads(1)
+	u.threadsDock.cache.value = mkDockTasks(1)
 	item := chat.NewAgentToolMessageItem(u.com.Styles,
 		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"do the thing"}`, Finished: false}, nil, false, nil)
 	item.SetMessageID("m1")
