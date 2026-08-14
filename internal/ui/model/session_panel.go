@@ -399,10 +399,11 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	// what it handed off rather than what is happening, and the threads
 	// are the live status. Nothing is lost here either: the transcript
 	// keeps the full list, and the todos come back as soon as no thread
-	// is running. Tasks deliberately do not suppress it — a background
-	// task runs alongside the main agent's own work, so its todos are
-	// still describing something live.
-	plan.todosVisible = hasIncompleteTodos(todos) && !hasActiveThread(active)
+	// is running — including when one goes idle, which is a parked
+	// workspace, not work in flight. Tasks deliberately do not suppress
+	// it either: a background task runs alongside the main agent's own
+	// work, so its todos are still describing something live.
+	plan.todosVisible = hasIncompleteTodos(todos) && !hasRunningThread(active)
 	if plan.todosVisible {
 		plan.todosExpanded = m.panel.expanded
 		// Collapsing the panel is never total: whatever is actively in

@@ -24,25 +24,28 @@ func incompleteTodos() []session.Todo {
 	return []session.Todo{{Content: "still open", Status: session.TodoStatusPending}}
 }
 
-// TestHasActiveThread_DistinguishesKinds pins the rule the panel depends
+// TestHasRunningThread_DistinguishesKindsAndIdle pins the rule the panel depends
 // on: a task is not a thread, so it must not suppress the todos section.
-func TestHasActiveThread_DistinguishesKinds(t *testing.T) {
+func TestHasRunningThread_DistinguishesKindsAndIdle(t *testing.T) {
 	t.Parallel()
 
-	require.False(t, hasActiveThread(nil))
-	require.False(t, hasActiveThread([]proto.Thread{
+	require.False(t, hasRunningThread(nil))
+	require.False(t, hasRunningThread([]proto.Thread{
 		activeThreadFixture("t1", string(thread.KindTask)),
 	}), "a background task must not count as a thread")
-	require.True(t, hasActiveThread([]proto.Thread{
+	require.True(t, hasRunningThread([]proto.Thread{
 		activeThreadFixture("th1", string(thread.KindThread)),
 	}))
-	require.True(t, hasActiveThread([]proto.Thread{
+	require.True(t, hasRunningThread([]proto.Thread{
 		activeThreadFixture("t1", string(thread.KindTask)),
 		activeThreadFixture("th1", string(thread.KindThread)),
 	}), "one running thread is enough")
-	require.True(t, hasActiveThread([]proto.Thread{
+	require.True(t, hasRunningThread([]proto.Thread{
 		activeThreadFixture("legacy", ""),
 	}), "a row predating the kind column is a thread")
+	require.False(t, hasRunningThread([]proto.Thread{
+		{ID: "th-idle", Kind: string(thread.KindThread), Status: string(thread.StatusIdle)},
+	}), "an idle thread is a parked workspace, not work in flight")
 }
 
 // TestSessionPanelPlan_RunningThreadHidesTodos covers the panel rule that
@@ -72,4 +75,13 @@ func TestSessionPanelPlan_RunningThreadHidesTodos(t *testing.T) {
 	u.threadsDock.cache.value = []proto.Thread{{ID: "th1", Kind: string(thread.KindThread), Status: string(thread.StatusMerged)}}
 	require.True(t, u.sessionPanelPlan(100).todosVisible,
 		"once no thread is running the todos come back")
+
+	// The case that made this rule wrong on its first outing: opening a
+	// finished thread reactivates it, so it sits at idle with nothing
+	// running. That must not hide the main agent's todos for the rest of
+	// the session.
+	u.threadsDock.cache.value = []proto.Thread{{ID: "th1", Kind: string(thread.KindThread), Status: string(thread.StatusIdle)}}
+	plan = u.sessionPanelPlan(100)
+	require.True(t, plan.todosVisible, "an idle thread is parked, not working")
+	require.NotZero(t, plan.threadsRows, "it still occupies the threads section")
 }
