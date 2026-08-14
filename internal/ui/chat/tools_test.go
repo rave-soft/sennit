@@ -110,6 +110,33 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	}
 }
 
+func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	for _, test := range []struct {
+		name      string
+		toolName  string
+		wantTitle string
+	}{
+		{name: "grep", toolName: tools.GrepToolName, wantTitle: "Grep"},
+		{name: "ripgrep", toolName: tools.RipgrepToolName, wantTitle: "Ripgrep"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			item := NewToolMessageItem(&sty, "msg", message.ToolCall{
+				ID:       test.name,
+				Name:     test.toolName,
+				Input:    `{"pattern":"needle"}`,
+				Finished: true,
+			}, nil, false, nil)
+
+			require.Contains(t, item.Render(80), test.wantTitle)
+		})
+	}
+}
+
 // TestNewToolMessageItem_CustomAgentDispatch covers the documented gap
 // closed here: a user-defined agent tool (internal/agent/custom_agent_tool.go
 // registers one per entry in cfg.Agents, named after the agent's id) must
