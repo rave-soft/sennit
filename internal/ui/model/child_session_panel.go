@@ -10,20 +10,15 @@ import (
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/presentation"
-	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
 // childSessionPanelHeight is the fixed height of the child-session info
 // panel that replaces the editor while a sub-agent session is being
-// viewed (see drawChildSessionPanel): breadcrumb + name + back button,
-// model/effort, token usage + elapsed/duration.
-const childSessionPanelHeight = 3
-
-// childPanelButtonLabel is the explicit, clickable "go back up" affordance
-// on the child-session panel (see drawChildSessionPanel).
-func (m *UI) childPanelButtonLabel() string {
-	return "↑ back (" + m.exitChildSessionShortcut() + ")"
-}
+// viewed (see drawChildSessionPanel): model/effort, then token usage +
+// elapsed/duration. Where you are and how to get out are not here — they
+// live in the breadcrumb bar (see breadcrumbs.go), which is on screen in
+// every mode, so this panel is purely facts about the delegation.
+const childSessionPanelHeight = 2
 
 // delegationInfo resolves a delegation tool item's display name,
 // model/effort override, and timing (see chat.DelegationInfoProvider) for
@@ -42,9 +37,8 @@ func delegationInfo(item chat.ToolMessageItem) (displayName, model, effort strin
 // delegation's agent name (falling back to the prompt-snippet label if the
 // item couldn't be resolved — see delegationInfo), plus a "(n/m)" sibling
 // counter when that level had more than one sibling to cycle through.
-// "main" is deliberately not part of any level — the back button already
-// means "go up", and the levels shown are exactly what alt+up walks back
-// through.
+// One level per alt+up step; the root and thread crumbs above them are the
+// breadcrumb bar's business, not this function's.
 func childSessionLevelName(frame sessionNavFrame) string {
 	name := frame.agentName
 	if name == "" {
@@ -87,85 +81,17 @@ func (m *UI) childSessionCurrentActivity() string {
 	return presentation.JoinStatusParts(parts, -1)
 }
 
-// childSessionHeaderText renders row 1's breadcrumb — levels joined by
-// " › ", the last one bold with its activity parenthetical — degrading
-// through progressively shorter candidates until one fits avail, in the
-// agreed sacrifice order: the activity parenthetical goes first, then
-// middle levels collapse to a single "…", and only as a last resort is the
-// current name itself hard-truncated.
-func (m *UI) childSessionHeaderText(s *styles.Styles, avail int) string {
-	cb := &s.ChildBanner
-	n := len(m.navStack)
-	last := m.navStack[n-1]
-	lastName := cb.Current.Render(childSessionLevelName(last))
-
-	renderRange := func(lo, hi int) string {
-		var b strings.Builder
-		for i := lo; i < hi; i++ {
-			if i > lo {
-				b.WriteString(cb.Sep.Render(" › "))
-			}
-			b.WriteString(cb.Path.Render(childSessionLevelName(m.navStack[i])))
-		}
-		return b.String()
-	}
-
-	ancestors := renderRange(0, n-1)
-	sep := ""
-	if ancestors != "" {
-		sep = cb.Sep.Render(" › ")
-	}
-
-	activity := ""
-	if a := m.childSessionCurrentActivity(); a != "" {
-		activity = " " + cb.Base.Render("("+a+")")
-	}
-
-	// Candidate 1: everything.
-	if full := ancestors + sep + lastName + activity; ansi.StringWidth(full) <= avail {
-		return full
-	}
-	// Candidate 2: drop the activity parenthetical.
-	if withoutActivity := ancestors + sep + lastName; ansi.StringWidth(withoutActivity) <= avail {
-		return withoutActivity
-	}
-	// Candidate 3: collapse every ancestor between the root and the
-	// current level into a single "…" (only meaningful with 2+ ancestors).
-	if n > 2 {
-		collapsed := cb.Path.Render(childSessionLevelName(m.navStack[0])) +
-			cb.Sep.Render(" › … › ") + lastName
-		if ansi.StringWidth(collapsed) <= avail {
-			return collapsed
-		}
-	}
-	// Candidate 4: the current level alone, no ancestors.
-	if ansi.StringWidth(lastName) <= avail {
-		return lastName
-	}
-	// Last resort: hard-truncate the current level's own name.
-	return ansi.Truncate(lastName, avail, "…")
-}
-
 // drawChildSessionPanel draws the info panel that replaces the editor while
-// a sub-agent session is being viewed, in three compact rows:
+// a sub-agent session is being viewed, in two compact rows:
 //
-//  1. the breadcrumb of subagent names (never "main" — the back button
-//     already means "go up"), each with a "(n/m)" sibling counter when
-//     relevant, the last one bold with its live activity in parens —
-//     e.g. "developer-junior (3/3) › task (Read the entire file… · step 34)"
-//     — and the "back" button, styled as a real accent-filled button
-//     rather than a text link. Narrow terminals shed, in order: the
-//     activity parenthetical, then middle levels (collapsed to "…"), then
-//     truncate the current name itself — see childSessionHeaderText;
-//  2. the delegation's model/effort override;
-//  3. the child session's own cumulative token usage and either a live
+//  1. the delegation's model/effort override;
+//  2. the child session's own cumulative token usage and either a live
 //     ticking elapsed time (still running) or the final duration (done).
 //
-// A click anywhere in area exits the child session (see the MouseClickMsg
-// handling in Update), so hovering anywhere in the panel highlights the
-// visible back button.
+// Navigation is deliberately absent: the breadcrumb bar above the editor
+// (breadcrumbs.go) already says which delegation this is and carries the
+// Back button, and it does so on every screen rather than only here.
 func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
-	m.childPanelButtonRect = uv.Rectangle{}
 	if area.Dy() <= 0 || area.Dx() <= 0 || len(m.navStack) == 0 {
 		return
 	}
@@ -173,53 +99,21 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
 	frame := m.navStack[len(m.navStack)-1]
 
-	// Row 1: the level breadcrumb (see childSessionHeaderText for
-	// the degrade-under-width-pressure logic) and the back button.
-	buttonSty := sty.Button
-	if m.childPanelHover {
-		buttonSty = sty.ButtonHover
-	}
-	button := buttonSty.Render(m.childPanelButtonLabel())
-	buttonWidth := ansi.StringWidth(button)
-
-	const gap = 1
-	row1 := area
-	row1.Max.Y = row1.Min.Y + 1
-	if avail := width - buttonWidth - gap; avail < 0 {
-		// Terminal too narrow for both the breadcrumb and button; drop
-		// the breadcrumb entirely.
-		uv.NewStyledString(ansi.Truncate(button, width, "")).Draw(scr, row1)
-	} else {
-		header := m.childSessionHeaderText(m.com.Styles, avail)
-		pad := max(0, avail-ansi.StringWidth(header))
-		row := header + strings.Repeat(" ", pad+gap) + button
-		uv.NewStyledString(row).Draw(scr, row1)
-
-		m.childPanelButtonRect = uv.Rectangle{
-			Min: uv.Position{X: area.Max.X - buttonWidth, Y: area.Min.Y},
-			Max: area.Max,
-		}
-		m.childPanelButtonRect.Max.Y = area.Min.Y + 1
-	}
-
-	// Row 2: model/effort override — "default model" when the delegation
+	// Row 1: model/effort override — "default model" when the delegation
 	// has none (agentic_fetch, or an agent tool inheriting the app's
 	// default), so the row is never blank.
-	if area.Dy() >= 2 {
-		line := childPanelModelSubtitle(frame.model, frame.effort)
-		if line == "" {
-			line = "default model"
-		}
-		row2 := area
-		row2.Min.Y = area.Min.Y + 1
-		row2.Max.Y = row2.Min.Y + 1
-		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row2)
+	line := childPanelModelSubtitle(frame.model, frame.effort)
+	if line == "" {
+		line = "default model"
 	}
+	row1 := area
+	row1.Max.Y = row1.Min.Y + 1
+	uv.NewStyledString(sty.Base.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row1)
 
-	// Row 3: the child session's own cumulative token usage and context
+	// Row 2: the child session's own cumulative token usage and context
 	// percentage, plus a live elapsed time while still running or the
 	// frozen total once done.
-	if area.Dy() >= 3 {
+	if area.Dy() >= 2 {
 		line := childPanelTokensLine(m.session)
 		if pct := m.childPanelContextPercent(frame); pct != "" {
 			line += " · " + pct
@@ -227,10 +121,10 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		if e := m.childPanelElapsedText(frame); e != "" {
 			line += " · " + e
 		}
-		row3 := area
-		row3.Min.Y = area.Min.Y + 2
-		row3.Max.Y = row3.Min.Y + 1
-		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row3)
+		row2 := area
+		row2.Min.Y = area.Min.Y + 1
+		row2.Max.Y = row2.Min.Y + 1
+		uv.NewStyledString(sty.Base.Render(ansi.Truncate(line, width, "…"))).Draw(scr, row2)
 	}
 }
 

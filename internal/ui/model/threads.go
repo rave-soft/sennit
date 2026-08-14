@@ -38,6 +38,9 @@ import (
 type enterThreadMsg struct {
 	id        string
 	sessionID string
+	// name is the thread's own name, carried through so the attached UI
+	// can show it as a breadcrumb without a second lookup.
+	name string
 }
 
 // openThreadCreateMsg requests opening the create-thread dialog. The dialog
@@ -288,8 +291,8 @@ func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea
 		if !ok {
 			return true, nil
 		}
-		id, sessionID := item.thread.ID, item.thread.SessionID
-		return true, func() tea.Msg { return enterThreadMsg{id: id, sessionID: sessionID} }
+		id, sessionID, name := item.thread.ID, item.thread.SessionID, item.thread.Name
+		return true, func() tea.Msg { return enterThreadMsg{id: id, sessionID: sessionID, name: name} }
 	case key.Matches(msg, m.keyMap.New):
 		return true, func() tea.Msg { return openThreadCreateMsg{} }
 	case key.Matches(msg, m.keyMap.Merge):

@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/message"
@@ -84,77 +83,29 @@ func TestChildSessionPanelReplacesEditor(t *testing.T) {
 		"viewing a child session must give the editor area the panel's fixed height")
 }
 
-// TestChildSessionPanelClickExitsChildSession: a click anywhere in the
-// editor area (now occupied by the panel) must pop the nav stack.
-func TestChildSessionPanelClickExitsChildSession(t *testing.T) {
+// TestDrawChildSessionPanel_ShowsModelEffortTokensAndNoNavigation covers
+// the panel's content end to end — the model/effort line and the split
+// token usage — and pins the division of labour: where you are and how to
+// leave belong to the breadcrumb bar, so no crumb, separator, or back
+// button may appear down here.
+func TestDrawChildSessionPanel_ShowsModelEffortTokensAndNoNavigation(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	require.NotZero(t, u.layout.editor)
-
-	_, cmd := u.Update(tea.MouseClickMsg(tea.Mouse{
-		X:      u.layout.editor.Min.X,
-		Y:      u.layout.editor.Min.Y,
-		Button: uv.MouseLeft,
-	}))
-
-	require.Len(t, u.navStack, 1, "clicking the panel must pop exactly one nav frame")
-	require.NotNil(t, cmd, "must return the loadSession cmd for the previous level")
-}
-
-// TestChildSessionPanelButtonHover: moving the pointer over the panel's
-// "back" button sets childPanelHover, and moving away clears it.
-func TestChildSessionPanelButtonHover(t *testing.T) {
-	t.Parallel()
-
-	u := newChildSessionPanelTestUI(t)
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChildSessionPanel(scr, u.layout.editor)
-	require.NotZero(t, u.childPanelButtonRect, "drawing the panel must compute the button's click/hover rect")
-
-	u.Update(tea.MouseMotionMsg(tea.Mouse{
-		X: u.childPanelButtonRect.Min.X,
-		Y: u.childPanelButtonRect.Min.Y,
-	}))
-	require.True(t, u.childPanelHover, "hovering the button must set childPanelHover")
-
-	u.Update(tea.MouseMotionMsg(tea.Mouse{X: 0, Y: 0}))
-	require.False(t, u.childPanelHover, "moving off the button must clear childPanelHover")
-}
-
-// TestDrawChildSessionPanel_ShowsBreadcrumbActivityModelEffortTokens covers
-// the panel's content end to end: the ancestor's name+counter, the current
-// level's bold name, its activity parenthetical (prompt snippet, step
-// count, last tool while running), the model/effort line, and the split
-// token usage. "main" must never appear — the back button already means
-// "go up".
-func TestDrawChildSessionPanel_ShowsBreadcrumbActivityModelEffortTokens(t *testing.T) {
-	t.Parallel()
-
-	u := newChildSessionPanelTestUI(t)
-	u.chat.AppendMessages(
-		chat.NewToolMessageItem(u.com.Styles, "m1", message.ToolCall{ID: "tc-1", Name: "view", Input: `{}`, Finished: true}, nil, false, nil),
-		chat.NewToolMessageItem(u.com.Styles, "m1", message.ToolCall{ID: "tc-2", Name: "view", Input: `{}`, Finished: true}, nil, false, nil),
-		chat.NewToolMessageItem(u.com.Styles, "m1",
-			message.ToolCall{ID: "tc-3", Name: "grep", Input: `{"pattern":"login"}`, Finished: true}, nil, false, nil),
-	)
 	u.wsCache.agentBusyCache.set(true)
 
 	scr := uv.NewScreenBuffer(u.width, u.height)
 	u.drawChildSessionPanel(scr, u.layout.editor)
 	out := ansi.Strip(scr.Render())
 
-	require.NotContains(t, out, "main", `"main" must never appear in the breadcrumb`)
-	require.Contains(t, out, "developer-junior (3/3)", "ancestor level: name + sibling counter")
-	require.Contains(t, out, "› task", "current level separated from its ancestor")
-	require.Contains(t, out, "Read the entire file", "current level's prompt snippet")
-	require.Contains(t, out, "step 3", "current level's step count, from the loaded child chat")
-	require.Contains(t, out, `grep "login"`, "current level's last tool call, while running")
-	require.Contains(t, out, "back (ctrl+up")
 	require.Contains(t, out, "claude-sonnet-5")
 	require.Contains(t, out, "effort medium")
 	require.Contains(t, out, "800", "prompt token count must be shown")
 	require.Contains(t, out, "200", "completion token count must be shown")
+
+	require.NotContains(t, out, "developer-junior", "the breadcrumb belongs to the bar, not the panel")
+	require.NotContains(t, out, "\u203a", "no breadcrumb separator in the panel")
+	require.NotContains(t, out, "Back", "the back button belongs to the bar, not the panel")
 }
 
 // TestChildSessionCurrentActivity_OmitsLastToolWhenNotRunning: the last
@@ -173,85 +124,6 @@ func TestChildSessionCurrentActivity_OmitsLastToolWhenNotRunning(t *testing.T) {
 	activity := u.childSessionCurrentActivity()
 	require.Contains(t, activity, "step 1")
 	require.NotContains(t, activity, "grep", "an idle delegation's last tool call is not shown")
-}
-
-// TestChildSessionHeaderText_DropsActivityBeforeAncestors covers the
-// agreed sacrifice order (requirement 5): under width pressure, the
-// activity parenthetical is dropped first, while the full ancestor
-// breadcrumb is kept as long as it still fits.
-func TestChildSessionHeaderText_DropsActivityBeforeAncestors(t *testing.T) {
-	t.Parallel()
-
-	u := newChildSessionPanelTestUI(t)
-
-	full := u.childSessionHeaderText(u.com.Styles, 200)
-	require.Contains(t, ansi.Strip(full), "Read the entire file", "plenty of width: activity parenthetical shown")
-
-	// Narrow enough to drop the parenthetical but not the ancestor name.
-	narrower := u.childSessionHeaderText(u.com.Styles, ansi.StringWidth(ansi.Strip(full))-5)
-	out := ansi.Strip(narrower)
-	require.NotContains(t, out, "Read the entire file", "activity parenthetical must be dropped first")
-	require.Contains(t, out, "developer-junior (3/3)", "ancestor breadcrumb must still be shown")
-	require.Contains(t, out, "task")
-}
-
-// TestChildSessionHeaderText_CollapsesMiddleLevels covers a 3+ level deep
-// stack: once even the plain (no-activity) breadcrumb doesn't fit, the
-// middle levels collapse into a single "…", keeping the root and the
-// current (bold) level.
-func TestChildSessionHeaderText_CollapsesMiddleLevels(t *testing.T) {
-	t.Parallel()
-
-	u := newChildSessionPanelTestUI(t)
-	u.navStack = append([]sessionNavFrame{
-		{parentSessionID: "root", parentTitle: "main", agentName: "root-agent-with-a-long-name"},
-	}, u.navStack...)
-	u.navStack[len(u.navStack)-1].label = "" // no activity to simplify this test
-
-	root := childSessionLevelName(u.navStack[0])
-	middle := childSessionLevelName(u.navStack[1])
-	last := childSessionLevelName(u.navStack[2])
-	full := root + " › " + middle + " › " + last
-
-	// Narrower than the full plain breadcrumb, but wide enough for
-	// "root › … › last".
-	collapsed := root + " › … › " + last
-	avail := ansi.StringWidth(collapsed) + 2
-	require.Less(t, avail, ansi.StringWidth(full), "test width must be too narrow for the uncollapsed breadcrumb")
-
-	out := ansi.Strip(u.childSessionHeaderText(u.com.Styles, avail))
-	require.Contains(t, out, "root-agent-with-a-long-name")
-	require.Contains(t, out, "…", "the middle level must collapse to an ellipsis")
-	require.Contains(t, out, "task")
-	require.NotContains(t, out, "developer-junior", "the collapsed middle level's real name must not appear")
-}
-
-// TestChildSessionHeaderText_DropsAncestorsKeepsCurrentName covers the
-// next sacrifice tier: too narrow even for the collapsed breadcrumb, so
-// only the current level's own name remains.
-func TestChildSessionHeaderText_DropsAncestorsKeepsCurrentName(t *testing.T) {
-	t.Parallel()
-
-	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].label = ""
-
-	out := ansi.Strip(u.childSessionHeaderText(u.com.Styles, len("task")+1))
-	require.Equal(t, "task", out)
-}
-
-// TestChildSessionHeaderText_HardTruncatesCurrentName is the last resort:
-// even the bare current name doesn't fit, so it gets hard-truncated with
-// an ellipsis rather than overflowing.
-func TestChildSessionHeaderText_HardTruncatesCurrentName(t *testing.T) {
-	t.Parallel()
-
-	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].agentName = "a-very-long-subagent-name"
-	u.navStack[len(u.navStack)-1].label = ""
-
-	out := ansi.Strip(u.childSessionHeaderText(u.com.Styles, 6))
-	require.LessOrEqual(t, ansi.StringWidth(out), 6)
-	require.Contains(t, out, "…")
 }
 
 // TestDrawChildSessionPanel_NoModelEffortShowsDefaultModel covers the
@@ -332,15 +204,15 @@ func TestDrawChildSessionPanel_UnknownDurationOmitsTime(t *testing.T) {
 	require.NotContains(t, out, "0s")
 }
 
-// TestChildSessionPanelHeight_TwoRowAreaOmitsTokens: with only two rows
-// available the panel must still render the breadcrumb and model line
-// without panicking, and must not draw the (missing) third row.
-func TestChildSessionPanelHeight_TwoRowAreaOmitsTokens(t *testing.T) {
+// TestChildSessionPanelHeight_OneRowAreaOmitsTokens: with only one row
+// available the panel must still render the model line without panicking,
+// and must not draw the (missing) second row.
+func TestChildSessionPanelHeight_OneRowAreaOmitsTokens(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
 	area := u.layout.editor
-	area.Max.Y = area.Min.Y + 2
+	area.Max.Y = area.Min.Y + 1
 
 	scr := uv.NewScreenBuffer(u.width, u.height)
 	require.NotPanics(t, func() {

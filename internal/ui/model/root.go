@@ -56,6 +56,7 @@ type threadEventSubscriber interface {
 // itself.
 type threadAttachment struct {
 	threadID string
+	name     string
 	ws       workspace.Workspace
 	ui       *UI
 	stop     func() // stops the SubscribeWith event pump
@@ -106,6 +107,7 @@ type threadEventMsg struct {
 type threadAttachedMsg struct {
 	id        string
 	sessionID string
+	name      string
 	ws        workspace.Workspace
 	detach    func()
 	err       error
@@ -204,7 +206,15 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return r, tea.Batch(r.dashboard.ApplyThreadsLoaded(msg)...)
 	case enterThreadMsg:
-		return r, r.attachThreadCmd(msg.id, msg.sessionID)
+		return r, r.attachThreadCmd(msg.id, msg.sessionID, msg.name)
+	case leaveThreadRequestedMsg:
+		// The Back button at the top of a drilled-in thread. The thread's
+		// embedded UI raises this rather than acting itself: the
+		// attachment (workspace + event pump) belongs to the router.
+		if r.active != screenThread {
+			return r, nil
+		}
+		return r, r.leaveThreadToMain()
 	case threadAttachedMsg:
 		return r.handleThreadAttached(msg)
 	case mergeThreadMsg:
@@ -357,12 +367,12 @@ func (r *Root) handleDashboardDialogAction(action dialog.Action) tea.Cmd {
 
 // attachThreadCmd calls AttachThread off-thread. Per AGENTS.md, model state
 // is never touched inside a command closure — only locals are captured.
-func (r *Root) attachThreadCmd(id, sessionID string) tea.Cmd {
+func (r *Root) attachThreadCmd(id, sessionID, name string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
 	return func() tea.Msg {
 		attached, detach, err := ws.AttachThread(ctx, id)
-		return threadAttachedMsg{id: id, sessionID: sessionID, ws: attached, detach: detach, err: err}
+		return threadAttachedMsg{id: id, sessionID: sessionID, name: name, ws: attached, detach: detach, err: err}
 	}
 }
 
@@ -376,7 +386,7 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	}
 
 	com := common.DefaultCommon(r.com.Context(), msg.ws)
-	childUI := New(com, msg.sessionID, false, WithEmbedded())
+	childUI := New(com, msg.sessionID, false, WithEmbedded(), WithBreadcrumbRoot(msg.name))
 
 	stop := func() {}
 	if sub, ok := msg.ws.(threadEventSubscriber); ok {
@@ -390,6 +400,7 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 
 	r.thread = &threadAttachment{
 		threadID: msg.id,
+		name:     msg.name,
 		ws:       msg.ws,
 		ui:       childUI,
 		stop:     stop,

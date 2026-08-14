@@ -380,14 +380,20 @@ type UI struct {
 	// (possibly no-longer-loaded) parent chat. See enterChildSession.
 	navStack []sessionNavFrame
 
-	// childPanelHover is set while the pointer is over the "back" button in
-	// the child-session panel (see drawChildSessionPanel), for hover
-	// feedback matching the status bar's back-button pattern.
-	childPanelHover bool
-	// childPanelButtonRect is the screen area of the panel's "back" button,
-	// recomputed on every drawChildSessionPanel call. Used to scope hover
-	// feedback to the button itself rather than the whole panel.
-	childPanelButtonRect image.Rectangle
+	// crumbRoot names the thread this UI is embedded in, for the second
+	// crumb of the breadcrumb bar ("main › <crumbRoot> › …"). Empty on the
+	// top-level UI, which has no thread above it. Set by the router when it
+	// attaches (see Root.handleThreadAttached).
+	crumbRoot string
+
+	// breadcrumbHover is set while the pointer is over the breadcrumb bar's
+	// Back button, for hover feedback.
+	breadcrumbHover bool
+	// breadcrumbButtonRect is the screen area of that button as last
+	// painted. Hit-testing recomputes it instead (see
+	// breadcrumbButtonHit) — this is kept only so the bar can be inspected
+	// after a draw.
+	breadcrumbButtonRect image.Rectangle
 
 	// onboarding state
 	onboarding struct {
@@ -528,6 +534,12 @@ type Option func(*UI)
 // router when attaching to a thread.
 func WithEmbedded() Option {
 	return func(m *UI) { m.embedded = true }
+}
+
+// WithBreadcrumbRoot names the thread this UI is embedded in, so the
+// breadcrumb bar can show the path that leads here (see crumbRoot).
+func WithBreadcrumbRoot(name string) Option {
+	return func(m *UI) { m.crumbRoot = name }
 }
 
 // New creates a new instance of the [UI] model.
@@ -1591,14 +1603,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
-		// A click anywhere on the child-session panel (see
-		// drawChildSessionPanel, which occupies the editor area in place of
-		// the textarea while a child session is being viewed) exits the
-		// child session. Mouse clicks never change m.focus (see
-		// uiFocusState) — this is the one dedicated, deliberate transition
-		// a click is allowed to trigger.
-		if msg.Button == tea.MouseLeft && m.viewingChildSession() && image.Pt(msg.X, msg.Y).In(m.layout.editor) {
-			if cmd := m.exitChildSession(); cmd != nil {
+		// A click on the breadcrumb bar's Back button goes up one level —
+		// out of a sub-agent session, or out of the thread itself once none
+		// are left. Mouse clicks never change m.focus (see uiFocusState) —
+		// this is the one dedicated, deliberate transition a click is
+		// allowed to trigger.
+		if msg.Button == tea.MouseLeft && m.breadcrumbButtonHit(image.Pt(msg.X, msg.Y)) {
+			if cmd := m.breadcrumbBack(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			return m, tea.Batch(cmds...)
@@ -1638,7 +1649,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					continue
 				}
 				th := plan.threads[i]
-				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID}))
+				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID, name: th.Name}))
 				return m, tea.Batch(cmds...)
 			}
 			// A click on a delegation block drills into its child session —
@@ -1694,10 +1705,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
-		// Hover feedback for the child-session panel's "back" button.
-		if m.viewingChildSession() {
-			m.childPanelHover = image.Pt(msg.X, msg.Y).In(m.layout.editor)
-		}
+		// Hover feedback for the breadcrumb bar's Back button.
+		m.breadcrumbHover = m.breadcrumbButtonHit(image.Pt(msg.X, msg.Y))
 
 		if m.activeInline == nil && len(m.editor.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
 			m.editor.attachments.SetHover(msg.X - m.layout.editor.Min.X)
@@ -4102,7 +4111,14 @@ func (m *UI) drawChatSeparators(scr uv.Screen, editorArea uv.Rectangle) {
 		if y < scr.Bounds().Min.Y || y >= scr.Bounds().Max.Y {
 			continue
 		}
-		uv.NewStyledString(separator).Draw(scr, image.Rect(editorArea.Min.X, y, editorArea.Max.X, y+1))
+		row := image.Rect(editorArea.Min.X, y, editorArea.Max.X, y+1)
+		// The rule above the editor doubles as the navigation bar once
+		// there is a trail to show; it falls through to the plain rule at
+		// the top level and on terminals too narrow for it.
+		if y == editorArea.Min.Y-1 && m.drawBreadcrumbBar(scr, row) {
+			continue
+		}
+		uv.NewStyledString(separator).Draw(scr, row)
 	}
 }
 
