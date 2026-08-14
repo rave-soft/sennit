@@ -648,3 +648,30 @@ func (l *lifecycle) recover(ctx context.Context) error {
 	}
 	return nil
 }
+
+// setPermissionsSkip applies the parent workspace's permission-bypass
+// ("yolo") state to every delegation workspace that is live right now.
+//
+// A thread runs in an isolated app.App with its own permission service, so
+// it only learns the parent's bypass state when it is spawned. Without
+// this, toggling yolo in the main window leaves a running thread on
+// whatever the state was when it started: turned on, the thread still
+// blocks on a prompt nobody is positioned to answer; turned off, the
+// thread keeps skipping prompts the user has just decided they want back.
+// The second direction is the one with consequences, which is why this
+// propagates in both.
+//
+// A task's handle wraps the parent's own App, so setting the flag through
+// it is the same idempotent write the caller already made - harmless, and
+// cheaper to allow than to special-case.
+func (l *lifecycle) setPermissionsSkip(skip bool) {
+	for _, c := range l.snapshotControls() {
+		c.mu.Lock()
+		rt := c.runtime
+		c.mu.Unlock()
+		if rt == nil {
+			continue
+		}
+		rt.handle.App().Permissions.SetSkipRequests(skip)
+	}
+}

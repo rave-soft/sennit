@@ -406,7 +406,7 @@ func (w *AppWorkspace) PermissionSkipRequests() bool {
 }
 
 func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
-	w.app.Permissions.SetSkipRequests(skip)
+	w.app.SetPermissionsSkip(skip)
 }
 
 // -- Questions --

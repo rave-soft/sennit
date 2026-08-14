@@ -45,7 +45,7 @@ func (b *Backend) SetPermissionsSkip(workspaceID string, skip bool) error {
 		return err
 	}
 
-	ws.Permissions.SetSkipRequests(skip)
+	ws.SetPermissionsSkip(skip)
 	return nil
 }
 

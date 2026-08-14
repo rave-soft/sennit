@@ -843,6 +843,20 @@ func (m *Manager) WorkspaceID(threadID string) string {
 // constructed sharing this Manager's lifecycle and ctx (see NewManager),
 // since m.lc.snapshotControls below walks that same shared controls map
 // regardless of which kind registered each entry.
+// SetPermissionsSkip propagates the parent workspace's permission-bypass
+// ("yolo") state to every delegation workspace currently live under this
+// manager, threads and tasks alike. Called by the parent App whenever its
+// own bypass state changes (see app.App.SetPermissionsSkip), which is the
+// single funnel every toggle goes through: the TUI's ctrl+y, the server's
+// SetPermissionsSkip endpoint, and a permissions.bypass config reload.
+//
+// Threads spawned after the change inherit it at spawn instead, from the
+// parent's live permission service — see the parentYOLO closures in
+// internal/cmd/root.go and internal/backend/backend.go.
+func (m *Manager) SetPermissionsSkip(skip bool) {
+	m.lc.setPermissionsSkip(skip)
+}
+
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.shutdownOnce.Do(func() {
 		m.lc.closeAdmission()
