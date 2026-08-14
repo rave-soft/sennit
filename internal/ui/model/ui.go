@@ -445,13 +445,6 @@ type UI struct {
 	// tracking.
 	panelThreadRects []uv.Rectangle
 	panelThreads     []proto.Thread
-	// hoveredPanelDelegation/panelDelegationRects/panelDelegations mirror
-	// hoveredPanelThread/panelThreadRects/panelThreads for the delegations
-	// section — see runningDelegationBlocks and drawPanelBlocks in
-	// session_panel.go.
-	hoveredPanelDelegation int
-	panelDelegationRects   []uv.Rectangle
-	panelDelegations       []panelDelegation
 	// panelTodosHover / panelTodosHeaderRect mirror childPanelHover /
 	// childPanelButtonRect for the todos header row's click-to-toggle
 	// affordance.
@@ -620,18 +613,17 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 			completions: comp,
 			attachments: attachments,
 		},
-		chat:                   ch,
-		header:                 header,
-		panelSpinner:           panelSpinner,
-		lspStates:              make(map[string]workspace.LSPClientInfo),
-		mcpStates:              make(map[string]workspace.MCPClientInfo),
-		notifyBackend:          notification.NoopBackend{},
-		notifyWindowFocused:    true,
-		initialSessionID:       initialSessionID,
-		continueLastSession:    continueLast,
-		skillStates:            skills.GetLatestStates(),
-		hoveredPanelThread:     -1,
-		hoveredPanelDelegation: -1,
+		chat:                ch,
+		header:              header,
+		panelSpinner:        panelSpinner,
+		lspStates:           make(map[string]workspace.LSPClientInfo),
+		mcpStates:           make(map[string]workspace.MCPClientInfo),
+		notifyBackend:       notification.NoopBackend{},
+		notifyWindowFocused: true,
+		initialSessionID:    initialSessionID,
+		continueLastSession: continueLast,
+		skillStates:         skills.GetLatestStates(),
+		hoveredPanelThread:  -1,
 	}
 	for _, opt := range opts {
 		opt(ui)
@@ -1636,7 +1628,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseLeft && m.state == uiChat && m.hasSession() {
 			pt := image.Pt(msg.X, msg.Y)
 			plan := m.sessionPanelPlan(m.layout.panel.Dy())
-			threadBlockRects, delegationBlockRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
+			threadBlockRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
 			if pt.In(todosHeaderRect) {
 				if cmd := m.toggleTodosExpanded(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -1653,20 +1645,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				th := plan.threads[i]
 				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID, name: th.Name}))
-				return m, tea.Batch(cmds...)
-			}
-			// A click on a delegation block drills into its child session —
-			// real navStack-based drill-in via enterChildSession, unlike
-			// threads (which need AttachThread): a delegation's session
-			// already lives in this same workspace/DB.
-			for i, rect := range delegationBlockRects {
-				if !pt.In(rect) {
-					continue
-				}
-				d := plan.delegations[i]
-				if cmd := m.enterChildSession(d.messageID, d.toolCallID); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -1723,20 +1701,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == uiChat {
 			pt := image.Pt(msg.X, msg.Y)
 			plan := m.sessionPanelPlan(m.layout.panel.Dy())
-			threadRects, delegationRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
+			threadRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
 			m.panelTodosHover = pt.In(todosHeaderRect)
 			m.panelThreadsHover = pt.In(threadsHeaderRect)
 			m.hoveredPanelThread = -1
 			for i, rect := range threadRects {
 				if pt.In(rect) {
 					m.hoveredPanelThread = i
-					break
-				}
-			}
-			m.hoveredPanelDelegation = -1
-			for i, rect := range delegationRects {
-				if pt.In(rect) {
-					m.hoveredPanelDelegation = i
 					break
 				}
 			}
@@ -1873,7 +1844,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.hasSession() {
 				plan := m.sessionPanelPlan(m.layout.panel.Dy())
 				if plan.todosScrollable {
-					_, _, _, todosListRect, _ := sessionPanelRowLayout(m.layout.panel, plan)
+					_, _, todosListRect, _ := sessionPanelRowLayout(m.layout.panel, plan)
 					if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(todosListRect) {
 						lines := int(msg.DeltaY)
 						if lines != 0 {

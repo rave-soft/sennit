@@ -1087,9 +1087,10 @@ func TestCmdDriving_LoadSession_NestedToolsApplied(t *testing.T) {
 	require.Equal(t, "child-call", container.NestedTools()[0].ToolCall().ID)
 
 	m.Update(result)
-	delegations := m.chat.RunningDelegations()
-	require.Len(t, delegations, 1)
-	applied := delegations[0].(chat.NestedToolContainer)
+	item := m.chat.MessageItem("agent-call")
+	require.NotNil(t, item, "the delegation container must be in the chat")
+	applied, ok := item.(chat.NestedToolContainer)
+	require.True(t, ok)
 	require.Len(t, applied.NestedTools(), 1)
 	require.Equal(t, "child-call", applied.NestedTools()[0].ToolCall().ID)
 }
