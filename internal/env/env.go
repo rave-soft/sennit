@@ -23,31 +23,3 @@ func (o *osEnv) Env() []string {
 func New() Env {
 	return &osEnv{}
 }
-
-type mapEnv struct {
-	m map[string]string
-}
-
-// Get implements Env.
-func (m *mapEnv) Get(key string) string {
-	if value, ok := m.m[key]; ok {
-		return value
-	}
-	return ""
-}
-
-// Env implements Env.
-func (m *mapEnv) Env() []string {
-	env := make([]string, 0, len(m.m))
-	for k, v := range m.m {
-		env = append(env, k+"="+v)
-	}
-	return env
-}
-
-func NewFromMap(m map[string]string) Env {
-	if m == nil {
-		m = make(map[string]string)
-	}
-	return &mapEnv{m: m}
-}

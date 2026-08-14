@@ -5,24 +5,6 @@ import (
 	"sync"
 )
 
-// LazySlice is a thread-safe lazy-loaded slice.
-type LazySlice[K any] struct {
-	inner []K
-	wg    sync.WaitGroup
-}
-
-// Seq returns an iterator that yields elements from the slice.
-func (s *LazySlice[K]) Seq() iter.Seq[K] {
-	s.wg.Wait()
-	return func(yield func(K) bool) {
-		for _, v := range s.inner {
-			if !yield(v) {
-				return
-			}
-		}
-	}
-}
-
 // Slice is a thread-safe slice implementation that provides concurrent access.
 type Slice[T any] struct {
 	inner []T

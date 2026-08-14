@@ -73,7 +73,7 @@ func (c *threadIndicatorState) dispatchRefresh(com *common.Common) tea.Cmd {
 	return func() tea.Msg {
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
-			slog.Error("list threads for indicator", "error", err)
+			slog.Error("Failed to list threads for indicator", "error", err)
 		}
 		return threadIndicatorLoadedMsg{gen: gen, count: activeThreadCount(threads), err: err}
 	}

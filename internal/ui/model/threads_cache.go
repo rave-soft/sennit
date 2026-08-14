@@ -78,7 +78,7 @@ func (c *threadsCacheState) dispatchThreadsRefresh(com *common.Common) tea.Cmd {
 	return func() tea.Msg {
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
-			slog.Error("list threads", "error", err)
+			slog.Error("Failed to list threads", "error", err)
 		}
 		// Tasks share the same Kind-discriminated table (see
 		// internal/workspace/tasks.go), so the dashboard's live-work list
@@ -90,7 +90,7 @@ func (c *threadsCacheState) dispatchThreadsRefresh(com *common.Common) tea.Cmd {
 		if ws.SupportsTasks() {
 			tasks, taskErr := ws.ListTasks(context.Background())
 			if taskErr != nil {
-				slog.Error("list tasks", "error", taskErr)
+				slog.Error("Failed to list tasks", "error", taskErr)
 			} else {
 				threads = append(threads, tasks...)
 			}

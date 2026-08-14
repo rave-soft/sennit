@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 )
@@ -224,7 +225,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		Name: st.Name,
 		Kind: string(st.Kind),
 	})
-	t.lc.startRun(runCtx, handle, t.spawner, st.ID, st.SessionID, args.Goal)
+	t.lc.startRun(agent.WithPromptOrigin(runCtx, message.OriginAgent), handle, t.spawner, st.ID, st.SessionID, args.Goal)
 	owned = false // Ownership transferred to the shared runtime state.
 
 	// ids and depth only — args.Goal is the user's prompt and never
@@ -293,7 +294,7 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID strin
 // to Create's caller.
 func (t *TaskManager) failCreate(ctx context.Context, st Thread, cause error) error {
 	if _, err := t.lc.setStatus(ctx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
-		slog.Error("thread: recording task create failure failed", "task", st.ID, "error", err)
+		slog.Error("Failed to record task create failure", "component", "thread", "task", st.ID, "error", err)
 	}
 	return cause
 }

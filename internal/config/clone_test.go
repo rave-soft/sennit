@@ -18,7 +18,7 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 		Model:        SelectedModel{Provider: "openai", Model: "gpt-4"},
 		RecentModels: []SelectedModel{{Provider: "openai", Model: "gpt-4"}},
 		MCP:          MCPs{"a": {}},
-		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+		Providers: csync.NewMap(map[string]ProviderConfig{
 			"openai": {APIKey: "old", OAuthToken: &oauth.Token{AccessToken: "old", Client: &oauth.OAuthClient{ClientID: "old"}}},
 		}),
 		Options: &Options{

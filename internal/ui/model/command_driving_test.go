@@ -22,6 +22,7 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/skills"
 	"github.com/rave-soft/braid/internal/ui/attachments"
 	"github.com/rave-soft/braid/internal/ui/chat"
@@ -73,6 +74,8 @@ type cmdDrivingWorkspace struct {
 	listMessagesByIDs       [][]string
 	listMessagesErrByID     map[string]error
 	listThreadsCalls        int
+	supportsThreads         bool
+	threads                 []proto.Thread
 	getSessionCalls         int
 	listSessionHistoryCalls int
 	lspStartCalls           int
@@ -95,6 +98,10 @@ func (w *cmdDrivingWorkspace) Config() *config.Config {
 
 func (w *cmdDrivingWorkspace) WorkingDir() string                { return "/tmp" }
 func (w *cmdDrivingWorkspace) Resolver() config.VariableResolver { return nil }
+func (w *cmdDrivingWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
+	return shell.BackgroundJobCounts{}
+}
+
 func (w *cmdDrivingWorkspace) UncommittedFiles(context.Context) ([]git.FileChange, error) {
 	return nil, nil
 }
@@ -261,9 +268,13 @@ func (w *cmdDrivingWorkspace) SetCurrentSessionGeneration(_ context.Context, ses
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) SupportsThreads() bool { return false }
+func (w *cmdDrivingWorkspace) SupportsThreads() bool { return w.supportsThreads }
 func (w *cmdDrivingWorkspace) ListThreads(_ context.Context) ([]proto.Thread, error) {
 	w.listThreadsCalls++
+	return append([]proto.Thread(nil), w.threads...), nil
+}
+func (w *cmdDrivingWorkspace) SupportsTasks() bool { return false }
+func (w *cmdDrivingWorkspace) ListTasks(context.Context) ([]proto.Thread, error) {
 	return nil, nil
 }
 

@@ -117,6 +117,48 @@ func TestListAllUserMessagesExcludesMachineGeneratedPrompts(t *testing.T) {
 	require.Equal(t, "human prompt", messages[0].Content().String())
 }
 
+func TestCreate_OriginDefaultsToPersonAndRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+
+	// Zero-value Origin (the common case: nothing explicitly set).
+	implicit, err := svc.Create(t.Context(), sessionID, CreateMessageParams{
+		Role:  User,
+		Parts: []ContentPart{TextContent{Text: "typed by hand"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, OriginPerson, implicit.Origin)
+
+	// Explicit OriginAgent.
+	delegated, err := svc.Create(t.Context(), sessionID, CreateMessageParams{
+		Role:   User,
+		Parts:  []ContentPart{TextContent{Text: "dispatched by an agent"}},
+		Origin: OriginAgent,
+	})
+	require.NoError(t, err)
+	require.Equal(t, OriginAgent, delegated.Origin)
+
+	// Round-trip through Get.
+	got, err := svc.Get(t.Context(), implicit.ID)
+	require.NoError(t, err)
+	require.Equal(t, OriginPerson, got.Origin)
+
+	got, err = svc.Get(t.Context(), delegated.ID)
+	require.NoError(t, err)
+	require.Equal(t, OriginAgent, got.Origin)
+
+	// Round-trip through List.
+	all, err := svc.List(t.Context(), sessionID)
+	require.NoError(t, err)
+	origins := make(map[string]Origin, len(all))
+	for _, m := range all {
+		origins[m.ID] = m.Origin
+	}
+	require.Equal(t, OriginPerson, origins[implicit.ID])
+	require.Equal(t, OriginAgent, origins[delegated.ID])
+}
+
 // eventCollector consumes broker events into a slice in a goroutine
 // and exposes thread-safe Snapshot / Reset helpers for assertions.
 type eventCollector struct {
