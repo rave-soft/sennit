@@ -371,6 +371,23 @@ type Options struct {
 	DisabledSkills          []string          `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=braid-config"`
 	WebSearch               *WebSearchOptions `json:"web_search,omitempty" jsonschema:"description=Web search backend configuration. Defaults to the keyless DuckDuckGo scraper when omitted."`
 	Threads                 *ThreadsOptions   `json:"threads,omitempty" jsonschema:"description=Threads (parallel agent work stream) configuration."`
+	// BackgroundAgents is a permanent opt-out, not a rollout flag: it stays
+	// in the product for anyone who does not want the model delegating work
+	// to background tasks in their workspace. Default true — a pointer
+	// distinguishes "unset" from an explicit false, the same tri-state
+	// AutoLSP and Progress use above. It defaults on because dispatch is
+	// already opt-in per model tool-call and every tool a task runs still
+	// goes through the same permission checks as the foreground turn; the
+	// switch exists for the person who wants to rule out unattended
+	// concurrent work entirely, not as a safety net for a first run.
+	//
+	// Turning this off only stops *new* dispatch: the "agent" tool's
+	// background parameter is refused and the task_* tools are not
+	// registered. A task already running when the config is reloaded is not
+	// killed — it runs to completion and its result is still delivered.
+	// Threads (the git-worktree feature) are a separate, older feature and
+	// are not affected by this switch.
+	BackgroundAgents *bool `json:"background_agents,omitempty" jsonschema:"description=Allow the agent tool's background mode and the task_* tools\\, letting the model delegate work to background tasks in this workspace. Turning this off only blocks new dispatch — a task already running keeps running to completion. Does not affect threads.,default=true"`
 	// HistoryRetentionDays is read by `braid gc`, not enforced automatically:
 	// nothing purges history on its own. A pointer distinguishes "unset"
 	// (defaults to 90) from an explicit 0, which means keep history forever.

@@ -99,6 +99,12 @@ type recoverHook func(ctx context.Context, st Thread) (handled bool, err error)
 // handle and may receive nil — see Manager.resolveDeliveryTarget.
 type deliveryResolver func(ctx context.Context, handle Handle, st Thread) (target *app.App, parentSessionID string, ok bool)
 
+// Logging note: every slog call in this package (and in the completion/
+// continuation path it feeds in internal/agent) is restricted to ids,
+// kinds, statuses, and counts. Never log a delegation's Goal or its
+// ResultSummary/Error text — that content is the user's own work, and logs
+// outlive the session it was generated in.
+
 // lifecycle is the generic delegation-lifecycle machinery shared by every
 // kind of background delegation this package drives: admission control,
 // per-entity serialization, worker tracking, run dispatch, workspace
@@ -488,6 +494,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 		}
 	}
 
+	slog.Info("Delegation reached terminal status", "id", id, "kind", finalSt.Kind, "status", finalSt.Status)
 	l.deliverCompletion(ctx, rt.handle, finalSt, depth)
 }
 
@@ -517,9 +524,11 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 	}
 	target, parentSessionID, ok := l.resolveDelivery(ctx, handle, st)
 	if !ok {
+		slog.Info("Delivery skipped: no resolvable parent", "id", st.ID, "kind", st.Kind)
 		return
 	}
 	if target == nil || target.AgentCoordinator == nil {
+		slog.Info("Delivery skipped: no delivery target", "id", st.ID, "kind", st.Kind)
 		return
 	}
 	target.AgentCoordinator.DeliverTaskCompletion(ctx, parentSessionID, agent.TaskCompletion{

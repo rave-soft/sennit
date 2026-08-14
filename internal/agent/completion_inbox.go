@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
@@ -74,7 +75,12 @@ func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompleti
 	mu.Lock()
 	defer mu.Unlock()
 	existing, _ := d.completionInbox.Get(sessionID)
-	d.completionInbox.Set(sessionID, append(existing, completion))
+	queued := append(existing, completion)
+	d.completionInbox.Set(sessionID, queued)
+	// ids, kind, and status only — never completion.Goal or .ResultText/
+	// .Error, which are the user's own work and must not end up in a log
+	// that outlives the session.
+	slog.Info("Completion enqueued", "delegation", completion.DelegationID, "kind", completion.Kind, "status", completion.Status, "session", sessionID, "inbox_size", len(queued))
 	return d.wakeEligibleLocked(sessionID)
 }
 
@@ -161,6 +167,7 @@ func (d *dispatcher) wakeEligibleLocked(sessionID string) bool {
 		// started since. Leave the event queued; it is delivered the
 		// ordinary way (drainCompletionsForStep) on whatever the next
 		// real user turn turns out to be.
+		slog.Info("Delivery skipped: session cancelled, completion left queued", "session", sessionID, "inbox_size", len(existing))
 		return false
 	}
 	return true

@@ -177,7 +177,14 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 		defer func() {
 			if err != nil {
 				t.agent.requeueCompletions(t.call.SessionID, completions)
+				return
 			}
+			// ids and statuses only, never Goal/ResultText/Error.
+			ids := make([]string, len(completions))
+			for i, c := range completions {
+				ids[i] = c.DelegationID
+			}
+			slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions))
 		}()
 		prepared.Messages = append(prepared.Messages, taskCompletionsMessage(completions))
 	}

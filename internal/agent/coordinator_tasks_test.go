@@ -120,6 +120,41 @@ func TestBuildTools_TaskToolsAbsentForSubAgent(t *testing.T) {
 	}
 }
 
+// TestBuildTools_TaskToolsAbsentWhenBackgroundAgentsDisabled proves
+// options.background_agents is a further, explicit gate on top of "is a
+// task manager wired": even with a real manager, an off switch hides the
+// task_* tools entirely.
+func TestBuildTools_TaskToolsAbsentWhenBackgroundAgentsDisabled(t *testing.T) {
+	coord, agentCfg := newTasksTestCoordinator(t, noopTaskManager{})
+	disabled := false
+	coord.cfg.Config().Options.BackgroundAgents = &disabled
+
+	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	require.NoError(t, err)
+
+	names := toolNames(t, built)
+	for _, absent := range taskToolNames {
+		require.NotContains(t, names, absent, "task tools must not be registered when options.background_agents is off")
+	}
+}
+
+// TestBuildTools_TaskToolsPresentWhenBackgroundAgentsExplicitlyEnabled
+// proves the option's true value behaves the same as its unset (default)
+// value already covered by TestBuildTools_TaskToolsPresentForMainAgentWithManager.
+func TestBuildTools_TaskToolsPresentWhenBackgroundAgentsExplicitlyEnabled(t *testing.T) {
+	coord, agentCfg := newTasksTestCoordinator(t, noopTaskManager{})
+	enabled := true
+	coord.cfg.Config().Options.BackgroundAgents = &enabled
+
+	built, err := coord.buildTools(t.Context(), agentCfg, false)
+	require.NoError(t, err)
+
+	names := toolNames(t, built)
+	for _, want := range taskToolNames {
+		require.Contains(t, names, want)
+	}
+}
+
 func TestCoordinator_SetTasksTakesEffectImmediately(t *testing.T) {
 	coord, agentCfg := newTasksTestCoordinator(t, nil)
 

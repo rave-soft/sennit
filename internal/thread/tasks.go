@@ -163,6 +163,11 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	t.lc.startRun(runCtx, handle, t.spawner, st.ID, st.SessionID, args.Goal)
 	owned = false // Ownership transferred to the shared runtime state.
 
+	// ids and depth only — args.Goal is the user's prompt and never
+	// belongs in a log line (see the package-level logging note in
+	// lifecycle.go).
+	slog.Info("Task dispatched", "task", st.ID, "session", st.SessionID, "parent_session", args.ParentSessionID, "depth", args.Depth)
+
 	return st, nil
 }
 

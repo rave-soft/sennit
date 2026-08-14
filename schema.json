@@ -572,6 +572,11 @@
           "$ref": "#/$defs/ThreadsOptions",
           "description": "Threads (parallel agent work stream) configuration."
         },
+        "background_agents": {
+          "type": "boolean",
+          "description": "Allow the agent tool's background mode and the task_* tools, letting the model delegate work to background tasks in this workspace. Turning this off only blocks new dispatch — a task already running keeps running to completion. Does not affect threads.",
+          "default": true
+        },
         "history_retention_days": {
           "type": "integer",
           "description": "Age in days after which \"braid gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"braid gc\" (e.g. from cron) to apply it.",

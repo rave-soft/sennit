@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,6 +107,38 @@ func titleStream() (fantasy.StreamResponse, error) {
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "title"})
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
 	}, nil
+}
+
+// syncLogBuffer is a thread-safe buffer, since the delegation lifecycle's
+// log calls come from goroutines (run watchers, continuation dispatch)
+// racing the test's own assertions.
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// captureLogs installs a buffer-backed slog handler at Debug level for the
+// duration of the test (mirroring internal/backend's captureDebugLogs),
+// restoring the previous default handler via t.Cleanup.
+func captureLogs(t *testing.T) *syncLogBuffer {
+	t.Helper()
+	var b syncLogBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&b, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &b
 }
 
 // ---------------------------------------------------------------------------

@@ -152,6 +152,66 @@ func TestDeliverTaskCompletion_WakesIdleSessionExactlyOnce(t *testing.T) {
 	require.True(t, sawCompletion, "the model must see the completion")
 }
 
+// TestDeliverTaskCompletion_LogsCarryNoPromptOrResultText proves the
+// privacy constraint on the delivery path's structured logging: a
+// completion's Goal and ResultText must never reach a log line, because
+// that content is the user's own work and logs outlive the session. This
+// drives a completion through the exact same wake path
+// TestDeliverTaskCompletion_WakesIdleSessionExactlyOnce exercises
+// (DeliverTaskCompletion -> enqueueCompletion -> startContinuation ->
+// prepareStep's drain-and-fold), capturing every slog line emitted along
+// the way, and requires both that the model actually saw the completion
+// (so a no-op delivery couldn't make this pass vacuously) and that neither
+// distinctive marker - the goal text or the result text - appears
+// anywhere in the captured logs.
+func TestDeliverTaskCompletion_LogsCarryNoPromptOrResultText(t *testing.T) {
+	t.Parallel()
+	logs := captureLogs(t)
+
+	env := testEnv(t)
+	model := &promptRecordingModel{text: "done"}
+	sa := testSessionAgent(env, model, "system").(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "earlier answer"}},
+	})
+	require.NoError(t, err)
+
+	completion := TaskCompletion{
+		DelegationID:   "task-1",
+		Kind:           "task",
+		Name:           "task-name",
+		Goal:           "SECRET-GOAL-do-not-log-this-prompt",
+		Status:         "completed",
+		ChildSessionID: "child-session",
+		ResultText:     "SECRET-RESULT-do-not-log-this-either",
+	}
+	sa.DeliverTaskCompletion(t.Context(), sess.ID, completion)
+
+	require.Eventually(t, func() bool { return model.count() > 0 }, 2*time.Second, 5*time.Millisecond,
+		"the continuation turn must actually reach the model")
+
+	// Confirm delivery actually happened - a passing assertion below on an
+	// empty log would prove nothing.
+	var sawCompletion bool
+	for _, prompt := range model.snapshotPrompts() {
+		for _, part := range prompt[len(prompt)-1].Content {
+			if text, ok := part.(fantasy.TextPart); ok && strings.Contains(text.Text, "SECRET-RESULT-do-not-log-this-either") {
+				sawCompletion = true
+			}
+		}
+	}
+	require.True(t, sawCompletion, "the model must see the completion for this test to prove anything")
+
+	captured := logs.String()
+	require.NotEmpty(t, captured, "the delivery path must actually log something for this test to prove anything")
+	require.NotContains(t, captured, "SECRET-GOAL-do-not-log-this-prompt", "a completion's Goal must never reach a log line")
+	require.NotContains(t, captured, "SECRET-RESULT-do-not-log-this-either", "a completion's ResultText must never reach a log line")
+}
+
 // TestDeliverTaskCompletion_PlaceholderNeverLeaksToModelOrHistory is the
 // direct assertion for the assumption stripContinuationPlaceholder
 // documents: continuationPromptPlaceholder exists only to satisfy

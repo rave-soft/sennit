@@ -721,7 +721,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// restriction as thread tools, for the same reason: only the
 	// top-level agent of the workspace that owns the task manager gets
 	// them, and there is no manager for a workspace that doesn't own one.
-	if !isSubAgent {
+	// options.background_agents is a further, explicit opt-out: when it is
+	// off the tools are not registered at all, regardless of whether a
+	// task manager is wired. This only affects what a *new* turn is
+	// offered — it does not reach into any task already running.
+	if !isSubAgent && c.backgroundAgentsEnabled() {
 		if taskManager := c.tasksManager(); taskManager != nil {
 			allTools = append(
 				allTools,
@@ -1025,6 +1029,17 @@ func (c *coordinator) tasksManager() tools.TaskManager {
 	c.tasksMu.RLock()
 	defer c.tasksMu.RUnlock()
 	return c.tasks
+}
+
+// backgroundAgentsEnabled reports whether options.background_agents allows
+// *new* background dispatch right now. It is read fresh on every call —
+// never cached — so a config reload takes effect for the next dispatch
+// without touching a task that is already running: that task's own runtime
+// state lives in the task manager, not here, and this gate is never
+// consulted again once a task has started.
+func (c *coordinator) backgroundAgentsEnabled() bool {
+	enabled := c.cfg.Config().Options.BackgroundAgents
+	return enabled == nil || *enabled
 }
 
 func (c *coordinator) IsBusy() bool {

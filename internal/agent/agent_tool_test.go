@@ -22,9 +22,10 @@ import (
 // returns without waiting — a real delegation run is exercised by
 // internal/thread's own tests, not here.
 type fakeTaskManager struct {
-	created []tools.TaskCreateArgs
-	info    tools.TaskInfo
-	err     error
+	created      []tools.TaskCreateArgs
+	info         tools.TaskInfo
+	err          error
+	cancelCalled bool
 }
 
 func (f *fakeTaskManager) Create(_ context.Context, args tools.TaskCreateArgs) (tools.TaskInfo, error) {
@@ -45,7 +46,10 @@ func (f *fakeTaskManager) Get(context.Context, string) (tools.TaskInfo, error) {
 	return tools.TaskInfo{}, nil
 }
 
-func (f *fakeTaskManager) Cancel(context.Context, string, string) error { return nil }
+func (f *fakeTaskManager) Cancel(context.Context, string, string) error {
+	f.cancelCalled = true
+	return nil
+}
 
 func (f *fakeTaskManager) Send(context.Context, string, string) error { return nil }
 
@@ -162,4 +166,73 @@ func TestAgentTool_BackgroundUnavailableReturnsClearError(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "unavailable background must be a clear tool error, not a silent foreground fallback")
 	require.Contains(t, resp.Content, "background unset")
+}
+
+// TestRunBackgroundAgent_RefusedWhenDisabledByConfig proves
+// options.background_agents = false refuses a background dispatch with a
+// clear, model-visible message telling it to retry in the foreground - the
+// same shape as the no-manager refusal above - and never reaches the task
+// manager at all, even though one is wired.
+func TestRunBackgroundAgent_RefusedWhenDisabledByConfig(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+	disabled := false
+	coord.cfg.Config().Options.BackgroundAgents = &disabled
+
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X")
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "a disabled switch must refuse, not silently run in the foreground")
+	require.Contains(t, resp.Content, "background_agents")
+	require.Contains(t, resp.Content, "background unset")
+	require.Empty(t, fake.created, "a refused dispatch must never reach the task manager")
+}
+
+// TestRunBackgroundAgent_AllowedWhenExplicitlyEnabled proves the option's
+// true value dispatches exactly like its unset (default) value already
+// covered by TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately.
+func TestRunBackgroundAgent_AllowedWhenExplicitlyEnabled(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+	enabled := true
+	coord.cfg.Config().Options.BackgroundAgents = &enabled
+
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X")
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Len(t, fake.created, 1)
+}
+
+// TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask proves what the
+// gate is documented to mean (see Options.BackgroundAgents and
+// coordinator.backgroundAgentsEnabled): turning the switch off only blocks
+// *new* dispatch through this same call from here on - it never reaches
+// into the task manager to cancel, list, or otherwise touch a task already
+// running. A config reload flips the option by swapping in a new *Config
+// (ConfigStore.Config's own doc comment), which is simulated here the same
+// way the rest of this package's tests mutate live Options in place (see
+// coderAgent in common_test.go) - the read path (backgroundAgentsEnabled)
+// is identical either way, since it always re-reads c.cfg.Config() fresh.
+func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+
+	// Dispatched while enabled - this is the "in-flight task" the reload
+	// below must leave alone.
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "do work")
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Len(t, fake.created, 1)
+
+	disabled := false
+	coord.cfg.Config().Options.BackgroundAgents = &disabled
+
+	// New dispatch is refused from here on...
+	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "more work")
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Len(t, fake.created, 1, "the refused call must never reach the task manager")
+
+	// ...but nothing about the toggle itself reaches into the task
+	// manager: no Cancel call was ever made as a side effect of it.
+	require.False(t, fake.cancelCalled, "toggling the option off must not cancel a task already running")
 }

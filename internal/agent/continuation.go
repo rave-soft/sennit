@@ -48,6 +48,11 @@ const continuationPromptPlaceholder = "(background delegation continuation)"
 // is what drains it, via drainCompletionsForStep, once (and only once)
 // this call actually becomes the active turn.
 //
+// reason is logged, not behavioral: it distinguishes the two callers
+// (a completion just arrived and the session was already idle, vs. the
+// session just went idle with something already waiting) for anyone
+// reading the logs later.
+//
 // The continuation is dispatched through the exact same a.Run entry
 // point every other turn uses — not a bespoke "start streaming" bypass —
 // so its own busy-check-and-become-active transition is what actually
@@ -73,12 +78,14 @@ const continuationPromptPlaceholder = "(background delegation continuation)"
 // mid-turn case) still applies, and run()'s exit hook
 // (wakeFromInboxIfIdle) will retry it automatically once this failed
 // attempt goes idle.
-func (a *sessionAgent) startContinuation(ctx context.Context, sessionID string) {
+func (a *sessionAgent) startContinuation(ctx context.Context, sessionID, reason string) {
 	call := SessionAgentCall{
 		SessionID:    sessionID,
 		Prompt:       continuationPromptPlaceholder,
 		Continuation: true,
 	}
+
+	slog.Info("Continuation started", "session", sessionID, "reason", reason)
 
 	// Detached from ctx's cancellation (ctx here is internal/thread's own
 	// long-lived lifecycle context, canceled at workspace shutdown) but
@@ -135,5 +142,5 @@ func (a *sessionAgent) wakeFromInboxIfIdle(ctx context.Context, sessionID string
 	if !a.dispatch.wakeEligible(sessionID) {
 		return
 	}
-	a.startContinuation(ctx, sessionID)
+	a.startContinuation(ctx, sessionID, "session went idle with a completion already queued")
 }

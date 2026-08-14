@@ -100,6 +100,15 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 // and got foreground without being told would believe work is proceeding
 // in parallel when it is not.
 func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, prompt string) (fantasy.ToolResponse, error) {
+	// options.background_agents is the workspace-level opt-out. Checked
+	// first, ahead of the cascade-depth and manager checks below, because
+	// it is the most fundamental of the three: config said no, full stop.
+	if !c.backgroundAgentsEnabled() {
+		return fantasy.NewTextErrorResponse(
+			"Background delegation is disabled in this workspace (options.background_agents). Retry the same request with background unset to run it in the foreground instead.",
+		), nil
+	}
+
 	// Refuse before touching the task manager at all: a turn already at
 	// the cascade limit still runs (it has real work to do — the
 	// completion that woke it), but must not be able to start yet

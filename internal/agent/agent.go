@@ -367,7 +367,7 @@ func (a *sessionAgent) DeliverTaskCompletion(ctx context.Context, sessionID stri
 	if !a.dispatch.enqueueCompletion(sessionID, completion) {
 		return
 	}
-	a.startContinuation(ctx, sessionID)
+	a.startContinuation(ctx, sessionID, "completion arrived while session was idle")
 }
 
 // drainCompletionsForStep removes and returns every completion queued for
