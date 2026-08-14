@@ -3,10 +3,8 @@ package model
 // The session panel is the merged strip between chat and the editor that
 // replaces the old, separately-wired "pills" (todo progress + queued-prompt
 // pills) and "threads dock" (active background threads). It paints, top to
-// bottom: up to threadsDockVisibleCap active-thread blocks, up to
-// delegationsVisibleCap running-delegation blocks (agent/agentic_fetch —
-// the same two-line block shape as threads), a collapsible todos section,
-// and an always-visible queued-prompts list.
+// bottom: up to threadsDockVisibleCap active-thread blocks, a collapsible
+// todos section, and an always-visible queued-prompts list.
 //
 // sessionPanelPlan is the single source of truth for how many rows each
 // section gets and what it contains. sessionPanelHeight and drawSessionPanel
@@ -16,7 +14,6 @@ package model
 // computed independently.
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -25,7 +22,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
@@ -44,19 +40,15 @@ func threadDockStatusText(t proto.Thread, activity threadDockActivity) string {
 
 // panelSpinnerWanted reports whether the panel currently shows any live
 // work worth animating: an in-progress todo while the local agent is busy
-// (the original todo-spinner condition), a running delegation block, or
-// an active background thread. The spinner used to belong to the todos
-// list alone; the thread/delegation blocks now share it, so it must keep
-// ticking even when the local agent is idle and only background threads
-// are working.
+// (the original todo-spinner condition), or an active background thread.
+// The spinner used to belong to the todos list alone; the thread blocks
+// now share it, so it must keep ticking even when the local agent is idle
+// and only background threads are working.
 func (m *UI) panelSpinnerWanted() bool {
 	if !m.hasSession() {
 		return false
 	}
 	if m.isAgentBusy() && hasInProgressTodo(m.session.Todos) {
-		return true
-	}
-	if m.chat != nil && len(m.chat.RunningDelegations()) > 0 {
 		return true
 	}
 	for _, t := range m.threadsDock.cache.value {
@@ -134,97 +126,6 @@ func hasInProgressTodo(todos []session.Todo) bool {
 		}
 	}
 	return false
-}
-
-// delegationsVisibleCap caps the panel's delegations section the same way
-// threadsDockVisibleCap caps threads: a handful of live blocks is useful,
-// a long backlog just crowds out chat.
-const delegationsVisibleCap = 3
-
-// panelDelegation is a running delegation's identity, captured at plan
-// time — enough for row math and the click/drill-in hit-test
-// (messageID/toolCallID) without touching width-dependent text. Its
-// display text (name/task/status line) is resolved from item at draw
-// time, mirroring how thread blocks resolve their text from the raw
-// proto.Thread only at draw time (see threadDockStatusText) — row counts
-// must never depend on rendering width, only per-row truncation does.
-type panelDelegation struct {
-	item       chat.ToolMessageItem
-	messageID  string
-	toolCallID string
-}
-
-// runningDelegationBlocks enumerates the current session's running
-// delegations for the panel, capped at delegationsVisibleCap, plus a count
-// of how many more are running beyond the cap — mirroring
-// visibleDockThreads. No IO: Chat.RunningDelegations reads the already-
-// loaded chat items directly, the same live-pushed data
-// (todos/tokens/nested-tool count) the transcript's own collapsed-
-// delegation summary already uses.
-func (m *UI) runningDelegationBlocks() ([]panelDelegation, int) {
-	if !m.hasSession() {
-		return nil, 0
-	}
-	items := m.chat.RunningDelegations()
-	if len(items) == 0 {
-		return nil, 0
-	}
-	more := 0
-	if len(items) > delegationsVisibleCap {
-		more = len(items) - delegationsVisibleCap
-		items = items[:delegationsVisibleCap]
-	}
-	blocks := make([]panelDelegation, 0, len(items))
-	for _, item := range items {
-		blocks = append(blocks, panelDelegation{
-			item:       item,
-			messageID:  item.MessageID(),
-			toolCallID: item.ToolCall().ID,
-		})
-	}
-	return blocks, more
-}
-
-// delegationTaskParams is the minimal shape shared by proto.AgentParams and
-// tools.AgenticFetchParams — both carry a "prompt" field describing the
-// delegation's task, which is all the panel block's line 1 needs. Decoding
-// it locally (rather than importing agent/tools types just for this)
-// keeps the panel block agnostic to which delegation tool produced it.
-type delegationTaskParams struct {
-	Prompt string `json:"prompt"`
-}
-
-// delegationName resolves a delegation block's display name via
-// chat.DelegationInfoProvider, falling back to a generic label on the
-// (should-never-happen) chance an item doesn't implement it.
-func delegationName(item chat.ToolMessageItem) string {
-	if di, ok := item.(chat.DelegationInfoProvider); ok {
-		name, _, _, _, _ := di.DelegationInfo()
-		if name != "" {
-			return name
-		}
-	}
-	return "delegation"
-}
-
-// delegationTask extracts a delegation's task/prompt first line from its
-// raw tool-call input.
-func delegationTask(item chat.ToolMessageItem) string {
-	var params delegationTaskParams
-	_ = json.Unmarshal([]byte(item.ToolCall().Input), &params)
-	return threadDockGoalFirstLine(params.Prompt)
-}
-
-// delegationStatusLine resolves a delegation's live status line (elapsed,
-// step count, last tool, tokens) via chat.PanelLiveActivityProvider — the
-// exact same text the transcript's own pending render used to show inline
-// before the panel took over that job. "" if the item doesn't implement
-// the interface or there's nothing to show yet.
-func delegationStatusLine(item chat.ToolMessageItem, sty *styles.Styles, width int) string {
-	if lp, ok := item.(chat.PanelLiveActivityProvider); ok {
-		return lp.PanelStatusLine(sty, width)
-	}
-	return ""
 }
 
 // splitTodosByStatus splits todos into in-progress, pending, and completed,
@@ -348,16 +249,6 @@ type sessionPanelPlan struct {
 	// the visible cap or the collapse state — what the header reports.
 	threadsActive int
 
-	// delegations are currently-running (no result yet) top-level
-	// sub-agent tool calls in this session's own chat, rendered with the
-	// same block shape as threads — see panelBlock/drawPanelBlocks.
-	delegations     []panelDelegation
-	delegationsMore int
-	delegationsRows int
-	// delegationsHeaderRows mirrors threadsHeaderRows for the "agents"
-	// section-separator line.
-	delegationsHeaderRows int
-
 	todosVisible   bool // at least one incomplete todo exists
 	todosExpanded  bool // m.panel.expanded, verbatim — budget shedding never forces this false anymore
 	todosCompleted int  // for the header ratio — independent of what's dropped below
@@ -467,14 +358,6 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.todosViewportRows = plan.todosContentRows
 	}
 
-	delegations, delegationsMore := m.runningDelegationBlocks()
-	plan.delegations = delegations
-	plan.delegationsMore = delegationsMore
-	plan.delegationsRows = len(delegations) * 2
-	if delegationsMore > 0 {
-		plan.delegationsRows++
-	}
-
 	plan.queue = m.wsCache.promptQueueItems
 
 	headerRows := func() int {
@@ -483,7 +366,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		}
 		return 1
 	}
-	// threadsHeaderRows/delegationsHeaderRows/queueHeaderRows are closures,
+	// threadsHeaderRows/queueHeaderRows are closures,
 	// not snapshotted values, so over() always reflects the CURRENT
 	// row/item counts — a header disappears for free the instant its
 	// section is shed to zero, which shrinks over() by exactly the row it
@@ -498,12 +381,6 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		}
 		return 0
 	}
-	delegationsHeaderRows := func() int {
-		if plan.delegationsRows > 0 {
-			return 1
-		}
-		return 0
-	}
 	queueHeaderRows := func() int {
 		if len(plan.queue) > 0 {
 			return 1
@@ -512,16 +389,14 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	}
 	over := func() int {
 		return threadsHeaderRows() + plan.threadsRows +
-			delegationsHeaderRows() + plan.delegationsRows +
 			headerRows() + plan.todosViewportRows +
 			queueHeaderRows() + len(plan.queue) - budget
 	}
 
-	// Shedding priority, highest to lowest: threads > delegations >
+	// Shedding priority, highest to lowest: threads >
 	// todos-in-progress (never touched — see the floor below) > todos
 	// pending/done (display-windowed via todosViewportRows, but never
-	// dropped from the plan) > queue tail > delegations row budget >
-	// threads row budget. The viewport never shrinks below
+	// dropped from the plan) > queue tail > threads row budget. The viewport never shrinks below
 	// len(todosInProgress): the in-progress rows are what "collapsing is
 	// never total" always guaranteed, and that guarantee carries over here
 	// as "the default (unscrolled) viewport always shows every in-progress
@@ -536,9 +411,6 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	if o := over(); o > 0 {
 		keep := max(0, len(plan.queue)-o)
 		plan.queue = plan.queue[:keep]
-	}
-	if o := over(); o > 0 {
-		plan.delegationsRows = max(0, plan.delegationsRows-o)
 	}
 	if o := over(); o > 0 {
 		// Shed whole blocks, not rows. A thread block is two rows, so
@@ -558,10 +430,8 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 
 	plan.todosScrollable = plan.todosExpanded && plan.todosVisible && plan.todosViewportRows < plan.todosContentRows
 	plan.threadsHeaderRows = threadsHeaderRows()
-	plan.delegationsHeaderRows = delegationsHeaderRows()
 	plan.queueHeaderRows = queueHeaderRows()
 	plan.totalRows = plan.threadsHeaderRows + plan.threadsRows +
-		plan.delegationsHeaderRows + plan.delegationsRows +
 		headerRows() + plan.todosViewportRows +
 		plan.queueHeaderRows + len(plan.queue)
 	return plan
@@ -585,7 +455,7 @@ func (m *UI) sessionPanelHeight(available int) int {
 // dependency, so it can be called both from a section's draw function
 // (which paints from it) and, via sessionPanelRowLayout, from the
 // click/hover hit-test, which must not wait for a Draw call to have
-// populated anything. Shared by the threads and delegations sections,
+// populated anything. Used by the threads section,
 // which use the identical two-line-block shape.
 func panelBlockGeometry(area uv.Rectangle, n int) []uv.Rectangle {
 	if area.Dy() <= 0 || area.Dx() <= 0 || n == 0 {
@@ -627,9 +497,9 @@ func threadBlockGeometry(area uv.Rectangle, threads []proto.Thread) []uv.Rectang
 // call this instead of duplicating the row-advancing math. todosListRect is
 // the area of the (possibly scrollable) todo rows below the header, for the
 // mouse-wheel hit-test that adjusts m.panelTodosScrollOffset.
-func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects, delegationBlockRects []uv.Rectangle, todosHeaderRect, todosListRect, threadsHeaderRect uv.Rectangle) {
+func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects []uv.Rectangle, todosHeaderRect, todosListRect, threadsHeaderRect uv.Rectangle) {
 	if area.Dy() <= 0 || area.Dx() <= 0 {
-		return nil, nil, uv.Rectangle{}, uv.Rectangle{}, uv.Rectangle{}
+		return nil, uv.Rectangle{}, uv.Rectangle{}, uv.Rectangle{}
 	}
 
 	row := area
@@ -654,16 +524,6 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 		row.Max.Y = row.Min.Y
 	}
 
-	if plan.delegationsRows > 0 && row.Min.Y < area.Max.Y {
-		row.Min.Y = min(row.Min.Y+plan.delegationsHeaderRows, area.Max.Y) // "agents" section-separator line, not hit-tested.
-		delegationsArea := area
-		delegationsArea.Min.Y = row.Min.Y
-		delegationsArea.Max.Y = min(row.Min.Y+plan.delegationsRows, area.Max.Y)
-		delegationBlockRects = panelBlockGeometry(delegationsArea, len(plan.delegations))
-		row.Min.Y = delegationsArea.Max.Y
-		row.Max.Y = row.Min.Y
-	}
-
 	if plan.todosVisible && row.Min.Y < area.Max.Y {
 		todosHeaderRect = row
 		todosHeaderRect.Max.Y = todosHeaderRect.Min.Y + 1
@@ -673,11 +533,11 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 		todosListRect.Max.Y = min(todosListRect.Min.Y+plan.todosViewportRows, area.Max.Y)
 	}
 
-	return threadBlockRects, delegationBlockRects, todosHeaderRect, todosListRect, threadsHeaderRect
+	return threadBlockRects, todosHeaderRect, todosListRect, threadsHeaderRect
 }
 
 // panelBlockDrawSpec supplies the context-specific content for the shared
-// two-line thread/delegation drawing path. Geometry, hover treatment,
+// two-line thread block drawing path. Geometry, hover treatment,
 // truncation, and footer placement stay identical for both sections.
 type panelBlockDrawSpec struct {
 	count  int
@@ -774,8 +634,6 @@ func clampPanelTodosScrollOffset(offset int, plan sessionPanelPlan) int {
 func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	m.panelThreadRects = nil
 	m.panelThreads = nil
-	m.panelDelegationRects = nil
-	m.panelDelegations = nil
 	m.panelTodosHeaderRect = uv.Rectangle{}
 	m.panelThreadsHeaderRect = uv.Rectangle{}
 	m.panelTodosListRect = uv.Rectangle{}
@@ -786,7 +644,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	plan := m.sessionPanelPlan(area.Dy())
 	t := m.com.Styles
 	width := area.Dx()
-	_, _, todosHeaderRect, todosListRect, _ := sessionPanelRowLayout(area, plan)
+	_, todosHeaderRect, todosListRect, _ := sessionPanelRowLayout(area, plan)
 	row := area
 	row.Max.Y = row.Min.Y
 
@@ -840,27 +698,6 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		})
 		m.panelThreads = plan.threads
 		row.Min.Y = threadsArea.Max.Y
-		row.Max.Y = row.Min.Y
-	}
-
-	if plan.delegationsRows > 0 && row.Min.Y < area.Max.Y {
-		if plan.delegationsHeaderRows > 0 {
-			row.Min.Y = drawPanelLine(scr, area, row.Min.Y, common.Section(t, "agents", width))
-			row.Max.Y = row.Min.Y
-		}
-		delegationsArea := area
-		delegationsArea.Min.Y = row.Min.Y
-		delegationsArea.Max.Y = min(row.Min.Y+plan.delegationsRows, area.Max.Y)
-		m.panelDelegationRects = m.drawPanelBlocks(scr, delegationsArea, m.hoveredPanelDelegation, panelBlockDrawSpec{
-			count: len(plan.delegations), more: plan.delegationsMore, footer: "…and %d more delegations",
-			name: func(i int) string { return delegationName(plan.delegations[i].item) },
-			task: func(i int) string { return delegationTask(plan.delegations[i].item) },
-			line2: func(i int) string {
-				return "  " + m.panelActivityIcon() + " " + delegationStatusLine(plan.delegations[i].item, m.com.Styles, width-4)
-			},
-		})
-		m.panelDelegations = plan.delegations
-		row.Min.Y = delegationsArea.Max.Y
 		row.Max.Y = row.Min.Y
 	}
 

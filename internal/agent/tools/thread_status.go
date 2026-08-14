@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 
@@ -34,6 +35,18 @@ func NewThreadStatusTool(manager ThreadManager) fantasy.AgentTool {
 			}
 
 			st, err := manager.Get(ctx, params.ID)
+			if errors.Is(err, ErrThreadNotFound) {
+				// Say what the absence most likely means. A thread is
+				// deleted once its branch lands, so "not found" is the
+				// normal answer for one that finished — reporting only
+				// the miss invites the model to conclude the thread was
+				// lost and start it over.
+				return fantasy.NewTextErrorResponse(fmt.Sprintf(
+					"no thread %q. A thread is removed once it merges — if it existed, "+
+						"it most likely landed and was cleared away; its merge is recorded "+
+						"in the session history. Use thread_list to see what is still running.",
+					params.ID)), nil
+			}
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}

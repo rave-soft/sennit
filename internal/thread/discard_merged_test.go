@@ -283,3 +283,29 @@ func TestThreadWorktreeLivesInsideTheDataDirectory(t *testing.T) {
 	require.Empty(t, strings.TrimSpace(runGit(t, repo, "status", "--porcelain")),
 		"the repository must not see its own thread worktrees")
 }
+
+// TestResolve_MissingThreadReportsADomainError: a merged thread is
+// deleted, so asking about one by name is an ordinary thing to do and the
+// answer has to be readable. It used to surface the store's own
+// "sql: no rows in result set" all the way into the agent's tool result,
+// which says nothing about threads at all.
+func TestResolve_MissingThreadReportsADomainError(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "lands-and-goes", Goal: "do it"})
+	require.NoError(t, err)
+
+	writeFile(t, st.WorktreePath, "output.txt", "done\n")
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	requireDiscardedEventually(t, mgr, repo, st)
+
+	_, err = mgr.Get(t.Context(), st.Name)
+	require.ErrorIs(t, err, ErrNotFound)
+	require.Contains(t, err.Error(), st.Name, "and it must name what was asked for")
+	require.NotContains(t, err.Error(), "sql:", "the store's wording must not reach the caller")
+
+	_, err = mgr.Get(t.Context(), "never-existed")
+	require.ErrorIs(t, err, ErrNotFound)
+}

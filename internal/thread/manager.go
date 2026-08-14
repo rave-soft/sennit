@@ -172,11 +172,21 @@ func (m *Manager) Get(ctx context.Context, idOrName string) (Thread, error) {
 }
 
 // resolve looks a thread up by ID first, falling back to name.
+//
+// A miss is reported as [ErrNotFound] rather than whatever the store said.
+// The store's own "sql: no rows in result set" is an implementation detail
+// that means nothing to the caller, and since a merged thread is removed
+// (see discardMerged), asking about one by name is now an ordinary thing
+// to do — the answer has to be a sentence, not a database message.
 func (m *Manager) resolve(ctx context.Context, idOrName string) (Thread, error) {
 	if st, err := m.store.Get(ctx, idOrName); err == nil {
 		return st, nil
 	}
-	return m.store.GetByName(ctx, idOrName)
+	st, err := m.store.GetByName(ctx, idOrName)
+	if err != nil {
+		return Thread{}, fmt.Errorf("%w: %q", ErrNotFound, idOrName)
+	}
+	return st, nil
 }
 
 // Create validates and dispatches a new thread: it records the thread,
