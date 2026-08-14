@@ -125,23 +125,37 @@ func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 }
 
 func (r *Registry) RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
-	session, ok := r.sessions.Get(name)
+	owner, session, ok := r.sessionOwner(name)
 	if !ok {
 		slog.Warn("Refresh tools: no session", "name", name)
 		return
 	}
-
 	tools, err := getTools(ctx, session)
 	if err != nil {
-		r.updateState(name, StateError, err, nil, Counts{})
+		r.updateStateForSession(name, owner, session, StateError, err, Counts{})
 		return
 	}
-
-	toolCount := r.updateTools(cfg, name, tools)
-
+	m, ok := cfg.Config().MCP[name]
+	if !ok {
+		return
+	}
+	tools = filterTools(m, tools)
+	r.publishMu.Lock()
+	defer r.publishMu.Unlock()
+	if !r.ownsSessionLocked(name, owner, session) {
+		return
+	}
+	r.catalogMu.Lock()
+	if len(tools) == 0 {
+		r.allTools.Del(name)
+	} else {
+		r.allTools.Set(name, tools)
+	}
+	r.catalogChanged()
+	r.catalogMu.Unlock()
 	prev, _ := r.states.Get(name)
-	prev.Counts.Tools = toolCount
-	r.updateState(name, StateConnected, nil, session, prev.Counts)
+	prev.Counts.Tools = len(tools)
+	r.updateStateLocked(name, StateConnected, nil, session, prev.Counts)
 }
 
 // registerSessionTools lists the tools a live session exposes and writes them

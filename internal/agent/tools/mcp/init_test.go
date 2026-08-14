@@ -2,17 +2,24 @@ package mcp
 
 import (
 	"context"
+	"errors"
+	"io"
 	"maps"
+	"net/http"
 	"os"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/env"
 	"github.com/rave-soft/braid/internal/oauth"
+	mcpoauth "github.com/rave-soft/braid/internal/oauth/mcp"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"golang.org/x/oauth2"
 )
 
 // shellResolverWithPath builds a shell resolver whose env carries PATH
@@ -59,6 +66,121 @@ func TestMCPSession_CancelOnClose(t *testing.T) {
 // the HTTP and SSE branches, success and failure, so a regression in
 // ResolvedURL wiring is caught at the transport layer rather than only
 // at the config layer.
+type testOAuthHandler struct {
+	tokenSource func(context.Context) (oauth2.TokenSource, error)
+	authorize   func(context.Context, *http.Request, *http.Response) error
+}
+
+func (h testOAuthHandler) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
+	return h.tokenSource(ctx)
+}
+
+func (h testOAuthHandler) Authorize(ctx context.Context, req *http.Request, resp *http.Response) error {
+	return h.authorize(ctx, req, resp)
+}
+
+type closeCounter struct{ count atomic.Int32 }
+
+func (c *closeCounter) Read([]byte) (int, error) { return 0, io.EOF }
+func (c *closeCounter) Close() error             { c.count.Add(1); return nil }
+
+func TestOAuthRoundTripperRetryAndCleanup(t *testing.T) {
+	t.Parallel()
+	failedBody := &closeCounter{}
+	var calls atomic.Int32
+	base := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		call := calls.Add(1)
+		body, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		require.Equal(t, "payload", string(body))
+		if call == 1 {
+			return &http.Response{StatusCode: http.StatusUnauthorized, Body: failedBody}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok"))}, nil
+	})
+	var authorize atomic.Int32
+	handler := testOAuthHandler{
+		tokenSource: func(context.Context) (oauth2.TokenSource, error) {
+			return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "token"}), nil
+		},
+		authorize: func(_ context.Context, _ *http.Request, resp *http.Response) error {
+			authorize.Add(1)
+			return resp.Body.Close()
+		},
+	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test", strings.NewReader("payload"))
+	require.NoError(t, err)
+	resp, err := newOAuthRoundTripper(handler, base).RoundTrip(req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, int32(2), calls.Load())
+	require.Equal(t, int32(1), authorize.Load())
+	require.Equal(t, int32(1), failedBody.count.Load())
+	require.Empty(t, req.Header.Get("Authorization"))
+}
+
+func TestOAuthRoundTripperClosesUnauthorizedBodyWhenAuthorizeDoesNot(t *testing.T) {
+	t.Parallel()
+	body := &closeCounter{}
+	handler := testOAuthHandler{
+		tokenSource: func(context.Context) (oauth2.TokenSource, error) { return nil, nil },
+		authorize: func(context.Context, *http.Request, *http.Response) error {
+			return mcpoauth.ErrInteractiveAuthRequired
+		},
+	}
+	resp, err := newOAuthRoundTripper(handler, roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: body}, nil
+	})).RoundTrip(mustRequest(t, http.MethodGet, "https://example.test", nil))
+	if resp != nil {
+		require.NoError(t, resp.Body.Close())
+	}
+	require.Nil(t, resp)
+	require.ErrorIs(t, err, mcpoauth.ErrInteractiveAuthRequired)
+	require.Equal(t, int32(1), body.count.Load())
+}
+
+func mustRequest(t *testing.T, method, url string, body io.Reader) *http.Request {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, url, body)
+	require.NoError(t, err)
+	return req
+}
+
+func TestOAuthRoundTripperClosesBodyBeforeDelegationErrors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		handler testOAuthHandler
+	}{
+		{name: "token source", handler: testOAuthHandler{tokenSource: func(context.Context) (oauth2.TokenSource, error) { return nil, errors.New("source") }}},
+		{name: "token", handler: testOAuthHandler{tokenSource: func(context.Context) (oauth2.TokenSource, error) {
+			return oauth2.ReuseTokenSource(nil, errorTokenSource{}), nil
+		}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body := &closeCounter{}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test", body)
+			require.NoError(t, err)
+			resp, err := newOAuthRoundTripper(tc.handler, roundTripperFunc(func(*http.Request) (*http.Response, error) { t.Fatal("delegated"); return nil, nil })).RoundTrip(req)
+			if resp != nil {
+				require.NoError(t, resp.Body.Close())
+			}
+			require.Error(t, err)
+			require.Equal(t, int32(1), body.count.Load())
+		})
+	}
+}
+
+type errorTokenSource struct{}
+
+func (errorTokenSource) Token() (*oauth2.Token, error) { return nil, errors.New("token") }
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
 func TestCreateTransport_URLResolution(t *testing.T) {
 	t.Parallel()
 
@@ -72,7 +194,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$MCP_HOST/api",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, shell)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
 		require.NoError(t, err)
 		require.NotNil(t, tr)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
@@ -86,7 +208,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPSSE,
 			URL:  "https://$(echo mcp.example.com)/events",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, shell)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
 		require.NoError(t, err)
 		sse, ok := tr.(*mcp.SSEClientTransport)
 		require.True(t, ok, "expected SSEClientTransport, got %T", tr)
@@ -103,7 +225,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$(false)/api",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, shellResolverWithPath(t, nil))
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shellResolverWithPath(t, nil))
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "url:")
@@ -122,7 +244,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$MCP_MISSING_HOST/api",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, shell)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
 		require.NoError(t, err)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
 		require.True(t, ok)
@@ -135,7 +257,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPSSE,
 			URL:  "https://$(false)/events",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, shell)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "url:")
@@ -151,7 +273,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "${MCP_EMPTY:-}",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, shell)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "non-empty 'url'")
@@ -163,7 +285,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 		// expansion, no error on unset vars.
 		tmpl := "https://$MCP_MISSING_HOST/api"
 		m := config.MCPConfig{Type: config.MCPHttp, URL: tmpl}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, config.IdentityResolver())
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, config.IdentityResolver())
 		require.NoError(t, err)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
 		require.True(t, ok)
@@ -194,7 +316,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 				"REFERENCE": "$MY_TOKEN",
 			},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.NoError(t, err)
 		require.NotNil(t, tr)
 
@@ -220,7 +342,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"TOKEN": "$(false)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "env TOKEN")
@@ -239,7 +361,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"FORGEJO_ACCESS_TOKEN": "$(exit 5)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "env FORGEJO_ACCESS_TOKEN")
@@ -260,7 +382,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"FORGEJO_ACCESS_TOKEN": "$FORGEJO_TOKEN_UNSET"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.NoError(t, err)
 		ct, ok := tr.(*mcp.CommandTransport)
 		require.True(t, ok)
@@ -275,7 +397,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Args:    []string{"--token", "$(false)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "arg 1")
@@ -288,7 +410,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Type:    config.MCPStdio,
 			Command: "$(false)",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "invalid mcp command")
@@ -303,7 +425,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Args:    []string{"--token", "$MCP_MISSING"},
 			Env:     map[string]string{"TOKEN": "$(vault read -f token)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, config.IdentityResolver())
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, config.IdentityResolver())
 		require.NoError(t, err)
 		ct, ok := tr.(*mcp.CommandTransport)
 		require.True(t, ok)
@@ -331,7 +453,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 				"X-Static":      "kept",
 			},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.NoError(t, err)
 
 		sct, ok := tr.(*mcp.StreamableClientTransport)
@@ -352,7 +474,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/api",
 			Headers: map[string]string{"Authorization": "$(false)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "header Authorization")
@@ -370,7 +492,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/events",
 			Headers: map[string]string{"Authorization": "$(false)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "header Authorization")
@@ -390,7 +512,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/events",
 			Headers: map[string]string{"Authorization": "$MISSING_TOKEN"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), nil, "test", m, r)
+		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
 		require.NoError(t, err)
 		sse, ok := tr.(*mcp.SSEClientTransport)
 		require.True(t, ok)
@@ -510,19 +632,16 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 			// stale entry from another test can't satisfy the
 			// assertion.
 			defaultRegistry.states.Del(tc.mcpName)
+			defaultRegistry.owners[tc.mcpName] = attemptID{gen: defaultRegistry.currentGen(tc.mcpName), seq: 1}
 			t.Cleanup(func() { defaultRegistry.states.Del(tc.mcpName) })
 
-			sess, err := defaultRegistry.createSession(t.Context(), nil, tc.mcpName, tc.cfg, r, false)
+			sess, err := defaultRegistry.createSession(t.Context(), nil, tc.mcpName, tc.cfg, attemptID{gen: defaultRegistry.currentGen(tc.mcpName), seq: 1}, r, false)
 			require.Error(t, err)
 			require.Nil(t, sess)
 			require.Contains(t, err.Error(), tc.wantErrContains)
-
-			info, ok := GetState(tc.mcpName)
-			require.True(t, ok, "state entry must be written for %q", tc.mcpName)
-			require.Equal(t, StateError, info.State, "expected StateError, got %s", info.State)
-			require.Error(t, info.Error, "state must carry the failure error")
-			require.Contains(t, info.Error.Error(), tc.wantErrContains)
-			require.Nil(t, info.Client, "no client session on failure")
+			// createSession is deliberately a resource factory: only its owning
+			// generation-aware attempt publishes state. This prevents a stale
+			// factory failure from overwriting a newer connection.
 		})
 	}
 }
@@ -770,6 +889,297 @@ func setDistinct(typ reflect.Type, field reflect.Value) {
 
 // TestBeginAuth_UnknownServer proves BeginAuth rejects a server that is not
 // present in the configuration.
+func TestBeginAuth_HungWorkerRetainsExecutionSlotUntilExit(t *testing.T) {
+	const name = "hung-auth"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	release := make(chan struct{})
+	started := make(chan struct{}, 2)
+	var sideEffects atomic.Int32
+	r.runAuth = func(context.Context, *config.ConfigStore, string, config.MCPConfig, attemptID) error {
+		started <- struct{}{}
+		sideEffects.Add(1)
+		<-release
+		return nil
+	}
+	finish, _, err := r.BeginAuth(cfg, name)
+	require.NoError(t, err)
+	<-started
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, finish(ctx), context.Canceled)
+
+	_, _, err = r.BeginAuth(cfg, name)
+	require.ErrorContains(t, err, "already has an authentication in progress")
+	require.Equal(t, int32(1), sideEffects.Load())
+	select {
+	case <-started:
+		t.Fatal("second authentication worker started before the first exited")
+	default:
+	}
+
+	r.authMu.Lock()
+	first := r.authFlows[name]
+	r.authMu.Unlock()
+	require.NotNil(t, first)
+	close(release)
+	<-first.workerDone
+	r.authMu.Lock()
+	_, active := r.authFlows[name]
+	r.authMu.Unlock()
+	require.False(t, active, "worker must remove its exact auth flow on exit")
+
+	r.runAuth = func(context.Context, *config.ConfigStore, string, config.MCPConfig, attemptID) error {
+		started <- struct{}{}
+		sideEffects.Add(1)
+		return nil
+	}
+	finish2, _, err := r.BeginAuth(cfg, name)
+	require.NoError(t, err)
+	<-started
+	require.NoError(t, finish2(t.Context()))
+	require.Equal(t, int32(2), sideEffects.Load())
+}
+
+func TestBeginAuth_CancelSettlesExactStartingOwner(t *testing.T) {
+	const name = "cancel-auth"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	started := make(chan struct{})
+	exited := make(chan struct{})
+	r.runAuth = func(ctx context.Context, _ *config.ConfigStore, name string, m config.MCPConfig, owner attemptID) error {
+		r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
+		close(started)
+		<-ctx.Done()
+		close(exited)
+		return ctx.Err()
+	}
+	_, cancel, err := r.BeginAuth(cfg, name)
+	require.NoError(t, err)
+	<-started
+	cancel()
+
+	r.authMu.Lock()
+	flow := r.authFlows[name]
+	r.authMu.Unlock()
+	require.NotNil(t, flow)
+	<-exited
+	<-flow.workerDone
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateNeedsAuth, info.State)
+}
+
+func TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState(t *testing.T) {
+	tests := []struct {
+		name  string
+		state State
+		newer bool
+	}{
+		{name: "disabled", state: StateDisabled},
+		{name: "connected", state: StateConnected},
+		{name: "new-generation", state: StateStarting, newer: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const name = "stale-cancel"
+			r := NewRegistry()
+			cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+			started := make(chan struct{})
+			release := make(chan struct{})
+			r.runAuth = func(context.Context, *config.ConfigStore, string, config.MCPConfig, attemptID) error {
+				close(started)
+				<-release
+				return context.Canceled
+			}
+			_, cancel, err := r.BeginAuth(cfg, name)
+			require.NoError(t, err)
+			<-started
+			if tt.newer {
+				r.publishMu.Lock()
+				r.gens.Set(name, r.currentGen(name)+1)
+				r.owners[name] = attemptID{gen: r.currentGen(name), seq: r.authAttempt.Add(1)}
+				r.updateStateLocked(name, tt.state, nil, nil, Counts{})
+				r.publishMu.Unlock()
+			} else {
+				r.updateState(name, tt.state, nil, nil, Counts{})
+			}
+			cancel()
+			close(release)
+			r.authMu.Lock()
+			flow := r.authFlows[name]
+			r.authMu.Unlock()
+			<-flow.workerDone
+			info, ok := r.states.Get(name)
+			require.True(t, ok)
+			require.Equal(t, tt.state, info.State)
+		})
+	}
+}
+
+func TestBeginAuth_PanicClosesPublishedHandlerOnce(t *testing.T) {
+	const name = "panic-auth"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	var closes atomic.Int32
+	r.runAuth = func(_ context.Context, _ *config.ConfigStore, name string, _ config.MCPConfig, owner attemptID) error {
+		auth := &ownedAuthHandler{closeFn: func() { closes.Add(1) }}
+		r.publishMu.Lock()
+		r.authURLs.Set(name, authPublication{auth: auth, gen: owner.gen, attempt: owner.seq})
+		r.publishMu.Unlock()
+		panic("boom")
+	}
+	finish, _, err := r.BeginAuth(cfg, name)
+	require.NoError(t, err)
+	require.ErrorContains(t, finish(t.Context()), "panic in MCP authentication")
+	require.Equal(t, int32(1), closes.Load())
+	_, ok := r.authURLs.Get(name)
+	require.False(t, ok)
+}
+
+func TestPublishSessionFailureCleansDetachedAuthOnce(t *testing.T) {
+	const name = "post-connect-failure"
+	r := NewRegistry()
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	var closes atomic.Int32
+	auth := &ownedAuthHandler{closeFn: func() { closes.Add(1) }}
+	session, _ := liveSession(t, "tool")
+	session.auth = auth
+	require.NoError(t, session.Close())
+	r.publishMu.Lock()
+	r.authURLs.Set(name, authPublication{auth: auth, gen: owner.gen, attempt: owner.seq})
+	r.publishMu.Unlock()
+
+	err = r.publishSession(t.Context(), name, config.MCPConfig{}, owner, session)
+	require.Error(t, err)
+	r.detachAuth(name, owner, nil).Close()
+	require.Equal(t, int32(1), closes.Load())
+	_, ok := r.authURLs.Get(name)
+	require.False(t, ok)
+}
+
+func TestOAuthTokenPersistenceCurrentOwnerPersistsOnce(t *testing.T) {
+	const name = "token-owner"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.updateStateFor(name, owner, StateStarting, nil)
+	var writes atomic.Int32
+	r.tokenPersist = func(_ context.Context, _ *config.ConfigStore, key string, value any) error {
+		writes.Add(1)
+		require.Equal(t, "mcp.token-owner.oauth_token", key)
+		require.Equal(t, "fresh", value.(*oauth.Token).AccessToken)
+		return nil
+	}
+
+	r.persistOAuthToken(t.Context(), cfg, name, owner, &oauth.Token{AccessToken: "fresh"})
+
+	require.Equal(t, int32(1), writes.Load())
+}
+
+func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T) {
+	for _, action := range []string{"teardown", "remove", "disable", "close"} {
+		t.Run(action, func(t *testing.T) {
+			const name = "token-owner"
+			r := NewRegistry()
+			cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+			owner, err := r.beginAttempt(name)
+			require.NoError(t, err)
+			r.updateStateFor(name, owner, StateStarting, nil)
+			blocked := make(chan struct{})
+			release := make(chan struct{})
+			r.beforeTokenPersist = func() { close(blocked); <-release }
+			var writes atomic.Int32
+			r.tokenPersist = func(context.Context, *config.ConfigStore, string, any) error {
+				writes.Add(1)
+				return nil
+			}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				r.persistOAuthToken(context.Background(), cfg, name, owner, &oauth.Token{AccessToken: "stale"})
+			}()
+			<-blocked
+			switch action {
+			case "teardown":
+				r.teardown(name)
+			case "remove":
+				r.removeServer(name)
+			case "disable":
+				require.NoError(t, r.DisableSingle(cfg, name))
+			case "close":
+				require.NoError(t, r.Close(t.Context()))
+			}
+			close(release)
+			<-done
+			require.Zero(t, writes.Load())
+			_, hasSession := r.sessions.Get(name)
+			require.False(t, hasSession)
+			if action == "remove" {
+				_, hasState := r.states.Get(name)
+				require.False(t, hasState)
+			}
+		})
+	}
+}
+
+func TestOAuthTokenPersistenceReservedWriteDelaysTeardown(t *testing.T) {
+	const name = "token-owner"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.updateStateFor(name, owner, StateStarting, nil)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	r.tokenPersist = func(context.Context, *config.ConfigStore, string, any) error {
+		close(started)
+		<-release
+		return nil
+	}
+	go r.persistOAuthToken(context.Background(), cfg, name, owner, &oauth.Token{AccessToken: "fresh"})
+	<-started
+	teardownDone := make(chan struct{})
+	go func() { r.teardown(name); close(teardownDone) }()
+	select {
+	case <-teardownDone:
+		t.Fatal("teardown returned while a reserved token write was in flight")
+	default:
+	}
+	close(release)
+	<-teardownDone
+}
+
+func TestOwnedAuthHandlerSharedPublicationAndSessionClosesOnce(t *testing.T) {
+	for _, action := range []string{"teardown", "close"} {
+		t.Run(action, func(t *testing.T) {
+			const name = "shared-auth"
+			r := NewRegistry()
+			var closes atomic.Int32
+			auth := &ownedAuthHandler{closeFn: func() { closes.Add(1) }}
+			session, _ := liveSession(t, "tool")
+			session.auth = auth
+			owner, err := r.beginAttempt(name)
+			require.NoError(t, err)
+			r.publishMu.Lock()
+			r.sessions.Set(name, session)
+			r.sessionOwners[name] = owner
+			r.authURLs.Set(name, authPublication{auth: auth, gen: owner.gen, attempt: owner.seq})
+			r.publishMu.Unlock()
+			if action == "teardown" {
+				r.teardown(name)
+			} else {
+				require.NoError(t, r.Close(t.Context()))
+			}
+			require.Equal(t, int32(1), closes.Load())
+			_, ok := r.authURLs.Get(name)
+			require.False(t, ok)
+		})
+	}
+}
+
 func TestBeginAuth_UnknownServer(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{})
 	_, _, err := BeginAuth(cfg, "missing")
@@ -789,33 +1199,4 @@ func TestBeginAuth_NonOAuth(t *testing.T) {
 		_, _, err := BeginAuth(cfg, name)
 		require.ErrorContains(t, err, "does not use OAuth", "name %q", name)
 	}
-}
-
-// TestBeginAuth_Concurrent proves only one browser-suppressed flow per
-// server may be in progress at a time; a second BeginAuth fails fast while
-// the first is outstanding, and succeeds once the first has finished.
-func TestBeginAuth_Concurrent(t *testing.T) {
-	const name = "oauth-http"
-	cfg := config.NewTestStore(&config.Config{
-		MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.com/mcp", OAuth: true}},
-	})
-
-	finish, cancel, err := BeginAuth(cfg, name)
-	require.NoError(t, err)
-	t.Cleanup(cancel)
-
-	// A second flow for the same server must fail fast while the first is
-	// still outstanding.
-	_, _, err = BeginAuth(cfg, name)
-	require.ErrorContains(t, err, "already has an authentication in progress")
-
-	// Finishing the first flow frees the slot for the next caller. Cancel
-	// the request context so finish returns promptly without dialing.
-	ctx, cancelCtx := context.WithCancel(context.Background())
-	cancelCtx()
-	_ = finish(ctx)
-
-	_, cancel2, err := BeginAuth(cfg, name)
-	require.NoError(t, err)
-	cancel2()
 }

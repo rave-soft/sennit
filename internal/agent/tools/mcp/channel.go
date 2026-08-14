@@ -46,6 +46,8 @@ const (
 	// maxChannelMetaValueBytes caps a single meta attribute value. Longer
 	// values cause the entry to be dropped.
 	maxChannelMetaValueBytes = 1024
+	maxChannelPendingCount   = 64
+	maxChannelPendingBytes   = 256 * 1024
 )
 
 // metaKeyPattern restricts meta attribute keys to valid XML names: a letter
@@ -213,9 +215,10 @@ const (
 // or buffered. During capability negotiation the gate is undecided and
 // messages are buffered; once resolved, the buffer is drained or discarded.
 type channelGate struct {
-	state   atomic.Int32 // channelGateState
-	mu      sync.Mutex
-	pending []json.RawMessage
+	state        atomic.Int32 // channelGateState
+	mu           sync.Mutex
+	pending      []json.RawMessage
+	pendingBytes int
 }
 
 func newChannelGate() *channelGate {
@@ -241,6 +244,7 @@ func (g *channelGate) resolve(open bool) []json.RawMessage {
 	}
 	buffered := g.pending
 	g.pending = nil
+	g.pendingBytes = 0
 	if open {
 		g.state.Store(int32(stateGateOpen))
 		return buffered // drain the buffer for the caller to publish
@@ -269,7 +273,15 @@ func (g *channelGate) accept(raw json.RawMessage) json.RawMessage {
 		case stateGateClosed:
 			return nil
 		}
-		g.pending = append(g.pending, raw)
+		if len(g.pending) >= maxChannelPendingCount || len(raw) > maxChannelPendingBytes-g.pendingBytes {
+			g.pending = nil
+			g.pendingBytes = 0
+			g.state.Store(int32(stateGateClosed))
+			return nil
+		}
+		copyRaw := append(json.RawMessage(nil), raw...)
+		g.pending = append(g.pending, copyRaw)
+		g.pendingBytes += len(copyRaw)
 		return nil
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/braid/internal/config"
@@ -128,6 +129,49 @@ func TestUpdateState_ErrorClosesSessionAndClearsTools(t *testing.T) {
 // attempt, StateStarting records the config the in-flight attempt is using,
 // StateDisabled clears the recorded config so a re-enable restarts, and every
 // other transition preserves what was there.
+func TestUpdateState_ErrorDetachesBeforeClosingOutsidePublishLock(t *testing.T) {
+	const name = "test-error-close-order"
+	r := NewRegistry()
+	session, _ := liveSession(t, "do_thing")
+	closeStarted := make(chan struct{})
+	releaseClose := make(chan struct{})
+	session.closeIdle = func() {
+		close(closeStarted)
+		<-releaseClose
+	}
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.publishMu.Lock()
+	r.sessions.Set(name, session)
+	r.sessionOwners[name] = owner
+	r.allTools.Set(name, []*Tool{{Name: "do_thing"}})
+	r.publishMu.Unlock()
+
+	updated := make(chan struct{})
+	go func() {
+		r.updateStateFor(name, owner, StateError, errors.New("broken"))
+		close(updated)
+	}()
+	<-closeStarted
+
+	require.True(t, r.publishMu.TryLock(), "session close must run after releasing publishMu")
+	_, hasSession := r.sessions.Get(name)
+	_, hasOwner := r.owners[name]
+	_, hasSessionOwner := r.sessionOwners[name]
+	_, hasTools := r.allTools.Get(name)
+	info, hasState := r.states.Get(name)
+	r.publishMu.Unlock()
+	require.False(t, hasSession)
+	require.False(t, hasOwner)
+	require.False(t, hasSessionOwner)
+	require.False(t, hasTools)
+	require.True(t, hasState)
+	require.Equal(t, StateError, info.State)
+
+	close(releaseClose)
+	<-updated
+}
+
 func TestUpdateState_ConfigBookkeeping(t *testing.T) {
 	const name = "test-config-bookkeeping"
 	t.Cleanup(func() {
@@ -201,6 +245,50 @@ func TestUpdateState_ErrorClearsPromptsAndResources(t *testing.T) {
 // registered or overwrite and leak a live replacement. With the per-server
 // lock only the first arrival rebuilds; the rest re-check and reuse the
 // healthy session, so exactly one new session is created.
+func TestGetOrRenewClient_StalePingCannotReplaceNewSession(t *testing.T) {
+	const name = "test-stale-ping"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	old, _ := liveSession(t, "old")
+	oldOwner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.publishMu.Lock()
+	r.sessions.Set(name, old)
+	r.sessionOwners[name] = oldOwner
+	r.publishMu.Unlock()
+
+	pingStarted := make(chan struct{})
+	releasePing := make(chan struct{})
+	var pingCalls atomic.Int32
+	r.ping = func(context.Context, *ClientSession, time.Duration) error {
+		if pingCalls.Add(1) == 1 {
+			close(pingStarted)
+			<-releasePing
+		}
+		return errors.New("stale ping")
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := r.getOrRenewClient(context.Background(), cfg, name)
+		result <- err
+	}()
+	<-pingStarted
+
+	r.teardown(name)
+	fresh, _ := liveSession(t, "fresh")
+	freshOwner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	r.publishMu.Lock()
+	r.sessions.Set(name, fresh)
+	r.sessionOwners[name] = freshOwner
+	r.publishMu.Unlock()
+	close(releasePing)
+	require.ErrorIs(t, <-result, context.Canceled)
+	published, ok := r.sessions.Get(name)
+	require.True(t, ok)
+	require.Same(t, fresh, published)
+}
+
 func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	const name = "test-renew-concurrency"
 	const workers = 8
@@ -219,7 +307,12 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	// renewal.
 	dead, _ := liveSession(t, "send_message")
 	require.NoError(t, dead.Close())
+	owner, err := defaultRegistry.beginAttempt(name)
+	require.NoError(t, err)
+	defaultRegistry.publishMu.Lock()
 	defaultRegistry.sessions.Set(name, dead)
+	defaultRegistry.sessionOwners[name] = owner
+	defaultRegistry.publishMu.Unlock()
 
 	// Pre-build enough live replacements that the buggy (unserialized) path
 	// could consume more than one; the fix must consume exactly one.
@@ -237,7 +330,7 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 
 	var created atomic.Int32
 	origNewSession := defaultRegistry.newSession
-	defaultRegistry.newSession = func(context.Context, *config.ConfigStore, string, config.MCPConfig, config.VariableResolver, bool) (*ClientSession, error) {
+	defaultRegistry.newSession = func(context.Context, *config.ConfigStore, string, config.MCPConfig, attemptID, config.VariableResolver, bool) (*ClientSession, error) {
 		created.Add(1)
 		return <-replacements, nil
 	}
@@ -360,13 +453,18 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 	// Seed a dead session so the renewal path runs.
 	dead, _ := liveSession(t, "send_message")
 	require.NoError(t, dead.Close())
+	owner, err := defaultRegistry.beginAttempt(name)
+	require.NoError(t, err)
+	defaultRegistry.publishMu.Lock()
 	defaultRegistry.sessions.Set(name, dead)
+	defaultRegistry.sessionOwners[name] = owner
+	defaultRegistry.publishMu.Unlock()
 	// Stale counts that must be recomputed, not preserved.
 	defaultRegistry.updateState(name, StateConnected, nil, dead, Counts{Tools: 1, Prompts: 1, Resources: 1})
 
 	replacement := liveSessionWithCapabilities(t, "send_message", "a_prompt", "res://thing")
 	origNewSession := defaultRegistry.newSession
-	defaultRegistry.newSession = func(context.Context, *config.ConfigStore, string, config.MCPConfig, config.VariableResolver, bool) (*ClientSession, error) {
+	defaultRegistry.newSession = func(context.Context, *config.ConfigStore, string, config.MCPConfig, attemptID, config.VariableResolver, bool) (*ClientSession, error) {
 		return replacement, nil
 	}
 	t.Cleanup(func() { defaultRegistry.newSession = origNewSession })

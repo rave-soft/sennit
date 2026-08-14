@@ -39,16 +39,30 @@ func (r *Registry) ListResources(ctx context.Context, cfg *config.ConfigStore, n
 	if err != nil {
 		return nil, err
 	}
-
-	resources, err := getResources(ctx, session)
+	owner, published, ok := r.sessionOwner(name)
+	if !ok || published != session {
+		return nil, context.Canceled
+	}
+	resources, err := r.listResources(ctx, session)
 	if err != nil {
 		return nil, err
 	}
-
-	resourceCount := r.updateResources(name, resources)
+	r.publishMu.Lock()
+	defer r.publishMu.Unlock()
+	if !r.ownsSessionLocked(name, owner, session) {
+		return resources, nil
+	}
+	r.catalogMu.Lock()
+	if len(resources) == 0 {
+		r.allResources.Del(name)
+	} else {
+		r.allResources.Set(name, resources)
+	}
+	r.catalogChanged()
+	r.catalogMu.Unlock()
 	prev, _ := r.states.Get(name)
-	prev.Counts.Resources = resourceCount
-	r.updateState(name, StateConnected, nil, session, prev.Counts)
+	prev.Counts.Resources = len(resources)
+	r.updateStateLocked(name, StateConnected, nil, session, prev.Counts)
 	return resources, nil
 }
 
@@ -74,23 +88,32 @@ func (r *Registry) ReadResource(ctx context.Context, cfg *config.ConfigStore, na
 func RefreshResources(ctx context.Context, name string) { defaultRegistry.RefreshResources(ctx, name) }
 
 func (r *Registry) RefreshResources(ctx context.Context, name string) {
-	session, ok := r.sessions.Get(name)
+	owner, session, ok := r.sessionOwner(name)
 	if !ok {
 		slog.Warn("Refresh resources: no session", "name", name)
 		return
 	}
-
-	resources, err := getResources(ctx, session)
+	resources, err := r.listResources(ctx, session)
 	if err != nil {
-		r.updateState(name, StateError, err, nil, Counts{})
+		r.updateStateForSession(name, owner, session, StateError, err, Counts{})
 		return
 	}
-
-	resourceCount := r.updateResources(name, resources)
-
+	r.publishMu.Lock()
+	defer r.publishMu.Unlock()
+	if !r.ownsSessionLocked(name, owner, session) {
+		return
+	}
+	r.catalogMu.Lock()
+	if len(resources) == 0 {
+		r.allResources.Del(name)
+	} else {
+		r.allResources.Set(name, resources)
+	}
+	r.catalogChanged()
+	r.catalogMu.Unlock()
 	prev, _ := r.states.Get(name)
-	prev.Counts.Resources = resourceCount
-	r.updateState(name, StateConnected, nil, session, prev.Counts)
+	prev.Counts.Resources = len(resources)
+	r.updateStateLocked(name, StateConnected, nil, session, prev.Counts)
 }
 
 func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {

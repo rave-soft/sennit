@@ -2,15 +2,14 @@ package mcp
 
 import (
 	"context"
-	"errors"
-	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
-	mcpoauth "github.com/rave-soft/braid/internal/oauth/mcp"
+	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
 )
@@ -30,11 +29,28 @@ import (
 // compatibility with tests and any caller that constructs a Registry
 // directly rather than via app.New; production call sites all go through
 // app.App.MCP.
+type attemptID struct {
+	gen uint64
+	seq uint64
+}
+
+func (a attemptID) valid() bool { return a.seq != 0 }
+
+type tokenWriteOwner struct {
+	name    string
+	attempt attemptID
+}
+
+type tokenWrite struct {
+	done chan struct{}
+}
+
 type Registry struct {
-	sessions *csync.Map[string, *ClientSession]
-	states   *csync.Map[string, ClientInfo]
-	authURLs *csync.Map[string, *mcpoauth.Handler]
-	broker   *pubsub.Broker[Event]
+	sessions    *csync.Map[string, *ClientSession]
+	states      *csync.Map[string, ClientInfo]
+	authURLs    *csync.Map[string, authPublication]
+	authAttempt atomic.Uint64
+	broker      *pubsub.Broker[Event]
 
 	initMu      sync.Mutex
 	initOnce    sync.Once
@@ -59,9 +75,30 @@ type Registry struct {
 	// remote (server-driven) OAuth flow is active for a server at a time.
 	suppressMus *csync.Map[string, *sync.Mutex]
 
+	// publishMu serializes every externally visible per-server publication.
+	// A generation check and the corresponding session, catalog, count and state
+	// update must be indivisible: otherwise teardown can observe and clear an old
+	// snapshot while its connector publishes it afterwards.
+	publishMu     sync.Mutex
+	owners        map[string]attemptID
+	sessionOwners map[string]attemptID
+	closing       bool
+
+	authMu    sync.Mutex
+	authFlows map[string]*authFlow
+
+	tokenWrites        map[tokenWriteOwner]map[*tokenWrite]struct{}
+	tokenReservations  map[tokenWriteOwner]*config.MCPTokenMutation
+	tokenPersist       func(context.Context, *config.ConfigStore, string, any) error
+	tokenCommit        func(*config.ConfigStore, *config.MCPTokenMutation, *oauth.Token) error
+	beforeTokenPersist func()
+
 	// newSession creates a client session. It is a seam so tests can exercise
 	// renewal concurrency without spawning a real transport.
-	newSession func(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error)
+	newSession    func(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error)
+	runAuth       func(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID) error
+	ping          func(ctx context.Context, session *ClientSession, timeout time.Duration) error
+	listResources func(ctx context.Context, session *ClientSession) ([]*Resource, error)
 
 	allTools     *csync.Map[string, []*Tool]
 	allResources *csync.Map[string, []*Resource]
@@ -89,19 +126,32 @@ type Registry struct {
 // NewRegistry creates an empty, ready-to-use MCP registry.
 func NewRegistry() *Registry {
 	r := &Registry{
-		sessions:     csync.NewMap[string, *ClientSession](),
-		states:       csync.NewMap[string, ClientInfo](),
-		authURLs:     csync.NewMap[string, *mcpoauth.Handler](),
-		broker:       pubsub.NewBroker[Event](),
-		initDone:     make(chan struct{}),
-		renewMus:     map[string]*sync.Mutex{},
-		gens:         csync.NewMap[string, uint64](),
-		suppressMus:  csync.NewMap[string, *sync.Mutex](),
-		allTools:     csync.NewMap[string, []*Tool](),
-		allResources: csync.NewMap[string, []*Resource](),
-		allPrompts:   csync.NewMap[string, []*Prompt](),
+		sessions:          csync.NewMap[string, *ClientSession](),
+		states:            csync.NewMap[string, ClientInfo](),
+		authURLs:          csync.NewMap[string, authPublication](),
+		broker:            pubsub.NewBroker[Event](),
+		initDone:          make(chan struct{}),
+		renewMus:          map[string]*sync.Mutex{},
+		gens:              csync.NewMap[string, uint64](),
+		suppressMus:       csync.NewMap[string, *sync.Mutex](),
+		authFlows:         map[string]*authFlow{},
+		tokenWrites:       map[tokenWriteOwner]map[*tokenWrite]struct{}{},
+		tokenReservations: map[tokenWriteOwner]*config.MCPTokenMutation{},
+		owners:            map[string]attemptID{},
+		sessionOwners:     map[string]attemptID{},
+		allTools:          csync.NewMap[string, []*Tool](),
+		allResources:      csync.NewMap[string, []*Resource](),
+		allPrompts:        csync.NewMap[string, []*Prompt](),
 	}
 	r.newSession = r.createSession
+	r.runAuth = r.runAuthFlow
+	r.ping = r.pingSession
+	r.listResources = getResources
+	r.tokenPersist = func(context.Context, *config.ConfigStore, string, any) error { return nil }
+	r.tokenCommit = func(cfg *config.ConfigStore, reservation *config.MCPTokenMutation, token *oauth.Token) error {
+		_, err := cfg.SetMCPToken(reservation, token)
+		return err
+	}
 	return r
 }
 
@@ -197,43 +247,92 @@ func (r *Registry) WaitForInit(ctx context.Context) error {
 func Close(ctx context.Context) error { return defaultRegistry.Close(ctx) }
 
 func (r *Registry) Close(ctx context.Context) error {
-	var wg sync.WaitGroup
-	for name, session := range r.sessions.Seq2() {
-		wg.Go(func() {
-			done := make(chan error, 1)
-			go func() {
-				done <- session.Close()
-			}()
-			select {
-			case err := <-done:
-				if err != nil &&
-					!errors.Is(err, io.EOF) &&
-					!errors.Is(err, context.Canceled) &&
-					err.Error() != "signal: killed" {
-					slog.Warn("Failed to shutdown MCP client", "name", name, "error", err)
-				}
-			case <-ctx.Done():
-			}
-		})
-	}
-	wg.Wait()
-	// Clean up any remaining OAuth handlers. Like sessions above, this is
-	// unconditional (not refcounted) — see the TODO on liveWorkspaces.
-	for _, h := range r.authURLs.Seq2() {
-		h.Close()
-	}
-
 	r.refMu.Lock()
 	if r.liveWorkspaces > 0 {
 		r.liveWorkspaces--
 	}
-	shutdown := r.liveWorkspaces <= 0
+	shutdown := r.liveWorkspaces == 0
 	r.refMu.Unlock()
-	if shutdown {
-		r.broker.Shutdown()
+	if !shutdown {
+		return nil
 	}
-	return nil
+
+	// Invalidate and detach everything before any potentially blocking close.
+	r.publishMu.Lock()
+	if r.closing {
+		r.publishMu.Unlock()
+		return nil
+	}
+	r.closing = true
+	names := map[string]struct{}{}
+	for name := range r.states.Seq2() {
+		names[name] = struct{}{}
+	}
+	for name := range r.gens.Seq2() {
+		names[name] = struct{}{}
+	}
+	for name := range r.sessions.Seq2() {
+		names[name] = struct{}{}
+	}
+	for name := range r.authURLs.Seq2() {
+		names[name] = struct{}{}
+	}
+	for name := range names {
+		r.gens.Set(name, r.currentGen(name)+1)
+		delete(r.owners, name)
+	}
+	sessions := r.sessions.Copy()
+	for name := range sessions {
+		r.sessions.Del(name)
+		delete(r.sessionOwners, name)
+	}
+	handlers := r.authURLs.Copy()
+	for name := range handlers {
+		r.authURLs.Del(name)
+	}
+	r.catalogMu.Lock()
+	for name := range names {
+		r.allTools.Del(name)
+		r.allPrompts.Del(name)
+		r.allResources.Del(name)
+	}
+	r.catalogChanged()
+	r.catalogMu.Unlock()
+	writeWaiters := r.tokenWriteWaitersLocked("")
+	r.publishMu.Unlock()
+
+	r.authMu.Lock()
+	flows := make(map[string]*authFlow, len(r.authFlows))
+	for name, flow := range r.authFlows {
+		flows[name] = flow
+	}
+	r.authMu.Unlock()
+	for name, flow := range flows {
+		r.abortAuthFlow(name, flow, context.Canceled)
+	}
+	for _, publication := range handlers {
+		publication.auth.Close()
+	}
+
+	var wg sync.WaitGroup
+	for name, session := range sessions {
+		wg.Go(func() { r.closeSessionContext(ctx, name, session) })
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+	writeErr := waitTokenWrites(ctx, writeWaiters)
+	r.broker.Shutdown()
+	if writeErr != nil {
+		return writeErr
+	}
+	return ctx.Err()
 }
+
+const lifecycleCleanupTimeout = 2 * time.Second
 
 // SubscribeEvents returns a channel for MCP events.
 //

@@ -19,6 +19,84 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestMCPTokenMutationIsConditionalAndOwnerOrdered(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "braid.json")
+	mcp := MCPConfig{Type: MCPHttp, URL: "https://example.test", OAuth: true, OAuthToken: &oauth.Token{AccessToken: "initial"}}
+	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true,"oauth_token":{"access_token":"initial"}}}}`), 0o600))
+	store := NewTestStore(&Config{MCP: MCPs{"server": mcp}})
+	store.globalDataPath = path
+
+	old, ok := store.ReserveMCPTokenMutation("server", mcp)
+	require.True(t, ok)
+	fresh, ok := store.ReserveMCPTokenMutation("server", mcp)
+	require.True(t, ok)
+	changed, err := store.SetMCPToken(&old, &oauth.Token{AccessToken: "stale"})
+	require.NoError(t, err)
+	require.False(t, changed)
+	changed, err = store.SetMCPToken(&fresh, &oauth.Token{AccessToken: "fresh"})
+	require.NoError(t, err)
+	require.True(t, changed)
+	changed, err = store.ClearMCPToken(&old, mcp.OAuthToken)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, "fresh", gjson.GetBytes(requireFile(t, path), "mcp.server.oauth_token.access_token").String())
+
+	reservation, ok := store.ReserveMCPTokenMutation("server", store.Config().MCP["server"])
+	require.True(t, ok)
+	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{}}`), 0o600))
+	changed, err = store.SetMCPToken(&reservation, &oauth.Token{AccessToken: "resurrected"})
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.False(t, gjson.GetBytes(requireFile(t, path), "mcp.server").Exists())
+
+	deleted, ok := store.ReserveMCPTokenMutation("server", store.Config().MCP["server"])
+	require.True(t, ok)
+	require.NoError(t, os.Remove(path))
+	changed, err = store.SetMCPToken(&deleted, &oauth.Token{AccessToken: "resurrected"})
+	require.NoError(t, err)
+	require.False(t, changed)
+	_, err = os.Stat(path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestMCPTokenMutationRejectsStaleStore(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "braid.json")
+	initial := &oauth.Token{AccessToken: "initial"}
+	mcp := MCPConfig{Type: MCPHttp, URL: "https://example.test", OAuth: true, OAuthToken: initial}
+	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true,"oauth_token":{"access_token":"initial"}}}}`), 0o600))
+
+	staleStore := NewTestStore(&Config{MCP: MCPs{"server": mcp}})
+	staleStore.globalDataPath = path
+	freshStore := NewTestStore(&Config{MCP: MCPs{"server": mcp}})
+	freshStore.globalDataPath = path
+	stale, ok := staleStore.ReserveMCPTokenMutation("server", mcp)
+	require.True(t, ok)
+	fresh, ok := freshStore.ReserveMCPTokenMutation("server", mcp)
+	require.True(t, ok)
+
+	changed, err := freshStore.SetMCPToken(&fresh, &oauth.Token{AccessToken: "fresh"})
+	require.NoError(t, err)
+	require.True(t, changed)
+	changed, err = staleStore.SetMCPToken(&stale, &oauth.Token{AccessToken: "stale"})
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, "fresh", gjson.GetBytes(requireFile(t, path), "mcp.server.oauth_token.access_token").String())
+
+	changed, err = staleStore.ClearMCPToken(&stale, initial)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, "fresh", gjson.GetBytes(requireFile(t, path), "mcp.server.oauth_token.access_token").String())
+}
+
+func requireFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return data
+}
+
 func TestConfigStore_ConfigPath_GlobalAlwaysWorks(t *testing.T) {
 	t.Parallel()
 

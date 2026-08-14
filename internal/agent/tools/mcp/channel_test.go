@@ -558,6 +558,29 @@ func TestChannelConnBuffersDuringUndecidedGate(t *testing.T) {
 // TestChannelConnDiscardsBufferOnClosedGate verifies that buffered messages
 // are discarded (not published) when the gate resolves to closed — a
 // non-opted-in or non-capable server must never deliver its events.
+func TestChannelGateOverflowFailsClosed(t *testing.T) {
+	t.Parallel()
+	gate := newChannelGate()
+	for range maxChannelPendingCount {
+		require.Nil(t, gate.accept(json.RawMessage(`{"content":"ok"}`)))
+	}
+	require.Nil(t, gate.accept(json.RawMessage(`{"content":"overflow"}`)))
+	require.Equal(t, stateGateClosed, channelGateState(gate.state.Load()))
+	require.Nil(t, gate.resolve(true))
+	require.Empty(t, gate.pending)
+	require.Zero(t, gate.pendingBytes)
+}
+
+func TestChannelGateCopiesAcceptedPayload(t *testing.T) {
+	t.Parallel()
+	gate := newChannelGate()
+	raw := json.RawMessage(`{"content":"original"}`)
+	gate.accept(raw)
+	copy(raw, `{"content":"changed!"}`)
+	buffered := gate.resolve(true)
+	require.Equal(t, `{"content":"original"}`, string(buffered[0]))
+}
+
 func TestChannelConnDiscardsBufferOnClosedGate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

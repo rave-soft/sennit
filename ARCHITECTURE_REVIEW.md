@@ -422,4 +422,7 @@ async rebuild Commands, а также rename/delete/cancel/busy transitions Sess
 4.4 закрыт: общий `thread.Attach` параметризован `Spawner`, сохраняет
 best-effort wiring и порядок shutdown.
 4.5 закрыт: Todo и LSP client state унифицированы алиасами с сохранением
-wire/OpenAPI контрактов; следующий пункт — 4.6.
+wire/OpenAPI контрактов.
+4.6 закрыт: MCP OAuth/lifecycle publication сериализованы по generation+attempt,
+owned HTTP ресурсы закрываются на всех путях, а refresh/renew не могут воскресить
+teardown. Следующий пункт — 4.7.

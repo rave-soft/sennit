@@ -158,7 +158,6 @@ func (r *Registry) reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
 func (r *Registry) removeServer(name string) {
 	r.teardown(name)
 	r.states.Del(name)
-	r.gens.Del(name)
 }
 
 // mcpConfigEqual reports whether two MCPConfig values are equal, ignoring
