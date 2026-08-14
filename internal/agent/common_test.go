@@ -187,9 +187,13 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 		GeneratedWith: true,
 	}
 
-	// Clear some fields to avoid issues with VCR cassette matching.
+	// Clear some fields to avoid issues with VCR cassette matching. Every
+	// builtin skill's name/description goes into the system prompt (so the
+	// model can choose to load it), so adding one changes the recorded
+	// cassettes' request bodies just like braid-config already did —
+	// "tasks" (added alongside this comment) needs the same exclusion.
 	cfg.Config().Options.SkillsPaths = nil
-	cfg.Config().Options.DisabledSkills = []string{"braid-config"}
+	cfg.Config().Options.DisabledSkills = []string{"braid-config", "tasks"}
 	cfg.Config().Options.ContextPaths = nil
 	cfg.Config().Options.GlobalContextPaths = nil
 	cfg.Config().LSP = nil
