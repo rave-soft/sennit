@@ -866,6 +866,13 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 	c.Options.DataDirectory = filepath.Clean(filepathext.SmartJoin(workingDir, c.Options.DataDirectory))
+	// Tool-name lists come from user-authored files that predate any
+	// rename, so fold legacy names onto current ones before anything
+	// matches against them. See [CanonicalToolName].
+	c.Options.DisabledTools = canonicalToolNames(c.Options.DisabledTools)
+	if c.Permissions != nil {
+		c.Permissions.AllowedTools = canonicalToolNames(c.Permissions.AllowedTools)
+	}
 	if c.Providers == nil {
 		c.Providers = csync.NewMap[string, ProviderConfig]()
 	}

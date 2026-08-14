@@ -13,37 +13,37 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// View Tool
+// Read Tool
 // -----------------------------------------------------------------------------
 
-// ViewToolMessageItem is a message item that represents a view tool call.
-type ViewToolMessageItem struct {
+// ReadToolMessageItem is a message item that represents a view tool call.
+type ReadToolMessageItem struct {
 	*baseToolMessageItem
 }
 
-var _ ToolMessageItem = (*ViewToolMessageItem)(nil)
+var _ ToolMessageItem = (*ReadToolMessageItem)(nil)
 
-// NewViewToolMessageItem creates a new [ViewToolMessageItem].
-func NewViewToolMessageItem(
+// NewReadToolMessageItem creates a new [ReadToolMessageItem].
+func NewReadToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ViewToolRenderContext{}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &ReadToolRenderContext{}, canceled)
 }
 
-// ViewToolRenderContext renders view tool messages.
-type ViewToolRenderContext struct{}
+// ReadToolRenderContext renders view tool messages.
+type ReadToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
-func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+func (v *ReadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Read", opts.Anim, opts.Compact)
 	}
 
-	var params tools.ViewParams
+	var params tools.ReadParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
@@ -77,14 +77,14 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	// Try to get content from metadata first (contains actual file content).
-	var meta tools.ViewResponseMetadata
+	var meta tools.ReadResponseMetadata
 	content := opts.Result.Content
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.Content != "" {
 		content = meta.Content
 	}
 
 	// Handle skill content.
-	if meta.ResourceType == tools.ViewResourceSkill {
+	if meta.ResourceType == tools.ReadResourceSkill {
 		body := toolOutputSkillContent(sty, meta.ResourceName, meta.ResourceDescription)
 		return joinToolParts(header, body)
 	}

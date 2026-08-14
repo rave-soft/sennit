@@ -173,7 +173,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.ViewToolName {
+							if tc.Name == tools.ReadToolName {
 								tcID = tc.ID
 							}
 						}
@@ -215,7 +215,7 @@ func TestCoderAgent(t *testing.T) {
 				for _, msg := range msgs {
 					if msg.Role == message.Assistant {
 						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.ViewToolName {
+							if tc.Name == tools.ReadToolName {
 								readTCID = tc.ID
 							}
 							if tc.Name == tools.EditToolName || tc.Name == tools.WriteToolName {
@@ -882,7 +882,7 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 		Parts: []message.ContentPart{
 			message.ToolCall{
 				ID:       "call_ok",
-				Name:     "view",
+				Name:     "read",
 				Input:    `{"path":"/foo"}`,
 				Finished: true,
 			},
@@ -902,7 +902,7 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 		Parts: []message.ContentPart{
 			message.ToolResult{
 				ToolCallID: "call_ok",
-				Name:       "view",
+				Name:       "read",
 				Content:    "file contents",
 			},
 		},

@@ -239,7 +239,7 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 
 	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
 	if lastRead.IsZero() {
-		return "", "", false, fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
+		return "", "", false, fantasy.NewTextErrorResponse("you must read the file before editing it. Use the read tool first"), nil
 	}
 
 	modTime := fileInfo.ModTime().Truncate(time.Second)

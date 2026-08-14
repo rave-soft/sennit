@@ -235,7 +235,7 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 		tools.NewGlobTool(env.workingDir, cfg.Config().Tools.Glob),
 		tools.NewGrepTool(env.workingDir, cfg.Config().Tools.Grep),
 		tools.NewLsTool(env.permissions, env.workingDir, cfg.Config().Tools.Ls),
-		tools.NewViewTool(nil, env.permissions, *env.filetracker, nil, env.workingDir),
+		tools.NewReadTool(nil, env.permissions, *env.filetracker, nil, env.workingDir),
 		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 	}
 

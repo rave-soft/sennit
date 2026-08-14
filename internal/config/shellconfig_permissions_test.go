@@ -42,18 +42,18 @@ func loadBraidShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 }
 
 func TestShellConfigPermissionsAllow(t *testing.T) {
-	store := loadBraidSh(t, `permissions allow bash view`)
+	store := loadBraidSh(t, `permissions allow bash read`)
 
 	require.NotNil(t, store.Config().Permissions)
-	require.ElementsMatch(t, []string{"bash", "view"}, store.Config().Permissions.AllowedTools)
+	require.ElementsMatch(t, []string{"bash", "read"}, store.Config().Permissions.AllowedTools)
 }
 
 func TestShellConfigPermissionsAccumulateAndDedup(t *testing.T) {
 	store := loadBraidSh(t, `permissions allow bash
-permissions allow view
+permissions allow read
 permissions allow bash`)
 
-	require.Equal(t, []string{"bash", "view"}, store.Config().Permissions.AllowedTools)
+	require.Equal(t, []string{"bash", "read"}, store.Config().Permissions.AllowedTools)
 }
 
 func TestShellConfigPermissionsLegacyFlagFails(t *testing.T) {
@@ -80,15 +80,15 @@ permissions deny bash`)
 // disabled_tools which removes it from the agent entirely, regardless of
 // its presence in the allow-list.
 func TestShellConfigPermissionsDenyWinsOverAllow(t *testing.T) {
-	store := loadBraidSh(t, `permissions allow bash view
+	store := loadBraidSh(t, `permissions allow bash read
 permissions deny bash`)
 
-	require.ElementsMatch(t, []string{"bash", "view"}, store.Config().Permissions.AllowedTools)
+	require.ElementsMatch(t, []string{"bash", "read"}, store.Config().Permissions.AllowedTools)
 	require.Equal(t, []string{"bash"}, store.Config().Options.DisabledTools)
 
 	// SetupAgents resolves the effective tool set; denied tools are excluded.
 	cfg := store.Config()
 	cfg.SetupAgents()
 	require.NotContains(t, cfg.Agents[config.AgentCoder].AllowedTools, "bash")
-	require.Contains(t, cfg.Agents[config.AgentCoder].AllowedTools, "view")
+	require.Contains(t, cfg.Agents[config.AgentCoder].AllowedTools, "read")
 }

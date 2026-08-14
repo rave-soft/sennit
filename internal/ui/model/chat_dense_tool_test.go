@@ -26,8 +26,8 @@ func TestChatDenseToolGroup_NoGapBetweenConsecutiveOneLinerTools(t *testing.T) {
 	u.chat.SetSize(80, 40)
 	sty := u.com.Styles
 
-	view := chat.NewViewToolMessageItem(sty,
-		message.ToolCall{ID: "tc-view", Name: tools.ViewToolName, Input: `{"file_path":"internal/foo.go"}`, Finished: true},
+	view := chat.NewReadToolMessageItem(sty,
+		message.ToolCall{ID: "tc-view", Name: tools.ReadToolName, Input: `{"file_path":"internal/foo.go"}`, Finished: true},
 		&message.ToolResult{ToolCallID: "tc-view", Content: strings.Repeat("x\n", 341) + "x"},
 		false)
 	view.SetMessageID("m-view")

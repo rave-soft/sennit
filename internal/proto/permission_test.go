@@ -103,15 +103,15 @@ func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 		},
 		{
 			name:     "view",
-			toolName: tools.ViewToolName,
-			params: tools.ViewPermissionsParams{
+			toolName: tools.ReadToolName,
+			params: tools.ReadPermissionsParams{
 				FilePath: "/tmp/x.go",
 				Offset:   10,
 				Limit:    100,
 			},
 			assert: func(t *testing.T, got any) {
-				v, ok := got.(tools.ViewPermissionsParams)
-				require.True(t, ok, "params must decode as tools.ViewPermissionsParams, got %T", got)
+				v, ok := got.(tools.ReadPermissionsParams)
+				require.True(t, ok, "params must decode as tools.ReadPermissionsParams, got %T", got)
 				require.Equal(t, "/tmp/x.go", v.FilePath)
 			},
 		},

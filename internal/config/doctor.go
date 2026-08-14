@@ -155,6 +155,12 @@ func doctorToolNames(cfg *Config) []Problem {
 	for id := range cfg.Agents {
 		known[id] = true
 	}
+	// Names Braid has since renamed are known too: they are folded onto
+	// the current name when the config is read (see [CanonicalToolName]),
+	// so warning about one would be warning about a name that works.
+	for legacy := range legacyToolNames {
+		known[legacy] = true
+	}
 	isKnown := func(name string) bool {
 		return known[name] || strings.HasPrefix(name, "mcp_")
 	}

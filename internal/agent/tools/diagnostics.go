@@ -38,7 +38,7 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 
 // openInLSPs ensures LSP servers are running and aware of the file, but does
 // not notify changes or wait for fresh diagnostics. Use this for read-only
-// operations like view where the file content hasn't changed.
+// operations like read where the file content hasn't changed.
 func openInLSPs(
 	ctx context.Context,
 	manager *lsp.Manager,

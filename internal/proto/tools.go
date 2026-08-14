@@ -208,27 +208,33 @@ type MultiEditResponseMetadata struct {
 	EditsFailed  []FailedEdit `json:"edits_failed,omitempty"`
 }
 
-const ViewToolName = "view"
+const (
+	ReadToolName = tools.ReadToolName
+	// LegacyReadToolName is the pre-rename name of the read tool, still
+	// present in sessions recorded before the rename. See
+	// [tools.LegacyReadToolName].
+	LegacyReadToolName = tools.LegacyReadToolName
+)
 
-// ViewParams represents the parameters for the view tool.
-type ViewParams struct {
+// ReadParams represents the parameters for the read tool.
+type ReadParams struct {
 	FilePath string `json:"file_path"`
 	Offset   int    `json:"offset"`
 	Limit    int    `json:"limit"`
 }
 
-// ViewPermissionsParams represents the permission parameters for the view tool.
-type ViewPermissionsParams = tools.ViewPermissionsParams
+// ReadPermissionsParams represents the permission parameters for the read tool.
+type ReadPermissionsParams = tools.ReadPermissionsParams
 
-// ViewResponseMetadata represents the metadata for a view tool response.
-type ViewResourceType string
+// ReadResponseMetadata represents the metadata for a read tool response.
+type ReadResourceType string
 
-const ViewResourceSkill ViewResourceType = "skill"
+const ReadResourceSkill ReadResourceType = "skill"
 
-type ViewResponseMetadata struct {
+type ReadResponseMetadata struct {
 	FilePath            string           `json:"file_path"`
 	Content             string           `json:"content"`
-	ResourceType        ViewResourceType `json:"resource_type,omitempty"`
+	ResourceType        ReadResourceType `json:"resource_type,omitempty"`
 	ResourceName        string           `json:"resource_name,omitempty"`
 	ResourceDescription string           `json:"resource_description,omitempty"`
 }

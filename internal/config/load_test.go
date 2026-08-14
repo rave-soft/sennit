@@ -1025,7 +1025,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "read"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -1044,11 +1044,11 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "ls", "question", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "ls", "question", "todos", "read", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "ls", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "ls", "read"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithWebSearchDisabled(t *testing.T) {
@@ -1079,7 +1079,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 				"lsp_call_hierarchy",
 				"lsp_definition",
 				"lsp_symbols",
-				"view",
+				"read",
 				"fetch",
 				"web_fetch",
 				"web_search",

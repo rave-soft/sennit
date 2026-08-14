@@ -528,7 +528,7 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 	// Show generic Path only for tools that don't render their own file/path line.
 	switch p.permission.ToolName {
 	case proto.EditToolName, proto.WriteToolName, proto.MultiEditToolName,
-		proto.ViewToolName, proto.ReplaceSymbolToolName,
+		proto.ReadToolName, proto.ReplaceSymbolToolName,
 		proto.DownloadToolName, proto.LSToolName:
 		// These tools show their own File/Directory line below.
 	default:
@@ -546,7 +546,7 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
 		}
-	case proto.EditToolName, proto.WriteToolName, proto.MultiEditToolName, proto.ViewToolName, proto.ReplaceSymbolToolName:
+	case proto.EditToolName, proto.WriteToolName, proto.MultiEditToolName, proto.ReadToolName, proto.ReplaceSymbolToolName:
 		var filePath string
 		switch params := p.permission.Params.(type) {
 		case proto.EditPermissionsParams:
@@ -555,7 +555,7 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 			filePath = params.FilePath
 		case proto.MultiEditPermissionsParams:
 			filePath = params.FilePath
-		case proto.ViewPermissionsParams:
+		case proto.ReadPermissionsParams:
 			filePath = params.FilePath
 		case proto.ReplaceSymbolPermissionsParams:
 			filePath = params.FilePath
@@ -624,7 +624,7 @@ func (p *Permissions) renderContent(width int) string {
 		return p.renderFetchContent(width)
 	case proto.AgenticFetchToolName:
 		return p.renderAgenticFetchContent(width)
-	case proto.ViewToolName:
+	case proto.ReadToolName:
 		return p.renderViewContent(width)
 	case proto.LSToolName:
 		return p.renderLSContent(width)
@@ -744,7 +744,7 @@ func (p *Permissions) renderAgenticFetchContent(width int) string {
 }
 
 func (p *Permissions) renderViewContent(width int) string {
-	params, ok := p.permission.Params.(proto.ViewPermissionsParams)
+	params, ok := p.permission.Params.(proto.ReadPermissionsParams)
 	if !ok {
 		return ""
 	}

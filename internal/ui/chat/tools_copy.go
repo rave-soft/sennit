@@ -57,8 +57,8 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 			cmd = strings.ReplaceAll(cmd, "\t", "    ")
 			return fmt.Sprintf("**Command:** %s", cmd)
 		}
-	case tools.ViewToolName:
-		var params tools.ViewParams
+	case tools.ReadToolName, tools.LegacyReadToolName:
+		var params tools.ReadParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("**File:** %s", fsext.PrettyPath(params.FilePath)))
@@ -205,8 +205,8 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 	switch t.toolCall.Name {
 	case tools.BashToolName:
 		return t.formatBashResultForCopy()
-	case tools.ViewToolName:
-		return t.formatViewResultForCopy()
+	case tools.ReadToolName, tools.LegacyReadToolName:
+		return t.formatReadResultForCopy()
 	case tools.EditToolName:
 		return t.formatEditResultForCopy()
 	case tools.MultiEditToolName:
@@ -263,7 +263,7 @@ func prettifyToolName(name string) string {
 		return "List"
 	case tools.TodosToolName:
 		return "To-Do"
-	case tools.ViewToolName:
+	case tools.ReadToolName, tools.LegacyReadToolName:
 		return "Read"
 	case tools.WriteToolName:
 		return "Write"

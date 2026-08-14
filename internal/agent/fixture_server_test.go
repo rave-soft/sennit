@@ -231,7 +231,7 @@ func fixtureScenarios() map[string]FixtureScenario {
 			Turns: []FixtureTurn{
 				{
 					ToolCalls: []FixtureToolCall{
-						{ID: "call_view_1", Type: "function", Name: "view", Args: `{"file_path":"go.mod"}`},
+						{ID: "call_view_1", Type: "function", Name: "read", Args: `{"file_path":"go.mod"}`},
 					},
 				},
 				{
@@ -243,7 +243,7 @@ func fixtureScenarios() map[string]FixtureScenario {
 			Turns: []FixtureTurn{
 				{
 					ToolCalls: []FixtureToolCall{
-						{ID: "call_view_1", Type: "function", Name: "view", Args: `{"file_path":"main.go"}`},
+						{ID: "call_view_1", Type: "function", Name: "read", Args: `{"file_path":"main.go"}`},
 					},
 				},
 				{
@@ -324,7 +324,7 @@ func fixtureScenarios() map[string]FixtureScenario {
 		},
 		"multiedit_tool": {
 			Turns: []FixtureTurn{
-				{ToolCalls: []FixtureToolCall{{ID: "call_view_1", Type: "function", Name: "view", Args: `{"file_path":"main.go"}`}}},
+				{ToolCalls: []FixtureToolCall{{ID: "call_view_1", Type: "function", Name: "read", Args: `{"file_path":"main.go"}`}}},
 				{
 					ToolCalls: []FixtureToolCall{
 						{ID: "call_medit_1", Type: "function", Name: "multiedit", Args: `{"file_path":"main.go","edits":[{"old_string":"func main() {\n\tfmt.Println(\"Hello, World!\")\n}","new_string":"func main() {\n\t// Greeting\n\tfmt.Println(\"Hello, Braid!\")\n}"}]}`},

@@ -25,7 +25,7 @@ provider add ollama --type ollama --base-url "http://localhost:11434/v1"
 model add ollama/llama3.3 --name "Llama 3.3" --context-window 128000
 
 # Auto-approve some tools.
-permissions allow view edit
+permissions allow read edit
 
 # Add an MCP server
 mcp add github \
@@ -449,7 +449,7 @@ Usage:
 ```
 
 ```bash
-permissions allow view ls grep edit
+permissions allow read ls grep edit
 permissions deny bash
 ```
 
@@ -586,7 +586,7 @@ to Bash-based config.
     "anthropic": { "api_key": "$ANTHROPIC_API_KEY" },
   },
   "model": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
-  "permissions": { "allowed_tools": ["view", "ls", "grep"] },
+  "permissions": { "allowed_tools": ["read", "ls", "grep"] },
 }
 ```
 

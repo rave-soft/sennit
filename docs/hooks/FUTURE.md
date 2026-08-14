@@ -25,7 +25,7 @@ puts there is concatenated into what the model sees. That's fine for short notes
 
 `context_files` is the lazy alternative: the hook returns **paths**, not
 contents. Braid tells the agent the files exist and are relevant, and the agent
-decides whether to open them with its existing `view` tool.
+decides whether to open them with its existing `read` tool.
 
 ### Proposed shape
 
@@ -52,7 +52,7 @@ Braid appends a short note to the turn's context along the lines of:
 - docs/ARCHITECTURE.md
 ```
 
-No file contents are inlined. The agent opens them with `view` if it decides
+No file contents are inlined. The agent opens them with `read` if it decides
 they're relevant. This keeps cost proportional to need.
 
 ### Aggregation
