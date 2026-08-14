@@ -96,6 +96,14 @@ type App struct {
 	// SetThreads/Threads.
 	threadManager any
 
+	// taskManager holds the task delegation manager for this workspace
+	// (internal/thread.TaskManager), typed any for the same import-cycle
+	// reason as threadManager. There is no tools-facing counterpart the
+	// way Threads is to threadManager: nothing consumes task tools yet,
+	// so only this accessor exists. Set via SetTaskManager; callers
+	// type-assert it back to *thread.TaskManager.
+	taskManager any
+
 	// lastConfigBypass is the permissions.bypass value from config as of
 	// the last time it was applied to Permissions.SetSkipRequests —
 	// either at construction or via a hot-reload. It is compared against
@@ -379,6 +387,20 @@ func (app *App) SetThreadManager(m any) {
 // threadManager field; callers type-assert it to *thread.Manager.
 func (app *App) ThreadManager() any {
 	return app.threadManager
+}
+
+// SetTaskManager wires the concrete task manager for callers that need it,
+// mirroring SetThreadManager (see taskManager's doc comment for why it is
+// untyped).
+func (app *App) SetTaskManager(m any) {
+	app.taskManager = m
+}
+
+// TaskManager returns the value passed to SetTaskManager, or nil if unset.
+// Typed any for the same import-cycle reason documented on the
+// taskManager field; callers type-assert it to *thread.TaskManager.
+func (app *App) TaskManager() any {
+	return app.taskManager
 }
 
 // AddCleanup registers fn to run, alongside the built-in cleanup tasks,

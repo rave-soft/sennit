@@ -187,3 +187,102 @@ waitForThreadEvent:
 	require.NotNil(t, conn)
 	require.NoError(t, db.Release(config.GlobalDBDir()))
 }
+
+// TestAttach_TaskManagerReachableAndSharesRecoverySweep proves the task
+// manager is wired up by Attach the way NewTaskManager requires: reachable
+// off the app, its Spawner wrapping the attached App itself rather than a
+// new one, and sharing the thread manager's lifecycle strongly enough
+// that a task and a thread created through them both get reconciled by
+// one Manager.Recover call.
+func TestAttach_TaskManagerReachableAndSharesRecoverySweep(t *testing.T) {
+	repo := initRepo(t)
+	a := newAttachTestApp(t, repo)
+	// Swap in fakes the same way fakeSpawner does for a thread's own
+	// isolated App, so a task's dispatch (which runs inside a itself,
+	// per ParentAppSpawner) is deterministic instead of hitting a real
+	// LLM/session store.
+	a.Sessions = &fakeSessions{}
+	a.AgentCoordinator = &fakeCoordinator{}
+
+	Attach(t.Context(), a, repo, newFakeSpawner(t))
+
+	mgr, ok := a.ThreadManager().(*Manager)
+	require.True(t, ok, "thread manager should be reachable off the app after attach")
+	tasks, ok := a.TaskManager().(*TaskManager)
+	require.True(t, ok, "task manager should be reachable off the app after attach")
+
+	taskSt, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+
+	// The task's runtime wraps the attached App itself, not a new one —
+	// Manager.Handle is kind-agnostic, so it reaches a task's runtime too.
+	h := mgr.Handle(taskSt.ID)
+	require.NotNil(t, h)
+	require.Same(t, a, h.App())
+
+	threadSt, err := mgr.Create(t.Context(), CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+
+	// Leave both dispatched runs in flight (no RunComplete published for
+	// either) and reconcile through a single recovery sweep. If
+	// TaskManager had its own lifecycle instead of sharing mgr's, this
+	// sweep would only ever see the thread.
+	require.NoError(t, mgr.Recover(t.Context()))
+
+	gotTask, err := mgr.Get(t.Context(), taskSt.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusInterrupted, gotTask.Status, "the task must be reachable through the same recovery sweep as the thread")
+
+	gotThread, err := mgr.Get(t.Context(), threadSt.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusInterrupted, gotThread.Status)
+}
+
+// TestAttach_ShutdownJoinsBothKinds proves the shutdown hook Attach
+// registers (mgr.Shutdown, wired via addShutdownHook) already joins a
+// task's in-flight run the same way it does a thread's, without any
+// teardown code added for the task manager specifically: both share
+// mgr's lifecycle, so mgr.Shutdown's single controls-map walk reaches
+// both.
+func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
+	repo := initRepo(t)
+	a := newAttachTestApp(t, repo)
+	a.Sessions = &fakeSessions{}
+	a.AgentCoordinator = &fakeCoordinator{}
+
+	threadSpawner := newFakeSpawner(t)
+	Attach(t.Context(), a, repo, threadSpawner)
+
+	mgr, ok := a.ThreadManager().(*Manager)
+	require.True(t, ok)
+	tasks, ok := a.TaskManager().(*TaskManager)
+	require.True(t, ok)
+
+	taskSt, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	threadSt, err := mgr.Create(t.Context(), CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: MergeManual})
+	require.NoError(t, err)
+
+	taskCoord := a.AgentCoordinator.(*fakeCoordinator)
+	require.Eventually(t, func() bool { return taskCoord.runCount() == 1 }, time.Second, time.Millisecond)
+	threadCoord := threadSpawner.coordFor(threadSt.WorktreePath)
+	require.Eventually(t, func() bool { return threadCoord.runCount() == 1 }, time.Second, time.Millisecond)
+	// Deliberately no RunComplete published for either: both runs are
+	// left in flight, the way TestTaskManager_ShutdownJoinsInFlightRun
+	// and the thread-only shutdown tests in manager_test.go leave theirs.
+
+	// Call mgr.Shutdown directly rather than a.Shutdown: this is exactly
+	// the function Attach registered as the app's shutdown hook (see
+	// deps.shutdown), and calling it directly — rather than through the
+	// full app shutdown, which also releases the underlying DB
+	// connection — leaves the store queryable afterward to assert on.
+	require.NoError(t, mgr.Shutdown(t.Context()))
+
+	gotTask, err := mgr.Get(t.Context(), taskSt.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusInterrupted, gotTask.Status)
+
+	gotThread, err := mgr.Get(t.Context(), threadSt.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusInterrupted, gotThread.Status)
+}

@@ -15,6 +15,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
@@ -173,6 +174,16 @@ func (f *fakeCoordinator) runCount() int {
 	defer f.mu.Unlock()
 	return len(f.runs)
 }
+
+// SetThreads and IsBusy are no-ops beyond what fakeCoordinator already
+// tracks. Neither is exercised by a thread's own spawned app (fakeSpawner
+// never calls App.SetThreads on it), but a fakeCoordinator assigned as
+// the App attach.go itself wires up (see attach_test.go's task manager
+// tests) goes through the real App.SetThreads/App.Shutdown paths, which
+// call both — the embedded nil agent.Coordinator would otherwise panic.
+func (f *fakeCoordinator) SetThreads(tools.ThreadManager) {}
+
+func (f *fakeCoordinator) IsBusy() bool { return false }
 
 // fakeHandle is the Handle returned by fakeSpawner.
 type fakeHandle struct {

@@ -102,9 +102,20 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner Spawne
 		slog.Warn("Failed to recover thread state", "error", err)
 	}
 
+	// TaskManager shares mgr's own lifecycle and context (both unexported,
+	// so only constructible from inside this package) rather than fresh
+	// ones: that is what makes mgr's shutdown hook above, and the recover
+	// call just above, already cover a task's in-flight run and store row
+	// too — see NewTaskManager's doc comment. Its Spawner wraps a, the
+	// App being attached, so a task runs inside it instead of spawning an
+	// isolated one; that Spawner's Release is a deliberate no-op, so
+	// nothing here needs its own teardown registration.
+	tasks := NewTaskManager(mgr.store, NewParentAppSpawner(a), mgr.lc, mgr.ctx)
+
 	// Publish only once shutdown and database cleanup are both registered:
 	// consumers must never observe a manager whose dependencies can leak.
 	a.SetThreads(AsAgentToolManager(mgr))
 	a.SetThreadManager(mgr)
+	a.SetTaskManager(tasks)
 	deps.forwardEvents(a, mgr)
 }
