@@ -507,7 +507,7 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool, inhe
 	if attachThreads {
 		thread.Attach(wsCtx, ws.App, args.Path, b.ThreadSpawner(
 			func() map[string]config.Agent { return ws.App.Config().UserAgents() },
-			func() bool { return ws.App.Store().Overrides().SkipPermissionRequests },
+			ws.PermissionsSkipFunc(),
 		))
 	}
 

@@ -394,6 +394,44 @@ func (app *App) ThreadManager() any {
 	return app.threadManager
 }
 
+// permissionsSkipPropagator is the thread manager's side of
+// [App.SetPermissionsSkip]. Declared here as a one-method interface rather
+// than referencing *thread.Manager, for the import-cycle reason documented
+// on the threadManager field.
+type permissionsSkipPropagator interface {
+	SetPermissionsSkip(skip bool)
+}
+
+// PermissionsSkipFunc returns an accessor for this workspace's live
+// permission-bypass ("yolo") state, for the thread spawners that must hand
+// it to a delegation workspace at spawn time (see internal/cmd/root.go and
+// internal/backend/backend.go).
+//
+// It exists so those two call sites cannot disagree about where the answer
+// comes from. They used to each read Store().Overrides().SkipPermissionRequests
+// - the --yolo flag as it was at bootstrap - which meant a thread created
+// after a ctrl+y or /yolo toggle inherited the state the process started
+// in, not the state the user was actually in.
+func (app *App) PermissionsSkipFunc() func() bool {
+	return func() bool { return app.Permissions.SkipRequests() }
+}
+
+// SetPermissionsSkip sets this workspace's permission-bypass ("yolo")
+// state and propagates it to every delegation workspace live under it.
+//
+// This is the single entry point for changing bypass state: the TUI's
+// ctrl+y and /yolo, the server's SetPermissionsSkip endpoint, and a
+// permissions.bypass config reload all funnel through here. Calling
+// Permissions.SetSkipRequests directly sets only this app's own flag and
+// leaves running threads - which have permission services of their own -
+// on whatever state they were spawned with.
+func (app *App) SetPermissionsSkip(skip bool) {
+	app.Permissions.SetSkipRequests(skip)
+	if mgr, ok := app.threadManager.(permissionsSkipPropagator); ok {
+		mgr.SetPermissionsSkip(skip)
+	}
+}
+
 // SetTasks wires the task delegation manager, forwarding it to the coder
 // agent so the built-in agent tool's background mode becomes available.
 // Mirrors SetThreads; safe to call with nil to clear it.

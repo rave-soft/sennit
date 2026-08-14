@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/stringext"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
@@ -519,6 +520,14 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 
 	lines := []string{title, "", toolLine}
 
+	// Say who is asking whenever it is not the visible turn. Several
+	// delegations can be running at once, each in its own worktree, so
+	// without this the user is approving a command with no idea which
+	// piece of work wants it — or against which checkout it will run.
+	if ref := p.permission.Delegation; ref.ID != "" {
+		lines = append(lines, p.renderKeyValue(delegationHeaderKey(ref.Kind), delegationHeaderValue(ref), contentWidth))
+	}
+
 	// Show generic Path only for tools that don't render their own file/path line.
 	switch p.permission.ToolName {
 	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName,
@@ -948,4 +957,27 @@ func (p *Permissions) ShortHelp() []key.Binding {
 // FullHelp implements [help.KeyMap].
 func (p *Permissions) FullHelp() [][]key.Binding {
 	return [][]key.Binding{p.ShortHelp()}
+}
+
+// delegationHeaderKey labels the "who is asking" line by delegation kind,
+// so the word matches what the user sees everywhere else (the dock, the
+// dashboard) rather than a generic one they have to translate.
+func delegationHeaderKey(kind string) string {
+	switch kind {
+	case string(thread.KindThread):
+		return "Thread"
+	case string(thread.KindTask):
+		return "Task"
+	default:
+		return "From"
+	}
+}
+
+// delegationHeaderValue prefers the delegation's name and falls back to
+// its id: a thread always has a name, a task may not.
+func delegationHeaderValue(ref permission.DelegationRef) string {
+	if ref.Name != "" {
+		return ref.Name
+	}
+	return ref.ID
 }

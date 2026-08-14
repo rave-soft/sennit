@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
@@ -579,4 +580,62 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 	attached.Shutdown()
 	_, err = aw.ListThreads(t.Context())
 	require.NoError(t, err, "parent workspace should still be functional after attached shutdown")
+}
+
+// TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt covers the
+// return half of the thread-permission relay. A thread's prompt is raised
+// inside its own isolated workspace and only displayed here, so answering
+// against this workspace's own permission service would find no such
+// request and quietly do nothing — leaving the thread blocked on the very
+// prompt the user just answered.
+func TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
+	ws, mgr := newTestThreadAppWorkspace(t)
+
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name:        "waiting",
+		Goal:        "do the thing",
+		MergePolicy: thread.MergeManual,
+	})
+	require.NoError(t, err)
+
+	threadApp := mgr.PermissionsFor(st.ID)
+	require.NotNil(t, threadApp, "the thread's own permission service must be live")
+
+	// Watch the thread's own service so the test answers the real
+	// request, id and all — the same value the relay hands the parent.
+	raised := threadApp.Subscribe(t.Context())
+
+	ctx := permission.WithDelegation(t.Context(), permission.DelegationRef{
+		ID: st.ID, Name: st.Name, Kind: string(st.Kind),
+	})
+	granted := make(chan bool, 1)
+	go func() {
+		ok, _ := threadApp.Request(ctx, permission.CreatePermissionRequest{
+			SessionID:  st.SessionID,
+			ToolCallID: "call-1",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       st.WorktreePath,
+		})
+		granted <- ok
+	}()
+
+	var req permission.PermissionRequest
+	select {
+	case ev := <-raised:
+		req = ev.Payload
+	case <-time.After(5 * time.Second):
+		t.Fatal("the thread never raised its permission request")
+	}
+	require.Equal(t, st.ID, req.Delegation.ID, "precondition: the request is attributed to its thread")
+
+	require.True(t, ws.PermissionGrant(req),
+		"granting through the parent workspace must reach the thread's own service")
+
+	select {
+	case ok := <-granted:
+		require.True(t, ok)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the thread stayed blocked after the parent granted its request")
+	}
 }

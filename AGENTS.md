@@ -67,6 +67,25 @@ internal/
 - **Config is a Service**: accessed via `config.Service`, not global state.
 - **Tools are self-documenting**: each tool has a `.go` implementation and a
   `.md` description file in `internal/agent/tools/`.
+- **Proto boundary**: `internal/proto` may alias leaf data types with no
+  behavior or transitive dependencies (for example, `message`, `session`, and
+  `skills`). Types with behavior, runtime references, or transitive
+  dependencies require explicit DTOs in `proto`, with narrowly scoped
+  conversion at the boundary. Do not add a general conversion framework.
+  - The following pre-existing canonical wire contracts are deliberate,
+    narrow exceptions; do not extend them. `tools.*PermissionsParams` remains
+    aliased because permission consumers assert its concrete Go type after a
+    JSON round trip. `config.Config`, `config.Scope`, and
+    `config.SelectedModel` remain in workspace and config request payloads
+    because their local DTO replacement requires conversions in the backend,
+    server, and workspace boundary. The existing LSP wire contracts use
+    `lsp.ServerState` in `LSPEvent` and alias `lsp.ClientInfo` to preserve their
+    established numeric state and error encoding. `lsp.ClientInfo` is not a
+    leaf type because it carries a runtime `Client` reference excluded from
+    JSON; replacing these types locally requires conversions across the LSP,
+    server, client, and workspace boundary. New types from these packages must
+    use DTOs unless a reviewed boundary change establishes an equally
+    necessary wire contract.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`
   with runtime data injected.
 - **Context files**: Braid reads AGENTS.md, BRAID.md, CLAUDE.md, GEMINI.md
