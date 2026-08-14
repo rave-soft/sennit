@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/lsp"
 	"github.com/rave-soft/braid/internal/message"
@@ -313,7 +312,7 @@ func TestMessageCreatedEventRefreshesBusyAndQueue(t *testing.T) {
 func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
 	pinTTLs(t)
 
-	for _, typ := range []notify.Type{notify.TypeAgentFinished, notify.TypeAgentError} {
+	for _, typ := range []workspace.AgentNotificationType{workspace.AgentNotificationFinished, workspace.AgentNotificationError} {
 		t.Run(string(typ), func(t *testing.T) {
 			ws := &countingWorkspace{ready: true} // agent now idle
 			m := newBusyUI(ws)
@@ -321,9 +320,9 @@ func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
 			ws.resetCounters()
 			require.True(t, m.isAgentBusy())
 
-			_, cmd := m.Update(pubsub.Event[notify.Notification]{
+			_, cmd := m.Update(pubsub.Event[workspace.AgentNotification]{
 				Type:    pubsub.CreatedEvent,
-				Payload: notify.Notification{Type: typ, SessionID: "s1"},
+				Payload: workspace.AgentNotification{Type: typ, SessionID: "s1"},
 			})
 			require.True(t, m.wsCache.busyFetchInFlight, "terminal notification must schedule a busy refresh")
 			require.True(t, m.wsCache.promptQueueInFlight, "terminal notification must schedule a queue refresh")
@@ -336,7 +335,7 @@ func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
 }
 
 // TestQueueChangedNotificationRefreshesQueueOnly pins the
-// notify.TypeQueueChanged edge (published by dispatcher.onQueueChanged
+// workspace.AgentNotificationQueueChanged edge (published by dispatcher.onQueueChanged
 // via sessionAgent.publishQueueChanged on enqueue/drain/requeue/cancel/
 // clear): unlike TypeAgentFinished/TypeAgentError, this is not a
 // busy<->idle edge - the session may still be busy, or may never have
@@ -350,9 +349,9 @@ func TestQueueChangedNotificationRefreshesQueueOnly(t *testing.T) {
 	warmCaches(m, true) // busy state starts fresh; only the queue is stale
 	ws.resetCounters()
 
-	_, cmd := m.Update(pubsub.Event[notify.Notification]{
+	_, cmd := m.Update(pubsub.Event[workspace.AgentNotification]{
 		Type:    pubsub.CreatedEvent,
-		Payload: notify.Notification{Type: notify.TypeQueueChanged, SessionID: "s1"},
+		Payload: workspace.AgentNotification{Type: workspace.AgentNotificationQueueChanged, SessionID: "s1"},
 	})
 	require.True(t, m.wsCache.promptQueueInFlight, "queue-changed notification must schedule a queue refresh")
 	require.False(t, m.wsCache.busyFetchInFlight,

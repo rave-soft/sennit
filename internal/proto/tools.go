@@ -27,8 +27,11 @@ const BashToolName = "bash"
 
 // BashParams represents the parameters for the bash tool.
 type BashParams struct {
-	Command string `json:"command"`
-	Timeout int    `json:"timeout"`
+	Description         string `json:"description"`
+	Command             string `json:"command"`
+	WorkingDir          string `json:"working_dir,omitempty"`
+	RunInBackground     bool   `json:"run_in_background,omitempty"`
+	AutoBackgroundAfter int    `json:"auto_background_after,omitempty"`
 }
 
 // BashPermissionsParams represents the permission parameters for the bash tool.
@@ -39,7 +42,10 @@ type BashResponseMetadata struct {
 	StartTime        int64  `json:"start_time"`
 	EndTime          int64  `json:"end_time"`
 	Output           string `json:"output"`
+	Description      string `json:"description"`
 	WorkingDirectory string `json:"working_directory"`
+	Background       bool   `json:"background,omitempty"`
+	ShellID          string `json:"shell_id,omitempty"`
 }
 
 // DiagnosticsParams represents the parameters for the diagnostics tool.
@@ -188,12 +194,18 @@ type MultiEditParams struct {
 type MultiEditPermissionsParams = tools.MultiEditPermissionsParams
 
 // MultiEditResponseMetadata represents the metadata for a multi-edit tool response.
+type FailedEdit struct {
+	Index int    `json:"index"`
+	Error string `json:"error"`
+}
+
 type MultiEditResponseMetadata struct {
-	Additions    int    `json:"additions"`
-	Removals     int    `json:"removals"`
-	OldContent   string `json:"old_content,omitempty"`
-	NewContent   string `json:"new_content,omitempty"`
-	EditsApplied int    `json:"edits_applied"`
+	Additions    int          `json:"additions"`
+	Removals     int          `json:"removals"`
+	OldContent   string       `json:"old_content,omitempty"`
+	NewContent   string       `json:"new_content,omitempty"`
+	EditsApplied int          `json:"edits_applied"`
+	EditsFailed  []FailedEdit `json:"edits_failed,omitempty"`
 }
 
 const ViewToolName = "view"
@@ -209,9 +221,16 @@ type ViewParams struct {
 type ViewPermissionsParams = tools.ViewPermissionsParams
 
 // ViewResponseMetadata represents the metadata for a view tool response.
+type ViewResourceType string
+
+const ViewResourceSkill ViewResourceType = "skill"
+
 type ViewResponseMetadata struct {
-	FilePath string `json:"file_path"`
-	Content  string `json:"content"`
+	FilePath            string           `json:"file_path"`
+	Content             string           `json:"content"`
+	ResourceType        ViewResourceType `json:"resource_type,omitempty"`
+	ResourceName        string           `json:"resource_name,omitempty"`
+	ResourceDescription string           `json:"resource_description,omitempty"`
 }
 
 const WriteToolName = "write"

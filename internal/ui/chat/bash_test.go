@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/message"
+	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )

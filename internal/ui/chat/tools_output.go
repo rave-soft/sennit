@@ -19,7 +19,7 @@ import (
 // lines. There is no click-to-expand for tool bodies (see
 // appendResultSummary) — the only remaining caller of this is
 // toolOutputMarkdownContent's parse-error fallback, itself only reachable
-// from the still-alive running-delegation preview in agent.go.
+// from the still-alive running-delegation preview in proto.go.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int) string {
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
@@ -308,7 +308,7 @@ func roundedEnumerator(lPadding, width int) tree.Enumerator {
 }
 
 // toolOutputMarkdownContent renders markdown content, capped to
-// responseContextHeight lines. Used only by agent.go for the still-alive
+// responseContextHeight lines. Used only by proto.go for the still-alive
 // running-delegation preview — no per-tool result body renders through
 // this anymore (see appendResultSummary).
 func toolOutputMarkdownContent(sty *styles.Styles, content string, width int) string {

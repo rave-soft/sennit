@@ -8,13 +8,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/question"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
+	mcptools "github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,7 +73,7 @@ func TestAWSSSO_StateTransitionsAndNarrowDraw(t *testing.T) {
 func TestMCPAuth_MultiServerStateTransitions(t *testing.T) {
 	t.Parallel()
 
-	dialog, _ := NewMCPAuth(newUncoveredDialogCommon(t), []mcptools.PendingAuthServer{
+	dialog, _ := NewMCPAuth(newUncoveredDialogCommon(t), []mcptools.MCPPendingAuthServer{
 		{Name: "first", URL: "https://first.example.test"},
 		{Name: "second", URL: "https://second.example.test"},
 	}, func(name string) string { return "https://auth.example.test/" + name })

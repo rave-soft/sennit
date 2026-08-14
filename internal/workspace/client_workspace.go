@@ -16,7 +16,6 @@ import (
 	"github.com/pkg/browser"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
-	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
@@ -950,18 +949,18 @@ func (w *ClientWorkspace) MCPResources() []MCPResourceInfo {
 	return result
 }
 
-func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
+func (w *ClientWorkspace) MCPGetStates() map[string]MCPClientInfo {
 	states, err := w.client.MCPGetStates(context.Background(), w.workspaceID())
 	if err != nil {
 		return nil
 	}
-	result := make(map[string]mcp.ClientInfo, len(states))
+	result := make(map[string]MCPClientInfo, len(states))
 	for k, v := range states {
-		result[k] = mcp.ClientInfo{
+		result[k] = MCPClientInfo{
 			Name:  v.Name,
-			State: mcp.State(v.State),
+			State: MCPState(v.State),
 			Error: v.Error,
-			Counts: mcp.Counts{
+			Counts: MCPCounts{
 				Tools:     v.ToolCount,
 				Prompts:   v.PromptCount,
 				Resources: v.ResourceCount,
@@ -1077,15 +1076,15 @@ func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) erro
 	}
 }
 
-func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
+func (w *ClientWorkspace) MCPPendingAuth() []MCPPendingAuthServer {
 	pending, err := w.client.MCPPendingAuth(context.Background(), w.workspaceID())
 	if err != nil {
 		slog.Warn("Failed to fetch MCP pending auth", "error", err)
 		return nil
 	}
-	result := make([]mcp.PendingAuthServer, len(pending))
+	result := make([]MCPPendingAuthServer, len(pending))
 	for i, p := range pending {
-		result[i] = mcp.PendingAuthServer{Name: p.Name, URL: p.URL}
+		result[i] = MCPPendingAuthServer{Name: p.Name, URL: p.URL}
 	}
 	return result
 }
@@ -1412,20 +1411,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			},
 		}
 	case pubsub.Event[proto.MCPEvent]:
-		return pubsub.Event[mcp.Event]{
-			Type: e.Type,
-			Payload: mcp.Event{
-				Type:  protoToMCPEventType(e.Payload.Type),
-				Name:  e.Payload.Name,
-				State: mcp.State(e.Payload.State),
-				Error: e.Payload.Error,
-				Counts: mcp.Counts{
-					Tools:     e.Payload.ToolCount,
-					Prompts:   e.Payload.PromptCount,
-					Resources: e.Payload.ResourceCount,
-				},
-			},
-		}
+		return pubsub.Event[MCPEvent]{Type: e.Type, Payload: MCPEvent{Type: MCPEventType(e.Payload.Type), Name: e.Payload.Name}}
 	case pubsub.Event[proto.PermissionRequest]:
 		return pubsub.Event[permission.PermissionRequest]{
 			Type: e.Type,
@@ -1495,18 +1481,19 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Payload: protoToFile(e.Payload),
 		}
 	case pubsub.Event[proto.AgentEvent]:
-		n := notify.Notification{
+		n := AgentNotification{
 			SessionID:    e.Payload.SessionID,
 			SessionTitle: e.Payload.SessionTitle,
 			RunID:        e.Payload.RunID,
-			Type:         notify.Type(e.Payload.Type),
+			ProviderID:   e.Payload.ProviderID,
+			Type:         AgentNotificationType(e.Payload.Type),
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,
 		}
 		if e.Payload.Error != nil {
 			n.Message = e.Payload.Error.Error()
 		}
-		return pubsub.Event[notify.Notification]{
+		return pubsub.Event[AgentNotification]{
 			Type:    e.Type,
 			Payload: n,
 		}
@@ -1538,7 +1525,7 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			Payload: skills.Event{States: states},
 		}
 	case pubsub.Event[proto.UpdateAvailable]:
-		return app.UpdateAvailableMsg{
+		return UpdateAvailableMsg{
 			CurrentVersion: e.Payload.CurrentVersion,
 			LatestVersion:  e.Payload.LatestVersion,
 			IsDevelopment:  e.Payload.IsDevelopment,

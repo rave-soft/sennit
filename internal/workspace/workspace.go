@@ -12,7 +12,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
+	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/git"
@@ -31,6 +32,23 @@ import (
 // Reasons the coder agent may be unavailable, returned by
 // Workspace.AgentReadyErr so callers can tell a genuinely
 // uninitialized agent apart from a lost server connection.
+type ProviderQuotaInfo struct {
+	Model       string
+	SettingsURL string
+}
+
+func GetProviderQuotaInfo(err error) (ProviderQuotaInfo, bool) {
+	var quotaErr *agent.ProviderQuotaError
+	if !errors.As(err, &quotaErr) {
+		return ProviderQuotaInfo{}, false
+	}
+	return ProviderQuotaInfo{Model: quotaErr.Model, SettingsURL: quotaErr.SettingsURL}, true
+}
+
+func ResetAgentToolCache() {
+	tools.ResetCache()
+}
+
 var (
 	// ErrAgentNotInitialized means the workspace exists but its coder
 	// agent has not been configured/initialized (e.g. no model set).
@@ -77,6 +95,34 @@ const (
 // ConnectionEvent is delivered to the TUI as a tea.Msg on degraded and
 // recovered transitions of the client-server link. Local (in-process)
 // workspaces never emit it.
+type AgentNotificationType string
+
+const (
+	AgentNotificationFinished       AgentNotificationType = "agent_finished"
+	AgentNotificationReAuthenticate AgentNotificationType = "re_authenticate"
+	AgentNotificationError          AgentNotificationType = "error"
+	AgentNotificationAWSSSOAuth     AgentNotificationType = "aws_sso_auth"
+	AgentNotificationAWSSSOResult   AgentNotificationType = "aws_sso_auth_result"
+	AgentNotificationQueueChanged   AgentNotificationType = "queue_changed"
+)
+
+type AgentNotification struct {
+	SessionID    string
+	SessionTitle string
+	Type         AgentNotificationType
+	ProviderID   string
+	RunID        string
+	Message      string
+	AWSSOCommand string
+	AWSSOURL     string
+}
+
+type UpdateAvailableMsg struct {
+	CurrentVersion string
+	LatestVersion  string
+	IsDevelopment  bool
+}
+
 type ConnectionEvent struct {
 	State ConnectionState
 	// Err is the most recent failure, set when State is
@@ -265,13 +311,56 @@ type ProjectLifecycle interface {
 
 // MCPController manages MCP server connections and their tools, prompts,
 // and resources (server-side in client mode).
+type MCPEventType string
+
+const (
+	MCPEventStateChanged         MCPEventType = "state_changed"
+	MCPEventToolsListChanged     MCPEventType = "tools_list_changed"
+	MCPEventPromptsListChanged   MCPEventType = "prompts_list_changed"
+	MCPEventResourcesListChanged MCPEventType = "resources_list_changed"
+)
+
+type MCPEvent struct {
+	Type MCPEventType
+	Name string
+}
+
+type MCPState = proto.MCPState
+
+const (
+	MCPStateDisabled  = proto.MCPStateDisabled
+	MCPStateStarting  = proto.MCPStateStarting
+	MCPStateConnected = proto.MCPStateConnected
+	MCPStateError     = proto.MCPStateError
+	MCPStateNeedsAuth = proto.MCPStateNeedsAuth
+)
+
+type MCPCounts struct {
+	Tools     int
+	Prompts   int
+	Resources int
+}
+
+type MCPClientInfo struct {
+	Name        string
+	State       MCPState
+	Error       error
+	Counts      MCPCounts
+	ConnectedAt time.Time
+}
+
+type MCPPendingAuthServer struct {
+	Name string
+	URL  string
+}
+
 type MCPController interface {
 	// WaitForMCPInit blocks until this workspace's MCP servers have
 	// finished their initial connection attempt (or ctx is done). Used by
 	// the UI to avoid reporting "no pending auth" before slow servers have
 	// had a chance to reach StateNeedsAuth.
 	WaitForMCPInit(ctx context.Context) error
-	MCPGetStates() map[string]mcptools.ClientInfo
+	MCPGetStates() map[string]MCPClientInfo
 	// MCPResources returns the cached resource catalog across all
 	// connected MCP servers, e.g. for completion popups.
 	MCPResources() []MCPResourceInfo
@@ -284,7 +373,7 @@ type MCPController interface {
 	EnableDockerMCP(ctx context.Context) error
 	DisableDockerMCP() error
 	MCPAuthenticate(ctx context.Context, name string) error
-	MCPPendingAuth() []mcptools.PendingAuthServer
+	MCPPendingAuth() []MCPPendingAuthServer
 	MCPAuthURL(name string) string
 }
 

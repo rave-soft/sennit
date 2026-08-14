@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/agent/notify"
 	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/commands"
@@ -571,8 +572,13 @@ func (w *AppWorkspace) WaitForMCPInit(ctx context.Context) error {
 	return w.app.MCP.WaitForInit(ctx)
 }
 
-func (w *AppWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {
-	return w.app.MCP.GetStates()
+func (w *AppWorkspace) MCPGetStates() map[string]MCPClientInfo {
+	states := w.app.MCP.GetStates()
+	result := make(map[string]MCPClientInfo, len(states))
+	for name, state := range states {
+		result[name] = MCPClientInfo{Name: state.Name, State: MCPState(state.State), Error: state.Error, Counts: MCPCounts{Tools: state.Counts.Tools, Prompts: state.Counts.Prompts, Resources: state.Counts.Resources}, ConnectedAt: state.ConnectedAt}
+	}
+	return result
 }
 
 func (w *AppWorkspace) MCPResources() []MCPResourceInfo {
@@ -659,8 +665,13 @@ func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
 	return w.app.MCP.AuthenticateMCP(ctx, w.store, name)
 }
 
-func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
-	return w.app.MCP.PendingAuthMCPs(w.store)
+func (w *AppWorkspace) MCPPendingAuth() []MCPPendingAuthServer {
+	pending := w.app.MCP.PendingAuthMCPs(w.store)
+	result := make([]MCPPendingAuthServer, len(pending))
+	for i, server := range pending {
+		result[i] = MCPPendingAuthServer{Name: server.Name, URL: server.URL}
+	}
+	return result
 }
 
 func (w *AppWorkspace) MCPAuthURL(name string) string {
@@ -692,6 +703,29 @@ func (w *AppWorkspace) Subscribe(program *tea.Program) {
 // instead of relying solely on their TTL-poll fallback. Any other
 // message passes through unchanged.
 func (w *AppWorkspace) translateEvent(msg any) any {
+	switch e := msg.(type) {
+	case pubsub.Event[notify.Notification]:
+		return pubsub.Event[AgentNotification]{Type: e.Type, Payload: AgentNotification{SessionID: e.Payload.SessionID, SessionTitle: e.Payload.SessionTitle, Type: AgentNotificationType(e.Payload.Type), ProviderID: e.Payload.ProviderID, RunID: e.Payload.RunID, Message: e.Payload.Message, AWSSOCommand: e.Payload.AWSSOCommand, AWSSOURL: e.Payload.AWSSOURL}}
+	case pubsub.Event[mcptools.Event]:
+		var eventType MCPEventType
+		switch e.Payload.Type {
+		case mcptools.EventStateChanged:
+			eventType = MCPEventStateChanged
+		case mcptools.EventToolsListChanged:
+			eventType = MCPEventToolsListChanged
+		case mcptools.EventPromptsListChanged:
+			eventType = MCPEventPromptsListChanged
+		case mcptools.EventResourcesListChanged:
+			eventType = MCPEventResourcesListChanged
+		default:
+			return nil
+		}
+		return pubsub.Event[MCPEvent]{Type: e.Type, Payload: MCPEvent{Type: eventType, Name: e.Payload.Name}}
+	case pubsub.Event[app.LSPEvent]:
+		return pubsub.Event[LSPEvent]{Type: e.Type, Payload: LSPEvent{Type: LSPEventType(e.Payload.Type), Name: e.Payload.Name, State: e.Payload.State, Error: e.Payload.Error, DiagnosticCount: e.Payload.DiagnosticCount}}
+	case app.UpdateAvailableMsg:
+		return UpdateAvailableMsg{CurrentVersion: e.CurrentVersion, LatestVersion: e.LatestVersion, IsDevelopment: e.IsDevelopment}
+	}
 	e, ok := msg.(pubsub.Event[thread.Event])
 	if !ok {
 		return msg

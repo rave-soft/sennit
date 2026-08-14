@@ -63,7 +63,7 @@ func TestShortFullHelpShowEnterChildSessionOnNestedItem(t *testing.T) {
 }
 
 // TestShortFullHelpHideEnterChildSessionOnPlainItem: a non-container
-// selection (or no session at all) must not surface enter-subagent.
+// selection (or no session at all) must not surface enter-subproto.
 func TestShortFullHelpHideEnterChildSessionOnPlainItem(t *testing.T) {
 	t.Parallel()
 

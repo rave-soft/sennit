@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/ui/util"
+	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,10 +50,10 @@ func TestAgentErrorNotificationReportsInApp(t *testing.T) {
 	m := newBusyUI(ws)
 	warmCaches(m, true)
 
-	_, cmd := m.Update(pubsub.Event[notify.Notification]{
+	_, cmd := m.Update(pubsub.Event[workspace.AgentNotification]{
 		Type: pubsub.CreatedEvent,
-		Payload: notify.Notification{
-			Type:      notify.TypeAgentError,
+		Payload: workspace.AgentNotification{
+			Type:      workspace.AgentNotificationError,
 			SessionID: "s1",
 			Message:   "provider request failed",
 		},
@@ -84,10 +84,10 @@ func TestAgentFinishedNotificationReportsNothing(t *testing.T) {
 	m := newBusyUI(ws)
 	warmCaches(m, true)
 
-	_, cmd := m.Update(pubsub.Event[notify.Notification]{
+	_, cmd := m.Update(pubsub.Event[workspace.AgentNotification]{
 		Type: pubsub.CreatedEvent,
-		Payload: notify.Notification{
-			Type:      notify.TypeAgentFinished,
+		Payload: workspace.AgentNotification{
+			Type:      workspace.AgentNotificationFinished,
 			SessionID: "s1",
 		},
 	})

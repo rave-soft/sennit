@@ -12,11 +12,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/stringext"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
@@ -365,7 +364,7 @@ func (p *Permissions) hitButton(x, y int) (int, bool) {
 
 func (p *Permissions) hasDiffView() bool {
 	switch p.permission.ToolName {
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ReplaceSymbolToolName:
+	case proto.EditToolName, proto.WriteToolName, proto.MultiEditToolName, proto.ReplaceSymbolToolName:
 		return true
 	}
 	return false
@@ -530,9 +529,9 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 
 	// Show generic Path only for tools that don't render their own file/path line.
 	switch p.permission.ToolName {
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName,
-		tools.ViewToolName, tools.ReplaceSymbolToolName,
-		tools.DownloadToolName, tools.LSToolName:
+	case proto.EditToolName, proto.WriteToolName, proto.MultiEditToolName,
+		proto.ViewToolName, proto.ReplaceSymbolToolName,
+		proto.DownloadToolName, proto.LSToolName:
 		// These tools show their own File/Directory line below.
 	default:
 		lines = append(lines, p.renderKeyValue("Path", fsext.PrettyPath(p.permission.Path), contentWidth))
@@ -540,34 +539,34 @@ func (p *Permissions) renderHeader(contentWidth int) string {
 
 	// Add tool-specific header info.
 	switch p.permission.ToolName {
-	case tools.BashToolName:
-		if params, ok := p.permission.Params.(tools.BashPermissionsParams); ok {
+	case proto.BashToolName:
+		if params, ok := p.permission.Params.(proto.BashPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("Desc", params.Description, contentWidth))
 		}
-	case tools.DownloadToolName:
-		if params, ok := p.permission.Params.(tools.DownloadPermissionsParams); ok {
+	case proto.DownloadToolName:
+		if params, ok := p.permission.Params.(proto.DownloadPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("URL", params.URL, contentWidth))
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(params.FilePath), contentWidth))
 		}
-	case tools.EditToolName, tools.WriteToolName, tools.MultiEditToolName, tools.ViewToolName, tools.ReplaceSymbolToolName:
+	case proto.EditToolName, proto.WriteToolName, proto.MultiEditToolName, proto.ViewToolName, proto.ReplaceSymbolToolName:
 		var filePath string
 		switch params := p.permission.Params.(type) {
-		case tools.EditPermissionsParams:
+		case proto.EditPermissionsParams:
 			filePath = params.FilePath
-		case tools.WritePermissionsParams:
+		case proto.WritePermissionsParams:
 			filePath = params.FilePath
-		case tools.MultiEditPermissionsParams:
+		case proto.MultiEditPermissionsParams:
 			filePath = params.FilePath
-		case tools.ViewPermissionsParams:
+		case proto.ViewPermissionsParams:
 			filePath = params.FilePath
-		case tools.ReplaceSymbolPermissionsParams:
+		case proto.ReplaceSymbolPermissionsParams:
 			filePath = params.FilePath
 		}
 		if filePath != "" {
 			lines = append(lines, p.renderKeyValue("File", fsext.PrettyPath(filePath), contentWidth))
 		}
-	case tools.LSToolName:
-		if params, ok := p.permission.Params.(tools.LSPermissionsParams); ok {
+	case proto.LSToolName:
+		if params, ok := p.permission.Params.(proto.LSPermissionsParams); ok {
 			lines = append(lines, p.renderKeyValue("Directory", fsext.PrettyPath(params.Path), contentWidth))
 		}
 	}
@@ -611,25 +610,25 @@ func prettyName(name string) string {
 
 func (p *Permissions) renderContent(width int) string {
 	switch p.permission.ToolName {
-	case tools.BashToolName:
+	case proto.BashToolName:
 		return p.renderBashContent(width)
-	case tools.EditToolName:
+	case proto.EditToolName:
 		return p.renderEditContent(width)
-	case tools.WriteToolName:
+	case proto.WriteToolName:
 		return p.renderWriteContent(width)
-	case tools.MultiEditToolName:
+	case proto.MultiEditToolName:
 		return p.renderMultiEditContent(width)
-	case tools.ReplaceSymbolToolName:
+	case proto.ReplaceSymbolToolName:
 		return p.renderReplaceSymbolContent(width)
-	case tools.DownloadToolName:
+	case proto.DownloadToolName:
 		return p.renderDownloadContent(width)
-	case tools.FetchToolName:
+	case proto.FetchToolName:
 		return p.renderFetchContent(width)
-	case tools.AgenticFetchToolName:
+	case proto.AgenticFetchToolName:
 		return p.renderAgenticFetchContent(width)
-	case tools.ViewToolName:
+	case proto.ViewToolName:
 		return p.renderViewContent(width)
-	case tools.LSToolName:
+	case proto.LSToolName:
 		return p.renderLSContent(width)
 	default:
 		return p.renderDefaultContent(width)
@@ -637,7 +636,7 @@ func (p *Permissions) renderContent(width int) string {
 }
 
 func (p *Permissions) renderBashContent(width int) string {
-	params, ok := p.permission.Params.(tools.BashPermissionsParams)
+	params, ok := p.permission.Params.(proto.BashPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -646,7 +645,7 @@ func (p *Permissions) renderBashContent(width int) string {
 }
 
 func (p *Permissions) renderEditContent(contentWidth int) string {
-	params, ok := p.permission.Params.(tools.EditPermissionsParams)
+	params, ok := p.permission.Params.(proto.EditPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -654,7 +653,7 @@ func (p *Permissions) renderEditContent(contentWidth int) string {
 }
 
 func (p *Permissions) renderWriteContent(contentWidth int) string {
-	params, ok := p.permission.Params.(tools.WritePermissionsParams)
+	params, ok := p.permission.Params.(proto.WritePermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -662,7 +661,7 @@ func (p *Permissions) renderWriteContent(contentWidth int) string {
 }
 
 func (p *Permissions) renderMultiEditContent(contentWidth int) string {
-	params, ok := p.permission.Params.(tools.MultiEditPermissionsParams)
+	params, ok := p.permission.Params.(proto.MultiEditPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -670,7 +669,7 @@ func (p *Permissions) renderMultiEditContent(contentWidth int) string {
 }
 
 func (p *Permissions) renderReplaceSymbolContent(contentWidth int) string {
-	params, ok := p.permission.Params.(tools.ReplaceSymbolPermissionsParams)
+	params, ok := p.permission.Params.(proto.ReplaceSymbolPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -708,7 +707,7 @@ func (p *Permissions) renderDiff(filePath, oldContent, newContent string, conten
 }
 
 func (p *Permissions) renderDownloadContent(width int) string {
-	params, ok := p.permission.Params.(tools.DownloadPermissionsParams)
+	params, ok := p.permission.Params.(proto.DownloadPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -722,7 +721,7 @@ func (p *Permissions) renderDownloadContent(width int) string {
 }
 
 func (p *Permissions) renderFetchContent(width int) string {
-	params, ok := p.permission.Params.(tools.FetchPermissionsParams)
+	params, ok := p.permission.Params.(proto.FetchPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -731,7 +730,7 @@ func (p *Permissions) renderFetchContent(width int) string {
 }
 
 func (p *Permissions) renderAgenticFetchContent(width int) string {
-	params, ok := p.permission.Params.(tools.AgenticFetchPermissionsParams)
+	params, ok := p.permission.Params.(proto.AgenticFetchPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -747,7 +746,7 @@ func (p *Permissions) renderAgenticFetchContent(width int) string {
 }
 
 func (p *Permissions) renderViewContent(width int) string {
-	params, ok := p.permission.Params.(tools.ViewPermissionsParams)
+	params, ok := p.permission.Params.(proto.ViewPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -764,7 +763,7 @@ func (p *Permissions) renderViewContent(width int) string {
 }
 
 func (p *Permissions) renderLSContent(width int) string {
-	params, ok := p.permission.Params.(tools.LSPermissionsParams)
+	params, ok := p.permission.Params.(proto.LSPermissionsParams)
 	if !ok {
 		return ""
 	}
@@ -964,9 +963,9 @@ func (p *Permissions) FullHelp() [][]key.Binding {
 // dashboard) rather than a generic one they have to translate.
 func delegationHeaderKey(kind string) string {
 	switch kind {
-	case string(thread.KindThread):
+	case string(proto.ThreadKindThread):
 		return "Thread"
-	case string(thread.KindTask):
+	case string(proto.ThreadKindTask):
 		return "Task"
 	default:
 		return "From"

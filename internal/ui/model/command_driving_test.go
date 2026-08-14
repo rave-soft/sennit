@@ -9,7 +9,6 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
@@ -361,7 +360,7 @@ func (w *cmdDrivingWorkspace) ReadSkill(ctx context.Context, skillID string) ([]
 	return nil, skills.SkillReadResult{}, nil
 }
 func (w *cmdDrivingWorkspace) WaitForMCPInit(ctx context.Context) error { return nil }
-func (w *cmdDrivingWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {
+func (w *cmdDrivingWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo {
 	return nil
 }
 
@@ -391,7 +390,7 @@ func (w *cmdDrivingWorkspace) MCPAuthenticate(ctx context.Context, name string) 
 	return nil
 }
 
-func (w *cmdDrivingWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
+func (w *cmdDrivingWorkspace) MCPPendingAuth() []workspace.MCPPendingAuthServer {
 	return nil
 }
 

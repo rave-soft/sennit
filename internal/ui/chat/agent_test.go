@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
+	tools "github.com/rave-soft/braid/internal/proto"
+
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
@@ -353,7 +354,7 @@ func TestAgentToolRenderCanceledCollapses(t *testing.T) {
 }
 
 // TestAgentToolRenderBackgroundDispatch covers a background agent-tool
-// dispatch (agent.AgentParams.Background): runBackgroundAgent returns
+// dispatch (tools.AgentParams.Background): runBackgroundAgent returns
 // synchronously with an acknowledgment, so HasResult is true immediately —
 // this must render as a distinct "just dispatched" block, not fall into
 // renderCollapsedDelegation's finished-with-an-answer shape.
@@ -367,7 +368,7 @@ func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
 		Input:    `{"prompt":"scan the repo for TODOs","background":true}`,
 		Finished: true,
 	}
-	metaJSON, err := json.Marshal(agent.AgentBackgroundResponseMetadata{
+	metaJSON, err := json.Marshal(tools.AgentBackgroundResponseMetadata{
 		TaskID:    "t1",
 		SessionID: "s1",
 		Status:    "running",

@@ -8,12 +8,12 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
-	mcp "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/logo"
 	"github.com/rave-soft/braid/internal/ui/styles"
+	mcp "github.com/rave-soft/braid/internal/workspace"
 )
 
 // sidebarState holds virtual-scroll state and cached rendered content for
@@ -276,7 +276,7 @@ func fileChangeCount(files []SessionFile) int {
 }
 
 // mcpCount returns the number of MCP servers that have a state entry.
-func mcpCount(mcpCfgs []config.MCP, states map[string]mcp.ClientInfo) int {
+func mcpCount(mcpCfgs []config.MCP, states map[string]mcp.MCPClientInfo) int {
 	count := 0
 	for _, cfg := range mcpCfgs {
 		if _, ok := states[cfg.Name]; ok {

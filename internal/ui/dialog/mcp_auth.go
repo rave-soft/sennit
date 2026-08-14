@@ -12,8 +12,8 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/pkg/browser"
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/ui/common"
+	mcptools "github.com/rave-soft/braid/internal/workspace"
 )
 
 // MCPAuthID is the identifier for the MCP authentication dialog.
@@ -34,7 +34,7 @@ type MCPAuth struct {
 	com *common.Common
 	Base
 
-	pending   []mcptools.PendingAuthServer
+	pending   []mcptools.MCPPendingAuthServer
 	current   int
 	state     MCPAuthState
 	err       error
@@ -55,7 +55,7 @@ type MCPAuth struct {
 var _ Dialog = (*MCPAuth)(nil)
 
 // NewMCPAuth creates a new MCP authentication dialog.
-func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authURLFn func(string) string) (*MCPAuth, tea.Cmd) {
+func NewMCPAuth(com *common.Common, pending []mcptools.MCPPendingAuthServer, authURLFn func(string) string) (*MCPAuth, tea.Cmd) {
 	t := com.Styles
 	m := &MCPAuth{
 		com:       com,
@@ -221,11 +221,11 @@ func (m *MCPAuth) authURL() string {
 	return m.authURLFn(m.currentServer().Name)
 }
 
-func (m *MCPAuth) currentServer() mcptools.PendingAuthServer {
+func (m *MCPAuth) currentServer() mcptools.MCPPendingAuthServer {
 	if m.current < len(m.pending) {
 		return m.pending[m.current]
 	}
-	return mcptools.PendingAuthServer{}
+	return mcptools.MCPPendingAuthServer{}
 }
 
 // Draw renders the dialog, sizing it to the available area so it never

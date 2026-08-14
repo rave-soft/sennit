@@ -125,6 +125,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 			SessionID:    e.Payload.SessionID,
 			SessionTitle: e.Payload.SessionTitle,
 			RunID:        e.Payload.RunID,
+			ProviderID:   e.Payload.ProviderID,
 			Type:         proto.AgentEventType(e.Payload.Type),
 			AWSSOCommand: e.Payload.AWSSOCommand,
 			AWSSOURL:     e.Payload.AWSSOURL,

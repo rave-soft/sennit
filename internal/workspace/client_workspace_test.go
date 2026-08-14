@@ -13,7 +13,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/message"
@@ -221,7 +220,7 @@ func TestNewClientWorkspace_SeedsSkillsCache(t *testing.T) {
 
 // TestTranslateEvent_UpdateAvailable verifies that an incoming
 // proto.UpdateAvailable event is converted back into the
-// app.UpdateAvailableMsg that the TUI expects, so client/server mode
+// UpdateAvailableMsg that the TUI expects, so client/server mode
 // shows the same update notification as local mode.
 func TestTranslateEvent_UpdateAvailable(t *testing.T) {
 	t.Parallel()
@@ -237,8 +236,8 @@ func TestTranslateEvent_UpdateAvailable(t *testing.T) {
 	}
 
 	out := w.translateEvent(ev)
-	got, ok := out.(app.UpdateAvailableMsg)
-	require.True(t, ok, "expected app.UpdateAvailableMsg, got %T", out)
+	got, ok := out.(UpdateAvailableMsg)
+	require.True(t, ok, "expected UpdateAvailableMsg, got %T", out)
 	require.Equal(t, "1.0.0", got.CurrentVersion)
 	require.Equal(t, "1.1.0", got.LatestVersion)
 	require.True(t, got.IsDevelopment)

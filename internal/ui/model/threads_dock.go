@@ -41,7 +41,6 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/presentation"
@@ -247,7 +246,7 @@ func (c *threadsDockState) staleThreadsDockRefreshCmd(com *common.Common, active
 func activeDockThreads(threads []proto.Thread) []proto.Thread {
 	var active []proto.Thread
 	for _, t := range threads {
-		if thread.Status(t.Status).Active() || thread.Status(t.Status) == thread.StatusIdle {
+		if proto.ThreadStatus(t.Status).Active() || proto.ThreadStatus(t.Status) == proto.ThreadStatusIdle {
 			active = append(active, t)
 		}
 	}
@@ -439,7 +438,7 @@ func threadDockGoalFirstLine(goal string) string {
 // at all, always suffixed with the elapsed time. Doesn't add the leading
 // spinner/arrow — that's a rendering concern for the drawing step to
 // prepend.
-func threadDockStatusLine(status thread.Status, activity threadDockActivity, elapsed time.Duration) string {
+func threadDockStatusLine(status proto.ThreadStatus, activity threadDockActivity, elapsed time.Duration) string {
 	var parts []string
 	if activity.MessageCount > 0 {
 		parts = append(parts, fmt.Sprintf("step %d", activity.MessageCount))
@@ -459,15 +458,15 @@ func threadDockStatusLine(status thread.Status, activity threadDockActivity, ela
 
 // threadDockStatusWord renders a thread's status as the terse, lowercase
 // fallback word used when there's no live activity to show instead.
-func threadDockStatusWord(status thread.Status) string {
+func threadDockStatusWord(status proto.ThreadStatus) string {
 	switch status {
-	case thread.StatusPending:
+	case proto.ThreadStatusPending:
 		return "pending"
-	case thread.StatusRunning:
+	case proto.ThreadStatusRunning:
 		return "running…"
-	case thread.StatusMerging:
+	case proto.ThreadStatusMerging:
 		return "merging…"
-	case thread.StatusIdle:
+	case proto.ThreadStatusIdle:
 		// Explicit, not the raw-status default: idle must read as its own
 		// waiting state, distinct from both "running" and a terminal word.
 		return "idle"

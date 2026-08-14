@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/git"
@@ -190,7 +189,7 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 
 	// MCP query state passes through.
 	require.NoError(t, ro.WaitForMCPInit(t.Context()))
-	require.IsType(t, map[string]mcptools.ClientInfo{}, ro.MCPGetStates())
+	require.IsType(t, map[string]MCPClientInfo{}, ro.MCPGetStates())
 	require.IsType(t, []MCPResourceInfo{}, ro.MCPResources())
 	resources, err := ro.ReadMCPResource(t.Context(), "name", "uri")
 	require.NoError(t, err)
@@ -468,7 +467,7 @@ func (s *stubWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, 
 
 // MCP
 func (s *stubWorkspace) WaitForMCPInit(ctx context.Context) error             { return nil }
-func (s *stubWorkspace) MCPGetStates() map[string]mcptools.ClientInfo         { return nil }
+func (s *stubWorkspace) MCPGetStates() map[string]MCPClientInfo               { return nil }
 func (s *stubWorkspace) MCPResources() []MCPResourceInfo                      { return nil }
 func (s *stubWorkspace) MCPRefreshPrompts(ctx context.Context, name string)   {}
 func (s *stubWorkspace) MCPRefreshResources(ctx context.Context, name string) {}
@@ -487,7 +486,7 @@ func (s *stubWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]
 func (s *stubWorkspace) EnableDockerMCP(ctx context.Context) error              { return nil }
 func (s *stubWorkspace) DisableDockerMCP() error                                { return nil }
 func (s *stubWorkspace) MCPAuthenticate(ctx context.Context, name string) error { return nil }
-func (s *stubWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer           { return nil }
+func (s *stubWorkspace) MCPPendingAuth() []MCPPendingAuthServer                 { return nil }
 func (s *stubWorkspace) MCPAuthURL(name string) string                          { return "" }
 
 // ThreadController (query only for stub)

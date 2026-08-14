@@ -8,11 +8,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/styles"
+	mcptools "github.com/rave-soft/braid/internal/workspace"
 )
 
 const (
@@ -223,13 +223,13 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 // DoctorProblems collects every config.Problem for this workspace: the
 // static findings from config.Doctor plus any MCP server currently stuck
 // in an error/needs-auth state. This mirrors braid_info's [problems]
-// section (internal/agent/tools/braid_info.go's writeProblems) — the same
+// section (domain/agent/tools/braid_info.go's writeProblems) — the same
 // merge, on the UI side of the workspace.Workspace boundary since
 // internal/config cannot import the MCP client package.
 func DoctorProblems(com *common.Common) []config.Problem {
 	problems := config.Doctor(com.Config())
 	for name, info := range com.Workspace.MCPGetStates() {
-		if info.State != mcptools.StateError && info.State != mcptools.StateNeedsAuth {
+		if info.State != mcptools.MCPStateError && info.State != mcptools.MCPStateNeedsAuth {
 			continue
 		}
 		msg := fmt.Sprintf("mcp server %s is in state %s", name, info.State)

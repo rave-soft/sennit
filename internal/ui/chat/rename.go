@@ -3,9 +3,9 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/fsext"
 	"github.com/rave-soft/braid/internal/message"
+	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 

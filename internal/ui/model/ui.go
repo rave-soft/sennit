@@ -34,11 +34,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/notify"
-	agenttools "github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
-	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/clipboard"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
@@ -256,7 +251,7 @@ type (
 	}
 	// mcpStateChangedMsg is sent when there is a change in MCP client states.
 	mcpStateChangedMsg struct {
-		states map[string]mcp.ClientInfo
+		states map[string]workspace.MCPClientInfo
 	}
 	// sendMessageMsg is sent to send a message.
 	// currently only used for mcp prompts.
@@ -415,7 +410,7 @@ type UI struct {
 	lspCheckedAt     time.Time
 
 	// mcp
-	mcpStates map[string]mcp.ClientInfo
+	mcpStates map[string]workspace.MCPClientInfo
 
 	// skills
 	skillStates []*skills.SkillState
@@ -617,7 +612,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		header:                 header,
 		panelSpinner:           panelSpinner,
 		lspStates:              make(map[string]workspace.LSPClientInfo),
-		mcpStates:              make(map[string]mcp.ClientInfo),
+		mcpStates:              make(map[string]workspace.MCPClientInfo),
 		notifyBackend:          notification.NoopBackend{},
 		notifyWindowFocused:    true,
 		initialSessionID:       initialSessionID,
@@ -977,7 +972,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyWindowFocused = true
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
-	case pubsub.Event[notify.Notification]:
+	case pubsub.Event[workspace.AgentNotification]:
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1257,31 +1252,27 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
-	case pubsub.Event[app.LSPEvent]:
+	case pubsub.Event[workspace.LSPEvent]:
 		// Refresh the memoized LSP state off-thread: LSPGetStates is a
 		// synchronous HTTP round-trip in client/server mode and diagnostics
 		// events can arrive per edited file.
 		if cmd := m.requestLSPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case pubsub.Event[workspace.LSPEvent]:
-		if cmd := m.requestLSPRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
-	case pubsub.Event[mcp.Event]:
+	case pubsub.Event[workspace.MCPEvent]:
 		switch msg.Payload.Type {
-		case mcp.EventStateChanged:
+		case workspace.MCPEventStateChanged:
 			return m, tea.Batch(
 				m.handleStateChanged(),
 				m.loadMCPrompts,
 			)
-		case mcp.EventPromptsListChanged:
+		case workspace.MCPEventPromptsListChanged:
 			return m, handleMCPPromptsEvent(m.com.Workspace, msg.Payload.Name)
-		case mcp.EventToolsListChanged:
+		case workspace.MCPEventToolsListChanged:
 			return m, handleMCPToolsEvent(m.com.Workspace, msg.Payload.Name)
-		case mcp.EventResourcesListChanged:
+		case workspace.MCPEventResourcesListChanged:
 			return m, handleMCPResourcesEvent(m.com.Workspace, msg.Payload.Name)
 		}
 	case pubsub.Event[permission.PermissionRequest]:
@@ -2093,7 +2084,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case threadDockActivityLoadedMsg:
 		m.threadsDock.applyThreadActivityLoaded(msg)
-	case app.UpdateAvailableMsg:
+	case workspace.UpdateAvailableMsg:
 		text := fmt.Sprintf("Braid update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
 			text = fmt.Sprintf("This is a development version of Braid. The latest version is v%s.", msg.LatestVersion)
@@ -5159,7 +5150,7 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		return nil
 	}
 
-	workspace := m.com.Workspace
+	ws := m.com.Workspace
 	styles := m.com.Styles
 	reads := append([]string(nil), m.sessionFileReads...)
 	ctx := context.Background()
@@ -5179,11 +5170,11 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 	}
 
 	return func() tea.Msg {
-		if err := workspace.AgentReadyErr(); err != nil {
+		if err := ws.AgentReadyErr(); err != nil {
 			return sendMessageErrorMsg{Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration, creating: creating}
 		}
 		if creating {
-			created, err := workspace.CreateSession(ctx, "New Session")
+			created, err := ws.CreateSession(ctx, "New Session")
 			if err != nil {
 				return sendMessageErrorMsg{Err: err, generation: generation, creating: true}
 			}
@@ -5191,14 +5182,13 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 		}
 		common.StartTurn()
 		for _, path := range reads {
-			workspace.FileTrackerRecordRead(ctx, sessionID, path)
-			workspace.LSPStart(ctx, path)
+			ws.FileTrackerRecordRead(ctx, sessionID, path)
+			ws.LSPStart(ctx, path)
 		}
-		if err := workspace.AgentRun(ctx, sessionID, content, attachments...); err != nil && !errors.Is(err, context.Canceled) {
-			var quotaErr *agent.ProviderQuotaError
-			if errors.As(err, &quotaErr) {
-				link := styles.Dialog.OAuth.Link.Hyperlink(quotaErr.SettingsURL, "id=copilot").Render(quotaErr.SettingsURL)
-				return sendMessageErrorMsg{Err: fmt.Errorf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quotaErr.Model, link), generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
+		if err := ws.AgentRun(ctx, sessionID, content, attachments...); err != nil && !errors.Is(err, context.Canceled) {
+			if quota, ok := workspace.GetProviderQuotaInfo(err); ok {
+				link := styles.Dialog.OAuth.Link.Hyperlink(quota.SettingsURL, "id=copilot").Render(quota.SettingsURL)
+				return sendMessageErrorMsg{Err: fmt.Errorf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quota.Model, link), generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
 			}
 			return sendMessageErrorMsg{Err: err, generation: generation, sessionID: sessionID, loadGeneration: loadGeneration}
 		}
@@ -5353,7 +5343,7 @@ func cancelTimerCmd() tea.Cmd {
 
 // cancelAgent handles the cancel key press. The first press sets isCanceling to true
 // and starts a timer. The second press (before the timer expires) actually
-// cancels the agent.
+// cancels the proto.
 func (m *UI) cancelAgent() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -5855,16 +5845,16 @@ func (m *UI) handlePermissionNotification(notification permission.PermissionNoti
 
 // handleAgentNotification translates domain agent events into desktop
 // notifications using the UI notification backend.
-func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
+func (m *UI) handleAgentNotification(n workspace.AgentNotification) tea.Cmd {
 	var cmds []tea.Cmd
 	switch n.Type {
-	case notify.TypeAgentFinished:
+	case workspace.AgentNotificationFinished:
 		common.StopTurn()
 		cmds = append(cmds, m.sendNotification(notification.Notification{
 			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
 			Message: notificationBodyTaskFinished(n.SessionTitle),
 		}))
-	case notify.TypeAgentError:
+	case workspace.AgentNotificationError:
 		// Terminal edge like TypeAgentFinished, but the turn ended with an
 		// error rather than a normal completion — surface it too instead of
 		// leaving the user to notice the failure on their own.
@@ -5882,13 +5872,13 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
 			Message: notificationBodyTaskFailed(n.Message),
 		}))
-	case notify.TypeReAuthenticate:
+	case workspace.AgentNotificationReAuthenticate:
 		return m.handleReAuthenticate(n.ProviderID)
-	case notify.TypeAWSSSOAuth:
+	case workspace.AgentNotificationAWSSSOAuth:
 		return m.handleAWSSSOAuth(n.AWSSOCommand, n.AWSSOURL)
-	case notify.TypeAWSSSOAuthResult:
+	case workspace.AgentNotificationAWSSSOResult:
 		return m.handleAWSSSOAuthResult(n.Message)
-	case notify.TypeQueueChanged:
+	case workspace.AgentNotificationQueueChanged:
 		// Not a busy→idle edge (the session may still be busy, or may
 		// never have been) - only the queue pill is stale, so refresh
 		// just that instead of also re-probing busy state. This is the
@@ -6006,7 +5996,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
 	m.editor.historyReset()
-	agenttools.ResetCache()
+	workspace.ResetAgentToolCache()
 	return tea.Batch(
 		func() tea.Msg {
 			m.com.Workspace.LSPStopAll(context.Background())

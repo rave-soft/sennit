@@ -200,10 +200,11 @@ func TestAgentErrorToProto_PreservesRunID(t *testing.T) {
 	src := pubsub.Event[notify.Notification]{
 		Type: pubsub.CreatedEvent,
 		Payload: notify.Notification{
-			SessionID: "S",
-			RunID:     "run-99",
-			Type:      notify.TypeAgentError,
-			Message:   "boom",
+			SessionID:  "S",
+			ProviderID: "copilot",
+			RunID:      "run-99",
+			Type:       notify.TypeAgentError,
+			Message:    "boom",
 		},
 	}
 
@@ -217,6 +218,7 @@ func TestAgentErrorToProto_PreservesRunID(t *testing.T) {
 	require.Equal(t, "S", decoded.Payload.SessionID)
 	require.Equal(t, "run-99", decoded.Payload.RunID,
 		"RunID must survive so observers can attribute the error to its run")
+	require.Equal(t, "copilot", decoded.Payload.ProviderID)
 	require.NotNil(t, decoded.Payload.Error)
 	require.Equal(t, "boom", decoded.Payload.Error.Error())
 }

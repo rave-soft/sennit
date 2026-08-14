@@ -9,8 +9,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/message"
+	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/stringext"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/presentation"

@@ -6,9 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/fsext"
+	tools "github.com/rave-soft/braid/internal/proto"
 )
 
 // formatToolForCopy formats the tool call for clipboard copying.
@@ -167,8 +166,8 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		}
 	case tools.DiagnosticsToolName:
 		return "**Project:** diagnostics"
-	case agent.AgentToolName:
-		var params agent.AgentParams
+	case tools.AgentToolName:
+		var params tools.AgentParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			return fmt.Sprintf("**Task:**\n%s", params.Prompt)
 		}
@@ -220,7 +219,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatAgenticFetchResultForCopy()
 	case tools.WebFetchToolName:
 		return t.formatWebFetchResultForCopy()
-	case agent.AgentToolName:
+	case tools.AgentToolName:
 		return t.formatAgentResultForCopy()
 	case tools.DownloadToolName, tools.GrepToolName, tools.RipgrepToolName, tools.GlobToolName, tools.LSToolName, tools.DiagnosticsToolName, tools.TodosToolName:
 		return fmt.Sprintf("```\n%s\n```", t.result.Content)
@@ -232,7 +231,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 // prettifyToolName returns a human-readable name for tool names.
 func prettifyToolName(name string) string {
 	switch name {
-	case agent.AgentToolName:
+	case tools.AgentToolName:
 		return "Agent"
 	case tools.BashToolName:
 		return "Bash"

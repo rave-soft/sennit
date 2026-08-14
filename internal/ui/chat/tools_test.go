@@ -3,10 +3,9 @@ package chat
 import (
 	"testing"
 
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
+	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
@@ -16,9 +15,9 @@ import (
 // toolMessageItemFactories, instead of registering a map entry — because
 // their constructor needs an argument (cfg, to resolve a delegation's
 // display name and model/effort override) that toolMessageItemFactory's
-// signature has no room for. See the map's comment on agent.AgentToolName.
+// signature has no room for. See the map's comment on tools.AgentToolName.
 var toolsHandledOutsideFactoryMap = []string{
-	agent.AgentToolName,
+	tools.AgentToolName,
 }
 
 // toolsWithoutDedicatedRenderer lists the built-in tools (from
@@ -31,7 +30,7 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.BraidLogsToolName,
 	tools.ListMCPResourcesToolName,
 	tools.ReadMCPResourceToolName,
-	// Thread tools (internal/agent/tools/thread_*.go) don't have a
+	// Thread tools (domain/agent/tools/thread_*.go) don't have a
 	// dedicated renderer yet; they fall back to the generic one until the
 	// TUI grows one.
 	tools.ThreadCreateToolName,
@@ -41,14 +40,14 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.ThreadWaitToolName,
 	tools.ThreadMergeToolName,
 	tools.ThreadRemoveToolName,
-	// Task tools (internal/agent/tools/task_*.go), same story: no
+	// Task tools (domain/agent/tools/task_*.go), same story: no
 	// dedicated renderer yet.
 	tools.TaskListToolName,
 	tools.TaskResultToolName,
 	tools.TaskCancelToolName,
 	tools.TaskSendToolName,
 	tools.TaskOutputToolName,
-	// ask_parent (internal/agent/tools/ask_parent.go), same story: no
+	// ask_parent (domain/agent/tools/ask_parent.go), same story: no
 	// dedicated renderer yet.
 	tools.AskParentToolName,
 }
@@ -93,7 +92,7 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	// them (which noRenderer-listed tools also do, for the opposite
 	// reason).
 	sty := styles.CharmtonePantera()
-	item := NewToolMessageItem(&sty, "msg", message.ToolCall{ID: "tc-agent", Name: agent.AgentToolName, Input: "{}"}, nil, false, nil)
+	item := NewToolMessageItem(&sty, "msg", message.ToolCall{ID: "tc-agent", Name: tools.AgentToolName, Input: "{}"}, nil, false, nil)
 	require.IsType(t, &AgentToolMessageItem{}, item,
 		"the built-in agent tool must dispatch to AgentToolMessageItem, not fall back to the generic renderer")
 
@@ -138,7 +137,7 @@ func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {
 }
 
 // TestNewToolMessageItem_CustomAgentDispatch covers the documented gap
-// closed here: a user-defined agent tool (internal/agent/custom_agent_tool.go
+// closed here: a user-defined agent tool (domain/agent/custom_agent_tool.go
 // registers one per entry in cfg.Agents, named after the agent's id) must
 // get the same AgentToolMessageItem renderer as the built-in "agent" tool —
 // status line, collapse-on-finish, click-to-drill — not the generic

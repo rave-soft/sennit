@@ -112,7 +112,7 @@ func TestHandleChildSessionUpdate(t *testing.T) {
 // TestHandleChildSessionUpdate_Todos is the todos counterpart of
 // TestHandleChildSessionUpdate: a session.Session update for a child
 // agent-tool session must reach the parent AgentToolMessageItem's todo
-// list and show up on re-render — the todos tool (internal/agent/tools/todos.go)
+// list and show up on re-render — the todos tool (domain/agent/tools/todos.go)
 // saves the child session with Todos set, publishing the same
 // pubsub.Event[session.Session] this handler already consumes for tokens.
 func TestHandleChildSessionUpdate_Todos(t *testing.T) {

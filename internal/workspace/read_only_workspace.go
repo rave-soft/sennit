@@ -7,7 +7,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/git"
@@ -425,7 +424,7 @@ func (w *readOnlyWorkspace) WaitForMCPInit(ctx context.Context) error {
 	return w.underlying.WaitForMCPInit(ctx)
 }
 
-func (w *readOnlyWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {
+func (w *readOnlyWorkspace) MCPGetStates() map[string]MCPClientInfo {
 	return w.underlying.MCPGetStates()
 }
 
@@ -469,7 +468,7 @@ func (w *readOnlyWorkspace) MCPAuthenticate(ctx context.Context, name string) er
 	return w.readOnlyError("MCPAuthenticate")
 }
 
-func (w *readOnlyWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
+func (w *readOnlyWorkspace) MCPPendingAuth() []MCPPendingAuthServer {
 	return w.underlying.MCPPendingAuth()
 }
 

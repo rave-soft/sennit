@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/ui/common"
@@ -19,16 +18,16 @@ import (
 type doctorTestWorkspace struct {
 	workspace.Workspace
 	cfg    *config.Config
-	states map[string]mcptools.ClientInfo
+	states map[string]workspace.MCPClientInfo
 }
 
 func (w *doctorTestWorkspace) SupportsThreads() bool { return false }
 
 func (w *doctorTestWorkspace) Config() *config.Config { return w.cfg }
 
-func (w *doctorTestWorkspace) MCPGetStates() map[string]mcptools.ClientInfo { return w.states }
+func (w *doctorTestWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo { return w.states }
 
-func newDoctorTestCommon(t *testing.T, cfg *config.Config, states map[string]mcptools.ClientInfo) *common.Common {
+func newDoctorTestCommon(t *testing.T, cfg *config.Config, states map[string]workspace.MCPClientInfo) *common.Common {
 	t.Helper()
 	s := styles.CharmtonePantera()
 	return &common.Common{
@@ -66,15 +65,15 @@ func TestDoctorProblems_StaticConfigCheck(t *testing.T) {
 }
 
 // TestDoctorProblems_MCPFailedState verifies a failed MCP server (the
-// registry's existing state, per internal/agent/tools/mcp) is merged in
+// registry's existing state, per domain/agent/tools/mcp) is merged in
 // alongside the static config.Doctor findings.
 func TestDoctorProblems_MCPFailedState(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{Options: &config.Options{}, Providers: csync.NewMap[string, config.ProviderConfig]()}
-	states := map[string]mcptools.ClientInfo{
-		"github": {Name: "github", State: mcptools.StateError, Error: errors.New("connection refused")},
-		"docs":   {Name: "docs", State: mcptools.StateConnected},
+	states := map[string]workspace.MCPClientInfo{
+		"github": {Name: "github", State: workspace.MCPStateError, Error: errors.New("connection refused")},
+		"docs":   {Name: "docs", State: workspace.MCPStateConnected},
 	}
 
 	com := newDoctorTestCommon(t, cfg, states)

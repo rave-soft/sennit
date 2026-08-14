@@ -4,10 +4,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
+	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/styles"
@@ -16,11 +15,11 @@ import (
 // responseContextHeight limits the number of lines displayed in tool output.
 // Regular tool calls (view/write/edit/bash/grep/...) never show a body at
 // all — see appendResultSummary — so in practice this only still bounds the
-// still-alive running-delegation preview in agent.go (toolOutputMarkdownContent).
+// still-alive running-delegation preview in tools.go (toolOutputMarkdownContent).
 const responseContextHeight = 10
 
 // previewTruncateFormat notes how much of a body was cut off. The tools
-// rendering through this (the running-delegation preview in agent.go) have
+// rendering through this (the running-delegation preview in tools.go) have
 // no click-to-see-more, so unlike assistantMessageTruncateFormat (the
 // assistant's own message text) and Bash's click-to-expand body, this
 // never invites a click.
@@ -267,7 +266,7 @@ func newRegisteredToolMessageItem(sty *styles.Styles, toolCall message.ToolCall,
 // message containing this tool call. cfg is used to recognize user-defined
 // agent tools (see isCustomAgentTool) so they get the same renderer as the
 // built-in "agent" tool; it may be nil, in which case no tool name is
-// treated as a custom agent.
+// treated as a custom tools.
 func NewToolMessageItem(
 	sty *styles.Styles,
 	messageID string,
@@ -278,7 +277,7 @@ func NewToolMessageItem(
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch {
-	case toolCall.Name == agent.AgentToolName:
+	case toolCall.Name == tools.AgentToolName:
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled, cfg)
 	case toolMessageItemFactories[toolCall.Name] != nil:
 		item = newRegisteredToolMessageItem(sty, toolCall, result, toolMessageItemFactories[toolCall.Name], canceled)
@@ -302,7 +301,7 @@ func NewToolMessageItem(
 }
 
 // isCustomAgentTool reports whether name is a user-defined agent tool.
-// internal/agent/custom_agent_tool.go registers one delegation tool per
+// domain/agent/custom_agent_tool.go registers one delegation tool per
 // entry in cfg.Agents, named after the agent's id — excluding "coder" and
 // "task", which are the built-in roles rather than tools a model can call.
 func isCustomAgentTool(cfg *config.Config, name string) bool {

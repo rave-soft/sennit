@@ -11,10 +11,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
+	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/presentation"
@@ -127,14 +126,14 @@ func NewAgentToolMessageItem(
 }
 
 // agentDisplayName resolves a delegation block's title from its tool name.
-// The built-in agent tool (agent.AgentToolName) always dispatches to the
+// The built-in agent tool (tools.AgentToolName) always dispatches to the
 // fixed config.AgentTask sub-agent — AgentParams carries no field
 // identifying a specific target — so it always renders as "task". A
 // user-defined agent tool's own name already is its identity: custom_agent_tool.go
 // registers one tool per cfg.Agents entry, named after the map key, so
 // toolCall.Name is already the right display name (e.g. "developer").
 func agentDisplayName(toolName string) string {
-	if toolName == agent.AgentToolName {
+	if toolName == tools.AgentToolName {
 		return config.AgentTask
 	}
 	return toolName
@@ -342,12 +341,12 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	cappedWidth := cappedMessageWidth(width)
-	var params agent.AgentParams
+	var params tools.AgentParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
 
-	// runBackgroundAgent (internal/agent/agent_tool.go) returns synchronously
+	// runBackgroundAgent (domain/agent/agent_tool.go) returns synchronously
 	// with an acknowledgment, not the delegation's actual answer — HasResult
 	// is already true the moment this block first renders, well before the
 	// background task has done any real work. Detect that case via the
@@ -356,7 +355,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// otherwise show a near-zero duration and treat the ack text as if it
 	// were the delegation's finished output.
 	if opts.Result != nil {
-		var bgMeta agent.AgentBackgroundResponseMetadata
+		var bgMeta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &bgMeta); err == nil && bgMeta.TaskID != "" {
 			content := renderBackgroundDispatch(sty, cappedWidth, r.agent.displayName, opts, prompt, bgMeta)
 			return clickableItemHover(sty, content, cappedWidth, opts.Hovered)
@@ -834,7 +833,7 @@ func renderBackgroundDispatch(
 	name string,
 	opts *ToolRenderOpts,
 	prompt string,
-	meta agent.AgentBackgroundResponseMetadata,
+	meta tools.AgentBackgroundResponseMetadata,
 ) string {
 	header := toolHeader(sty, opts.Status, name, width, opts, firstLine(prompt))
 	if opts.Compact {
@@ -1146,7 +1145,7 @@ func toolKeyArgument(tc message.ToolCall) string {
 		if json.Unmarshal([]byte(tc.Input), &p) == nil {
 			return p.Query
 		}
-	case agent.AgentToolName:
+	case tools.AgentToolName:
 		var p struct {
 			Prompt string `json:"prompt"`
 		}

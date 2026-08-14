@@ -25,7 +25,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/presentation"
@@ -40,7 +39,7 @@ import (
 // been running"; the panel wants the latter.
 func threadDockStatusText(t proto.Thread, activity threadDockActivity) string {
 	elapsed := time.Since(time.Unix(t.CreatedAt, 0))
-	return threadDockStatusLine(thread.Status(t.Status), activity, elapsed)
+	return threadDockStatusLine(proto.ThreadStatus(t.Status), activity, elapsed)
 }
 
 // panelSpinnerWanted reports whether the panel currently shows any live
@@ -61,8 +60,8 @@ func (m *UI) panelSpinnerWanted() bool {
 		return true
 	}
 	for _, t := range m.threadsDock.cache.value {
-		switch thread.Status(t.Status) {
-		case thread.StatusRunning, thread.StatusMerging:
+		switch proto.ThreadStatus(t.Status) {
+		case proto.ThreadStatusRunning, proto.ThreadStatusMerging:
 			return true
 		}
 	}
@@ -186,7 +185,7 @@ func (m *UI) runningDelegationBlocks() ([]panelDelegation, int) {
 	return blocks, more
 }
 
-// delegationTaskParams is the minimal shape shared by agent.AgentParams and
+// delegationTaskParams is the minimal shape shared by proto.AgentParams and
 // tools.AgenticFetchParams — both carry a "prompt" field describing the
 // delegation's task, which is all the panel block's line 1 needs. Decoding
 // it locally (rather than importing agent/tools types just for this)
@@ -822,7 +821,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				// worktree/branch of their own — tag them so a user can
 				// tell the two apart without opening the dashboard. Threads
 				// stay unlabeled since they're the common case.
-				if thread.Kind(item.Kind) == thread.KindTask {
+				if proto.ThreadKind(item.Kind) == proto.ThreadKindTask {
 					return "[task] " + name
 				}
 				return name
@@ -831,7 +830,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 			line2: func(i int) string {
 				item := plan.threads[i]
 				icon := m.com.Styles.ChildBanner.Base.Render("→")
-				if status := thread.Status(item.Status); status == thread.StatusRunning || status == thread.StatusMerging {
+				if status := proto.ThreadStatus(item.Status); status == proto.ThreadStatusRunning || status == proto.ThreadStatusMerging {
 					icon = m.panelActivityIcon()
 				}
 				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.activity[item.ID].value))

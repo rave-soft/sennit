@@ -24,6 +24,21 @@ linters:
     # - unconvert
     - unparam
     - whitespace
+    - depguard
+  settings:
+    depguard:
+      rules:
+        ui-boundary:
+          files:
+            - "**/internal/ui/**/*.go"
+          deny:
+            - pkg: github.com/rave-soft/braid/internal/agent
+            - pkg: github.com/rave-soft/braid/internal/thread
+            - pkg: github.com/rave-soft/braid/internal/backend
+            - pkg: github.com/rave-soft/braid/internal/db
+            - pkg: github.com/rave-soft/braid/internal/app
+            - pkg: github.com/rave-soft/braid/internal/server
+            - pkg: github.com/rave-soft/braid/internal/client
     # - wrapcheck
   disable:
     - ineffassign

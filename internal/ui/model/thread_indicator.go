@@ -22,7 +22,6 @@ import (
 
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 )
 
@@ -50,7 +49,7 @@ type threadIndicatorLoadedMsg struct {
 func activeThreadCount(threads []proto.Thread) int {
 	n := 0
 	for _, t := range threads {
-		if thread.Status(t.Status).Active() {
+		if proto.ThreadStatus(t.Status).Active() {
 			n++
 		}
 	}

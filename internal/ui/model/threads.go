@@ -27,7 +27,6 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/list"
 	"github.com/rave-soft/braid/internal/ui/styles"
@@ -316,7 +315,7 @@ func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea
 		}
 		// An already-terminal delegation (of either kind) has nothing left
 		// to cancel.
-		if thread.Status(item.thread.Status).Terminal() {
+		if proto.ThreadStatus(item.thread.Status).Terminal() {
 			return true, nil
 		}
 		id, kind := item.thread.ID, item.thread.Kind
@@ -333,11 +332,11 @@ func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea
 // of status; a thread is mergeable in any status other than already merged
 // or currently merging.
 func threadMergeable(kind, status string) bool {
-	if thread.Kind(kind) == thread.KindTask {
+	if proto.ThreadKind(kind) == proto.ThreadKindTask {
 		return false
 	}
-	switch thread.Status(status) {
-	case thread.StatusMerged, thread.StatusMerging:
+	switch proto.ThreadStatus(status) {
+	case proto.ThreadStatusMerged, proto.ThreadStatusMerging:
 		return false
 	default:
 		return true
@@ -386,14 +385,14 @@ func (it *threadItem) Finished() bool {
 func threadBadge(sty *styles.Styles, status string) string {
 	label := strings.ToUpper(status)
 	style := sty.Status.InfoMessage
-	switch thread.Status(status) {
-	case thread.StatusCompleted, thread.StatusMerged:
+	switch proto.ThreadStatus(status) {
+	case proto.ThreadStatusCompleted, proto.ThreadStatusMerged:
 		style = sty.Status.SuccessMessage
-	case thread.StatusMerging, thread.StatusInterrupted, thread.StatusCancelled:
+	case proto.ThreadStatusMerging, proto.ThreadStatusInterrupted, proto.ThreadStatusCancelled:
 		style = sty.Status.WarnMessage
-	case thread.StatusConflict, thread.StatusMergeBlocked, thread.StatusFailed:
+	case proto.ThreadStatusConflict, proto.ThreadStatusMergeBlocked, proto.ThreadStatusFailed:
 		style = sty.Status.ErrorMessage
-	case thread.StatusIdle:
+	case proto.ThreadStatusIdle:
 		// Explicit, not the default fallthrough: idle must not read as
 		// "done" (SuccessMessage) or as a warning — it's a live delegation
 		// with no run in flight. InfoMessage is already this palette's

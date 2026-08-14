@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/message"
+	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/stretchr/testify/require"
 )

@@ -23,7 +23,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
 	"github.com/rave-soft/braid/internal/ui/util"
@@ -510,7 +509,7 @@ func (r *Root) cancelDelegationCmd(id, kind string) tea.Cmd {
 	ws := r.com.Workspace
 	return func() tea.Msg {
 		var err error
-		if thread.Kind(kind) == thread.KindThread {
+		if proto.ThreadKind(kind) == proto.ThreadKindThread {
 			err = ws.CancelThread(ctx, id, "cancelled from panel")
 		} else {
 			err = ws.CancelTask(ctx, id, "cancelled from panel")

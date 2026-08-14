@@ -5,16 +5,16 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/styles"
+	mcp "github.com/rave-soft/braid/internal/workspace"
 )
 
 // mcpInfo renders the MCP status section showing active MCP clients and their
 // tool/prompt counts.
 func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
-	var mcps []mcp.ClientInfo
+	var mcps []mcp.MCPClientInfo
 	t := m.com.Styles
 
 	for _, mcp := range m.com.Config().MCP.Sorted() {
@@ -36,7 +36,7 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 }
 
 // mcpCounts formats tool, prompt, and resource counts for display.
-func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
+func mcpCounts(t *styles.Styles, counts mcp.MCPCounts) string {
 	var parts []string
 	if counts.Tools > 0 {
 		parts = append(parts, t.Resource.CapabilityCount.Render(fmt.Sprintf("%d tools", counts.Tools)))
@@ -52,7 +52,7 @@ func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
 
 // mcpList renders a list of MCP clients with their status and counts,
 // truncating to maxItems if needed.
-func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) string {
+func mcpList(t *styles.Styles, mcps []mcp.MCPClientInfo, width, maxItems int) string {
 	if maxItems <= 0 {
 		return ""
 	}
@@ -70,22 +70,22 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		var extraContent string
 
 		switch m.State {
-		case mcp.StateStarting:
+		case mcp.MCPStateStarting:
 			icon = t.Resource.BusyIcon.String()
 			description = t.Resource.StatusText.Render("starting...")
-		case mcp.StateConnected:
+		case mcp.MCPStateConnected:
 			icon = t.Resource.EnabledIcon.String()
 			extraContent = mcpCounts(t, m.Counts)
-		case mcp.StateError:
+		case mcp.MCPStateError:
 			icon = t.Resource.ErrorIcon.String()
 			description = t.Resource.StatusText.Render("error")
 			if m.Error != nil {
 				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", m.Error.Error()))
 			}
-		case mcp.StateNeedsAuth:
+		case mcp.MCPStateNeedsAuth:
 			icon = t.Resource.NeedsAuthIcon.String()
 			description = t.Resource.StatusText.Render("needs authentication")
-		case mcp.StateDisabled:
+		case mcp.MCPStateDisabled:
 			icon = t.Resource.DisabledIcon.String()
 			description = t.Resource.StatusText.Render("disabled")
 		default:

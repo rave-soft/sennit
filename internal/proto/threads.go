@@ -1,5 +1,41 @@
 package proto
 
+type ThreadStatus string
+
+const (
+	ThreadStatusPending      ThreadStatus = "pending"
+	ThreadStatusRunning      ThreadStatus = "running"
+	ThreadStatusIdle         ThreadStatus = "idle"
+	ThreadStatusCompleted    ThreadStatus = "completed"
+	ThreadStatusFailed       ThreadStatus = "failed"
+	ThreadStatusInterrupted  ThreadStatus = "interrupted"
+	ThreadStatusCancelled    ThreadStatus = "cancelled"
+	ThreadStatusMerging      ThreadStatus = "merging"
+	ThreadStatusMerged       ThreadStatus = "merged"
+	ThreadStatusConflict     ThreadStatus = "conflict"
+	ThreadStatusMergeBlocked ThreadStatus = "merge_blocked"
+)
+
+func (s ThreadStatus) Active() bool {
+	return s == ThreadStatusPending || s == ThreadStatusRunning || s == ThreadStatusMerging
+}
+
+func (s ThreadStatus) Terminal() bool {
+	switch s {
+	case ThreadStatusCompleted, ThreadStatusMerged, ThreadStatusConflict, ThreadStatusMergeBlocked, ThreadStatusFailed, ThreadStatusInterrupted, ThreadStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+type ThreadKind string
+
+const (
+	ThreadKindThread ThreadKind = "thread"
+	ThreadKindTask   ThreadKind = "task"
+)
+
 // Thread is the wire representation of a thread (see internal/thread.Thread).
 type Thread struct {
 	ID           string `json:"id"`

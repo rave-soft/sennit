@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/diff"
 	"github.com/rave-soft/braid/internal/fsext"
+	tools "github.com/rave-soft/braid/internal/proto"
 )
 
 // formatViewResultForCopy formats view tool results for clipboard.

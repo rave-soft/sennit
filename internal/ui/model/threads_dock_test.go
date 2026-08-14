@@ -9,7 +9,6 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
@@ -56,11 +55,11 @@ func TestActiveDockThreadsIncludesIdle(t *testing.T) {
 func TestThreadDockStatusWordIdleIsExplicit(t *testing.T) {
 	t.Parallel()
 
-	word := threadDockStatusWord(thread.StatusIdle)
+	word := threadDockStatusWord(proto.ThreadStatusIdle)
 	require.NotEmpty(t, word)
-	require.NotEqual(t, threadDockStatusWord(thread.StatusCompleted), word)
-	require.NotEqual(t, threadDockStatusWord(thread.StatusRunning), word)
-	require.NotEqual(t, threadDockStatusWord(thread.StatusFailed), word, "must not fall through to an unhandled-status default indistinguishable from idle")
+	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusCompleted), word)
+	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusRunning), word)
+	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusFailed), word, "must not fall through to an unhandled-status default indistinguishable from idle")
 }
 
 // TestDispatchThreadsDockRefreshMergesTasks proves the dock's refresh
@@ -133,7 +132,7 @@ func TestThreadDockStatusLine(t *testing.T) {
 
 	// The step count and the in-progress todo are both shown; the todo
 	// wins over the last tool call as the activity segment.
-	line := threadDockStatusLine(thread.StatusRunning, threadDockActivity{
+	line := threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{
 		InProgressTodo: "writing tests",
 		LastTool:       "bash go test ./...",
 		MessageCount:   7,
@@ -141,31 +140,31 @@ func TestThreadDockStatusLine(t *testing.T) {
 	require.Equal(t, "step 7 · → writing tests · 4m03s", line)
 
 	// Without a todo, the last tool call fills the activity segment.
-	line = threadDockStatusLine(thread.StatusRunning, threadDockActivity{
+	line = threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{
 		LastTool:     "Read internal/ui/model/ui.go",
 		MessageCount: 7,
 	}, elapsed)
 	require.Equal(t, "step 7 · → Read internal/ui/model/ui.go · 4m03s", line)
 
 	// Just a step count when there's neither todo nor tool activity.
-	line = threadDockStatusLine(thread.StatusRunning, threadDockActivity{
+	line = threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{
 		MessageCount: 7,
 	}, elapsed)
 	require.Equal(t, "step 7 · 4m03s", line)
 
 	// Falls back to the thread's own status word when there's no activity
 	// at all.
-	line = threadDockStatusLine(thread.StatusRunning, threadDockActivity{}, elapsed)
+	line = threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{}, elapsed)
 	require.Equal(t, "running… · 4m03s", line)
 
-	line = threadDockStatusLine(thread.StatusPending, threadDockActivity{}, elapsed)
+	line = threadDockStatusLine(proto.ThreadStatusPending, threadDockActivity{}, elapsed)
 	require.Equal(t, "pending · 4m03s", line)
 
-	line = threadDockStatusLine(thread.StatusMerging, threadDockActivity{}, elapsed)
+	line = threadDockStatusLine(proto.ThreadStatusMerging, threadDockActivity{}, elapsed)
 	require.Equal(t, "merging… · 4m03s", line)
 
 	// The elapsed suffix is always present, regardless of branch.
-	require.Contains(t, threadDockStatusLine(thread.StatusRunning, threadDockActivity{}, 45*time.Second), "45s")
+	require.Contains(t, threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{}, 45*time.Second), "45s")
 }
 
 func TestApplyThreadEventInvalidatesThreadsDock(t *testing.T) {

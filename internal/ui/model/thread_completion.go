@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/util"
 )
@@ -15,7 +14,7 @@ import (
 // not a persisted chat-transcript entry. Investigated first: this
 // codebase has no mechanism for injecting a non-model, system-authored
 // entry into a session's *persisted* transcript — message.Message rows
-// are written by the agent loop (internal/agent) or by an actual user
+// are written by the agent loop (domain/agent) or by an actual user
 // input, and internal/ui/chat's synthetic-looking items (e.g. ShellItem
 // for bang-mode results) are UI-list-only: constructed straight into
 // m.chat from local UI state, never round-tripped through
@@ -37,8 +36,8 @@ import (
 // completed -> idle. Neither is work finishing, so neither should raise a
 // "thread finished" toast.
 func isTerminalThreadStatus(status string) bool {
-	s := thread.Status(status)
-	return !s.Active() && s != thread.StatusIdle
+	s := proto.ThreadStatus(status)
+	return !s.Active() && s != proto.ThreadStatusIdle
 }
 
 // notifyThreadCompletion detects a thread's edge transition into a
@@ -74,20 +73,20 @@ func threadCompletionToast(t proto.Thread) tea.Cmd {
 	if name == "" {
 		name = t.ID
 	}
-	switch thread.Status(t.Status) {
-	case thread.StatusMerged:
+	switch proto.ThreadStatus(t.Status) {
+	case proto.ThreadStatusMerged:
 		return util.ReportInfo(fmt.Sprintf("thread %s merged%s", name, threadCompletionElapsedSuffix(t)))
-	case thread.StatusCompleted:
+	case proto.ThreadStatusCompleted:
 		return util.ReportInfo(fmt.Sprintf("thread %s completed%s", name, threadCompletionElapsedSuffix(t)))
-	case thread.StatusFailed:
+	case proto.ThreadStatusFailed:
 		return util.ReportWarn(fmt.Sprintf("thread %s failed", name))
-	case thread.StatusConflict:
+	case proto.ThreadStatusConflict:
 		return util.ReportWarn(fmt.Sprintf("thread %s has a merge conflict", name))
-	case thread.StatusMergeBlocked:
+	case proto.ThreadStatusMergeBlocked:
 		return util.ReportWarn(fmt.Sprintf("thread %s is merge-blocked", name))
-	case thread.StatusInterrupted:
+	case proto.ThreadStatusInterrupted:
 		return util.ReportWarn(fmt.Sprintf("thread %s was interrupted", name))
-	case thread.StatusCancelled:
+	case proto.ThreadStatusCancelled:
 		return util.ReportWarn(fmt.Sprintf("thread %s was cancelled", name))
 	default:
 		return util.ReportInfo(fmt.Sprintf("thread %s finished (%s)", name, t.Status))
