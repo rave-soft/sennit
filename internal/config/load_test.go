@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/braid/internal/config/migrate"
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/rave-soft/braid/internal/testenv"
@@ -77,7 +78,7 @@ func TestConfig_LoadFromBytes_SingleModel(t *testing.T) {
 // don't stop braid from starting.
 func TestConfig_LoadFromBytes_DropsIncompatibleRecentModels(t *testing.T) {
 	data := []byte(`{"recent_models":{"large":[{"provider":"openai","model":"gpt-4o"}]},"providers": {}}`)
-	data = dropIncompatibleRecentModels(data, "test.json")
+	data = migrate.DropIncompatibleRecentModels(data, "test.json")
 
 	loadedConfig, err := loadFromBytes([][]byte{data})
 
@@ -209,7 +210,7 @@ func TestLoad_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *testing.T) {
 // working without edits.
 func TestConfig_LoadFromBytes_DeprecatedStrandsAlias(t *testing.T) {
 	data := []byte(`{"options":{"strands":{"worktree_dir":"../thread-worktrees"}},"providers": {}}`)
-	data = migrateDeprecatedKey(data, "options.strands", "options.threads", "test.json")
+	data = migrate.MigrateDeprecatedKey(data, "options.strands", "options.threads", "test.json")
 
 	loadedConfig, err := loadFromBytes([][]byte{data})
 

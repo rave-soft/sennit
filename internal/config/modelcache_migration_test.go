@@ -10,6 +10,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
+	"github.com/rave-soft/braid/internal/config/migrate"
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/testenv"
 	"github.com/stretchr/testify/require"
@@ -20,7 +21,7 @@ import (
 // that moves a custom provider's bloated models array, left over from
 // before the model-discovery cache existed, out of the data-dir config
 // file and into the cache — leaving a known catalog provider's models
-// override untouched. The array must exceed modelCacheMigrationThreshold
+// override untouched. The array must exceed migrate.ModelCacheMigrationThreshold
 // (a real discovery dump, like the 1239-model omniroute catalog that
 // prompted this cache) — see
 // TestConfig_Load_SmallManualModelListIsNotMigrated for the other side of
@@ -36,7 +37,7 @@ func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 
 	var modelsJSON bytes.Buffer
 	modelsJSON.WriteString("[")
-	const seedCount = modelCacheMigrationThreshold + 10
+	const seedCount = migrate.ModelCacheMigrationThreshold + 10
 	for i := range seedCount {
 		if i > 0 {
 			modelsJSON.WriteString(",")
@@ -82,7 +83,7 @@ func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 }
 
 // TestConfig_Load_SmallManualModelListIsNotMigrated is the regression test
-// for the incident that prompted modelCacheMigrationThreshold: a
+// for the incident that prompted migrate.ModelCacheMigrationThreshold: a
 // llama.cpp provider ("qwen36-local") with 3 hand-written models got swept
 // up by an unconditional migration as if it were a bloated discovery dump,
 // moved into the cache, and then lost when a later refresh replaced the
