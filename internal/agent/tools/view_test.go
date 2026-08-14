@@ -354,3 +354,7 @@ func TestSniffImageMimeType(t *testing.T) {
 		})
 	}
 }
+
+func (m *mockViewPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
+	return permission.PermissionRequest{}, false
+}

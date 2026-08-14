@@ -379,6 +379,19 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 	}
 	forwardInto(ctx, l, a.Permissions.Subscribe)
 	forwardInto(ctx, l, a.Permissions.SubscribeNotifications)
+
+	// A request already waiting when the relay starts was published
+	// before anything was listening, and a request is announced exactly
+	// once - so without this it would sit there unanswerable, which is
+	// the failure this whole relay exists to prevent. Reachable whenever
+	// a workspace is re-installed under a delegation that still has a
+	// prompt outstanding.
+	if req, ok := a.Permissions.ActiveRequest(); ok {
+		l.parentApp.SendEvent(pubsub.Event[permission.PermissionRequest]{
+			Type:    pubsub.CreatedEvent,
+			Payload: req,
+		})
+	}
 }
 
 // forwardInto pumps one of a delegation workspace's event sources onto the
