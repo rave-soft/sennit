@@ -303,10 +303,10 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 // what gets surfaced.
 func (m *Manager) abortSpawn(ctx context.Context, handle Handle, worktreePath string) {
 	if err := m.spawner.Release(ctx, handle.ID()); err != nil {
-		slog.Error("thread: release spawner handle during create rollback failed", "error", err)
+		slog.Error("Failed to release spawner handle during create rollback", "component", "thread", "error", err)
 	}
 	if err := git.WorktreeRemove(ctx, m.repoRoot, worktreePath, true); err != nil {
-		slog.Error("thread: worktree removal during create rollback failed", "error", err)
+		slog.Error("Failed to remove worktree during create rollback", "component", "thread", "error", err)
 	}
 }
 
@@ -314,7 +314,7 @@ func (m *Manager) abortSpawn(ctx context.Context, handle Handle, worktreePath st
 // to Create's caller.
 func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error {
 	if _, err := m.lc.setStatus(ctx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
-		slog.Error("thread: recording create failure failed", "thread", st.ID, "error", err)
+		slog.Error("Failed to record create failure", "component", "thread", "thread", st.ID, "error", err)
 	}
 	return cause
 }
@@ -350,7 +350,7 @@ func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, 
 		c.opMu.Lock()
 		defer c.opMu.Unlock()
 		if err := m.mergeAttempt(ctx, st.ID, true, resultText); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Error("thread: auto-merge failed", "thread", st.ID, "error", err)
+			slog.Error("Auto-merge failed", "component", "thread", "thread", st.ID, "error", err)
 		}
 		// The run finishing is not this thread's useful terminal event —
 		// an auto-merge thread hands straight from running into the merge
@@ -382,7 +382,7 @@ func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, 
 func (m *Manager) deliverMergeOutcome(ctx context.Context, threadID string) {
 	st, err := m.store.Get(ctx, threadID)
 	if err != nil {
-		slog.Error("thread: re-fetch thread for merge-outcome delivery failed", "thread", threadID, "error", err)
+		slog.Error("Failed to re-fetch thread for merge-outcome delivery", "component", "thread", "thread", threadID, "error", err)
 		return
 	}
 	if !st.Status.Terminal() {
@@ -653,7 +653,7 @@ func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary strin
 				a.AgentCoordinator.Cancel(st.SessionID)
 			}
 			if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
-				slog.Error("thread: release merged workspace failed", "thread", threadID, "error", err)
+				slog.Error("Failed to release merged workspace", "component", "thread", "thread", threadID, "error", err)
 			}
 		}
 	}
@@ -717,7 +717,7 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 			}
 		}
 		if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
-			slog.Error("thread: release spawner handle on remove failed", "thread", st.ID, "error", err)
+			slog.Error("Failed to release spawner handle on remove", "component", "thread", "thread", st.ID, "error", err)
 		}
 	}
 
@@ -808,7 +808,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 						}
 					}
 					if err := rt.spawner.Release(context.Background(), rt.handle.ID()); err != nil {
-						slog.Error("thread: release workspace on shutdown failed", "error", err)
+						slog.Error("Failed to release workspace on shutdown", "component", "thread", "error", err)
 					}
 					// The workspace DB remains live until this method returns to
 					// its cleanup caller, so record the interrupted terminal
@@ -899,7 +899,7 @@ func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st T
 		}
 		sess, err := a.Sessions.Get(ctx, st.SessionID)
 		if err != nil {
-			slog.Error("thread: resolve task's parent session failed", "task", st.ID, "error", err)
+			slog.Error("Failed to resolve task's parent session", "component", "thread", "task", st.ID, "error", err)
 			return nil, "", false
 		}
 		if sess.ParentSessionID == "" {

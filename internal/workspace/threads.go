@@ -196,7 +196,7 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 			return NewAppWorkspace(a, a.Store()), func() {}, nil
 		}
 	} else {
-		slog.Debug("attach thread: reactivation unavailable, falling back to read-only", "thread", id, "error", err)
+		slog.Debug("Thread reactivation unavailable during attach, falling back to read-only", "thread", id, "error", err)
 	}
 	// Reactivation is not always possible — threads in the merge flow
 	// are deliberately refused, and the worktree may be gone. Fall back
@@ -475,7 +475,7 @@ func (w *ClientWorkspace) AttachThread(ctx context.Context, id string) (Workspac
 			// fails if the worktree is gone. Fall back to a read-only
 			// workspace over the parent so the caller can still inspect
 			// persisted session data.
-			slog.Debug("attach thread: reactivation unavailable, falling back to read-only", "thread", id, "error", err)
+			slog.Debug("Thread reactivation unavailable during attach, falling back to read-only", "thread", id, "error", err)
 			ro := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
 			return ro, func() {}, nil
 		}
@@ -484,7 +484,7 @@ func (w *ClientWorkspace) AttachThread(ctx context.Context, id string) (Workspac
 			// Activation reported success without a live workspace.
 			// There is nothing to attach to, so stay read-only rather
 			// than requesting an empty workspace ID.
-			slog.Warn("attach thread: activated thread reported no workspace", "thread", id)
+			slog.Warn("Activated thread reported no workspace during attach", "thread", id)
 			ro := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
 			return ro, func() {}, nil
 		}

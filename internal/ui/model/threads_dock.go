@@ -122,7 +122,7 @@ func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cm
 	return func() tea.Msg {
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
-			slog.Error("list threads for dock", "error", err)
+			slog.Error("Failed to list threads for dock", "error", err)
 		}
 		// Merge in task rows the same way threads_cache.go does: a
 		// ListTasks failure is logged and just leaves task rows out of
@@ -131,7 +131,7 @@ func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cm
 		if ws.SupportsTasks() {
 			tasks, taskErr := ws.ListTasks(context.Background())
 			if taskErr != nil {
-				slog.Error("list tasks for dock", "error", taskErr)
+				slog.Error("Failed to list tasks for dock", "error", taskErr)
 			} else {
 				threads = append(threads, tasks...)
 			}
@@ -260,14 +260,14 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 		ctx := context.Background()
 		attached, detach, err := ws.AttachThread(ctx, threadID)
 		if err != nil {
-			slog.Error("attach thread for dock activity", "thread", threadID, "error", err)
+			slog.Error("Failed to attach thread for dock activity", "thread", threadID, "error", err)
 			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
 		}
 		defer detach()
 
 		sess, err := attached.GetSession(ctx, sessionID)
 		if err != nil {
-			slog.Error("get session for dock activity", "thread", threadID, "error", err)
+			slog.Error("Failed to get session for dock activity", "thread", threadID, "error", err)
 			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
 		}
 
@@ -295,7 +295,7 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 		if hasPrev && prev.MessageCount == sess.MessageCount {
 			activity.LastTool = prev.LastTool
 		} else if msgs, err := attached.ListMessages(ctx, sessionID); err != nil {
-			slog.Error("list messages for dock activity", "thread", threadID, "error", err)
+			slog.Error("Failed to list messages for dock activity", "thread", threadID, "error", err)
 		} else {
 			activity.LastTool = lastToolSummary(msgs)
 		}
