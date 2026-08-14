@@ -720,6 +720,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 				tools.NewTaskListTool(taskManager),
 				tools.NewTaskResultTool(taskManager),
 				tools.NewTaskCancelTool(taskManager, c.permissions),
+				tools.NewTaskSendTool(taskManager),
+				tools.NewTaskOutputTool(taskManager),
 			)
 		}
 	}

@@ -18,8 +18,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/git"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
@@ -418,74 +416,11 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 	if st.Kind != KindThread {
 		return fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
-
-	c := m.lc.control(st.ID)
-	c.opMu.Lock()
-	defer c.opMu.Unlock()
-	c.mu.Lock()
-	rt := c.runtime
-	removed := c.removed
-	c.mu.Unlock()
-	if removed {
-		return fmt.Errorf("thread: %q has been removed", idOrName)
-	}
-
-	if rt != nil {
-		// The workspace is live: either a run is in flight, or the
-		// thread is idle (created without a goal, or reactivated). Both
-		// take the same path — dispatch the message as its own
-		// RunID-bearing turn (the dispatcher gives every RunID-bearing
-		// queued prompt its own turn and terminal RunComplete) and hand
-		// workspace ownership to it: rt.runID is advanced under c.mu, so
-		// any in-flight run's completion no longer matches in
-		// onRunComplete and cannot release the workspace out from under
-		// the queued turn. For an idle thread rt.runID was empty, so
-		// there is no earlier run to displace.
-		st, err = m.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
-		if err != nil {
-			return err
-		}
-		runID := uuid.NewString()
-		c.mu.Lock()
-		rt.runID = runID
-		c.mu.Unlock()
-		sessionID := st.SessionID
-		m.lc.goWorker(func() {
-			if _, err := rt.handle.App().AgentCoordinator.Run(agent.WithRunID(m.ctx, runID), sessionID, message); err != nil {
-				slog.Error("thread: queued agent run returned an error", "session_id", sessionID, "error", err)
-				// Mirror startRun's fallback for pre-execution failures
-				// so the workspace is not stranded on a run that never
-				// published its own RunComplete.
-				m.lc.handleRunComplete(m.ctx, st.ID, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
-			}
-		})
-		return nil
-	}
-
-	handle, err := m.spawner.Spawn(m.ctx, st.WorktreePath)
-	if err != nil {
-		return fmt.Errorf("thread: respawn workspace: %w", err)
-	}
-	if err := m.ctx.Err(); err != nil {
-		_ = m.spawner.Release(context.Background(), handle.ID())
-		return err
-	}
-	// This call owns the freshly spawned handle until startRun installs it
-	// as the manager runtime; release it on every earlier exit.
-	owned := true
-	defer func() {
-		if owned {
-			_ = m.spawner.Release(ctx, handle.ID())
-		}
-	}()
-
-	st, err = m.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
-	if err != nil {
-		return err
-	}
-	m.lc.startRun(m.ctx, handle, m.spawner, st.ID, st.SessionID, message)
-	owned = false // Ownership transferred to the manager runtime state.
-	return nil
+	// The "queue into a live runtime" / "respawn from spawnPath, then
+	// dispatch" logic itself has nothing thread-specific in it — see
+	// lifecycle.send's doc comment — so it lives there, shared with
+	// TaskManager.Send.
+	return m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message)
 }
 
 // Merge runs (or retries) the merge flow for a thread. Manual-policy

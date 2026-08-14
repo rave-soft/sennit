@@ -110,7 +110,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner Spawne
 	// App being attached, so a task runs inside it instead of spawning an
 	// isolated one; that Spawner's Release is a deliberate no-op, so
 	// nothing here needs its own teardown registration.
-	tasks := NewTaskManager(mgr.store, NewParentAppSpawner(a), mgr.lc, mgr.ctx)
+	tasks := NewTaskManager(mgr.store, NewParentAppSpawner(a), a.Messages, mgr.lc, mgr.ctx)
 
 	// Publish only once shutdown and database cleanup are both registered:
 	// consumers must never observe a manager whose dependencies can leak.

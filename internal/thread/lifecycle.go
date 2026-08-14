@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -284,6 +285,91 @@ func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner S
 		}
 	})
 	return rt
+}
+
+// send dispatches message into id's session, respawning its workspace
+// first if it is not currently live. It is the generic body behind
+// [Manager.Send] and [TaskManager.Send]: neither the "queue into a live
+// runtime" branch nor the "respawn, then dispatch" branch has any
+// git-specific or task-specific logic in it — only spawnPath (the
+// worktree path for a thread, "" for a task, since [ParentAppSpawner]
+// ignores it) and spawner differ between the two callers.
+//
+// ctx is the caller's own request context, used for the status writes
+// and to release an early-abandoned respawn; bgCtx is the long-lived
+// background context (Manager's or TaskManager's own ctx field) the
+// dispatched run and its watcher goroutine are bound to, and the one
+// checked for the caller's manager having started shutting down
+// concurrently with this call — mirroring [lifecycle.startRun]'s same
+// split.
+//
+// Callers must hold no locks: send acquires id's own opMu for its
+// duration, the same admission ordering [Manager.Send] always used.
+func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, message string) error {
+	c := l.control(id)
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	c.mu.Lock()
+	rt := c.runtime
+	removed := c.removed
+	c.mu.Unlock()
+	if removed {
+		return fmt.Errorf("thread: %q has been removed", id)
+	}
+
+	if rt != nil {
+		// The workspace is live: either a run is in flight, or the entity
+		// is idle (created without a goal, or reactivated). Both take the
+		// same path — dispatch the message as its own RunID-bearing turn
+		// (the dispatcher gives every RunID-bearing queued prompt its own
+		// turn and terminal RunComplete) and hand workspace ownership to
+		// it: rt.runID is advanced under c.mu, so any in-flight run's
+		// completion no longer matches in handleRunComplete and cannot
+		// release the workspace out from under the queued turn. For an
+		// idle entity rt.runID was empty, so there is no earlier run to
+		// displace.
+		if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
+			return err
+		}
+		runID := uuid.NewString()
+		c.mu.Lock()
+		rt.runID = runID
+		c.mu.Unlock()
+		l.goWorker(func() {
+			if _, err := rt.handle.App().AgentCoordinator.Run(agent.WithRunID(bgCtx, runID), sessionID, message); err != nil {
+				slog.Error("thread: queued agent run returned an error", "session_id", sessionID, "error", err)
+				// Mirror startRun's fallback for pre-execution failures so
+				// the workspace is not stranded on a run that never
+				// published its own RunComplete.
+				l.handleRunComplete(bgCtx, id, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
+			}
+		})
+		return nil
+	}
+
+	handle, err := spawner.Spawn(bgCtx, spawnPath)
+	if err != nil {
+		return fmt.Errorf("thread: respawn workspace: %w", err)
+	}
+	if err := bgCtx.Err(); err != nil {
+		_ = spawner.Release(context.Background(), handle.ID())
+		return err
+	}
+	// This call owns the freshly spawned handle until startRun installs it
+	// as the shared runtime; release it on every earlier exit.
+	owned := true
+	defer func() {
+		if owned {
+			_ = spawner.Release(ctx, handle.ID())
+		}
+	}()
+
+	if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
+		return err
+	}
+	l.startRun(bgCtx, handle, spawner, id, sessionID, message)
+	owned = false // Ownership transferred to the shared runtime state.
+	return nil
 }
 
 // handleRunComplete is the generic reaction to a RunComplete notification

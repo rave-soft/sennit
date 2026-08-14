@@ -56,6 +56,22 @@ func (a *agentToolTaskManager) Cancel(ctx context.Context, id, reason string) er
 	return a.t.Cancel(ctx, id, reason)
 }
 
+func (a *agentToolTaskManager) Send(ctx context.Context, id, message string) error {
+	return a.t.Send(ctx, id, message)
+}
+
+func (a *agentToolTaskManager) Output(ctx context.Context, id string, limit int) (tools.TaskOutput, error) {
+	out, err := a.t.Output(ctx, id, limit)
+	if err != nil {
+		return tools.TaskOutput{}, err
+	}
+	messages := make([]tools.TaskOutputMessage, len(out.Messages))
+	for i, m := range out.Messages {
+		messages[i] = tools.TaskOutputMessage{Role: m.Role, Text: m.Text}
+	}
+	return tools.TaskOutput{Messages: messages, Total: out.Total}, nil
+}
+
 func toTaskInfo(st Thread) tools.TaskInfo {
 	return tools.TaskInfo{
 		ID:            st.ID,

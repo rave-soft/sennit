@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/google/uuid"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 )
 
@@ -38,10 +39,11 @@ type TaskCreateArgs struct {
 // shares with Manager is the [lifecycle] underneath both — see
 // [NewTaskManager].
 type TaskManager struct {
-	store   Store
-	spawner Spawner
-	ctx     context.Context
-	lc      *lifecycle
+	store    Store
+	spawner  Spawner
+	messages message.Service
+	ctx      context.Context
+	lc       *lifecycle
 }
 
 // NewTaskManager constructs a TaskManager. lc and ctx must be an existing
@@ -51,9 +53,12 @@ type TaskManager struct {
 // group, and recovery sweep, splitting exactly the machinery this package
 // exists to share, and a separate ctx would mean Manager.Shutdown's
 // cancellation never reaches a task's in-flight run. spawner should be a
-// [ParentAppSpawner] wrapping the workspace's own App.
-func NewTaskManager(store Store, spawner Spawner, lc *lifecycle, ctx context.Context) *TaskManager {
-	return &TaskManager{store: store, spawner: spawner, ctx: ctx, lc: lc}
+// [ParentAppSpawner] wrapping the workspace's own App, and messages that
+// same App's own message.Service — a task's child session lives in the
+// parent's own message store, not a separate one, so [TaskManager.Output]
+// reads it directly rather than through any task-specific plumbing.
+func NewTaskManager(store Store, spawner Spawner, messages message.Service, lc *lifecycle, ctx context.Context) *TaskManager {
+	return &TaskManager{store: store, spawner: spawner, messages: messages, ctx: ctx, lc: lc}
 }
 
 // Create records a task, gives it a child session under
@@ -243,4 +248,121 @@ func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 	}
 	_, err = t.lc.setStatus(ctx, st.ID, StatusInterrupted, reason, "", 0)
 	return err
+}
+
+// Send dispatches message into id's session, reactivating it first if its
+// runtime is not currently live — the same "queue if live, otherwise
+// respawn and dispatch" behavior [Manager.Send] gives a thread, shared via
+// lifecycle.send. For a task, "respawn" only means rebinding to the
+// parent App through [ParentAppSpawner]; nothing is actually rebuilt.
+//
+// A task [TaskManager.Cancel] stopped is the one exception: cancelling was
+// a decision, not a pause, so Send refuses to resume it rather than
+// silently treating it the same as a task that was merely interrupted
+// (e.g. by a process restart). Anything else not live — completed,
+// failed, or incidentally interrupted — is reactivated exactly like a
+// thread would be, since a task has no merge-flow-equivalent state that
+// would make reactivating it meaningless the way [Manager.Activate]
+// refuses a thread mid-merge.
+func (t *TaskManager) Send(ctx context.Context, id, message string) error {
+	done, err := t.lc.beginOp()
+	if err != nil {
+		return err
+	}
+	defer done()
+	st, err := t.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if wasCancelled(st) {
+		return fmt.Errorf("thread: task %q was cancelled (%s) and cannot be resumed; create a new task instead", id, st.Error)
+	}
+	return t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message)
+}
+
+// wasCancelled reports whether st's Interrupted status came from an
+// explicit [TaskManager.Cancel] rather than an incidental interruption
+// (process restart via lifecycle.recover, Manager.Shutdown, or the run's
+// own RunComplete reporting Cancelled): Cancel is the only path that
+// records a non-empty Error alongside StatusInterrupted — recover and
+// Shutdown's status writes, and the RunComplete-cancelled path in
+// handleRunComplete, all leave Error empty.
+func wasCancelled(st Thread) bool {
+	return st.Status == StatusInterrupted && st.Error != ""
+}
+
+// defaultOutputLimit and maxOutputLimit bound how many of a task's child
+// session messages [TaskManager.Output] returns: a background task's
+// transcript goes straight into the parent's own context when read, so
+// the default stays small and even an explicit request cannot ask for
+// the whole history in one call.
+const (
+	defaultOutputLimit = 20
+	maxOutputLimit     = 100
+)
+
+// TaskOutputMessage is one message from a task's child session, reduced
+// to what [TaskManager.Output] surfaces: the role and its text content.
+// Tool calls, tool results, and reasoning are omitted — see Output's doc
+// comment for why.
+type TaskOutputMessage struct {
+	Role string
+	Text string
+}
+
+// TaskOutput is the result of [TaskManager.Output]: a tail of a task's
+// child session transcript.
+type TaskOutput struct {
+	Messages []TaskOutputMessage
+	// Total is how many user/assistant text messages exist in the
+	// session, so a caller can tell a truncated tail from the whole
+	// transcript instead of the omission passing silently.
+	Total int
+}
+
+// Output returns a tail of id's child session transcript: the same data
+// the UI would render for that session, reduced to user and assistant
+// text only. Tool calls, tool results, and reasoning are deliberately
+// left out — the point of this method is letting the caller check on a
+// task without the check itself flooding its own context, and raw tool
+// traffic is exactly what would defeat that.
+//
+// limit caps how many of the most recent such messages come back; <= 0
+// uses defaultOutputLimit, and any larger value is clamped to
+// maxOutputLimit — the default is a starting point, not a ceiling the
+// caller can lift by asking.
+func (t *TaskManager) Output(ctx context.Context, id string, limit int) (TaskOutput, error) {
+	st, err := t.Get(ctx, id)
+	if err != nil {
+		return TaskOutput{}, err
+	}
+	if limit <= 0 {
+		limit = defaultOutputLimit
+	}
+	if limit > maxOutputLimit {
+		limit = maxOutputLimit
+	}
+
+	all, err := t.messages.List(ctx, st.SessionID)
+	if err != nil {
+		return TaskOutput{}, fmt.Errorf("thread: list task session messages: %w", err)
+	}
+
+	texts := make([]TaskOutputMessage, 0, len(all))
+	for _, msg := range all {
+		if msg.Role != message.User && msg.Role != message.Assistant {
+			continue
+		}
+		text := msg.Content().Text
+		if text == "" {
+			continue
+		}
+		texts = append(texts, TaskOutputMessage{Role: string(msg.Role), Text: text})
+	}
+
+	total := len(texts)
+	if total > limit {
+		texts = texts[total-limit:]
+	}
+	return TaskOutput{Messages: texts, Total: total}, nil
 }

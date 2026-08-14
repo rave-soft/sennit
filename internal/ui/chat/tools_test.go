@@ -46,6 +46,8 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.TaskListToolName,
 	tools.TaskResultToolName,
 	tools.TaskCancelToolName,
+	tools.TaskSendToolName,
+	tools.TaskOutputToolName,
 }
 
 // TestToolMessageItemFactories_MatchExpectedNames checks

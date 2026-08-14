@@ -2,11 +2,15 @@ package thread
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/braid/internal/session"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,7 +18,10 @@ import (
 // running App: the thing a task shares instead of spawning its own,
 // wired with the same fakeSessions/fakeCoordinator doubles fakeSpawner
 // uses for a thread's isolated App, so a task's run can be driven and
-// observed the same way.
+// observed the same way. Messages is left nil (as app.NewForTest leaves
+// it): nothing here reads it except TestTaskManager_Output, which needs
+// real session/message rows satisfying the messages table's FK to
+// sessions — see newTestTaskManagerWithRealMessages — not this fake.
 func newTestParentApp(t *testing.T) *app.App {
 	t.Helper()
 	a := app.NewForTest(context.Background())
@@ -22,6 +29,42 @@ func newTestParentApp(t *testing.T) *app.App {
 	a.Sessions = &fakeSessions{}
 	a.AgentCoordinator = &fakeCoordinator{}
 	return a
+}
+
+// newTestTaskManagerWithRealMessages is like newTestTaskManager, but
+// wires the parent App's Sessions and Messages to a real, shared,
+// sqlite-backed pair instead of fakeSessions: TestTaskManager_Output
+// inserts real message rows, and the messages table has a FK to
+// sessions that fakeSessions (which fabricates a Session value without
+// persisting it) would violate.
+func newTestTaskManagerWithRealMessages(t *testing.T) (*TaskManager, *app.App, session.Service, message.Service) {
+	t.Helper()
+	store := newTestStoreDB(t)
+	mgr := NewManager(ManagerOptions{
+		Store:    store,
+		Spawner:  newFakeSpawner(t),
+		RepoRoot: t.TempDir(),
+	})
+
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	q := db.New(conn)
+	sessions := session.NewService(q, conn, "/test/project")
+	messages := message.NewService(q)
+
+	parentApp := app.NewForTest(context.Background())
+	t.Cleanup(parentApp.ShutdownForTest)
+	parentApp.Sessions = sessions
+	parentApp.Messages = messages
+	parentApp.AgentCoordinator = &fakeCoordinator{}
+
+	tasks := NewTaskManager(store, NewParentAppSpawner(parentApp), messages, mgr.lc, mgr.ctx)
+	return tasks, parentApp, sessions, messages
 }
 
 // newTestTaskManager wires a TaskManager sharing a Manager's lifecycle and
@@ -38,7 +81,7 @@ func newTestTaskManager(t *testing.T, store Store) (*Manager, *TaskManager, *app
 		RepoRoot: t.TempDir(),
 	})
 	parentApp := newTestParentApp(t)
-	tasks := NewTaskManager(store, NewParentAppSpawner(parentApp), mgr.lc, mgr.ctx)
+	tasks := NewTaskManager(store, NewParentAppSpawner(parentApp), parentApp.Messages, mgr.lc, mgr.ctx)
 	return mgr, tasks, parentApp
 }
 
@@ -345,4 +388,163 @@ func TestTaskManager_CancelRejectsThreadID(t *testing.T) {
 	got, err := store.Get(t.Context(), threadRow.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusRunning, got.Status, "a rejected call must not touch the thread's row")
+}
+
+// TestTaskManager_SendReachesLiveTask proves the live-runtime branch of
+// the shared lifecycle.send is reached: a task with a run still in
+// flight (no RunComplete published yet) gets the follow-up queued into
+// that same runtime, not a respawned one.
+func TestTaskManager_SendReachesLiveTask(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+
+	require.NoError(t, tasks.Send(t.Context(), st.ID, "follow up"))
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+
+	coord.mu.Lock()
+	last := coord.runs[len(coord.runs)-1]
+	coord.mu.Unlock()
+	require.Equal(t, st.SessionID, last.sessionID)
+	require.Equal(t, "follow up", last.prompt)
+}
+
+// TestTaskManager_SendReactivatesUnspawnedTask proves the not-live branch:
+// once a task's run completes and its runtime is released, Send
+// respawns — for a task, that only means rebinding to the same parent
+// App via ParentAppSpawner — and dispatches there.
+func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
+	store := newTestStoreDB(t)
+	mgr, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	publishSuccess(t, parentApp, st.SessionID)
+	require.Eventually(t, func() bool {
+		got, err := store.Get(t.Context(), st.ID)
+		return err == nil && got.Status == StatusCompleted
+	}, time.Second, time.Millisecond)
+	require.Nil(t, mgr.Handle(st.ID), "runtime must have been released once the run completed")
+
+	require.NoError(t, tasks.Send(t.Context(), st.ID, "one more thing"))
+
+	h := mgr.Handle(st.ID)
+	require.NotNil(t, h, "Send must reactivate the task")
+	require.Same(t, parentApp, h.App(), "reactivating must rebind to the same parent App, not spawn a new one")
+
+	got, err := store.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusRunning, got.Status)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+}
+
+// TestTaskManager_SendRefusesCancelledTask is the constraint the
+// coordinator called out explicitly: a task task_cancel stopped must not
+// be silently resumed by task_send, because cancelling was a decision,
+// not a pause.
+func TestTaskManager_SendRefusesCancelledTask(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+
+	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "no longer needed"))
+
+	err = tasks.Send(t.Context(), st.ID, "please continue")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cancelled")
+	require.Equal(t, 1, coord.runCount(), "a refused Send must never dispatch")
+}
+
+func TestTaskManager_SendRejectsThreadID(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, _ := newTestTaskManager(t, store)
+	threadRow := seedThreadRow(t, store)
+
+	err := tasks.Send(t.Context(), threadRow.ID, "hi")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is not a task")
+}
+
+// seedMessage inserts a real message row for sessionID, satisfying the
+// messages table's FK to sessions — see
+// newTestTaskManagerWithRealMessages for why this needs a real session.
+func seedMessage(t *testing.T, messages message.Service, sessionID string, role message.MessageRole, text string) {
+	t.Helper()
+	_, err := messages.Create(t.Context(), sessionID, message.CreateMessageParams{
+		Role:  role,
+		Parts: []message.ContentPart{message.TextContent{Text: text}},
+	})
+	require.NoError(t, err)
+}
+
+// TestTaskManager_OutputReturnsUserAndAssistantTextOnly proves Output's
+// content filter: tool traffic is exactly what would let a long-running
+// task quietly fill the parent's context on every check, so it is
+// dropped, leaving only user/assistant text in order.
+func TestTaskManager_OutputReturnsUserAndAssistantTextOnly(t *testing.T) {
+	tasks, parentApp, sessions, messages := newTestTaskManagerWithRealMessages(t)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	parentSess, err := sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "investigate X", ParentSessionID: parentSess.ID})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+
+	seedMessage(t, messages, st.SessionID, message.User, "investigate X")
+	seedMessage(t, messages, st.SessionID, message.Tool, "tool output that should not appear")
+	seedMessage(t, messages, st.SessionID, message.Assistant, "here is what I found")
+
+	out, err := tasks.Output(t.Context(), st.ID, 0)
+	require.NoError(t, err)
+	require.Equal(t, 2, out.Total)
+	require.Len(t, out.Messages, 2)
+	require.Equal(t, "investigate X", out.Messages[0].Text)
+	require.Equal(t, "here is what I found", out.Messages[1].Text)
+}
+
+// TestTaskManager_OutputReportsTruncation is the bound the coordinator
+// asked to be explicit rather than silent: a task with more messages
+// than the limit must report how many were omitted, not just hand back
+// a suspiciously-round-looking tail.
+func TestTaskManager_OutputReportsTruncation(t *testing.T) {
+	tasks, parentApp, sessions, messages := newTestTaskManagerWithRealMessages(t)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	parentSess, err := sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "go", ParentSessionID: parentSess.ID})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+
+	for i := range 5 {
+		seedMessage(t, messages, st.SessionID, message.User, fmt.Sprintf("message %d", i))
+	}
+
+	out, err := tasks.Output(t.Context(), st.ID, 2)
+	require.NoError(t, err)
+	require.Equal(t, 5, out.Total, "Total must report the full count even when truncated")
+	require.Len(t, out.Messages, 2, "Messages must be capped at the requested limit")
+	require.Equal(t, "message 3", out.Messages[0].Text, "the tail is the most recent messages, in chronological order")
+	require.Equal(t, "message 4", out.Messages[1].Text)
+}
+
+func TestTaskManager_OutputRejectsThreadID(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, _ := newTestTaskManager(t, store)
+	threadRow := seedThreadRow(t, store)
+
+	_, err := tasks.Output(t.Context(), threadRow.ID, 0)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is not a task")
 }

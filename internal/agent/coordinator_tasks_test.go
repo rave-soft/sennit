@@ -31,10 +31,18 @@ func (noopTaskManager) Get(context.Context, string) (tools.TaskInfo, error) {
 
 func (noopTaskManager) Cancel(context.Context, string, string) error { return nil }
 
+func (noopTaskManager) Send(context.Context, string, string) error { return nil }
+
+func (noopTaskManager) Output(context.Context, string, int) (tools.TaskOutput, error) {
+	return tools.TaskOutput{}, nil
+}
+
 var taskToolNames = []string{
 	tools.TaskListToolName,
 	tools.TaskResultToolName,
 	tools.TaskCancelToolName,
+	tools.TaskSendToolName,
+	tools.TaskOutputToolName,
 }
 
 // newTasksTestCoordinator mirrors newThreadsTestCoordinator, wired

@@ -26,6 +26,20 @@ type TaskInfo struct {
 	CompletedAt   int64
 }
 
+// TaskOutputMessage mirrors internal/thread.TaskOutputMessage.
+type TaskOutputMessage struct {
+	Role string
+	Text string
+}
+
+// TaskOutput mirrors internal/thread.TaskOutput: a tail of a task's child
+// session transcript, plus Total so a caller can tell a truncated tail
+// from the whole thing.
+type TaskOutput struct {
+	Messages []TaskOutputMessage
+	Total    int
+}
+
 // TaskManager is the subset of internal/thread.TaskManager's API the
 // built-in agent tool's background mode and the task_* tools need.
 type TaskManager interface {
@@ -40,4 +54,11 @@ type TaskManager interface {
 	// Cancel stops id's in-flight run, recording reason as its terminal
 	// error, for task_cancel.
 	Cancel(ctx context.Context, id, reason string) error
+	// Send dispatches message into id's session, reactivating it first if
+	// not live, for task_send.
+	Send(ctx context.Context, id, message string) error
+	// Output returns a tail of id's child session transcript (at most
+	// limit messages; <= 0 means the implementation's own default), for
+	// task_output.
+	Output(ctx context.Context, id string, limit int) (TaskOutput, error)
 }

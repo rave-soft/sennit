@@ -21,11 +21,13 @@ import (
 type fakeTaskManager struct {
 	tasks       map[string]TaskInfo
 	cancelCalls []struct{ id, reason string }
+	sendCalls   []struct{ id, message string }
+	outputs     map[string]TaskOutput
 	listErr     error
 }
 
 func newFakeTaskManager() *fakeTaskManager {
-	return &fakeTaskManager{tasks: make(map[string]TaskInfo)}
+	return &fakeTaskManager{tasks: make(map[string]TaskInfo), outputs: make(map[string]TaskOutput)}
 }
 
 func (f *fakeTaskManager) Create(context.Context, TaskCreateArgs) (TaskInfo, error) {
@@ -64,6 +66,26 @@ func (f *fakeTaskManager) Cancel(_ context.Context, id, reason string) error {
 	ti.Error = reason
 	f.tasks[id] = ti
 	return nil
+}
+
+func (f *fakeTaskManager) Send(_ context.Context, id, message string) error {
+	if _, ok := f.tasks[id]; !ok {
+		return fmt.Errorf("thread: %q is not a task", id)
+	}
+	f.sendCalls = append(f.sendCalls, struct{ id, message string }{id, message})
+	return nil
+}
+
+// Output returns exactly what the test configured in f.outputs[id],
+// including its Total: the limit/truncation bound itself is
+// internal/thread's behavior (see TestTaskManager_OutputReportsTruncation
+// there), not this fake's to reimplement. This tool layer only needs to
+// prove the tool renders whatever (Messages, Total) shape it is handed.
+func (f *fakeTaskManager) Output(_ context.Context, id string, _ int) (TaskOutput, error) {
+	if _, ok := f.tasks[id]; !ok {
+		return TaskOutput{}, fmt.Errorf("thread: %q is not a task", id)
+	}
+	return f.outputs[id], nil
 }
 
 func skipPermissions(t *testing.T) permission.Service {
@@ -173,4 +195,100 @@ func TestTaskCancelTool_WrongKindRejection(t *testing.T) {
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "is not a task")
 	require.Empty(t, manager.cancelCalls, "rejected id must never reach a resolved Cancel")
+}
+
+func TestTaskSendTool_SendsMessage(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "running"}
+
+	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "t1", Message: "keep going"})
+	require.False(t, resp.IsError)
+
+	require.Len(t, manager.sendCalls, 1)
+	require.Equal(t, "t1", manager.sendCalls[0].id)
+	require.Equal(t, "keep going", manager.sendCalls[0].message)
+}
+
+func TestTaskSendTool_MissingFields(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "running"}
+	tool := NewTaskSendTool(manager)
+
+	resp := callTaskTool(t, tool, TaskSendParams{Message: "hi"})
+	require.True(t, resp.IsError)
+
+	resp = callTaskTool(t, tool, TaskSendParams{ID: "t1"})
+	require.True(t, resp.IsError)
+}
+
+// TestTaskSendTool_WrongKindRejection mirrors the other tools' wrong-kind
+// tests.
+func TestTaskSendTool_WrongKindRejection(t *testing.T) {
+	manager := newFakeTaskManager()
+	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "a-thread-id", Message: "hi"})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "is not a task")
+	require.Empty(t, manager.sendCalls, "rejected id must never reach a resolved Send")
+}
+
+func TestTaskOutputTool_ReturnsMessages(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1"}
+	manager.outputs["t1"] = TaskOutput{
+		Messages: []TaskOutputMessage{
+			{Role: "user", Text: "investigate X"},
+			{Role: "assistant", Text: "here is what I found"},
+		},
+		Total: 2,
+	}
+
+	resp := callTaskTool(t, NewTaskOutputTool(manager), TaskOutputParams{ID: "t1"})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "investigate X")
+	require.Contains(t, resp.Content, "here is what I found")
+	require.NotContains(t, resp.Content, "Showing last", "no truncation banner when nothing was truncated")
+}
+
+// TestTaskOutputTool_ReportsTruncation is the bound the coordinator asked
+// to be explicit about: a task with more messages than the limit must say
+// so in the response text, not just silently hand back a partial tail.
+func TestTaskOutputTool_ReportsTruncation(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1"}
+	manager.outputs["t1"] = TaskOutput{
+		Messages: []TaskOutputMessage{
+			{Role: "user", Text: "message 3"},
+			{Role: "user", Text: "message 4"},
+		},
+		Total: 5,
+	}
+
+	resp := callTaskTool(t, NewTaskOutputTool(manager), TaskOutputParams{ID: "t1", Limit: 2})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "Showing last 2 of 5 messages")
+
+	var meta TaskOutput
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, 5, meta.Total)
+	require.Len(t, meta.Messages, 2)
+}
+
+func TestTaskOutputTool_EmptyWhenNoMessages(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1"}
+
+	resp := callTaskTool(t, NewTaskOutputTool(manager), TaskOutputParams{ID: "t1"})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "No output yet")
+}
+
+func TestTaskOutputTool_MissingID(t *testing.T) {
+	resp := callTaskTool(t, NewTaskOutputTool(newFakeTaskManager()), TaskOutputParams{})
+	require.True(t, resp.IsError)
+}
+
+func TestTaskOutputTool_WrongKindRejection(t *testing.T) {
+	resp := callTaskTool(t, NewTaskOutputTool(newFakeTaskManager()), TaskOutputParams{ID: "a-thread-id"})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "is not a task")
 }

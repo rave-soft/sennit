@@ -985,6 +985,8 @@ func allToolNames() []string {
 		"task_list",
 		"task_result",
 		"task_cancel",
+		"task_send",
+		"task_output",
 	}
 }
 
