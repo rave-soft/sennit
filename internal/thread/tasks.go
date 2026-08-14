@@ -293,7 +293,7 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID strin
 // to Create's caller.
 func (t *TaskManager) failCreate(ctx context.Context, st Thread, cause error) error {
 	if _, err := t.lc.setStatus(ctx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
-		slog.Error("thread: recording task create failure failed", "task", st.ID, "error", err)
+		slog.Error("Failed to record task create failure", "component", "thread", "task", st.ID, "error", err)
 	}
 	return cause
 }
