@@ -255,6 +255,19 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, cmd := r.main.Update(msg)
 		return r, cmd
 	default:
+		// Results of work the main screen started come back to the main
+		// screen, whatever is on top by the time they land. Routing them
+		// by active screen instead delivers them to the thread's embedded
+		// UI (or, on the dashboard, nowhere at all) — and a result that
+		// never arrives leaves the fetch that produced it marked
+		// in-flight forever, so the main screen's threads panel and
+		// header badge stop refreshing for good. That is the stale panel:
+		// drill into a thread once while a refresh is out, and the panel
+		// behind you never updates again.
+		if _, ok := msg.(mainScreenMsg); ok {
+			_, cmd := r.main.Update(msg)
+			return r, cmd
+		}
 		switch r.active {
 		case screenThread:
 			if r.thread != nil {
@@ -558,3 +571,26 @@ func (r *Root) Cleanup() {
 	}
 	r.thread = nil
 }
+
+// mainScreenMsg marks a message that belongs to the main session screen no
+// matter which screen is currently on top — the result of a refresh only
+// the main screen ever starts. Root delivers these to r.main directly
+// rather than to the active screen; see the reasoning in Update.
+//
+// Embed mainScreenOwned in the message type to claim this.
+type mainScreenMsg interface{ isMainScreenMsg() }
+
+// mainScreenOwned is the embeddable implementation of mainScreenMsg.
+type mainScreenOwned struct{}
+
+func (mainScreenOwned) isMainScreenMsg() {}
+
+// Compile-time proof that each main-owned message actually claims the
+// interface. Embedding a struct whose method shares its own type name
+// silently fails to promote that method, so without these the marker can
+// look present and do nothing.
+var (
+	_ mainScreenMsg = threadsDockLoadedMsg{}
+	_ mainScreenMsg = threadDockActivityLoadedMsg{}
+	_ mainScreenMsg = threadIndicatorLoadedMsg{}
+)

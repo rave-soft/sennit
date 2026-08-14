@@ -126,12 +126,9 @@ func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread
 	if !ok {
 		return proto.Thread{}, ErrThreadsNotSupported
 	}
-	if err := mgr.Merge(ctx, id); err != nil {
-		return proto.Thread{}, err
-	}
-	// Re-fetch after merge to return the latest status, mirroring the
-	// server handler.
-	st, err := mgr.Get(ctx, id)
+	// Merge returns the outcome directly: a thread that merged cleanly is
+	// discarded, so re-fetching it here would find nothing.
+	st, err := mgr.Merge(ctx, id)
 	if err != nil {
 		return proto.Thread{}, err
 	}

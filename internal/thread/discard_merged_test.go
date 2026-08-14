@@ -1,0 +1,285 @@
+package thread
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/session"
+	"github.com/stretchr/testify/require"
+)
+
+// requireDiscarded asserts that a merged thread has been cleared away
+// completely: no store row, no worktree on disk, no branch. Use after a
+// synchronous Merge; the automatic path finishes off-goroutine and needs
+// requireDiscardedEventually instead.
+func requireDiscarded(t *testing.T, mgr *Manager, repo string, st Thread) {
+	t.Helper()
+	_, err := mgr.Get(context.Background(), st.ID)
+	require.Error(t, err, "a merged thread's row must be gone")
+	require.NoDirExists(t, st.WorktreePath, "a merged thread's worktree must be gone")
+	requireBranchGone(t, repo, st.Branch)
+}
+
+// requireDiscardedEventually is requireDiscarded for the automatic merge
+// path, which discards after delivering the outcome, on its own goroutine.
+func requireDiscardedEventually(t *testing.T, mgr *Manager, repo string, st Thread) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		_, err := mgr.Get(context.Background(), st.ID)
+		return err != nil
+	}, 5*time.Second, 5*time.Millisecond, "a merged thread's row must be gone")
+	require.NoDirExists(t, st.WorktreePath)
+	requireBranchGone(t, repo, st.Branch)
+}
+
+func requireBranchGone(t *testing.T, repo, branch string) {
+	t.Helper()
+	out := runGit(t, repo, "branch", "--list", branch)
+	require.Empty(t, strings.TrimSpace(out), "a merged thread's branch must be deleted")
+}
+
+// newTestManagerWithRealMessages wires a Manager whose parent App has a
+// real, sqlite-backed session and message service, so the note a discard
+// writes into the parent session's history can actually be read back.
+func newTestManagerWithRealMessages(t *testing.T, repo string) (*Manager, *fakeSpawner, session.Service, message.Service) {
+	t.Helper()
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	q := db.New(conn)
+	sessions := session.NewService(q, conn, "/test/project")
+	messages := message.NewService(q)
+
+	parentApp := app.NewForTest(context.Background())
+	t.Cleanup(parentApp.ShutdownForTest)
+	parentApp.Sessions = sessions
+	parentApp.Messages = messages
+	parentApp.AgentCoordinator = &fakeCoordinator{}
+
+	spawner := newFakeSpawner(t)
+	mgr := NewManager(ManagerOptions{
+		Store:       newTestStoreDB(t),
+		Spawner:     spawner,
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+		ParentApp:   parentApp,
+	})
+	return mgr, spawner, sessions, messages
+}
+
+// TestDiscardMerged_WritesTheDisappearanceIntoHistory is the point of the
+// whole feature: a thread that merges vanishes from the panel, and the
+// user can still find out what happened to it. Without the note, a row
+// silently ceasing to exist is indistinguishable from a bug.
+//
+// The note is a system-role message on purpose. That role is dropped when
+// the prompt is assembled, so it is a record for the person, not a second
+// telling for the model — which already learned of the merge through the
+// completion inbox.
+func TestDiscardMerged_WritesTheDisappearanceIntoHistory(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner, sessions, messages := newTestManagerWithRealMessages(t, repo)
+
+	parent, err := sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{
+		Name:            "tidy-up",
+		Goal:            "do it",
+		ParentSessionID: parent.ID,
+	})
+	require.NoError(t, err)
+
+	writeFile(t, st.WorktreePath, "output.txt", "done\n")
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	requireDiscardedEventually(t, mgr, repo, st)
+
+	var notice message.Message
+	require.Eventually(t, func() bool {
+		msgs, listErr := messages.List(context.Background(), parent.ID)
+		if listErr != nil {
+			return false
+		}
+		for _, m := range msgs {
+			if m.Role == message.System {
+				notice = m
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 5*time.Millisecond, "the merge and removal must be recorded in the parent session")
+
+	text := notice.Content().Text
+	require.Contains(t, text, "tidy-up", "the note must name the thread")
+	require.Contains(t, text, "merged")
+	require.Contains(t, text, "removed")
+	require.NotContains(t, text, "kept", "nothing was left behind, so the note must not claim otherwise")
+}
+
+// TestDiscardMerged_PublishesRemovalSoThePanelDrops: the panel drops a row
+// the moment a removal is announced rather than waiting for a re-list (see
+// threadsDockState.applyThreadEvent), so this event is what actually makes
+// the thread leave the screen. EventRemoved is also the one that maps to
+// pubsub.DeletedEvent on the way to the TUI (threadEventPubsubType), which
+// is what the drop keys off — announcing the discard as a mere status
+// change would leave the row on screen.
+func TestDiscardMerged_PublishesRemovalSoThePanelDrops(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+	events := mgr.Subscribe(t.Context())
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "vanishes", Goal: "do it"})
+	require.NoError(t, err)
+
+	writeFile(t, st.WorktreePath, "output.txt", "done\n")
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-events:
+			if ev.Payload.Type == EventRemoved && ev.Payload.Thread.ID == st.ID {
+				return
+			}
+		case <-deadline:
+			t.Fatal("a merged thread never announced its removal")
+		}
+	}
+}
+
+// TestDiscardMerged_ConflictKeepsEverything: a conflict is precisely the
+// state where the user needs the worktree — that is where they resolve it,
+// and Merge is retried against it afterwards. Clearing it away because the
+// merge flow "finished" would destroy the work.
+func TestDiscardMerged_ConflictKeepsEverything(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "collides", Goal: "do it"})
+	require.NoError(t, err)
+
+	// Both branches edit README.md, so the automatic merge conflicts.
+	writeFile(t, repo, "README.md", "main version\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-m", "edit on main")
+	writeFile(t, st.WorktreePath, "README.md", "thread version\n")
+
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err, "a conflicted thread must keep its row")
+	require.Equal(t, StatusConflict, got.Status)
+	require.DirExists(t, st.WorktreePath, "a conflicted thread must keep its worktree to resolve in")
+	require.Contains(t, runGit(t, repo, "branch", "--list", st.Branch), st.Branch)
+
+	// And once resolved by hand, the same thread is discarded like any
+	// other merge.
+	writeFile(t, st.WorktreePath, "README.md", "resolved\n")
+	runGit(t, st.WorktreePath, "add", "README.md")
+	_, mergeErr := mgr.Merge(t.Context(), st.ID)
+	require.NoError(t, mergeErr)
+	requireDiscarded(t, mgr, repo, st)
+}
+
+// TestDiscardMerged_DeliversTheOutcomeBeforeRemovingTheRow guards the
+// ordering the whole wake-up path depends on: deliverMergeOutcome re-reads
+// the store row to learn which outcome the attempt reached, so a discard
+// that ran first would leave the parent agent never hearing that its
+// thread landed.
+func TestDiscardMerged_DeliversTheOutcomeBeforeRemovingTheRow(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{
+		Name:            "reports-then-goes",
+		Goal:            "do it",
+		ParentSessionID: "parent-sess",
+	})
+	require.NoError(t, err)
+
+	writeFile(t, st.WorktreePath, "output.txt", "done\n")
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	requireDiscardedEventually(t, mgr, repo, st)
+
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	delivered := coord.deliveredCompletions()
+	require.Len(t, delivered, 1, "the parent must still be told, exactly once")
+	require.Equal(t, string(StatusMerged), delivered[0].completion.Status)
+	require.Equal(t, st.ID, delivered[0].completion.DelegationID)
+}
+
+// TestDiscardMerged_KeepsTheRowWhenTheWorktreeCannotGo: if the directory
+// cannot be removed there is nothing to gain by deleting the row on top of
+// it — that would leave an orphaned worktree no code knows about. A thread
+// still listed as merged is the recoverable failure.
+func TestDiscardMerged_KeepsTheRowWhenTheWorktreeCannotGo(t *testing.T) {
+	repo := initRepo(t)
+	mgr, _ := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "stuck", Goal: "do it", MergePolicy: MergeManual})
+	require.NoError(t, err)
+
+	_, err = mgr.lc.setStatus(t.Context(), st.ID, StatusMerged, "", "", time.Now().Unix())
+	require.NoError(t, err)
+
+	// Take the worktree out from under the manager, so its own removal
+	// call fails on a path git no longer recognizes.
+	runGit(t, repo, "worktree", "remove", "--force", st.WorktreePath)
+
+	mgr.discardMerged(t.Context(), st.ID)
+
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err, "the row must survive a failed worktree removal")
+	require.Equal(t, StatusMerged, got.Status)
+	require.Contains(t, runGit(t, repo, "branch", "--list", st.Branch), st.Branch,
+		"and the branch must not be deleted behind a failed removal either")
+}
+
+// TestThreadWorktreeLivesInsideTheDataDirectory pins where a thread's
+// checkout goes, end to end, and the property that makes putting it there
+// safe: the repository must not see the worktree as a second, untracked
+// copy of itself.
+//
+// That safety comes from the "*" .gitignore the workspace writes into its
+// data directory on first use (app.ensureDotBraidDir). This test creates
+// that file itself, so if it ever stops being written, this stays green
+// while reality does not — the link is only as strong as that one call.
+func TestThreadWorktreeLivesInsideTheDataDirectory(t *testing.T) {
+	repo := initRepo(t)
+	dataDir := filepath.Join(repo, ".braid")
+	require.NoError(t, os.MkdirAll(dataDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, ".gitignore"), []byte("*\n"), 0o644))
+
+	mgr := NewManager(ManagerOptions{
+		Store:    newTestStoreDB(t),
+		Spawner:  newFakeSpawner(t),
+		RepoRoot: repo,
+		DataDir:  dataDir,
+	})
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "in-place", Goal: "do it"})
+	require.NoError(t, err)
+
+	require.Equal(t, filepath.Join(dataDir, "threads", "in-place"), st.WorktreePath)
+	require.DirExists(t, st.WorktreePath)
+	require.FileExists(t, filepath.Join(st.WorktreePath, "README.md"),
+		"the worktree must be a real checkout, not just a directory")
+
+	require.Empty(t, strings.TrimSpace(runGit(t, repo, "status", "--porcelain")),
+		"the repository must not see its own thread worktrees")
+}

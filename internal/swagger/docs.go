@@ -3176,6 +3176,125 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/tasks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "List tasks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.Thread"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/tasks/{taskID}/cancel": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Cancel task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "taskID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Cancel reason",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/proto.CancelDelegationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Thread"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/threads": {
             "get": {
                 "produces": [
@@ -3427,6 +3546,76 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/proto.Thread"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/threads/{threadID}/cancel": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "threads"
+                ],
+                "summary": "Cancel thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Thread ID or name",
+                        "name": "threadID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Cancel reason",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/proto.CancelDelegationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Thread"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
                         }
                     },
                     "404": {
@@ -3980,7 +4169,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "worktree_dir": {
-                    "description": "WorktreeDir is the parent directory under which each thread's git\nworktree is created (at \u003cworktree_dir\u003e/\u003cthread-name\u003e). A relative\npath is resolved against the parent of the repository root (the\nsame directory the default sibling \"\u003crepo\u003e-threads\" lives in), not\nagainst the working directory. Absolute paths are used as-is.\nDefaults to a \"\u003crepo\u003e-threads\" sibling of the repository root.",
+                    "description": "WorktreeDir is the parent directory under which each thread's git\nworktree is created (at \u003cworktree_dir\u003e/\u003cthread-name\u003e). A relative\npath is resolved against the parent of the repository root, not\nagainst the working directory. Absolute paths are used as-is.\nDefaults to \"threads\" inside the workspace data directory\n(\u003crepo\u003e/.braid/threads), which is ignored by the repository's own\ngit, so a worktree there is not seen as a second copy of the\nproject.",
                     "type": "string"
                 }
             }
@@ -4155,6 +4344,10 @@ const docTemplate = `{
                 "auto_lsp": {
                     "type": "boolean"
                 },
+                "background_agents": {
+                    "description": "BackgroundAgents is a permanent opt-out, not a rollout flag: it stays\nin the product for anyone who does not want the model delegating work\nto background tasks in their workspace. Default true — a pointer\ndistinguishes \"unset\" from an explicit false, the same tri-state\nAutoLSP and Progress use above. It defaults on because dispatch is\nalready opt-in per model tool-call and every tool a task runs still\ngoes through the same permission checks as the foreground turn; the\nswitch exists for the person who wants to rule out unattended\nconcurrent work entirely, not as a safety net for a first run.\n\nTurning this off only stops *new* dispatch: the \"agent\" tool's\nbackground parameter is refused and the task_* tools are not\nregistered. A task already running when the config is reloaded is not\nkilled — it runs to completion and its result is still delivered.\nThreads (the git-worktree feature) are a separate, older feature and\nare not affected by this switch.",
+                    "type": "boolean"
+                },
                 "context_paths": {
                     "type": "array",
                     "items": {
@@ -4250,6 +4443,9 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "origin": {
+                    "$ref": "#/definitions/proto.Origin"
                 },
                 "parts": {
                     "type": "array",
@@ -4443,6 +4639,15 @@ const docTemplate = `{
                 }
             }
         },
+        "proto.CancelDelegationRequest": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "description": "Reason is recorded as the delegation's terminal Error. Empty\ndefaults to \"cancelled\" server-side.",
+                    "type": "string"
+                }
+            }
+        },
         "proto.ConfigCompactRequest": {
             "type": "object",
             "properties": {
@@ -4533,6 +4738,10 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "parent_session_id": {
+                    "description": "ParentSessionID is the session the thread was started from. It is\nwhat lets the thread's completion reach the agent that is waiting\nfor it: without it the delegation has nobody to report to and its\nresult is only discoverable by looking. Empty when a thread is\ncreated outside any session, as the CLI does.",
+                    "type": "string"
                 }
             }
         },
@@ -4543,6 +4752,20 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "session_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.DelegationRef": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }
@@ -4811,6 +5034,19 @@ const docTemplate = `{
                 "Tool"
             ]
         },
+        "proto.Origin": {
+            "type": "string",
+            "enum": [
+                "person",
+                "agent",
+                "person",
+                "agent"
+            ],
+            "x-enum-varnames": [
+                "OriginPerson",
+                "OriginAgent"
+            ]
+        },
         "proto.PermissionAction": {
             "type": "string",
             "enum": [
@@ -4848,6 +5084,9 @@ const docTemplate = `{
             "properties": {
                 "action": {
                     "type": "string"
+                },
+                "delegation": {
+                    "$ref": "#/definitions/proto.DelegationRef"
                 },
                 "description": {
                     "type": "string"
@@ -5144,10 +5383,18 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "kind": {
+                    "description": "Kind discriminates the delegation kinds sharing the threads table\n(see internal/thread.Kind); every value the server sends today is\n\"thread\". Additive field: older clients that don't read it are\nunaffected.",
+                    "type": "string"
+                },
                 "merge_policy": {
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "parent_session_id": {
+                    "description": "ParentSessionID is the session this delegation reports its\ncompletion (and any mid-run ask) to, if any — see\ninternal/thread.Delegation.ParentSessionID. Additive field: older\nclients that don't read it are unaffected.",
                     "type": "string"
                 },
                 "result_summary": {
@@ -5245,6 +5492,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/proto.SkillState"
                     }
+                },
+                "tasks_supported": {
+                    "description": "TasksSupported reports whether this workspace has a task manager\nattached, mirroring ThreadsSupported. Unlike threads, tasks have no\nlegacy fallback probe: this field (and the /tasks routes it\ndescribes) is new, so there is no older server to be compatible\nwith — a nil value is simply treated as unsupported by the client\nrather than triggering a probe.",
+                    "type": "boolean"
                 },
                 "threads_supported": {
                     "description": "ThreadsSupported reports whether this workspace has a thread\nmanager attached (i.e. it is rooted at a git repository and not\nitself a thread's nested workspace). The server sets this field\nbased on attachServerThreads; the client seeds its local cache\nfrom it, avoiding a live probe at construction time. A nil value\nmeans the server predates this field and the client must perform\na single fallback probe in a controlled point (not the hot path).",

@@ -48,6 +48,9 @@ type ThreadManager interface {
 	Get(ctx context.Context, idOrName string) (ThreadInfo, error)
 	Send(ctx context.Context, idOrName, message string) error
 	Wait(ctx context.Context, ids []string, timeout time.Duration) error
-	Merge(ctx context.Context, idOrName string) error
+	// Merge returns the thread as the attempt left it. A clean merge
+	// discards the thread, so there is nothing left to Get afterwards —
+	// this return value is the only report of the outcome.
+	Merge(ctx context.Context, idOrName string) (ThreadInfo, error)
 	Remove(ctx context.Context, idOrName string, force, deleteBranch bool) error
 }

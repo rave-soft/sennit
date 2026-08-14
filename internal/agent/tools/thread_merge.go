@@ -58,18 +58,15 @@ func NewThreadMergeTool(manager ThreadManager, permissions permission.Service) f
 				return resp, nil
 			}
 
-			if err := manager.Merge(ctx, params.ID); err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
-			}
-
-			st, err := manager.Get(ctx, params.ID)
+			st, err := manager.Merge(ctx, params.ID)
 			if err != nil {
-				return fantasy.NewTextResponse("Merge attempt finished."), nil
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
 			switch st.Status {
 			case "merged":
-				return fantasy.NewTextResponse(fmt.Sprintf("Thread %q merged.", params.ID)), nil
+				return fantasy.NewTextResponse(fmt.Sprintf(
+					"Thread %q merged into %s; its worktree and branch have been removed.", params.ID, st.BaseBranch)), nil
 			case "conflict":
 				return fantasy.NewTextResponse(fmt.Sprintf("Thread %q has merge conflicts: %s", params.ID, st.Error)), nil
 			default:

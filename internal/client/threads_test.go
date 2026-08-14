@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/server"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/stretchr/testify/require"
 )
 
@@ -152,9 +153,12 @@ func TestThreads_CreateListGetSendMergeRemove(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, created.ID, merged.ID)
 
-	// Force, since the merge outcome above may have left the thread
-	// active rather than completed.
-	require.NoError(t, c.RemoveThread(ctx, ws.ID, created.ID, proto.RemoveThreadOptions{Force: true}))
+	// A thread that merged cleanly is already gone: the merge discards
+	// it. Anything else still needs removing by hand, forced because the
+	// outcome may have left it active.
+	if merged.Status != string(thread.StatusMerged) {
+		require.NoError(t, c.RemoveThread(ctx, ws.ID, created.ID, proto.RemoveThreadOptions{Force: true}))
+	}
 
 	_, err = c.GetThread(ctx, ws.ID, created.ID)
 	require.Error(t, err)

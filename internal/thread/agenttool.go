@@ -65,8 +65,12 @@ func (a *agentToolManager) Wait(ctx context.Context, ids []string, timeout time.
 	return a.m.Wait(ctx, ids, timeout)
 }
 
-func (a *agentToolManager) Merge(ctx context.Context, idOrName string) error {
-	return a.m.Merge(ctx, idOrName)
+func (a *agentToolManager) Merge(ctx context.Context, idOrName string) (tools.ThreadInfo, error) {
+	st, err := a.m.Merge(ctx, idOrName)
+	if err != nil {
+		return tools.ThreadInfo{}, err
+	}
+	return toToolInfo(st), nil
 }
 
 func (a *agentToolManager) Remove(ctx context.Context, idOrName string, force, deleteBranch bool) error {

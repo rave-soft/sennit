@@ -127,7 +127,11 @@ func TestClientWorkspace_CreateListGetSendMergeRemove(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, created.ID, merged.ID)
 
-	require.NoError(t, ws.RemoveThread(ctx, created.ID, proto.RemoveThreadOptions{Force: true}))
+	// A clean merge discards the thread on its own; any other outcome
+	// still has to be removed by hand.
+	if merged.Status != string(thread.StatusMerged) {
+		require.NoError(t, ws.RemoveThread(ctx, created.ID, proto.RemoveThreadOptions{Force: true}))
+	}
 
 	_, err = ws.GetThread(ctx, created.ID)
 	require.Error(t, err)

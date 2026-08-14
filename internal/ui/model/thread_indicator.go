@@ -38,6 +38,7 @@ type threadIndicatorState struct {
 // threadIndicatorLoadedMsg delivers the result of an off-thread thread list
 // fetch made for the indicator badge.
 type threadIndicatorLoadedMsg struct {
+	mainScreenOwned
 	gen   uint64
 	count int
 	err   error

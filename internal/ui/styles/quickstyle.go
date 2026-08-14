@@ -890,6 +890,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
 		Background(o.destructive).Foreground(o.onPrimary)
 	s.Messages.OriginAgentTag = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
+	s.Messages.Notice = lipgloss.NewStyle().Foreground(o.fgMostSubtle).Italic(true)
 	s.Messages.ErrorTitle = lipgloss.NewStyle().Foreground(o.fgSubtle)
 	s.Messages.ErrorDetails = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 

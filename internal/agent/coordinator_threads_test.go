@@ -36,7 +36,11 @@ func (noopThreadManager) Send(context.Context, string, string) error { return ni
 func (noopThreadManager) Wait(context.Context, []string, time.Duration) error {
 	return nil
 }
-func (noopThreadManager) Merge(context.Context, string) error { return nil }
+
+func (noopThreadManager) Merge(context.Context, string) (tools.ThreadInfo, error) {
+	return tools.ThreadInfo{}, nil
+}
+
 func (noopThreadManager) Remove(context.Context, string, bool, bool) error {
 	return nil
 }

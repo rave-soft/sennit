@@ -113,6 +113,7 @@ type threadsDockState struct {
 // threadsDockLoadedMsg delivers the result of an off-thread thread list
 // fetch for the dock.
 type threadsDockLoadedMsg struct {
+	mainScreenOwned
 	// gen is the generation captured when the fetch was dispatched; see
 	// threadsDockState.gen.
 	gen     uint64
@@ -269,6 +270,7 @@ func visibleDockThreads(active []proto.Thread) (visible []proto.Thread, moreCoun
 // threadDockActivityLoadedMsg delivers the result of an off-thread
 // AttachThread + GetSession fetch for a single thread's live activity.
 type threadDockActivityLoadedMsg struct {
+	mainScreenOwned
 	threadID string
 	// gen is the activityGen captured when the fetch was dispatched; see
 	// threadsDockState.activityGen.
