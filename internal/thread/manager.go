@@ -64,32 +64,12 @@ type ManagerOptions struct {
 	Context context.Context
 }
 
-// runtimeState tracks the in-memory bookkeeping for a thread whose
-// workspace is currently spawned: the handle to release on removal, and
-// the cancel function for its RunComplete watcher goroutine.
-type runtimeState struct {
-	handle      Handle
-	watchCancel context.CancelFunc
-	runID       string
-}
-
-// threadControl is permanent while a thread is known to the manager. opMu
-// serializes lifecycle operations for one thread without serializing unrelated
-// threads or holding the manager map lock across I/O.
-type threadControl struct {
-	opMu    sync.Mutex
-	mu      sync.Mutex
-	runtime *runtimeState
-	removed bool
-}
-
-// ErrManagerClosed is returned by mutating manager operations once shutdown
-// has started.
-var ErrManagerClosed = errors.New("thread: manager is closed")
-
 // Manager is the core of the threads feature: it drives thread creation,
 // dispatches and tracks each thread's agent run in its isolated
-// workspace, and folds completed work back into the base branch.
+// workspace, and folds completed work back into the base branch. The
+// generic admission, per-entity serialization, worker tracking, and event
+// plumbing it needs to do that live in the [lifecycle] it holds; Manager
+// itself is the git/merge-specific overlay on top.
 type Manager struct {
 	store       Store
 	spawner     Spawner
@@ -98,20 +78,11 @@ type Manager struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	broker *pubsub.Broker[Event]
+	lc *lifecycle
 
-	mu              sync.Mutex
-	controls        map[string]*threadControl
-	closed          bool
 	shutdownOnce    sync.Once
 	shutdownStarted chan struct{}
 	shutdownDone    chan struct{}
-	workers         sync.WaitGroup
-
-	// changeCh is closed and replaced on every status-affecting event,
-	// giving Wait a broadcast condition to select on without polling.
-	changeMu sync.Mutex
-	changeCh chan struct{}
 }
 
 // NewManager constructs a Manager. Callers must only do so for
@@ -135,55 +106,20 @@ func NewManager(opts ManagerOptions) *Manager {
 		repoRoot:        opts.RepoRoot,
 		worktreeDir:     worktreeDir,
 		ctx:             ctx,
-		broker:          pubsub.NewBroker[Event](),
-		controls:        make(map[string]*threadControl),
 		shutdownStarted: make(chan struct{}),
 		shutdownDone:    make(chan struct{}),
-		changeCh:        make(chan struct{}),
 	}
+	// onAutoMerge/recoverWorktree are this package's git/merge overlay on
+	// the generic lifecycle; a lighter, worktree-less delegation kind
+	// would pass nil for both.
+	m.lc = newLifecycle(opts.Store, opts.Spawner, m.onAutoMerge, m.recoverWorktree)
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	return m
 }
 
-// beginOp admits one mutating operation. Shutdown closes admission and then
-// waits for this count, so no operation can attach a runtime after teardown.
-func (m *Manager) beginOp() (func(), error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed {
-		return nil, ErrManagerClosed
-	}
-	m.workers.Add(1)
-	return m.workers.Done, nil
-}
-
-func (m *Manager) control(threadID string) *threadControl {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	c := m.controls[threadID]
-	if c == nil {
-		c = &threadControl{}
-		m.controls[threadID] = c
-	}
-	return c
-}
-
-func (m *Manager) existingControl(threadID string) *threadControl {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.controls[threadID]
-}
-
-// goWorker is called only while an admitted operation or existing worker is
-// counted. Consequently its Add cannot race Shutdown's Wait after zero.
-func (m *Manager) goWorker(fn func()) {
-	m.workers.Add(1)
-	go func() { defer m.workers.Done(); fn() }()
-}
-
 // Subscribe returns a per-caller channel of thread lifecycle events.
 func (m *Manager) Subscribe(ctx context.Context) <-chan pubsub.Event[Event] {
-	return m.broker.Subscribe(ctx)
+	return m.lc.subscribe(ctx)
 }
 
 // List returns every known thread.
@@ -219,7 +155,7 @@ func (m *Manager) resolve(ctx context.Context, idOrName string) (Thread, error) 
 // agent validation and strand the thread at [StatusFailed] with a
 // worktree on disk.
 func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
-	done, err := m.beginOp()
+	done, err := m.lc.beginOp()
 	if err != nil {
 		return Thread{}, err
 	}
@@ -264,14 +200,14 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	if err != nil {
 		return Thread{}, fmt.Errorf("thread: create record: %w", err)
 	}
-	m.publish(EventCreated, st)
+	m.lc.publish(EventCreated, st)
 
 	// The thread is resolvable from here on, so a concurrent Remove can
 	// race the rest of creation. Hold the per-thread lifecycle lock across
 	// worktree/spawn/startRun: Remove takes the same lock, so it either
 	// runs before this point (nothing beyond the row exists yet) or waits
 	// until the runtime is fully installed and tears it down normally.
-	c := m.control(st.ID)
+	c := m.lc.control(st.ID)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.mu.Lock()
@@ -313,7 +249,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	}
 
 	if args.Goal == "" {
-		st, err = m.setStatus(ctx, st.ID, StatusIdle, "", "", 0)
+		st, err = m.lc.setStatus(ctx, st.ID, StatusIdle, "", "", 0)
 		if err != nil {
 			m.abortSpawn(ctx, handle, worktreePath)
 			return Thread{}, err
@@ -326,7 +262,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return st, nil
 	}
 
-	st, err = m.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
+	st, err = m.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 	if err != nil {
 		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, err
@@ -352,7 +288,7 @@ func (m *Manager) abortSpawn(ctx context.Context, handle Handle, worktreePath st
 // failCreate records cause as the thread's terminal failure and returns it
 // to Create's caller.
 func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error {
-	if _, err := m.setStatus(ctx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
+	if _, err := m.lc.setStatus(ctx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
 		slog.Error("thread: recording create failure failed", "thread", st.ID, "error", err)
 	}
 	return cause
@@ -371,7 +307,7 @@ func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error 
 // stranded on a thread that no longer exists.
 func (m *Manager) startRun(handle Handle, threadID, sessionID, prompt string) {
 	rt := m.installRuntime(handle, threadID)
-	c := m.control(threadID)
+	c := m.lc.control(threadID)
 	runID := uuid.NewString()
 	c.mu.Lock()
 	rt.runID = runID
@@ -380,7 +316,7 @@ func (m *Manager) startRun(handle Handle, threadID, sessionID, prompt string) {
 	// Reserve acceptance before dispatch so cancellation cannot leave a run
 	// unaccounted for between goroutine scheduling and coordinator admission.
 	accept := handle.App().AgentCoordinator.BeginAccepted(sessionID)
-	m.goWorker(func() {
+	m.lc.goWorker(func() {
 		if _, err := handle.App().AgentCoordinator.RunAccepted(agent.WithRunID(m.ctx, runID), accept, sessionID, prompt); err != nil {
 			slog.Error("thread: agent run returned an error", "session_id", sessionID, "error", err)
 			// backend.runAgent documents this fallback for pre-execution
@@ -401,7 +337,7 @@ func (m *Manager) startRun(handle Handle, threadID, sessionID, prompt string) {
 // does. Callers must hold the thread's opMu, for the reason startRun
 // documents.
 func (m *Manager) installRuntime(handle Handle, threadID string) *runtimeState {
-	c := m.control(threadID)
+	c := m.lc.control(threadID)
 	watchCtx, cancel := context.WithCancel(m.ctx)
 	sub := handle.App().RunCompletions().Subscribe(watchCtx)
 	rt := &runtimeState{handle: handle, watchCancel: cancel}
@@ -409,7 +345,7 @@ func (m *Manager) installRuntime(handle Handle, threadID string) *runtimeState {
 	c.runtime = rt
 	c.mu.Unlock()
 
-	m.goWorker(func() {
+	m.lc.goWorker(func() {
 		for {
 			select {
 			case <-watchCtx.Done():
@@ -429,68 +365,39 @@ func (m *Manager) installRuntime(handle Handle, threadID string) *runtimeState {
 // end-of-run signal for a thread's session by recording the outcome and,
 // on success with an auto merge policy, kicking off the merge flow.
 func (m *Manager) onRunComplete(threadID string, rc notify.RunComplete) {
-	c := m.existingControl(threadID)
-	if c == nil {
-		return
-	}
-	c.opMu.Lock()
-	defer c.opMu.Unlock()
-	c.mu.Lock()
-	rt := c.runtime
-	if rt == nil || rc.RunID == "" || rc.RunID != rt.runID {
-		c.mu.Unlock()
-		return
-	}
-	c.runtime = nil
-	c.mu.Unlock()
-	rt.watchCancel()
-	if err := m.spawner.Release(m.ctx, rt.handle.ID()); err != nil {
-		slog.Error("thread: release completed workspace failed", "thread", threadID, "error", err)
-	}
-	st, err := m.store.Get(m.ctx, threadID)
-	if err != nil {
-		return
-	}
-	// Only react to the session this thread currently owns, and only
-	// while a run is actually in flight: Remove or a completed merge can
-	// race a straggling RunComplete from a run that no longer matters.
-	if rc.SessionID != st.SessionID || st.Status != StatusRunning {
-		return
-	}
+	m.lc.handleRunComplete(m.ctx, threadID, rc)
+}
 
-	if rc.Cancelled {
-		if _, err := m.setStatus(m.ctx, threadID, StatusInterrupted, "", "", 0); err != nil {
-			slog.Error("thread: recording run cancellation failed", "thread", threadID, "error", err)
+// onAutoMerge is the [runCompleteHook] that gives MergeAuto threads their
+// merge-instead-of-completed treatment: on a successful run it folds the
+// thread's branch back into its base branch rather than letting the
+// generic lifecycle rest the thread at StatusCompleted. Manual-policy
+// threads decline (return false) and get the generic StatusCompleted
+// write.
+//
+// Auto-merge threads go straight from running into the merge flow without
+// resting at "completed" in between: setting a terminal "completed"
+// status first would give [Manager.Wait] a window where it observes a
+// non-active status and returns before the merge that is about to start
+// has even begun. That is what the goroutine handoff below preserves —
+// handleRunComplete calls this method with the thread's opMu held, so the
+// merge itself cannot start until this method (and the handleRunComplete
+// call it returns to) release it; until then the thread is still
+// StatusRunning, which [Status.Active] reports as active, so Wait never
+// observes anything but an active status between the run finishing and
+// mergeAttempt setting StatusMerging.
+func (m *Manager) onAutoMerge(ctx context.Context, c *threadControl, st Thread, resultText string) bool {
+	if st.MergePolicy != MergeAuto {
+		return false
+	}
+	m.lc.goWorker(func() {
+		c.opMu.Lock()
+		defer c.opMu.Unlock()
+		if err := m.mergeAttempt(ctx, st.ID, true, resultText); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Error("thread: auto-merge failed", "thread", st.ID, "error", err)
 		}
-		return
-	}
-	if rc.Error != "" {
-		if _, err := m.setStatus(m.ctx, threadID, StatusFailed, rc.Error, "", 0); err != nil {
-			slog.Error("thread: recording run failure failed", "thread", threadID, "error", err)
-		}
-		return
-	}
-
-	// Auto-merge threads go straight from running into the merge flow
-	// without resting at "completed" in between: setting a terminal
-	// "completed" status first would give [Manager.Wait] a window where
-	// it observes a non-active status and returns before the merge that
-	// is about to start has even begun. Manual threads have no such
-	// follow-up, so they rest at "completed" for real.
-	if st.MergePolicy == MergeAuto {
-		m.goWorker(func() {
-			c.opMu.Lock()
-			defer c.opMu.Unlock()
-			if err := m.mergeAttempt(m.ctx, threadID, true, rc.Text); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("thread: auto-merge failed", "thread", threadID, "error", err)
-			}
-		})
-		return
-	}
-
-	if _, err := m.setStatus(m.ctx, threadID, StatusCompleted, "", rc.Text, time.Now().Unix()); err != nil {
-		slog.Error("thread: recording run completion failed", "thread", threadID, "error", err)
-	}
+	})
+	return true
 }
 
 // Activate makes a thread's isolated workspace live again without
@@ -506,7 +413,7 @@ func (m *Manager) onRunComplete(threadID string, rc notify.RunComplete) {
 // branch, and reopening the worktree for hand edits underneath that is a
 // different feature with its own conflict semantics.
 func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error) {
-	done, err := m.beginOp()
+	done, err := m.lc.beginOp()
 	if err != nil {
 		return Thread{}, err
 	}
@@ -516,7 +423,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 		return Thread{}, err
 	}
 
-	c := m.control(st.ID)
+	c := m.lc.control(st.ID)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.mu.Lock()
@@ -550,7 +457,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	// Preserve the earlier run's outcome: SetStatus rewrites all four
 	// columns, so the summary/error/timestamp have to be carried across
 	// explicitly or reactivating would erase the record of what ran.
-	st, err = m.setStatus(ctx, st.ID, StatusIdle, st.Error, st.ResultSummary, st.CompletedAt)
+	st, err = m.lc.setStatus(ctx, st.ID, StatusIdle, st.Error, st.ResultSummary, st.CompletedAt)
 	if err != nil {
 		_ = m.spawner.Release(ctx, handle.ID())
 		return Thread{}, err
@@ -563,7 +470,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 // workspace is not currently spawned (e.g. after an interrupted run — the
 // worktree is still on disk, so the workspace is simply respawned).
 func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
-	done, err := m.beginOp()
+	done, err := m.lc.beginOp()
 	if err != nil {
 		return err
 	}
@@ -573,7 +480,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 		return err
 	}
 
-	c := m.control(st.ID)
+	c := m.lc.control(st.ID)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.mu.Lock()
@@ -595,7 +502,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 		// onRunComplete and cannot release the workspace out from under
 		// the queued turn. For an idle thread rt.runID was empty, so
 		// there is no earlier run to displace.
-		st, err = m.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
+		st, err = m.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 		if err != nil {
 			return err
 		}
@@ -604,7 +511,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 		rt.runID = runID
 		c.mu.Unlock()
 		sessionID := st.SessionID
-		m.goWorker(func() {
+		m.lc.goWorker(func() {
 			if _, err := rt.handle.App().AgentCoordinator.Run(agent.WithRunID(m.ctx, runID), sessionID, message); err != nil {
 				slog.Error("thread: queued agent run returned an error", "session_id", sessionID, "error", err)
 				// Mirror startRun's fallback for pre-execution failures
@@ -633,7 +540,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 		}
 	}()
 
-	st, err = m.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
+	st, err = m.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 	if err != nil {
 		return err
 	}
@@ -646,7 +553,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 // threads are merged this way once their run completes; auto-policy
 // threads use this to retry after a conflict has been resolved.
 func (m *Manager) Merge(ctx context.Context, idOrName string) error {
-	done, err := m.beginOp()
+	done, err := m.lc.beginOp()
 	if err != nil {
 		return err
 	}
@@ -658,7 +565,7 @@ func (m *Manager) Merge(ctx context.Context, idOrName string) error {
 	// Empty resultSummary tells mergeAttempt to keep whatever is already
 	// on the row (e.g. from the run that led to the current conflict or
 	// merge_blocked state) instead of clobbering it.
-	c := m.control(st.ID)
+	c := m.lc.control(st.ID)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	return m.mergeAttempt(ctx, st.ID, true, "")
@@ -681,7 +588,7 @@ func (m *Manager) mergeAttempt(ctx context.Context, threadID string, allowRetry 
 		resultSummary = st.ResultSummary
 	}
 
-	st, err = m.setStatus(ctx, threadID, StatusMerging, "", resultSummary, 0)
+	st, err = m.lc.setStatus(ctx, threadID, StatusMerging, "", resultSummary, 0)
 	if err != nil {
 		return err
 	}
@@ -738,11 +645,11 @@ func (m *Manager) mergeAttempt(ctx context.Context, threadID string, allowRetry 
 }
 
 func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary string) error {
-	st, err := m.setStatus(ctx, threadID, StatusMerged, "", resultSummary, time.Now().Unix())
+	st, err := m.lc.setStatus(ctx, threadID, StatusMerged, "", resultSummary, time.Now().Unix())
 	if err != nil {
 		return err
 	}
-	if c := m.existingControl(threadID); c != nil {
+	if c := m.lc.existingControl(threadID); c != nil {
 		c.mu.Lock()
 		rt := c.runtime
 		c.runtime = nil
@@ -757,17 +664,17 @@ func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary strin
 			}
 		}
 	}
-	m.publish(EventMerged, st)
+	m.lc.publish(EventMerged, st)
 	return nil
 }
 
 func (m *Manager) setConflict(ctx context.Context, threadID, resultSummary string, conflicts []string) error {
-	_, err := m.setStatus(ctx, threadID, StatusConflict, "merge conflicts: "+strings.Join(conflicts, ", "), resultSummary, 0)
+	_, err := m.lc.setStatus(ctx, threadID, StatusConflict, "merge conflicts: "+strings.Join(conflicts, ", "), resultSummary, 0)
 	return err
 }
 
 func (m *Manager) blockMerge(ctx context.Context, threadID, resultSummary, reason string) error {
-	_, err := m.setStatus(ctx, threadID, StatusMergeBlocked, reason, resultSummary, 0)
+	_, err := m.lc.setStatus(ctx, threadID, StatusMergeBlocked, reason, resultSummary, 0)
 	return err
 }
 
@@ -776,7 +683,7 @@ func (m *Manager) blockMerge(ctx context.Context, threadID, resultSummary, reaso
 // deletes its store row. It refuses to run/merging threads unless force,
 // and refuses unmerged threads with a dirty worktree unless force.
 func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBranch bool) error {
-	done, err := m.beginOp()
+	done, err := m.lc.beginOp()
 	if err != nil {
 		return err
 	}
@@ -795,7 +702,7 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 		}
 	}
 
-	c := m.control(st.ID)
+	c := m.lc.control(st.ID)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	c.mu.Lock()
@@ -827,7 +734,7 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 	if err := m.store.Delete(ctx, st.ID); err != nil {
 		return fmt.Errorf("thread: delete record: %w", err)
 	}
-	m.publish(EventRemoved, st)
+	m.lc.publish(EventRemoved, st)
 	return nil
 }
 
@@ -835,9 +742,7 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 // thread's workspace is not currently spawned (e.g. it finished, or is
 // between runs after an interrupt).
 func (m *Manager) Handle(threadID string) Handle {
-	m.mu.Lock()
-	c := m.controls[threadID]
-	m.mu.Unlock()
+	c := m.lc.existingControl(threadID)
 	if c == nil {
 		return nil
 	}
@@ -868,22 +773,15 @@ func (m *Manager) WorkspaceID(threadID string) string {
 // waits for manager-owned goroutines. It is idempotent and safe concurrently.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.shutdownOnce.Do(func() {
-		m.mu.Lock()
-		m.closed = true
-		m.mu.Unlock()
+		m.lc.closeAdmission()
 		close(m.shutdownStarted)
 		m.cancel()
 		go func() {
-			// beginOp/Add are serialized with closed above. Existing workers
-			// only add children before their own Done, so this join cannot
-			// observe zero before all manager work has finished.
-			m.workers.Wait()
-			m.mu.Lock()
-			controls := make(map[string]*threadControl, len(m.controls))
-			for id, c := range m.controls {
-				controls[id] = c
-			}
-			m.mu.Unlock()
+			// beginOp/Add are serialized with closeAdmission above. Existing
+			// workers only add children before their own Done, so this join
+			// cannot observe zero before all manager work has finished.
+			m.lc.wait()
+			controls := m.lc.snapshotControls()
 			for threadID, c := range controls {
 				c.opMu.Lock()
 				c.mu.Lock()
@@ -902,7 +800,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 					// its cleanup caller, so record the interrupted terminal
 					// state before the connection is released.
 					if st, err := m.store.Get(context.Background(), threadID); err == nil && st.Status == StatusRunning {
-						_, _ = m.setStatus(context.Background(), st.ID, StatusInterrupted, "", "", 0)
+						_, _ = m.lc.setStatus(context.Background(), st.ID, StatusInterrupted, "", "", 0)
 					}
 				}
 				c.opMu.Unlock()
@@ -923,32 +821,32 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 // the old process) become interrupted, and threads whose worktree has
 // vanished from disk become failed.
 func (m *Manager) Recover(ctx context.Context) error {
-	done, err := m.beginOp()
+	done, err := m.lc.beginOp()
 	if err != nil {
 		return err
 	}
 	defer done()
-	threads, err := m.store.List(ctx)
-	if err != nil {
-		return err
+	return m.lc.recover(ctx)
+}
+
+// recoverWorktree is the [recoverHook] that fails threads whose worktree
+// has vanished from disk, ahead of the generic active-status sweep in
+// lifecycle.recover. A thread already StatusFailed or StatusMerged is
+// left alone: re-failing it would be a no-op at best and clobber a merged
+// thread's outcome at worst. A Stat error other than "not exist" (e.g. a
+// permission problem) is treated as "worktree present" and falls through
+// to the generic sweep, matching the pre-hook behavior.
+func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) {
+	if _, statErr := os.Stat(st.WorktreePath); !os.IsNotExist(statErr) {
+		return false, nil
 	}
-	for _, st := range threads {
-		if _, statErr := os.Stat(st.WorktreePath); os.IsNotExist(statErr) {
-			if st.Status == StatusFailed || st.Status == StatusMerged {
-				continue
-			}
-			if _, err := m.setStatus(ctx, st.ID, StatusFailed, "worktree missing on recovery", "", 0); err != nil {
-				return err
-			}
-			continue
-		}
-		if st.Status.Active() {
-			if _, err := m.setStatus(ctx, st.ID, StatusInterrupted, "", "", 0); err != nil {
-				return err
-			}
-		}
+	if st.Status == StatusFailed || st.Status == StatusMerged {
+		return true, nil
 	}
-	return nil
+	if _, err := m.lc.setStatus(ctx, st.ID, StatusFailed, "worktree missing on recovery", "", 0); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Wait blocks until none of the threads named by ids (all threads, when
@@ -969,7 +867,7 @@ func (m *Manager) Wait(ctx context.Context, ids []string, timeout time.Duration)
 			return nil
 		}
 		select {
-		case <-m.waitChan():
+		case <-m.lc.waitChan():
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -1002,42 +900,6 @@ func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, erro
 		threads = append(threads, st)
 	}
 	return threads, nil
-}
-
-// publish emits a lifecycle event and wakes any Wait callers blocked on a
-// status change.
-func (m *Manager) publish(t EventType, st Thread) {
-	m.broker.Publish(pubsub.UpdatedEvent, Event{Type: t, Thread: st})
-	m.notifyChange()
-}
-
-// setStatus is the shared SetStatus + publish helper used by every status
-// transition in this file.
-func (m *Manager) setStatus(ctx context.Context, threadID string, status Status, errText, resultSummary string, completedAt int64) (Thread, error) {
-	st, err := m.store.SetStatus(ctx, threadID, SetStatusParams{
-		Status:        status,
-		Error:         errText,
-		ResultSummary: resultSummary,
-		CompletedAt:   completedAt,
-	})
-	if err != nil {
-		return Thread{}, err
-	}
-	m.publish(EventStatusChanged, st)
-	return st, nil
-}
-
-func (m *Manager) notifyChange() {
-	m.changeMu.Lock()
-	close(m.changeCh)
-	m.changeCh = make(chan struct{})
-	m.changeMu.Unlock()
-}
-
-func (m *Manager) waitChan() chan struct{} {
-	m.changeMu.Lock()
-	defer m.changeMu.Unlock()
-	return m.changeCh
 }
 
 func validateName(name string) (string, error) {

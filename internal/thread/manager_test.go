@@ -960,7 +960,12 @@ func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
 		spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: id, Text: "finished"})
 	}
 	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, time.Second, time.Millisecond)
-	require.GreaterOrEqual(t, spawner.releases(st.WorktreePath), 2)
+	// Wait for the release rather than asserting it outright: the
+	// run-completion path clears c.runtime (which is what makes Handle
+	// return nil) and only then calls Spawner.Release, so a bare
+	// assertion here races that window and fails intermittently under
+	// -race.
+	require.Eventually(t, func() bool { return spawner.releases(st.WorktreePath) >= 2 }, time.Second, time.Millisecond)
 }
 
 func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {

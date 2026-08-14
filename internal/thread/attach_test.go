@@ -161,7 +161,7 @@ func TestAttachPublishesEventsAndReleasesStoreOnShutdown(t *testing.T) {
 	// Let ForwardEvents subscribe before publishing, as production event tests
 	// do for post-construction sources.
 	time.Sleep(10 * time.Millisecond)
-	mgr.publish(EventStatusChanged, Thread{ID: "thread-1", Name: "one"})
+	mgr.lc.publish(EventStatusChanged, Thread{ID: "thread-1", Name: "one"})
 	timeout := time.After(5 * time.Second)
 waitForThreadEvent:
 	for {
