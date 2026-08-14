@@ -448,6 +448,10 @@ func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigSto
 	if err != nil {
 		return err
 	}
+	return r.publishOrClose(ctx, name, m, owner, session)
+}
+
+func (r *Registry) publishOrClose(ctx context.Context, name string, m config.MCPConfig, owner attemptID, session *ClientSession) error {
 	committed := false
 	defer func() {
 		if !committed {
@@ -955,11 +959,10 @@ func (r *Registry) getOrRenewClient(ctx context.Context, cfg *config.ConfigStore
 		}
 		return nil, err
 	}
-	if err := r.publishSession(ctx, name, m, renewal, newSess); err != nil {
+	if err := r.publishOrClose(ctx, name, m, renewal, newSess); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			r.updateStateFor(name, renewal, StateError, err)
 		}
-		r.closeSession(name, newSess)
 		return nil, err
 	}
 	return newSess, nil
@@ -1306,6 +1309,30 @@ func (r *Registry) createTransport(ctx context.Context, m config.MCPConfig, reso
 	return r.createTransportFor(ctx, nil, name, m, r.currentGen(name), r.authAttempt.Add(1), resolver)
 }
 
+func (r *Registry) buildHTTPTransport(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver) (string, http.RoundTripper, *mcpoauth.Handler, error) {
+	url, err := m.ResolvedURL(resolver)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if strings.TrimSpace(url) == "" {
+		return "", nil, nil, fmt.Errorf("mcp %s config requires a non-empty 'url' field", m.Type)
+	}
+	headers, err := m.ResolvedHeaders(resolver)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	transport := http.RoundTripper(&headerRoundTripper{headers: headers, base: newOwnedHTTPTransport()})
+	var oauthHandler *mcpoauth.Handler
+	if m.OAuth {
+		oauthHandler, err = r.oauthSetup(ctx, cfg, name, m, gen, attempt, resolver, url)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		transport = newOAuthRoundTripper(oauthHandler, transport)
+	}
+	return url, transport, oauthHandler, nil
+}
+
 func (r *Registry) createTransportFor(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver) (mcp.Transport, *mcpoauth.Handler, error) {
 	switch m.Type {
 	case config.MCPStdio:
@@ -1336,63 +1363,17 @@ func (r *Registry) createTransportFor(ctx context.Context, cfg *config.ConfigSto
 			Command: cmd,
 		}, nil, nil
 	case config.MCPHttp:
-		url, err := m.ResolvedURL(resolver)
+		url, transport, oauthHandler, err := r.buildHTTPTransport(ctx, cfg, name, m, gen, attempt, resolver)
 		if err != nil {
 			return nil, nil, err
 		}
-		if strings.TrimSpace(url) == "" {
-			return nil, nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
-		}
-
-		headers, err := m.ResolvedHeaders(resolver)
-		if err != nil {
-			return nil, nil, err
-		}
-		transport := http.RoundTripper(&headerRoundTripper{headers: headers, base: newOwnedHTTPTransport()})
-		var oauthHandler *mcpoauth.Handler
-		if m.OAuth {
-			oauthHandler, err = r.oauthSetup(ctx, cfg, name, m, gen, attempt, resolver, url)
-			if err != nil {
-				return nil, nil, err
-			}
-			transport = newOAuthRoundTripper(oauthHandler, transport)
-		}
-		// oauthRoundTripper is the sole OAuth owner. Supplying OAuthHandler to
-		// the SDK as well causes a second authorize/retry cycle on HTTP.
 		return &mcp.StreamableClientTransport{Endpoint: url, HTTPClient: &http.Client{Transport: transport}}, oauthHandler, nil
 	case config.MCPSSE:
-		url, err := m.ResolvedURL(resolver)
+		url, transport, oauthHandler, err := r.buildHTTPTransport(ctx, cfg, name, m, gen, attempt, resolver)
 		if err != nil {
 			return nil, nil, err
 		}
-		if strings.TrimSpace(url) == "" {
-			return nil, nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
-		}
-		headers, err := m.ResolvedHeaders(resolver)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		var transport http.RoundTripper = &headerRoundTripper{headers: headers, base: newOwnedHTTPTransport()}
-		var oauthHandler *mcpoauth.Handler
-
-		// SSE transports don't support the SDK's OAuthHandler natively,
-		// so we wrap the HTTP transport with our own round-tripper that
-		// injects bearer tokens and handles 401-triggered authorization.
-		// Based on Bruno Krugel's oauthRoundTripper from PR #3396.
-		if m.OAuth {
-			oauthHandler, err = r.oauthSetup(ctx, cfg, name, m, gen, attempt, resolver, url)
-			if err != nil {
-				return nil, nil, err
-			}
-			transport = newOAuthRoundTripper(oauthHandler, transport)
-		}
-
-		client := &http.Client{Transport: transport}
-		return &mcp.SSEClientTransport{
-			Endpoint:   url,
-			HTTPClient: client,
-		}, oauthHandler, nil
+		return &mcp.SSEClientTransport{Endpoint: url, HTTPClient: &http.Client{Transport: transport}}, oauthHandler, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported mcp type: %s", m.Type)
 	}

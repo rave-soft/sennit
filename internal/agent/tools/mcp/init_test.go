@@ -3,14 +3,18 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"os"
+	"os/exec"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/braid/internal/config"
@@ -1176,6 +1180,205 @@ func TestOwnedAuthHandlerSharedPublicationAndSessionClosesOnce(t *testing.T) {
 			require.Equal(t, int32(1), closes.Load())
 			_, ok := r.authURLs.Get(name)
 			require.False(t, ok)
+		})
+	}
+}
+
+func TestMain(m *testing.M) {
+	if os.Getenv("BRAID_STDIO_CHECK_HELPER") == "1" {
+		got := strings.Join(os.Args[1:], " ")
+		fmt.Printf("args: %s", got)
+		if got != os.Getenv("BRAID_STDIO_CHECK_EXPECTED_ARGS") {
+			os.Exit(4)
+		}
+		if os.Getenv("BRAID_STDIO_CHECK_FAIL") == "1" {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func TestStdioCheckArgv(t *testing.T) {
+	t.Parallel()
+	old := &exec.Cmd{
+		Path: os.Args[0],
+		Args: []string{os.Args[0], "--flag", "value"},
+		Env: append(os.Environ(),
+			"BRAID_STDIO_CHECK_HELPER=1",
+			"BRAID_STDIO_CHECK_EXPECTED_ARGS=--flag value",
+			"BRAID_STDIO_CHECK_FAIL=1"),
+	}
+	err := stdioCheck(old)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "args: --flag value")
+}
+
+func TestStdioCheckNilArgs(t *testing.T) {
+	t.Parallel()
+	old := &exec.Cmd{
+		Path: os.Args[0],
+		Env: append(os.Environ(),
+			"BRAID_STDIO_CHECK_HELPER=1",
+			"BRAID_STDIO_CHECK_EXPECTED_ARGS="),
+	}
+	require.NoError(t, stdioCheck(old))
+}
+
+func TestOAuthRoundTripperNonReplayableBody(t *testing.T) {
+	t.Parallel()
+	handler := testOAuthHandler{
+		tokenSource: func(context.Context) (oauth2.TokenSource, error) {
+			return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "token"}), nil
+		},
+		authorize: func(context.Context, *http.Request, *http.Response) error {
+			return nil
+		},
+	}
+	var calls atomic.Int32
+	base := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("unauthorized"))}, nil
+	})
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.test", strings.NewReader("payload"))
+	require.NoError(t, err)
+	req.GetBody = nil
+	resp, err := newOAuthRoundTripper(handler, base).RoundTrip(req)
+	if resp != nil && resp.Body != nil {
+		require.NoError(t, resp.Body.Close())
+	}
+	require.Nil(t, resp)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-replayable body")
+	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestSuppressLockConcurrentAccess(t *testing.T) {
+	t.Parallel()
+	r := NewRegistry()
+	const names = 10
+	const goroutines = 100
+	var wg sync.WaitGroup
+	results := make([][]*sync.Mutex, names)
+	for i := range names {
+		results[i] = make([]*sync.Mutex, goroutines)
+	}
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for name := 0; name < names; name++ {
+				results[name][i] = r.suppressLock(fmt.Sprintf("name-%d", name))
+			}
+		}(i)
+	}
+	wg.Wait()
+	for name := 0; name < names; name++ {
+		for i := 1; i < goroutines; i++ {
+			require.Same(t, results[name][0], results[name][i],
+				"suppressLock must return the same mutex for the same name")
+		}
+	}
+}
+
+func TestBeginAuth_FinishTimeoutRestoresStateNeedsAuth(t *testing.T) {
+	const name = "finish-timeout-auth"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	started := make(chan struct{})
+	r.runAuth = func(ctx context.Context, _ *config.ConfigStore, name string, m config.MCPConfig, owner attemptID) error {
+		r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	finish, _, err := r.BeginAuth(cfg, name)
+	require.NoError(t, err)
+	<-started
+	r.authMu.Lock()
+	flow := r.authFlows[name]
+	r.authMu.Unlock()
+	require.NotNil(t, flow)
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Millisecond))
+	cancel()
+	require.ErrorIs(t, finish(ctx), context.DeadlineExceeded)
+	<-flow.workerDone
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateNeedsAuth, info.State)
+}
+
+func TestConnectAndRegisterPublishFailureClosesSession(t *testing.T) {
+	const name = "publish-fail-close"
+	r := NewRegistry()
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	session, ctx := liveSession(t, "tool")
+	t.Cleanup(func() { _ = session.Close() })
+	r.publishMu.Lock()
+	r.gens.Set(name, r.currentGen(name)+1)
+	r.publishMu.Unlock()
+	err = r.publishOrClose(t.Context(), name, config.MCPConfig{}, owner, session)
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, ctx.Err(), context.Canceled, "stale session must be closed")
+}
+
+func TestBuildHTTPTransportOAuth(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		typ             config.MCPType
+		wantURL         string
+		transportClient func(*testing.T, mcp.Transport, string) *http.Client
+	}{
+		{
+			name:    "http",
+			typ:     config.MCPHttp,
+			wantURL: "https://mcp.example.com/api",
+			transportClient: func(t *testing.T, transport mcp.Transport, wantURL string) *http.Client {
+				t.Helper()
+				tr, ok := transport.(*mcp.StreamableClientTransport)
+				require.True(t, ok, "expected *mcp.StreamableClientTransport, got %T", transport)
+				require.Equal(t, wantURL, tr.Endpoint)
+				return tr.HTTPClient
+			},
+		},
+		{
+			name:    "sse",
+			typ:     config.MCPSSE,
+			wantURL: "https://mcp.example.com/events",
+			transportClient: func(t *testing.T, transport mcp.Transport, wantURL string) *http.Client {
+				t.Helper()
+				tr, ok := transport.(*mcp.SSEClientTransport)
+				require.True(t, ok, "expected *mcp.SSEClientTransport, got %T", transport)
+				require.Equal(t, wantURL, tr.Endpoint)
+				return tr.HTTPClient
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const name = "oauth-transport"
+			r := NewRegistry()
+			owner, err := r.beginAttempt(name)
+			require.NoError(t, err)
+			t.Cleanup(func() { r.detachAuth(name, owner, nil).Close() })
+			cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: tc.typ, URL: tc.wantURL, OAuth: true}}})
+			m := cfg.Config().MCP[name]
+			transport, handler, err := r.createTransportFor(t.Context(), cfg, name, m, owner.gen, owner.seq, cfg.Resolver())
+			require.NoError(t, err)
+			require.NotNil(t, handler, "OAuth handler must be created")
+			client := tc.transportClient(t, transport, tc.wantURL)
+			require.NotNil(t, client, "HTTPClient must be set")
+			oauthRT, ok := client.Transport.(*oauthRoundTripper)
+			require.True(t, ok, "expected oauthRoundTripper, got %T", client.Transport)
+			headerRT, ok := oauthRT.base.(*headerRoundTripper)
+			require.True(t, ok, "expected headerRoundTripper, got %T", oauthRT.base)
+			_, ok = headerRT.base.(*ownedHTTPTransport)
+			require.True(t, ok, "expected ownedHTTPTransport, got %T", headerRT.base)
+			r.publishMu.Lock()
+			pub, ok := r.authURLs.Get(name)
+			r.publishMu.Unlock()
+			require.True(t, ok, "OAuth handler must be registered")
+			require.Same(t, handler, pub.auth.handler, "registered handler must match returned handler")
 		})
 	}
 }
