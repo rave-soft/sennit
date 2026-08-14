@@ -58,18 +58,19 @@ func (c *stubDispatchCoordinator) Cancel(string)                                
 func (c *stubDispatchCoordinator) CancelAll()                                        {}
 func (c *stubDispatchCoordinator) IsBusy() bool                                      { return false }
 
-func (c *stubDispatchCoordinator) IsSessionBusy(string) bool                          { return false }
-func (c *stubDispatchCoordinator) QueuedPrompts(string) int                           { return 0 }
-func (c *stubDispatchCoordinator) QueuedPromptsList(string) []string                  { return nil }
-func (c *stubDispatchCoordinator) ClearQueue(string)                                  {}
-func (c *stubDispatchCoordinator) Summarize(context.Context, string) error            { return nil }
-func (c *stubDispatchCoordinator) Model() agent.Model                                 { return agent.Model{} }
-func (c *stubDispatchCoordinator) UpdateModels(context.Context) error                 { return nil }
-func (c *stubDispatchCoordinator) GenerateTitle(context.Context, string, string)      {}
-func (c *stubDispatchCoordinator) SetThreads(tools.ThreadManager)                     {}
-func (c *stubDispatchCoordinator) SetTasks(tools.TaskManager)                         {}
-func (c *stubDispatchCoordinator) DeliverTaskCompletion(string, agent.TaskCompletion) {}
-func (c *stubDispatchCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)     {}
+func (c *stubDispatchCoordinator) IsSessionBusy(string) bool                     { return false }
+func (c *stubDispatchCoordinator) QueuedPrompts(string) int                      { return 0 }
+func (c *stubDispatchCoordinator) QueuedPromptsList(string) []string             { return nil }
+func (c *stubDispatchCoordinator) ClearQueue(string)                             {}
+func (c *stubDispatchCoordinator) Summarize(context.Context, string) error       { return nil }
+func (c *stubDispatchCoordinator) Model() agent.Model                            { return agent.Model{} }
+func (c *stubDispatchCoordinator) UpdateModels(context.Context) error            { return nil }
+func (c *stubDispatchCoordinator) GenerateTitle(context.Context, string, string) {}
+func (c *stubDispatchCoordinator) SetThreads(tools.ThreadManager)                {}
+func (c *stubDispatchCoordinator) SetTasks(tools.TaskManager)                    {}
+func (c *stubDispatchCoordinator) DeliverTaskCompletion(context.Context, string, agent.TaskCompletion) {
+}
+func (c *stubDispatchCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
 
 // TestAgentDispatcher_SendRefusedAfterMarkClosing asserts that once
 // MarkClosing has been called, Send refuses synchronously with

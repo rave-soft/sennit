@@ -36,6 +36,11 @@ type threadControl struct {
 	mu      sync.Mutex
 	runtime *runtimeState
 	removed bool
+	// depth is the background-delegation cascade depth the creating turn
+	// stamped at Create (see TaskManager.Create and TaskCreateArgs.Depth
+	// — only tasks set this to anything nonzero today). handleRunComplete
+	// reads it back to compute an auto-woken continuation's depth.
+	depth int
 }
 
 // ErrManagerClosed is returned by mutating manager operations once shutdown
@@ -398,6 +403,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 		return
 	}
 	c.runtime = nil
+	depth := c.depth
 	c.mu.Unlock()
 	rt.watchCancel()
 	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
@@ -440,7 +446,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 	}
 
 	if finalSt.Kind == KindTask {
-		l.deliverTaskCompletion(ctx, rt.handle, finalSt)
+		l.deliverTaskCompletion(ctx, rt.handle, finalSt, depth)
 	}
 }
 
@@ -458,7 +464,14 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 // one) is silently skipped rather than delivered nowhere useful; the
 // task's own terminal status is still recorded and still pollable via
 // task_result regardless.
-func (l *lifecycle) deliverTaskCompletion(ctx context.Context, handle Handle, st Thread) {
+//
+// depth is the cascade depth the creating turn stamped on this task at
+// Create (threadControl.depth, read by the caller before releasing
+// c.mu) — carried onto the event so an auto-woken continuation can run
+// one level deeper, and refuse to cascade further once the hard limit
+// is reached (see agent.TaskCompletion.Depth and the "agent" tool's
+// background mode).
+func (l *lifecycle) deliverTaskCompletion(ctx context.Context, handle Handle, st Thread, depth int) {
 	a := handle.App()
 	if a == nil || a.AgentCoordinator == nil || a.Sessions == nil {
 		return
@@ -471,7 +484,7 @@ func (l *lifecycle) deliverTaskCompletion(ctx context.Context, handle Handle, st
 	if sess.ParentSessionID == "" {
 		return
 	}
-	a.AgentCoordinator.DeliverTaskCompletion(sess.ParentSessionID, agent.TaskCompletion{
+	a.AgentCoordinator.DeliverTaskCompletion(ctx, sess.ParentSessionID, agent.TaskCompletion{
 		DelegationID:   st.ID,
 		Kind:           string(st.Kind),
 		Name:           st.Name,
@@ -480,6 +493,7 @@ func (l *lifecycle) deliverTaskCompletion(ctx context.Context, handle Handle, st
 		ChildSessionID: st.SessionID,
 		ResultText:     st.ResultSummary,
 		Error:          st.Error,
+		Depth:          depth,
 	})
 }
 

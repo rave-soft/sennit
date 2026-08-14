@@ -21,6 +21,13 @@ type TaskCreateArgs struct {
 	// thread's child session via Sessions.CreateTaskSession. Required: a
 	// task with no parent is not a task, just an orphaned session.
 	ParentSessionID string
+	// Depth is the background-delegation cascade depth of the turn that
+	// created this task (0 for a real user turn). It is carried
+	// in-memory only (see threadControl.depth) — not persisted — since it
+	// is only ever needed transiently, between this Create and the one
+	// completion event this task ever produces, to compute the depth of
+	// an auto-woken continuation (see agent.TaskCompletion.Depth).
+	Depth int
 }
 
 // TaskManager drives the task delegation kind: the same admission,
@@ -104,6 +111,10 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	defer c.opMu.Unlock()
 	c.mu.Lock()
 	removed := c.removed
+	// Stash the creating turn's cascade depth on the control now, while
+	// nothing else can be reading it yet - deliverTaskCompletion reads it
+	// back through this same control once the task finishes.
+	c.depth = args.Depth
 	c.mu.Unlock()
 	if removed {
 		return Thread{}, fmt.Errorf("thread: task %q was removed during creation", st.ID)

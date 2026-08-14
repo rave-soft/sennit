@@ -25,6 +25,7 @@ type (
 	messageIDContextKey string
 	supportsImagesKey   string
 	modelNameKey        string
+	depthContextKey     string
 )
 
 const (
@@ -36,6 +37,13 @@ const (
 	SupportsImagesContextKey supportsImagesKey = "supports_images"
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
+	// DepthContextKey is the key for the current turn's background-
+	// delegation cascade depth (0 for a real user turn; N+1 for a
+	// continuation started from a depth-N completion). The "agent" tool's
+	// background mode reads this to refuse starting further background
+	// work once the cascade limit is reached — see
+	// internal/agent/agent_tool.go.
+	DepthContextKey depthContextKey = "depth"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -69,6 +77,12 @@ func GetSupportsImagesFromContext(ctx context.Context) bool {
 // GetModelNameFromContext retrieves the model name from the context.
 func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
+}
+
+// GetDepthFromContext retrieves the current turn's background-delegation
+// cascade depth from the context. Absent (0) means a real user turn.
+func GetDepthFromContext(ctx context.Context) int {
+	return getContextValue(ctx, DepthContextKey, 0)
 }
 
 // NewPermissionDeniedResponse returns a tool response indicating the user

@@ -134,8 +134,10 @@ func TestPrepareStep_CompletionDeliveredBeforeSteering(t *testing.T) {
 	}
 
 	// Land the completion and the steering follow-up "at the same time":
-	// both are queued before step 2's PrepareStep has run.
-	sa.DeliverTaskCompletion(sess.ID, TaskCompletion{
+	// both are queued before step 2's PrepareStep has run. The session is
+	// busy here (mid step 1, inside the gated tool call), so this only
+	// enqueues - it does not attempt to auto-wake a continuation.
+	sa.DeliverTaskCompletion(t.Context(), sess.ID, TaskCompletion{
 		DelegationID:   "task-1",
 		Kind:           "task",
 		Name:           "task-name",
@@ -246,6 +248,24 @@ func (m *promptRecordingModel) StreamObject(context.Context, fantasy.ObjectCall)
 	return nil, errors.New("not implemented")
 }
 
+// count returns how many non-title Stream calls have been recorded so
+// far. Locked, unlike reading m.prompts directly - Stream runs on its
+// own goroutine relative to whatever's polling this from a test.
+func (m *promptRecordingModel) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.prompts)
+}
+
+// snapshotPrompts returns a copy of every prompt recorded so far, for a
+// test that needs to inspect their contents once settled rather than
+// just count them.
+func (m *promptRecordingModel) snapshotPrompts() []fantasy.Prompt {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]fantasy.Prompt(nil), m.prompts...)
+}
+
 // occurrences counts how many text parts across every recorded prompt
 // contain substr, letting a test tell "delivered once" from "delivered
 // twice" without caring which step/message carried it.
@@ -271,9 +291,17 @@ func (m *promptRecordingModel) occurrences(substr string) int {
 // steering: a step that errors after draining the completion inbox
 // (here, because the assistant message create that follows the drain
 // fails - completions have no create of their own to fail) must not
-// lose the completion, and a subsequent successful retry must deliver
-// it exactly once, not replay it a second time on top of some earlier
-// partial delivery.
+// lose the completion.
+//
+// It does not stop there, though: run()'s own exit (see
+// wakeFromInboxIfIdle, agent.go) re-checks the inbox once the failed
+// call's session goes idle again and, finding the just-requeued
+// completion still sitting there, auto-retries it as a continuation
+// turn immediately - the same mechanism that closes the "busy turn with
+// no further step" gap for the wake path. So the requeue does not just
+// prevent loss in principle; the completion is actually, automatically
+// redelivered, and exactly once - not replayed a second time on top of
+// an earlier partial delivery.
 func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {
 	t.Parallel()
 
@@ -282,6 +310,8 @@ func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {
 	// nothing is queued to fold) the step's assistant message create (2).
 	// Failing call 2 fails the step *after* the completion drain above it
 	// in PrepareStep, without any create of the completion's own to fail.
+	// The auto-retry's own creates (3, 4, ...) all land past failOn, so
+	// they succeed.
 	failing := &failNthCreate{Service: env.messages, failOn: 2}
 	env.messages = failing
 
@@ -300,27 +330,24 @@ func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {
 		ChildSessionID: "child-session",
 		ResultText:     "background-task-result-once",
 	}
-	sa.DeliverTaskCompletion(sess.ID, completion)
+	// The low-level dispatcher primitive, not sa.DeliverTaskCompletion:
+	// DeliverTaskCompletion would itself attempt to wake a continuation
+	// immediately (the session is idle), which is not what this test is
+	// isolating - it wants the completion sitting in the inbox exactly
+	// as if a task had completed while this session last went busy, for
+	// PrepareStep's own step-0 drain to pick up.
+	sa.dispatch.enqueueCompletion(sess.ID, completion)
 
 	_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "main"})
 	require.Error(t, runErr, "the assistant-message create failure must propagate out of Run")
 
-	// Not lost: draining the inbox now must still yield exactly the one
-	// completion, unchanged, proving the failed step put it back rather
-	// than dropping it. Re-deliver it immediately so the retry below
-	// drains it the normal way, the way a real retried step would find
-	// it still queued.
-	requeued := sa.drainCompletionsForStep(sess.ID)
-	require.Equal(t, []TaskCompletion{completion}, requeued,
-		"a step that errors after draining must requeue the completion, not lose it")
-	sa.DeliverTaskCompletion(sess.ID, completion)
-
-	result, retryErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "main-retry"})
-	require.NoError(t, retryErr)
-	require.NotNil(t, result)
+	// Not lost, and not left to wait indefinitely either: run()'s exit
+	// re-checks the inbox once idle and auto-retries.
+	require.Eventually(t, func() bool { return model.occurrences("background-task-result-once") > 0 }, 2*time.Second, 5*time.Millisecond,
+		"a step that errors after draining must requeue the completion, and the auto-retry must actually deliver it")
 
 	require.Empty(t, sa.drainCompletionsForStep(sess.ID),
-		"the successful retry must have drained the inbox; nothing should be left queued")
+		"the auto-retry must have drained the inbox; nothing should be left queued")
 	require.Equal(t, 1, model.occurrences("background-task-result-once"),
-		"the completion must reach the model exactly once across the failed step and its retry, never twice")
+		"the completion must reach the model exactly once across the failed step and its auto-retry, never twice")
 }

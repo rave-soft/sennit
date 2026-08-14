@@ -104,6 +104,31 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 
 	prepared.Tools = t.tools
 
+	// A continuation's own call.Prompt is a placeholder
+	// (continuationPromptPlaceholder), not real content: it exists only
+	// to satisfy fantasy's own createPrompt, which refuses an empty
+	// prompt unless the session's prior history already ends in a
+	// user/tool message - not the case for a freshly-idle session waking
+	// from an ordinary assistant reply. Strip the user message fantasy
+	// synthesized from it before the model ever sees it. What replaces it
+	// is exactly the completion-inbox drain below - the same mechanism,
+	// the same non-persisted delivery, as the mid-turn fold case, so the
+	// two paths cannot record the same event differently.
+	//
+	// stripContinuationPlaceholder verifies the entry it removes actually
+	// is the placeholder rather than trusting its position (always last -
+	// see fantasy's createPrompt) alone: a future fantasy release that
+	// changes how it builds the initial prompt would otherwise either
+	// leak the placeholder into the model's context as a fabricated user
+	// turn, or delete real content - both silent. A mismatch fails this
+	// step loudly instead, at the point the assumption broke.
+	if t.call.Continuation && options.StepNumber == 0 {
+		prepared.Messages, err = stripContinuationPlaceholder(prepared.Messages)
+		if err != nil {
+			return callContext, prepared, err
+		}
+	}
+
 	// Drain the completion inbox before touching the steering queue, so
 	// a turn that has both sees a task's finished work ahead of a
 	// follow-up that may refer to it. Completions travel as a user-role
@@ -112,16 +137,33 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	// any other message has come before it), but the message text plainly
 	// labels it as a system-generated report - not something the user
 	// typed - and it is never persisted via createUserMessage/
-	// message.Service the way a real steering follow-up is.
+	// message.Service the way a real steering follow-up is. That holds
+	// for a continuation's own step 0 exactly as it does for a mid-turn
+	// fold: this is the *only* place either path turns a completion into
+	// conversation content.
 	//
 	// At-most-once mirrors the steering drain immediately below: if
 	// this step fails before the completions are actually appended, put
 	// them back at the front of the inbox rather than lose them - and,
 	// critically, never re-drain and re-append ones already folded in
 	// successfully. A completion delivered twice would tell the model a
-	// task finished twice, which is worse than delivering it late.
+	// task finished twice, which is worse than delivering it late. For a
+	// continuation, run()'s exit hook (wakeFromInboxIfIdle) will retry a
+	// requeued batch automatically once this failed attempt goes idle.
 	completions := t.agent.drainCompletionsForStep(t.call.SessionID)
 	if len(completions) > 0 {
+		if t.call.Continuation && options.StepNumber == 0 {
+			// Only knowable now that we see what actually woke this
+			// turn: one level deeper than the deepest delegation in the
+			// batch - see maxTaskCascadeDepth.
+			depth := 0
+			for _, c := range completions {
+				if c.Depth > depth {
+					depth = c.Depth
+				}
+			}
+			t.call.Depth = depth + 1
+		}
 		// Nothing below this point persists a completion anywhere durable
 		// (unlike a folded steering prompt, which is written via
 		// createUserMessage before it's appended): a completion lives
@@ -206,6 +248,7 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.model.CatalogCfg.SupportsImages)
 	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.model.CatalogCfg.Name)
+	callContext = context.WithValue(callContext, tools.DepthContextKey, t.call.Depth)
 	t.currentAssistant = &assistantMsg
 	return callContext, prepared, err
 }

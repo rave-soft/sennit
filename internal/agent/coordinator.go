@@ -87,10 +87,12 @@ type Coordinator interface {
 	SetTasks(tasks tools.TaskManager)
 	// DeliverTaskCompletion enqueues completion into sessionID's
 	// completion inbox for delivery on that session's next step (see
-	// runTurn.prepareStep). internal/thread calls this once a task
-	// reaches a terminal status, having resolved sessionID as the
-	// task's *parent* session - never the task's own child session.
-	DeliverTaskCompletion(sessionID string, completion TaskCompletion)
+	// runTurn.prepareStep), or starts a continuation turn immediately if
+	// the session is idle and eligible (see startContinuation).
+	// internal/thread calls this once a task reaches a terminal status,
+	// having resolved sessionID as the task's *parent* session - never
+	// the task's own child session.
+	DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion)
 	// RefreshSkills replaces the coordinator's cached skill discovery
 	// results — called by the backend after its skills-directory watcher
 	// detects a SKILL.md added, edited, or removed outside this process,
@@ -984,8 +986,8 @@ func (c *coordinator) SetTasks(tasks tools.TaskManager) {
 }
 
 // DeliverTaskCompletion implements Coordinator.
-func (c *coordinator) DeliverTaskCompletion(sessionID string, completion TaskCompletion) {
-	c.currentAgent.DeliverTaskCompletion(sessionID, completion)
+func (c *coordinator) DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion) {
+	c.currentAgent.DeliverTaskCompletion(ctx, sessionID, completion)
 }
 
 // RefreshSkills implements Coordinator.RefreshSkills.

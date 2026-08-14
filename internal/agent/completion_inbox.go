@@ -44,24 +44,38 @@ type TaskCompletion struct {
 	ResultText string
 	// Error is the failure text on failure; empty otherwise.
 	Error string
+	// Depth is the background-delegation cascade depth of the turn that
+	// created the delegation this completion reports on (0 for a real
+	// user turn). An auto-woken continuation started from this
+	// completion runs at Depth+1 — see startContinuation and the "agent"
+	// tool's background mode, which refuses to start further background
+	// work once that reaches the hard cascade limit.
+	Depth int
 }
 
-// enqueueCompletion appends completion to sessionID's completion inbox.
-// It never interrupts a running turn and never starts one on an idle
-// session - both cases just leave the event queued for the session's
-// next prepareStep (or, for an idle session, a future step - see the
-// dispatcher doc comment on completionInbox for what's not built yet).
+// enqueueCompletion appends completion to sessionID's completion inbox
+// and reports whether the session is now eligible for an auto-wake
+// attempt (idle, not left canceled by the user). It never interrupts a
+// running turn itself - eligible only ever means "the caller may attempt
+// a continuation," never "this call drained anything." The actual
+// consumption happens later, atomically, in whichever turn's own
+// PrepareStep (step 0, for a continuation; any step, for the mid-turn
+// fold) ends up draining the inbox via drainCompletionsForStep - see
+// that method and startContinuation.
 //
 // Locking mirrors enqueueCall/requeueContinuation: the per-session
 // dispatch mutex also guards this session's completion inbox, so a
-// concurrent drain (prepareStep) and enqueue (a task finishing
-// mid-step) can never interleave into a torn read.
-func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompletion) {
+// concurrent drain (PrepareStep) and enqueue (a task finishing
+// mid-step) can never interleave into a torn read, and the eligibility
+// read below can never observe a stale busy/canceled state a concurrent
+// Run has already changed by the time this returns.
+func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompletion) (wakeEligible bool) {
 	mu := d.sessionMu(sessionID)
 	mu.Lock()
 	defer mu.Unlock()
 	existing, _ := d.completionInbox.Get(sessionID)
 	d.completionInbox.Set(sessionID, append(existing, completion))
+	return d.wakeEligibleLocked(sessionID)
 }
 
 // drainCompletionsForStep removes and returns every completion queued for
@@ -109,6 +123,49 @@ func (d *dispatcher) requeueCompletions(sessionID string, remainder []TaskComple
 	d.completionInbox.Set(sessionID, merged)
 }
 
+// wakeEligible reports whether sessionID currently has something in its
+// completion inbox and is eligible for an auto-wake attempt (idle, not
+// left canceled by the user). It exists for run()'s exit path: a
+// completion can arrive while a session is busy and never get the chance
+// to be drained via that turn's own PrepareStep (a turn with no further
+// step after the one it was busy on - the common case), so something has
+// to look again once the turn that was busy actually goes idle. See
+// wakeFromInboxIfIdle, the only caller.
+//
+// This is a peek, not a drain: nothing is removed from the inbox here.
+// The actual consumption happens later, atomically, in whichever turn's
+// own PrepareStep drains it via drainCompletionsForStep - see
+// startContinuation for why a separate pre-drain step would reintroduce
+// exactly the "fabricated user message" problem this design avoids.
+func (d *dispatcher) wakeEligible(sessionID string) bool {
+	mu := d.sessionMu(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+	return d.wakeEligibleLocked(sessionID)
+}
+
+// wakeEligibleLocked is wakeEligible's body. Callers must hold
+// sessionID's dispatch mutex - see enqueueCompletion's doc comment for
+// why this decision has to be made under that same lock a normal run's
+// own busy-check uses.
+func (d *dispatcher) wakeEligibleLocked(sessionID string) bool {
+	existing, ok := d.completionInbox.Get(sessionID)
+	if !ok || len(existing) == 0 {
+		return false
+	}
+	if _, busy := d.activeRequests.Get(sessionID); busy {
+		return false
+	}
+	if _, canceled := d.cancelledSessions.Get(sessionID); canceled {
+		// The user explicitly canceled this session and no new turn has
+		// started since. Leave the event queued; it is delivered the
+		// ordinary way (drainCompletionsForStep) on whatever the next
+		// real user turn turns out to be.
+		return false
+	}
+	return true
+}
+
 // taskCompletionsMessage renders completions as a single user-role
 // message, plainly labeled as a system-generated report rather than
 // something the user typed.
@@ -133,18 +190,29 @@ func (d *dispatcher) requeueCompletions(sessionID string, remainder []TaskComple
 // Anthropic, merges) a user message appended after other turns - the
 // same path this rides now. The plan's constraint was that a completion
 // must not be *queued as a user prompt* or attributed to the user in
-// history (see dispatcher's completionInbox doc comment: this never goes
-// through createUserMessage/message.Service, so nothing here is
-// persisted or shows up as something the user said) - not that
-// fantasy.MessageRoleUser can never carry it on the wire. The leading
-// label in formatTaskCompletion's text is what keeps the model itself
-// from misreading it as user speech.
+// history - not that fantasy.MessageRoleUser can never carry it on the
+// wire. This never goes through createUserMessage/message.Service (it is
+// folded directly into prepared.Messages, not persisted) whether it is
+// reached from the mid-turn fold or from a continuation's own step 0
+// (runTurn.prepareStep's Continuation branch calls this exact function
+// too - the two delivery paths share this one code path deliberately, so
+// they cannot drift into recording the same event differently); the
+// leading label in joinTaskCompletions' text is what keeps the model
+// itself from misreading it as user speech.
 func taskCompletionsMessage(completions []TaskCompletion) fantasy.Message {
+	return fantasy.NewUserMessage(joinTaskCompletions(completions))
+}
+
+// joinTaskCompletions renders a batch of completions as one block of
+// plain text, wrapped as a fantasy message by taskCompletionsMessage -
+// the sole caller, used identically whether that message ends up folded
+// into an active turn or into a continuation's own step 0.
+func joinTaskCompletions(completions []TaskCompletion) string {
 	parts := make([]string, len(completions))
 	for i, c := range completions {
 		parts[i] = formatTaskCompletion(c)
 	}
-	return fantasy.NewUserMessage(strings.Join(parts, "\n\n"))
+	return strings.Join(parts, "\n\n")
 }
 
 // formatTaskCompletion renders one completion as plain text for the

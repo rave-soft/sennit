@@ -52,16 +52,29 @@ type dispatcher struct {
 	// notification is lost.
 	//
 	// See enqueueCompletion/drainCompletionsForStep/requeueCompletions
-	// in completion_inbox.go for the operations, and
-	// runTurn.prepareStep for the drain-before-steering ordering this
-	// exists to support.
-	//
-	// Enqueuing never distinguishes a busy session from an idle one:
-	// today both cases just leave the event queued (a busy session's
-	// active turn drains it on its own next step). Waking an idle
-	// session to deliver one immediately - via IsSessionBusy - is a
-	// deliberately unbuilt follow-up, not a gap in this map.
+	// in completion_inbox.go for the operations, and runTurn.prepareStep
+	// for the drain-before-steering ordering, and the Continuation
+	// branch that drains this same way for a continuation's own step 0.
+	// wakeEligible (also completion_inbox.go) is the idle-session
+	// trigger: when a session is idle, not user-canceled, and this map
+	// holds something for it, sessionAgent attempts a continuation turn
+	// instead of leaving the event to wait indefinitely - see
+	// startContinuation. It only decides to attempt, never drains: the
+	// actual consumption always happens in PrepareStep, so the mid-turn
+	// and wake paths can never record the same event differently.
 	completionInbox *csync.Map[string, []TaskCompletion]
+	// cancelledSessions marks a session as "the user explicitly canceled
+	// this" until the next turn actually starts (see run's idle branch,
+	// which clears it). It exists solely to gate auto-waking a
+	// continuation from the completion inbox: cancelMark above is the
+	// wrong signal for that (it is scoped to covering accepted-but-not-
+	// active runs and is dropped once none remain — see endAccepted —
+	// so by the time a session is genuinely idle with an empty queue, a
+	// plain Escape has usually already cleared it). Presence means
+	// canceled; absence means not. Set only by cancel(); cleared only by
+	// run() admitting a new active turn, whichever call — a real user
+	// Run/Steer or our own auto-continuation — gets there next.
+	cancelledSessions *csync.Map[string, struct{}]
 	// acceptedRuns counts dispatched-but-not-yet-active runs per
 	// session. A counter > 0 means a dispatched prompt is in flight
 	// and has not yet completed the dispatch handoff in Run. Only
@@ -107,12 +120,13 @@ type dispatcher struct {
 
 func newDispatcher() *dispatcher {
 	return &dispatcher{
-		messageQueue:    csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:  csync.NewMap[string, *activeCancel](),
-		dispatchMu:      csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:    csync.NewMap[string, int](),
-		cancelMark:      csync.NewMap[string, uint64](),
-		completionInbox: csync.NewMap[string, []TaskCompletion](),
+		messageQueue:      csync.NewMap[string, []SessionAgentCall](),
+		activeRequests:    csync.NewMap[string, *activeCancel](),
+		dispatchMu:        csync.NewMap[string, *sync.Mutex](),
+		acceptedRuns:      csync.NewMap[string, int](),
+		cancelMark:        csync.NewMap[string, uint64](),
+		completionInbox:   csync.NewMap[string, []TaskCompletion](),
+		cancelledSessions: csync.NewMap[string, struct{}](),
 	}
 }
 
@@ -513,6 +527,15 @@ func (d *dispatcher) cancel(sessionID string) []SessionAgentCall {
 	}()
 	mu.Lock()
 	defer mu.Unlock()
+
+	// Mark the session canceled unconditionally, before anything below
+	// can return early: this is what gates auto-waking a continuation
+	// from the completion inbox (see wakeEligible) - "the user canceled
+	// the parent session" is recorded by the fact
+	// this call happened at all, not by whether it found anything to
+	// actually cancel. run() clears it the next time this session's
+	// turn genuinely starts.
+	d.cancelledSessions.Set(sessionID, struct{}{})
 
 	// Cancel regular requests. Don't use Take() here - we need the entry to
 	// remain in activeRequests so IsBusy() returns true until the goroutine

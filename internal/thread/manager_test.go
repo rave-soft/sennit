@@ -155,7 +155,7 @@ type deliveredCompletion struct {
 }
 
 // DeliverTaskCompletion implements agent.Coordinator.
-func (f *fakeCoordinator) DeliverTaskCompletion(sessionID string, completion agent.TaskCompletion) {
+func (f *fakeCoordinator) DeliverTaskCompletion(_ context.Context, sessionID string, completion agent.TaskCompletion) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.delivered = append(f.delivered, deliveredCompletion{sessionID: sessionID, completion: completion})

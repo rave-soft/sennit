@@ -8,6 +8,11 @@ import "context"
 type TaskCreateArgs struct {
 	Goal            string
 	ParentSessionID string
+	// Depth is the cascade depth of the turn creating this task (0 for a
+	// real user turn; see internal/agent's DepthContextKey/completion
+	// continuation depth). The task inherits it as-is — a continuation
+	// created from this task's completion runs one level deeper.
+	Depth int
 }
 
 // TaskInfo mirrors the fields of internal/thread.Thread the task_* tools

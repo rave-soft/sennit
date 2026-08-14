@@ -53,8 +53,9 @@ func (m *mockSessionAgent) ClearQueue(sessionID string)                 {}
 func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error {
 	return nil
 }
-func (m *mockSessionAgent) GenerateTitle(context.Context, string, string)            {}
-func (m *mockSessionAgent) DeliverTaskCompletion(sessionID string, c TaskCompletion) {}
+func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
+func (m *mockSessionAgent) DeliverTaskCompletion(ctx context.Context, sessionID string, c TaskCompletion) {
+}
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderConfig) *coordinator {

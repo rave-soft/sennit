@@ -100,6 +100,19 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 // and got foreground without being told would believe work is proceeding
 // in parallel when it is not.
 func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, prompt string) (fantasy.ToolResponse, error) {
+	// Refuse before touching the task manager at all: a turn already at
+	// the cascade limit still runs (it has real work to do — the
+	// completion that woke it), but must not be able to start yet
+	// another task whose own eventual completion would wake a turn one
+	// level deeper still. See maxTaskCascadeDepth.
+	depth := tools.GetDepthFromContext(ctx)
+	if depth >= maxTaskCascadeDepth {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"Background delegation depth limit (%d) reached: this turn is itself a background continuation too many levels deep to start another one. Finish this work directly instead of delegating it further.",
+			maxTaskCascadeDepth,
+		)), nil
+	}
+
 	taskManager := c.tasksManager()
 	if taskManager == nil {
 		return fantasy.NewTextErrorResponse(
@@ -110,6 +123,7 @@ func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, prompt 
 	info, err := taskManager.Create(ctx, tools.TaskCreateArgs{
 		Goal:            prompt,
 		ParentSessionID: sessionID,
+		Depth:           depth,
 	})
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to start background task: %s", err)), nil

@@ -42,22 +42,22 @@ func (c *errorCoordinator) Steer(ctx context.Context, call agent.SessionAgentCal
 	return agent.SteerRan, nil, c.err
 }
 
-func (c *errorCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun  { return nil }
-func (c *errorCoordinator) Cancel(string)                                      {}
-func (c *errorCoordinator) CancelAll()                                         {}
-func (c *errorCoordinator) IsBusy() bool                                       { return false }
-func (c *errorCoordinator) IsSessionBusy(string) bool                          { return false }
-func (c *errorCoordinator) QueuedPrompts(string) int                           { return 0 }
-func (c *errorCoordinator) QueuedPromptsList(string) []string                  { return nil }
-func (c *errorCoordinator) ClearQueue(string)                                  {}
-func (c *errorCoordinator) Summarize(context.Context, string) error            { return nil }
-func (c *errorCoordinator) Model() agent.Model                                 { return agent.Model{} }
-func (c *errorCoordinator) UpdateModels(context.Context) error                 { return nil }
-func (c *errorCoordinator) GenerateTitle(context.Context, string, string)      {}
-func (c *errorCoordinator) SetThreads(tools.ThreadManager)                     {}
-func (c *errorCoordinator) SetTasks(tools.TaskManager)                         {}
-func (c *errorCoordinator) DeliverTaskCompletion(string, agent.TaskCompletion) {}
-func (c *errorCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)     {}
+func (c *errorCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun                   { return nil }
+func (c *errorCoordinator) Cancel(string)                                                       {}
+func (c *errorCoordinator) CancelAll()                                                          {}
+func (c *errorCoordinator) IsBusy() bool                                                        { return false }
+func (c *errorCoordinator) IsSessionBusy(string) bool                                           { return false }
+func (c *errorCoordinator) QueuedPrompts(string) int                                            { return 0 }
+func (c *errorCoordinator) QueuedPromptsList(string) []string                                   { return nil }
+func (c *errorCoordinator) ClearQueue(string)                                                   {}
+func (c *errorCoordinator) Summarize(context.Context, string) error                             { return nil }
+func (c *errorCoordinator) Model() agent.Model                                                  { return agent.Model{} }
+func (c *errorCoordinator) UpdateModels(context.Context) error                                  { return nil }
+func (c *errorCoordinator) GenerateTitle(context.Context, string, string)                       {}
+func (c *errorCoordinator) SetThreads(tools.ThreadManager)                                      {}
+func (c *errorCoordinator) SetTasks(tools.TaskManager)                                          {}
+func (c *errorCoordinator) DeliverTaskCompletion(context.Context, string, agent.TaskCompletion) {}
+func (c *errorCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)                      {}
 
 // insertRunCompleteWorkspace installs a workspace backed by a real
 // app.App (so the runCompletions broker exists) with the given

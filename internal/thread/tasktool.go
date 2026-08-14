@@ -25,6 +25,7 @@ func (a *agentToolTaskManager) Create(ctx context.Context, args tools.TaskCreate
 	st, err := a.t.Create(ctx, TaskCreateArgs{
 		Goal:            args.Goal,
 		ParentSessionID: args.ParentSessionID,
+		Depth:           args.Depth,
 	})
 	if err != nil {
 		return tools.TaskInfo{}, err

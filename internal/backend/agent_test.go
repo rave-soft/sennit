@@ -54,22 +54,22 @@ func (c *blockingCoordinator) Steer(ctx context.Context, call agent.SessionAgent
 	return agent.SteerRan, nil, nil
 }
 
-func (c *blockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun  { return nil }
-func (c *blockingCoordinator) Cancel(string)                                      {}
-func (c *blockingCoordinator) CancelAll()                                         {}
-func (c *blockingCoordinator) IsBusy() bool                                       { return false }
-func (c *blockingCoordinator) IsSessionBusy(string) bool                          { return false }
-func (c *blockingCoordinator) QueuedPrompts(string) int                           { return 0 }
-func (c *blockingCoordinator) QueuedPromptsList(string) []string                  { return nil }
-func (c *blockingCoordinator) ClearQueue(string)                                  {}
-func (c *blockingCoordinator) Summarize(context.Context, string) error            { return nil }
-func (c *blockingCoordinator) Model() agent.Model                                 { return agent.Model{} }
-func (c *blockingCoordinator) UpdateModels(context.Context) error                 { return nil }
-func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)      {}
-func (c *blockingCoordinator) SetThreads(tools.ThreadManager)                     {}
-func (c *blockingCoordinator) SetTasks(tools.TaskManager)                         {}
-func (c *blockingCoordinator) DeliverTaskCompletion(string, agent.TaskCompletion) {}
-func (c *blockingCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)     {}
+func (c *blockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun                   { return nil }
+func (c *blockingCoordinator) Cancel(string)                                                       {}
+func (c *blockingCoordinator) CancelAll()                                                          {}
+func (c *blockingCoordinator) IsBusy() bool                                                        { return false }
+func (c *blockingCoordinator) IsSessionBusy(string) bool                                           { return false }
+func (c *blockingCoordinator) QueuedPrompts(string) int                                            { return 0 }
+func (c *blockingCoordinator) QueuedPromptsList(string) []string                                   { return nil }
+func (c *blockingCoordinator) ClearQueue(string)                                                   {}
+func (c *blockingCoordinator) Summarize(context.Context, string) error                             { return nil }
+func (c *blockingCoordinator) Model() agent.Model                                                  { return agent.Model{} }
+func (c *blockingCoordinator) UpdateModels(context.Context) error                                  { return nil }
+func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)                       {}
+func (c *blockingCoordinator) SetThreads(tools.ThreadManager)                                      {}
+func (c *blockingCoordinator) SetTasks(tools.TaskManager)                                          {}
+func (c *blockingCoordinator) DeliverTaskCompletion(context.Context, string, agent.TaskCompletion) {}
+func (c *blockingCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)                      {}
 
 // insertAgentWorkspace installs a synthetic workspace with the given
 // coordinator (or none) and a workspace run context, mirroring the

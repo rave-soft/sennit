@@ -125,6 +125,26 @@ type SessionAgentCall struct {
 	// this lifecycle. It is preserved across queued continuations.
 	Runtime       *compiledRuntime
 	ActiveRuntime *activeRuntime
+	// Depth is this turn's background-delegation cascade depth: 0 for a
+	// real user turn (the zero value, so every ordinary caller gets this
+	// for free). For a Continuation call it starts at 0 too and is set by
+	// PrepareStep once it knows what it actually drained (N+1 for a
+	// depth-N completion) - see runTurn.prepareStep. Either way,
+	// PrepareStep stamps the final value onto the step's context
+	// (tools.DepthContextKey) so the "agent" tool's background mode can
+	// refuse to start further background work once it reaches the hard
+	// cascade limit.
+	Depth int
+	// Continuation marks an auto-woken continuation turn (see
+	// startContinuation): its Prompt is a placeholder, not real content
+	// (see continuationPromptPlaceholder), so run() skips
+	// createUserMessage for it and PrepareStep strips the placeholder
+	// message before the model ever sees it, folding in whatever
+	// PrepareStep's own completion-inbox drain finds instead - the same
+	// mechanism and the same non-persisted delivery the mid-turn fold
+	// case already uses, so the two paths cannot produce different
+	// history for the same event.
+	Continuation bool
 }
 
 // SteerOutcome reports which branch of sessionAgent.run's atomic dispatch
@@ -176,9 +196,11 @@ type SessionAgent interface {
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 	// DeliverTaskCompletion enqueues completion into sessionID's
-	// completion inbox. See dispatcher's completionInbox field and
-	// runTurn.prepareStep for delivery.
-	DeliverTaskCompletion(sessionID string, completion TaskCompletion)
+	// completion inbox and, if the session is idle and was not left
+	// canceled by the user, starts a continuation turn for it. See
+	// dispatcher's completionInbox field, runTurn.prepareStep (the
+	// mid-turn delivery path), and startContinuation (the wake path).
+	DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion)
 }
 
 type Model struct {
@@ -334,9 +356,18 @@ func (a *sessionAgent) clearPendingCancel(sessionID string) {
 }
 
 // DeliverTaskCompletion enqueues completion into sessionID's completion
-// inbox. See dispatcher.enqueueCompletion.
-func (a *sessionAgent) DeliverTaskCompletion(sessionID string, completion TaskCompletion) {
-	a.dispatch.enqueueCompletion(sessionID, completion)
+// inbox and, if that leaves the session eligible (idle, not left
+// canceled by the user), attempts a continuation turn for it. See
+// dispatcher.enqueueCompletion and startContinuation. The attempt does
+// not itself drain anything - the completion stays in the inbox until
+// whichever turn actually becomes active drains it via PrepareStep, so a
+// continuation call that loses its own busy-check race (see run()) drops
+// cleanly without losing or duplicating completion's content.
+func (a *sessionAgent) DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion) {
+	if !a.dispatch.enqueueCompletion(sessionID, completion) {
+		return
+	}
+	a.startContinuation(ctx, sessionID)
 }
 
 // drainCompletionsForStep removes and returns every completion queued for
@@ -374,14 +405,17 @@ func (a *sessionAgent) publishQueueChanged(sessionID string) {
 // persistCanceledTurn writes the user/assistant records for a turn that
 // was canceled before (or just as) streaming would have produced them.
 // It creates the user message only when it was not already created by an
-// earlier createUserMessage call (userMsgCreated), then writes an
-// assistant message with FinishReasonCanceled. Both writes use
+// earlier createUserMessage call (userMsgCreated) and this is not a
+// continuation (whose Prompt is a placeholder, never persisted - see
+// SessionAgentCall.Continuation - so there is never a user message to
+// create here even on this fallback path), then writes an assistant
+// message with FinishReasonCanceled. Both writes use
 // context.WithoutCancel(ctx) so workspace shutdown (which cancels the run
 // context) can't drop them.
 func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgentCall, userMsgCreated bool) error {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if !userMsgCreated {
+	if !userMsgCreated && !call.Continuation {
 		if _, err := a.createUserMessage(writeCtx, call); err != nil {
 			return err
 		}
@@ -500,6 +534,23 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	}
 
 	if a.IsSessionBusy(call.SessionID) {
+		if call.Continuation {
+			// A continuation call carries no content of its own to fold
+			// in later (its Prompt is only a placeholder - see
+			// continuationPromptPlaceholder); the completions that
+			// triggered this attempt are still safe in the inbox for
+			// whichever turn *is* active to pick up, either via its own
+			// PrepareStep drain or via wakeFromInboxIfIdle once it goes
+			// idle. Queuing this call would only let its placeholder be
+			// persisted later as if it were a real follow-up (see
+			// drainQueueForStep's fold, which calls createUserMessage on
+			// whatever it finds) - drop it instead.
+			if call.Accepted != nil {
+				call.Accepted.Close()
+			}
+			sessMu.Unlock()
+			return SteerEnqueued, nil, nil
+		}
 		// Busy: an earlier prompt is active. Queue this call so it is
 		// folded into (or sequenced after) the active turn, and release any
 		// accept reservation. A Cancel arriving after this point sees the
@@ -530,6 +581,11 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
 	a.dispatch.activeRequests.Set(call.SessionID, ac)
+	// A new turn is genuinely starting for this session - whether a real
+	// user Run/Steer or our own auto-continuation (see
+	// enqueueCompletionAndDrainForWake) - so any earlier "user canceled
+	// this session" marker is now stale.
+	a.dispatch.cancelledSessions.Del(call.SessionID)
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}
@@ -540,7 +596,22 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	// by a newer run. Without this guard, the deferred Del fires after a
 	// concurrent run registers in the completion window, silently wiping
 	// the new run's cancel and breaking cancellation.
-	defer csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
+	//
+	// wakeFromInboxIfIdle runs right after: this is the single choke
+	// point every exit from here (success, error, cancel, panic) passes
+	// through exactly once, right when this session's activeRequests
+	// entry has just been cleared (whether by this CompareAndDelete or,
+	// for the shouldSummarize/queued-handoff paths, by an earlier
+	// explicit one this call becomes a harmless no-op against). Without
+	// it, a completion that arrived while this turn was busy but never
+	// got another step of its own (the common case: most turns are a
+	// single step) would sit in the inbox with nothing left to drain it
+	// until some unrelated later call happened to touch this session —
+	// exactly the race the "wake an idle parent" contract calls out.
+	defer func() {
+		csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
+		a.wakeFromInboxIfIdle(context.WithoutCancel(ctx), call.SessionID)
+	}()
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModel.
 	// model is read exactly once here and used by value for the rest of the
@@ -601,18 +672,30 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	// Generate title from the first real (non-shell) user prompt.
 	// can take tens of seconds. Blocking Run on it delays the
 	// response to the caller. Use a detached context so the title
-	// goroutine survives Run's cancel.
-	if !hasUserTextMessage(msgs) {
+	// goroutine survives Run's cancel. Never for a continuation: its
+	// Prompt is a placeholder (see continuationPromptPlaceholder), not
+	// something to title a session from, and a continuation only ever
+	// runs on a session that already has real conversation behind it.
+	if !call.Continuation && !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
 		go a.generateTitle(titleCtx, call.SessionID, call.Prompt, model, promptPrefix)
 	}
 
-	// Add the user message to the session.
-	_, err = a.createUserMessage(ctx, call)
-	if err != nil {
-		return SteerRan, nil, err
+	// Add the user message to the session - except for a continuation,
+	// whose Prompt is a placeholder standing in for fantasy's own
+	// non-empty-prompt requirement, not real content (see
+	// continuationPromptPlaceholder and SessionAgentCall.Continuation).
+	// Persisting it would put a message in history the user never wrote;
+	// PrepareStep strips the placeholder from the model's own view of
+	// this step and folds in the completion inbox instead, the same way
+	// it already does for the mid-turn fold case.
+	if !call.Continuation {
+		_, err = a.createUserMessage(ctx, call)
+		if err != nil {
+			return SteerRan, nil, err
+		}
+		userMsgCreated = true
 	}
-	userMsgCreated = true
 
 	// Add the session to the context. The run context (genCtx) and its
 	// cancel func were already created and registered under the dispatch
