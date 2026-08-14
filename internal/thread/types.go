@@ -62,16 +62,31 @@ func (s Status) Terminal() bool {
 	}
 }
 
+// Kind discriminates the delegation kinds sharing the threads table (see
+// [Delegation.Kind]).
+type Kind string
+
+const (
+	// KindThread is the value every [Thread] writes: a delegation that
+	// lives in its own git worktree and branch, with a merge policy.
+	KindThread Kind = "thread"
+	// KindTask is reserved for the lightweight, worktree-less delegation
+	// kind planned on top of this same table. Nothing constructs it yet.
+	KindTask Kind = "task"
+)
+
 // Delegation is the core record every background delegation this package
 // manages carries, regardless of overlay: identity, goal, the session
-// driving it, and lifecycle status/outcome. [Thread] embeds it and adds
-// the git-worktree-specific fields its overlay needs.
+// driving it, lifecycle status/outcome, and which overlay (Kind) owns it.
+// [Thread] embeds it and adds the git-worktree-specific fields its overlay
+// needs.
 type Delegation struct {
 	ID            string
 	Name          string
 	Goal          string
 	SessionID     string
 	Status        Status
+	Kind          Kind
 	ResultSummary string
 	Error         string
 	CreatedAt     int64

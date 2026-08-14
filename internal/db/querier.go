@@ -30,6 +30,10 @@ type Querier interface {
 	GetLastSession(ctx context.Context, projectPath string) (Session, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
+	// Unfiltered by kind: entries are addressed by primary key, and callers
+	// that hold an id already know what they asked for (id-or-name resolution,
+	// RunComplete matching). A kind-scoped caller uses GetThreadByName or
+	// ListThreads instead.
 	GetThread(ctx context.Context, id string) (Thread, error)
 	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error)
 	// Prompt-history source: only messages a human typed. Sub-agent child sessions
@@ -57,11 +61,25 @@ type Querier interface {
 	// attribution for multi-model sessions, see internal/cmd/stat.go).
 	ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error)
 	ListSkillLoadsSince(ctx context.Context, arg ListSkillLoadsSinceParams) ([]ListSkillLoadsSinceRow, error)
+	// Thread-facing: thread_list, the dashboard, and any other caller that
+	// means "threads" specifically. Scoped to kind = 'thread' so a caller
+	// asking for threads never sees another delegation kind sharing this
+	// table. The generic lifecycle recovery sweep must NOT use this query;
+	// see ListThreadsAll.
 	ListThreads(ctx context.Context, projectPath string) ([]Thread, error)
+	// Every delegation kind sharing this table (threads today, tasks once
+	// they exist), scoped to project_path but not kind. This is the listing
+	// the generic lifecycle recovery sweep uses: recovery must reconcile
+	// every kind after a restart, not just threads, or a non-thread row left
+	// "running" when the process died would never be caught and would sit
+	// displayed as active forever. Not for thread-facing callers; see
+	// ListThreads.
+	ListThreadsAll(ctx context.Context, projectPath string) ([]Thread, error)
 	// Every thread across every project, trimmed to the columns `braid gc`
 	// needs to pick finished threads older than the retention cutoff.
 	// Unscoped by project_path; the caller filters by project in Go for
-	// --project.
+	// --project. Scoped by kind = 'thread': gc is a thread-facing caller and
+	// must not see other delegation kinds sharing this table.
 	ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	NextFileVersion(ctx context.Context, path string) (int64, error)

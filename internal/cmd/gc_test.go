@@ -153,7 +153,7 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 	mustThread := func(id, name, projectPath string) {
 		_, err := q.CreateThread(ctx, braiddb.CreateThreadParams{
 			ID: id, Name: name, ProjectPath: projectPath, Goal: "goal", BaseBranch: "main",
-			Branch: "thread/" + name, WorktreePath: "/tmp/" + name, Status: "pending", MergePolicy: "auto",
+			Branch: "thread/" + name, WorktreePath: "/tmp/" + name, Status: "pending", MergePolicy: "auto", Kind: "thread",
 		})
 		require.NoError(t, err)
 	}
@@ -442,7 +442,7 @@ func TestGC_AuthoritativeSelectionKeepsActiveAndUnknownThreads(t *testing.T) {
 	require.NoError(t, err)
 	_, err = q.CreateThread(t.Context(), braiddb.CreateThreadParams{
 		ID: "thread-unknown", Name: "unknown", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
-		Branch: "thread/unknown", WorktreePath: "/tmp/unknown", Status: "future_status", MergePolicy: "auto",
+		Branch: "thread/unknown", WorktreePath: "/tmp/unknown", Status: "future_status", MergePolicy: "auto", Kind: "thread",
 	})
 	require.NoError(t, err)
 	_, err = conn.ExecContext(t.Context(), `UPDATE threads SET updated_at = ? WHERE id = 'thread-unknown'`, cutoff-1)

@@ -12,9 +12,14 @@ type Thread struct {
 	// spawned isolated workspace (see internal/thread.Manager.WorkspaceID),
 	// empty when the thread's workspace is not currently spawned (e.g.
 	// completed/merged/failed, or interrupted and not yet resumed).
-	WorkspaceID   string `json:"workspace_id,omitempty"`
-	SessionID     string `json:"session_id,omitempty"`
-	Status        string `json:"status"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	Status      string `json:"status"`
+	// Kind discriminates the delegation kinds sharing the threads table
+	// (see internal/thread.Kind); every value the server sends today is
+	// "thread". Additive field: older clients that don't read it are
+	// unaffected.
+	Kind          string `json:"kind"`
 	MergePolicy   string `json:"merge_policy"`
 	ResultSummary string `json:"result_summary,omitempty"`
 	Error         string `json:"error,omitempty"`

@@ -138,6 +138,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listThreadsStmt, err = db.PrepareContext(ctx, listThreads); err != nil {
 		return nil, fmt.Errorf("error preparing query ListThreads: %w", err)
 	}
+	if q.listThreadsAllStmt, err = db.PrepareContext(ctx, listThreadsAll); err != nil {
+		return nil, fmt.Errorf("error preparing query ListThreadsAll: %w", err)
+	}
 	if q.listThreadsForGCStmt, err = db.PrepareContext(ctx, listThreadsForGC); err != nil {
 		return nil, fmt.Errorf("error preparing query ListThreadsForGC: %w", err)
 	}
@@ -366,6 +369,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listThreadsStmt: %w", cerr)
 		}
 	}
+	if q.listThreadsAllStmt != nil {
+		if cerr := q.listThreadsAllStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listThreadsAllStmt: %w", cerr)
+		}
+	}
 	if q.listThreadsForGCStmt != nil {
 		if cerr := q.listThreadsForGCStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listThreadsForGCStmt: %w", cerr)
@@ -498,6 +506,7 @@ type Queries struct {
 	listSessionsSinceStmt             *sql.Stmt
 	listSkillLoadsSinceStmt           *sql.Stmt
 	listThreadsStmt                   *sql.Stmt
+	listThreadsAllStmt                *sql.Stmt
 	listThreadsForGCStmt              *sql.Stmt
 	listUserMessagesBySessionStmt     *sql.Stmt
 	nextFileVersionStmt               *sql.Stmt
@@ -553,6 +562,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSessionsSinceStmt:             q.listSessionsSinceStmt,
 		listSkillLoadsSinceStmt:           q.listSkillLoadsSinceStmt,
 		listThreadsStmt:                   q.listThreadsStmt,
+		listThreadsAllStmt:                q.listThreadsAllStmt,
 		listThreadsForGCStmt:              q.listThreadsForGCStmt,
 		listUserMessagesBySessionStmt:     q.listUserMessagesBySessionStmt,
 		nextFileVersionStmt:               q.nextFileVersionStmt,

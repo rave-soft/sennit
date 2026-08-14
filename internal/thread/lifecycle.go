@@ -264,8 +264,14 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 // onRecover (if set) gets a chance to reclassify st itself — Manager's
 // overlay uses it to fail entities whose worktree has vanished from disk,
 // a check the generic path has no business making.
+//
+// This sweeps every delegation kind (ListAll), not just threads: it is
+// the generic path, and a kind-scoped listing here would leave any other
+// kind's interrupted runs silently unreconciled after a restart — exactly
+// the "left displayed as running forever" state recovery exists to
+// prevent.
 func (l *lifecycle) recover(ctx context.Context) error {
-	threads, err := l.store.List(ctx)
+	threads, err := l.store.ListAll(ctx)
 	if err != nil {
 		return err
 	}

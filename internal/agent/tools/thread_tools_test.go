@@ -191,6 +191,12 @@ func (s *fakeStore) List(_ context.Context) ([]thread.Thread, error) {
 	return out, nil
 }
 
+// ListAll is identical to List here: this fake never writes anything but
+// KindThread rows, so there is no other kind to distinguish.
+func (s *fakeStore) ListAll(ctx context.Context) ([]thread.Thread, error) {
+	return s.List(ctx)
+}
+
 func (s *fakeStore) SetStatus(_ context.Context, id string, p thread.SetStatusParams) (thread.Thread, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

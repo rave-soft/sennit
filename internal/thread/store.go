@@ -9,8 +9,8 @@ import (
 )
 
 // CreateParams holds the fields needed to create a new thread. Status
-// defaults to StatusPending and MergePolicy defaults to MergeAuto when left
-// unset.
+// defaults to StatusPending, MergePolicy defaults to MergeAuto, and Kind
+// defaults to KindThread when left unset.
 type CreateParams struct {
 	Name         string
 	Goal         string
@@ -19,6 +19,7 @@ type CreateParams struct {
 	WorktreePath string
 	SessionID    string
 	MergePolicy  MergePolicy
+	Kind         Kind
 }
 
 // SetStatusParams holds the fields updated by a status transition.
@@ -38,7 +39,16 @@ type Store interface {
 	Create(ctx context.Context, params CreateParams) (Thread, error)
 	Get(ctx context.Context, id string) (Thread, error)
 	GetByName(ctx context.Context, name string) (Thread, error)
+	// List returns every kind = 'thread' row. Thread-facing callers
+	// (thread_list, the dashboard, gc) want this. The generic lifecycle
+	// recovery sweep must not: use ListAll instead, or a delegation of a
+	// different kind left running when the process died would never be
+	// reconciled.
 	List(ctx context.Context) ([]Thread, error)
+	// ListAll returns every delegation kind sharing this table (threads
+	// today, tasks once they exist), scoped to project but not kind. This
+	// is what the generic lifecycle recovery sweep uses.
+	ListAll(ctx context.Context) ([]Thread, error)
 	SetStatus(ctx context.Context, id string, params SetStatusParams) (Thread, error)
 	SetSession(ctx context.Context, id, sessionID string) (Thread, error)
 	Delete(ctx context.Context, id string) error
@@ -62,6 +72,10 @@ func (s *store) Create(ctx context.Context, params CreateParams) (Thread, error)
 	if mergePolicy == "" {
 		mergePolicy = MergeAuto
 	}
+	kind := params.Kind
+	if kind == "" {
+		kind = KindThread
+	}
 
 	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
 		ID:           uuid.New().String(),
@@ -74,6 +88,7 @@ func (s *store) Create(ctx context.Context, params CreateParams) (Thread, error)
 		SessionID:    params.SessionID,
 		Status:       string(StatusPending),
 		MergePolicy:  string(mergePolicy),
+		Kind:         string(kind),
 	})
 	if err != nil {
 		return Thread{}, err
@@ -102,6 +117,18 @@ func (s *store) GetByName(ctx context.Context, name string) (Thread, error) {
 
 func (s *store) List(ctx context.Context) ([]Thread, error) {
 	dbThreads, err := s.q.ListThreads(ctx, s.projectPath)
+	if err != nil {
+		return nil, err
+	}
+	threads := make([]Thread, len(dbThreads))
+	for i, dbThread := range dbThreads {
+		threads[i] = fromDBItem(dbThread)
+	}
+	return threads, nil
+}
+
+func (s *store) ListAll(ctx context.Context) ([]Thread, error) {
+	dbThreads, err := s.q.ListThreadsAll(ctx, s.projectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +179,7 @@ func fromDBItem(item db.Thread) Thread {
 			Goal:          item.Goal,
 			SessionID:     item.SessionID,
 			Status:        Status(item.Status),
+			Kind:          Kind(item.Kind),
 			ResultSummary: item.ResultSummary,
 			Error:         item.Error,
 			CreatedAt:     item.CreatedAt,

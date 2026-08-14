@@ -837,6 +837,13 @@ func (m *Manager) Recover(ctx context.Context) error {
 // permission problem) is treated as "worktree present" and falls through
 // to the generic sweep, matching the pre-hook behavior.
 func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) {
+	// This hook only knows how to judge threads: a worktree check makes no
+	// sense for a delegation kind with no worktree, and an empty
+	// WorktreePath would otherwise read as "missing" and get marked
+	// failed before the generic active-status sweep ever sees it.
+	if st.Kind != KindThread {
+		return false, nil
+	}
 	if _, statErr := os.Stat(st.WorktreePath); !os.IsNotExist(statErr) {
 		return false, nil
 	}
@@ -887,6 +894,13 @@ func (m *Manager) anyActive(ctx context.Context, ids []string) (bool, error) {
 	return false, nil
 }
 
+// waitTargets resolves the entities Wait should watch. With ids empty this
+// deliberately uses the kind = 'thread'-scoped store.List, not
+// store.ListAll: Manager's whole public surface (Create, Merge, Wait's own
+// doc comment) is stated in terms of threads, so "wait for everything"
+// means "wait for every thread" here, unlike the kind-agnostic sweep
+// lifecycle.recover needs. A future Task-flavored manager over this same
+// table would make the analogous choice for its own kind.
 func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, error) {
 	if len(ids) == 0 {
 		return m.store.List(ctx)

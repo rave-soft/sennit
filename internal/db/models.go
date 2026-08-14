@@ -68,4 +68,5 @@ type Thread struct {
 	CreatedAt     int64         `json:"created_at"`
 	UpdatedAt     int64         `json:"updated_at"`
 	CompletedAt   sql.NullInt64 `json:"completed_at"`
+	Kind          string        `json:"kind"`
 }

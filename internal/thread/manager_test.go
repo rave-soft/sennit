@@ -785,6 +785,54 @@ func TestManager_Recover(t *testing.T) {
 	require.Equal(t, StatusMerged, got.Status)
 }
 
+// TestManager_RecoverReconcilesNonThreadKinds guards the generic recovery
+// sweep against silently degrading into "threads only" at either layer it
+// could regress at: the query (Store.List is scoped to kind = 'thread',
+// so Recover must source its sweep from ListAll, not List) and the
+// git-overlay hook (recoverWorktree must decline anything that is not a
+// Kind: KindThread, or a worktree-less row reads as "worktree missing"
+// and gets marked failed before the generic sweep ever sees it). The
+// seeded row's WorktreePath is deliberately empty, matching what a real
+// task row will have — a non-empty path would silently avoid the
+// hook-level half of this bug. If either layer regresses, a non-thread
+// delegation left running when the process died would never be
+// reconciled to interrupted — it would sit displayed as running forever
+// with no goroutine behind it. Nothing creates task-kind rows yet, so
+// this seeds one directly through the store, the same seam a real task
+// store will use.
+func TestManager_RecoverReconcilesNonThreadKinds(t *testing.T) {
+	repo := initRepo(t)
+	store := newTestStoreDB(t)
+	mgr := NewManager(ManagerOptions{
+		Store:       store,
+		Spawner:     newFakeSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+
+	task, err := store.Create(t.Context(), CreateParams{
+		Name: "task-left-running", Goal: "x",
+		Kind: KindTask,
+	})
+	require.NoError(t, err)
+	_, err = store.SetStatus(t.Context(), task.ID, SetStatusParams{Status: StatusRunning})
+	require.NoError(t, err)
+
+	// Confirm the setup actually exercises the gap this test guards:
+	// the thread-facing listing must not surface a task-kind row.
+	threads, err := store.List(t.Context())
+	require.NoError(t, err)
+	for _, th := range threads {
+		require.NotEqual(t, task.ID, th.ID, "a task-kind row must not appear in the thread-scoped listing")
+	}
+
+	require.NoError(t, mgr.Recover(t.Context()))
+
+	got, err := store.Get(t.Context(), task.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusInterrupted, got.Status, "recovery must reconcile every delegation kind, not just threads")
+}
+
 func TestManager_RemoveRefusesActiveWithoutForce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)

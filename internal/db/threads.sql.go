@@ -22,6 +22,7 @@ INSERT INTO threads (
     session_id,
     status,
     merge_policy,
+    kind,
     updated_at,
     created_at
 ) VALUES (
@@ -35,9 +36,10 @@ INSERT INTO threads (
     ?,
     ?,
     ?,
+    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
 `
 
 type CreateThreadParams struct {
@@ -51,6 +53,7 @@ type CreateThreadParams struct {
 	SessionID    string `json:"session_id"`
 	Status       string `json:"status"`
 	MergePolicy  string `json:"merge_policy"`
+	Kind         string `json:"kind"`
 }
 
 func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thread, error) {
@@ -65,6 +68,7 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		arg.SessionID,
 		arg.Status,
 		arg.MergePolicy,
+		arg.Kind,
 	)
 	var i Thread
 	err := row.Scan(
@@ -83,6 +87,7 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -98,11 +103,15 @@ func (q *Queries) DeleteThread(ctx context.Context, id string) error {
 }
 
 const getThread = `-- name: GetThread :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
 FROM threads
 WHERE id = ? LIMIT 1
 `
 
+// Unfiltered by kind: entries are addressed by primary key, and callers
+// that hold an id already know what they asked for (id-or-name resolution,
+// RunComplete matching). A kind-scoped caller uses GetThreadByName or
+// ListThreads instead.
 func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 	row := q.queryRow(ctx, q.getThreadStmt, getThread, id)
 	var i Thread
@@ -122,14 +131,15 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.Kind,
 	)
 	return i, err
 }
 
 const getThreadByName = `-- name: GetThreadByName :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
 FROM threads
-WHERE name = ? AND project_path = ? LIMIT 1
+WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1
 `
 
 type GetThreadByNameParams struct {
@@ -156,17 +166,23 @@ func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.Kind,
 	)
 	return i, err
 }
 
 const listThreads = `-- name: ListThreads :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
 FROM threads
-WHERE project_path = ?
+WHERE project_path = ? AND kind = 'thread'
 ORDER BY created_at
 `
 
+// Thread-facing: thread_list, the dashboard, and any other caller that
+// means "threads" specifically. Scoped to kind = 'thread' so a caller
+// asking for threads never sees another delegation kind sharing this
+// table. The generic lifecycle recovery sweep must NOT use this query;
+// see ListThreadsAll.
 func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread, error) {
 	rows, err := q.query(ctx, q.listThreadsStmt, listThreads, projectPath)
 	if err != nil {
@@ -192,6 +208,61 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CompletedAt,
+			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listThreadsAll = `-- name: ListThreadsAll :many
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
+FROM threads
+WHERE project_path = ?
+ORDER BY created_at
+`
+
+// Every delegation kind sharing this table (threads today, tasks once
+// they exist), scoped to project_path but not kind. This is the listing
+// the generic lifecycle recovery sweep uses: recovery must reconcile
+// every kind after a restart, not just threads, or a non-thread row left
+// "running" when the process died would never be caught and would sit
+// displayed as active forever. Not for thread-facing callers; see
+// ListThreads.
+func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thread, error) {
+	rows, err := q.query(ctx, q.listThreadsAllStmt, listThreadsAll, projectPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Thread{}
+	for rows.Next() {
+		var i Thread
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ProjectPath,
+			&i.Goal,
+			&i.BaseBranch,
+			&i.Branch,
+			&i.WorktreePath,
+			&i.SessionID,
+			&i.Status,
+			&i.MergePolicy,
+			&i.ResultSummary,
+			&i.Error,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CompletedAt,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -209,6 +280,7 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 const listThreadsForGC = `-- name: ListThreadsForGC :many
 SELECT id, project_path, status, updated_at
 FROM threads
+WHERE kind = 'thread'
 `
 
 type ListThreadsForGCRow struct {
@@ -221,7 +293,8 @@ type ListThreadsForGCRow struct {
 // Every thread across every project, trimmed to the columns `braid gc`
 // needs to pick finished threads older than the retention cutoff.
 // Unscoped by project_path; the caller filters by project in Go for
-// --project.
+// --project. Scoped by kind = 'thread': gc is a thread-facing caller and
+// must not see other delegation kinds sharing this table.
 func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error) {
 	rows, err := q.query(ctx, q.listThreadsForGCStmt, listThreadsForGC)
 	if err != nil {
@@ -255,7 +328,7 @@ UPDATE threads
 SET
     session_id = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
 `
 
 type UpdateThreadSessionParams struct {
@@ -282,6 +355,7 @@ func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessi
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -294,7 +368,7 @@ SET
     result_summary = ?,
     completed_at = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
 `
 
 type UpdateThreadStatusParams struct {
@@ -330,6 +404,7 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CompletedAt,
+		&i.Kind,
 	)
 	return i, err
 }
