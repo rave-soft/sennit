@@ -45,6 +45,7 @@ import (
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/presentation"
+	"github.com/rave-soft/braid/internal/workspace"
 )
 
 // threadsDockTTL bounds how long the memoized thread list may go without a
@@ -56,6 +57,20 @@ var threadsDockTTL = 5 * time.Second
 // costs an AttachThread round trip, not just a list. Package var so tests
 // can pin it.
 var threadsDockActivityTTL = 8 * time.Second
+
+// threadsRefreshBackoff is how long a failed thread-list, indicator, or
+// activity refresh waits before being retried. Without it a refresh that
+// fails every time re-dispatches on every Update — and since the failure's
+// own result message is itself an Update, the loop feeds itself and pins
+// the event loop (observed: ~830 attempts a second, 10MB of identical
+// error lines every half minute, a UI that looks frozen and background
+// work that looks like it stopped on its own).
+//
+// Longer than any of the TTLs it backs: a repeatedly failing probe is
+// worth far less than a successful one, and the states that produce a
+// permanent failure (a read-only workspace, a removed worktree) do not
+// resolve on their own in seconds.
+var threadsRefreshBackoff = 30 * time.Second
 
 // threadsDockVisibleCap is the maximum number of active threads the dock
 // renders (and therefore the maximum it ever fetches live activity for).
@@ -143,15 +158,19 @@ func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cm
 // applyThreadsDockLoaded stores an off-thread fetch result. Runs on the
 // Update goroutine.
 func (c *threadsDockState) applyThreadsDockLoaded(com *common.Common, msg threadsDockLoadedMsg) tea.Cmd {
+	if msg.err != nil {
+		if !c.cache.fail(msg.gen) {
+			// Started before a newer state transition; discard and
+			// re-dispatch so the authoritative refresh isn't lost.
+			return c.dispatchThreadsDockRefresh(com)
+		}
+		return nil
+	}
 	if !c.cache.complete(msg.gen) {
-		// Started before a newer state transition; discard and re-dispatch
-		// so the authoritative refresh isn't lost.
 		return c.dispatchThreadsDockRefresh(com)
 	}
-	if msg.err == nil {
-		c.cache.set(msg.threads)
-		c.activityGen++
-	}
+	c.cache.set(msg.threads)
+	c.activityGen++
 	return nil
 }
 
@@ -202,7 +221,7 @@ func (c *threadsDockState) dropThread(id string) {
 // currently visible) and the memoized list has outlived its TTL, it
 // schedules an off-thread re-probe. It never does IO itself.
 func (c *threadsDockState) staleThreadsDockRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	if !active || c.cache.fresh(threadsDockTTL) {
+	if !active || c.cache.fresh(threadsDockTTL) || c.cache.backingOff(threadsRefreshBackoff) {
 		return nil
 	}
 	// A fetched-and-empty list stays empty until a thread event
@@ -338,9 +357,16 @@ func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoade
 	if !ok {
 		return
 	}
+	if msg.err != nil {
+		// Record the failure so the next Update backs off instead of
+		// re-dispatching immediately; see threadsRefreshBackoff.
+		entry.fail(msg.entryGen)
+		c.activity[msg.threadID] = entry
+		return
+	}
 	matchingEntry := entry.complete(msg.entryGen)
 	c.activity[msg.threadID] = entry
-	if !matchingEntry || msg.gen != c.activityGen || msg.err != nil {
+	if !matchingEntry || msg.gen != c.activityGen {
 		return
 	}
 	entry.set(msg.activity)
@@ -354,6 +380,15 @@ func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoade
 // session yet (SessionID == "") are skipped — there's nothing to attach
 // to.
 func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, visible []proto.Thread) []tea.Cmd {
+	// Activity needs AttachThread, which a read-only workspace refuses
+	// unconditionally — that happens whenever the user is inside a thread
+	// that could not be reactivated. Backing off would already stop the
+	// spin this used to cause, but there is no reason to keep asking a
+	// workspace that can only ever say no.
+	if com == nil || com.Workspace == nil || !workspace.SupportsThreadAttach(com.Workspace) {
+		return nil
+	}
+
 	var cmds []tea.Cmd
 	for _, t := range visible {
 		if t.SessionID == "" {
@@ -363,7 +398,7 @@ func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, vi
 			c.activity = make(map[string]ttlCache[threadDockActivity])
 		}
 		activity := c.activity[t.ID]
-		if activity.inFlight || activity.fresh(threadsDockActivityTTL) {
+		if activity.inFlight || activity.fresh(threadsDockActivityTTL) || activity.backingOff(threadsRefreshBackoff) {
 			continue
 		}
 		if cmd := c.dispatchThreadActivityRefresh(com, t.ID, t.SessionID); cmd != nil {

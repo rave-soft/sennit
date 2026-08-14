@@ -519,6 +519,34 @@ func (w *readOnlyWorkspace) AttachThread(ctx context.Context, id string) (Worksp
 	return nil, nil, w.readOnlyError("AttachThread")
 }
 
+// threadAttachRefuser is implemented by a Workspace whose AttachThread can
+// never succeed, so it can say so up front. Declared by the refusing type
+// rather than by every capable one on purpose: a workspace implementation
+// (or a test stub) that says nothing is assumed capable, which at worst
+// costs one failed call, whereas the opposite default would silently strip
+// the capability from anything that forgot to opt in.
+type threadAttachRefuser interface {
+	refusesThreadAttach()
+}
+
+func (w *readOnlyWorkspace) refusesThreadAttach() {}
+
+// SupportsThreadAttach reports whether ws.AttachThread can succeed at all.
+// It is false only for a read-only view of a thread (the fallback
+// AttachThread itself returns when a thread cannot be reactivated), where
+// the refusal is a property of the workspace rather than of the call: every
+// attempt fails, forever, so a caller that polls wants to know before it
+// starts rather than learning it once per attempt.
+//
+// This is a capability question, not a permission check, and it is an
+// optimization rather than a guarantee — a caller that polls still needs to
+// handle a failing AttachThread without spinning. Callers that genuinely
+// want to attach should just call AttachThread and handle the error.
+func SupportsThreadAttach(ws Workspace) bool {
+	_, refuses := ws.(threadAttachRefuser)
+	return !refuses
+}
+
 // -- TaskController (query only) --
 
 func (w *readOnlyWorkspace) SupportsTasks() bool {

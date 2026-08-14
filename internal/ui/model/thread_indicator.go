@@ -82,12 +82,18 @@ func (c *threadIndicatorState) dispatchRefresh(com *common.Common) tea.Cmd {
 // applyLoaded stores an off-thread fetch result. Runs on the Update
 // goroutine.
 func (c *threadIndicatorState) applyLoaded(com *common.Common, msg threadIndicatorLoadedMsg) tea.Cmd {
+	if msg.err != nil {
+		// Record the failure so staleRefreshCmd backs off instead of
+		// re-dispatching on the next Update; see threadsRefreshBackoff.
+		if !c.cache.fail(msg.gen) {
+			return c.dispatchRefresh(com)
+		}
+		return nil
+	}
 	if !c.cache.complete(msg.gen) {
 		return c.dispatchRefresh(com)
 	}
-	if msg.err == nil {
-		c.cache.set(msg.count)
-	}
+	c.cache.set(msg.count)
 	return nil
 }
 
@@ -108,7 +114,7 @@ func (c *threadIndicatorState) applyEvent(_ pubsub.Event[proto.Thread]) {
 // staleRefreshCmd is the TTL backstop: schedules an off-thread re-probe
 // when the memoized count has outlived its TTL.
 func (c *threadIndicatorState) staleRefreshCmd(com *common.Common) tea.Cmd {
-	if c.cache.fresh(threadIndicatorTTL) {
+	if c.cache.fresh(threadIndicatorTTL) || c.cache.backingOff(threadsRefreshBackoff) {
 		return nil
 	}
 	// A fetched zero count stays zero until a thread event invalidates it

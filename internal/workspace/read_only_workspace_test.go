@@ -570,3 +570,24 @@ func TestReadOnlyWorkspace_BatchMessages_ChildAndSibling(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, []string{"root"}, stub.batchRoots)
 }
+
+// TestSupportsThreadAttach_ReadOnlyRefusesUpFront pairs the capability
+// answer with the behaviour it predicts. A read-only workspace is the one
+// place AttachThread can never succeed — it is the fallback AttachThread
+// itself returns when a thread cannot be reactivated — so a poller (the
+// threads dock's activity probe) needs to know before it starts rather
+// than discovering it once per attempt, forever.
+func TestSupportsThreadAttach_ReadOnlyRefusesUpFront(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubWorkspace{}
+	require.True(t, SupportsThreadAttach(stub),
+		"a workspace that says nothing is assumed capable; the opposite default would silently strip the capability from any implementation that forgot to opt in")
+
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+	require.False(t, SupportsThreadAttach(ro))
+
+	_, _, err := ro.AttachThread(t.Context(), "thread-1")
+	require.True(t, IsReadOnlyError(err),
+		"the capability answer must match what the call actually does")
+}
