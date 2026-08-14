@@ -152,11 +152,17 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 		}
 
 	case ActionMCPAuthComplete:
+		if msg.Name != m.currentServer().Name {
+			return nil
+		}
 		m.state = MCPAuthStateSuccess
 		m.cancelAuth = nil
 		return nil
 
 	case ActionMCPAuthErrored:
+		if msg.Name != m.currentServer().Name {
+			return nil
+		}
 		m.state = MCPAuthStateError
 		m.err = msg.Error
 		m.cancelAuth = nil
