@@ -115,6 +115,16 @@ type SessionAgentCall struct {
 	// paths treat as covered by any present mark, preserving the
 	// pre-sequence behavior.
 	acceptSeq uint64
+	// queuedAt is when this call was enqueued behind a busy session (see
+	// dispatcher.enqueueCall, the only place it is set) — the "submit"
+	// instant runTurn.prepareStep's steering fold measures against once
+	// it drains and folds this call into a step. Zero for a call that
+	// was never queued (ran as its own turn immediately) or was queued
+	// by some path other than enqueueCall (e.g. requeueContinuation's
+	// post-summarize resumption, which is the same turn continuing, not
+	// a steering follow-up) — the fold log skips zero entries rather
+	// than reporting a nonsense multi-decade wait.
+	queuedAt time.Time
 	// OnAuthRefresh, when non-nil, is called by fantasy when a stream
 	// fails with an authentication error (HTTP 401). The callback should
 	// refresh credentials and return nil on success, in which case

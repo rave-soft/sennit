@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 )
@@ -52,6 +53,15 @@ type TaskCompletion struct {
 	// tool's background mode, which refuses to start further background
 	// work once that reaches the hard cascade limit.
 	Depth int
+	// TerminalAt is when this completion was built for delivery —
+	// stamped once, in internal/thread's lifecycle.deliverCompletion (the
+	// single place every delivery path, including a thread's auto-merge
+	// outcome, constructs a TaskCompletion), a few synchronous
+	// instructions after the terminal status write itself lands. Read
+	// back by runTurn.prepareStep to report how long the completion sat
+	// before reaching the model, without a second clock reading anywhere
+	// else that could drift from this one.
+	TerminalAt time.Time
 }
 
 // enqueueCompletion appends completion to sessionID's completion inbox

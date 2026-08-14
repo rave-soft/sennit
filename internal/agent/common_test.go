@@ -129,15 +129,32 @@ func (b *syncLogBuffer) String() string {
 	return b.buf.String()
 }
 
+// logCaptureMu serializes every captureLogs/captureJSONLogs call across
+// this package's whole test binary. slog.SetDefault is process-global:
+// two t.Parallel() tests each installing their own handler would race —
+// whichever SetDefault ran last wins, so an unlucky ordering makes one
+// test's log lines vanish and hands them to the other's buffer instead
+// (this was an actual observed failure, not a theoretical one). Holding
+// this for the capture's whole lifetime — install through the t.Cleanup
+// restore — makes "capturing logs" a resource only one test can hold at a
+// time, the same way a shared external resource would be serialized,
+// without having to strip t.Parallel() from every test that uses it.
+var logCaptureMu sync.Mutex
+
 // captureLogs installs a buffer-backed slog handler at Debug level for the
 // duration of the test (mirroring internal/backend's captureDebugLogs),
-// restoring the previous default handler via t.Cleanup.
+// restoring the previous default handler via t.Cleanup. See logCaptureMu
+// for why this serializes against every other capture in the package.
 func captureLogs(t *testing.T) *syncLogBuffer {
 	t.Helper()
+	logCaptureMu.Lock()
 	var b syncLogBuffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&b, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		logCaptureMu.Unlock()
+	})
 	return &b
 }
 

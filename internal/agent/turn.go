@@ -179,12 +179,15 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 				t.agent.requeueCompletions(t.call.SessionID, completions)
 				return
 			}
-			// ids and statuses only, never Goal/ResultText/Error.
+			// ids, statuses, and durations only, never Goal/ResultText/Error.
 			ids := make([]string, len(completions))
+			waitedMS := make([]int64, len(completions))
+			now := time.Now()
 			for i, c := range completions {
 				ids[i] = c.DelegationID
+				waitedMS[i] = now.Sub(c.TerminalAt).Milliseconds()
 			}
-			slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions))
+			slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions), "waited_ms", waitedMS)
 		}()
 		prepared.Messages = append(prepared.Messages, taskCompletionsMessage(completions))
 	}
@@ -214,6 +217,28 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 			return callContext, prepared, createErr
 		}
 		prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+	}
+	// Every queued call in fold reached this point only once it was
+	// successfully persisted above (an error returns early, before this
+	// line, with the whole remainder put back in the queue) - so this is
+	// the "injection" instant: submit (dispatcher.enqueueCall's stamp)
+	// to here is how long a steering message waited to actually reach
+	// the model. Calls with no stamp (queuedAt.IsZero()) were queued by
+	// a path other than a real steering follow-up - see queuedAt's own
+	// doc comment - and are left out rather than reported as a nonsense
+	// multi-decade wait.
+	if len(fold) > 0 {
+		var waitedMS []int64
+		now := time.Now()
+		for _, queued := range fold {
+			if queued.queuedAt.IsZero() {
+				continue
+			}
+			waitedMS = append(waitedMS, now.Sub(queued.queuedAt).Milliseconds())
+		}
+		if len(waitedMS) > 0 {
+			slog.Info("Steering folded into turn", "session", t.call.SessionID, "count", len(waitedMS), "waited_ms", waitedMS)
+		}
 	}
 
 	prepared.Messages = t.agent.workaroundProviderMediaLimitations(prepared.Messages, t.model)

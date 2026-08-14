@@ -595,6 +595,12 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 		ResultText:     st.ResultSummary,
 		Error:          st.Error,
 		Depth:          depth,
+		// Stamped once, here — the single place every delivery path
+		// (a run finishing, or a thread's auto-merge outcome) builds a
+		// TaskCompletion — so prepareStep's own "Completion delivered"
+		// log can report how long the completion sat before reaching
+		// the model without a second clock reading anywhere else.
+		TerminalAt: time.Now(),
 	})
 }
 

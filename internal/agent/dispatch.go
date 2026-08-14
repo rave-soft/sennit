@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rave-soft/braid/internal/csync"
 )
@@ -263,6 +264,9 @@ func (d *dispatcher) enqueueCall(call SessionAgentCall) {
 	}
 	queued.OnComplete = nil
 	queued.Accepted = nil
+	// The single stamp this measurement rests on — see queuedAt's own
+	// doc comment.
+	queued.queuedAt = time.Now()
 	existing = append(existing, queued)
 	d.messageQueue.Set(call.SessionID, existing)
 }

@@ -164,6 +164,37 @@ func TestTaskManager_CompletionDeliveredToParentNotChild(t *testing.T) {
 	require.Empty(t, got.completion.Error)
 }
 
+// TestTaskManager_CompletionCarriesTerminalAtStamp proves
+// deliverCompletion stamps TaskCompletion.TerminalAt at delivery time —
+// the one place internal/agent's own "Completion delivered" log measures
+// against to report how long a completion sat before reaching the model.
+// A zero or stale TerminalAt would silently make that duration wrong (or,
+// for the zero case, wildly large) without any test noticing, since
+// nothing else here depends on the field's value.
+func TestTaskManager_CompletionCarriesTerminalAtStamp(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+
+	before := time.Now()
+	publishSuccess(t, parentApp, st.SessionID)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
+	after := time.Now()
+
+	delivered := coord.deliveredCompletions()
+	require.Len(t, delivered, 1)
+	stamp := delivered[0].completion.TerminalAt
+
+	require.False(t, stamp.IsZero(), "TerminalAt must be stamped, not left at its zero value")
+	require.False(t, stamp.Before(before), "TerminalAt must not predate the run completing")
+	require.False(t, stamp.After(after), "TerminalAt must not postdate delivery being observed")
+}
+
 // TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable is the
 // failure mode that matters most for this delegation kind: a task must
 // never get its own isolated App (that is the entire reason it is
