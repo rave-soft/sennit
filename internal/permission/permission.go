@@ -169,9 +169,12 @@ func (s *permissionService) resolve(permission PermissionRequest, granted, denie
 }
 
 // enqueue publishes the request immediately if no other request is
-// currently awaiting a response, otherwise it appends to the queue to be
-// published once the current one resolves. This is what guarantees the
-// UI only ever sees one PermissionRequest event outstanding at a time.
+// currently awaiting a response, otherwise it inserts it into the queue
+// (see insertQueued) to be published once the current one resolves. This
+// is what guarantees the UI only ever sees one PermissionRequest event
+// outstanding at a time. current itself is never touched here: whatever
+// is already on screen stays on screen until it resolves or its ctx ends,
+// regardless of what arrives behind it.
 func (s *permissionService) enqueue(permission PermissionRequest) {
 	s.dialogMu.Lock()
 	if s.current == "" {
@@ -180,8 +183,35 @@ func (s *permissionService) enqueue(permission PermissionRequest) {
 		s.Publish(pubsub.CreatedEvent, permission)
 		return
 	}
-	s.queue = append(s.queue, permission)
+	s.insertQueued(permission)
 	s.dialogMu.Unlock()
+}
+
+// insertQueued inserts permission into s.queue so that every foreground
+// request (Delegation is the zero value — the visible turn) sits ahead of
+// every background one (raised by a delegation, e.g. a task): a user
+// continuing their own conversation should not have to answer for queued
+// background work first. Within each class, order is FIFO — insertion
+// never reorders two requests already in the same class, so this stays
+// stable. dispatchNext always pops queue[0], so keeping the queue sorted
+// here is what makes that pop correct; must be called with dialogMu held.
+func (s *permissionService) insertQueued(permission PermissionRequest) {
+	if permission.Delegation != (DelegationRef{}) {
+		// Background: goes behind every request already queued, whether
+		// foreground or background — this is what keeps background
+		// requests FIFO among themselves without needing to hunt for
+		// where the background run of the queue starts.
+		s.queue = append(s.queue, permission)
+		return
+	}
+	// Foreground: goes behind every foreground request already queued
+	// (FIFO among foreground requests) but ahead of every background one,
+	// wherever those currently sit.
+	i := 0
+	for i < len(s.queue) && s.queue[i].Delegation == (DelegationRef{}) {
+		i++
+	}
+	s.queue = slices.Insert(s.queue, i, permission)
 }
 
 // dispatchNext is called once a request identified by id has been finally

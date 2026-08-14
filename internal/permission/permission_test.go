@@ -626,6 +626,20 @@ func queueLen(t *testing.T, svc Service) int {
 	return len(ps.queue)
 }
 
+// queueOrder returns the ToolCallID of every request currently queued, in
+// order, for asserting relative ordering without racing dispatch.
+func queueOrder(t *testing.T, svc Service) []string {
+	t.Helper()
+	ps := svc.(*permissionService)
+	ps.dialogMu.Lock()
+	defer ps.dialogMu.Unlock()
+	ids := make([]string, len(ps.queue))
+	for i, p := range ps.queue {
+		ids[i] = p.ToolCallID
+	}
+	return ids
+}
+
 // TestPermissionService_QueuedDispatch covers the fix for the
 // requestMu-held-across-the-wait bug described in ARCHITECTURE_REVIEW.md
 // §3.5: Request must not block *posting* a second request behind a
@@ -948,6 +962,175 @@ func TestPermissionService_DelegationAttribution(t *testing.T) {
 		assert.Equal(t, ref, pending2.Delegation, "the ref must survive dispatchNext's republish")
 
 		service.Deny(pending2)
+		wg.Wait()
+	})
+}
+
+// TestPermissionService_QueuePriority covers the fix that keeps a user
+// continuing their own conversation from being made to answer for queued
+// background delegations first: a foreground request (no delegation ref)
+// is dispatched ahead of every queued background one, each class stays
+// FIFO among itself, and whatever is already on screen is never preempted
+// by what arrives behind it.
+func TestPermissionService_QueuePriority(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a foreground request queued behind background ones is dispatched first, and each class stays FIFO", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		holder := CreatePermissionRequest{SessionID: "s0", ToolCallID: "holder", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		bg1 := CreatePermissionRequest{SessionID: "s1", ToolCallID: "bg-1", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		bg2 := CreatePermissionRequest{SessionID: "s2", ToolCallID: "bg-2", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		fg := CreatePermissionRequest{SessionID: "s3", ToolCallID: "fg", ToolName: "bash", Action: "execute", Path: "/tmp"}
+
+		var wg sync.WaitGroup
+		wg.Go(func() { _, _ = service.Request(t.Context(), holder) })
+
+		var current PermissionRequest
+		select {
+		case ev := <-events:
+			current = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("holder request was never published")
+		}
+
+		// Queue two background requests, then a foreground one behind them.
+		wg.Go(func() {
+			_, _ = service.Request(WithDelegation(t.Context(), DelegationRef{ID: "t1", Name: "task-t1", Kind: "task"}), bg1)
+		})
+		require.Eventually(t, func() bool { return queueLen(t, service) == 1 }, 2*time.Second, 5*time.Millisecond)
+		wg.Go(func() {
+			_, _ = service.Request(WithDelegation(t.Context(), DelegationRef{ID: "t2", Name: "task-t2", Kind: "task"}), bg2)
+		})
+		require.Eventually(t, func() bool { return queueLen(t, service) == 2 }, 2*time.Second, 5*time.Millisecond)
+		wg.Go(func() { _, _ = service.Request(t.Context(), fg) })
+		require.Eventually(t, func() bool { return queueLen(t, service) == 3 }, 2*time.Second, 5*time.Millisecond)
+
+		// The foreground request jumped ahead of both background ones,
+		// which kept their own relative order.
+		assert.Equal(t, []string{"fg", "bg-1", "bg-2"}, queueOrder(t, service))
+
+		service.Grant(current)
+		for _, want := range []string{"fg", "bg-1", "bg-2"} {
+			var dispatched PermissionRequest
+			select {
+			case ev := <-events:
+				dispatched = ev.Payload
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s was never published", want)
+			}
+			assert.Equal(t, want, dispatched.ToolCallID)
+			service.Grant(dispatched)
+		}
+		wg.Wait()
+	})
+
+	t.Run("a background request on screen is never preempted by a foreground one arriving", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		bg := CreatePermissionRequest{SessionID: "s1", ToolCallID: "bg-current", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		fg := CreatePermissionRequest{SessionID: "s2", ToolCallID: "fg-late", ToolName: "bash", Action: "execute", Path: "/tmp"}
+
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			_, _ = service.Request(WithDelegation(t.Context(), DelegationRef{ID: "t1", Name: "task-t1", Kind: "task"}), bg)
+		})
+
+		var current PermissionRequest
+		select {
+		case ev := <-events:
+			current = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("background request was never published")
+		}
+		require.Equal(t, "bg-current", current.ToolCallID)
+
+		wg.Go(func() { _, _ = service.Request(t.Context(), fg) })
+		require.Eventually(t, func() bool { return queueLen(t, service) == 1 }, 2*time.Second, 5*time.Millisecond,
+			"foreground request should queue behind the current one")
+
+		// Nothing new is published: the background request stays on
+		// screen, unpreempted, until it resolves — regardless of what a
+		// higher-priority class has waiting behind it.
+		select {
+		case ev := <-events:
+			t.Fatalf("current request was preempted: %+v", ev.Payload)
+		case <-time.After(100 * time.Millisecond):
+			// good.
+		}
+
+		service.Grant(current)
+		var dispatched PermissionRequest
+		select {
+		case ev := <-events:
+			dispatched = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("foreground request was never published after the background one resolved")
+		}
+		assert.Equal(t, "fg-late", dispatched.ToolCallID)
+
+		service.Grant(dispatched)
+		wg.Wait()
+	})
+
+	t.Run("stable FIFO within each class when interleaved", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		holder := CreatePermissionRequest{SessionID: "s0", ToolCallID: "holder", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		var wg sync.WaitGroup
+		wg.Go(func() { _, _ = service.Request(t.Context(), holder) })
+
+		var current PermissionRequest
+		select {
+		case ev := <-events:
+			current = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("holder request was never published")
+		}
+
+		// Interleave bg-1, fg-1, bg-2, fg-2 behind the holder. Expected
+		// resulting order: fg-1, fg-2 (FIFO among foreground, both ahead
+		// of background), then bg-1, bg-2 (FIFO among background).
+		reqs := []struct {
+			id  string
+			ref DelegationRef
+		}{
+			{"bg-1", DelegationRef{ID: "t1", Kind: "task"}},
+			{"fg-1", DelegationRef{}},
+			{"bg-2", DelegationRef{ID: "t2", Kind: "task"}},
+			{"fg-2", DelegationRef{}},
+		}
+		for i, r := range reqs {
+			ctx := t.Context()
+			if r.ref != (DelegationRef{}) {
+				ctx = WithDelegation(ctx, r.ref)
+			}
+			req := CreatePermissionRequest{SessionID: "s", ToolCallID: r.id, ToolName: "bash", Action: "execute", Path: "/tmp"}
+			wg.Go(func() { _, _ = service.Request(ctx, req) })
+			want := i + 1
+			require.Eventually(t, func() bool { return queueLen(t, service) == want }, 2*time.Second, 5*time.Millisecond)
+		}
+
+		assert.Equal(t, []string{"fg-1", "fg-2", "bg-1", "bg-2"}, queueOrder(t, service))
+
+		service.Grant(current)
+		for _, want := range []string{"fg-1", "fg-2", "bg-1", "bg-2"} {
+			var dispatched PermissionRequest
+			select {
+			case ev := <-events:
+				dispatched = ev.Payload
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s was never published", want)
+			}
+			assert.Equal(t, want, dispatched.ToolCallID)
+			service.Grant(dispatched)
+		}
 		wg.Wait()
 	})
 }
