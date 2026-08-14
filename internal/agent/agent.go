@@ -669,6 +669,13 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	// of which owns messages that belong to earlier sessions.
 	history, files := a.preparePrompt(withPriorMessages(call.PriorMessages, msgs), model.CatalogCfg.SupportsImages, call.Attachments...)
 
+	// Only this session's own messages, not the carried ones: a summary
+	// replaces exactly what msgs holds, which is what stopOnContextWindow
+	// needs to know to tell a summarizable context from an irreducible
+	// one.
+	ownHistory, _ := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages)
+	t.historyTokens = estimateMessageTokens(ownHistory)
+
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
 

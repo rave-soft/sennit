@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/session"
 	"github.com/stretchr/testify/require"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -103,4 +104,73 @@ func TestSummarizeBuffer_TripsWhileAReplyStillFits(t *testing.T) {
 
 	require.Greater(t, summarizeBuffer(window, maxOut), int64(maxOut),
 		"the reply-aware buffer must trip while a whole reply still fits")
+}
+
+// newThresholdTurn builds the minimum runTurn stopOnContextWindow reads:
+// the model's window, the session's token counters, and how much of the
+// prompt is this session's own history. The reply limit is fixed at the
+// 32k of the local model these cases were found on.
+func newThresholdTurn(window, prompt, completion, history int64) *runTurn {
+	const maxOut = 32_768
+
+	return &runTurn{
+		call: SessionAgentCall{SessionID: "sess"},
+		model: Model{
+			CatalogCfg: catwalk.Model{ContextWindow: window},
+			ModelCfg:   config.SelectedModel{MaxTokens: maxOut},
+		},
+		currentSession: session.Session{PromptTokens: prompt, CompletionTokens: completion},
+		historyTokens:  history,
+	}
+}
+
+// TestStopOnContextWindow_SummarizesWhenHistoryIsWorthReclaiming is the
+// ordinary case: the session's own messages are what filled the window,
+// so replacing them with a summary frees real room.
+func TestStopOnContextWindow_SummarizesWhenHistoryIsWorthReclaiming(t *testing.T) {
+	t.Parallel()
+
+	turn := newThresholdTurn(262_144, 240_000, 2_000, 200_000)
+	require.True(t, turn.stopOnContextWindow(nil))
+	require.True(t, turn.shouldSummarize)
+}
+
+// TestStopOnContextWindow_SkipsWhenHistoryIsSmallerThanTheBuffer is the
+// regression test for a session that summarized on a loop: fourteen
+// summaries in twenty-five minutes, two of them stubs, with only a few
+// thousand tokens of new messages between them.
+//
+// A summary replaces this session's history and nothing else. When the
+// window is full but the history is small, the context is made of things
+// a summary cannot touch — the system prompt, the skills, the carried
+// sub-agent history, the summary the previous pass already wrote — so
+// another pass reads the whole context to produce something that cannot
+// change the outcome, and the next continuation trips immediately.
+func TestStopOnContextWindow_SkipsWhenHistoryIsSmallerThanTheBuffer(t *testing.T) {
+	t.Parallel()
+
+	// The buffer here is 40,960; the history a summary could reclaim is
+	// less than half of that.
+	turn := newThresholdTurn(262_144, 240_000, 2_000, 18_000)
+	require.False(t, turn.stopOnContextWindow(nil))
+	require.False(t, turn.shouldSummarize)
+}
+
+// TestStopOnContextWindow_UnknownHistorySizeStillSummarizes: historyTokens
+// is zero when the run never measured it. That must not be read as "there
+// is nothing to reclaim" — an unmeasured session keeps the old behavior.
+func TestStopOnContextWindow_UnknownHistorySizeStillSummarizes(t *testing.T) {
+	t.Parallel()
+
+	turn := newThresholdTurn(262_144, 240_000, 2_000, 0)
+	require.True(t, turn.stopOnContextWindow(nil))
+}
+
+// TestStopOnContextWindow_UnknownContextWindowNeverSummarizes keeps the
+// existing guard for custom/local models that declare no window.
+func TestStopOnContextWindow_UnknownContextWindowNeverSummarizes(t *testing.T) {
+	t.Parallel()
+
+	turn := newThresholdTurn(0, 10_000_000, 0, 5_000_000)
+	require.False(t, turn.stopOnContextWindow(nil))
 }
