@@ -27,8 +27,21 @@ git diff --exit-code --quiet go.mod go.sum ||
 go build ./... || fail "go build failed"
 
 # 4. Lint (cached between runs; CI uses the same config).
+#
+# A failure is retried once against a cleaned cache before it blocks the
+# commit. golangci-lint's cache outlives the tree it was populated from,
+# and a stale entry gets replayed as a finding for code that is not in
+# this commit — including files outside it entirely, reported with paths
+# like ../../../internal/... when several worktrees live under
+# .claude/worktrees/. Those phantoms vanish on a clean cache while a real
+# finding survives it, so the retry tells them apart instead of leaving
+# the author to guess and reach for --no-verify.
 if command -v golangci-lint >/dev/null 2>&1; then
-	golangci-lint run --timeout 10m || fail "golangci-lint found issues"
+	if ! golangci-lint run --timeout 10m; then
+		echo "pre-commit: lint failed; retrying against a clean cache" >&2
+		golangci-lint cache clean || true
+		golangci-lint run --timeout 10m || fail "golangci-lint found issues"
+	fi
 else
 	echo "pre-commit: golangci-lint not installed, skipping lint" >&2
 fi
