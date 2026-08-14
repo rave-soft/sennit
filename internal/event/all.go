@@ -1,23 +1,11 @@
 package event
 
-import (
-	"time"
-)
-
-var appStartTime time.Time
-
 func AppInitialized() {
-	appStartTime = time.Now()
 	send("app initialized")
 }
 
 func AppExited() {
-	duration := time.Since(appStartTime).Truncate(time.Second)
-	send(
-		"app exited",
-		"app duration pretty", duration.String(),
-		"app duration in seconds", int64(duration.Seconds()),
-	)
+	send("app exited")
 	Flush()
 }
 

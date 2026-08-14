@@ -59,7 +59,7 @@ var threadsDockActivityTTL = 8 * time.Second
 
 // threadsDockVisibleCap is the maximum number of active threads the dock
 // renders (and therefore the maximum it ever fetches live activity for).
-const threadsDockVisibleCap = 3
+const threadsDockVisibleCap = 5
 
 // threadDockActivity is a per-thread live snapshot fetched from the
 // thread's own session via AttachThread + GetSession.
@@ -122,7 +122,7 @@ func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cm
 	return func() tea.Msg {
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
-			slog.Error("list threads for dock", "error", err)
+			slog.Error("Failed to list threads for dock", "error", err)
 		}
 		// Merge in task rows the same way threads_cache.go does: a
 		// ListTasks failure is logged and just leaves task rows out of
@@ -131,7 +131,7 @@ func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cm
 		if ws.SupportsTasks() {
 			tasks, taskErr := ws.ListTasks(context.Background())
 			if taskErr != nil {
-				slog.Error("list tasks for dock", "error", taskErr)
+				slog.Error("Failed to list tasks for dock", "error", taskErr)
 			} else {
 				threads = append(threads, tasks...)
 			}
@@ -163,12 +163,38 @@ func (c *threadsDockState) invalidateThreadsDock() {
 
 // applyThreadEvent reacts to a thread pubsub event by invalidating the
 // cached list, so the next stale-refresh reconciles with the authoritative
-// list. Unlike threads_cache.go's analogous method, this doesn't try to
-// upsert the row optimistically — the dock's list is a coarse input to
-// filtering/capping logic, not something rendered field-by-field, so a
-// short-lived staleness until the next refresh is unremarkable.
-func (c *threadsDockState) applyThreadEvent(_ pubsub.Event[proto.Thread]) {
+// list. It does not upsert an updated row optimistically — the dock's list
+// is a coarse input to filtering/capping logic, not something rendered
+// field-by-field, so brief staleness in a row's fields is unremarkable.
+//
+// A removal is different in kind and is applied immediately. A stale row
+// for a thread that no longer exists is not slightly-out-of-date detail:
+// it is a panel entry that cannot be opened, because attaching resolves
+// the id and finds nothing. Waiting for a re-list to notice leaves that
+// dead row on screen for as long as the refresh takes — or forever, if it
+// never lands.
+func (c *threadsDockState) applyThreadEvent(ev pubsub.Event[proto.Thread]) {
+	if ev.Type == pubsub.DeletedEvent {
+		c.dropThread(ev.Payload.ID)
+	}
 	c.invalidateThreadsDock()
+}
+
+// dropThread removes one entry from the cached list in place, leaving the
+// cache's freshness bookkeeping alone: the caller invalidates separately,
+// so this only makes the current frame stop painting a row that is gone.
+func (c *threadsDockState) dropThread(id string) {
+	if id == "" || len(c.cache.value) == 0 {
+		return
+	}
+	kept := make([]proto.Thread, 0, len(c.cache.value))
+	for _, t := range c.cache.value {
+		if t.ID != id {
+			kept = append(kept, t)
+		}
+	}
+	c.cache.value = kept
+	delete(c.activity, id)
 }
 
 // staleThreadsDockRefreshCmd is the TTL backstop for the thread list: while
@@ -260,14 +286,14 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 		ctx := context.Background()
 		attached, detach, err := ws.AttachThread(ctx, threadID)
 		if err != nil {
-			slog.Error("attach thread for dock activity", "thread", threadID, "error", err)
+			slog.Error("Failed to attach thread for dock activity", "thread", threadID, "error", err)
 			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
 		}
 		defer detach()
 
 		sess, err := attached.GetSession(ctx, sessionID)
 		if err != nil {
-			slog.Error("get session for dock activity", "thread", threadID, "error", err)
+			slog.Error("Failed to get session for dock activity", "thread", threadID, "error", err)
 			return threadDockActivityLoadedMsg{threadID: threadID, gen: gen, entryGen: entryGen, err: err}
 		}
 
@@ -295,7 +321,7 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 		if hasPrev && prev.MessageCount == sess.MessageCount {
 			activity.LastTool = prev.LastTool
 		} else if msgs, err := attached.ListMessages(ctx, sessionID); err != nil {
-			slog.Error("list messages for dock activity", "thread", threadID, "error", err)
+			slog.Error("Failed to list messages for dock activity", "thread", threadID, "error", err)
 		} else {
 			activity.LastTool = lastToolSummary(msgs)
 		}

@@ -560,7 +560,7 @@ func TestMouseClick_TodosHeaderTogglesWithoutPriorDraw(t *testing.T) {
 	// Derive the header's expected coordinates the same way the fixed click
 	// handler does, independently of any cached Draw-time field.
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	_, _, headerRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	_, _, headerRect, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.NotZero(t, headerRect, "expected a non-empty todos header rect")
 
 	_, cmd := u.Update(tea.MouseClickMsg{X: headerRect.Min.X, Y: headerRect.Min.Y, Button: tea.MouseLeft})
@@ -584,7 +584,7 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	require.Empty(t, u.panelThreadRects, "must not have been populated by any Draw call yet")
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	threadRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	threadRects, _, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.Len(t, threadRects, 1)
 
 	rect := threadRects[0]
@@ -675,7 +675,7 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 	// would hit-test it, then drive enough wheel-down events through
 	// Update to reach the bottom of the section.
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	_, _, _, todosListRect := sessionPanelRowLayout(u.layout.panel, plan)
+	_, _, _, todosListRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.NotZero(t, todosListRect, "expected a non-empty todos list rect to scroll")
 
 	maxOffset := plan.todosContentRows - plan.todosViewportRows
@@ -910,7 +910,7 @@ func TestMouseClick_ThreadBlockEntersThreadWithDelegationsAboveTodos(t *testing.
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
 	require.Equal(t, 1, plan.threadsHeaderRows)
-	threadRects, delegationRects, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	threadRects, delegationRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.Len(t, threadRects, 1)
 	require.Len(t, delegationRects, 1)
 	// The thread block sits above the delegations block; its rect must not
@@ -984,7 +984,7 @@ func TestDrawSessionPanel_TodosScrollWithThreadsAndDelegationsAbove(t *testing.T
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
 	require.Equal(t, 1, plan.threadsHeaderRows)
 	require.Equal(t, 1, plan.delegationsHeaderRows)
-	_, _, _, todosListRect := sessionPanelRowLayout(u.layout.panel, plan)
+	_, _, _, todosListRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
 	require.NotZero(t, todosListRect, "expected a non-empty todos list rect to scroll")
 
 	maxOffset := plan.todosContentRows - plan.todosViewportRows

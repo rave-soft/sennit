@@ -277,10 +277,13 @@ func TestTaskManager_CreateAttributesRunToDelegation(t *testing.T) {
 
 	coord.mu.Lock()
 	got := coord.runs[0].delegation
+	origin := coord.runs[0].origin
 	coord.mu.Unlock()
 
 	require.Equal(t, permission.DelegationRef{ID: st.ID, Name: st.Name, Kind: "task"}, got,
 		"a permission request raised by this run must be attributable to the task, not the parent's own turn")
+	require.Equal(t, message.OriginAgent, origin,
+		"a task's goal must be dispatched as agent-origin")
 }
 
 // TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork is the
@@ -649,6 +652,8 @@ func TestTaskManager_SendReachesLiveTask(t *testing.T) {
 	coord.mu.Unlock()
 	require.Equal(t, st.SessionID, last.sessionID)
 	require.Equal(t, "follow up", last.prompt)
+	require.Equal(t, message.OriginAgent, last.origin,
+		"a task_send follow-up must be dispatched as agent-origin")
 }
 
 // TestTaskManager_SendReactivatesUnspawnedTask proves the not-live branch:

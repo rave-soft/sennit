@@ -13,6 +13,7 @@ type CreateMessageParams struct {
 	Parts    []ContentPart `json:"parts"`
 	Model    string        `json:"model"`
 	Provider string        `json:"provider,omitempty"`
+	Origin   Origin        `json:"origin,omitempty"`
 }
 
 // Message represents a message in the proto layer.
@@ -23,6 +24,7 @@ type Message struct {
 	Parts     []ContentPart `json:"parts"`
 	Model     string        `json:"model"`
 	Provider  string        `json:"provider"`
+	Origin    Origin        `json:"origin,omitempty"`
 	CreatedAt int64         `json:"created_at"`
 	UpdatedAt int64         `json:"updated_at"`
 }
@@ -48,6 +50,7 @@ type Message struct {
 // unaffected. See ARCHITECTURE_REVIEW.md §3.2 for the full writeup.
 type (
 	MessageRole      = message.MessageRole
+	Origin           = message.Origin
 	FinishReason     = message.FinishReason
 	ContentPart      = message.ContentPart
 	ReasoningContent = message.ReasoningContent
@@ -65,6 +68,11 @@ const (
 	User      = message.User
 	System    = message.System
 	Tool      = message.Tool
+)
+
+const (
+	OriginPerson = message.OriginPerson
+	OriginAgent  = message.OriginAgent
 )
 
 const (

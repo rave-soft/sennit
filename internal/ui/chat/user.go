@@ -69,14 +69,36 @@ func turnSeparator(sty *styles.Styles, width int) string {
 	return sty.Section.Line.Render(strings.Repeat(styles.SectionSeparator, width))
 }
 
+// originAgentTagLabel is the small caption marking a message an agent
+// authored (a delegated goal or a thread_send/task_send follow-up) rather
+// than something the person actually typed.
+const originAgentTagLabel = "Agent"
+
 // withTurnSeparator prepends the turn separator rule (plus a blank line)
-// to a user message's rendered body.
+// to a user message's rendered body. When the message originated from
+// another agent rather than the person, a muted tag line is inserted
+// between the separator and the blank line so the turn reads as
+// agent-authored at a glance.
 func (m *UserMessageItem) withTurnSeparator(content string, width int) string {
 	sep := turnSeparator(m.sty, width)
+	if m.message.Origin == message.OriginAgent {
+		sep = sep + "\n" + m.sty.Messages.OriginAgentTag.Render(originAgentTagLabel)
+	}
 	if content == "" {
 		return sep
 	}
 	return sep + "\n\n" + content
+}
+
+// headerLineCount returns the number of leading lines in RawRender's
+// output that belong to the turn header (separator rule, optional origin
+// tag, blank spacer) rather than the message body. Render uses this to
+// decide which lines get plain padding instead of the user border prefix.
+func (m *UserMessageItem) headerLineCount() int {
+	if m.message.Origin == message.OriginAgent {
+		return 3
+	}
+	return 2
 }
 
 // RawRender implements [MessageItem].
@@ -176,8 +198,9 @@ func (m *UserMessageItem) Render(width int) string {
 	// only.
 	pad := strings.Repeat(" ", lipgloss.Width(prefix))
 	lines := strings.Split(m.RawRender(width), "\n")
+	header := m.headerLineCount()
 	for i, line := range lines {
-		if i <= 1 {
+		if i < header {
 			lines[i] = pad + line
 			continue
 		}

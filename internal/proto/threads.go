@@ -34,6 +34,12 @@ type CreateThreadRequest struct {
 	Goal        string `json:"goal"`
 	BaseBranch  string `json:"base_branch,omitempty"`
 	MergePolicy string `json:"merge_policy,omitempty"`
+	// ParentSessionID is the session the thread was started from. It is
+	// what lets the thread's completion reach the agent that is waiting
+	// for it: without it the delegation has nobody to report to and its
+	// result is only discoverable by looking. Empty when a thread is
+	// created outside any session, as the CLI does.
+	ParentSessionID string `json:"parent_session_id,omitempty"`
 }
 
 // SendThreadRequest is the request body for sending a follow-up message to

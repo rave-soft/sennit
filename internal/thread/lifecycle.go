@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/pubsub"
 )
 
@@ -294,7 +295,7 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 	accept := handle.App().AgentCoordinator.BeginAccepted(sessionID)
 	l.goWorker(func() {
 		if _, err := handle.App().AgentCoordinator.RunAccepted(agent.WithRunID(ctx, runID), accept, sessionID, prompt); err != nil {
-			slog.Error("thread: agent run returned an error", "session_id", sessionID, "error", err)
+			slog.Error("Agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 			// backend.runAgent documents this fallback for pre-execution
 			// failures. Local coordinators do not provide that wrapper.
 			l.handleRunComplete(ctx, id, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
@@ -354,7 +355,16 @@ func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner S
 //
 // Callers must hold no locks: send acquires id's own opMu for its
 // duration, the same admission ordering [Manager.Send] always used.
-func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, message string) error {
+func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string) error {
+	// Tag bgCtx so coordinator.run persists this dispatch's user message
+	// with Origin: message.OriginAgent instead of the default
+	// message.OriginPerson — a thread_send/task_send follow-up was not
+	// typed by the person, even though it is (and must remain) an
+	// ordinary message.User turn like any other. Both branches below
+	// (queue into the live runtime, and respawn-then-dispatch) read
+	// bgCtx, so tagging it once here covers both.
+	bgCtx = agent.WithPromptOrigin(bgCtx, message.OriginAgent)
+
 	c := l.control(id)
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
@@ -385,8 +395,8 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		rt.runID = runID
 		c.mu.Unlock()
 		l.goWorker(func() {
-			if _, err := rt.handle.App().AgentCoordinator.Run(agent.WithRunID(bgCtx, runID), sessionID, message); err != nil {
-				slog.Error("thread: queued agent run returned an error", "session_id", sessionID, "error", err)
+			if _, err := rt.handle.App().AgentCoordinator.Run(agent.WithRunID(bgCtx, runID), sessionID, msg); err != nil {
+				slog.Error("Queued agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 				// Mirror startRun's fallback for pre-execution failures so
 				// the workspace is not stranded on a run that never
 				// published its own RunComplete.
@@ -416,7 +426,7 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
 		return err
 	}
-	l.startRun(bgCtx, handle, spawner, id, sessionID, message)
+	l.startRun(bgCtx, handle, spawner, id, sessionID, msg)
 	owned = false // Ownership transferred to the shared runtime state.
 	return nil
 }
@@ -462,7 +472,7 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 		a.AgentCoordinator.Cancel(st.SessionID)
 	}
 	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
-		slog.Error("thread: release cancelled workspace failed", "id", st.ID, "kind", st.Kind, "error", err)
+		slog.Error("Failed to release cancelled workspace", "component", "thread", "id", st.ID, "kind", st.Kind, "error", err)
 	}
 
 	if reason == "" {
@@ -510,7 +520,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 	c.mu.Unlock()
 	rt.watchCancel()
 	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
-		slog.Error("thread: release completed workspace failed", "thread", id, "error", err)
+		slog.Error("Failed to release completed workspace", "component", "thread", "thread", id, "error", err)
 	}
 	st, err := l.store.Get(ctx, id)
 	if err != nil {
@@ -528,13 +538,13 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 	case rc.Cancelled:
 		finalSt, err = l.setStatus(ctx, id, StatusInterrupted, "", "", 0)
 		if err != nil {
-			slog.Error("thread: recording run cancellation failed", "thread", id, "error", err)
+			slog.Error("Failed to record run cancellation", "component", "thread", "thread", id, "error", err)
 			return
 		}
 	case rc.Error != "":
 		finalSt, err = l.setStatus(ctx, id, StatusFailed, rc.Error, "", 0)
 		if err != nil {
-			slog.Error("thread: recording run failure failed", "thread", id, "error", err)
+			slog.Error("Failed to record run failure", "component", "thread", "thread", id, "error", err)
 			return
 		}
 	default:
@@ -543,7 +553,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 		}
 		finalSt, err = l.setStatus(ctx, id, StatusCompleted, "", rc.Text, time.Now().Unix())
 		if err != nil {
-			slog.Error("thread: recording run completion failed", "thread", id, "error", err)
+			slog.Error("Failed to record run completion", "component", "thread", "thread", id, "error", err)
 			return
 		}
 	}

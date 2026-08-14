@@ -19,7 +19,7 @@ func TestNewMap(t *testing.T) {
 	require.Equal(t, 0, m.Len())
 }
 
-func TestNewMapFrom(t *testing.T) {
+func TestNewMapWithInitial(t *testing.T) {
 	t.Parallel()
 
 	original := map[string]int{
@@ -27,7 +27,7 @@ func TestNewMapFrom(t *testing.T) {
 		"key2": 2,
 	}
 
-	m := NewMapFrom(original)
+	m := NewMap(original)
 	require.NotNil(t, m)
 	require.Equal(t, original, m.inner)
 	require.Equal(t, 2, m.Len())
@@ -40,7 +40,7 @@ func TestNewMapFrom(t *testing.T) {
 func TestMap_Reset(t *testing.T) {
 	t.Parallel()
 
-	m := NewMapFrom(map[string]int{
+	m := NewMap(map[string]int{
 		"a": 10,
 	})
 

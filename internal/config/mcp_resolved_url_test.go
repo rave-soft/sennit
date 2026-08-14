@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/braid/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,7 +22,7 @@ func TestMCPConfig_ResolvedURL(t *testing.T) {
 	t.Run("literal url passes through unchanged", func(t *testing.T) {
 		t.Parallel()
 		m := MCPConfig{Type: MCPHttp, URL: "https://mcp.example.com/api"}
-		got, err := m.ResolvedURL(NewShellVariableResolver(env.NewFromMap(nil)))
+		got, err := m.ResolvedURL(NewShellVariableResolver(testenv.New(nil)))
 		require.NoError(t, err)
 		require.Equal(t, "https://mcp.example.com/api", got)
 	})
@@ -30,7 +30,7 @@ func TestMCPConfig_ResolvedURL(t *testing.T) {
 	t.Run("expands $VAR with shell resolver", func(t *testing.T) {
 		t.Parallel()
 		m := MCPConfig{Type: MCPHttp, URL: "https://$MCP_HOST/api"}
-		r := NewShellVariableResolver(env.NewFromMap(map[string]string{"MCP_HOST": "mcp.example.com"}))
+		r := NewShellVariableResolver(testenv.New(map[string]string{"MCP_HOST": "mcp.example.com"}))
 		got, err := m.ResolvedURL(r)
 		require.NoError(t, err)
 		require.Equal(t, "https://mcp.example.com/api", got)
@@ -39,7 +39,7 @@ func TestMCPConfig_ResolvedURL(t *testing.T) {
 	t.Run("expands $(cmd) with shell resolver", func(t *testing.T) {
 		t.Parallel()
 		m := MCPConfig{Type: MCPSSE, URL: "https://$(echo mcp.example.com)/events"}
-		got, err := m.ResolvedURL(NewShellVariableResolver(env.NewFromMap(nil)))
+		got, err := m.ResolvedURL(NewShellVariableResolver(testenv.New(nil)))
 		require.NoError(t, err)
 		require.Equal(t, "https://mcp.example.com/events", got)
 	})
@@ -53,7 +53,7 @@ func TestMCPConfig_ResolvedURL(t *testing.T) {
 		// trade-off for making $OPTIONAL-style patterns work, and
 		// required-credential callers should use ${VAR:?msg}.
 		m := MCPConfig{Type: MCPHttp, URL: "https://$MCP_MISSING_HOST/api"}
-		got, err := m.ResolvedURL(NewShellVariableResolver(env.NewFromMap(nil)))
+		got, err := m.ResolvedURL(NewShellVariableResolver(testenv.New(nil)))
 		require.NoError(t, err, "unset var must not error under lenient default")
 		require.Equal(t, "https:///api", got)
 	})
@@ -65,7 +65,7 @@ func TestMCPConfig_ResolvedURL(t *testing.T) {
 		// surface at load time instead of shipping empty-host URLs
 		// to the transport layer.
 		m := MCPConfig{Type: MCPHttp, URL: "https://${MCP_MISSING_HOST:?set MCP_MISSING_HOST}/api"}
-		_, err := m.ResolvedURL(NewShellVariableResolver(env.NewFromMap(nil)))
+		_, err := m.ResolvedURL(NewShellVariableResolver(testenv.New(nil)))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "url:")
 		require.Contains(t, err.Error(), "set MCP_MISSING_HOST")
@@ -74,7 +74,7 @@ func TestMCPConfig_ResolvedURL(t *testing.T) {
 	t.Run("failing command substitution is an error", func(t *testing.T) {
 		t.Parallel()
 		m := MCPConfig{Type: MCPHttp, URL: "https://$(false)/api"}
-		_, err := m.ResolvedURL(NewShellVariableResolver(env.NewFromMap(nil)))
+		_, err := m.ResolvedURL(NewShellVariableResolver(testenv.New(nil)))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "url:")
 		require.Contains(t, err.Error(), "$(false)")
