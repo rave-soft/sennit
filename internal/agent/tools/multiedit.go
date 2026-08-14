@@ -75,6 +75,10 @@ func NewMultiEditTool(
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
 
+			if msg, refused := confinementRefusal(permissions, params.FilePath); refused {
+				return fantasy.NewTextErrorResponse(msg), nil
+			}
+
 			// Validate all edits before applying any
 			if err := validateEdits(params.Edits); err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil

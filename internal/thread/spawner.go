@@ -79,6 +79,12 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
 		GlobalSkillsMirror: false,
 		InheritedAgents:    inheritedAgents,
 		YOLO:               yolo,
+		// A thread exists to keep its work on its own branch, in its own
+		// worktree. Inheriting yolo from the main agent removes the
+		// prompt that would otherwise stand between it and the rest of
+		// the disk, so the boundary has to be enforced rather than asked
+		// about.
+		ConfineWrites: true,
 	})
 	if err != nil {
 		return nil, err

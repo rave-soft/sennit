@@ -90,6 +90,20 @@ type Service interface {
 	ActiveRequest() (PermissionRequest, bool)
 	SkipRequests() bool
 	SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[PermissionNotification]
+	// ConfineToWorkingDir marks this workspace as one that may not write
+	// outside its working directory at all. See ConfinedDir.
+	ConfineToWorkingDir()
+	// ConfinedDir returns the directory this workspace's writes are
+	// confined to, or "" when they are not confined.
+	//
+	// This is a boundary, not a permission: a confined workspace is one
+	// whose whole purpose is to keep its changes to itself — a thread,
+	// working in its own git worktree on its own branch. Asking the user
+	// to approve an escape would be the wrong question, and under yolo
+	// (which threads inherit from the main agent) nobody would be asked
+	// at all. So it is enforced ahead of the permission flow rather than
+	// through it; see the file tools, which refuse rather than prompt.
+	ConfinedDir() string
 }
 
 // PermissionKey is a composite key for session permission lookups.
@@ -101,6 +115,10 @@ type PermissionKey struct {
 }
 
 type permissionService struct {
+	// confined marks this service's workspace as write-confined to
+	// workingDir; see Service.ConfinedDir.
+	confined atomic.Bool
+
 	*pubsub.Broker[PermissionRequest]
 
 	notificationBroker    *pubsub.Broker[PermissionNotification]
@@ -439,6 +457,17 @@ func (s *permissionService) SetSkipRequests(skip bool) {
 
 func (s *permissionService) SkipRequests() bool {
 	return s.skip.Load()
+}
+
+// ConfineToWorkingDir implements Service.
+func (s *permissionService) ConfineToWorkingDir() { s.confined.Store(true) }
+
+// ConfinedDir implements Service.
+func (s *permissionService) ConfinedDir() string {
+	if !s.confined.Load() {
+		return ""
+	}
+	return s.workingDir
 }
 
 func NewPermissionService(workingDir string, skip bool, allowedTools []string) Service {
