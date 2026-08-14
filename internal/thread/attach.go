@@ -81,6 +81,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner Spawne
 		Spawner:     spawner,
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,
+		DataDir:     a.Config().Options.DataDirectory,
 		Context:     ctx,
 		ParentApp:   a,
 	})

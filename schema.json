@@ -854,7 +854,7 @@
       "properties": {
         "worktree_dir": {
           "type": "string",
-          "description": "Parent directory for thread worktrees (\u003cworktree_dir\u003e/\u003cthread-name\u003e). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to a \"\u003crepo\u003e-threads\" sibling of the repository root.",
+          "description": "Parent directory for thread worktrees (\u003cworktree_dir\u003e/\u003cthread-name\u003e). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to \"threads\" inside the workspace data directory (.braid/threads).",
           "examples": [
             "/var/tmp/braid-threads",
             "../thread-worktrees"

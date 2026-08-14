@@ -399,11 +399,13 @@ type Options struct {
 type ThreadsOptions struct {
 	// WorktreeDir is the parent directory under which each thread's git
 	// worktree is created (at <worktree_dir>/<thread-name>). A relative
-	// path is resolved against the parent of the repository root (the
-	// same directory the default sibling "<repo>-threads" lives in), not
+	// path is resolved against the parent of the repository root, not
 	// against the working directory. Absolute paths are used as-is.
-	// Defaults to a "<repo>-threads" sibling of the repository root.
-	WorktreeDir string `json:"worktree_dir,omitempty" jsonschema:"description=Parent directory for thread worktrees (<worktree_dir>/<thread-name>). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to a \"<repo>-threads\" sibling of the repository root.,example=/var/tmp/braid-threads,example=../thread-worktrees"`
+	// Defaults to "threads" inside the workspace data directory
+	// (<repo>/.braid/threads), which is ignored by the repository's own
+	// git, so a worktree there is not seen as a second copy of the
+	// project.
+	WorktreeDir string `json:"worktree_dir,omitempty" jsonschema:"description=Parent directory for thread worktrees (<worktree_dir>/<thread-name>). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to \"threads\" inside the workspace data directory (.braid/threads).,example=/var/tmp/braid-threads,example=../thread-worktrees"`
 }
 
 // WebSearchOptions configures the backend used by the web_search tool.

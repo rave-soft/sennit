@@ -27,6 +27,13 @@ import (
 	"github.com/rave-soft/braid/internal/session"
 )
 
+// defaultDataDirName is the project-local data directory a workspace uses
+// when nothing else is configured; thread worktrees live in "threads"
+// inside it. Kept as a literal rather than imported from internal/config
+// to avoid a dependency edge for one string — the fallback only applies
+// when a caller supplies no DataDir at all.
+const defaultDataDirName = ".braid"
+
 // nameRe restricts thread names to values safe to embed in a branch name
 // and a worktree directory: lowercase alphanumeric slugs, hyphen
 // separated, not leading/trailing with a hyphen.
@@ -54,12 +61,19 @@ type ManagerOptions struct {
 	// only for git-toplevel workspaces.
 	RepoRoot string
 	// WorktreeDir is the parent directory under which each thread's
-	// worktree is created (at WorktreeDir/<name>). Empty defaults to a
-	// "<repo>-threads" sibling of RepoRoot; a relative value is resolved
-	// against RepoRoot's parent directory (the same place the default
-	// lives), not against the process's working directory; an absolute
-	// value is used as-is.
+	// worktree is created (at WorktreeDir/<name>). Empty defaults to
+	// "threads" inside DataDir. A relative value is resolved against
+	// RepoRoot's parent directory, not against the process's working
+	// directory; an absolute value is used as-is.
 	WorktreeDir string
+	// DataDir is the workspace's project-local data directory
+	// (<repo>/.braid by default), which is where thread worktrees live
+	// unless WorktreeDir says otherwise. That directory carries a
+	// "*" .gitignore of its own (see app.ensureDotBraidDir), which is
+	// what lets worktrees sit inside the repository without the repo
+	// seeing a second copy of itself as untracked files. Empty falls
+	// back to RepoRoot/.braid.
+	DataDir string
 	// Context is the base context background thread goroutines (agent
 	// runs, RunComplete watchers) are bound to. Defaults to
 	// context.Background().
@@ -112,7 +126,11 @@ func NewManager(opts ManagerOptions) *Manager {
 	worktreeDir := opts.WorktreeDir
 	switch {
 	case worktreeDir == "":
-		worktreeDir = filepath.Join(filepath.Dir(opts.RepoRoot), filepath.Base(opts.RepoRoot)+"-threads")
+		dataDir := opts.DataDir
+		if dataDir == "" {
+			dataDir = filepath.Join(opts.RepoRoot, defaultDataDirName)
+		}
+		worktreeDir = filepath.Join(dataDir, "threads")
 	case !filepath.IsAbs(worktreeDir):
 		worktreeDir = filepath.Join(filepath.Dir(opts.RepoRoot), worktreeDir)
 	}

@@ -403,9 +403,28 @@ func publishSuccess(t *testing.T, a *app.App, sessionID string) {
 func TestNewManager_WorktreeDirResolution(t *testing.T) {
 	repoRoot := filepath.Join(string(filepath.Separator), "home", "user", "myrepo")
 
-	t.Run("empty defaults to sibling of repo root", func(t *testing.T) {
+	// Worktrees live inside the workspace's own data directory. That
+	// directory carries a "*" .gitignore, so a checkout there is not
+	// something the repository sees as a second, untracked copy of
+	// itself — which is what makes keeping them in-repo workable at all.
+	t.Run("empty defaults to threads inside the data directory", func(t *testing.T) {
+		dataDir := filepath.Join(repoRoot, ".braid")
+		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, DataDir: dataDir})
+		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.worktreeDir)
+	})
+
+	t.Run("empty with no data directory falls back to the repo's own .braid", func(t *testing.T) {
 		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot})
-		require.Equal(t, filepath.Join(string(filepath.Separator), "home", "user", "myrepo-threads"), mgr.worktreeDir)
+		require.Equal(t, filepath.Join(repoRoot, ".braid", "threads"), mgr.worktreeDir)
+	})
+
+	// A relocated data directory takes the worktrees with it: they are
+	// workspace state, and splitting them from the rest of it would put
+	// a checkout back inside a repo that has no .gitignore covering it.
+	t.Run("a relocated data directory takes the worktrees with it", func(t *testing.T) {
+		dataDir := filepath.Join(string(filepath.Separator), "var", "lib", "braid", "myrepo")
+		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, DataDir: dataDir})
+		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.worktreeDir)
 	})
 
 	t.Run("relative resolves against repo root's parent", func(t *testing.T) {

@@ -338,10 +338,12 @@ definitions:
         description: |-
           WorktreeDir is the parent directory under which each thread's git
           worktree is created (at <worktree_dir>/<thread-name>). A relative
-          path is resolved against the parent of the repository root (the
-          same directory the default sibling "<repo>-threads" lives in), not
+          path is resolved against the parent of the repository root, not
           against the working directory. Absolute paths are used as-is.
-          Defaults to a "<repo>-threads" sibling of the repository root.
+          Defaults to "threads" inside the workspace data directory
+          (<repo>/.braid/threads), which is ignored by the repository's own
+          git, so a worktree there is not seen as a second copy of the
+          project.
         type: string
     type: object
   config.ToolGlob:
@@ -475,6 +477,25 @@ definitions:
         $ref: '#/definitions/config.Attribution'
       auto_lsp:
         type: boolean
+      background_agents:
+        description: |-
+          BackgroundAgents is a permanent opt-out, not a rollout flag: it stays
+          in the product for anyone who does not want the model delegating work
+          to background tasks in their workspace. Default true — a pointer
+          distinguishes "unset" from an explicit false, the same tri-state
+          AutoLSP and Progress use above. It defaults on because dispatch is
+          already opt-in per model tool-call and every tool a task runs still
+          goes through the same permission checks as the foreground turn; the
+          switch exists for the person who wants to rule out unattended
+          concurrent work entirely, not as a safety net for a first run.
+
+          Turning this off only stops *new* dispatch: the "agent" tool's
+          background parameter is refused and the task_* tools are not
+          registered. A task already running when the config is reloaded is not
+          killed — it runs to completion and its result is still delivered.
+          Threads (the git-worktree feature) are a separate, older feature and
+          are not affected by this switch.
+        type: boolean
       context_paths:
         items:
           type: string
@@ -551,6 +572,8 @@ definitions:
         type: string
       model:
         type: string
+      origin:
+        $ref: '#/definitions/proto.Origin'
       parts:
         items: {}
         type: array
@@ -681,6 +704,14 @@ definitions:
       mime_type:
         type: string
     type: object
+  proto.CancelDelegationRequest:
+    properties:
+      reason:
+        description: |-
+          Reason is recorded as the delegation's terminal Error. Empty
+          defaults to "cancelled" server-side.
+        type: string
+    type: object
   proto.ConfigCompactRequest:
     properties:
       enabled:
@@ -740,12 +771,29 @@ definitions:
         type: string
       name:
         type: string
+      parent_session_id:
+        description: |-
+          ParentSessionID is the session the thread was started from. It is
+          what lets the thread's completion reach the agent that is waiting
+          for it: without it the delegation has nobody to report to and its
+          result is only discoverable by looking. Empty when a thread is
+          created outside any session, as the CLI does.
+        type: string
     type: object
   proto.CurrentSession:
     properties:
       generation:
         type: integer
       session_id:
+        type: string
+    type: object
+  proto.DelegationRef:
+    properties:
+      id:
+        type: string
+      kind:
+        type: string
+      name:
         type: string
     type: object
   proto.Error:
@@ -928,6 +976,16 @@ definitions:
     - User
     - System
     - Tool
+  proto.Origin:
+    enum:
+    - person
+    - agent
+    - person
+    - agent
+    type: string
+    x-enum-varnames:
+    - OriginPerson
+    - OriginAgent
   proto.PermissionAction:
     enum:
     - allow
@@ -954,6 +1012,8 @@ definitions:
     properties:
       action:
         type: string
+      delegation:
+        $ref: '#/definitions/proto.DelegationRef'
       description:
         type: string
       id:
@@ -1146,9 +1206,23 @@ definitions:
         type: string
       id:
         type: string
+      kind:
+        description: |-
+          Kind discriminates the delegation kinds sharing the threads table
+          (see internal/thread.Kind); every value the server sends today is
+          "thread". Additive field: older clients that don't read it are
+          unaffected.
+        type: string
       merge_policy:
         type: string
       name:
+        type: string
+      parent_session_id:
+        description: |-
+          ParentSessionID is the session this delegation reports its
+          completion (and any mid-run ask) to, if any — see
+          internal/thread.Delegation.ParentSessionID. Additive field: older
+          clients that don't read it are unaffected.
         type: string
       result_summary:
         type: string
@@ -1223,6 +1297,15 @@ definitions:
         items:
           $ref: '#/definitions/proto.SkillState'
         type: array
+      tasks_supported:
+        description: |-
+          TasksSupported reports whether this workspace has a task manager
+          attached, mirroring ThreadsSupported. Unlike threads, tasks have no
+          legacy fallback probe: this field (and the /tasks routes it
+          describes) is new, so there is no older server to be compatible
+          with — a nil value is simply treated as unsupported by the client
+          rather than triggering a probe.
+        type: boolean
       threads_supported:
         description: |-
           ThreadsSupported reports whether this workspace has a thread
@@ -3335,6 +3418,84 @@ paths:
       summary: Read skill content
       tags:
       - skills
+  /workspaces/{id}/tasks:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.Thread'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List tasks
+      tags:
+      - tasks
+  /workspaces/{id}/tasks/{taskID}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: taskID
+        required: true
+        type: string
+      - description: Cancel reason
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/proto.CancelDelegationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Thread'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Cancel task
+      tags:
+      - tasks
   /workspaces/{id}/threads:
     get:
       parameters:
@@ -3514,6 +3675,52 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Activate thread
+      tags:
+      - threads
+  /workspaces/{id}/threads/{threadID}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Thread ID or name
+        in: path
+        name: threadID
+        required: true
+        type: string
+      - description: Cancel reason
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/proto.CancelDelegationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.Thread'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Cancel thread
       tags:
       - threads
   /workspaces/{id}/threads/{threadID}/merge:

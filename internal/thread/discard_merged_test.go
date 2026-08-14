@@ -2,6 +2,8 @@ package thread
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -246,4 +248,38 @@ func TestDiscardMerged_KeepsTheRowWhenTheWorktreeCannotGo(t *testing.T) {
 	require.Equal(t, StatusMerged, got.Status)
 	require.Contains(t, runGit(t, repo, "branch", "--list", st.Branch), st.Branch,
 		"and the branch must not be deleted behind a failed removal either")
+}
+
+// TestThreadWorktreeLivesInsideTheDataDirectory pins where a thread's
+// checkout goes, end to end, and the property that makes putting it there
+// safe: the repository must not see the worktree as a second, untracked
+// copy of itself.
+//
+// That safety comes from the "*" .gitignore the workspace writes into its
+// data directory on first use (app.ensureDotBraidDir). This test creates
+// that file itself, so if it ever stops being written, this stays green
+// while reality does not — the link is only as strong as that one call.
+func TestThreadWorktreeLivesInsideTheDataDirectory(t *testing.T) {
+	repo := initRepo(t)
+	dataDir := filepath.Join(repo, ".braid")
+	require.NoError(t, os.MkdirAll(dataDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, ".gitignore"), []byte("*\n"), 0o644))
+
+	mgr := NewManager(ManagerOptions{
+		Store:    newTestStoreDB(t),
+		Spawner:  newFakeSpawner(t),
+		RepoRoot: repo,
+		DataDir:  dataDir,
+	})
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "in-place", Goal: "do it"})
+	require.NoError(t, err)
+
+	require.Equal(t, filepath.Join(dataDir, "threads", "in-place"), st.WorktreePath)
+	require.DirExists(t, st.WorktreePath)
+	require.FileExists(t, filepath.Join(st.WorktreePath, "README.md"),
+		"the worktree must be a real checkout, not just a directory")
+
+	require.Empty(t, strings.TrimSpace(runGit(t, repo, "status", "--porcelain")),
+		"the repository must not see its own thread worktrees")
 }
