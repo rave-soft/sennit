@@ -335,6 +335,34 @@ func TestAgentTerminalNotificationsRefreshBusy(t *testing.T) {
 	}
 }
 
+// TestQueueChangedNotificationRefreshesQueueOnly pins the
+// notify.TypeQueueChanged edge (published by dispatcher.onQueueChanged
+// via sessionAgent.publishQueueChanged on enqueue/drain/requeue/cancel/
+// clear): unlike TypeAgentFinished/TypeAgentError, this is not a
+// busy<->idle edge - the session may still be busy, or may never have
+// been - so the handler must refresh only the queue pill, not also
+// re-fetch busy state.
+func TestQueueChangedNotificationRefreshesQueueOnly(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"a", "b"}}
+	m := newBusyUI(ws)
+	warmCaches(m, true) // busy state starts fresh; only the queue is stale
+	ws.resetCounters()
+
+	_, cmd := m.Update(pubsub.Event[notify.Notification]{
+		Type:    pubsub.CreatedEvent,
+		Payload: notify.Notification{Type: notify.TypeQueueChanged, SessionID: "s1"},
+	})
+	require.True(t, m.wsCache.promptQueueInFlight, "queue-changed notification must schedule a queue refresh")
+	require.False(t, m.wsCache.busyFetchInFlight,
+		"queue-changed notification must not schedule a busy refresh - it is not a busy<->idle edge")
+
+	runCmds(m, cmd)
+	require.Equal(t, 2, m.wsCache.promptQueue, "refreshed queue count must land in the cache")
+	require.False(t, m.wsCache.promptQueueInFlight)
+}
+
 // TestSessionSwitchRefreshesQueueAndBusy: switching sessions must drop the
 // previous session's queue pill and memoized busy state and fetch the new
 // session's, so esc never offers to clear the wrong queue.

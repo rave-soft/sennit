@@ -37,6 +37,10 @@ func (s *stubCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepte
 	return nil, nil
 }
 
+func (s *stubCoordinator) Steer(ctx context.Context, call agent.SessionAgentCall) (agent.SteerOutcome, *fantasy.AgentResult, error) {
+	return agent.SteerRan, nil, nil
+}
+
 func (s *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }

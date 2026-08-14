@@ -141,11 +141,24 @@ func (m *continuationRaceModel) StreamObject(context.Context, fantasy.ObjectCall
 type blockingNotificationPublisher struct {
 	published chan struct{}
 	release   chan struct{}
+	blocked   atomic.Bool
 }
 
+// Publish blocks only on the first call - the parked run's own
+// TypeAgentFinished notification, which these tests use to land a
+// simulated concurrent dispatch precisely at that pause point. Now that
+// queue mutations (e.g. ClearQueue) also publish their own
+// notify.TypeQueueChanged notification (see sessionAgent.
+// publishQueueChanged), a second call can legitimately arrive while the
+// first is still parked here; sync.Once would serialize that second
+// call behind the first's in-flight block, deadlocking the two, so this
+// uses a CompareAndSwap instead: only the call that wins it blocks,
+// every other caller returns immediately.
 func (p *blockingNotificationPublisher) Publish(pubsub.EventType, notify.Notification) {
-	close(p.published)
-	<-p.release
+	if p.blocked.CompareAndSwap(false, true) {
+		close(p.published)
+		<-p.release
+	}
 }
 
 func (*blockingNotificationPublisher) PublishMustDeliver(context.Context, pubsub.EventType, notify.Notification) {

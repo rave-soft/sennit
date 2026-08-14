@@ -127,8 +127,40 @@ type SessionAgentCall struct {
 	ActiveRuntime *activeRuntime
 }
 
+// SteerOutcome reports which branch of sessionAgent.run's atomic dispatch
+// decision a call took. Run discards it (a queued call and a completed
+// call with no result both look like (nil, nil) to a Run caller); Steer
+// exists specifically to hand it back, so a caller can tell "queued
+// behind the active turn" from "ran as its own turn" without a
+// follow-up probe of the queue.
+type SteerOutcome int
+
+const (
+	// SteerRan means the call became a turn itself (the session was
+	// idle) - result/error are this call's own.
+	SteerRan SteerOutcome = iota
+	// SteerEnqueued means the call was queued behind an active turn: a
+	// call without a RunID will fold into that turn's next step, one
+	// with a RunID runs recursively once the queue drains. result is
+	// always nil.
+	SteerEnqueued
+	// SteerCanceled means the call was canceled on entry: a cancel
+	// covering its accept sequence was already recorded before the
+	// dispatch decision, so a canceled turn was persisted without ever
+	// streaming. Only reachable when the call carries an Accepted
+	// handle, which Steer callers submitting fresh interactive
+	// follow-ups do not set.
+	SteerCanceled
+)
+
 type SessionAgent interface {
 	Run(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)
+	// Steer submits call as an explicit steering follow-up: it makes the
+	// same atomic enqueue-into-the-active-turn vs run-as-a-new-turn
+	// decision Run makes as a side effect of its busy check, and reports
+	// which one it took. See sessionAgent.run for the shared
+	// implementation and sessionAgent.Steer for the contract.
+	Steer(context.Context, SessionAgentCall) (SteerOutcome, *fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
 	SetModel(model Model)
 	SetTools(tools []fantasy.AgentTool)
@@ -202,7 +234,7 @@ func NewSessionAgent(
 	if len(opts.Tools) > 0 {
 		opts.Tools[len(opts.Tools)-1].SetProviderOptions(cacheControlOptions())
 	}
-	return &sessionAgent{
+	a := &sessionAgent{
 		model:                csync.NewValue(opts.Model),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
@@ -216,6 +248,11 @@ func NewSessionAgent(
 		mcp:                  opts.MCP,
 		dispatch:             newDispatcher(),
 	}
+	// Wired after construction since the hook closes over a: dispatch
+	// itself must stay free of any dependency on a or on pubsub (see
+	// dispatcher's doc comment).
+	a.dispatch.onQueueChanged = a.publishQueueChanged
+	return a
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
@@ -244,6 +281,12 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 // streaming step. See dispatcher.drainQueueForStep.
 func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
 	return a.dispatch.drainQueueForStep(sessionID)
+}
+
+// requeueDrained puts a suffix of a drainQueueForStep fold batch back onto
+// the front of the session's queue. See dispatcher.requeueDrained.
+func (a *sessionAgent) requeueDrained(sessionID string, remainder []SessionAgentCall) {
+	a.dispatch.requeueDrained(sessionID, remainder)
 }
 
 // publishCanceledQueueDrops emits a terminal cancelled RunComplete for
@@ -284,6 +327,25 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 // dispatcher.clearPendingCancel.
 func (a *sessionAgent) clearPendingCancel(sessionID string) {
 	a.dispatch.clearPendingCancel(sessionID)
+}
+
+// publishQueueChanged is wired as dispatch.onQueueChanged (see
+// NewSessionAgent) so the dispatcher can signal a queue mutation without
+// importing pubsub itself. It publishes a lossy, best-effort
+// notify.TypeQueueChanged event; the UI's queued-prompt pill re-probes
+// the actual count off it instead of trusting a payload, and still falls
+// back to its TTL if this is ever dropped by the broker. Called by
+// dispatcher methods only after their per-session dispatch mutex has
+// been released, so this may itself take a session's dispatch mutex (a
+// subscriber callback could, in principle) without risk of deadlock.
+func (a *sessionAgent) publishQueueChanged(sessionID string) {
+	if a.notify == nil {
+		return
+	}
+	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+		SessionID: sessionID,
+		Type:      notify.TypeQueueChanged,
+	})
 }
 
 // persistCanceledTurn writes the user/assistant records for a turn that
@@ -351,9 +413,14 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
-func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
+// run is the shared implementation behind the exported Run and Steer:
+// both dispatch through it so there is exactly one place that makes the
+// cancel-on-entry / enqueue / become-active decision and exactly one
+// per-session lock discipline guarding it. Run discards outcome; Steer
+// reports it. See SteerOutcome.
+func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome SteerOutcome, result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
-		return nil, err
+		return SteerRan, nil, err
 	}
 	if call.Accepted != nil {
 		call.acceptSeq = call.Accepted.seq
@@ -403,10 +470,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if err := a.persistCanceledTurn(ctx, call, false); err != nil {
 			complete.Error = err.Error()
 			reporter.publish(ctx, complete)
-			return nil, err
+			return SteerCanceled, nil, err
 		}
 		reporter.publish(ctx, complete)
-		return nil, nil
+		return SteerCanceled, nil, nil
 	}
 
 	if a.IsSessionBusy(call.SessionID) {
@@ -426,7 +493,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			call.Accepted.Close()
 		}
 		sessMu.Unlock()
-		return nil, nil
+		// enqueueCall itself must not call notifyQueueChanged (it runs
+		// under sessMu, held by this caller, not by dispatch itself) - so
+		// this calls it explicitly, only now that the lock is released.
+		a.dispatch.notifyQueueChanged(call.SessionID)
+		return SteerEnqueued, nil, nil
 	}
 
 	// Idle: become the active run. Register the cancel func before dropping
@@ -496,12 +567,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
+		return SteerRan, nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
 	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session messages: %w", err)
+		return SteerRan, nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 
 	// Generate title from the first real (non-shell) user prompt.
@@ -516,7 +587,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Add the user message to the session.
 	_, err = a.createUserMessage(ctx, call)
 	if err != nil {
-		return nil, err
+		return SteerRan, nil, err
 	}
 	userMsgCreated = true
 
@@ -631,7 +702,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
-		return t.handleStreamError(err)
+		streamResult, streamErr := t.handleStreamError(err)
+		return SteerRan, streamResult, streamErr
 	}
 
 	if t.shouldSummarize {
@@ -641,7 +713,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// this release opens up before Summarize does its own busy check.
 		csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
 		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, model, promptPrefix, call.ActiveRuntime); summarizeErr != nil {
-			return nil, summarizeErr
+			return SteerRan, nil, summarizeErr
 		}
 		// If the agent wasn't done...
 		if len(t.currentAssistant.ToolCalls()) > 0 {
@@ -686,7 +758,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// hang.
 	a.publishCanceledQueueDrops(canceledRunIDDrops)
 	if firstQueued == nil {
-		return result, err
+		return SteerRan, result, err
 	}
 	// There are queued messages, restart the loop. Publishing this
 	// turn's RunComplete explicitly below (when owed) fires reporter's
@@ -732,7 +804,50 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// finds nothing left to publish.
 		reporter.suppress()
 	}
-	return a.Run(ctx, *firstQueued)
+	// outcome is clobbered here exactly like result/retErr already are:
+	// this call did run (it produced the turn above), but its return
+	// value becomes whatever the recursively-dispatched *firstQueued
+	// call's own dispatch decision was. A Steer caller only ever
+	// observes this tail when its own call triggered an auto-summarize
+	// continuation or handed off to something else queued behind it —
+	// not on the plain busy/idle paths the busy- and idle-path tests
+	// cover.
+	return a.run(ctx, *firstQueued)
+}
+
+// Run dispatches call, atomically picking cancel-on-entry, enqueue
+// behind an active turn, or become the active turn, under
+// call.SessionID's per-session dispatch mutex - see run. A queued call
+// and a turn that legitimately produced no result both return (nil,
+// nil), so a caller that needs to tell those apart should use Steer
+// instead.
+func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+	_, result, err := a.run(ctx, call)
+	return result, err
+}
+
+// Steer gives interactive follow-ups an explicit entry point for the
+// "enqueue behind the active turn, or start a new one" decision that Run
+// already makes as a side effect of its busy check, and - unlike Run -
+// reports which one happened. Steer does not reimplement that decision;
+// it dispatches through the same run as Run, so it inherits the exact
+// same atomicity: the busy check and the activeRequests registration (or
+// the enqueue) happen under call.SessionID's per-session dispatch mutex,
+// the same lock run's own end-of-turn cleanup and drainNext handoff use.
+// A Steer call can only ever land on one side of that lock - observing
+// the session as busy (and getting queued for the active turn to drain
+// or hand off) or as idle (and becoming the new active turn) - never
+// both and never neither, so a follow-up landing exactly as the active
+// turn finishes is still guaranteed to run exactly once, and Steer's
+// reported outcome always matches what actually happened to it.
+//
+// The RunID fork is entirely run's (see drainQueueForStep/drainNext): a
+// queued call without a RunID folds into the active turn's next step;
+// one with a RunID always gets its own turn and its own RunComplete,
+// whether that turn starts immediately (idle) or via the recursive
+// hand-off (busy). Steer does not special-case RunID either way.
+func (a *sessionAgent) Steer(ctx context.Context, call SessionAgentCall) (SteerOutcome, *fantasy.AgentResult, error) {
+	return a.run(ctx, call)
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {

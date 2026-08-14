@@ -50,6 +50,10 @@ func (c *blockingCoordinator) RunAccepted(ctx context.Context, accept *agent.Acc
 	return nil, nil
 }
 
+func (c *blockingCoordinator) Steer(ctx context.Context, call agent.SessionAgentCall) (agent.SteerOutcome, *fantasy.AgentResult, error) {
+	return agent.SteerRan, nil, nil
+}
+
 func (c *blockingCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun { return nil }
 func (c *blockingCoordinator) Cancel(string)                                     {}
 func (c *blockingCoordinator) CancelAll()                                        {}

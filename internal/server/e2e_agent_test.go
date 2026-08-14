@@ -180,6 +180,11 @@ func (c *scriptedCoordinator) RunAccepted(ctx context.Context, accept *agent.Acc
 	return c.Run(ctx, sessionID, prompt, attachments...)
 }
 
+func (c *scriptedCoordinator) Steer(ctx context.Context, call agent.SessionAgentCall) (agent.SteerOutcome, *fantasy.AgentResult, error) {
+	res, err := c.Run(ctx, call.SessionID, call.Prompt, call.Attachments...)
+	return agent.SteerRan, res, err
+}
+
 func (c *scriptedCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
 
 func (c *scriptedCoordinator) Cancel(sessionID string) {
