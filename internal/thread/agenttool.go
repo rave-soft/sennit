@@ -2,6 +2,8 @@ package thread
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/rave-soft/braid/internal/agent/tools"
@@ -49,10 +51,20 @@ func (a *agentToolManager) List(ctx context.Context) ([]tools.ThreadInfo, error)
 	return out, nil
 }
 
+// toolErr translates this package's sentinels into the tools package's,
+// so a tool can recognize "no such thread" without importing the thread
+// domain (see tools.ThreadManager).
+func toolErr(err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("%w", tools.ErrThreadNotFound)
+	}
+	return err
+}
+
 func (a *agentToolManager) Get(ctx context.Context, idOrName string) (tools.ThreadInfo, error) {
 	st, err := a.m.Get(ctx, idOrName)
 	if err != nil {
-		return tools.ThreadInfo{}, err
+		return tools.ThreadInfo{}, toolErr(err)
 	}
 	return toToolInfo(st), nil
 }
@@ -68,7 +80,7 @@ func (a *agentToolManager) Wait(ctx context.Context, ids []string, timeout time.
 func (a *agentToolManager) Merge(ctx context.Context, idOrName string) (tools.ThreadInfo, error) {
 	st, err := a.m.Merge(ctx, idOrName)
 	if err != nil {
-		return tools.ThreadInfo{}, err
+		return tools.ThreadInfo{}, toolErr(err)
 	}
 	return toToolInfo(st), nil
 }

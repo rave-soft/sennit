@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -42,6 +43,13 @@ type ThreadInfo struct {
 // tools need. The coordinator is only ever given one for the main agent of
 // a main (non-thread) workspace; it is nil everywhere else, and the
 // thread_* tools are omitted entirely when it is nil.
+// ErrThreadNotFound reports that no thread matches the id or name given.
+// Callers should say more than "not found" when they surface it: a thread
+// is deleted once it merges, so a name that resolved a minute ago
+// resolving to nothing now usually means the work landed, not that the
+// caller got the name wrong.
+var ErrThreadNotFound = errors.New("no such thread")
+
 type ThreadManager interface {
 	Create(ctx context.Context, args ThreadCreateArgs) (ThreadInfo, error)
 	List(ctx context.Context) ([]ThreadInfo, error)

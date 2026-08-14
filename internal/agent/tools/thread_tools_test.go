@@ -428,3 +428,20 @@ func TestThreadWaitTool_ReturnsImmediatelyWhenNothingActive(t *testing.T) {
 	resp := callTool(t, tool, tools.ThreadWaitParams{TimeoutSeconds: 1})
 	require.False(t, resp.IsError)
 }
+
+// TestThreadStatusTool_MissingThreadExplainsItself: asking about a thread
+// that merged is now an ordinary thing to do, because merging removes it.
+// The tool used to hand the model the store's own "sql: no rows in result
+// set" — a database message with nothing to say about threads, which
+// invites the conclusion that the work was lost and should be restarted.
+func TestThreadStatusTool_MissingThreadExplainsItself(t *testing.T) {
+	repo := initRepo(t)
+	mgr := newTestThreadManager(t, repo)
+	tool := tools.NewThreadStatusTool(mgr)
+
+	resp := callTool(t, tool, tools.ThreadStatusParams{ID: "already-landed"})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "already-landed", "name what was asked for")
+	require.Contains(t, resp.Content, "removed once it merges", "and say what the absence means")
+	require.NotContains(t, resp.Content, "sql:", "never the store's wording")
+}

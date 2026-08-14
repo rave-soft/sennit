@@ -62,6 +62,13 @@ type threadControl struct {
 // has started.
 var ErrManagerClosed = errors.New("thread: manager is closed")
 
+// ErrNotFound is returned when no delegation matches the id or name a
+// caller asked for. A thread that merged is deleted along with its
+// worktree and branch, so this is the ordinary answer for one that has
+// already landed, not only for a name that never existed — callers that
+// can say so should (see the thread_status tool).
+var ErrNotFound = errors.New("thread: no such thread")
+
 // runCompleteHook lets an overlay intervene when a run finishes
 // successfully, before the generic lifecycle would otherwise rest the
 // entity at StatusCompleted. It is called with the entity's opMu held —
