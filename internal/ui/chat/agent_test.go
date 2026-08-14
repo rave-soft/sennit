@@ -1,12 +1,14 @@
 package chat
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/session"
@@ -348,6 +350,57 @@ func TestAgentToolRenderCanceledCollapses(t *testing.T) {
 	out := ansi.Strip(item.Render(120))
 	require.Contains(t, out, "canceled")
 	require.NotContains(t, out, "Task")
+}
+
+// TestAgentToolRenderBackgroundDispatch covers a background agent-tool
+// dispatch (agent.AgentParams.Background): runBackgroundAgent returns
+// synchronously with an acknowledgment, so HasResult is true immediately —
+// this must render as a distinct "just dispatched" block, not fall into
+// renderCollapsedDelegation's finished-with-an-answer shape.
+func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	parent := message.ToolCall{
+		ID:       "agent-bg",
+		Name:     "agent",
+		Input:    `{"prompt":"scan the repo for TODOs","background":true}`,
+		Finished: true,
+	}
+	metaJSON, err := json.Marshal(agent.AgentBackgroundResponseMetadata{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Status:    "running",
+	})
+	require.NoError(t, err)
+	result := &message.ToolResult{
+		ToolCallID: "agent-bg",
+		Content:    "Started background task t1 (session s1, status=running). It is running independently; its result will follow separately.",
+		Metadata:   string(metaJSON),
+	}
+	item := NewAgentToolMessageItem(&sty, parent, result, false, nil)
+
+	out := ansi.Strip(item.Render(120))
+
+	// Distinct from a normal finished delegation: shows the task id and a
+	// background marker...
+	require.Contains(t, out, "t1")
+	require.Contains(t, out, "background")
+	// ...and does not show the ack text as if it were a finished result
+	// preview.
+	require.NotContains(t, out, "It is running independently")
+	// ...nor a fabricated duration: r.agent.duration is near-zero here
+	// (SetResult freezes it at construction), so renderDelegationOutcomeLine
+	// would never have shown one anyway, but confirm the "step N" outcome
+	// line renderCollapsedDelegation would have produced is absent too —
+	// this block never calls renderCollapsedDelegation for a background
+	// dispatch.
+	require.NotContains(t, out, "step 0")
+
+	// The tool call itself is genuinely finished — never mistaken for
+	// still streaming.
+	require.False(t, item.isSpinning())
+	require.True(t, item.Finished())
 }
 
 // TestAgentToolToggleExpandedIsNoOp covers the removal of inline

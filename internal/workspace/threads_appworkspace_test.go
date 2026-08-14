@@ -12,6 +12,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/agent"
+	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
@@ -137,6 +138,12 @@ func (f *fakeThreadCoordinator) RunAccepted(_ context.Context, _ *agent.Accepted
 func (f *fakeThreadCoordinator) CancelAll() {}
 
 func (f *fakeThreadCoordinator) Cancel(sessionID string) {}
+
+func (f *fakeThreadCoordinator) IsBusy() bool { return false }
+
+func (f *fakeThreadCoordinator) SetThreads(tools.ThreadManager) {}
+
+func (f *fakeThreadCoordinator) SetTasks(tools.TaskManager) {}
 
 type fakeThreadHandle struct {
 	id  string

@@ -80,6 +80,21 @@ func (c *threadsCacheState) dispatchThreadsRefresh(com *common.Common) tea.Cmd {
 		if err != nil {
 			slog.Error("list threads", "error", err)
 		}
+		// Tasks share the same Kind-discriminated table (see
+		// internal/workspace/tasks.go), so the dashboard's live-work list
+		// merges both round trips rather than only ever seeing threads.
+		// err below stays whatever ListThreads reported: a ListTasks
+		// failure is logged and simply leaves task rows out of this
+		// refresh rather than discarding an otherwise-successful thread
+		// list too (applyThreadsLoaded only caches on err == nil).
+		if ws.SupportsTasks() {
+			tasks, taskErr := ws.ListTasks(context.Background())
+			if taskErr != nil {
+				slog.Error("list tasks", "error", taskErr)
+			} else {
+				threads = append(threads, tasks...)
+			}
+		}
 		return threadsLoadedMsg{gen: gen, threads: threads, err: err}
 	}
 }

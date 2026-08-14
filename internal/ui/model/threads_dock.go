@@ -124,6 +124,18 @@ func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cm
 		if err != nil {
 			slog.Error("list threads for dock", "error", err)
 		}
+		// Merge in task rows the same way threads_cache.go does: a
+		// ListTasks failure is logged and just leaves task rows out of
+		// this refresh, it never discards an otherwise-successful thread
+		// list (applyThreadsDockLoaded only caches on err == nil).
+		if ws.SupportsTasks() {
+			tasks, taskErr := ws.ListTasks(context.Background())
+			if taskErr != nil {
+				slog.Error("list tasks for dock", "error", taskErr)
+			} else {
+				threads = append(threads, tasks...)
+			}
+		}
 		return threadsDockLoadedMsg{gen: gen, threads: threads, err: err}
 	}
 }
@@ -177,13 +189,20 @@ func (c *threadsDockState) staleThreadsDockRefreshCmd(com *common.Common, active
 }
 
 // activeDockThreads filters threads down to the ones worth showing in the
-// dock — pending, running, or merging, mirroring activeThreadCount's status
-// set — and sorts them stably by CreatedAt ascending so the oldest (first
-// started) thread leads, giving deterministic dock ordering.
+// dock as live work: pending, running, or merging (mirroring
+// activeThreadCount's status set), plus idle. Idle is deliberately included
+// here even though Status.Active() excludes it (see thread/types.go's
+// StatusIdle doc comment): an idle delegation's workspace is still live and
+// worth surfacing, it just has no run in flight right now — "idle must not
+// read as finished". Rendering (threadDockStatusWord, the panel's line2
+// icon) is responsible for keeping idle visually distinct from
+// running/merging and from a terminal status. Results are sorted stably by
+// CreatedAt ascending so the oldest (first started) thread leads, giving
+// deterministic dock ordering.
 func activeDockThreads(threads []proto.Thread) []proto.Thread {
 	var active []proto.Thread
 	for _, t := range threads {
-		if thread.Status(t.Status).Active() {
+		if thread.Status(t.Status).Active() || thread.Status(t.Status) == thread.StatusIdle {
 			active = append(active, t)
 		}
 	}
@@ -387,6 +406,10 @@ func threadDockStatusWord(status thread.Status) string {
 		return "running…"
 	case thread.StatusMerging:
 		return "merging…"
+	case thread.StatusIdle:
+		// Explicit, not the raw-status default: idle must read as its own
+		// waiting state, distinct from both "running" and a terminal word.
+		return "idle"
 	default:
 		return string(status)
 	}

@@ -347,6 +347,22 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	prompt := params.Prompt
 
+	// runBackgroundAgent (internal/agent/agent_tool.go) returns synchronously
+	// with an acknowledgment, not the delegation's actual answer — HasResult
+	// is already true the moment this block first renders, well before the
+	// background task has done any real work. Detect that case via the
+	// result's metadata and render a dedicated "just dispatched" block
+	// instead of falling into renderCollapsedDelegation below, which would
+	// otherwise show a near-zero duration and treat the ack text as if it
+	// were the delegation's finished output.
+	if opts.Result != nil {
+		var bgMeta agent.AgentBackgroundResponseMetadata
+		if err := json.Unmarshal([]byte(opts.Result.Metadata), &bgMeta); err == nil && bgMeta.TaskID != "" {
+			content := renderBackgroundDispatch(sty, cappedWidth, r.agent.displayName, opts, prompt, bgMeta)
+			return clickableItemHover(sty, content, cappedWidth, opts.Hovered)
+		}
+	}
+
 	// A finished (or canceled) top-level delegation collapses to a compact
 	// summary — the full result and nested-tool tree are only reachable by
 	// drilling into the child session (click, or alt+down), never by
@@ -800,6 +816,40 @@ func renderCollapsedDelegation(
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+// renderBackgroundDispatch renders a background agent-tool dispatch: the
+// tool call itself is finished (it returned an acknowledgment), but the
+// background task it started has barely begun — unlike a normal finished
+// delegation (renderCollapsedDelegation), there is no real duration to
+// report yet and the ack text is not a result worth previewing. The block
+// instead shows the delegation's name/goal plus a "background" marker and
+// the dispatched task's id, so it reads as "started elsewhere" rather than
+// "running" (no spinner — see AgentToolMessageItem's spinningFunc) or
+// "finished with an answer". The task id lets a user correlate this block
+// with its row in the tasks panel.
+func renderBackgroundDispatch(
+	sty *styles.Styles,
+	width int,
+	name string,
+	opts *ToolRenderOpts,
+	prompt string,
+	meta agent.AgentBackgroundResponseMetadata,
+) string {
+	header := toolHeader(sty, opts.Status, name, width, opts, firstLine(prompt))
+	if opts.Compact {
+		return header
+	}
+
+	// JobToolName is the same "info" token bash.go's renderJobTool uses to
+	// mark a background shell job — reused here so both kinds of
+	// "started, running independently" work read consistently.
+	badge := sty.Tool.JobToolName.Render("background")
+	sep := sty.Tool.TodoStatusNote.Render(" · task ")
+	taskID := sty.Tool.TodoStatusNote.Render(meta.TaskID)
+	note := ansi.Truncate(badge+sep+taskID, width, "…")
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, note)
 }
 
 // renderDelegationOutcomeLine renders the collapsed block's second line,

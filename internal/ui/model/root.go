@@ -210,6 +210,8 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, r.mergeThreadCmd(msg.id)
 	case removeThreadMsg:
 		return r, r.removeThreadCmd(msg.id)
+	case cancelTaskMsg:
+		return r, r.cancelTaskCmd(msg.id)
 	case openThreadCreateMsg:
 		r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
 		return r, nil
@@ -472,6 +474,18 @@ func (r *Root) removeThreadCmd(id string) tea.Cmd {
 	ws := r.com.Workspace
 	return func() tea.Msg {
 		err := ws.RemoveThread(ctx, id, proto.RemoveThreadOptions{})
+		return threadActionDoneMsg{err: err}
+	}
+}
+
+// cancelTaskCmd calls CancelTask off-thread. Task-only (see cancelTaskMsg's
+// doc comment) — reuses threadActionDoneMsg so a successful cancel gets the
+// same dashboard refresh merge/remove already trigger.
+func (r *Root) cancelTaskCmd(id string) tea.Cmd {
+	ctx := r.com.Context()
+	ws := r.com.Workspace
+	return func() tea.Msg {
+		err := ws.CancelTask(ctx, id, "cancelled from panel")
 		return threadActionDoneMsg{err: err}
 	}
 }

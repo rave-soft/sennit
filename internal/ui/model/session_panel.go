@@ -726,9 +726,17 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		m.panelThreadRects = m.drawPanelBlocks(scr, threadsArea, m.hoveredPanelThread, panelBlockDrawSpec{
 			count: len(plan.threads), more: plan.threadsMore, footer: "…and %d more threads",
 			name: func(i int) string {
-				name := plan.threads[i].Name
+				item := plan.threads[i]
+				name := item.Name
 				if name == "" {
-					return plan.threads[i].ID
+					name = item.ID
+				}
+				// Tasks share this block shape with threads but have no
+				// worktree/branch of their own — tag them so a user can
+				// tell the two apart without opening the dashboard. Threads
+				// stay unlabeled since they're the common case.
+				if thread.Kind(item.Kind) == thread.KindTask {
+					return "[task] " + name
 				}
 				return name
 			},

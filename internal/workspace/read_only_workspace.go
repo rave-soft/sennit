@@ -515,6 +515,20 @@ func (w *readOnlyWorkspace) AttachThread(ctx context.Context, id string) (Worksp
 	return nil, nil, w.readOnlyError("AttachThread")
 }
 
+// -- TaskController (query only) --
+
+func (w *readOnlyWorkspace) SupportsTasks() bool {
+	return w.underlying.SupportsTasks()
+}
+
+func (w *readOnlyWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
+	return w.underlying.ListTasks(ctx)
+}
+
+func (w *readOnlyWorkspace) CancelTask(ctx context.Context, id, reason string) error {
+	return w.readOnlyError("CancelTask")
+}
+
 // -- EventSubscriber --
 
 func (w *readOnlyWorkspace) Subscribe(program *tea.Program) {

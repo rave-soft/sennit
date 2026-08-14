@@ -115,6 +115,38 @@ func TestDrawSessionPanel_RendersThreadBlocksAndMoreFooter(t *testing.T) {
 	require.Len(t, u.panelThreads, threadsDockVisibleCap)
 }
 
+// TestDrawSessionPanel_RunningTaskRendersIdentityAndElapsed proves a task
+// row draws through the exact same panel-block path a thread does (see
+// drawSessionPanel's "[task] " name tag), showing its own identity (name,
+// tagged as a task so it's not mistaken for a thread), goal, and a live
+// elapsed time — not just that the dock/cache merge tested elsewhere
+// carries the row through, but that it actually paints.
+func TestDrawSessionPanel_RunningTaskRendersIdentityAndElapsed(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.threadsDock.cache.value = []proto.Thread{{
+		ID:        "t1",
+		Name:      "scan-todos",
+		Goal:      "Scan the repo for TODOs",
+		Status:    "running",
+		Kind:      "task",
+		CreatedAt: time.Now().Add(-90 * time.Second).Unix(),
+	}}
+
+	height := u.sessionPanelPlan(100).totalRows
+	scr := uv.NewScreenBuffer(u.width, height)
+	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: height}}
+	u.drawSessionPanel(scr, area)
+	out := ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "[task] scan-todos", "a task row must be tagged and show its own name")
+	require.Contains(t, out, "Scan the repo for TODOs", "the task's goal must render like a thread's")
+	require.Contains(t, out, "1m", "a running task must show a live elapsed time, not a frozen/absent one")
+	require.Len(t, u.panelThreads, 1)
+	require.Equal(t, "task", u.panelThreads[0].Kind)
+}
+
 // TestDrawSessionPanel_NoOpOnZeroArea guards against a panic when the panel
 // is given a degenerate (zero-height or zero-width) area.
 func TestDrawSessionPanel_NoOpOnZeroArea(t *testing.T) {

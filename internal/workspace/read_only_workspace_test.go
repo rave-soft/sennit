@@ -517,6 +517,11 @@ func (s *stubWorkspace) AttachThread(ctx context.Context, id string) (Workspace,
 	return nil, nil, nil
 }
 
+// TaskController (query only for stub)
+func (s *stubWorkspace) SupportsTasks() bool                               { return false }
+func (s *stubWorkspace) ListTasks(context.Context) ([]proto.Thread, error) { return nil, nil }
+func (s *stubWorkspace) CancelTask(context.Context, string, string) error  { return nil }
+
 // EventSubscriber
 func (s *stubWorkspace) Subscribe(program *tea.Program) {}
 func (s *stubWorkspace) Shutdown()                      {}

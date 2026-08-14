@@ -31,6 +31,64 @@ func TestActiveDockThreadsFiltersAndSorts(t *testing.T) {
 	require.Equal(t, []string{"a-pending", "c-merging", "b-running"}, dockThreadIDs(active))
 }
 
+// TestActiveDockThreadsIncludesIdle proves "idle must not read as
+// finished" (see StatusIdle's doc comment) at the filtering layer: an idle
+// delegation's workspace is still live and belongs in the dock's live-work
+// list even though Status.Active() alone excludes it. Covers both a
+// Kind=thread and a Kind=task idle row.
+func TestActiveDockThreadsIncludesIdle(t *testing.T) {
+	t.Parallel()
+
+	threads := []proto.Thread{
+		{ID: "idle-thread", Kind: "thread", Status: "idle", CreatedAt: 1},
+		{ID: "idle-task", Kind: "task", Status: "idle", CreatedAt: 2},
+		{ID: "done", Kind: "thread", Status: "completed", CreatedAt: 3},
+	}
+
+	active := activeDockThreads(threads)
+	require.ElementsMatch(t, []string{"idle-thread", "idle-task"}, dockThreadIDs(active))
+}
+
+// TestThreadDockStatusWordIdleIsExplicit proves threadDockStatusWord gives
+// idle its own word rather than falling through to the raw-status default
+// (undifferentiated from any other unhandled status) or reusing a terminal
+// word.
+func TestThreadDockStatusWordIdleIsExplicit(t *testing.T) {
+	t.Parallel()
+
+	word := threadDockStatusWord(thread.StatusIdle)
+	require.NotEmpty(t, word)
+	require.NotEqual(t, threadDockStatusWord(thread.StatusCompleted), word)
+	require.NotEqual(t, threadDockStatusWord(thread.StatusRunning), word)
+	require.NotEqual(t, threadDockStatusWord(thread.StatusFailed), word, "must not fall through to an unhandled-status default indistinguishable from idle")
+}
+
+// TestDispatchThreadsDockRefreshMergesTasks proves the dock's refresh
+// merges task rows in from ListTasks (mirroring TestDispatchThreadsRefresh
+// MergesTasks in threads_cache_test.go), so a running task shows up in the
+// dock's live-work list with its own identity.
+func TestDispatchThreadsDockRefreshMergesTasks(t *testing.T) {
+	t.Parallel()
+
+	ws := &threadsDockTestWorkspace{
+		supported:     true,
+		threads:       []proto.Thread{{ID: "thr-1", Name: "a-thread", Status: "running"}},
+		taskSupported: true,
+		tasks:         []proto.Thread{{ID: "task-1", Name: "a-task", Kind: "task", Status: "running"}},
+	}
+	com := &common.Common{Workspace: ws}
+	c := &threadsDockState{}
+
+	cmd := c.dispatchThreadsDockRefresh(com)
+	require.NotNil(t, cmd)
+	msg := cmd()
+	loaded, ok := msg.(threadsDockLoadedMsg)
+	require.True(t, ok)
+
+	active := activeDockThreads(loaded.threads)
+	require.ElementsMatch(t, []string{"thr-1", "task-1"}, dockThreadIDs(active))
+}
+
 func TestVisibleDockThreadsCapsAndReportsMore(t *testing.T) {
 	t.Parallel()
 
@@ -269,12 +327,22 @@ type threadsDockTestWorkspace struct {
 
 	msgs    []message.Message
 	msgsErr error
+
+	taskSupported bool
+	tasks         []proto.Thread
+	taskErr       error
 }
 
 func (w *threadsDockTestWorkspace) SupportsThreads() bool { return w.supported }
 
 func (w *threadsDockTestWorkspace) ListThreads(context.Context) ([]proto.Thread, error) {
 	return w.threads, w.err
+}
+
+func (w *threadsDockTestWorkspace) SupportsTasks() bool { return w.taskSupported }
+
+func (w *threadsDockTestWorkspace) ListTasks(context.Context) ([]proto.Thread, error) {
+	return w.tasks, w.taskErr
 }
 
 func (w *threadsDockTestWorkspace) AttachThread(context.Context, string) (workspace.Workspace, func(), error) {

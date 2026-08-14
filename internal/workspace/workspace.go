@@ -54,6 +54,10 @@ var (
 	// workspace — nesting is not supported). Returned by every
 	// ThreadController method except SupportsThreads when it reports false.
 	ErrThreadsNotSupported = errors.New("workspace does not support threads")
+	// ErrTasksNotSupported means this workspace has no task manager
+	// attached. Returned by every TaskController method except
+	// SupportsTasks when it reports false.
+	ErrTasksNotSupported = errors.New("workspace does not support tasks")
 )
 
 // ConnectionState describes the health of the client-server link as
@@ -327,6 +331,21 @@ type ThreadController interface {
 	AttachThread(ctx context.Context, id string) (Workspace, func(), error)
 }
 
+// TaskController manages a workspace's tasks: the worktree-less background
+// delegation kind, sibling to threads (see internal/thread.TaskManager).
+// Tasks share threads' wire representation (proto.Thread, discriminated by
+// Kind) but have no workspace of their own — proto.Thread.WorkspaceID is
+// always "" for a task, since a task runs inside its parent workspace's own
+// App rather than spawning an isolated one. SupportsTasks reports whether
+// the workspace owns a task manager at all; every other method's behavior
+// when it's false is implementation-defined (both implementations return
+// ErrTasksNotSupported rather than panicking).
+type TaskController interface {
+	SupportsTasks() bool
+	ListTasks(ctx context.Context) ([]proto.Thread, error)
+	CancelTask(ctx context.Context, id, reason string) error
+}
+
 // EventSubscriber wires a frontend into the workspace's event stream and
 // tears it down.
 type BackgroundJobs interface {
@@ -357,6 +376,7 @@ type Workspace interface {
 	ProjectLifecycle
 	MCPController
 	ThreadController
+	TaskController
 	BackgroundJobs
 	EventSubscriber
 }

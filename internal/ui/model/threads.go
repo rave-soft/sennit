@@ -65,6 +65,18 @@ type confirmRemoveThreadMsg struct {
 	id, name string
 }
 
+// cancelTaskMsg requests cancelling a task's in-flight run. Consumed by the
+// router (root.go), which calls Workspace.CancelTask.
+//
+// Task-only: threads have no single-thread "interrupt without tearing down
+// the worktree/branch" primitive on internal/thread.Manager yet (only
+// Remove, which is a full teardown), so a thread row is not cancelable via
+// this message — that's scoped-out follow-up work, not an oversight. See
+// HandleKey's Cancel case below.
+type cancelTaskMsg struct {
+	id string
+}
+
 // threadsKeyMap holds the key bindings local to the threads dashboard. It
 // is intentionally separate from the app-wide KeyMap in keys.go: these
 // bindings only apply while the dashboard has focus.
@@ -75,6 +87,7 @@ type threadsKeyMap struct {
 	New    key.Binding
 	Merge  key.Binding
 	Remove key.Binding
+	Cancel key.Binding
 	Reload key.Binding
 }
 
@@ -105,6 +118,10 @@ func defaultThreadsKeyMap() threadsKeyMap {
 			key.WithKeys("x", "d"),
 			key.WithHelp("x/d", "remove"),
 		),
+		Cancel: key.NewBinding(
+			key.WithKeys("c"),
+			key.WithHelp("c", "cancel"),
+		),
 		Reload: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh"),
@@ -115,7 +132,7 @@ func defaultThreadsKeyMap() threadsKeyMap {
 // ShortHelp implements [help.KeyMap] so the footer can be built with the
 // same shared help machinery other views use.
 func (k threadsKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Enter, k.New, k.Merge, k.Remove, k.Reload}
+	return []key.Binding{k.Up, k.Down, k.Enter, k.New, k.Merge, k.Remove, k.Cancel, k.Reload}
 }
 
 // threadsDashboard renders the thread list: a header line with the thread
@@ -280,7 +297,7 @@ func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea
 		return true, func() tea.Msg { return openThreadCreateMsg{} }
 	case key.Matches(msg, m.keyMap.Merge):
 		item, ok := m.list.SelectedItem().(*threadItem)
-		if !ok || !threadMergeable(item.thread.Status) {
+		if !ok || !threadMergeable(item.thread.Kind, item.thread.Status) {
 			return true, nil
 		}
 		id := item.thread.ID
@@ -292,15 +309,33 @@ func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea
 		}
 		id, name := item.thread.ID, item.thread.Name
 		return true, func() tea.Msg { return confirmRemoveThreadMsg{id: id, name: name} }
+	case key.Matches(msg, m.keyMap.Cancel):
+		item, ok := m.list.SelectedItem().(*threadItem)
+		if !ok {
+			return true, nil
+		}
+		// Thread cancel is out of scope this step (see cancelTaskMsg's doc
+		// comment); an already-terminal task has nothing left to cancel.
+		if thread.Kind(item.thread.Kind) != thread.KindTask || thread.Status(item.thread.Status).Terminal() {
+			return true, nil
+		}
+		id := item.thread.ID
+		return true, func() tea.Msg { return cancelTaskMsg{id: id} }
 	case key.Matches(msg, m.keyMap.Reload):
 		return true, m.cache.dispatchThreadsRefresh(m.com)
 	}
 	return false, nil
 }
 
-// threadMergeable reports whether a thread in the given status is eligible
-// to be merged: anything other than already merged or currently merging.
-func threadMergeable(status string) bool {
+// threadMergeable reports whether a delegation in the given kind/status is
+// eligible to be merged: a task has no worktree/branch of its own (see
+// TaskController's doc comment), so it never reports mergeable regardless
+// of status; a thread is mergeable in any status other than already merged
+// or currently merging.
+func threadMergeable(kind, status string) bool {
+	if thread.Kind(kind) == thread.KindTask {
+		return false
+	}
 	switch thread.Status(status) {
 	case thread.StatusMerged, thread.StatusMerging:
 		return false
@@ -358,6 +393,13 @@ func threadBadge(sty *styles.Styles, status string) string {
 		style = sty.Status.WarnMessage
 	case thread.StatusConflict, thread.StatusMergeBlocked, thread.StatusFailed:
 		style = sty.Status.ErrorMessage
+	case thread.StatusIdle:
+		// Explicit, not the default fallthrough: idle must not read as
+		// "done" (SuccessMessage) or as a warning — it's a live delegation
+		// with no run in flight. InfoMessage is already this palette's
+		// muted/neutral tone (fgSubtle, see quickstyle.go), which is what
+		// "waiting" should look like here.
+		style = sty.Status.InfoMessage
 	}
 	return style.Render(label)
 }
@@ -379,7 +421,15 @@ func (it *threadItem) Render(width int) string {
 	badge := threadBadge(it.sty, s.Status)
 	ago := humanize.Time(time.Unix(s.UpdatedAt, 0))
 
-	fixed := fmt.Sprintf("%s  %s  %s  %s", s.Name, badge, s.Branch, ago)
+	// A task has no branch (see TaskController's doc comment) — build the
+	// field list conditionally rather than a fixed-format string, so its
+	// row doesn't carry a stray double-space where the branch would be.
+	fields := []string{s.Name, badge}
+	if s.Branch != "" {
+		fields = append(fields, s.Branch)
+	}
+	fields = append(fields, ago)
+	fixed := strings.Join(fields, "  ")
 	fixedWidth := ansi.StringWidth(fixed)
 
 	line := fixed
