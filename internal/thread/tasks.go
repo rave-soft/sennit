@@ -152,9 +152,10 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	}
 
 	st, err := t.store.Create(ctx, CreateParams{
-		Name: "task-" + uuid.NewString(),
-		Goal: args.Goal,
-		Kind: KindTask,
+		Name:            "task-" + uuid.NewString(),
+		Goal:            args.Goal,
+		Kind:            KindTask,
+		ParentSessionID: args.ParentSessionID,
 	})
 	if err != nil {
 		return Thread{}, fmt.Errorf("thread: create task record: %w", err)
@@ -393,7 +394,34 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) error {
 	if wasCancelled(st) {
 		return fmt.Errorf("thread: task %q was cancelled (%s) and cannot be resumed; create a new task instead", id, st.Error)
 	}
-	return t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message)
+	if err := t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message); err != nil {
+		return err
+	}
+	// The dispatcher's DelegationParent registry lives per coordinator
+	// instance and is empty on a freshly-started process — see
+	// Manager.Send's identical re-registration. A task's Parent is its own
+	// coordinator (it shares its parent's App via ParentAppSpawner, unlike
+	// a thread's wholly isolated one), so no ParentApp guard is needed
+	// here, only a persisted parent to re-register.
+	if st.ParentSessionID != "" {
+		if c := t.lc.existingControl(st.ID); c != nil {
+			c.mu.Lock()
+			rt := c.runtime
+			c.mu.Unlock()
+			if rt != nil {
+				coord := rt.handle.App().AgentCoordinator
+				coord.RegisterDelegationParent(st.SessionID, agent.DelegationParent{
+					Parent:          coord,
+					ParentSessionID: st.ParentSessionID,
+					DelegationID:    st.ID,
+					Kind:            string(KindTask),
+					Name:            st.Name,
+					Depth:           0,
+				})
+			}
+		}
+	}
+	return nil
 }
 
 // wasCancelled reports whether st was explicitly stopped via

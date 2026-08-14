@@ -210,12 +210,13 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	worktreePath := filepath.Join(m.worktreeDir, name)
 
 	st, err := m.store.Create(ctx, CreateParams{
-		Name:         name,
-		Goal:         args.Goal,
-		BaseBranch:   base,
-		Branch:       branch,
-		WorktreePath: worktreePath,
-		MergePolicy:  mergePolicy,
+		Name:            name,
+		Goal:            args.Goal,
+		BaseBranch:      base,
+		Branch:          branch,
+		WorktreePath:    worktreePath,
+		MergePolicy:     mergePolicy,
+		ParentSessionID: args.ParentSessionID,
 	})
 	if err != nil {
 		return Thread{}, fmt.Errorf("thread: create record: %w", err)
@@ -489,6 +490,22 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 		return Thread{}, err
 	}
 	m.lc.installRuntime(m.ctx, handle, m.spawner, st.ID)
+	// The dispatcher's DelegationParent registry lives per coordinator
+	// instance and is empty on a freshly-started process (see
+	// resolveDeliveryTarget's doc comment on the persisted column this now
+	// reads from). Re-register here, on the freshly-installed handle, so a
+	// thread resumed after a restart can still ask its parent mid-run — not
+	// just report its eventual completion.
+	if st.ParentSessionID != "" && m.parentApp != nil {
+		handle.App().AgentCoordinator.RegisterDelegationParent(st.SessionID, agent.DelegationParent{
+			Parent:          m.parentApp.AgentCoordinator,
+			ParentSessionID: st.ParentSessionID,
+			DelegationID:    st.ID,
+			Kind:            string(KindThread),
+			Name:            st.Name,
+			Depth:           0, // Depth is not persisted (a pre-existing gap - see threadControl.depth, also in-memory-only); 0 is the safe default a resumed entity's cascade depth already silently falls back to today.
+		})
+	}
 	return st, nil
 }
 
@@ -553,7 +570,34 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 	// dispatch" logic itself has nothing thread-specific in it — see
 	// lifecycle.send's doc comment — so it lives there, shared with
 	// TaskManager.Send.
-	return m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message)
+	if err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message); err != nil {
+		return err
+	}
+	// l.send does not hand the (possibly freshly respawned) handle back to
+	// its caller, so re-register from here instead, reading the
+	// now-installed runtime off the entity's control — see Activate's
+	// identical re-registration for why this has to happen on every resume,
+	// not just at Create. Runs on every Send, including when the workspace
+	// was already live (never actually restarted): that is fine, it is an
+	// idempotent Set, not a spawn.
+	if st.ParentSessionID != "" && m.parentApp != nil {
+		if c := m.lc.existingControl(st.ID); c != nil {
+			c.mu.Lock()
+			rt := c.runtime
+			c.mu.Unlock()
+			if rt != nil {
+				rt.handle.App().AgentCoordinator.RegisterDelegationParent(st.SessionID, agent.DelegationParent{
+					Parent:          m.parentApp.AgentCoordinator,
+					ParentSessionID: st.ParentSessionID,
+					DelegationID:    st.ID,
+					Kind:            string(KindThread),
+					Name:            st.Name,
+					Depth:           0,
+				})
+			}
+		}
+	}
+	return nil
 }
 
 // Merge runs (or retries) the merge flow for a thread. Manual-policy
@@ -858,6 +902,14 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 // threads left pending/running/merging (their goroutines are gone with
 // the old process) become interrupted, and threads whose worktree has
 // vanished from disk become failed.
+//
+// This deliberately does not call RegisterDelegationParent for anything:
+// a recovered entity is not live — recover only marks it interrupted, no
+// workspace or coordinator instance exists yet to register against.
+// Every path that makes a delegation's workspace live again (Activate,
+// Send) already re-registers using the persisted ParentSessionID, so
+// there is nothing to gain here and a real risk of registering against a
+// coordinator that then never gets used.
 func (m *Manager) Recover(ctx context.Context) error {
 	done, err := m.lc.beginOp()
 	if err != nil {
@@ -900,55 +952,42 @@ func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) 
 // way onAutoMerge and recoverWorktree do, since both kinds sharing this
 // lifecycle resolve their delivery target completely differently.
 //
-// A task shares its parent's own App and session store (ParentAppSpawner
-// — see internal/thread/spawner.go), so handle.App() already *is* the
-// parent App, and its parent session is just a row away via
-// Sessions.Get(st.SessionID).ParentSessionID.
+// Both branches now read st.ParentSessionID directly — the persisted
+// column (see Delegation.ParentSessionID), not any in-memory field — so
+// this resolves correctly even for a delegation resumed after a process
+// restart, when no in-memory state from the original Create survives.
+//
+// A task shares its parent's own App (ParentAppSpawner — see
+// internal/thread/spawner.go), so handle.App() already *is* the parent
+// App.
 //
 // A thread spawns its own isolated App with a wholly separate database
-// (LocalSpawner), so neither of those holds: handle.App() is the
-// thread's own App, whose Sessions has never heard of a session living
-// in a different database, and by the time an auto-merge thread's
-// workspace is queried it may already be released. The parent link is
-// instead captured once, directly, at Create (threadControl.
-// parentSessionID), and the delivery target is m.parentApp — the
+// (LocalSpawner), so the delivery target is instead m.parentApp — the
 // workspace this Manager itself was attached to, not the thread's own —
 // see ManagerOptions.ParentApp.
 func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st Thread) (*app.App, string, bool) {
 	switch st.Kind {
 	case KindTask:
+		if st.ParentSessionID == "" {
+			return nil, "", false
+		}
 		a := handle.App()
-		if a == nil || a.Sessions == nil {
+		if a == nil {
 			return nil, "", false
 		}
-		sess, err := a.Sessions.Get(ctx, st.SessionID)
-		if err != nil {
-			slog.Error("Failed to resolve task's parent session", "component", "thread", "task", st.ID, "error", err)
-			return nil, "", false
-		}
-		if sess.ParentSessionID == "" {
-			return nil, "", false
-		}
-		return a, sess.ParentSessionID, true
+		return a, st.ParentSessionID, true
 	case KindThread:
 		if m.parentApp == nil {
 			return nil, "", false
 		}
-		c := m.lc.existingControl(st.ID)
-		if c == nil {
-			return nil, "", false
-		}
-		c.mu.Lock()
-		parentSessionID := c.parentSessionID
-		c.mu.Unlock()
-		if parentSessionID == "" {
+		if st.ParentSessionID == "" {
 			// A thread created with no ParentSessionID (optional, unlike
 			// a task's — see CreateArgs and the CLI's own thread create
 			// path). Nobody to deliver to; the thread's own terminal
 			// status is still recorded and pollable via thread_status.
 			return nil, "", false
 		}
-		return m.parentApp, parentSessionID, true
+		return m.parentApp, st.ParentSessionID, true
 	default:
 		return nil, "", false
 	}

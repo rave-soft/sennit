@@ -26,6 +26,11 @@ type Thread struct {
 	CreatedAt     int64  `json:"created_at"`
 	UpdatedAt     int64  `json:"updated_at"`
 	CompletedAt   int64  `json:"completed_at,omitempty"`
+	// ParentSessionID is the session this delegation reports its
+	// completion (and any mid-run ask) to, if any — see
+	// internal/thread.Delegation.ParentSessionID. Additive field: older
+	// clients that don't read it are unaffected.
+	ParentSessionID string `json:"parent_session_id,omitempty"`
 }
 
 // CreateThreadRequest is the request body for creating a thread.

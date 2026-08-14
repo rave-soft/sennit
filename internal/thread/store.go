@@ -20,6 +20,11 @@ type CreateParams struct {
 	SessionID    string
 	MergePolicy  MergePolicy
 	Kind         Kind
+	// ParentSessionID is the durable counterpart of the old in-memory-only
+	// threadControl.parentSessionID (see [Delegation.ParentSessionID]):
+	// the session this delegation's own session nests under, persisted so
+	// it survives a process restart. Empty means no parent.
+	ParentSessionID string
 }
 
 // SetStatusParams holds the fields updated by a status transition.
@@ -83,17 +88,18 @@ func (s *store) Create(ctx context.Context, params CreateParams) (Thread, error)
 	}
 
 	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
-		ID:           uuid.New().String(),
-		Name:         params.Name,
-		ProjectPath:  s.projectPath,
-		Goal:         params.Goal,
-		BaseBranch:   params.BaseBranch,
-		Branch:       params.Branch,
-		WorktreePath: params.WorktreePath,
-		SessionID:    params.SessionID,
-		Status:       string(StatusPending),
-		MergePolicy:  string(mergePolicy),
-		Kind:         string(kind),
+		ID:              uuid.New().String(),
+		Name:            params.Name,
+		ProjectPath:     s.projectPath,
+		Goal:            params.Goal,
+		BaseBranch:      params.BaseBranch,
+		Branch:          params.Branch,
+		WorktreePath:    params.WorktreePath,
+		SessionID:       params.SessionID,
+		Status:          string(StatusPending),
+		MergePolicy:     string(mergePolicy),
+		Kind:            string(kind),
+		ParentSessionID: params.ParentSessionID,
 	})
 	if err != nil {
 		return Thread{}, err
@@ -179,17 +185,18 @@ func (s *store) Delete(ctx context.Context, id string) error {
 func fromDBItem(item db.Thread) Thread {
 	return Thread{
 		Delegation: Delegation{
-			ID:            item.ID,
-			Name:          item.Name,
-			Goal:          item.Goal,
-			SessionID:     item.SessionID,
-			Status:        Status(item.Status),
-			Kind:          Kind(item.Kind),
-			ResultSummary: item.ResultSummary,
-			Error:         item.Error,
-			CreatedAt:     item.CreatedAt,
-			UpdatedAt:     item.UpdatedAt,
-			CompletedAt:   item.CompletedAt.Int64,
+			ID:              item.ID,
+			Name:            item.Name,
+			Goal:            item.Goal,
+			SessionID:       item.SessionID,
+			Status:          Status(item.Status),
+			Kind:            Kind(item.Kind),
+			ResultSummary:   item.ResultSummary,
+			Error:           item.Error,
+			CreatedAt:       item.CreatedAt,
+			UpdatedAt:       item.UpdatedAt,
+			CompletedAt:     item.CompletedAt.Int64,
+			ParentSessionID: item.ParentSessionID,
 		},
 		BaseBranch:   item.BaseBranch,
 		Branch:       item.Branch,

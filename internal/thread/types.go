@@ -103,6 +103,14 @@ type Delegation struct {
 	CreatedAt     int64
 	UpdatedAt     int64
 	CompletedAt   int64
+	// ParentSessionID is the session this delegation's own session nests
+	// under, persisted so the link survives a process restart — the
+	// durable counterpart of the old in-memory-only
+	// threadControl.parentSessionID, which now only feeds
+	// TaskManager.checkActiveCaps's admission cache. Empty means no
+	// parent, exactly as before: resolveDeliveryTarget and SendToParent
+	// both treat "" as nobody to deliver/ask.
+	ParentSessionID string
 }
 
 // MergePolicy controls how a completed thread's branch is merged back into

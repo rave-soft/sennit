@@ -23,6 +23,7 @@ INSERT INTO threads (
     status,
     merge_policy,
     kind,
+    parent_session_id,
     updated_at,
     created_at
 ) VALUES (
@@ -37,23 +38,25 @@ INSERT INTO threads (
     ?,
     ?,
     ?,
+    ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
+) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
 `
 
 type CreateThreadParams struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	ProjectPath  string `json:"project_path"`
-	Goal         string `json:"goal"`
-	BaseBranch   string `json:"base_branch"`
-	Branch       string `json:"branch"`
-	WorktreePath string `json:"worktree_path"`
-	SessionID    string `json:"session_id"`
-	Status       string `json:"status"`
-	MergePolicy  string `json:"merge_policy"`
-	Kind         string `json:"kind"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	ProjectPath     string `json:"project_path"`
+	Goal            string `json:"goal"`
+	BaseBranch      string `json:"base_branch"`
+	Branch          string `json:"branch"`
+	WorktreePath    string `json:"worktree_path"`
+	SessionID       string `json:"session_id"`
+	Status          string `json:"status"`
+	MergePolicy     string `json:"merge_policy"`
+	Kind            string `json:"kind"`
+	ParentSessionID string `json:"parent_session_id"`
 }
 
 func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thread, error) {
@@ -69,6 +72,7 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		arg.Status,
 		arg.MergePolicy,
 		arg.Kind,
+		arg.ParentSessionID,
 	)
 	var i Thread
 	err := row.Scan(
@@ -88,6 +92,7 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		&i.UpdatedAt,
 		&i.CompletedAt,
 		&i.Kind,
+		&i.ParentSessionID,
 	)
 	return i, err
 }
@@ -103,7 +108,7 @@ func (q *Queries) DeleteThread(ctx context.Context, id string) error {
 }
 
 const getThread = `-- name: GetThread :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
 FROM threads
 WHERE id = ? LIMIT 1
 `
@@ -132,12 +137,13 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 		&i.UpdatedAt,
 		&i.CompletedAt,
 		&i.Kind,
+		&i.ParentSessionID,
 	)
 	return i, err
 }
 
 const getThreadByName = `-- name: GetThreadByName :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
 FROM threads
 WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1
 `
@@ -167,12 +173,13 @@ func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams
 		&i.UpdatedAt,
 		&i.CompletedAt,
 		&i.Kind,
+		&i.ParentSessionID,
 	)
 	return i, err
 }
 
 const listThreads = `-- name: ListThreads :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
 FROM threads
 WHERE project_path = ? AND kind = 'thread'
 ORDER BY created_at
@@ -209,6 +216,7 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 			&i.UpdatedAt,
 			&i.CompletedAt,
 			&i.Kind,
+			&i.ParentSessionID,
 		); err != nil {
 			return nil, err
 		}
@@ -224,7 +232,7 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 }
 
 const listThreadsAll = `-- name: ListThreadsAll :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
 FROM threads
 WHERE project_path = ?
 ORDER BY created_at
@@ -263,6 +271,7 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 			&i.UpdatedAt,
 			&i.CompletedAt,
 			&i.Kind,
+			&i.ParentSessionID,
 		); err != nil {
 			return nil, err
 		}
@@ -328,7 +337,7 @@ UPDATE threads
 SET
     session_id = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
 `
 
 type UpdateThreadSessionParams struct {
@@ -356,6 +365,7 @@ func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessi
 		&i.UpdatedAt,
 		&i.CompletedAt,
 		&i.Kind,
+		&i.ParentSessionID,
 	)
 	return i, err
 }
@@ -368,7 +378,7 @@ SET
     result_summary = ?,
     completed_at = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
 `
 
 type UpdateThreadStatusParams struct {
@@ -405,6 +415,7 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 		&i.UpdatedAt,
 		&i.CompletedAt,
 		&i.Kind,
+		&i.ParentSessionID,
 	)
 	return i, err
 }

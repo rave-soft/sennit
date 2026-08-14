@@ -43,18 +43,17 @@ type threadControl struct {
 	// — only tasks set this to anything nonzero today). handleRunComplete
 	// reads it back to compute an auto-woken continuation's depth.
 	depth int
-	// parentSessionID is the session this entity's own session nests
-	// under, stamped once at Create (see Manager.Create/TaskManager.Create)
-	// and never touched again. It exists here — in memory, not persisted —
-	// for the same reason depth does: a task can resolve its parent via
-	// Sessions.Get(childSessionID).ParentSessionID because it shares its
-	// parent's own App and session store (ParentAppSpawner), but a thread
-	// spawns its own isolated App with a completely separate database
-	// (LocalSpawner) — its child session's row has no reachable path back
-	// to a parent session living in a different store, so the link has to
-	// be captured directly instead. Empty means no parent (a thread
-	// created with no ParentSessionID — CreateArgs.ParentSessionID is
-	// optional, unlike a task's) — see Manager.resolveDeliveryTarget.
+	// parentSessionID is an in-memory admission-check cache only now,
+	// stamped once at Create (see Manager.Create/TaskManager.Create) and
+	// never touched again. It exists purely to give
+	// TaskManager.checkActiveCaps a cheap in-memory read across every
+	// currently-active task's control under createMu, with no
+	// restart-survival requirement (a process restart sweeps every active
+	// task to interrupted via Recover, so there is nothing "active" left
+	// in a fresh process for this cache to be wrong about until a new
+	// Create repopulates it). The durable source of truth for delivery/ask
+	// resolution is Delegation.ParentSessionID on the row, read directly
+	// by resolveDeliveryTarget — not this field.
 	parentSessionID string
 }
 

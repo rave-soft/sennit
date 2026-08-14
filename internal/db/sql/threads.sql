@@ -11,9 +11,11 @@ INSERT INTO threads (
     status,
     merge_policy,
     kind,
+    parent_session_id,
     updated_at,
     created_at
 ) VALUES (
+    ?,
     ?,
     ?,
     ?,

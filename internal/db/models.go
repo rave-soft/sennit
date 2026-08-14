@@ -54,20 +54,21 @@ type Session struct {
 }
 
 type Thread struct {
-	ID            string        `json:"id"`
-	Name          string        `json:"name"`
-	ProjectPath   string        `json:"project_path"`
-	Goal          string        `json:"goal"`
-	BaseBranch    string        `json:"base_branch"`
-	Branch        string        `json:"branch"`
-	WorktreePath  string        `json:"worktree_path"`
-	SessionID     string        `json:"session_id"`
-	Status        string        `json:"status"`
-	MergePolicy   string        `json:"merge_policy"`
-	ResultSummary string        `json:"result_summary"`
-	Error         string        `json:"error"`
-	CreatedAt     int64         `json:"created_at"`
-	UpdatedAt     int64         `json:"updated_at"`
-	CompletedAt   sql.NullInt64 `json:"completed_at"`
-	Kind          string        `json:"kind"`
+	ID              string        `json:"id"`
+	Name            string        `json:"name"`
+	ProjectPath     string        `json:"project_path"`
+	Goal            string        `json:"goal"`
+	BaseBranch      string        `json:"base_branch"`
+	Branch          string        `json:"branch"`
+	WorktreePath    string        `json:"worktree_path"`
+	SessionID       string        `json:"session_id"`
+	Status          string        `json:"status"`
+	MergePolicy     string        `json:"merge_policy"`
+	ResultSummary   string        `json:"result_summary"`
+	Error           string        `json:"error"`
+	CreatedAt       int64         `json:"created_at"`
+	UpdatedAt       int64         `json:"updated_at"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
+	Kind            string        `json:"kind"`
+	ParentSessionID string        `json:"parent_session_id"`
 }
