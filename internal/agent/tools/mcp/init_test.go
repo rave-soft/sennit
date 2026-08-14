@@ -14,9 +14,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/env"
 	"github.com/rave-soft/braid/internal/oauth"
 	mcpoauth "github.com/rave-soft/braid/internal/oauth/mcp"
+	"github.com/rave-soft/braid/internal/testenv"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"golang.org/x/oauth2"
@@ -30,7 +30,7 @@ func shellResolverWithPath(t *testing.T, overrides map[string]string) config.Var
 	t.Helper()
 	m := map[string]string{"PATH": os.Getenv("PATH")}
 	maps.Copy(m, overrides)
-	return config.NewShellVariableResolver(env.NewFromMap(m))
+	return config.NewShellVariableResolver(testenv.New(m))
 }
 
 func TestMCPSession_CancelOnClose(t *testing.T) {
@@ -184,7 +184,7 @@ func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func TestCreateTransport_URLResolution(t *testing.T) {
 	t.Parallel()
 
-	shell := config.NewShellVariableResolver(env.NewFromMap(map[string]string{
+	shell := config.NewShellVariableResolver(testenv.New(map[string]string{
 		"MCP_HOST": "mcp.example.com",
 	}))
 

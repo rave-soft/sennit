@@ -13,18 +13,13 @@ type Map[K comparable, V any] struct {
 	mu    sync.RWMutex
 }
 
-// NewMap creates a new thread-safe map with the specified key and value types.
-func NewMap[K comparable, V any]() *Map[K, V] {
-	return &Map[K, V]{
-		inner: make(map[K]V),
+// NewMap creates a thread-safe map, optionally initialized from a map.
+func NewMap[K comparable, V any](initial ...map[K]V) *Map[K, V] {
+	inner := make(map[K]V)
+	if len(initial) > 0 {
+		inner = initial[0]
 	}
-}
-
-// NewMapFrom creates a new thread-safe map from an existing map.
-func NewMapFrom[K comparable, V any](m map[K]V) *Map[K, V] {
-	return &Map[K, V]{
-		inner: m,
-	}
+	return &Map[K, V]{inner: inner}
 }
 
 // Reset replaces the inner map with the new one.

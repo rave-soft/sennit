@@ -338,7 +338,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 			select {
 			case result := <-done:
 				if result.err != nil {
-					if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
+					if errors.Is(result.err, context.Canceled) {
 						out <- AgentRunEvent{Done: true}
 						return
 					}
