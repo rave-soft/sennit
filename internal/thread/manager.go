@@ -18,13 +18,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/git"
-	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/session"
 )
 
 // defaultDataDirName is the project-local data directory a workspace uses
@@ -78,17 +74,17 @@ type ManagerOptions struct {
 	// runs, RunComplete watchers) are bound to. Defaults to
 	// context.Background().
 	Context context.Context
-	// ParentApp is the workspace App this Manager is attached to (see
+	// ParentApp is the workspace this Manager is attached to (see
 	// Attach) — the one a thread's own CreateArgs.ParentSessionID refers
-	// to a session in. A thread spawns its own isolated App (Spawner),
-	// completely separate from this one, so its terminal-completion
-	// delivery target has to be captured explicitly here rather than
-	// derived from the thread's own workspace the way a task's is (see
-	// Manager.resolveDeliveryTarget). Optional: nil disables thread
-	// delivery without otherwise affecting the manager (Attach always
-	// supplies it in production; a test building a bare Manager may not
-	// need thread delivery at all).
-	ParentApp *app.App
+	// to a session in. A thread spawns its own isolated workspace
+	// (Spawner), completely separate from this one, so its
+	// terminal-completion delivery target has to be captured explicitly
+	// here rather than derived from the thread's own workspace the way a
+	// task's is (see Manager.resolveDeliveryTarget). Optional: nil
+	// disables thread delivery without otherwise affecting the manager
+	// (Attach always supplies it in production; a test building a bare
+	// Manager may not need thread delivery at all).
+	ParentApp Workspace
 }
 
 // Manager is the core of the threads feature: it drives thread creation,
@@ -104,9 +100,9 @@ type Manager struct {
 	worktreeDir string
 	ctx         context.Context
 	cancel      context.CancelFunc
-	// parentApp is the workspace App this Manager is attached to — see
+	// parentApp is the workspace this Manager is attached to — see
 	// ManagerOptions.ParentApp and resolveDeliveryTarget.
-	parentApp *app.App
+	parentApp Workspace
 
 	lc *lifecycle
 
@@ -278,11 +274,11 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return Thread{}, err
 	}
 
-	var sess session.Session
+	var sess Session
 	if args.ParentSessionID == "" {
-		sess, err = handle.App().Sessions.Create(ctx, args.Goal)
+		sess, err = handle.Workspace().Sessions().Create(ctx, args.Goal)
 	} else {
-		sess, err = handle.App().Sessions.CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, args.Goal)
+		sess, err = handle.Workspace().Sessions().CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, args.Goal)
 	}
 	if err != nil {
 		m.abortSpawn(ctx, handle, worktreePath)
@@ -307,8 +303,8 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	// idle (empty-Goal) and dispatched-Goal paths below register it - an
 	// idle thread activated by hand later must still be able to ask.
 	if args.ParentSessionID != "" && m.parentApp != nil {
-		handle.App().AgentCoordinator.RegisterDelegationParent(sess.ID, agent.DelegationParent{
-			Parent:          m.parentApp.AgentCoordinator,
+		handle.Workspace().Coordinator().RegisterDelegationParent(sess.ID, DelegationParent{
+			Parent:          m.parentApp.Coordinator(),
 			ParentSessionID: args.ParentSessionID,
 			DelegationID:    st.ID,
 			Kind:            string(KindThread),
@@ -336,7 +332,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, err
 	}
-	m.lc.startRun(agent.WithPromptOrigin(m.ctx, message.OriginAgent), handle, m.spawner, st.ID, st.SessionID, args.Goal)
+	m.lc.startRun(WithAgentDispatch(m.ctx), handle, m.spawner, st.ID, st.SessionID, args.Goal)
 
 	return st, nil
 }
@@ -520,8 +516,8 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	// thread resumed after a restart can still ask its parent mid-run — not
 	// just report its eventual completion.
 	if st.ParentSessionID != "" && m.parentApp != nil {
-		handle.App().AgentCoordinator.RegisterDelegationParent(st.SessionID, agent.DelegationParent{
-			Parent:          m.parentApp.AgentCoordinator,
+		handle.Workspace().Coordinator().RegisterDelegationParent(st.SessionID, DelegationParent{
+			Parent:          m.parentApp.Coordinator(),
 			ParentSessionID: st.ParentSessionID,
 			DelegationID:    st.ID,
 			Kind:            string(KindThread),
@@ -609,8 +605,8 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 			rt := c.runtime
 			c.mu.Unlock()
 			if rt != nil {
-				rt.handle.App().AgentCoordinator.RegisterDelegationParent(st.SessionID, agent.DelegationParent{
-					Parent:          m.parentApp.AgentCoordinator,
+				rt.handle.Workspace().Coordinator().RegisterDelegationParent(st.SessionID, DelegationParent{
+					Parent:          m.parentApp.Coordinator(),
 					ParentSessionID: st.ParentSessionID,
 					DelegationID:    st.ID,
 					Kind:            string(KindThread),
@@ -763,8 +759,8 @@ func (m *Manager) finishMerge(ctx context.Context, threadID, resultSummary strin
 			// App with something else (a task's parent) would cancel
 			// unrelated work, so this stays correct if that guard is ever
 			// loosened.
-			if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
-				a.AgentCoordinator.Cancel(st.SessionID)
+			if a := rt.handle.Workspace(); a != nil && a.Coordinator() != nil {
+				a.Coordinator().Cancel(st.SessionID)
 			}
 			if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
 				slog.Error("Failed to release merged workspace", "component", "thread", "thread", threadID, "error", err)
@@ -847,7 +843,7 @@ func (m *Manager) discardMerged(ctx context.Context, threadID string) {
 // voice, would be the kind of duplicate that makes an agent repeat itself.
 func (m *Manager) recordDiscardNotice(ctx context.Context, st Thread, branchKept bool) {
 	a, sessionID, ok := m.resolveDeliveryTarget(ctx, nil, st)
-	if !ok || a == nil || a.Messages == nil {
+	if !ok || a == nil || a.Messages() == nil {
 		return
 	}
 	text := fmt.Sprintf("Thread %q merged into %s and removed.", st.Name, st.BaseBranch)
@@ -855,10 +851,7 @@ func (m *Manager) recordDiscardNotice(ctx context.Context, st Thread, branchKept
 		text = fmt.Sprintf("Thread %q merged into %s and removed; branch %s kept (git declined to delete it).",
 			st.Name, st.BaseBranch, st.Branch)
 	}
-	if _, err := a.Messages.Create(ctx, sessionID, message.CreateMessageParams{
-		Role:  message.System,
-		Parts: []message.ContentPart{message.TextContent{Text: text}},
-	}); err != nil {
+	if err := a.Messages().Create(ctx, sessionID, RoleSystem, []ContentPart{TextContent{Text: text}}); err != nil {
 		slog.Error("Failed to record thread removal in history", "component", "thread", "thread", st.ID, "error", err)
 	}
 }
@@ -912,10 +905,10 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 	if rt != nil {
 		rt.watchCancel()
 		if force {
-			// Cancel this delegation's own session, not the whole App's
+			// Cancel this delegation's own session, not the whole workspace's
 			// coordinator — see finishMerge's identical comment.
-			if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
-				a.AgentCoordinator.Cancel(st.SessionID)
+			if a := rt.handle.Workspace(); a != nil && a.Coordinator() != nil {
+				a.Coordinator().Cancel(st.SessionID)
 			}
 		}
 		if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
@@ -1017,11 +1010,11 @@ func (m *Manager) PermissionsFor(delegationID string) permission.Service {
 	if rt == nil {
 		return nil
 	}
-	a := rt.handle.App()
+	a := rt.handle.Workspace()
 	if a == nil || a == m.parentApp {
 		return nil
 	}
-	return a.Permissions
+	return a.Permissions()
 }
 
 func (m *Manager) Shutdown(ctx context.Context) error {
@@ -1052,8 +1045,8 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 					// fallback for "cancel something, we don't know what".
 					st, getErr := m.store.Get(context.Background(), threadID)
 					if getErr == nil {
-						if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
-							a.AgentCoordinator.Cancel(st.SessionID)
+						if a := rt.handle.Workspace(); a != nil && a.Coordinator() != nil {
+							a.Coordinator().Cancel(st.SessionID)
 						}
 					}
 					if err := rt.spawner.Release(context.Background(), rt.handle.ID()); err != nil {
@@ -1138,21 +1131,20 @@ func (m *Manager) recoverWorktree(ctx context.Context, st Thread) (bool, error) 
 // this resolves correctly even for a delegation resumed after a process
 // restart, when no in-memory state from the original Create survives.
 //
-// A task shares its parent's own App (ParentAppSpawner — see
-// internal/thread/spawner.go), so handle.App() already *is* the parent
-// App.
+// A task shares its parent's own App (threadspawn's ParentAppSpawner),
+// so handle.Workspace() already *is* the parent workspace.
 //
 // A thread spawns its own isolated App with a wholly separate database
-// (LocalSpawner), so the delivery target is instead m.parentApp — the
-// workspace this Manager itself was attached to, not the thread's own —
-// see ManagerOptions.ParentApp.
-func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st Thread) (*app.App, string, bool) {
+// (threadspawn's LocalSpawner), so the delivery target is instead
+// m.parentApp — the workspace this Manager itself was attached to, not
+// the thread's own — see ManagerOptions.ParentApp.
+func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st Thread) (Workspace, string, bool) {
 	switch st.Kind {
 	case KindTask:
 		if st.ParentSessionID == "" {
 			return nil, "", false
 		}
-		a := handle.App()
+		a := handle.Workspace()
 		if a == nil {
 			return nil, "", false
 		}

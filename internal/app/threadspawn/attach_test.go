@@ -1,4 +1,4 @@
-package thread
+package threadspawn
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/thread"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,14 +33,14 @@ func TestAttachOnlyAtRepositoryRoot(t *testing.T) {
 	repo := initRepo(t)
 	a := newAttachTestApp(t, repo)
 
-	Attach(t.Context(), a, repo, newFakeSpawner(t))
-	require.IsType(t, (*Manager)(nil), a.ThreadManager())
+	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
+	require.IsType(t, (*thread.Manager)(nil), a.ThreadManager())
 	require.NotNil(t, a.Threads)
 
 	subdir := filepath.Join(repo, "subdir")
 	require.NoError(t, os.Mkdir(subdir, 0o755))
 	nested := newAttachTestApp(t, subdir)
-	Attach(t.Context(), nested, subdir, newFakeSpawner(t))
+	Attach(t.Context(), nested, subdir, newAttachTestSpawner(t))
 	require.Nil(t, nested.ThreadManager())
 	require.Nil(t, nested.Threads)
 }
@@ -50,7 +51,7 @@ func TestAttachDoesNotPublishWhenConnectFails(t *testing.T) {
 	deps := testAttachDeps()
 	deps.connect = func(context.Context, string) (*sql.DB, error) { return nil, errors.New("connect") }
 
-	attachWithDeps(t.Context(), a, repo, newFakeSpawner(t), deps)
+	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
 	require.Nil(t, a.ThreadManager())
 	require.Nil(t, a.Threads)
@@ -60,11 +61,11 @@ func TestAttachRecoversBestEffortAndPublishes(t *testing.T) {
 	repo := initRepo(t)
 	a := newAttachTestApp(t, repo)
 	deps := testAttachDeps()
-	deps.recover = func(*Manager, context.Context) error { return errors.New("recover") }
+	deps.recover = func(*thread.Manager, context.Context) error { return errors.New("recover") }
 
-	attachWithDeps(t.Context(), a, repo, newFakeSpawner(t), deps)
+	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
-	require.IsType(t, (*Manager)(nil), a.ThreadManager())
+	require.IsType(t, (*thread.Manager)(nil), a.ThreadManager())
 	require.NotNil(t, a.Threads)
 }
 
@@ -79,7 +80,7 @@ func TestAttachShutdownHookFailureReleasesDatabaseWithoutPublishing(t *testing.T
 		return db.Release(dir)
 	}
 
-	attachWithDeps(t.Context(), a, repo, newFakeSpawner(t), deps)
+	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
 	require.Equal(t, 1, releases)
 	require.Nil(t, a.ThreadManager())
@@ -92,7 +93,7 @@ func TestAttachCriticalCleanupFailureShutsDownThenReleasesWithoutPublishing(t *t
 	deps := testAttachDeps()
 	var calls []string
 	deps.addCriticalCleanup = func(*app.App, func(context.Context) error) error { return errors.New("cleanup") }
-	deps.shutdown = func(mgr *Manager, ctx context.Context) error {
+	deps.shutdown = func(mgr *thread.Manager, ctx context.Context) error {
 		calls = append(calls, "shutdown")
 		return mgr.Shutdown(ctx)
 	}
@@ -101,14 +102,14 @@ func TestAttachCriticalCleanupFailureShutsDownThenReleasesWithoutPublishing(t *t
 		return db.Release(dir)
 	}
 
-	attachWithDeps(t.Context(), a, repo, newFakeSpawner(t), deps)
+	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
 	require.Equal(t, []string{"shutdown", "release"}, calls)
 	require.Nil(t, a.ThreadManager())
 	require.Nil(t, a.Threads)
 }
 
-func testAttachDeps() attachDeps { return productionAttachDeps }
+func testAttachDeps() attachDeps { return ProductionAttachDeps() }
 
 func TestAttachCleanupShutsDownManagerBeforeReleasingDatabase(t *testing.T) {
 	repo := initRepo(t)
@@ -124,7 +125,7 @@ func TestAttachCleanupShutsDownManagerBeforeReleasingDatabase(t *testing.T) {
 		criticalCleanup = fn
 		return nil
 	}
-	deps.shutdown = func(mgr *Manager, ctx context.Context) error {
+	deps.shutdown = func(mgr *thread.Manager, ctx context.Context) error {
 		calls = append(calls, "shutdown")
 		return mgr.Shutdown(ctx)
 	}
@@ -133,9 +134,9 @@ func TestAttachCleanupShutsDownManagerBeforeReleasingDatabase(t *testing.T) {
 		return db.Release(dir)
 	}
 
-	attachWithDeps(t.Context(), a, repo, newFakeSpawner(t), deps)
+	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
-	require.IsType(t, (*Manager)(nil), a.ThreadManager())
+	require.IsType(t, (*thread.Manager)(nil), a.ThreadManager())
 	require.NotNil(t, a.Threads)
 	require.NotNil(t, shutdownHook)
 	require.NotNil(t, criticalCleanup)
@@ -154,20 +155,20 @@ func TestAttachPublishesEventsAndReleasesStoreOnShutdown(t *testing.T) {
 	a := newAttachTestApp(t, repo)
 	ch := a.Events(t.Context())
 
-	Attach(t.Context(), a, repo, newFakeSpawner(t))
-	mgr, ok := a.ThreadManager().(*Manager)
+	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
+	mgr, ok := a.ThreadManager().(*thread.Manager)
 	require.True(t, ok)
 
 	// Let ForwardEvents subscribe before publishing, as production event tests
 	// do for post-construction sources.
 	time.Sleep(10 * time.Millisecond)
-	mgr.lc.publish(EventStatusChanged, Thread{Delegation: Delegation{ID: "thread-1", Name: "one"}})
+	mgr.PublishForTest(thread.EventStatusChanged, thread.Thread{Delegation: thread.Delegation{ID: "thread-1", Name: "one"}})
 	timeout := time.After(5 * time.Second)
 waitForThreadEvent:
 	for {
 		select {
 		case event := <-ch:
-			forwarded, ok := event.Payload.(pubsub.Event[Event])
+			forwarded, ok := event.Payload.(pubsub.Event[thread.Event])
 			if !ok {
 				continue
 			}
@@ -201,26 +202,33 @@ func TestAttach_TaskManagerReachableAndSharesRecoverySweep(t *testing.T) {
 	// isolated App, so a task's dispatch (which runs inside a itself,
 	// per ParentAppSpawner) is deterministic instead of hitting a real
 	// LLM/session store.
-	a.Sessions = &fakeSessions{}
-	a.AgentCoordinator = &fakeCoordinator{}
+	a.SetSessionsForTest(&attachFakeSessions{})
+	a.AgentCoordinator = &attachFakeCoordinator{}
 
-	Attach(t.Context(), a, repo, newFakeSpawner(t))
+	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
 
-	mgr, ok := a.ThreadManager().(*Manager)
+	mgr, ok := a.ThreadManager().(*thread.Manager)
 	require.True(t, ok, "thread manager should be reachable off the app after attach")
-	tasks, ok := a.TaskManager().(*TaskManager)
+	tasks, ok := a.TaskManager().(*thread.TaskManager)
 	require.True(t, ok, "task manager should be reachable off the app after attach")
 
-	taskSt, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	taskSt, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
 	// The task's runtime wraps the attached App itself, not a new one —
 	// Manager.Handle is kind-agnostic, so it reaches a task's runtime too.
 	h := mgr.Handle(taskSt.ID)
 	require.NotNil(t, h)
-	require.Same(t, a, h.App())
+	// A task's runtime is produced by Attach's NewParentAppSpawner, so its
+	// handle is the production *parentHandle wrapping the attached App —
+	// not the thread-spawner's attachTestHandle.
+	adh, ok := h.(*parentHandle)
+	require.True(t, ok)
+	parentWorkspace, ok := adh.Workspace().(*AppWorkspaceAdapter)
+	require.True(t, ok)
+	require.Same(t, a, parentWorkspace.App)
 
-	threadSt, err := mgr.Create(t.Context(), CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: MergeManual})
+	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	// Leave both dispatched runs in flight (no RunComplete published for
@@ -231,11 +239,11 @@ func TestAttach_TaskManagerReachableAndSharesRecoverySweep(t *testing.T) {
 
 	gotTask, err := mgr.Get(t.Context(), taskSt.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, gotTask.Status, "the task must be reachable through the same recovery sweep as the thread")
+	require.Equal(t, thread.StatusInterrupted, gotTask.Status, "the task must be reachable through the same recovery sweep as the thread")
 
 	gotThread, err := mgr.Get(t.Context(), threadSt.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, gotThread.Status)
+	require.Equal(t, thread.StatusInterrupted, gotThread.Status)
 }
 
 // TestAttach_ShutdownJoinsBothKinds proves the shutdown hook Attach
@@ -247,23 +255,23 @@ func TestAttach_TaskManagerReachableAndSharesRecoverySweep(t *testing.T) {
 func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 	repo := initRepo(t)
 	a := newAttachTestApp(t, repo)
-	a.Sessions = &fakeSessions{}
-	a.AgentCoordinator = &fakeCoordinator{}
+	a.SetSessionsForTest(&attachFakeSessions{})
+	a.AgentCoordinator = &attachFakeCoordinator{}
 
-	threadSpawner := newFakeSpawner(t)
+	threadSpawner := newAttachTestSpawner(t)
 	Attach(t.Context(), a, repo, threadSpawner)
 
-	mgr, ok := a.ThreadManager().(*Manager)
+	mgr, ok := a.ThreadManager().(*thread.Manager)
 	require.True(t, ok)
-	tasks, ok := a.TaskManager().(*TaskManager)
+	tasks, ok := a.TaskManager().(*thread.TaskManager)
 	require.True(t, ok)
 
-	taskSt, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	taskSt, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	threadSt, err := mgr.Create(t.Context(), CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: MergeManual})
+	threadSt, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "sibling-thread", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
-	taskCoord := a.AgentCoordinator.(*fakeCoordinator)
+	taskCoord := a.AgentCoordinator.(*attachFakeCoordinator)
 	require.Eventually(t, func() bool { return taskCoord.runCount() == 1 }, time.Second, time.Millisecond)
 	threadCoord := threadSpawner.coordFor(threadSt.WorktreePath)
 	require.Eventually(t, func() bool { return threadCoord.runCount() == 1 }, time.Second, time.Millisecond)
@@ -280,9 +288,9 @@ func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 
 	gotTask, err := mgr.Get(t.Context(), taskSt.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, gotTask.Status)
+	require.Equal(t, thread.StatusInterrupted, gotTask.Status)
 
 	gotThread, err := mgr.Get(t.Context(), threadSt.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, gotThread.Status)
+	require.Equal(t, thread.StatusInterrupted, gotThread.Status)
 }

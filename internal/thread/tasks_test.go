@@ -28,7 +28,7 @@ func newTestParentApp(t *testing.T) *app.App {
 	t.Helper()
 	a := app.NewForTest(context.Background())
 	t.Cleanup(a.ShutdownForTest)
-	a.Sessions = &fakeSessions{}
+	a.SetSessionsForTest(&fakeSessions{})
 	a.AgentCoordinator = &fakeCoordinator{}
 	return a
 }
@@ -61,11 +61,11 @@ func newTestTaskManagerWithRealMessages(t *testing.T) (*TaskManager, *app.App, s
 
 	parentApp := app.NewForTest(context.Background())
 	t.Cleanup(parentApp.ShutdownForTest)
-	parentApp.Sessions = sessions
-	parentApp.Messages = messages
+	parentApp.SetSessionsForTest(sessions)
+	parentApp.SetMessagesForTest(messages)
 	parentApp.AgentCoordinator = &fakeCoordinator{}
 
-	tasks := NewTaskManager(store, NewParentAppSpawner(parentApp), messages, mgr.lc, mgr.ctx)
+	tasks := NewTaskManager(store, NewTestParentAppSpawner(parentApp), NewTestMessageService(messages), mgr.lc, mgr.ctx)
 	return tasks, parentApp, sessions, messages
 }
 
@@ -83,7 +83,7 @@ func newTestTaskManager(t *testing.T, store Store) (*Manager, *TaskManager, *app
 		RepoRoot: t.TempDir(),
 	})
 	parentApp := newTestParentApp(t)
-	tasks := NewTaskManager(store, NewParentAppSpawner(parentApp), parentApp.Messages, mgr.lc, mgr.ctx)
+	tasks := NewTaskManager(store, NewTestParentAppSpawner(parentApp), NewTestMessageService(parentApp.Messages()), mgr.lc, mgr.ctx)
 	return mgr, tasks, parentApp
 }
 
@@ -102,7 +102,7 @@ func TestTaskManager_CreateRunsToCompletion(t *testing.T) {
 
 	// The child session nests under the caller's session, the same
 	// relationship a thread's child session gets from Manager.Create.
-	sessions := parentApp.Sessions.(*fakeSessions)
+	sessions := parentApp.SessionsForTest().(*fakeSessions)
 	sessions.mu.Lock()
 	created := sessions.createdSession
 	sessions.mu.Unlock()
@@ -184,7 +184,7 @@ func TestTaskManager_CreateRegistersDelegationParent(t *testing.T) {
 
 	require.Equal(t, st.SessionID, got.sessionID,
 		"a task's parent must be registered under its own child session id")
-	require.Equal(t, coord, got.parent.Parent,
+	require.Equal(t, coord, got.parent.Parent.(*testCoordinatorAdapter).inner,
 		"a task shares its parent's own coordinator")
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
@@ -240,7 +240,9 @@ func TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable(t *testin
 	// App instance the test constructed as the parent.
 	h := mgr.Handle(st.ID)
 	require.NotNil(t, h)
-	require.Same(t, parentApp, h.App())
+	ph, ok := h.(*parentAppTestHandle)
+	require.True(t, ok)
+	require.Same(t, parentApp, ph.app)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
@@ -252,7 +254,7 @@ func TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable(t *testin
 
 	// Prove the parent App itself is still alive and usable, not torn
 	// down by that release.
-	_, err = parentApp.Sessions.Create(t.Context(), "still alive")
+	_, err = parentApp.Sessions().Create(t.Context(), "still alive")
 	require.NoError(t, err)
 }
 
@@ -283,7 +285,7 @@ func TestTaskManager_ShutdownJoinsInFlightRun(t *testing.T) {
 	// Shutdown released the task's runtime via its own Spawner
 	// (ParentAppSpawner.Release), not the Manager's thread Spawner — and,
 	// critically, did not shut the parent App down.
-	_, err = parentApp.Sessions.Create(t.Context(), "still alive after shutdown")
+	_, err = parentApp.Sessions().Create(t.Context(), "still alive after shutdown")
 	require.NoError(t, err)
 }
 
@@ -708,7 +710,9 @@ func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 
 	h := mgr.Handle(st.ID)
 	require.NotNil(t, h, "Send must reactivate the task")
-	require.Same(t, parentApp, h.App(), "reactivating must rebind to the same parent App, not spawn a new one")
+	ph, ok := h.(*parentAppTestHandle)
+	require.True(t, ok)
+	require.Same(t, parentApp, ph.app, "reactivating must rebind to the same parent App, not spawn a new one")
 
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)

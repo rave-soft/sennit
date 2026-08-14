@@ -31,11 +31,11 @@ func TestSetPermissionsSkipPropagatesToThreads(t *testing.T) {
 	app.SetThreadManager(propagator)
 
 	app.SetPermissionsSkip(true)
-	require.True(t, app.Permissions.SkipRequests(), "the workspace's own flag must be set")
+	require.True(t, app.Permissions().SkipRequests(), "the workspace's own flag must be set")
 	require.Equal(t, []bool{true}, propagator.calls, "and forwarded to live threads")
 
 	app.SetPermissionsSkip(false)
-	require.False(t, app.Permissions.SkipRequests())
+	require.False(t, app.Permissions().SkipRequests())
 	require.Equal(t, []bool{true, false}, propagator.calls,
 		"turning bypass off must propagate too")
 }
@@ -50,7 +50,7 @@ func TestSetPermissionsSkipWithoutThreadManager(t *testing.T) {
 	t.Cleanup(app.ShutdownForTest)
 
 	require.NotPanics(t, func() { app.SetPermissionsSkip(true) })
-	require.True(t, app.Permissions.SkipRequests())
+	require.True(t, app.Permissions().SkipRequests())
 }
 
 // TestPermissionsSkipFuncTracksLiveState is the regression test for what

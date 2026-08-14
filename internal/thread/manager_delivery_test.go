@@ -22,7 +22,7 @@ func newTestManagerWithParentApp(t *testing.T, repo string) (*Manager, *fakeSpaw
 		Spawner:     spawner,
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-		ParentApp:   parentApp,
+		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 	return mgr, spawner, parentApp
 }
@@ -212,7 +212,7 @@ func TestManager_CreateWithParentRegistersDelegationParent(t *testing.T) {
 
 	require.Equal(t, st.SessionID, got.sessionID,
 		"a thread's parent must be registered under its own child session id")
-	require.Equal(t, parentApp.AgentCoordinator, got.parent.Parent,
+	require.Equal(t, parentApp.AgentCoordinator, got.parent.Parent.(*testCoordinatorAdapter).inner,
 		"a thread's Parent must resolve to the Manager's parentApp coordinator, not its own isolated one")
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)

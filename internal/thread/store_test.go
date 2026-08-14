@@ -17,10 +17,7 @@ func newTestStore(t *testing.T) Store {
 		db.ResetPool()
 	})
 
-	conn, err := db.Connect(t.Context(), dataDir)
-	require.NoError(t, err)
-
-	return NewStore(db.New(conn), dataDir)
+	return newTestStoreDB(t)
 }
 
 func testCreateParams(name string) CreateParams {

@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/notify"
 	mcptools "github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/git"
@@ -55,31 +56,31 @@ func (w *AppWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
 }
 
 func (w *AppWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
-	return w.app.Sessions.Create(ctx, title)
+	return w.app.Sessions().Create(ctx, title)
 }
 
 func (w *AppWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {
-	return w.app.Sessions.Get(ctx, sessionID)
+	return w.app.Sessions().Get(ctx, sessionID)
 }
 
 func (w *AppWorkspace) ListSessions(ctx context.Context) ([]session.Session, error) {
-	return w.app.Sessions.List(ctx)
+	return w.app.Sessions().List(ctx)
 }
 
 func (w *AppWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
-	return w.app.Sessions.Save(ctx, sess)
+	return w.app.Sessions().Save(ctx, sess)
 }
 
 func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
-	return w.app.Sessions.Delete(ctx, sessionID)
+	return w.app.Sessions().Delete(ctx, sessionID)
 }
 
 func (w *AppWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return w.app.Sessions.CreateAgentToolSessionID(messageID, toolCallID)
+	return w.app.Sessions().CreateAgentToolSessionID(messageID, toolCallID)
 }
 
 func (w *AppWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	return w.app.Sessions.ParseAgentToolSessionID(sessionID)
+	return w.app.Sessions().ParseAgentToolSessionID(sessionID)
 }
 
 // SetCurrentSession reports the active session to herdr so the pane
@@ -101,29 +102,29 @@ func (w *AppWorkspace) ListMessages(ctx context.Context, sessionID string) ([]me
 	// Drain any debounced updates so the caller observes the latest
 	// in-memory state. message.Service buffers streaming deltas and a
 	// cold List would otherwise miss them at session-switch time.
-	if err := w.app.Messages.FlushAll(ctx); err != nil {
+	if err := w.app.Messages().FlushAll(ctx); err != nil {
 		return nil, err
 	}
-	return w.app.Messages.List(ctx, sessionID)
+	return w.app.Messages().List(ctx, sessionID)
 }
 
 func (w *AppWorkspace) ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
-	return w.app.Messages.ListUserMessages(ctx, sessionID)
+	return w.app.Messages().ListUserMessages(ctx, sessionID)
 }
 
 func (w *AppWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
-	return w.app.Messages.ListAllUserMessages(ctx)
+	return w.app.Messages().ListAllUserMessages(ctx)
 }
 
 func (w *AppWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSessionID string, _ uint64, sessionIDs []string) (map[string][]message.Message, error) {
-	validated, err := w.app.Sessions.ValidateSessionIDsInTree(ctx, rootSessionID, sessionIDs)
+	validated, err := w.app.Sessions().ValidateSessionIDsInTree(ctx, rootSessionID, sessionIDs)
 	if err != nil {
 		return nil, err
 	}
-	if err := w.app.Messages.FlushAll(ctx); err != nil {
+	if err := w.app.Messages().FlushAll(ctx); err != nil {
 		return nil, err
 	}
-	return w.app.Messages.ListBySessionIDs(ctx, validated)
+	return w.app.Messages().ListBySessionIDs(ctx, validated)
 }
 
 // -- Agent --
@@ -157,7 +158,7 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	var persist shell.PersistFunc
 	if sessionID != "" {
 		persist = func(cmd, output string, exitCode int) error {
-			return shell.PersistOutput(ctx, w.app.Messages, sessionID, cmd, output, exitCode)
+			return shell.PersistOutput(ctx, w.app.Messages(), sessionID, cmd, output, exitCode)
 		}
 	}
 
@@ -303,7 +304,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 
 	// Automatically approve all permission requests for this
 	// non-interactive run.
-	w.app.Permissions.AutoApproveSession(sessionID)
+	w.app.Permissions().AutoApproveSession(sessionID)
 
 	// Report session identity to herdr. Local mode's Messages/RunComplete
 	// event bridge (see herdr.BridgeLocal in app.New) does the rest.
@@ -331,7 +332,7 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 		defer cancel()
 		defer close(out)
 
-		messageEvents := w.app.Messages.Subscribe(ctx)
+		messageEvents := w.app.Messages().Subscribe(ctx)
 		readBytes := make(map[string]int)
 		var printed bool
 
@@ -399,16 +400,16 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 // in this very App.
 func (w *AppWorkspace) permissionsFor(perm permission.PermissionRequest) permission.Service {
 	if perm.Delegation.ID == "" {
-		return w.app.Permissions
+		return w.app.Permissions()
 	}
 	mgr, ok := w.threadManager()
 	if !ok {
-		return w.app.Permissions
+		return w.app.Permissions()
 	}
 	if svc := mgr.PermissionsFor(perm.Delegation.ID); svc != nil {
 		return svc
 	}
-	return w.app.Permissions
+	return w.app.Permissions()
 }
 
 func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
@@ -424,7 +425,7 @@ func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
 }
 
 func (w *AppWorkspace) PermissionSkipRequests() bool {
-	return w.app.Permissions.SkipRequests()
+	return w.app.Permissions().SkipRequests()
 }
 
 func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
@@ -737,7 +738,7 @@ func (w *AppWorkspace) translateEvent(msg any) any {
 	if mgr, ok := w.threadManager(); ok {
 		workspaceID = mgr.WorkspaceID(e.Payload.Thread.ID)
 	}
-	pe := thread.EventToProto(e.Payload, workspaceID)
+	pe := threadspawn.EventToProto(e.Payload, workspaceID)
 	return pubsub.Event[proto.Thread]{
 		Type:    threadEventPubsubType(pe.Type),
 		Payload: pe.Thread,

@@ -9,10 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/notify"
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
 )
@@ -93,12 +89,13 @@ type recoverHook func(ctx context.Context, st Thread) (handled bool, err error)
 // regardless of whether anything is listening for it.
 //
 // handle is the entity's own workspace handle, passed through for a kind
-// (a task) whose delivery target is reachable through it (ParentAppSpawner
-// means handle.App() *is* the parent App). A kind that delivers into a
-// different App than its own workspace (a thread, whose LocalSpawner
-// gives it a wholly separate App/database) resolves independently of
-// handle and may receive nil — see Manager.resolveDeliveryTarget.
-type deliveryResolver func(ctx context.Context, handle Handle, st Thread) (target *app.App, parentSessionID string, ok bool)
+// (a task) whose delivery target is reachable through it (threadspawn's
+// ParentAppSpawner means handle.Workspace() *is* the parent workspace). A
+// kind that delivers into a different workspace than its own (a thread,
+// whose LocalSpawner gives it a wholly separate App/database) resolves
+// independently of handle and may receive nil — see
+// Manager.resolveDeliveryTarget.
+type deliveryResolver func(ctx context.Context, handle Handle, st Thread) (target Workspace, parentSessionID string, ok bool)
 
 // Logging note: every slog call in this package (and in the completion/
 // continuation path it feeds in internal/agent) is restricted to ids,
@@ -133,13 +130,13 @@ type lifecycle struct {
 	changeMu sync.Mutex
 	changeCh chan struct{}
 
-	// parentApp is the workspace App this lifecycle's delegations belong
+	// parentApp is the workspace this lifecycle's delegations belong
 	// to, and the event stream a user is actually watching. A thread runs
 	// in an isolated App whose events nobody outside it sees unless the
 	// user has drilled into that thread, so permission traffic raised
 	// there is relayed here — see forwardPermissions. Nil in tests that
 	// construct a lifecycle without one; forwarding is then skipped.
-	parentApp *app.App
+	parentApp Workspace
 }
 
 // newLifecycle constructs a ready-to-use lifecycle backed by store.
@@ -152,7 +149,7 @@ type lifecycle struct {
 // delegation kind driven over the same store — see [Manager] and
 // [TaskManager] — rather than constructing one per kind, or admission,
 // recovery, and shutdown will each only ever see one kind.
-func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHook, resolveDelivery deliveryResolver, parentApp *app.App) *lifecycle {
+func newLifecycle(store Store, onRunSuccess runCompleteHook, onRecover recoverHook, resolveDelivery deliveryResolver, parentApp Workspace) *lifecycle {
 	return &lifecycle{
 		store:           store,
 		onRunSuccess:    onRunSuccess,
@@ -302,13 +299,14 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 
 	// Reserve acceptance before dispatch so cancellation cannot leave a run
 	// unaccounted for between goroutine scheduling and coordinator admission.
-	accept := handle.App().AgentCoordinator.BeginAccepted(sessionID)
+	coord := handle.Workspace().Coordinator()
+	accept := coord.BeginAccepted(sessionID)
 	l.goWorker(func() {
-		if _, err := handle.App().AgentCoordinator.RunAccepted(agent.WithRunID(ctx, runID), accept, sessionID, prompt); err != nil {
+		if err := coord.RunAccepted(WithRunID(ctx, runID), accept, sessionID, prompt); err != nil {
 			slog.Error("Agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 			// backend.runAgent documents this fallback for pre-execution
 			// failures. Local coordinators do not provide that wrapper.
-			l.handleRunComplete(ctx, id, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
+			l.handleRunComplete(ctx, id, RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
 		}
 	})
 }
@@ -325,7 +323,7 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner Spawner, id string) *runtimeState {
 	c := l.control(id)
 	watchCtx, cancel := context.WithCancel(ctx)
-	sub := handle.App().RunCompletions().Subscribe(watchCtx)
+	sub := handle.Workspace().RunCompletions().Subscribe(watchCtx)
 	rt := &runtimeState{handle: handle, spawner: spawner, watchCancel: cancel}
 	c.mu.Lock()
 	c.runtime = rt
@@ -373,12 +371,12 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 	if l.parentApp == nil {
 		return
 	}
-	a := handle.App()
+	a := handle.Workspace()
 	if a == nil || a == l.parentApp {
 		return
 	}
-	forwardInto(ctx, l, a.Permissions.Subscribe)
-	forwardInto(ctx, l, a.Permissions.SubscribeNotifications)
+	forwardInto(ctx, l, a.Permissions().Subscribe)
+	forwardInto(ctx, l, a.Permissions().SubscribeNotifications)
 
 	// A request already waiting when the relay starts was published
 	// before anything was listening, and a request is announced exactly
@@ -386,7 +384,7 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 	// the failure this whole relay exists to prevent. Reachable whenever
 	// a workspace is re-installed under a delegation that still has a
 	// prompt outstanding.
-	if req, ok := a.Permissions.ActiveRequest(); ok {
+	if req, ok := a.Permissions().ActiveRequest(); ok {
 		l.parentApp.SendEvent(pubsub.Event[permission.PermissionRequest]{
 			Type:    pubsub.CreatedEvent,
 			Payload: req,
@@ -443,8 +441,8 @@ func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Conte
 // [Manager.Send] and [TaskManager.Send]: neither the "queue into a live
 // runtime" branch nor the "respawn, then dispatch" branch has any
 // git-specific or task-specific logic in it — only spawnPath (the
-// worktree path for a thread, "" for a task, since [ParentAppSpawner]
-// ignores it) and spawner differ between the two callers.
+// worktree path for a thread, "" for a task, since threadspawn's
+// ParentAppSpawner ignores it) and spawner differ between the two callers.
 //
 // ctx is the caller's own request context, used for the status writes
 // and to release an early-abandoned respawn; bgCtx is the long-lived
@@ -458,13 +456,13 @@ func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Conte
 // duration, the same admission ordering [Manager.Send] always used.
 func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string) error {
 	// Tag bgCtx so coordinator.run persists this dispatch's user message
-	// with Origin: message.OriginAgent instead of the default
+	// with Origin agent.OriginAgent instead of the default
 	// message.OriginPerson — a thread_send/task_send follow-up was not
 	// typed by the person, even though it is (and must remain) an
 	// ordinary message.User turn like any other. Both branches below
 	// (queue into the live runtime, and respawn-then-dispatch) read
 	// bgCtx, so tagging it once here covers both.
-	bgCtx = agent.WithPromptOrigin(bgCtx, message.OriginAgent)
+	bgCtx = WithAgentDispatch(bgCtx)
 	// Same reasoning for the delegation tag: both branches below dispatch
 	// a run, and a prompt raised by either has to be attributable.
 	bgCtx = l.withDelegation(bgCtx, id)
@@ -499,12 +497,12 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		rt.runID = runID
 		c.mu.Unlock()
 		l.goWorker(func() {
-			if _, err := rt.handle.App().AgentCoordinator.Run(agent.WithRunID(bgCtx, runID), sessionID, msg); err != nil {
+			if err := rt.handle.Workspace().Coordinator().Run(WithRunID(bgCtx, runID), sessionID, msg); err != nil {
 				slog.Error("Queued agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 				// Mirror startRun's fallback for pre-execution failures so
 				// the workspace is not stranded on a run that never
 				// published its own RunComplete.
-				l.handleRunComplete(bgCtx, id, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
+				l.handleRunComplete(bgCtx, id, RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
 			}
 		})
 		return nil
@@ -572,8 +570,8 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	}
 
 	rt.watchCancel()
-	if a := rt.handle.App(); a != nil && a.AgentCoordinator != nil {
-		a.AgentCoordinator.Cancel(st.SessionID)
+	if a := rt.handle.Workspace(); a != nil && a.Coordinator() != nil {
+		a.Coordinator().Cancel(st.SessionID)
 	}
 	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
 		slog.Error("Failed to release cancelled workspace", "component", "thread", "id", st.ID, "kind", st.Kind, "error", err)
@@ -606,7 +604,7 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 // run finishing mid-flight — see Manager.onAutoMerge and
 // Manager.deliverMergeOutcome, which deliver that event once mergeAttempt
 // concludes instead.
-func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.RunComplete) {
+func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComplete) {
 	c := l.existingControl(id)
 	if c == nil {
 		return
@@ -673,8 +671,9 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc notify.
 //
 // Where to deliver is entirely resolveDelivery's call — see
 // Manager.resolveDeliveryTarget for how a task (which shares its
-// parent's own App via ParentAppSpawner) and a thread (which spawns a
-// wholly separate one via LocalSpawner) resolve differently. ok=false
+// parent's own App via threadspawn's ParentAppSpawner) and a thread
+// (which spawns a wholly separate one via LocalSpawner) resolve
+// differently. ok=false
 // (no resolver configured, no overlay claims st.Kind, or no resolvable
 // parent) is a clean no-op: st's own terminal status is already recorded
 // and still pollable regardless of whether anything is listening for it.
@@ -695,11 +694,11 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 		slog.Info("Delivery skipped: no resolvable parent", "id", st.ID, "kind", st.Kind)
 		return
 	}
-	if target == nil || target.AgentCoordinator == nil {
+	if target == nil || target.Coordinator() == nil {
 		slog.Info("Delivery skipped: no delivery target", "id", st.ID, "kind", st.Kind)
 		return
 	}
-	target.AgentCoordinator.DeliverTaskCompletion(ctx, parentSessionID, agent.TaskCompletion{
+	target.Coordinator().DeliverTaskCompletion(ctx, parentSessionID, TaskCompletion{
 		DelegationID:   st.ID,
 		Kind:           string(st.Kind),
 		Name:           st.Name,
@@ -777,6 +776,6 @@ func (l *lifecycle) setPermissionsSkip(skip bool) {
 		if rt == nil {
 			continue
 		}
-		rt.handle.App().Permissions.SetSkipRequests(skip)
+		rt.handle.Workspace().Permissions().SetSkipRequests(skip)
 	}
 }

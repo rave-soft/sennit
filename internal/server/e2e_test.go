@@ -456,7 +456,7 @@ func TestE2E_PermissionFlowCrossClient(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		granted, err := h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
+		granted, err := h.app.Permissions().Request(ctx, permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			ToolCallID:  toolCallID,
 			ToolName:    "view",
@@ -640,9 +640,9 @@ func TestE2E_ClientListMessagesBySessionIDs(t *testing.T) {
 	require.NoError(t, err)
 	ws, err := h.backend.GetWorkspace(wsProto.ID)
 	require.NoError(t, err)
-	root, err := ws.Sessions.Create(t.Context(), "root")
+	root, err := ws.Sessions().Create(t.Context(), "root")
 	require.NoError(t, err)
-	child, err := ws.Sessions.CreateTaskSession(t.Context(), "child", root.ID, "child")
+	child, err := ws.Sessions().CreateTaskSession(t.Context(), "child", root.ID, "child")
 	require.NoError(t, err)
 	for _, tc := range []struct {
 		sessionID string
@@ -651,7 +651,7 @@ func TestE2E_ClientListMessagesBySessionIDs(t *testing.T) {
 		{root.ID, "root message"},
 		{child.ID, "child message"},
 	} {
-		_, err := ws.Messages.Create(t.Context(), tc.sessionID, message.CreateMessageParams{
+		_, err := ws.Messages().Create(t.Context(), tc.sessionID, message.CreateMessageParams{
 			Role:  message.User,
 			Parts: []message.ContentPart{message.TextContent{Text: tc.text}},
 		})
@@ -664,10 +664,10 @@ func TestE2E_ClientListMessagesBySessionIDs(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, c.SetCurrentSession(t.Context(), wsProto.ID, root.ID))
 
-	pending, err := ws.Messages.Create(t.Context(), child.ID, message.CreateMessageParams{Role: message.Assistant})
+	pending, err := ws.Messages().Create(t.Context(), child.ID, message.CreateMessageParams{Role: message.Assistant})
 	require.NoError(t, err)
 	pending.AppendContent("pending update")
-	require.NoError(t, ws.Messages.Update(t.Context(), pending))
+	require.NoError(t, ws.Messages().Update(t.Context(), pending))
 
 	got, err := c.ListMessagesBySessionIDs(t.Context(), wsProto.ID, root.ID, 1, []string{root.ID, child.ID})
 	require.NoError(t, err)
@@ -684,13 +684,13 @@ func TestE2E_BatchMessagesSwitchesScopeMonotonically(t *testing.T) {
 	require.NoError(t, err)
 	ws, err := h.backend.GetWorkspace(wsProto.ID)
 	require.NoError(t, err)
-	rootA, err := ws.Sessions.Create(t.Context(), "root A")
+	rootA, err := ws.Sessions().Create(t.Context(), "root A")
 	require.NoError(t, err)
-	rootB, err := ws.Sessions.Create(t.Context(), "root B")
+	rootB, err := ws.Sessions().Create(t.Context(), "root B")
 	require.NoError(t, err)
-	childB, err := ws.Sessions.CreateTaskSession(t.Context(), "child B", rootB.ID, "child B")
+	childB, err := ws.Sessions().CreateTaskSession(t.Context(), "child B", rootB.ID, "child B")
 	require.NoError(t, err)
-	_, err = ws.Messages.Create(t.Context(), childB.ID, message.CreateMessageParams{
+	_, err = ws.Messages().Create(t.Context(), childB.ID, message.CreateMessageParams{
 		Role:  message.User,
 		Parts: []message.ContentPart{message.TextContent{Text: "nested B"}},
 	})
@@ -721,15 +721,15 @@ func TestE2E_BatchMessagesRejectsForgedRoot(t *testing.T) {
 	require.NoError(t, err)
 	ws, err := h.backend.GetWorkspace(wsProto.ID)
 	require.NoError(t, err)
-	rootA, err := ws.Sessions.Create(t.Context(), "root A")
+	rootA, err := ws.Sessions().Create(t.Context(), "root A")
 	require.NoError(t, err)
-	childA, err := ws.Sessions.CreateTaskSession(t.Context(), "child A", rootA.ID, "child A")
+	childA, err := ws.Sessions().CreateTaskSession(t.Context(), "child A", rootA.ID, "child A")
 	require.NoError(t, err)
-	rootB, err := ws.Sessions.Create(t.Context(), "root B")
+	rootB, err := ws.Sessions().Create(t.Context(), "root B")
 	require.NoError(t, err)
-	childB, err := ws.Sessions.CreateTaskSession(t.Context(), "child B", rootB.ID, "child B")
+	childB, err := ws.Sessions().CreateTaskSession(t.Context(), "child B", rootB.ID, "child B")
 	require.NoError(t, err)
-	_, err = ws.Messages.Create(t.Context(), childB.ID, message.CreateMessageParams{
+	_, err = ws.Messages().Create(t.Context(), childB.ID, message.CreateMessageParams{
 		Role:  message.User,
 		Parts: []message.ContentPart{message.TextContent{Text: "private B"}},
 	})

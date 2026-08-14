@@ -23,6 +23,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/session"
@@ -108,6 +109,9 @@ type fakeHandle struct {
 
 func (h *fakeHandle) ID() string    { return h.id }
 func (h *fakeHandle) App() *app.App { return h.app }
+func (h *fakeHandle) Workspace() thread.Workspace {
+	return &threadspawn.AppWorkspaceAdapter{App: h.app}
+}
 
 type fakeSpawner struct {
 	t *testing.T
@@ -116,7 +120,7 @@ type fakeSpawner struct {
 func (s *fakeSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
-	a.Sessions = &fakeSessions{}
+	a.SetSessionsForTest(&fakeSessions{})
 	a.AgentCoordinator = &fakeCoordinator{}
 	return &fakeHandle{id: path, app: a}, nil
 }
@@ -253,7 +257,7 @@ func newTestThreadManager(t *testing.T, repo string) tools.ThreadManager {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	return thread.AsAgentToolManager(mgr)
+	return threadspawn.AsAgentToolManager(mgr)
 }
 
 // grantingPermissions always grants, skipping the interactive prompt path

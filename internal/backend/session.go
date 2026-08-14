@@ -16,7 +16,7 @@ func (b *Backend) CreateSession(ctx context.Context, workspaceID, title string) 
 		return session.Session{}, err
 	}
 
-	return ws.Sessions.Create(ctx, title)
+	return ws.Sessions().Create(ctx, title)
 }
 
 // GetSession retrieves a session by workspace and session ID.
@@ -26,7 +26,7 @@ func (b *Backend) GetSession(ctx context.Context, workspaceID, sessionID string)
 		return session.Session{}, err
 	}
 
-	return ws.Sessions.Get(ctx, sessionID)
+	return ws.Sessions().Get(ctx, sessionID)
 }
 
 // ListSessions returns all sessions in the given workspace.
@@ -36,7 +36,7 @@ func (b *Backend) ListSessions(ctx context.Context, workspaceID string) ([]sessi
 		return nil, err
 	}
 
-	return ws.Sessions.List(ctx)
+	return ws.Sessions().List(ctx)
 }
 
 // GetAgentSession returns session metadata with the agent's busy
@@ -47,7 +47,7 @@ func (b *Backend) GetAgentSession(ctx context.Context, workspaceID, sessionID st
 		return proto.AgentSession{}, err
 	}
 
-	se, err := ws.Sessions.Get(ctx, sessionID)
+	se, err := ws.Sessions().Get(ctx, sessionID)
 	if err != nil {
 		return proto.AgentSession{}, err
 	}
@@ -76,10 +76,10 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 	// Drain debounced updates so HTTP clients (and the TUI on session
 	// switch) observe the latest in-memory state rather than racing the
 	// debounce timer in message.Service.
-	if err := ws.Messages.FlushAll(ctx); err != nil {
+	if err := ws.Messages().FlushAll(ctx); err != nil {
 		return nil, err
 	}
-	return ws.Messages.List(ctx, sessionID)
+	return ws.Messages().List(ctx, sessionID)
 }
 
 func (b *Backend) ListSessionMessagesByIDs(ctx context.Context, workspaceID, clientID, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]message.Message, error) {
@@ -87,17 +87,17 @@ func (b *Backend) ListSessionMessagesByIDs(ctx context.Context, workspaceID, cli
 	if err != nil {
 		return nil, err
 	}
-	validated, err := ws.Sessions.ValidateSessionIDsInTree(ctx, rootSessionID, append(sessionIDs, rootSessionID))
+	validated, err := ws.Sessions().ValidateSessionIDsInTree(ctx, rootSessionID, append(sessionIDs, rootSessionID))
 	if err != nil {
 		return nil, err
 	}
 	if !slices.Contains(validated, rootSessionID) {
 		return nil, ErrSessionScope
 	}
-	if err := ws.Messages.FlushAll(ctx); err != nil {
+	if err := ws.Messages().FlushAll(ctx); err != nil {
 		return nil, err
 	}
-	messages, err := ws.Messages.ListBySessionIDs(ctx, validated)
+	messages, err := ws.Messages().ListBySessionIDs(ctx, validated)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (b *Backend) SaveSession(ctx context.Context, workspaceID string, sess sess
 		return session.Session{}, err
 	}
 
-	return ws.Sessions.Save(ctx, sess)
+	return ws.Sessions().Save(ctx, sess)
 }
 
 // DeleteSession deletes a session from the given workspace.
@@ -134,7 +134,7 @@ func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID stri
 		return err
 	}
 
-	return ws.Sessions.Delete(ctx, sessionID)
+	return ws.Sessions().Delete(ctx, sessionID)
 }
 
 // ListUserMessages returns user-role messages for a session.
@@ -144,7 +144,7 @@ func (b *Backend) ListUserMessages(ctx context.Context, workspaceID, sessionID s
 		return nil, err
 	}
 
-	return ws.Messages.ListUserMessages(ctx, sessionID)
+	return ws.Messages().ListUserMessages(ctx, sessionID)
 }
 
 // ListAllUserMessages returns all user-role messages across sessions.
@@ -154,5 +154,5 @@ func (b *Backend) ListAllUserMessages(ctx context.Context, workspaceID string) (
 		return nil, err
 	}
 
-	return ws.Messages.ListAllUserMessages(ctx)
+	return ws.Messages().ListAllUserMessages(ctx)
 }

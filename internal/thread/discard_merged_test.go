@@ -63,8 +63,8 @@ func newTestManagerWithRealMessages(t *testing.T, repo string) (*Manager, *fakeS
 
 	parentApp := app.NewForTest(context.Background())
 	t.Cleanup(parentApp.ShutdownForTest)
-	parentApp.Sessions = sessions
-	parentApp.Messages = messages
+	parentApp.SetSessionsForTest(sessions)
+	parentApp.SetMessagesForTest(messages)
 	parentApp.AgentCoordinator = &fakeCoordinator{}
 
 	spawner := newFakeSpawner(t)
@@ -73,7 +73,7 @@ func newTestManagerWithRealMessages(t *testing.T, repo string) (*Manager, *fakeS
 		Spawner:     spawner,
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-		ParentApp:   parentApp,
+		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 	return mgr, spawner, sessions, messages
 }

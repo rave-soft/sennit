@@ -24,7 +24,7 @@ func TestManager_ResolveDeliveryTarget_SurvivesRestart(t *testing.T) {
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-		ParentApp:   parentApp,
+		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 	st, err := mgr1.Create(t.Context(), CreateArgs{
 		Name:            "restart-thread",
@@ -39,14 +39,14 @@ func TestManager_ResolveDeliveryTarget_SurvivesRestart(t *testing.T) {
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-		ParentApp:   parentApp,
+		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 	fresh, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 
 	target, parentSessionID, ok := mgr2.resolveDeliveryTarget(t.Context(), nil, fresh)
 	require.True(t, ok)
-	require.Same(t, parentApp, target)
+	require.Same(t, parentApp, target.(*testAppWorkspace).app)
 	require.Equal(t, "parent-sess", parentSessionID)
 }
 
@@ -67,7 +67,7 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-		ParentApp:   parentApp,
+		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 	st, err := mgr1.Create(t.Context(), CreateArgs{
 		Name:            "resume-thread",
@@ -86,7 +86,7 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 		Spawner:     spawner2,
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-		ParentApp:   parentApp,
+		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 
 	require.NoError(t, mgr2.Send(t.Context(), st.ID, "resume message"))
@@ -96,7 +96,7 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 	require.Len(t, registered, 1)
 	got := registered[0]
 	require.Equal(t, st.SessionID, got.sessionID)
-	require.Same(t, parentApp.AgentCoordinator, got.parent.Parent)
+	require.Same(t, parentApp.AgentCoordinator, got.parent.Parent.(*testCoordinatorAdapter).inner)
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
 	require.Equal(t, string(KindThread), got.parent.Kind)
@@ -113,7 +113,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	store := newTestStoreDB(t)
 	parentApp1 := newTestParentApp(t)
 	mgr1 := NewManager(ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
-	tasks1 := NewTaskManager(store, NewParentAppSpawner(parentApp1), parentApp1.Messages, mgr1.lc, mgr1.ctx)
+	tasks1 := NewTaskManager(store, NewTestParentAppSpawner(parentApp1), NewTestMessageService(parentApp1.Messages()), mgr1.lc, mgr1.ctx)
 
 	st, err := tasks1.Create(t.Context(), TaskCreateArgs{Goal: "do it", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	// registration are both gone.
 	parentApp2 := newTestParentApp(t)
 	mgr2 := NewManager(ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
-	tasks2 := NewTaskManager(store, NewParentAppSpawner(parentApp2), parentApp2.Messages, mgr2.lc, mgr2.ctx)
+	tasks2 := NewTaskManager(store, NewTestParentAppSpawner(parentApp2), NewTestMessageService(parentApp2.Messages()), mgr2.lc, mgr2.ctx)
 
 	require.NoError(t, tasks2.Send(t.Context(), st.ID, "resume message"))
 
@@ -132,7 +132,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	require.Len(t, registered, 1)
 	got := registered[0]
 	require.Equal(t, st.SessionID, got.sessionID)
-	require.Same(t, parentApp2.AgentCoordinator, got.parent.Parent)
+	require.Same(t, parentApp2.AgentCoordinator, got.parent.Parent.(*testCoordinatorAdapter).inner)
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
 	require.Equal(t, string(KindTask), got.parent.Kind)
@@ -154,7 +154,7 @@ func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-		ParentApp:   parentApp,
+		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 	st, err := mgr1.Create(t.Context(), CreateArgs{
 		Name:        "restart-solo",
@@ -170,7 +170,7 @@ func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 		Spawner:     spawner2,
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
-		ParentApp:   parentApp,
+		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 
 	fresh, err := store.Get(t.Context(), st.ID)

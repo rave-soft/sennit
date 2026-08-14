@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/backend"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
@@ -118,6 +119,9 @@ type fakeThreadHandle struct {
 
 func (h *fakeThreadHandle) ID() string    { return h.id }
 func (h *fakeThreadHandle) App() *app.App { return h.app }
+func (h *fakeThreadHandle) Workspace() thread.Workspace {
+	return &threadspawn.AppWorkspaceAdapter{App: h.app}
+}
 
 type fakeThreadSpawner struct {
 	t *testing.T
@@ -126,7 +130,7 @@ type fakeThreadSpawner struct {
 func (s *fakeThreadSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
-	a.Sessions = &fakeThreadSessions{}
+	a.SetSessionsForTest(&fakeThreadSessions{})
 	a.AgentCoordinator = &fakeThreadCoordinator{}
 	return &fakeThreadHandle{id: path, app: a}, nil
 }
@@ -147,7 +151,7 @@ func newTestThreadStore(t *testing.T) thread.Store {
 	})
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	return thread.NewStore(db.New(conn), dataDir)
+	return threadspawn.NewStore(db.New(conn), dataDir)
 }
 
 // threadTestHarness wires a controllerV1 + httptest.Server around a
@@ -156,10 +160,11 @@ func newTestThreadStore(t *testing.T) thread.Store {
 // thread.Attach wires production
 // workspaces.
 type threadTestHarness struct {
-	httpSrv *httptest.Server
-	c       *controllerV1
-	ws      *backend.Workspace
-	mgr     *thread.Manager
+	httpSrv         *httptest.Server
+	c               *controllerV1
+	ws              *backend.Workspace
+	mgr             *thread.Manager
+	parentWorkspace *threadspawn.AppWorkspaceAdapter
 }
 
 func newThreadTestHarness(t *testing.T) *threadTestHarness {
@@ -173,11 +178,13 @@ func newThreadTestHarness(t *testing.T) *threadTestHarness {
 		a.ShutdownForTest()
 	})
 
+	parentWorkspace := threadspawn.NewAppWorkspaceAdapter(a)
 	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       newTestThreadStore(t),
 		Spawner:     &fakeThreadSpawner{t: t},
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
+		ParentApp:   parentWorkspace,
 	})
 	a.SetThreadManager(mgr)
 	app.ForwardEvents(a, "thread", mgr.Subscribe)
@@ -197,10 +204,11 @@ func newThreadTestHarness(t *testing.T) *threadTestHarness {
 	backend.InsertWorkspaceForTest(srv.backend, ws)
 
 	return &threadTestHarness{
-		httpSrv: hs,
-		c:       &controllerV1{backend: srv.backend, server: srv},
-		ws:      ws,
-		mgr:     mgr,
+		httpSrv:         hs,
+		c:               &controllerV1{backend: srv.backend, server: srv},
+		ws:              ws,
+		mgr:             mgr,
+		parentWorkspace: parentWorkspace,
 	}
 }
 

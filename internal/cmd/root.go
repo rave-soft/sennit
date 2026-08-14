@@ -21,6 +21,7 @@ import (
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/event"
@@ -30,7 +31,6 @@ import (
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/server/supervisor"
 	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/ui/common"
 	ui "github.com/rave-soft/braid/internal/ui/model"
 	"github.com/rave-soft/braid/internal/version"
@@ -283,7 +283,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
-	thread.Attach(ctx, boot.App, cwd, thread.NewLocalSpawner(
+	threadspawn.Attach(ctx, boot.App, cwd, threadspawn.NewLocalSpawner(
 		func() map[string]config.Agent { return boot.App.Config().UserAgents() },
 		boot.App.PermissionsSkipFunc(),
 	))

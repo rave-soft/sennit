@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/log"
 	"github.com/rave-soft/braid/internal/proto"
@@ -66,7 +67,7 @@ func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) 
 	}
 	result := make([]proto.Thread, len(sts))
 	for i, st := range sts {
-		result[i] = mgr.ToProto(st)
+		result[i] = threadspawn.ThreadToProto(mgr, st)
 	}
 	return result, nil
 }
@@ -80,7 +81,7 @@ func (w *AppWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, 
 	if err != nil {
 		return proto.Thread{}, err
 	}
-	return mgr.ToProto(st), nil
+	return threadspawn.ThreadToProto(mgr, st), nil
 }
 
 func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
@@ -98,7 +99,7 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 	if err != nil {
 		return proto.Thread{}, err
 	}
-	return mgr.ToProto(st), nil
+	return threadspawn.ThreadToProto(mgr, st), nil
 }
 
 func (w *AppWorkspace) SendThread(ctx context.Context, id, message string) error {
@@ -118,7 +119,7 @@ func (w *AppWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thr
 	if err != nil {
 		return proto.Thread{}, err
 	}
-	return mgr.ToProto(st), nil
+	return threadspawn.ThreadToProto(mgr, st), nil
 }
 
 func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
@@ -132,7 +133,7 @@ func (w *AppWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread
 	if err != nil {
 		return proto.Thread{}, err
 	}
-	return mgr.ToProto(st), nil
+	return threadspawn.ThreadToProto(mgr, st), nil
 }
 
 func (w *AppWorkspace) CancelThread(ctx context.Context, id, reason string) error {
@@ -173,9 +174,17 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 		// Manager, not by whoever is viewing it, so there is nothing to
 		// release here — teardown happens via Manager.Remove or process
 		// shutdown, not via this detach.
-		a := h.App()
-		aw := NewAppWorkspace(a, a.Store())
-		return aw, func() {}, nil
+		// The handle's Workspace is the domain-facing thread.Workspace
+		// seam; the spawners present it as a threadspawn.AppWorkspaceAdapter
+		// (see its doc comment), so assert that back here at the boundary
+		// to reach the concrete *app.App it wraps — this façade layer is
+		// allowed to know it (NewAppWorkspace needs it).
+		aw, ok := h.Workspace().(*threadspawn.AppWorkspaceAdapter)
+		if !ok || aw.App == nil {
+			return nil, nil, fmt.Errorf("thread: workspace handle does not wrap an *app.App")
+		}
+		ws := NewAppWorkspace(aw.App, aw.App.Store())
+		return ws, func() {}, nil
 	}
 	// Thread is not currently spawned (completed, interrupted, failed).
 	// Verify the thread actually exists before returning a workspace —
@@ -190,8 +199,9 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 	// user wants to open and keep working in by hand.
 	if _, err := mgr.Activate(ctx, id); err == nil {
 		if h := mgr.Handle(id); h != nil {
-			a := h.App()
-			return NewAppWorkspace(a, a.Store()), func() {}, nil
+			if a, ok := h.Workspace().(*threadspawn.AppWorkspaceAdapter); ok && a.App != nil {
+				return NewAppWorkspace(a.App, a.App.Store()), func() {}, nil
+			}
 		}
 	} else {
 		slog.Debug("Thread reactivation unavailable during attach, falling back to read-only", "thread", id, "error", err)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/backend"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/thread"
@@ -107,7 +108,7 @@ func (c *controllerV1) handleGetWorkspaceTasks(w http.ResponseWriter, r *http.Re
 	for i, st := range tasks {
 		// A task has no workspace of its own — see TaskController's doc
 		// comment in internal/workspace/workspace.go.
-		result[i] = thread.ToProto(st, "")
+		result[i] = threadspawn.ToProto(st, "")
 	}
 	jsonEncode(w, result)
 }
@@ -158,5 +159,5 @@ func (c *controllerV1) handlePostWorkspaceTaskCancel(w http.ResponseWriter, r *h
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, thread.ToProto(st, ""))
+	jsonEncode(w, threadspawn.ToProto(st, ""))
 }

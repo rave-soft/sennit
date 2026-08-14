@@ -436,7 +436,7 @@ func TestBootstrap_TwoProjectsConcurrentWrites(t *testing.T) {
 	write := func(a *App, label string) {
 		defer wg.Done()
 		for i := range writesPerApp {
-			if _, err := a.Sessions.Create(context.Background(), fmt.Sprintf("%s-%d", label, i)); err != nil {
+			if _, err := a.Sessions().Create(context.Background(), fmt.Sprintf("%s-%d", label, i)); err != nil {
 				errs <- err
 			}
 		}
@@ -452,11 +452,11 @@ func TestBootstrap_TwoProjectsConcurrentWrites(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	sessionsA, err := appA.Sessions.List(context.Background())
+	sessionsA, err := appA.Sessions().List(context.Background())
 	require.NoError(t, err)
 	require.Len(t, sessionsA, writesPerApp, "project A must see only its own sessions")
 
-	sessionsB, err := appB.Sessions.List(context.Background())
+	sessionsB, err := appB.Sessions().List(context.Background())
 	require.NoError(t, err)
 	require.Len(t, sessionsB, writesPerApp, "project B must see only its own sessions")
 }

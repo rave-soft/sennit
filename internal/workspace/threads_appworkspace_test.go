@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
@@ -85,7 +86,7 @@ func newTestThreadStoreDB(t *testing.T) thread.Store {
 	})
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	return thread.NewStore(db.New(conn), dataDir)
+	return threadspawn.NewStore(db.New(conn), dataDir)
 }
 
 // -- fakes: mirror internal/thread/manager_test.go's fakeSessions,
@@ -176,6 +177,9 @@ type fakeThreadHandle struct {
 
 func (h *fakeThreadHandle) ID() string    { return h.id }
 func (h *fakeThreadHandle) App() *app.App { return h.app }
+func (h *fakeThreadHandle) Workspace() thread.Workspace {
+	return &threadspawn.AppWorkspaceAdapter{App: h.app}
+}
 
 // fakeThreadSpawner spawns a real (but network/db-free) app.App per call
 // via app.NewForTest, wired with a fake Sessions/AgentCoordinator instead
@@ -197,7 +201,7 @@ func (s *fakeThreadSpawner) Spawn(ctx context.Context, path string) (thread.Hand
 
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
-	a.Sessions = newFakeThreadSessions()
+	a.SetSessionsForTest(newFakeThreadSessions())
 	a.AgentCoordinator = &fakeThreadCoordinator{}
 
 	h := &fakeThreadHandle{id: path, app: a}
@@ -290,7 +294,9 @@ func TestAppWorkspace_AttachThread(t *testing.T) {
 
 	attachedAW, ok := attached.(*AppWorkspace)
 	require.True(t, ok)
-	require.Same(t, handle.App(), attachedAW.App(), "AttachThread must bind to the thread's own nested App")
+	fh, ok := handle.(*fakeThreadHandle)
+	require.True(t, ok)
+	require.Same(t, fh.app, attachedAW.App(), "AttachThread must bind to the thread's own nested App")
 	require.NotSame(t, aw.App(), attachedAW.App())
 
 	require.NotPanics(t, func() { detach() })
@@ -313,7 +319,7 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
 	fs := newFakeThreadSessions()
-	a.Sessions = fs
+	a.SetSessionsForTest(fs)
 
 	store := newTestThreadStoreDB(t)
 	spawner := newFakeThreadSpawner(t)
@@ -466,7 +472,7 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
 	fs := newFakeThreadSessions()
-	a.Sessions = fs
+	a.SetSessionsForTest(fs)
 
 	store := newTestThreadStoreDB(t)
 	spawner := newFakeThreadSpawner(t)
@@ -528,7 +534,7 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
 	fs := newFakeThreadSessions()
-	a.Sessions = fs
+	a.SetSessionsForTest(fs)
 
 	store := newTestThreadStoreDB(t)
 	mgr := thread.NewManager(thread.ManagerOptions{

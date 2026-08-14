@@ -1,34 +1,35 @@
-package thread
+package threadspawn
 
 import (
 	"context"
 	"time"
 
 	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/thread"
 )
 
-// agentToolManager adapts a [Manager] to [tools.ThreadManager], the
+// agentToolManager adapts a *thread.Manager to tools.ThreadManager, the
 // interface the thread_* agent tools are built against. It exists because
 // internal/agent/tools cannot import internal/thread (internal/thread
 // imports internal/app, which imports internal/agent, which imports
 // internal/agent/tools — a cycle), so the tool-facing types there are
 // declared independently and this type converts between the two.
 type agentToolManager struct {
-	m *Manager
+	m *thread.Manager
 }
 
-// AsAgentToolManager returns m adapted to [tools.ThreadManager], for
+// AsAgentToolManager returns m adapted to tools.ThreadManager, for
 // wiring into agent.CoordinatorOptions.
-func AsAgentToolManager(m *Manager) tools.ThreadManager {
+func AsAgentToolManager(m *thread.Manager) tools.ThreadManager {
 	return &agentToolManager{m: m}
 }
 
 func (a *agentToolManager) Create(ctx context.Context, args tools.ThreadCreateArgs) (tools.ThreadInfo, error) {
-	st, err := a.m.Create(ctx, CreateArgs{
+	st, err := a.m.Create(ctx, thread.CreateArgs{
 		Name:            args.Name,
 		Goal:            args.Goal,
 		BaseBranch:      args.BaseBranch,
-		MergePolicy:     MergePolicy(args.MergePolicy),
+		MergePolicy:     thread.MergePolicy(args.MergePolicy),
 		ParentSessionID: args.ParentSessionID,
 	})
 	if err != nil {
@@ -77,7 +78,7 @@ func (a *agentToolManager) Remove(ctx context.Context, idOrName string, force, d
 	return a.m.Remove(ctx, idOrName, force, deleteBranch)
 }
 
-func toToolInfo(st Thread) tools.ThreadInfo {
+func toToolInfo(st thread.Thread) tools.ThreadInfo {
 	return tools.ThreadInfo{
 		ID:            st.ID,
 		Name:          st.Name,

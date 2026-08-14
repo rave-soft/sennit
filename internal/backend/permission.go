@@ -56,16 +56,16 @@ func (b *Backend) GrantPermission(workspaceID string, req proto.PermissionGrant)
 // through its own workspace type.
 func permissionsFor(ws *Workspace, perm permission.PermissionRequest) permission.Service {
 	if perm.Delegation.ID == "" {
-		return ws.Permissions
+		return ws.Permissions()
 	}
 	mgr, ok := ws.ThreadManager().(*thread.Manager)
 	if !ok || mgr == nil {
-		return ws.Permissions
+		return ws.Permissions()
 	}
 	if svc := mgr.PermissionsFor(perm.Delegation.ID); svc != nil {
 		return svc
 	}
-	return ws.Permissions
+	return ws.Permissions()
 }
 
 // SetPermissionsSkip sets whether permission prompts are skipped.
@@ -86,5 +86,5 @@ func (b *Backend) GetPermissionsSkip(workspaceID string) (bool, error) {
 		return false, err
 	}
 
-	return ws.Permissions.SkipRequests(), nil
+	return ws.Permissions().SkipRequests(), nil
 }

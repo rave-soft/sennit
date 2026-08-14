@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/proto"
@@ -29,9 +30,9 @@ func newAttachedTaskTestApp(t *testing.T, repo string) *app.App {
 	a := boot.App
 	// Deterministic session/coordinator fakes, same as attach_test.go's
 	// task-manager tests, so a task's dispatch doesn't hit a real LLM.
-	a.Sessions = newFakeThreadSessions()
+	a.SetSessionsForTest(newFakeThreadSessions())
 	a.AgentCoordinator = &fakeThreadCoordinator{}
-	thread.Attach(t.Context(), a, repo, newFakeThreadSpawner(t))
+	threadspawn.Attach(t.Context(), a, repo, newFakeThreadSpawner(t))
 	return a
 }
 
@@ -59,7 +60,7 @@ func TestAppWorkspace_ListTasks(t *testing.T) {
 
 	tm, ok := a.TaskManager().(*thread.TaskManager)
 	require.True(t, ok)
-	parent, err := a.Sessions.Create(ctx, "parent")
+	parent, err := a.Sessions().Create(ctx, "parent")
 	require.NoError(t, err)
 	created, err := tm.Create(ctx, thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: parent.ID})
 	require.NoError(t, err)
@@ -82,7 +83,7 @@ func TestAppWorkspace_CancelTask(t *testing.T) {
 
 	tm, ok := a.TaskManager().(*thread.TaskManager)
 	require.True(t, ok)
-	parent, err := a.Sessions.Create(ctx, "parent")
+	parent, err := a.Sessions().Create(ctx, "parent")
 	require.NoError(t, err)
 	created, err := tm.Create(ctx, thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: parent.ID})
 	require.NoError(t, err)

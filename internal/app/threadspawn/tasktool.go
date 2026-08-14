@@ -1,28 +1,29 @@
-package thread
+package threadspawn
 
 import (
 	"context"
 
 	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/thread"
 )
 
-// agentToolTaskManager adapts a [TaskManager] to [tools.TaskManager], the
-// interface the built-in agent tool's background mode and the task_*
+// agentToolTaskManager adapts a *thread.TaskManager to tools.TaskManager,
+// the interface the built-in agent tool's background mode and the task_*
 // tools are built against. Exists for the same import-cycle reason
-// [agentToolManager] does — see its doc comment.
+// agentToolManager does — see its doc comment.
 type agentToolTaskManager struct {
-	t *TaskManager
+	t *thread.TaskManager
 }
 
-// AsAgentToolTaskManager returns t adapted to [tools.TaskManager], for
+// AsAgentToolTaskManager returns t adapted to tools.TaskManager, for
 // wiring into agent.CoordinatorOptions (or app.SetTasks, which forwards
 // to it).
-func AsAgentToolTaskManager(t *TaskManager) tools.TaskManager {
+func AsAgentToolTaskManager(t *thread.TaskManager) tools.TaskManager {
 	return &agentToolTaskManager{t: t}
 }
 
 func (a *agentToolTaskManager) Create(ctx context.Context, args tools.TaskCreateArgs) (tools.TaskInfo, error) {
-	st, err := a.t.Create(ctx, TaskCreateArgs{
+	st, err := a.t.Create(ctx, thread.TaskCreateArgs{
 		Goal:            args.Goal,
 		ParentSessionID: args.ParentSessionID,
 		Depth:           args.Depth,
@@ -73,7 +74,7 @@ func (a *agentToolTaskManager) Output(ctx context.Context, id string, limit int)
 	return tools.TaskOutput{Messages: messages, Total: out.Total}, nil
 }
 
-func toTaskInfo(st Thread) tools.TaskInfo {
+func toTaskInfo(st thread.Thread) tools.TaskInfo {
 	return tools.TaskInfo{
 		ID:            st.ID,
 		Goal:          st.Goal,

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/backend"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/thread"
@@ -64,7 +65,7 @@ func (c *controllerV1) handleGetWorkspaceThreads(w http.ResponseWriter, r *http.
 	}
 	result := make([]proto.Thread, len(threads))
 	for i, st := range threads {
-		result[i] = mgr.ToProto(st)
+		result[i] = threadspawn.ThreadToProto(mgr, st)
 	}
 	jsonEncode(w, result)
 }
@@ -112,7 +113,7 @@ func (c *controllerV1) handlePostWorkspaceThreads(w http.ResponseWriter, r *http
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	jsonEncode(w, mgr.ToProto(st))
+	jsonEncode(w, threadspawn.ThreadToProto(mgr, st))
 }
 
 // handleGetWorkspaceThread returns a single thread.
@@ -145,7 +146,7 @@ func (c *controllerV1) handleGetWorkspaceThread(w http.ResponseWriter, r *http.R
 		jsonError(w, http.StatusNotFound, "thread not found")
 		return
 	}
-	jsonEncode(w, mgr.ToProto(st))
+	jsonEncode(w, threadspawn.ThreadToProto(mgr, st))
 }
 
 // handlePostWorkspaceThreadSend sends a follow-up message to a thread.
@@ -222,7 +223,7 @@ func (c *controllerV1) handlePostWorkspaceThreadActivate(w http.ResponseWriter, 
 		jsonError(w, http.StatusConflict, err.Error())
 		return
 	}
-	jsonEncode(w, mgr.ToProto(st))
+	jsonEncode(w, threadspawn.ThreadToProto(mgr, st))
 }
 
 // handlePostWorkspaceThreadMerge merges (or retries merging) a thread.
@@ -262,7 +263,7 @@ func (c *controllerV1) handlePostWorkspaceThreadMerge(w http.ResponseWriter, r *
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jsonEncode(w, mgr.ToProto(st))
+	jsonEncode(w, threadspawn.ThreadToProto(mgr, st))
 }
 
 // handlePostWorkspaceThreadCancel cancels a thread's in-flight run,
@@ -318,7 +319,7 @@ func (c *controllerV1) handlePostWorkspaceThreadCancel(w http.ResponseWriter, r 
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, mgr.ToProto(st))
+	jsonEncode(w, threadspawn.ThreadToProto(mgr, st))
 }
 
 // handleDeleteWorkspaceThread removes a thread.

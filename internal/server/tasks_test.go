@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
@@ -35,9 +36,9 @@ import (
 func newTaskTestHarness(t *testing.T) (*threadTestHarness, *thread.TaskManager) {
 	t.Helper()
 	h := newThreadTestHarness(t)
-	h.ws.Sessions = &fakeThreadSessions{}
+	h.ws.SetSessionsForTest(&fakeThreadSessions{})
 	h.ws.AgentCoordinator = &fakeThreadCoordinator{}
-	tasks := thread.NewTaskManagerForTest(h.mgr, thread.NewParentAppSpawner(h.ws.App), h.ws.Messages)
+	tasks := thread.NewTaskManagerForTest(h.mgr, threadspawn.NewParentAppSpawner(h.parentWorkspace), threadspawn.NewMessageService(h.ws.Messages()))
 	h.ws.SetTaskManager(tasks)
 	return h, tasks
 }

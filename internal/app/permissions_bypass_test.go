@@ -34,7 +34,7 @@ func TestNew_ConfigBypassSkipsPermissionsAtStartup(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(result.App.Shutdown)
 
-	require.True(t, result.App.Permissions.SkipRequests())
+	require.True(t, result.App.Permissions().SkipRequests())
 	require.True(t, result.App.lastConfigBypass)
 }
 
@@ -50,14 +50,14 @@ func TestApplyConfigPermissionsBypass_AppliesChange(t *testing.T) {
 
 	app := &App{
 		config:      store,
-		Permissions: permission.NewPermissionService("", false, nil),
+		permissions: permission.NewPermissionService("", false, nil),
 	}
-	require.False(t, app.Permissions.SkipRequests())
+	require.False(t, app.Permissions().SkipRequests())
 
 	store.Config().Permissions = &config.Permissions{Bypass: true}
 	app.applyConfigPermissionsBypass()
 
-	require.True(t, app.Permissions.SkipRequests())
+	require.True(t, app.Permissions().SkipRequests())
 	require.True(t, app.lastConfigBypass)
 }
 
@@ -74,17 +74,17 @@ func TestApplyConfigPermissionsBypass_DoesNotClobberManualToggle(t *testing.T) {
 
 	app := &App{
 		config:      store,
-		Permissions: permission.NewPermissionService("", false, nil),
+		permissions: permission.NewPermissionService("", false, nil),
 	}
 
 	// Simulate a manual ctrl+y toggle: session-only, config.bypass stays false.
-	app.Permissions.SetSkipRequests(true)
+	app.Permissions().SetSkipRequests(true)
 
 	// Re-invoke the reload path with the config value unchanged (still
 	// false/unset) -- this must be a no-op with respect to the manual
 	// toggle.
 	app.applyConfigPermissionsBypass()
 
-	require.True(t, app.Permissions.SkipRequests(), "manual toggle should survive a no-op config reload")
+	require.True(t, app.Permissions().SkipRequests(), "manual toggle should survive a no-op config reload")
 	require.False(t, app.lastConfigBypass)
 }

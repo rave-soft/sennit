@@ -18,12 +18,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/skills"
-	"github.com/rave-soft/braid/internal/thread"
 	"github.com/rave-soft/braid/internal/version"
 )
 
@@ -505,7 +505,7 @@ func (b *Backend) createWorkspace(args proto.Workspace, attachThreads bool, inhe
 	go forwardWorkspaceChanged(wsCtx, ws)
 
 	if attachThreads {
-		thread.Attach(wsCtx, ws.App, args.Path, b.ThreadSpawner(
+		threadspawn.Attach(wsCtx, ws.App, args.Path, b.ThreadSpawner(
 			func() map[string]config.Agent { return ws.App.Config().UserAgents() },
 			ws.PermissionsSkipFunc(),
 		))

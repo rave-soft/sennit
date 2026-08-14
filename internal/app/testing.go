@@ -6,11 +6,24 @@ import (
 
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/question"
+	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/shell"
 )
+
+// Test-only accessors for the services that used to be exported App fields
+// (now unexported, exposed to the thread domain through the accessors in
+// thread_workspace.go). Production code keeps using those accessors; these
+// exist purely so tests can still install or read the services directly.
+func (app *App) SetSessionsForTest(s session.Service)       { app.sessions = s }
+func (app *App) SessionsForTest() session.Service           { return app.sessions }
+func (app *App) SetMessagesForTest(m message.Service)       { app.messages = m }
+func (app *App) MessagesForTest() message.Service           { return app.messages }
+func (app *App) SetPermissionsForTest(p permission.Service) { app.permissions = p }
+func (app *App) PermissionsForTest() permission.Service     { return app.permissions }
 
 // NewForTest constructs a minimal [App] suitable for in-process tests
 // that need a working event broker and permission service without
@@ -34,7 +47,7 @@ import (
 // tear down the fan-in goroutines and the events broker.
 func NewForTest(ctx context.Context) *App {
 	app := &App{
-		Permissions:        permission.NewPermissionService("", false, nil),
+		permissions:        permission.NewPermissionService("", false, nil),
 		Questions:          question.NewService(),
 		BackgroundShells:   shell.NewBackgroundShellManager(),
 		globalCtx:          ctx,
@@ -50,9 +63,9 @@ func NewForTest(ctx context.Context) *App {
 	eventsCtx, cancel := context.WithCancel(ctx)
 	app.eventsCtx = eventsCtx
 	setupSubscriberMustDeliver(eventsCtx, app.serviceEventsWG, "permissions",
-		app.Permissions.Subscribe, app.events)
+		app.permissions.Subscribe, app.events)
 	setupSubscriberMustDeliver(eventsCtx, app.serviceEventsWG, "permissions-notifications",
-		app.Permissions.SubscribeNotifications, app.events)
+		app.permissions.SubscribeNotifications, app.events)
 	setupSubscriberMustDeliver(eventsCtx, app.serviceEventsWG, "question-batches",
 		app.Questions.Subscribe, app.events)
 	setupSubscriberMustDeliver(eventsCtx, app.serviceEventsWG, "question-notifications",

@@ -39,7 +39,7 @@ func TestManager_ThreadPermissionRequestReachesTheParentStream(t *testing.T) {
 	// bash tool would. Request blocks until answered, so it runs in its
 	// own goroutine.
 	go func() {
-		_, _ = handle.App().Permissions.Request(t.Context(), permission.CreatePermissionRequest{
+		_, _ = handle.App().Permissions().Request(t.Context(), permission.CreatePermissionRequest{
 			SessionID:   st.SessionID,
 			ToolCallID:  "call-1",
 			ToolName:    "bash",
@@ -82,7 +82,7 @@ func TestManager_ForwardedPermissionCarriesItsDelegation(t *testing.T) {
 		ID: st.ID, Name: st.Name, Kind: string(st.Kind),
 	})
 	go func() {
-		_, _ = handle.App().Permissions.Request(ctx, permission.CreatePermissionRequest{
+		_, _ = handle.App().Permissions().Request(ctx, permission.CreatePermissionRequest{
 			SessionID:  st.SessionID,
 			ToolCallID: "call-1",
 			ToolName:   "bash",
@@ -122,7 +122,7 @@ func TestManager_PermissionsForRoutesToTheThreadThatIsWaiting(t *testing.T) {
 	})
 	granted := make(chan bool, 1)
 	go func() {
-		ok, _ := handle.App().Permissions.Request(ctx, permission.CreatePermissionRequest{
+		ok, _ := handle.App().Permissions().Request(ctx, permission.CreatePermissionRequest{
 			SessionID:  st.SessionID,
 			ToolCallID: "call-1",
 			ToolName:   "bash",
@@ -136,7 +136,7 @@ func TestManager_PermissionsForRoutesToTheThreadThatIsWaiting(t *testing.T) {
 
 	svc := mgr.PermissionsFor(req.Delegation.ID)
 	require.NotNil(t, svc, "a live thread's permission service must be resolvable from its delegation id")
-	require.NotSame(t, parent.Permissions, svc, "and it must not be the parent's own")
+	require.NotSame(t, parent.Permissions(), svc, "and it must not be the parent's own")
 	require.True(t, svc.Grant(req), "granting must resolve the pending request")
 
 	select {

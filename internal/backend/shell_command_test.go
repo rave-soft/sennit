@@ -32,10 +32,9 @@ func TestRunShellCommand_SkipsPersistenceForMissingSession(t *testing.T) {
 		clients:      make(map[string]*clientState),
 		shutdownFn:   func() {},
 	}
-	ws.App = &app.App{
-		Sessions: sessions,
-		Messages: messages,
-	}
+	ws.App = &app.App{}
+	ws.SetSessionsForTest(sessions)
+	ws.SetMessagesForTest(messages)
 	ws.ctx, ws.cancel = context.WithCancel(b.ctx)
 	InsertWorkspaceForTest(b, ws)
 

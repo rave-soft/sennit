@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/thread"
@@ -16,12 +17,13 @@ import (
 // the backend workspace ID (not the internal client ID used to hold it
 // open); Release looks the client ID back up from it.
 type threadHandle struct {
-	id  string
-	app *app.App
+	id        string
+	app       *app.App
+	workspace *threadspawn.AppWorkspaceAdapter
 }
 
-func (h *threadHandle) ID() string    { return h.id }
-func (h *threadHandle) App() *app.App { return h.app }
+func (h *threadHandle) ID() string                  { return h.id }
+func (h *threadHandle) Workspace() thread.Workspace { return h.workspace }
 
 // threadSpawner adapts [Backend] to [thread.Spawner]: it drives thread
 // workspaces through the same CreateWorkspace bootstrap path every other
@@ -79,7 +81,11 @@ func (s *threadSpawner) Spawn(ctx context.Context, path string) (thread.Handle, 
 	s.clientOf[ws.ID] = clientID
 	s.mu.Unlock()
 
-	return &threadHandle{id: ws.ID, app: ws.App}, nil
+	return &threadHandle{
+		id:        ws.ID,
+		app:       ws.App,
+		workspace: threadspawn.NewAppWorkspaceAdapter(ws.App),
+	}, nil
 }
 
 // Release implements thread.Spawner.

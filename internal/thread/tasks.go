@@ -7,8 +7,6 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 )
 
@@ -19,7 +17,7 @@ import (
 // misconfigure upward would defeat the reason they exist.
 //
 // Every task runs inside the *same* parent App as the turn that created it
-// (see ParentAppSpawner) — the same working directory, and the same
+// (see threadspawn's ParentAppSpawner) — the same working directory, and the same
 // permission.Service the visible turn itself uses. Permission prompts are
 // answered one at a time, so beyond a small number, extra concurrent tasks
 // do not get more done in parallel; they just queue behind the same
@@ -36,7 +34,8 @@ import (
 // session) of the ability to delegate anything at all.
 //
 // Threads do not count toward either limit: a thread spawns its own
-// isolated App with its own worktree (LocalSpawner), so it never touches
+// isolated App with its own worktree (threadspawn's LocalSpawner), so it
+// never touches
 // the parent App's working directory or its permission.Service - neither
 // of the two resources these limits protect. This is enforced simply by
 // scope: the counts below are computed from List, which is already
@@ -70,7 +69,8 @@ type TaskCreateArgs struct {
 // per-entity serialization, run dispatch, status transitions, recovery,
 // and shutdown as [Manager]'s threads, minus the git worktree/merge
 // overlay. A task runs inside its parent workspace's own App instead of
-// an isolated one it spawns — see [ParentAppSpawner] — which is the
+// an isolated one it spawns — see threadspawn's ParentAppSpawner — which
+// is the
 // entire reason this kind exists: it starts cheaply where a thread
 // cannot.
 //
@@ -84,7 +84,7 @@ type TaskCreateArgs struct {
 type TaskManager struct {
 	store    Store
 	spawner  Spawner
-	messages message.Service
+	messages MessageService
 	ctx      context.Context
 	lc       *lifecycle
 
@@ -105,11 +105,12 @@ type TaskManager struct {
 // group, and recovery sweep, splitting exactly the machinery this package
 // exists to share, and a separate ctx would mean Manager.Shutdown's
 // cancellation never reaches a task's in-flight run. spawner should be a
-// [ParentAppSpawner] wrapping the workspace's own App, and messages that
+// threadspawn ParentAppSpawner wrapping the workspace's own App, and
+// messages that
 // same App's own message.Service — a task's child session lives in the
 // parent's own message store, not a separate one, so [TaskManager.Output]
 // reads it directly rather than through any task-specific plumbing.
-func NewTaskManager(store Store, spawner Spawner, messages message.Service, lc *lifecycle, ctx context.Context) *TaskManager {
+func NewTaskManager(store Store, spawner Spawner, messages MessageService, lc *lifecycle, ctx context.Context) *TaskManager {
 	return &TaskManager{store: store, spawner: spawner, messages: messages, ctx: ctx, lc: lc}
 }
 
@@ -200,7 +201,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		}
 	}()
 
-	sess, err := handle.App().Sessions.CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, args.Goal)
+	sess, err := handle.Workspace().Sessions().CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, args.Goal)
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
@@ -216,8 +217,8 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	// task's turns through. Placing it before setStatus/startRun means
 	// no later error path in this function can leave a half-registered
 	// parent pointing at a session that never actually runs.
-	handle.App().AgentCoordinator.RegisterDelegationParent(sess.ID, agent.DelegationParent{
-		Parent:          handle.App().AgentCoordinator,
+	handle.Workspace().Coordinator().RegisterDelegationParent(sess.ID, DelegationParent{
+		Parent:          handle.Workspace().Coordinator(),
 		ParentSessionID: args.ParentSessionID,
 		DelegationID:    st.ID,
 		Kind:            string(KindTask),
@@ -241,7 +242,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		Name: st.Name,
 		Kind: string(st.Kind),
 	})
-	t.lc.startRun(agent.WithPromptOrigin(runCtx, message.OriginAgent), handle, t.spawner, st.ID, st.SessionID, args.Goal)
+	t.lc.startRun(WithAgentDispatch(runCtx), handle, t.spawner, st.ID, st.SessionID, args.Goal)
 	owned = false // Ownership transferred to the shared runtime state.
 
 	// ids and depth only — args.Goal is the user's prompt and never
@@ -371,7 +372,8 @@ func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 // runtime is not currently live — the same "queue if live, otherwise
 // respawn and dispatch" behavior [Manager.Send] gives a thread, shared via
 // lifecycle.send. For a task, "respawn" only means rebinding to the
-// parent App through [ParentAppSpawner]; nothing is actually rebuilt.
+// parent App through threadspawn's ParentAppSpawner; nothing is actually
+// rebuilt.
 //
 // A task [TaskManager.Cancel] stopped is the one exception: cancelling was
 // a decision, not a pause, so Send refuses to resume it rather than
@@ -400,17 +402,17 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) error {
 	// The dispatcher's DelegationParent registry lives per coordinator
 	// instance and is empty on a freshly-started process — see
 	// Manager.Send's identical re-registration. A task's Parent is its own
-	// coordinator (it shares its parent's App via ParentAppSpawner, unlike
-	// a thread's wholly isolated one), so no ParentApp guard is needed
-	// here, only a persisted parent to re-register.
+	// coordinator (it shares its parent's App via threadspawn's
+	// ParentAppSpawner, unlike a thread's wholly isolated one), so no
+	// ParentApp guard is needed here, only a persisted parent to re-register.
 	if st.ParentSessionID != "" {
 		if c := t.lc.existingControl(st.ID); c != nil {
 			c.mu.Lock()
 			rt := c.runtime
 			c.mu.Unlock()
 			if rt != nil {
-				coord := rt.handle.App().AgentCoordinator
-				coord.RegisterDelegationParent(st.SessionID, agent.DelegationParent{
+				coord := rt.handle.Workspace().Coordinator()
+				coord.RegisterDelegationParent(st.SessionID, DelegationParent{
 					Parent:          coord,
 					ParentSessionID: st.ParentSessionID,
 					DelegationID:    st.ID,
@@ -496,14 +498,13 @@ func (t *TaskManager) Output(ctx context.Context, id string, limit int) (TaskOut
 
 	texts := make([]TaskOutputMessage, 0, len(all))
 	for _, msg := range all {
-		if msg.Role != message.User && msg.Role != message.Assistant {
+		if msg.Role != RoleUser && msg.Role != RoleAssistant {
 			continue
 		}
-		text := msg.Content().Text
-		if text == "" {
+		if msg.Text == "" {
 			continue
 		}
-		texts = append(texts, TaskOutputMessage{Role: string(msg.Role), Text: text})
+		texts = append(texts, TaskOutputMessage{Role: string(msg.Role), Text: msg.Text})
 	}
 
 	total := len(texts)

@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/notify"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/backend"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/message"
@@ -179,7 +180,7 @@ func wrapEvent(ev any) *pubsub.Payload {
 		// let clients that need it re-GET the thread.
 		return envelope(pubsub.PayloadTypeThreadEvent, pubsub.Event[proto.ThreadEvent]{
 			Type:    e.Type,
-			Payload: thread.EventToProto(e.Payload, ""),
+			Payload: threadspawn.EventToProto(e.Payload, ""),
 		})
 	default:
 		slog.Warn("Unrecognized event type for SSE wrapping", "type", fmt.Sprintf("%T", ev))

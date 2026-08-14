@@ -49,10 +49,16 @@ type coordinatorCloser interface {
 }
 
 type App struct {
-	Sessions    session.Service
-	Messages    message.Service
+	// The three service fields below are unexported with accessors on
+	// top (see thread_workspace.go) so that *App can satisfy
+	// thread.Workspace — Go forbids a method and a field sharing a name,
+	// and the domain interface internal/thread drives its delegations
+	// through requires method accessors. Read them through the
+	// Sessions()/Messages()/Permissions() accessors, not as fields.
+	sessions    session.Service
+	messages    message.Service
 	History     history.Service
-	Permissions permission.Service
+	permissions permission.Service
 	Questions   question.Service
 	FileTracker filetracker.Service
 
@@ -236,10 +242,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	app := &App{
-		Sessions:         sessions,
-		Messages:         messages,
+		sessions:         sessions,
+		messages:         messages,
 		History:          files,
-		Permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
+		permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		Questions:        question.NewService(),
 		FileTracker:      filetracker.NewService(q, store.WorkingDir()),
 		LSPManager:       lsp.NewManager(store),
@@ -279,15 +285,15 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	app.MCP.ArmInit()
 	mcpInitCtx, mcpInitCancel := context.WithCancel(ctx)
 	app.mcpInitCancel = mcpInitCancel
-	app.mcpInitWG.Go(func() { app.MCP.Initialize(mcpInitCtx, app.Permissions, store) })
+	app.mcpInitWG.Go(func() { app.MCP.Initialize(mcpInitCtx, app.Permissions(), store) })
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
 	herdr.BridgeLocal(ctx, app.herdrClient, herdr.BridgeSources{
-		PermRequests:      app.Permissions,
-		PermNotifications: app.Permissions,
+		PermRequests:      app.Permissions(),
+		PermNotifications: app.Permissions(),
 		RunCompletions:    app.runCompletions,
-		Messages:          app.Messages,
+		Messages:          app.Messages(),
 	})
 
 	// Keep production resources in explicit dependency phases rather than
@@ -413,7 +419,7 @@ type permissionsSkipPropagator interface {
 // after a ctrl+y or /yolo toggle inherited the state the process started
 // in, not the state the user was actually in.
 func (app *App) PermissionsSkipFunc() func() bool {
-	return func() bool { return app.Permissions.SkipRequests() }
+	return func() bool { return app.Permissions().SkipRequests() }
 }
 
 // SetPermissionsSkip sets this workspace's permission-bypass ("yolo")
@@ -426,7 +432,7 @@ func (app *App) PermissionsSkipFunc() func() bool {
 // leaves running threads - which have permission services of their own -
 // on whatever state they were spawned with.
 func (app *App) SetPermissionsSkip(skip bool) {
-	app.Permissions.SetSkipRequests(skip)
+	app.Permissions().SetSkipRequests(skip)
 	if mgr, ok := app.threadManager.(permissionsSkipPropagator); ok {
 		mgr.SetPermissionsSkip(skip)
 	}
@@ -587,10 +593,10 @@ func (app *App) UpdateAgentModel(ctx context.Context) error {
 func (app *App) setupEvents() {
 	ctx, cancel := context.WithCancel(app.globalCtx)
 	app.eventsCtx = ctx
-	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.Sessions.Subscribe, app.events)
-	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.Messages.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "permissions", app.Permissions.Subscribe, app.events)
-	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "permissions-notifications", app.Permissions.SubscribeNotifications, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "sessions", app.sessions.Subscribe, app.events)
+	setupSubscriber(ctx, app.serviceEventsWG, "messages", app.messages.Subscribe, app.events)
+	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "permissions", app.permissions.Subscribe, app.events)
+	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "permissions-notifications", app.permissions.SubscribeNotifications, app.events)
 	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "question-batches", app.Questions.Subscribe, app.events)
 	setupSubscriberMustDeliver(ctx, app.serviceEventsWG, "question-notifications", app.Questions.SubscribeNotifications, app.events)
 	setupSubscriber(ctx, app.serviceEventsWG, "history", app.History.Subscribe, app.events)
@@ -706,9 +712,9 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:           app.config,
-		Sessions:         app.Sessions,
-		Messages:         app.Messages,
-		Permissions:      app.Permissions,
+		Sessions:         app.sessions,
+		Messages:         app.messages,
+		Permissions:      app.permissions,
 		Questions:        app.Questions,
 		History:          app.History,
 		FileTracker:      app.FileTracker,
@@ -925,9 +931,9 @@ func (app *App) Shutdown() {
 	// 3. Flush any debounced message updates before the DB-close cleanup
 	// runs. message.Service buffers streaming deltas and we must land
 	// them while the connection is still open.
-	if app.Messages != nil {
+	if app.messages != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), app.shutdownTimeout)
-		if err := app.Messages.FlushAll(ctx); err != nil {
+		if err := app.messages.FlushAll(ctx); err != nil {
 			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
 		}
 		cancel()

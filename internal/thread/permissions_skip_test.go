@@ -26,15 +26,15 @@ func TestManager_SetPermissionsSkipReachesLiveThreads(t *testing.T) {
 
 	handle := spawner.handleFor(st.WorktreePath)
 	require.NotNil(t, handle)
-	require.False(t, handle.App().Permissions.SkipRequests(),
+	require.False(t, handle.App().Permissions().SkipRequests(),
 		"precondition: the spawned thread starts without bypass")
 
 	mgr.SetPermissionsSkip(true)
-	require.True(t, handle.App().Permissions.SkipRequests(),
+	require.True(t, handle.App().Permissions().SkipRequests(),
 		"turning bypass on in the parent must reach a thread already running")
 
 	mgr.SetPermissionsSkip(false)
-	require.False(t, handle.App().Permissions.SkipRequests(),
+	require.False(t, handle.App().Permissions().SkipRequests(),
 		"turning bypass off must reach it too — this is the direction with consequences")
 }
 

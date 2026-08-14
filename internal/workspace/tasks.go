@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 
+	"github.com/rave-soft/braid/internal/app/threadspawn"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/thread"
 )
@@ -36,7 +37,7 @@ func (w *AppWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
 	for i, st := range sts {
 		// A task has no workspace of its own (see TaskController's doc
 		// comment), so workspaceID is always "".
-		result[i] = thread.ToProto(st, "")
+		result[i] = threadspawn.ToProto(st, "")
 	}
 	return result, nil
 }
