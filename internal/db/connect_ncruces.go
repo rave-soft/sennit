@@ -10,24 +10,6 @@ import (
 	"github.com/ncruces/go-sqlite3/driver"
 )
 
-func openDBReadOnly(dbPath string) (*sql.DB, error) {
-	dsn := fmt.Sprintf("file:%s?mode=ro&_txlock=immediate", dbPath)
-	// busy_timeout still applies to readers: a live writer holding the WAL
-	// briefly (e.g. mid-checkpoint) can otherwise return SQLITE_BUSY
-	// immediately instead of letting the read retry.
-	db, err := driver.Open(dsn, func(c *sqlite3.Conn) error {
-		if err := c.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
-			return fmt.Errorf("failed to set pragma busy_timeout: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	return db, nil
-}
-
 func openDB(dbPath string) (*sql.DB, error) {
 	// Use BEGIN IMMEDIATE so writers acquire the reserved lock up front,
 	// preventing deferred-to-writer upgrade deadlocks. The "file:" prefix

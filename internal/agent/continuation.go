@@ -94,7 +94,7 @@ func (a *sessionAgent) startContinuation(ctx context.Context, sessionID, reason 
 	runCtx := context.WithoutCancel(ctx)
 	go func() {
 		if _, err := a.Run(runCtx, call); err != nil {
-			slog.Error("agent: auto-continuation turn failed", "session_id", sessionID, "error", err)
+			slog.Error("Auto-continuation turn failed", "session_id", sessionID, "error", err)
 		}
 	}()
 }

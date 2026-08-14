@@ -285,21 +285,19 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 
 	discoveryResults := discoverCustomProviderModels(ctx, c.Providers, knownProviderNames, resolver)
 
-	validateActions, err := c.validateCustomProviders(knownProviderNames, resolver, discoveryResults, store.globalDataPath)
+	err = c.validateCustomProviders(knownProviderNames, resolver, discoveryResults, store.globalDataPath)
 	if err != nil {
 		return err
 	}
 
 	// Disk writes collected while merging (e.g. dropping a stale Claude
-	// Code OAuth provider) and while validating (e.g. persisting freshly
-	// discovered custom-provider models so the next load skips the HTTP
-	// round trip) are applied together here, via a direct write rather
+	// Code OAuth provider) are applied here via a direct write rather
 	// than through RemoveConfigField/SetConfigFields: their autoReload
 	// trigger would be pointless mid-load/reload (a fresh config is about
 	// to be swapped in anyway) and, prior to this refactor, was the thing
 	// that forced this whole call to run under writeMu just so the
 	// re-entrant autoReload could TryLock-and-noop instead of deadlocking.
-	applyPendingDiskActions(store, append(actions, validateActions...))
+	applyPendingDiskActions(store, actions)
 
 	if c.Providers.Len() == 0 && c.Options.DisableDefaultProviders {
 		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
@@ -683,14 +681,10 @@ func discoverCustomProviderModels(ctx context.Context, providers *csync.Map[stri
 // validateCustomProviders validates every provider outside the known
 // catalog, applies any discovery results computed for it, and drops
 // providers that end up unusable (unsupported type, disabled, no models, no
-// endpoint). Providers whose models were freshly discovered have that list
-// written into the global model-discovery cache (see saveCachedModels), so
-// a later load can skip the HTTP round trip; the cache write happens
-// directly here rather than through a pendingDiskAction because it never
-// touches braid.json, unlike the actions this still returns for other
-// cleanup (see configureProviders for why those go through the caller).
-func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, resolver VariableResolver, discoveryResults map[string]discoveryResult, globalDataPath string) ([]pendingDiskAction, error) {
-	var actions []pendingDiskAction
+// endpoint). Providers whose models were freshly discovered are written to
+// the global model-discovery cache (see saveCachedModels), so a later load
+// can skip the HTTP round trip.
+func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, resolver VariableResolver, discoveryResults map[string]discoveryResult, globalDataPath string) error {
 	for id, providerConfig := range c.Providers.Seq2() {
 		if knownProviderNames[id] {
 			continue
@@ -795,7 +789,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		for k, v := range providerConfig.ExtraHeaders {
 			resolved, err := resolver.ResolveValue(v)
 			if err != nil {
-				return nil, fmt.Errorf("resolving provider %s header %q: %w", id, k, err)
+				return fmt.Errorf("resolving provider %s header %q: %w", id, k, err)
 			}
 			if resolved == "" {
 				delete(providerConfig.ExtraHeaders, k)
@@ -820,7 +814,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		c.Providers.Set(id, providerConfig)
 	}
 
-	return actions, nil
+	return nil
 }
 
 // applyEnv sets top-level env vars from the config. Keys are sorted for

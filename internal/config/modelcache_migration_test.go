@@ -11,7 +11,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/braid/internal/testenv"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -150,7 +150,7 @@ func TestConfig_Load_DiscoverModelsFalseNeverDiscovers(t *testing.T) {
 
 	discoverFalse := false
 	cfg := &Config{
-		Providers: csync.NewMapFrom(map[string]ProviderConfig{
+		Providers: csync.NewMap(map[string]ProviderConfig{
 			"qwen36-local": {
 				APIKey:             "test-key",
 				BaseURL:            "http://127.0.0.1:1/v1", // unreachable; discovery must never even be attempted
@@ -163,7 +163,7 @@ func TestConfig_Load_DiscoverModelsFalseNeverDiscovers(t *testing.T) {
 	}
 	cfg.setDefaults(t.TempDir(), "")
 
-	testEnv := env.NewFromMap(map[string]string{})
+	testEnv := testenv.New(map[string]string{})
 	resolver := NewShellVariableResolver(testEnv)
 	err := cfg.configureProviders(context.Background(), testStore(cfg), testEnv, resolver, []catwalk.Provider{})
 	require.NoError(t, err)

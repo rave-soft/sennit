@@ -462,6 +462,10 @@ type UI struct {
 	// affordance.
 	panelTodosHover      bool
 	panelTodosHeaderRect uv.Rectangle
+	// panelThreadsHover / panelThreadsHeaderRect mirror the todos pair for
+	// the threads section's own collapse header.
+	panelThreadsHover      bool
+	panelThreadsHeaderRect uv.Rectangle
 	// panelTodosListRect is the on-screen area of the (possibly scrollable)
 	// todo rows below the header, rebuilt on every drawSessionPanel call —
 	// the mouse-wheel handler in Update hit-tests against this to decide
@@ -1618,11 +1622,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseLeft && m.state == uiChat && m.hasSession() {
 			pt := image.Pt(msg.X, msg.Y)
 			plan := m.sessionPanelPlan(m.layout.panel.Dy())
-			threadBlockRects, delegationBlockRects, todosHeaderRect, _ := sessionPanelRowLayout(m.layout.panel, plan)
+			threadBlockRects, delegationBlockRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
 			if pt.In(todosHeaderRect) {
 				if cmd := m.toggleTodosExpanded(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+				return m, tea.Batch(cmds...)
+			}
+			if pt.In(threadsHeaderRect) {
+				m.toggleThreadsCollapsed()
 				return m, tea.Batch(cmds...)
 			}
 			for i, rect := range threadBlockRects {
@@ -1703,8 +1711,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == uiChat {
 			pt := image.Pt(msg.X, msg.Y)
 			plan := m.sessionPanelPlan(m.layout.panel.Dy())
-			threadRects, delegationRects, todosHeaderRect, _ := sessionPanelRowLayout(m.layout.panel, plan)
+			threadRects, delegationRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
 			m.panelTodosHover = pt.In(todosHeaderRect)
+			m.panelThreadsHover = pt.In(threadsHeaderRect)
 			m.hoveredPanelThread = -1
 			for i, rect := range threadRects {
 				if pt.In(rect) {
@@ -1852,7 +1861,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.hasSession() {
 				plan := m.sessionPanelPlan(m.layout.panel.Dy())
 				if plan.todosScrollable {
-					_, _, _, todosListRect := sessionPanelRowLayout(m.layout.panel, plan)
+					_, _, _, todosListRect, _ := sessionPanelRowLayout(m.layout.panel, plan)
 					if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(todosListRect) {
 						lines := int(msg.DeltaY)
 						if lines != 0 {

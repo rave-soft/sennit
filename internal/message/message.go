@@ -554,7 +554,7 @@ func (s *service) ListBySessionIDs(ctx context.Context, sessionIDs []string) (ma
 	for _, row := range rows {
 		msg, err := s.fromDBItem(row)
 		if err != nil {
-			slog.Warn("list batch messages", "message_id", row.ID, "error", err)
+			slog.Warn("Failed to list batch messages", "message_id", row.ID, "error", err)
 			continue
 		}
 		result[msg.SessionID] = append(result[msg.SessionID], msg)
