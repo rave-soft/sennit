@@ -269,6 +269,34 @@ func sessionPanelTodosHeaderText(completed, total int, expanded bool) string {
 	return fmt.Sprintf("todos %d/%d %s", completed, total, chevron)
 }
 
+// shedThreadBlocks drops whole two-row thread blocks until the plan fits
+// the budget, returning the surviving blocks, the updated hidden count,
+// and the rows they occupy. Blocks are dropped from the end, so the
+// oldest (first-created) threads are the ones that stay visible, and
+// every dropped block is added to the "…and N more" count rather than
+// disappearing unannounced.
+func shedThreadBlocks(threads []proto.Thread, more, over int) ([]proto.Thread, int, int) {
+	drop := (over + 1) / 2 // round up: one row over still costs a block
+	if drop > len(threads) {
+		drop = len(threads)
+	}
+	kept := threads[:len(threads)-drop]
+	more += drop
+	if len(kept) == 0 {
+		// Nothing survived: the section disappears entirely, header and
+		// footer included. The budget has to be able to reclaim every
+		// row it lent — a section that always keeps one line to say how
+		// much is hidden could never be shed to zero, which is exactly
+		// what a pathological terminal height needs.
+		return nil, more, 0
+	}
+	rows := len(kept) * 2
+	if more > 0 {
+		rows++ // the footer row that reports what is hidden
+	}
+	return kept, more, rows
+}
+
 // sessionPanelThreadsHeaderText renders the threads header row's plain
 // text: "threads <active>" plus the same disclosure triangle the todos
 // header uses — ▸ collapsed, ▾ expanded.
@@ -512,7 +540,12 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.delegationsRows = max(0, plan.delegationsRows-o)
 	}
 	if o := over(); o > 0 {
-		plan.threadsRows = max(0, plan.threadsRows-o)
+		// Shed whole blocks, not rows. A thread block is two rows, so
+		// subtracting an odd count used to leave half a block painted —
+		// a name with no status line under it — and the hidden threads
+		// vanished silently, with the "…and N more" footer still
+		// reporting only what the visible cap had dropped.
+		plan.threads, plan.threadsMore, plan.threadsRows = shedThreadBlocks(plan.threads, plan.threadsMore, o)
 	}
 	if over() > 0 {
 		// budget < 1: even the one-line todos header doesn't fit. The todo

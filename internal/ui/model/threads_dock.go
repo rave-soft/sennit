@@ -163,12 +163,38 @@ func (c *threadsDockState) invalidateThreadsDock() {
 
 // applyThreadEvent reacts to a thread pubsub event by invalidating the
 // cached list, so the next stale-refresh reconciles with the authoritative
-// list. Unlike threads_cache.go's analogous method, this doesn't try to
-// upsert the row optimistically — the dock's list is a coarse input to
-// filtering/capping logic, not something rendered field-by-field, so a
-// short-lived staleness until the next refresh is unremarkable.
-func (c *threadsDockState) applyThreadEvent(_ pubsub.Event[proto.Thread]) {
+// list. It does not upsert an updated row optimistically — the dock's list
+// is a coarse input to filtering/capping logic, not something rendered
+// field-by-field, so brief staleness in a row's fields is unremarkable.
+//
+// A removal is different in kind and is applied immediately. A stale row
+// for a thread that no longer exists is not slightly-out-of-date detail:
+// it is a panel entry that cannot be opened, because attaching resolves
+// the id and finds nothing. Waiting for a re-list to notice leaves that
+// dead row on screen for as long as the refresh takes — or forever, if it
+// never lands.
+func (c *threadsDockState) applyThreadEvent(ev pubsub.Event[proto.Thread]) {
+	if ev.Type == pubsub.DeletedEvent {
+		c.dropThread(ev.Payload.ID)
+	}
 	c.invalidateThreadsDock()
+}
+
+// dropThread removes one entry from the cached list in place, leaving the
+// cache's freshness bookkeeping alone: the caller invalidates separately,
+// so this only makes the current frame stop painting a row that is gone.
+func (c *threadsDockState) dropThread(id string) {
+	if id == "" || len(c.cache.value) == 0 {
+		return
+	}
+	kept := make([]proto.Thread, 0, len(c.cache.value))
+	for _, t := range c.cache.value {
+		if t.ID != id {
+			kept = append(kept, t)
+		}
+	}
+	c.cache.value = kept
+	delete(c.activity, id)
 }
 
 // staleThreadsDockRefreshCmd is the TTL backstop for the thread list: while
