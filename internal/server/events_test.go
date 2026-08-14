@@ -9,6 +9,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/skills"
@@ -123,6 +124,69 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 	require.Equal(t, "VERDICT: APPROVED", decoded.Payload.Text)
 	require.Empty(t, decoded.Payload.Error)
 	require.False(t, decoded.Payload.Cancelled)
+}
+
+// TestPermissionRequestToProto_CarriesDelegation verifies that a
+// permission request's delegation ref survives the SSE envelope: this is
+// the notification/subscriber path a UI (or a client/server-mode TUI)
+// actually reads, as opposed to the in-process permission.Service
+// broker internal/permission's own tests exercise directly. Without this,
+// a background delegation's identity would reach internal/permission
+// correctly but still get silently dropped on the way out over HTTP.
+func TestPermissionRequestToProto_CarriesDelegation(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[permission.PermissionRequest]{
+		Type: pubsub.CreatedEvent,
+		Payload: permission.PermissionRequest{
+			ID:         "perm-1",
+			SessionID:  "task-session",
+			ToolCallID: "call-1",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       "/tmp",
+			Delegation: permission.DelegationRef{ID: "task-1", Name: "task-abc", Kind: "task"},
+		},
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+	require.Equal(t, pubsub.PayloadTypePermissionRequest, env.Type)
+
+	var decoded pubsub.Event[proto.PermissionRequest]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, "perm-1", decoded.Payload.ID)
+	require.Equal(t, proto.DelegationRef{ID: "task-1", Name: "task-abc", Kind: "task"}, decoded.Payload.Delegation,
+		"a background delegation's identity must survive the SSE envelope for a client/server-mode UI to attribute it")
+}
+
+// TestPermissionRequestToProto_EmptyDelegationUnchanged verifies that the
+// visible turn's own requests — which carry no delegation ctx — still
+// convert with a zero DelegationRef, exactly as every request did before
+// this field existed.
+func TestPermissionRequestToProto_EmptyDelegationUnchanged(t *testing.T) {
+	t.Parallel()
+
+	src := pubsub.Event[permission.PermissionRequest]{
+		Type: pubsub.CreatedEvent,
+		Payload: permission.PermissionRequest{
+			ID:         "perm-2",
+			SessionID:  "visible-session",
+			ToolCallID: "call-2",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       "/tmp",
+		},
+	}
+
+	env := wrapEvent(src)
+	require.NotNil(t, env)
+
+	var decoded pubsub.Event[proto.PermissionRequest]
+	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	require.Equal(t, proto.DelegationRef{}, decoded.Payload.Delegation)
+	require.Equal(t, "perm-2", decoded.Payload.ID)
+	require.Equal(t, "visible-session", decoded.Payload.SessionID)
 }
 
 // TestAgentErrorToProto_PreservesRunID verifies that an async agent

@@ -60,6 +60,10 @@ type PermissionRequest struct {
 	Action      string `json:"action"`
 	Params      any    `json:"params"`
 	Path        string `json:"path"`
+	// Delegation identifies the background delegation whose run raised
+	// this request (see [WithDelegation]), or the zero value if the
+	// visible turn asked.
+	Delegation DelegationRef `json:"delegation,omitempty"`
 }
 
 type Service interface {
@@ -296,6 +300,7 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		Description: opts.Description,
 		Action:      opts.Action,
 		Params:      opts.Params,
+		Delegation:  DelegationFromContext(ctx),
 	}
 
 	if _, ok := s.sessionPermissions.Get(PermissionKey{

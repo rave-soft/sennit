@@ -805,3 +805,149 @@ func TestPermissionService_QueuedDispatch(t *testing.T) {
 		assert.True(t, granted2)
 	})
 }
+
+// TestPermissionService_DelegationAttribution covers WithDelegation: a
+// request made under a delegation ctx is published carrying that ref, one
+// made without carries the zero ref (today's only value), and neither
+// case's grant/deny behavior changes.
+func TestPermissionService_DelegationAttribution(t *testing.T) {
+	t.Parallel()
+
+	t.Run("request under a delegation ctx is published carrying the ref", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		ref := DelegationRef{ID: "task-1", Name: "task-abc", Kind: "task"}
+		ctx := WithDelegation(t.Context(), ref)
+
+		var (
+			wg      sync.WaitGroup
+			granted bool
+			err     error
+		)
+		wg.Go(func() {
+			granted, err = service.Request(ctx, CreatePermissionRequest{
+				SessionID:  "task-session",
+				ToolCallID: "call-deleg",
+				ToolName:   "bash",
+				Action:     "execute",
+				Path:       "/tmp",
+			})
+		})
+
+		var pending PermissionRequest
+		select {
+		case ev := <-events:
+			pending = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("request was never published")
+		}
+		assert.Equal(t, ref, pending.Delegation, "published request should carry the delegation ref")
+
+		service.Grant(pending)
+		wg.Wait()
+		require.NoError(t, err)
+		assert.True(t, granted, "delegated requests are gated exactly like any other: grant still works")
+	})
+
+	t.Run("request without a delegation ctx is published with the zero ref", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		req := CreatePermissionRequest{
+			SessionID:   "visible-session",
+			ToolCallID:  "call-visible",
+			ToolName:    "bash",
+			Action:      "execute",
+			Description: "the visible turn's own command",
+			Params:      map[string]string{"cmd": "ls"},
+			Path:        "/tmp",
+		}
+
+		var (
+			wg      sync.WaitGroup
+			granted bool
+			err     error
+		)
+		wg.Go(func() {
+			granted, err = service.Request(t.Context(), req)
+		})
+
+		var pending PermissionRequest
+		select {
+		case ev := <-events:
+			pending = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("request was never published")
+		}
+		assert.Equal(t, DelegationRef{}, pending.Delegation, "an absent delegation ctx means the zero ref")
+		// Every other field is exactly what Request always produced —
+		// nothing about the rest of the published request changed.
+		assert.Equal(t, req.SessionID, pending.SessionID)
+		assert.Equal(t, req.ToolCallID, pending.ToolCallID)
+		assert.Equal(t, req.ToolName, pending.ToolName)
+		assert.Equal(t, req.Action, pending.Action)
+		assert.Equal(t, req.Description, pending.Description)
+		assert.Equal(t, req.Params, pending.Params)
+		assert.Equal(t, req.Path, pending.Path)
+		assert.NotEmpty(t, pending.ID)
+
+		service.Deny(pending)
+		wg.Wait()
+		require.NoError(t, err)
+		assert.False(t, granted, "denial still works exactly as before")
+	})
+
+	t.Run("ref survives to the subscriber path once a queued request is dispatched", func(t *testing.T) {
+		t.Parallel()
+		service := NewPermissionService("/tmp", false, nil)
+		events := service.Subscribe(t.Context())
+
+		ref := DelegationRef{ID: "task-2", Name: "task-def", Kind: "task"}
+		delegatedCtx := WithDelegation(t.Context(), ref)
+
+		req1 := CreatePermissionRequest{SessionID: "s1", ToolCallID: "call-1", ToolName: "bash", Action: "execute", Path: "/tmp"}
+		req2 := CreatePermissionRequest{SessionID: "s2", ToolCallID: "call-2", ToolName: "bash", Action: "execute", Path: "/tmp"}
+
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			_, _ = service.Request(t.Context(), req1)
+		})
+
+		var pending1 PermissionRequest
+		select {
+		case ev := <-events:
+			pending1 = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("first request was never published")
+		}
+
+		// The second, delegated request is queued behind the first (see
+		// TestPermissionService_QueuedDispatch) rather than published
+		// immediately — it reaches Subscribe through dispatchNext's
+		// republish, a different code path than the one the first two
+		// subtests exercised.
+		wg.Go(func() {
+			_, _ = service.Request(delegatedCtx, req2)
+		})
+		require.Eventually(t, func() bool {
+			return queueLen(t, service) == 1
+		}, 2*time.Second, 5*time.Millisecond, "second request should be queued")
+
+		service.Grant(pending1)
+
+		var pending2 PermissionRequest
+		select {
+		case ev := <-events:
+			pending2 = ev.Payload
+		case <-time.After(2 * time.Second):
+			t.Fatal("second request was never published after the first resolved")
+		}
+		assert.Equal(t, ref, pending2.Delegation, "the ref must survive dispatchNext's republish")
+
+		service.Deny(pending2)
+		wg.Wait()
+	})
+}

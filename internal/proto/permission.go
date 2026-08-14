@@ -22,16 +22,27 @@ type PermissionNotification struct {
 	Denied     bool   `json:"denied"`
 }
 
+// DelegationRef identifies the background delegation whose run raised a
+// permission request, if any (see internal/permission.DelegationRef).
+// The zero value means the visible turn asked. Additive: older clients
+// that do not read it are unaffected.
+type DelegationRef struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+	Kind string `json:"kind,omitempty"`
+}
+
 // PermissionRequest represents a pending permission request.
 type PermissionRequest struct {
-	ID          string `json:"id"`
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
+	ID          string        `json:"id"`
+	SessionID   string        `json:"session_id"`
+	ToolCallID  string        `json:"tool_call_id"`
+	ToolName    string        `json:"tool_name"`
+	Description string        `json:"description"`
+	Action      string        `json:"action"`
+	Params      any           `json:"params"`
+	Path        string        `json:"path"`
+	Delegation  DelegationRef `json:"delegation,omitempty"`
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface. This is needed

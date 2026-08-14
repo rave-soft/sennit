@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/google/uuid"
+	"github.com/rave-soft/braid/internal/permission"
 )
 
 // TaskCreateArgs holds the inputs to [TaskManager.Create].
@@ -131,7 +132,19 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	if err != nil {
 		return Thread{}, err
 	}
-	t.lc.startRun(t.ctx, handle, t.spawner, st.ID, st.SessionID, args.Goal)
+	// A task's tool calls hit the parent App's permission.Service — the
+	// same one the visible turn uses — so without this, a prompt raised
+	// by the task's run would be indistinguishable from one raised by
+	// the user's own turn. Stamping the ref onto a context derived from
+	// t.ctx (not t.ctx itself) keeps it scoped to this run: t.ctx is
+	// shared with every other task and, transitively, with Manager's
+	// threads, and must not pick up one run's identity permanently.
+	runCtx := permission.WithDelegation(t.ctx, permission.DelegationRef{
+		ID:   st.ID,
+		Name: st.Name,
+		Kind: string(st.Kind),
+	})
+	t.lc.startRun(runCtx, handle, t.spawner, st.ID, st.SessionID, args.Goal)
 	owned = false // Ownership transferred to the shared runtime state.
 
 	return st, nil

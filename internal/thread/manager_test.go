@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/braid/internal/app"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/stretchr/testify/require"
@@ -128,15 +129,21 @@ type fakeCoordinator struct {
 }
 
 type fakeRun struct {
-	sessionID string
-	prompt    string
-	runID     string
+	sessionID  string
+	prompt     string
+	runID      string
+	delegation permission.DelegationRef
 }
 
 func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.runs = append(f.runs, fakeRun{sessionID: sessionID, prompt: prompt, runID: agent.RunIDFromContext(ctx)})
+	f.runs = append(f.runs, fakeRun{
+		sessionID:  sessionID,
+		prompt:     prompt,
+		runID:      agent.RunIDFromContext(ctx),
+		delegation: permission.DelegationFromContext(ctx),
+	})
 	return nil, f.runErr
 }
 
@@ -144,7 +151,12 @@ func (f *fakeCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil 
 
 func (f *fakeCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
 	f.mu.Lock()
-	f.runs = append(f.runs, fakeRun{sessionID: sessionID, prompt: prompt, runID: agent.RunIDFromContext(ctx)})
+	f.runs = append(f.runs, fakeRun{
+		sessionID:  sessionID,
+		prompt:     prompt,
+		runID:      agent.RunIDFromContext(ctx),
+		delegation: permission.DelegationFromContext(ctx),
+	})
 	err := f.runErr
 	f.mu.Unlock()
 	return nil, err

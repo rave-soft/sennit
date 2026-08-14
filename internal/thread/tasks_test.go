@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/braid/internal/app"
+	"github.com/rave-soft/braid/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 
@@ -138,4 +139,29 @@ func TestTaskManager_ShutdownJoinsInFlightRun(t *testing.T) {
 	// critically, did not shut the parent App down.
 	_, err = parentApp.Sessions.Create(t.Context(), "still alive after shutdown")
 	require.NoError(t, err)
+}
+
+// TestTaskManager_CreateAttributesRunToDelegation proves a task's run
+// context carries its DelegationRef: a permission request raised by a
+// tool the task's run invokes would reach permission.DelegationFromContext
+// with the task's identity, not the zero ref a visible turn's tools see.
+// The fake coordinator is the same seam other tests use to inspect what a
+// dispatched run actually received — no real tool is needed to prove the
+// context is threaded through correctly.
+func TestTaskManager_CreateAttributesRunToDelegation(t *testing.T) {
+	store := newTestStoreDB(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+
+	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+
+	coord.mu.Lock()
+	got := coord.runs[0].delegation
+	coord.mu.Unlock()
+
+	require.Equal(t, permission.DelegationRef{ID: st.ID, Name: st.Name, Kind: "task"}, got,
+		"a permission request raised by this run must be attributable to the task, not the parent's own turn")
 }
