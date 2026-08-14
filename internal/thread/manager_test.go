@@ -205,6 +205,12 @@ func (f *fakeCoordinator) cancelAllWasCalled() bool {
 // call both — the embedded nil agent.Coordinator would otherwise panic.
 func (f *fakeCoordinator) SetThreads(tools.ThreadManager) {}
 
+// SetTasks is a no-op for the same reason SetThreads is: attach.go's
+// Attach calls it unconditionally once a task manager exists, and this
+// fake stands in as the App's AgentCoordinator in attach_test.go's task
+// manager tests.
+func (f *fakeCoordinator) SetTasks(tools.TaskManager) {}
+
 func (f *fakeCoordinator) IsBusy() bool { return false }
 
 // fakeHandle is the Handle returned by fakeSpawner.

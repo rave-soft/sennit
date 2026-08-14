@@ -229,6 +229,7 @@ func (c *scriptedCoordinator) Model() agent.Model                             { 
 func (c *scriptedCoordinator) UpdateModels(context.Context) error             { return nil }
 func (c *scriptedCoordinator) GenerateTitle(context.Context, string, string)  {}
 func (c *scriptedCoordinator) SetThreads(tools.ThreadManager)                 {}
+func (c *scriptedCoordinator) SetTasks(tools.TaskManager)                     {}
 func (c *scriptedCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
 
 // agentE2EHarness extends the SSE harness with a scripted coordinator

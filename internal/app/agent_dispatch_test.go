@@ -67,6 +67,7 @@ func (c *stubDispatchCoordinator) Model() agent.Model                           
 func (c *stubDispatchCoordinator) UpdateModels(context.Context) error             { return nil }
 func (c *stubDispatchCoordinator) GenerateTitle(context.Context, string, string)  {}
 func (c *stubDispatchCoordinator) SetThreads(tools.ThreadManager)                 {}
+func (c *stubDispatchCoordinator) SetTasks(tools.TaskManager)                     {}
 func (c *stubDispatchCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill) {}
 
 // TestAgentDispatcher_SendRefusedAfterMarkClosing asserts that once

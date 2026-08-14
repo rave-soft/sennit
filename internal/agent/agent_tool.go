@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 
 	"charm.land/fantasy"
 
@@ -17,11 +18,27 @@ var agentToolDescription string
 
 type AgentParams struct {
 	Prompt string `json:"prompt" description:"The task for the agent to perform"`
+	// Background, when true, dispatches the prompt as a task delegation
+	// instead of running it inline: the call returns immediately with
+	// the task's id, child session id, and status, rather than blocking
+	// for the subagent's text. See the tool description for when this is
+	// appropriate.
+	Background bool `json:"background,omitempty" description:"Run as a background task delegation instead of blocking for a result. Suited to read-only/research work; leave unset for anything that edits files."`
 }
 
 const (
 	AgentToolName = "agent"
 )
+
+// AgentBackgroundResponseMetadata is the structured metadata a
+// background agent tool call returns immediately: enough for the caller
+// to reference the task later (poll it or be notified), not the
+// delegation's full record.
+type AgentBackgroundResponseMetadata struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
+}
 
 func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
 	agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
@@ -50,6 +67,10 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
 
+			if params.Background {
+				return c.runBackgroundAgent(ctx, sessionID, params.Prompt)
+			}
+
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
@@ -65,4 +86,42 @@ func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) 
 			})
 		},
 	), nil
+}
+
+// runBackgroundAgent creates a task delegation for prompt, parented to
+// sessionID, and returns its metadata immediately without waiting for the
+// task's own run to finish — that result reaches the parent through a
+// separate mechanism (polling or notification), not this call.
+//
+// If no task manager is wired (tasksManager returns nil — e.g. not a git
+// repository, or Attach declined for some other reason), this reports the
+// failure back to the model as a tool error rather than silently running
+// prompt in the foreground instead: a caller that asked for background
+// and got foreground without being told would believe work is proceeding
+// in parallel when it is not.
+func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, prompt string) (fantasy.ToolResponse, error) {
+	taskManager := c.tasksManager()
+	if taskManager == nil {
+		return fantasy.NewTextErrorResponse(
+			"Background delegation is unavailable in this workspace. Retry the same request with background unset to run it in the foreground instead.",
+		), nil
+	}
+
+	info, err := taskManager.Create(ctx, tools.TaskCreateArgs{
+		Goal:            prompt,
+		ParentSessionID: sessionID,
+	})
+	if err != nil {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to start background task: %s", err)), nil
+	}
+
+	text := fmt.Sprintf(
+		"Started background task %s (session %s, status=%s). It is running independently; its result will follow separately.",
+		info.ID, info.SessionID, info.Status,
+	)
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text), AgentBackgroundResponseMetadata{
+		TaskID:    info.ID,
+		SessionID: info.SessionID,
+		Status:    info.Status,
+	}), nil
 }

@@ -67,6 +67,7 @@ func (c *blockingCoordinator) Model() agent.Model                               
 func (c *blockingCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *blockingCoordinator) GenerateTitle(context.Context, string, string)     {}
 func (c *blockingCoordinator) SetThreads(tools.ThreadManager)                    {}
+func (c *blockingCoordinator) SetTasks(tools.TaskManager)                        {}
 func (c *blockingCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)    {}
 
 // insertAgentWorkspace installs a synthetic workspace with the given

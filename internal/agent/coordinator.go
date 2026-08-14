@@ -79,6 +79,12 @@ type Coordinator interface {
 	// tools are only ever offered to the top-level agent of the
 	// workspace the manager belongs to, never to sub-agents.
 	SetThreads(threads tools.ThreadManager)
+	// SetTasks wires (or clears, with nil) the task manager the built-in
+	// agent tool's background mode uses. Unlike SetThreads, this does not
+	// change the tool list (the agent tool is always offered when
+	// configured; only its background branch's availability depends on
+	// this), so it takes effect immediately with no rebuild needed.
+	SetTasks(tasks tools.TaskManager)
 	// RefreshSkills replaces the coordinator's cached skill discovery
 	// results — called by the backend after its skills-directory watcher
 	// detects a SKILL.md added, edited, or removed outside this process,
@@ -116,6 +122,13 @@ type coordinator struct {
 	// reads on every run via UpdateModels.
 	threadsMu sync.RWMutex
 	threads   tools.ThreadManager
+
+	// tasksMu guards tasks, wired the same way and for the same reason as
+	// threads above, but read by the "agent" tool's background branch at
+	// call time rather than by buildTools — see SetTasks's doc comment on
+	// the Coordinator interface for why no rebuild is needed.
+	tasksMu sync.RWMutex
+	tasks   tools.TaskManager
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -249,7 +262,13 @@ type CoordinatorOptions struct {
 	// since the thread manager is set up post-bootstrap; this field
 	// exists mainly so tests and other in-process callers can supply one
 	// up front.
-	Threads          tools.ThreadManager
+	Threads tools.ThreadManager
+	// Tasks is nil-safe the same way Threads is: when nil, the built-in
+	// agent tool's background branch reports background delegation as
+	// unavailable rather than silently running in the foreground. Wired
+	// after construction via [Coordinator.SetTasks] in production, same
+	// as Threads.
+	Tasks            tools.TaskManager
 	BackgroundShells *shell.BackgroundShellManager
 }
 
@@ -289,6 +308,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:  opts.Interactive,
 		mcp:          opts.MCP,
 		threads:      opts.Threads,
+		tasks:        opts.Tasks,
 		background:   opts.BackgroundShells,
 		runtime:      newRuntimeCache(),
 	}
@@ -929,6 +949,16 @@ func (c *coordinator) SetThreads(threads tools.ThreadManager) {
 	c.invalidateRuntime()
 }
 
+// SetTasks implements Coordinator. No invalidateRuntime call: unlike
+// SetThreads, this never changes which tools are offered (the agent tool
+// is always present when configured), so there is no cached tool list to
+// rebuild — tasksManager is read fresh on every background call instead.
+func (c *coordinator) SetTasks(tasks tools.TaskManager) {
+	c.tasksMu.Lock()
+	c.tasks = tasks
+	c.tasksMu.Unlock()
+}
+
 // RefreshSkills implements Coordinator.RefreshSkills.
 func (c *coordinator) RefreshSkills(allSkills, activeSkills []*skills.Skill) {
 	c.skillsMu.Lock()
@@ -957,6 +987,13 @@ func (c *coordinator) threadsManager() tools.ThreadManager {
 	c.threadsMu.RLock()
 	defer c.threadsMu.RUnlock()
 	return c.threads
+}
+
+// tasksManager returns the currently wired task manager, or nil.
+func (c *coordinator) tasksManager() tools.TaskManager {
+	c.tasksMu.RLock()
+	defer c.tasksMu.RUnlock()
+	return c.tasks
 }
 
 func (c *coordinator) IsBusy() bool {

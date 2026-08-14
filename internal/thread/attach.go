@@ -117,5 +117,6 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner Spawne
 	a.SetThreads(AsAgentToolManager(mgr))
 	a.SetThreadManager(mgr)
 	a.SetTaskManager(tasks)
+	a.SetTasks(AsAgentToolTaskManager(tasks))
 	deps.forwardEvents(a, mgr)
 }

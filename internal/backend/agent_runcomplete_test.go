@@ -55,6 +55,7 @@ func (c *errorCoordinator) Model() agent.Model                                { 
 func (c *errorCoordinator) UpdateModels(context.Context) error                { return nil }
 func (c *errorCoordinator) GenerateTitle(context.Context, string, string)     {}
 func (c *errorCoordinator) SetThreads(tools.ThreadManager)                    {}
+func (c *errorCoordinator) SetTasks(tools.TaskManager)                        {}
 func (c *errorCoordinator) RefreshSkills([]*skills.Skill, []*skills.Skill)    {}
 
 // insertRunCompleteWorkspace installs a workspace backed by a real

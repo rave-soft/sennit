@@ -96,12 +96,17 @@ type App struct {
 	// SetThreads/Threads.
 	threadManager any
 
-	// taskManager holds the task delegation manager for this workspace
-	// (internal/thread.TaskManager), typed any for the same import-cycle
-	// reason as threadManager. There is no tools-facing counterpart the
-	// way Threads is to threadManager: nothing consumes task tools yet,
-	// so only this accessor exists. Set via SetTaskManager; callers
-	// type-assert it back to *thread.TaskManager.
+	// Tasks is the task delegation manager's tool-facing counterpart to
+	// Threads, wired in post-bootstrap alongside it (see attach.go) via
+	// SetTasks. Declared as tools.TaskManager for the same import-cycle
+	// reason Threads is tools.ThreadManager. Nil for workspaces that
+	// don't own a task manager, same as Threads.
+	Tasks tools.TaskManager
+
+	// taskManager holds the same task manager as Tasks, but typed any
+	// instead of tools.TaskManager, for the same reason threadManager is
+	// untyped relative to Threads. Set via SetTaskManager, independent of
+	// SetTasks/Tasks; callers type-assert it back to *thread.TaskManager.
 	taskManager any
 
 	// lastConfigBypass is the permissions.bypass value from config as of
@@ -387,6 +392,16 @@ func (app *App) SetThreadManager(m any) {
 // threadManager field; callers type-assert it to *thread.Manager.
 func (app *App) ThreadManager() any {
 	return app.threadManager
+}
+
+// SetTasks wires the task delegation manager, forwarding it to the coder
+// agent so the built-in agent tool's background mode becomes available.
+// Mirrors SetThreads; safe to call with nil to clear it.
+func (app *App) SetTasks(tasks tools.TaskManager) {
+	app.Tasks = tasks
+	if app.AgentCoordinator != nil {
+		app.AgentCoordinator.SetTasks(tasks)
+	}
 }
 
 // SetTaskManager wires the concrete task manager for callers that need it,
