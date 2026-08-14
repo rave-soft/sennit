@@ -427,16 +427,18 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		return plan
 	}
 
-	active := activeDockThreads(m.threadsDock.cache.value)
-	plan.threadsActive = len(active)
-	plan.threadsExpanded = !m.panel.threadsCollapsed
-	if plan.threadsExpanded {
-		visible, more := visibleDockThreads(active)
-		plan.threads = visible
-		plan.threadsMore = more
-		plan.threadsRows = len(visible) * 2
-		if more > 0 {
-			plan.threadsRows++
+	if m.surfacesThreads() {
+		active := activeDockThreads(m.threadsDock.cache.value)
+		plan.threadsActive = len(active)
+		plan.threadsExpanded = !m.panel.threadsCollapsed
+		if plan.threadsExpanded {
+			visible, more := visibleDockThreads(active)
+			plan.threads = visible
+			plan.threadsMore = more
+			plan.threadsRows = len(visible) * 2
+			if more > 0 {
+				plan.threadsRows++
+			}
 		}
 	}
 

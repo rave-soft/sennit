@@ -542,6 +542,24 @@ func WithBreadcrumbRoot(name string) Option {
 	return func(m *UI) { m.crumbRoot = name }
 }
 
+// surfacesThreads reports whether this UI shows other threads at all: the
+// panel's threads block, the header's active-thread badge, and the
+// refreshes that feed them.
+//
+// A thread's own embedded UI does not. Threads belong to the workspace
+// above it — listing its siblings inside one of them says nothing about
+// the work you drilled in to look at, and offering to open them from
+// there invites a stack of threads within threads. The panel is for what
+// this session is doing.
+//
+// This is also what keeps the messages those refreshes produce
+// unambiguous: with only the main UI ever asking, a thread-panel result
+// can be routed to its owner (see Root.Update) instead of to whichever
+// screen happens to be on top.
+func (m *UI) surfacesThreads() bool {
+	return !m.embedded
+}
+
 // New creates a new instance of the [UI] model.
 func New(com *common.Common, initialSessionID string, continueLast bool, opts ...Option) *UI {
 	// Editor components
@@ -1598,7 +1616,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// threads dashboard — the badge rendered there (see header.go's
 		// renderHeaderDetails) is the only visible hint threads are running
 		// while on the main screen, so it doubles as a button.
-		if msg.Button == tea.MouseLeft && m.threadIndicator.cache.value > 0 && image.Pt(msg.X, msg.Y).In(m.layout.header) {
+		if msg.Button == tea.MouseLeft && m.activeThreadBadgeCount() > 0 && image.Pt(msg.X, msg.Y).In(m.layout.header) {
 			cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
 			return m, tea.Batch(cmds...)
 		}
@@ -3926,6 +3944,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	return tea.Sequence(cmds...)
 }
 
+// activeThreadBadgeCount is the header badge's active-thread count, or 0
+// where threads are not this UI's business (see surfacesThreads).
+func (m *UI) activeThreadBadgeCount() int {
+	if !m.surfacesThreads() {
+		return 0
+	}
+	return m.threadIndicator.cache.value
+}
+
 // drawHeader draws the header section of the UI.
 func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 	m.header.drawHeader(
@@ -3936,7 +3963,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.detailsOpen,
 		area.Dx(),
 		m.lspErrorCount(),
-		m.threadIndicator.cache.value,
+		m.activeThreadBadgeCount(),
 		bindingKey(m.keyMap.Chat.Details),
 	)
 }

@@ -319,6 +319,9 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 // IO itself, and it costs nothing beyond time comparisons while the
 // project has no threads.
 func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
+	if !m.surfacesThreads() {
+		return nil
+	}
 	var cmds []tea.Cmd
 	if cmd := m.threadIndicator.staleRefreshCmd(m.com); cmd != nil {
 		cmds = append(cmds, cmd)
