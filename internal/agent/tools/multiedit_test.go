@@ -328,3 +328,6 @@ func TestProcessMultiEditWithCreationPartialFailure(t *testing.T) {
 func (m *mockPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }
+
+func (*mockPermissionService) ConfineToWorkingDir() {}
+func (*mockPermissionService) ConfinedDir() string  { return "" }
