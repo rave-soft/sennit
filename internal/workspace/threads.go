@@ -89,10 +89,11 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 		return proto.Thread{}, ErrThreadsNotSupported
 	}
 	st, err := mgr.Create(ctx, thread.CreateArgs{
-		Name:        req.Name,
-		Goal:        req.Goal,
-		BaseBranch:  req.BaseBranch,
-		MergePolicy: thread.MergePolicy(req.MergePolicy),
+		Name:            req.Name,
+		Goal:            req.Goal,
+		BaseBranch:      req.BaseBranch,
+		MergePolicy:     thread.MergePolicy(req.MergePolicy),
+		ParentSessionID: req.ParentSessionID,
 	})
 	if err != nil {
 		return proto.Thread{}, err

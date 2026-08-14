@@ -497,12 +497,26 @@ func (r *Root) cancelDelegationCmd(id, kind string) tea.Cmd {
 }
 
 // createThreadCmd calls CreateThread off-thread with the dialog's validated
-// input.
+// input, attributing the thread to the session it was started from.
+//
+// That attribution is what makes the thread's completion come back: a
+// thread reports to its parent session when it finishes, and one created
+// without a parent has nobody to tell, leaving its result discoverable
+// only by going and looking. Empty when the dashboard is open without a
+// session, which is the same "nobody is waiting" case the CLI creates.
 func (r *Root) createThreadCmd(name, goal string) tea.Cmd {
 	ctx := r.com.Context()
 	ws := r.com.Workspace
+	parentSessionID := ""
+	if r.main != nil && r.main.hasSession() {
+		parentSessionID = r.main.session.ID
+	}
 	return func() tea.Msg {
-		thread, err := ws.CreateThread(ctx, proto.CreateThreadRequest{Name: name, Goal: goal})
+		thread, err := ws.CreateThread(ctx, proto.CreateThreadRequest{
+			Name:            name,
+			Goal:            goal,
+			ParentSessionID: parentSessionID,
+		})
 		return threadCreatedMsg{thread: thread, err: err}
 	}
 }

@@ -18,3 +18,18 @@ import "github.com/rave-soft/braid/internal/message"
 func NewTaskManagerForTest(mgr *Manager, spawner Spawner, messages message.Service) *TaskManager {
 	return NewTaskManager(mgr.store, spawner, messages, mgr.lc, mgr.ctx)
 }
+
+// ParentSessionIDForTest exposes the in-memory parent-session link a
+// delegation reports its completion to. It exists so tests outside this
+// package can prove the link survives the path that created it — the
+// field itself stays unexported because nothing in production reads it
+// from outside the manager.
+func (m *Manager) ParentSessionIDForTest(id string) string {
+	c := m.lc.existingControl(id)
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.parentSessionID
+}
