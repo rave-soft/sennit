@@ -41,6 +41,17 @@ func NewBashToolMessageItem(
 	return &BashToolMessageItem{newBaseToolMessageItem(sty, toolCall, result, &BashToolRenderContext{}, canceled)}
 }
 
+// registerBashToolRenderers registers the bash and job tool renderers.
+func registerBashToolRenderers() {
+	registerToolItemFactory(tools.BashToolName,
+		func(sty *styles.Styles, tc message.ToolCall, res *message.ToolResult, canceled bool) ToolMessageItem {
+			return NewBashToolMessageItem(sty, tc, res, canceled)
+		},
+		&BashToolRenderContext{})
+	registerToolRenderer(tools.JobOutputToolName, &JobOutputToolRenderContext{})
+	registerToolRenderer(tools.JobKillToolName, &JobKillToolRenderContext{})
+}
+
 // BashToolRenderContext renders bash tool messages.
 type BashToolRenderContext struct{}
 

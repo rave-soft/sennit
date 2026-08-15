@@ -25,6 +25,17 @@ func NewDefinitionToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &DefinitionToolRenderContext{}, canceled)
 }
 
+// registerLSPToolRenderers registers the LSP tool renderers.
+func registerLSPToolRenderers() {
+	registerToolRenderer(tools.DefinitionToolName, &DefinitionToolRenderContext{})
+	registerToolRenderer(tools.ReferencesToolName, &ReferencesToolRenderContext{})
+	registerToolRenderer(tools.RenameToolName, &RenameToolRenderContext{})
+	registerToolRenderer(tools.ReplaceSymbolToolName, &ReplaceSymbolToolRenderContext{})
+	registerToolRenderer(tools.CallHierarchyToolName, &CallHierarchyToolRenderContext{})
+	registerToolRenderer(tools.SymbolsToolName, &SymbolsToolRenderContext{})
+	registerToolRenderer(tools.LSPRestartToolName, &LSPRestartToolRenderContext{})
+}
+
 // DefinitionToolRenderContext renders definition tool messages.
 type DefinitionToolRenderContext struct{}
 

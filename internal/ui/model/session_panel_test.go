@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -62,9 +63,9 @@ func sessionUI() *UI {
 }
 
 // TestSessionPanelPlan_ThreadsRows covers the threads section's natural row
-// budget: zero for no active threads, two rows per visible thread up to the
-// cap, and one extra "more" row once the active set overflows
-// threadsDockVisibleCap.
+// budget: zero for no active threads, two rows per active thread, and no
+// "more" footer at any count — with room in the budget every active thread
+// gets its own block (the old fixed cap of 5 is gone).
 func TestSessionPanelPlan_ThreadsRows(t *testing.T) {
 	t.Parallel()
 
@@ -74,32 +75,28 @@ func TestSessionPanelPlan_ThreadsRows(t *testing.T) {
 	u.threadsDock.cache.value = []proto.Thread{{ID: "x", Status: "merged"}}
 	require.Zero(t, u.sessionPanelPlan(100).threadsRows, "no active threads")
 
-	for n := 1; n <= threadsDockVisibleCap; n++ {
+	for n := 1; n <= 12; n++ {
 		u.threadsDock.cache.value = mkDockThreads(n)
-		require.Equal(t, n*2, u.sessionPanelPlan(100).threadsRows, "n=%d", n)
+		plan := u.sessionPanelPlan(100)
+		require.Equal(t, n*2, plan.threadsRows, "n=%d", n)
+		require.Len(t, plan.threads, n, "n=%d", n)
+		require.Zero(t, plan.threadsMore, "n=%d", n)
 	}
-
-	u.threadsDock.cache.value = mkDockThreads(threadsDockVisibleCap + 2)
-	plan := u.sessionPanelPlan(100)
-	require.Equal(t, threadsDockVisibleCap*2+1, plan.threadsRows,
-		"overflow must add exactly one footer row")
-	require.Len(t, plan.threads, threadsDockVisibleCap)
-	require.Equal(t, 2, plan.threadsMore)
 }
 
-// TestDrawSessionPanel_RendersThreadBlocksAndMoreFooter covers end-to-end
-// rendering: numbered blocks for the visible threads and the "…and N more
-// threads" footer when the active set overflows the cap.
-func TestDrawSessionPanel_RendersThreadBlocksAndMoreFooter(t *testing.T) {
+// TestDrawSessionPanel_RendersEveryThreadBlock covers end-to-end rendering:
+// a numbered block per active thread and no "…and N more threads" footer,
+// for a count that used to overflow the visible cap.
+func TestDrawSessionPanel_RendersEveryThreadBlock(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadsDock.cache.value = mkDockThreads(threadsDockVisibleCap + 1)
+	u.threadsDock.cache.value = mkDockThreads(6)
 
 	height := u.sessionPanelPlan(100).totalRows
-	// threadsDockVisibleCap*2+1 block/footer rows, plus 1 for the
-	// "threads" section-separator header line above them.
-	require.Equal(t, threadsDockVisibleCap*2+2, height)
+	// 6 two-row blocks, plus 1 for the "threads" section-separator header
+	// line above them. No footer row.
+	require.Equal(t, 6*2+1, height)
 
 	scr := uv.NewScreenBuffer(u.width, height)
 	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: height}}
@@ -107,12 +104,12 @@ func TestDrawSessionPanel_RendersThreadBlocksAndMoreFooter(t *testing.T) {
 	out := ansi.Strip(scr.Render())
 
 	require.Contains(t, out, "threads ")
-	require.Contains(t, out, "1 fix-auth — Refactor login flow to OAuth2")
-	require.Contains(t, out, "2 fix-auth — Refactor login flow to OAuth2")
-	require.Contains(t, out, "3 fix-auth — Refactor login flow to OAuth2")
-	require.Contains(t, out, "…and 1 more threads")
-	require.Len(t, u.panelThreadRects, threadsDockVisibleCap)
-	require.Len(t, u.panelThreads, threadsDockVisibleCap)
+	for n := 1; n <= 6; n++ {
+		require.Containsf(t, out, fmt.Sprintf("%d fix-auth — Refactor login flow to OAuth2", n), "block %d", n)
+	}
+	require.NotContains(t, out, "more threads")
+	require.Len(t, u.panelThreadRects, 6)
+	require.Len(t, u.panelThreads, 6)
 }
 
 // TestDrawSessionPanel_RunningTaskRendersIdentityAndElapsed proves a task
@@ -414,15 +411,13 @@ func TestSessionPanelPlan_PanelHidesOnceAllTodosCompleted(t *testing.T) {
 	require.False(t, u.panel.expanded)
 }
 
-// TestDrawSessionPanel_CollapsedStillShowsInProgressTodo is the regression
-// test for "collapsing the panel is never total": even with the todos
-// section collapsed (m.panel.expanded == false), a todo that's actively
-// in progress right now must still be painted, not hidden behind the
-// header until the user expands the section. sessionPanelPlan populating
-// plan.todosActive with the in-progress subset isn't enough on its own —
-// drawSessionPanel used to re-gate the whole item-drawing loop on
-// plan.todosExpanded, which silently swallowed those rows again.
-func TestDrawSessionPanel_CollapsedStillShowsInProgressTodo(t *testing.T) {
+// TestDrawSessionPanel_CollapsedHidesEveryTodo pins collapsing as total:
+// with the todos section collapsed (m.panel.expanded == false) nothing but
+// the header is painted — the in-progress row included. It used to stay
+// pinned open, which made "collapsed" a different height depending on what
+// was running; the header's completed/total ratio carries that state
+// instead. Expanding brings every row back.
+func TestDrawSessionPanel_CollapsedHidesEveryTodo(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
@@ -435,16 +430,26 @@ func TestDrawSessionPanel_CollapsedStillShowsInProgressTodo(t *testing.T) {
 
 	plan := u.sessionPanelPlan(100)
 	require.False(t, plan.todosExpanded)
-	require.Equal(t, 2, plan.totalRows, "header + the one always-visible in-progress row")
+	require.Equal(t, 1, plan.totalRows, "the header alone")
 
 	scr := uv.NewScreenBuffer(u.width, 3)
 	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: 3}}
 	u.drawSessionPanel(scr, area)
 	out := ansi.Strip(scr.Render())
 
-	require.Contains(t, out, "Doing the in-flight task", "in-progress todo must render even while collapsed")
+	require.NotContains(t, out, "Doing the in-flight task", "in-progress todo must be hidden while collapsed")
 	require.NotContains(t, out, "not started", "pending todo must stay hidden while collapsed")
 	require.NotContains(t, out, "already done", "completed todo must stay hidden while collapsed")
+
+	u.toggleTodosExpanded()
+	scr = uv.NewScreenBuffer(u.width, 5)
+	area = uv.Rectangle{Max: uv.Position{X: u.width, Y: 5}}
+	u.drawSessionPanel(scr, area)
+	out = ansi.Strip(scr.Render())
+
+	require.Contains(t, out, "Doing the in-flight task", "expanding brings every row back")
+	require.Contains(t, out, "not started")
+	require.Contains(t, out, "already done")
 }
 
 // TestSessionPanelPlan_RealisticTerminalNoSheddingForEverydayTodoList is the

@@ -12,19 +12,20 @@ import (
 
 // toolsHandledOutsideFactoryMap lists built-in tools with a dedicated
 // renderer that NewToolMessageItem special-cases before consulting
-// toolMessageItemFactories, instead of registering a map entry — because
-// their constructor needs an argument (cfg, to resolve a delegation's
-// display name and model/effort override) that toolMessageItemFactory's
-// signature has no room for. See the map's comment on tools.AgentToolName.
+// toolRenderers, instead of registering a map entry — because their
+// constructor needs an argument (cfg, to resolve a delegation's display
+// name and model/effort override) that the registry's signature has no
+// room for. See the comment on tools.AgentToolName in
+// registerAgentToolRenderers.
 var toolsHandledOutsideFactoryMap = []string{
 	tools.AgentToolName,
 }
 
 // toolsWithoutDedicatedRenderer lists the built-in tools (from
 // config.AllToolNames, the actual source of truth for what tools exist)
-// that intentionally have no entry in toolMessageItemFactories and fall
-// back to the generic renderer. Anything not on this list (and not in
-// toolsHandledOutsideFactoryMap) must have a dedicated factory.
+// that intentionally have no entry in toolRenderers and fall back to the
+// generic renderer. Anything not on this list (and not in
+// toolsHandledOutsideFactoryMap) must have a dedicated renderer.
 var toolsWithoutDedicatedRenderer = []string{
 	tools.BraidInfoToolName,
 	tools.BraidLogsToolName,
@@ -53,7 +54,7 @@ var toolsWithoutDedicatedRenderer = []string{
 }
 
 // TestToolMessageItemFactories_MatchExpectedNames checks
-// toolMessageItemFactories against config.AllToolNames instead of a
+// toolRenderers against config.AllToolNames instead of a
 // second, hand-maintained list of tool names living in this test file.
 // Two hand-maintained lists drift silently: a new tool can be added to
 // allToolNames() without anyone remembering to update a duplicate here,
@@ -73,17 +74,17 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 
 	for _, name := range config.AllToolNames() {
 		if specialCased[name] {
-			require.NotContainsf(t, toolMessageItemFactories, name,
-				"tool %q is listed in toolsHandledOutsideFactoryMap but also has a map entry; the map entry is unreachable dead code, remove one or the other", name)
+			require.NotContainsf(t, toolRenderers, name,
+				"tool %q is listed in toolsHandledOutsideFactoryMap but also has a registry entry; the entry is unreachable dead code, remove one or the other", name)
 			continue
 		}
 		if noRenderer[name] {
-			require.NotContainsf(t, toolMessageItemFactories, name,
+			require.NotContainsf(t, toolRenderers, name,
 				"tool %q is listed as having no dedicated renderer, but one is registered; remove it from toolsWithoutDedicatedRenderer", name)
 			continue
 		}
-		require.Containsf(t, toolMessageItemFactories, name,
-			"tool %q has no registered factory and will fall back to the generic renderer", name)
+		require.Containsf(t, toolRenderers, name,
+			"tool %q has no registered renderer and will fall back to the generic renderer", name)
 	}
 
 	// toolsHandledOutsideFactoryMap's whole premise is that
@@ -109,9 +110,9 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	for _, name := range config.AllToolNames() {
 		known[name] = true
 	}
-	for name := range toolMessageItemFactories {
+	for name := range toolRenderers {
 		require.Truef(t, known[name] || known[config.CanonicalToolName(name)],
-			"tool %q has a registered factory but is neither in config.AllToolNames() nor a legacy name of a tool that is", name)
+			"tool %q has a registered renderer but is neither in config.AllToolNames() nor a legacy name of a tool that is", name)
 	}
 }
 
