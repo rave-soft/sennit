@@ -199,7 +199,6 @@ prompt в parent session, с явной пометкой задачи-источ
 
 Основные файлы:
 
-- `internal/backend/agent.go`;
 - `internal/app/app.go`;
 - `internal/workspace/app_workspace.go`;
 - `internal/ui/model/ui.go`;
@@ -433,7 +432,7 @@ follow-up в работающую делегацию (`Send`), оживлени�
 - новые tools в `internal/agent/tools/` рядом с `thread_*.go`;
 - `internal/db/threads.sql.go` и миграции — если общий store требует изменения
   схемы;
-- wiring в `internal/app/` и `internal/backend/`.
+- wiring в `internal/app/`.
 
 ## Этап 4. Доставлять completion фоновой делегации главному агенту — выполнен
 

@@ -958,13 +958,9 @@ func (m *Manager) Handle(threadID string) Handle {
 	return rt.handle
 }
 
-// WorkspaceID returns the backend/runtime identifier of threadID's
-// currently-spawned workspace (Handle.ID()), or "" if not spawned. In
-// client/server mode this is the backend workspace ID the thread's
-// workspace was created with (see internal/backend/thread_spawner.go's
-// threadHandle), letting a client attach to it directly over HTTP; in
-// local (single-process) mode it is an opaque spawner-internal ID with no
-// meaning outside the process.
+// WorkspaceID returns the runtime identifier of threadID's
+// currently-spawned workspace (Handle.ID()), or "" if not spawned. It is
+// an opaque spawner-internal ID with no meaning outside the process.
 func (m *Manager) WorkspaceID(threadID string) string {
 	if h := m.Handle(threadID); h != nil {
 		return h.ID()
@@ -984,12 +980,12 @@ func (m *Manager) WorkspaceID(threadID string) string {
 // ("yolo") state to every delegation workspace currently live under this
 // manager, threads and tasks alike. Called by the parent App whenever its
 // own bypass state changes (see app.App.SetPermissionsSkip), which is the
-// single funnel every toggle goes through: the TUI's ctrl+y, the server's
-// SetPermissionsSkip endpoint, and a permissions.bypass config reload.
+// single funnel every toggle goes through: the TUI's ctrl+y and a
+// permissions.bypass config reload.
 //
 // Threads spawned after the change inherit it at spawn instead, from the
-// parent's live permission service — see the parentYOLO closures in
-// internal/cmd/root.go and internal/backend/backend.go.
+// parent's live permission service — see the parentYOLO closure in
+// internal/cmd/root.go.
 func (m *Manager) SetPermissionsSkip(skip bool) {
 	m.lc.setPermissionsSkip(skip)
 }

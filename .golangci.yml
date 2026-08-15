@@ -29,20 +29,17 @@ linters:
     depguard:
       rules:
         # C3 UI boundary inventory/rationale: the deny-list forbids orchestration and
-        # runtime packages (agent, thread, backend, db, app, server, client). Remaining
-        # domain imports in internal/ui are allowed only as event/DTO contracts; all
-        # domain operations must go through the Workspace facade, never called directly.
+        # runtime packages (agent, thread, db, app). Remaining domain imports in
+        # internal/ui are allowed only as event/DTO contracts; all domain operations
+        # must go through the Workspace facade, never called directly.
         ui-boundary:
           files:
             - "**/internal/ui/**/*.go"
           deny:
             - pkg: github.com/rave-soft/braid/internal/agent
             - pkg: github.com/rave-soft/braid/internal/thread
-            - pkg: github.com/rave-soft/braid/internal/backend
             - pkg: github.com/rave-soft/braid/internal/db
             - pkg: github.com/rave-soft/braid/internal/app
-            - pkg: github.com/rave-soft/braid/internal/server
-            - pkg: github.com/rave-soft/braid/internal/client
     # - wrapcheck
   disable:
     - ineffassign

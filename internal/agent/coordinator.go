@@ -134,8 +134,8 @@ type coordinator struct {
 
 	// threadsMu guards threads, which SetThreads may set after
 	// construction (thread managers are wired in post-bootstrap; see
-	// internal/cmd/root.go and internal/backend/backend.go) and buildTools
-	// reads on every run via UpdateModels.
+	// internal/app/app.go and internal/app/threadspawn/attach.go) and
+	// buildTools reads on every run via UpdateModels.
 	threadsMu sync.RWMutex
 	threads   tools.ThreadManager
 
@@ -709,8 +709,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// that owns the thread manager: sub-agents never get them (spawning
 	// threads from a delegated task would nest workspace ownership in a
 	// way the manager doesn't support), and there simply is no manager
-	// for non-git or thread-spawned workspaces (see internal/cmd/root.go
-	// and internal/backend/backend.go).
+	// for non-git or thread-spawned workspaces (see internal/app/app.go
+	// and internal/app/threadspawn/attach.go).
 	if !isSubAgent {
 		if threads := c.threadsManager(); threads != nil {
 			allTools = append(

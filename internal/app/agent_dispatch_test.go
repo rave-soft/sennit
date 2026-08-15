@@ -140,7 +140,7 @@ func TestAgentDispatcher_SendDispatchesAndWaits(t *testing.T) {
 // error returned from RunAccepted before the coordinator could publish
 // its own terminal event still yields a reliable terminal RunComplete
 // for the run's RunID, mirroring the guarantee runAgent used to provide
-// directly in internal/backend.
+// directly.
 func TestAgentDispatcher_TerminalFallbackOnPreRunError(t *testing.T) {
 	t.Parallel()
 

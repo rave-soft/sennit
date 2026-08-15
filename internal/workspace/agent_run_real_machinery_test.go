@@ -22,7 +22,7 @@ import (
 )
 
 // -- real session/message services, mirroring internal/agent's own
-// testEnv and internal/backend's newRealCoordinator helper. --
+// testEnv helper. --
 
 func newRealSessionAgentEnv(t *testing.T) (session.Service, message.Service) {
 	t.Helper()
@@ -375,9 +375,7 @@ func TestAppWorkspace_AgentRun_CancelBetweenAcceptAndActive_RealMachinery(t *tes
 
 // gatedRunAcceptedCoordinator parks RunAccepted before delegating to the
 // wrapped coordinatorOverSessionAgent, so a cancel can be made to land
-// in the accepted-but-not-yet-active window deterministically —
-// mirroring internal/backend/accepted_run_integration_test.go's
-// gatedCoordinator.
+// in the accepted-but-not-yet-active window deterministically.
 type gatedRunAcceptedCoordinator struct {
 	*coordinatorOverSessionAgent
 	entered chan struct{}

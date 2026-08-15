@@ -89,8 +89,7 @@ type SendThreadRequest struct {
 	Message string `json:"message"`
 }
 
-// RemoveThreadOptions controls thread removal (query params on the DELETE
-// endpoint — see internal/server).
+// RemoveThreadOptions controls thread removal.
 type RemoveThreadOptions struct {
 	Force        bool `json:"force,omitempty"`
 	DeleteBranch bool `json:"delete_branch,omitempty"`

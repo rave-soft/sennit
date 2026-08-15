@@ -232,9 +232,7 @@ func ensureDotBraidDir(dir string) error {
 }
 
 // SkillsDiscoveryConfig adapts a *config.ConfigStore to the inputs
-// skills.DiscoverFromConfig expects. Exported so internal/backend can
-// build the same DiscoveryConfig for its skills-directory watcher
-// (see backend.createWorkspace) without duplicating the field mapping.
+// skills.DiscoverFromConfig expects.
 func SkillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
 	opts := cfg.Config().Options
 	var paths, disabled []string

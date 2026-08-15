@@ -13,11 +13,11 @@ import (
 
 // TestStartExternalChangeWatchers_LocalModePicksUpMCPWithoutBackend is the
 // local-mode regression test for the bug this fixes: WatchForExternalChanges
-// used to start only in backend.createWorkspace (client/server mode, off by
-// default), so a bare App built via app.New/Bootstrap — the default local
-// path — never picked up a config file edited outside the process at all.
-// This exercises Bootstrap+New directly, with no *backend.Backend involved,
-// and checks that an MCP server added straight to the workspace's
+// used to start only in the now-removed client/server backend, so a bare
+// App built via app.New/Bootstrap — the default local path — never picked
+// up a config file edited outside the process at all. This exercises
+// Bootstrap+New directly, and checks that an MCP server added straight to
+// the workspace's
 // .braid/braid.json (as an agent's Write tool would do, bypassing
 // ConfigStore.SetConfigFields) shows up in cfg.MCP and a WorkspaceChanged
 // event is published, purely from app.New's own wiring.
@@ -39,8 +39,8 @@ func TestStartExternalChangeWatchers_LocalModePicksUpMCPWithoutBackend(t *testin
 
 	// Write directly to the workspace config file on disk -- the same
 	// thing an agent's Write/Edit tool would do -- instead of going
-	// through result.Config.SetConfigField. No *backend.Workspace exists
-	// in this test at all: app.New must have started the watcher itself.
+	// through result.Config.SetConfigField. app.New must have started
+	// the watcher itself.
 	workspacePath := filepath.Join(dataDir, "braid.json")
 	require.NoError(t, os.WriteFile(workspacePath,
 		[]byte(`{"mcp":{"added-externally":{"command":"echo"}}}`), 0o600))

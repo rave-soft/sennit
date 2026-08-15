@@ -16,21 +16,16 @@ import (
 // adding an MCP server to .braid/braid.json directly, bypassing
 // SetConfigFields.
 //
-// It carries no payload; subscribers that cache a derived snapshot
-// (backend's workspaceToProto, for remote/client-server clients) should
-// refetch theirs — see internal/backend/backend.go, which subscribes to
-// app.Events and translates this into a workspace-scoped
-// proto.ConfigChanged. Local-mode UI does not need to handle this type
-// specially: it already reacts to the underlying MCP/skills events these
-// same reloads publish via app.events (see setupEvents).
+// It carries no payload; subscribers that cache a derived snapshot should
+// refetch theirs. The UI does not need to handle this type specially: it
+// already reacts to the underlying MCP/skills events these same reloads
+// publish via app.events (see setupEvents).
 type WorkspaceChanged struct{}
 
 // startExternalChangeWatchers wires the config and skills external-change
 // pollers to this App and starts them, bound to app's own lifetime rather
-// than a caller's. Both local mode (a bare App, no backend) and
-// client/server mode (backend.Workspace, which embeds App) get hot-reload
-// from this single place. Previously these were started only in
-// backend.createWorkspace, so local mode — the default — never picked up
+// than a caller's. Previously these were started only by the now-removed
+// client/server backend, so local mode — the only mode — never picked up
 // an externally-edited config or skill file without a restart.
 //
 // A dedicated context/WaitGroup pair, not app.eventsCtx/serviceEventsWG:
@@ -45,7 +40,7 @@ func (app *App) startExternalChangeWatchers(ctx context.Context) {
 	app.config.OnExternalChange(func() {
 		// Re-init MCP servers whose config changed, against this app's own
 		// registry. Run async so the poll loop is never blocked on MCP
-		// reconciliation (mirrors backend's former publishConfigChanged).
+		// reconciliation.
 		reinitializeWG.Go(func() { app.MCP.Reinitialize(watchCtx, app.config) })
 		app.applyConfigPermissionsBypass()
 		app.publishWorkspaceChanged()

@@ -6,8 +6,8 @@ GO       ?= go
 BINARY   ?= braid
 SCRATCH  ?= /tmp/braid-fresh
 
-.PHONY: all build install run dev fresh test race client-server lint fmt tidy vet \
-        schema schema-check swag check ci hooks clean help
+.PHONY: all build install run dev fresh test race lint fmt tidy vet \
+        schema schema-check check ci hooks clean help
 
 all: build
 
@@ -49,9 +49,6 @@ race:
 	$(GO) build -o "$$test_binary" .; \
 	BRAID_TEST_BINARY="$$test_binary" $(GO) test -race -failfast ./...
 
-client-server:
-	$(GO) test -count=1 ./internal/cmd/clientserverrace -run TestClientServerThreadLifecycle
-
 ## lint: golangci-lint with the CI config
 lint:
 	golangci-lint run --timeout 10m
@@ -77,12 +74,6 @@ schema:
 schema-check:
 	$(GO) run . schema > /tmp/braid-schema-check.json
 	diff -u schema.json /tmp/braid-schema-check.json
-
-## swag: regenerate swagger docs
-swag:
-	$(GO) run github.com/swaggo/swag/cmd/swag@v1.16.6 init \
-		--generalInfo main.go --dir . --output internal/swagger \
-		--packageName swagger --parseDependency --parseInternal --parseDepth 5
 
 ## check: everything the pre-commit hook runs
 check: tidy build lint schema-check

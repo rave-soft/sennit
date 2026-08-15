@@ -142,8 +142,8 @@ func (b *syncLogBuffer) String() string {
 var logCaptureMu sync.Mutex
 
 // captureLogs installs a buffer-backed slog handler at Debug level for the
-// duration of the test (mirroring internal/backend's captureDebugLogs),
-// restoring the previous default handler via t.Cleanup. See logCaptureMu
+// duration of the test, restoring the previous default handler via
+// t.Cleanup. See logCaptureMu
 // for why this serializes against every other capture in the package.
 func captureLogs(t *testing.T) *syncLogBuffer {
 	t.Helper()

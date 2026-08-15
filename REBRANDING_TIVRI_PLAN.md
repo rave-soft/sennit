@@ -55,7 +55,7 @@
 - `go.mod`, Go imports, linker flags в `Taskfile.yaml` и `.goreleaser.yml`;
 - `internal/cmd/`, `internal/config/`, `internal/db/`, `internal/hooks/`;
 - `internal/shell/`, `internal/skills/`, `internal/agent/tools/`;
-- `internal/ui/`, `internal/oauth/`, `internal/swagger/`;
+- `internal/ui/`, `internal/oauth/`;
 - `README.md`, `docs/`, `schema.json`, builtin skills и agent prompts;
 - packaging и release-конфигурация.
 
@@ -127,9 +127,8 @@
 
 Критичные текущие точки: `internal/config/config.go`,
 `internal/config/load.go`, `internal/db/connect.go`,
-`internal/db/legacy_import.go`, `internal/db/datadirlock.go`,
-`internal/projects/projects.go`, `internal/hostaddr/hostaddr.go` и
-`internal/client/client.go`.
+`internal/db/legacy_import.go`, `internal/db/datadirlock.go` и
+`internal/projects/projects.go`.
 
 ## Этап 4. Переименовать код и технические идентификаторы
 
@@ -141,7 +140,6 @@
 - [ ] Обновить application name, User-Agent и HTTP metadata.
 - [ ] Обновить `braid://`, tool names и skill identifiers согласно принятой
   политике совместимости.
-- [ ] Регенерировать Swagger после изменения module path и API metadata.
 - [ ] Регенерировать JSON schema и проверить ее `$id` и descriptions.
 - [ ] Проверить код и тесты на case-insensitive файловых системах.
 
@@ -242,7 +240,7 @@
    сохраняет настройки, sessions, credentials, agents, skills и hooks.
 3. Автоматизация на `BRAID_*` продолжает работать в течение объявленного окна
    совместимости и получает понятное предупреждение.
-4. Все официальные пакеты, документация, schema, Swagger и release assets
+4. Все официальные пакеты, документация, schema и release assets
    используют согласованные идентификаторы Tivri.
 5. Для каждого оставшегося упоминания Braid есть документированная причина и
    дата пересмотра или удаления.
@@ -254,7 +252,7 @@
 | Простая замена путей | Пустой профиль и «потеря» истории | Dual-read и атомарная миграция |
 | Одновременный запуск имен | Повреждение БД/state | Общий migration lock и обнаружение процесса |
 | Смена env/hooks без aliases | Поломка пользовательской автоматизации | Переходный экспорт обоих контрактов |
-| Смена module path | Сломанные imports, linker flags и Swagger refs | Автоматическая замена плюс регенерация |
+| Смена module path | Сломанные imports и linker flags | Автоматическая замена плюс регенерация |
 | Незанятые package names | Невозможность согласованного релиза | Резервирование до публикации кода |
 | Слепая замена Charm | Нарушение атрибуции и dependency URLs | Ручная классификация упоминаний |
 | Разные имена по каналам | Supply-chain риск и путаница | Единый release manifest и smoke-тесты |

@@ -82,7 +82,7 @@ type App struct {
 
 	// Threads is the thread manager owning this workspace's parallel
 	// agent work streams, wired in post-bootstrap by the caller (see
-	// internal/cmd/root.go and internal/backend/backend.go) via
+	// internal/app/app.go and internal/app/threadspawn/attach.go) via
 	// SetThreads. Declared as the tool-facing interface, not
 	// *thread.Manager, because internal/thread imports this package —
 	// see internal/agent/tools/thread_manager.go for the seam. Nil for
@@ -91,9 +91,8 @@ type App struct {
 	Threads tools.ThreadManager
 
 	// threadManager holds the same thread manager as Threads, but typed
-	// any instead of tools.ThreadManager: internal/workspace and
-	// internal/server (added in later steps) need the concrete
-	// *thread.Manager (Subscribe, full-arg Merge/Remove, etc.), which is
+	// any instead of tools.ThreadManager: internal/workspace needs the
+	// concrete *thread.Manager (Subscribe, full-arg Merge/Remove, etc.), which is
 	// richer than the tools.ThreadManager seam built for the agent-tool
 	// wiring. app cannot reference *thread.Manager by name because
 	// internal/thread imports internal/app (see the Threads doc above),
@@ -161,10 +160,10 @@ type App struct {
 	agentNotifications *pubsub.Broker[notify.Notification]
 	// runCompletions is the authoritative per-run completion signal,
 	// emitted once per top-level agent turn after all message
-	// updates have been flushed. Bridged into app.events so SSE
-	// subscribers (notably `braid run` in client/server mode) can
-	// drive their exit on a deterministic, payload-bearing event
-	// instead of guessing from message finish parts.
+	// updates have been flushed. Bridged into app.events so
+	// subscribers (notably `braid run`) can drive their exit on a
+	// deterministic, payload-bearing event instead of guessing from
+	// message finish parts.
 	runCompletions *pubsub.Broker[notify.RunComplete]
 
 	// agentDispatcher accepts and dispatches fire-and-forget agent runs
@@ -303,9 +302,9 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	app.mcpClose = func(ctx context.Context) error { return app.MCP.Close(ctx) }
 	app.mainDBRelease = func(context.Context) error { return db.Release(dbDir) }
 
-	// Hot-reload config and skills on external edits, in both local mode
-	// and client/server mode (see startExternalChangeWatchers' doc).
-	// Started regardless of cfg.IsConfigured(): an unconfigured project's
+	// Hot-reload config and skills on external edits (see
+	// startExternalChangeWatchers' doc). Started regardless of
+	// cfg.IsConfigured(): an unconfigured project's
 	// config or an empty skills dir can still change externally.
 	app.startExternalChangeWatchers(ctx)
 
@@ -373,8 +372,8 @@ func (app *App) Store() *config.ConfigStore {
 // SetThreads wires the thread manager owning this workspace's parallel
 // agent work streams, forwarding it to the coder agent so the thread_*
 // tools become available. Safe to call with nil to clear it. The caller
-// (see internal/cmd/root.go and internal/backend/backend.go) is
-// responsible for deciding whether this workspace should own one at all.
+// (see internal/app/threadspawn/attach.go) is responsible for deciding
+// whether this workspace should own one at all.
 func (app *App) SetThreads(threads tools.ThreadManager) {
 	app.Threads = threads
 	if app.AgentCoordinator != nil {
@@ -383,12 +382,11 @@ func (app *App) SetThreads(threads tools.ThreadManager) {
 }
 
 // SetThreadManager wires the concrete thread manager for callers (see
-// internal/workspace and internal/server) that need more than the
-// tools.ThreadManager seam exposes. Kept separate from SetThreads/Threads,
-// which exist purely for the agent-tool wiring; both are set from the
-// same manager by the caller (see internal/cmd/threads.go,
-// internal/backend/threads.go), but this accessor is additive and neither
-// replaces nor is replaced by the other.
+// internal/workspace) that need more than the tools.ThreadManager seam
+// exposes. Kept separate from SetThreads/Threads, which exist purely for
+// the agent-tool wiring; both are set from the same manager by the caller
+// (see internal/app/threadspawn/attach.go), but this accessor is
+// additive and neither replaces nor is replaced by the other.
 func (app *App) SetThreadManager(m any) {
 	app.threadManager = m
 }
@@ -410,11 +408,10 @@ type permissionsSkipPropagator interface {
 
 // PermissionsSkipFunc returns an accessor for this workspace's live
 // permission-bypass ("yolo") state, for the thread spawners that must hand
-// it to a delegation workspace at spawn time (see internal/cmd/root.go and
-// internal/backend/backend.go).
+// it to a delegation workspace at spawn time (see internal/cmd/root.go).
 //
-// It exists so those two call sites cannot disagree about where the answer
-// comes from. They used to each read Store().Overrides().SkipPermissionRequests
+// It exists so callers cannot disagree about where the answer comes from.
+// They used to each read Store().Overrides().SkipPermissionRequests
 // - the --yolo flag as it was at bootstrap - which meant a thread created
 // after a ctrl+y or /yolo toggle inherited the state the process started
 // in, not the state the user was actually in.
@@ -426,8 +423,8 @@ func (app *App) PermissionsSkipFunc() func() bool {
 // state and propagates it to every delegation workspace live under it.
 //
 // This is the single entry point for changing bypass state: the TUI's
-// ctrl+y and /yolo, the server's SetPermissionsSkip endpoint, and a
-// permissions.bypass config reload all funnel through here. Calling
+// ctrl+y and /yolo, and a permissions.bypass config reload all funnel
+// through here. Calling
 // Permissions.SetSkipRequests directly sets only this app's own flag and
 // leaves running threads - which have permission services of their own -
 // on whatever state they were spawned with.
@@ -646,16 +643,15 @@ func setupSubscriber[T any](
 
 // ForwardEvents subscribes to an event source attached to app after
 // construction (e.g. the thread manager, wired in post-bootstrap by
-// SetThreadManager — see internal/cmd/threads.go and
-// internal/backend/threads.go) and forwards its events into app's own
-// event fan-in (app.events), so both local-mode (app.Subscribe) and
-// client/server-mode (app.Events/SSE) consumers see them exactly like
-// every source wired in at New() time by setupEvents.
+// SetThreadManager — see internal/app/threadspawn/attach.go) and
+// forwards its events into app's own event fan-in (app.events), so
+// app.Subscribe consumers see them exactly like every source wired in
+// at New() time by setupEvents.
 //
 // A free function rather than a method because Go has no generic
 // methods; T is inferred from subscribe at the call site. Exported
 // because the caller lives in a different package (internal/thread, via
-// internal/cmd or internal/backend). Callers must invoke this before
+// internal/app/threadspawn). Callers must invoke this before
 // app.Shutdown tears down app.eventsCtx/app.events — true in practice,
 // since thread managers are attached once, early in a workspace's life.
 func ForwardEvents[T any](app *App, name string, subscribe func(context.Context) <-chan pubsub.Event[T]) {

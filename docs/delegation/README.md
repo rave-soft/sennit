@@ -47,11 +47,6 @@ option is turned off keeps running to completion rather than being killed —
 the switch only blocks new dispatch. Threads are a separate, older feature
 and are unaffected by it.
 
-In client/server mode, a remote client can list and cancel a workspace's
-tasks, but cannot send one a follow-up or read its transcript that way —
-those are only reachable from inside the same process the task itself runs
-in.
-
 ## Threads
 
 A thread is the opposite trade-off: real isolation — its own git worktree

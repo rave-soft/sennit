@@ -92,7 +92,7 @@ func newTestThreadStoreDB(t *testing.T) thread.Store {
 // -- fakes: mirror internal/thread/manager_test.go's fakeSessions,
 // fakeCoordinator, fakeHandle, fakeSpawner (unexported to package thread,
 // so reimplemented here against the exported thread.Spawner/thread.Handle
-// interfaces, the same approach internal/server/threads_test.go took). --
+// interfaces). --
 
 type fakeThreadSessions struct {
 	session.Service

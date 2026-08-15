@@ -18,9 +18,8 @@ type Handle interface {
 // Spawner bootstraps and tears down the isolated workspace backing a
 // thread. Implementations differ in how the resulting workspace's
 // lifecycle interacts with the rest of the process — the in-process CLI
-// case and the client/server case build them in internal/app/threadspawn
-// and internal/backend respectively, keeping the app-specific bootstrap
-// out of this domain package.
+// case builds one in internal/app/threadspawn, keeping the app-specific
+// bootstrap out of this domain package.
 type Spawner interface {
 	// Spawn bootstraps a workspace rooted at path (a thread's git
 	// worktree) and returns a handle to it.

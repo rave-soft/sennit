@@ -690,7 +690,7 @@ func (w *AppWorkspace) Subscribe(program *tea.Program) {
 // the TUI's Update() expects. Every source app.setupEvents wires in at
 // construction already arrives pre-shaped; the one exception is thread
 // events, forwarded raw by app.ForwardEvents (see SetThreadManager in
-// internal/cmd/threads.go / internal/backend/threads.go) as the
+// internal/app/threadspawn/attach.go) as the
 // pubsub.Event[thread.Event] the Manager itself publishes, because
 // ForwardEvents is generic over T and has no way to convert on the way
 // in. Convert here, at the UI-facing boundary, into
