@@ -108,8 +108,8 @@ func TestDrawSessionPanel_RendersEveryThreadBlock(t *testing.T) {
 		require.Containsf(t, out, fmt.Sprintf("%d fix-auth — Refactor login flow to OAuth2", n), "block %d", n)
 	}
 	require.NotContains(t, out, "more threads")
-	require.Len(t, u.panelThreadRects, 6)
-	require.Len(t, u.panelThreads, 6)
+	require.Len(t, u.panel.panelThreadRects, 6)
+	require.Len(t, u.panel.panelThreads, 6)
 }
 
 // TestDrawSessionPanel_RunningTaskRendersIdentityAndElapsed proves a task
@@ -140,8 +140,8 @@ func TestDrawSessionPanel_RunningTaskRendersIdentityAndElapsed(t *testing.T) {
 	require.Contains(t, out, "[task] scan-todos", "a task row must be tagged and show its own name")
 	require.Contains(t, out, "Scan the repo for TODOs", "the task's goal must render like a thread's")
 	require.Contains(t, out, "1m", "a running task must show a live elapsed time, not a frozen/absent one")
-	require.Len(t, u.panelThreads, 1)
-	require.Equal(t, "task", u.panelThreads[0].Kind)
+	require.Len(t, u.panel.panelThreads, 1)
+	require.Equal(t, "task", u.panel.panelThreads[0].Kind)
 }
 
 // TestDrawSessionPanel_NoOpOnZeroArea guards against a panic when the panel
@@ -526,9 +526,9 @@ func TestMouseClick_ThreadBlockEntersThread(t *testing.T) {
 	// doesn't wire the sidebar machinery Draw also touches).
 	scr := uv.NewScreenBuffer(u.width, u.height)
 	u.drawSessionPanel(scr, u.layout.panel)
-	require.Len(t, u.panelThreadRects, 1)
+	require.Len(t, u.panel.panelThreadRects, 1)
 
-	rect := u.panelThreadRects[0]
+	rect := u.panel.panelThreadRects[0]
 	_, cmd := u.Update(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseLeft})
 	require.NotNil(t, cmd)
 
@@ -541,7 +541,7 @@ func TestMouseClick_ThreadBlockEntersThread(t *testing.T) {
 
 // TestMouseClick_TodosHeaderTogglesWithoutPriorDraw is the regression test
 // for the dead-click-on-first-frame bug: the click hit-test used to read
-// m.panelTodosHeaderRect, which is only populated as a side effect of
+// m.panel.panelTodosHeaderRect, which is only populated as a side effect of
 // drawSessionPanel — itself only reachable through Draw/View. A click
 // delivered by Update before the panel's first paint (e.g. immediately
 // after updateLayoutAndSize runs synchronously inside Update, which is
@@ -576,7 +576,7 @@ func TestMouseClick_TodosHeaderTogglesWithoutPriorDraw(t *testing.T) {
 // TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw mirrors
 // TestMouseClick_TodosHeaderTogglesWithoutPriorDraw for the thread-block
 // hit-test, which shared the same Draw-time-cache bug via
-// m.panelThreadRects/m.panelThreads.
+// m.panel.panelThreadRects/m.panel.panelThreads.
 func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	t.Parallel()
 
@@ -586,7 +586,7 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 		{ID: "t1", SessionID: "s-t1", Name: "fix-auth", Status: "running", CreatedAt: time.Now().Unix()},
 	}
 	u.updateLayoutAndSize()
-	require.Empty(t, u.panelThreadRects, "must not have been populated by any Draw call yet")
+	require.Empty(t, u.panel.panelThreadRects, "must not have been populated by any Draw call yet")
 
 	plan := u.sessionPanelPlan(u.layout.panel.Dy())
 	threadRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
@@ -691,7 +691,7 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 			DeltaY: 1,
 		})
 	}
-	require.Equal(t, maxOffset, u.panelTodosScrollOffset, "wheel-down must reach the section's bottom")
+	require.Equal(t, maxOffset, u.panel.panelTodosScrollOffset, "wheel-down must reach the section's bottom")
 
 	scr = uv.NewScreenBuffer(u.width, u.height)
 	u.drawSessionPanel(scr, u.layout.panel)
@@ -710,7 +710,7 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 			})
 		}
 	})
-	require.Equal(t, maxOffset, u.panelTodosScrollOffset, "offset must clamp at the bottom")
+	require.Equal(t, maxOffset, u.panel.panelTodosScrollOffset, "offset must clamp at the bottom")
 }
 
 // TestRenderSessionTodoLine_CompletedStyleSurvivesBudgetConstrainedPlan
@@ -735,7 +735,7 @@ func TestRenderSessionTodoLine_CompletedStyleSurvivesBudgetConstrainedPlan(t *te
 	require.Len(t, plan.todosDone, 3)
 
 	maxOffset := plan.todosContentRows - plan.todosViewportRows
-	u.panelTodosScrollOffset = maxOffset
+	u.panel.panelTodosScrollOffset = maxOffset
 	scr := uv.NewScreenBuffer(u.width, u.height)
 	u.drawSessionPanel(scr, u.layout.panel)
 	out := scr.Render()
@@ -931,9 +931,9 @@ func TestMouseClick_TodosHeaderTogglesWithHeaderStyling(t *testing.T) {
 
 	scr := uv.NewScreenBuffer(u.width, u.height)
 	u.drawSessionPanel(scr, u.layout.panel)
-	require.NotZero(t, u.panelTodosHeaderRect)
+	require.NotZero(t, u.panel.panelTodosHeaderRect)
 
-	rect := u.panelTodosHeaderRect
+	rect := u.panel.panelTodosHeaderRect
 	_, cmd := u.Update(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseLeft})
 	require.True(t, u.panel.expanded, "click on the restyled todos header must still toggle expand state")
 	_ = cmd
@@ -979,7 +979,7 @@ func TestDrawSessionPanel_TodosScrollWithThreadsAndDelegationsAbove(t *testing.T
 			DeltaY: 1,
 		})
 	}
-	require.Equal(t, maxOffset, u.panelTodosScrollOffset, "wheel-down must reach the section's bottom")
+	require.Equal(t, maxOffset, u.panel.panelTodosScrollOffset, "wheel-down must reach the section's bottom")
 
 	scr = uv.NewScreenBuffer(u.width, u.height)
 	u.drawSessionPanel(scr, u.layout.panel)

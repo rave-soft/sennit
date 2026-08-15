@@ -17,7 +17,6 @@ import (
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/history"
-	"github.com/rave-soft/braid/internal/lsp"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/proto"
@@ -354,19 +353,9 @@ type UI struct {
 		yesInitializeSelected bool
 	}
 
-	// lspStates / lspDiagnostics memoize the workspace LSP state and
-	// per-server severity counts (each probe behind them is a synchronous
-	// HTTP round-trip in client/server mode, and the sidebar, landing view,
-	// and compact header render them every frame). LSP events refresh them
-	// off-thread with a TTL backstop; see lsp.go.
-	lspStates        map[string]workspace.LSPClientInfo
-	lspDiagnostics   map[string]lsp.DiagnosticCounts
-	lspFetchInFlight bool
-	// lspRefreshQueued records that an LSP event arrived while a fetch was
-	// already in flight; applyLSPStates re-dispatches so the freshest state
-	// still lands.
-	lspRefreshQueued bool
-	lspCheckedAt     time.Time
+	// lsp holds the memoized workspace LSP state and per-server diagnostic
+	// counts. See lsp.go.
+	lsp lspState
 
 	// mcp
 	mcpStates map[string]workspace.MCPClientInfo
@@ -399,43 +388,6 @@ type UI struct {
 	// todos + queue, between chat and the editor). See session_panel.go.
 	panel sessionPanelState
 
-	// hoveredPanelThread is the index (into panelThreads/panelThreadRects)
-	// of the thread block currently under the pointer, -1 for none. Set
-	// from tea.MouseMotionMsg, read by drawSessionPanel for hover styling.
-	hoveredPanelThread int
-	// panelThreadRects/panelThreads are parallel slices — the on-screen
-	// rect and source thread for each currently visible thread block —
-	// rebuilt on every drawSessionPanel call. Used by the MouseClickMsg
-	// hit-test (drill into the clicked thread) and MouseMotionMsg hover
-	// tracking.
-	panelThreadRects []uv.Rectangle
-	panelThreads     []proto.Thread
-	// panelTodosHover / panelTodosHeaderRect mirror childPanelHover /
-	// childPanelButtonRect for the todos header row's click-to-toggle
-	// affordance.
-	panelTodosHover      bool
-	panelTodosHeaderRect uv.Rectangle
-	// panelThreadsHover / panelThreadsHeaderRect mirror the todos pair for
-	// the threads section's own collapse header.
-	panelThreadsHover      bool
-	panelThreadsHeaderRect uv.Rectangle
-	// panelTodosListRect is the on-screen area of the (possibly scrollable)
-	// todo rows below the header, rebuilt on every drawSessionPanel call —
-	// the mouse-wheel handler in Update hit-tests against this to decide
-	// whether a wheel event scrolls the todos section instead of the chat.
-	panelTodosListRect uv.Rectangle
-	// panelTodosScrollOffset is the expanded todos section's own scroll
-	// position — an index into the concatenated in-progress+pending+done
-	// row list (see sessionPanelTodosContent), independent of chat/sidebar
-	// scrolling. sessionPanelPlan never drops todosDone/todosPending to fit
-	// the panel's row budget anymore (see session_panel.go); when the
-	// section's natural size exceeds what's granted, this offset is what
-	// reveals the rest instead. drawSessionPanel clamps it to
-	// [0, max(0, contentRows-viewportRows)] every frame, so a stale offset
-	// left over from a shorter list (todos completed/removed) never
-	// dangles out of range.
-	panelTodosScrollOffset int
-
 	// threadLastStatus tracks each thread's last-seen status, so
 	// notifyThreadCompletion (thread_completion.go) can detect the exact
 	// edge transition into a terminal state and toast it exactly once.
@@ -459,10 +411,6 @@ type UI struct {
 	// sessionsLoadedMsg.
 	sessionsDialogLoading bool
 	sessionsDialogGen     uint64
-
-	// Todo spinner
-	panelSpinner    spinner.Model
-	panelIsSpinning bool
 
 	sessionLoadGen        uint64
 	sessionLoadExpectedID string
@@ -578,17 +526,21 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 			completions: comp,
 			attachments: attachments,
 		},
-		chat:                ch,
-		header:              header,
-		panelSpinner:        panelSpinner,
-		lspStates:           make(map[string]workspace.LSPClientInfo),
+		chat:   ch,
+		header: header,
+		panel: sessionPanelState{
+			panelSpinner:       panelSpinner,
+			hoveredPanelThread: -1,
+		},
+		lsp: lspState{
+			lspStates: make(map[string]workspace.LSPClientInfo),
+		},
 		mcpStates:           make(map[string]workspace.MCPClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
 		initialSessionID:    initialSessionID,
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
-		hoveredPanelThread:  -1,
 	}
 	for _, opt := range opts {
 		opt(ui)
@@ -1300,7 +1252,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.chat.ClearMessages()
 	m.panel.expanded = false
 	m.panel.autoExpanded = false
-	m.panelTodosScrollOffset = 0
+	m.panel.panelTodosScrollOffset = 0
 	m.wsCache.promptQueue = 0
 	m.wsCache.promptQueueItems = nil
 	m.wsCache.promptQueueCheckedAt = time.Now()

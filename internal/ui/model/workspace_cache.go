@@ -298,7 +298,7 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if time.Since(m.lspCheckedAt) >= lspStatesTTL {
+	if time.Since(m.lsp.lspCheckedAt) >= lspStatesTTL {
 		if cmd := m.dispatchLSPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

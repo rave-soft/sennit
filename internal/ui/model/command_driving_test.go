@@ -446,7 +446,7 @@ func warmCmdDrivenCaches(m *UI) {
 	m.wsCache.yoloCache.set(false)
 	m.wsCache.agentReady = true
 	m.wsCache.promptQueueCheckedAt = time.Now()
-	m.lspCheckedAt = time.Now()
+	m.lsp.lspCheckedAt = time.Now()
 }
 
 // sequenceMsgType is the exact unexported wrapper type returned by

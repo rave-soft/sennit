@@ -132,9 +132,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.com.Workspace.AgentCancel(m.session.ID)
 		// Stop the spinning todo indicator and drop the memoized busy
 		// state the cancel just changed; the session panel reads
-		// m.panelIsSpinning fresh on every draw, and again once the
+		// m.panel.panelIsSpinning fresh on every draw, and again once the
 		// off-thread refresh (and the agent's own events) land.
-		m.panelIsSpinning = false
+		m.panel.panelIsSpinning = false
 		m.invalidateBusyCaches()
 		return m.dispatchBusyRefresh()
 	}

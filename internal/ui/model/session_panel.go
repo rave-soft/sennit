@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -68,12 +69,12 @@ func (m *UI) panelSpinnerWanted() bool {
 // refreshes) funnels through this instead of duplicating the condition.
 func (m *UI) syncPanelSpinner() tea.Cmd {
 	want := m.panelSpinnerWanted()
-	if want && !m.panelIsSpinning {
-		m.panelIsSpinning = true
-		return m.panelSpinner.Tick
+	if want && !m.panel.panelIsSpinning {
+		m.panel.panelIsSpinning = true
+		return m.panel.panelSpinner.Tick
 	}
 	if !want {
-		m.panelIsSpinning = false
+		m.panel.panelIsSpinning = false
 	}
 	return nil
 }
@@ -84,8 +85,8 @@ func (m *UI) syncPanelSpinner() tea.Cmd {
 // static-fallback the todos list uses, so a briefly-stalled tick loop
 // degrades to a frozen glyph rather than a misleading arrow.
 func (m *UI) panelActivityIcon() string {
-	if m.panelIsSpinning {
-		return m.panelSpinner.View()
+	if m.panel.panelIsSpinning {
+		return m.panel.panelSpinner.View()
 	}
 	return m.com.Styles.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 }
@@ -111,6 +112,47 @@ type sessionPanelState struct {
 	// way, since its header's completed/total ratio still reports the whole
 	// list's state while a collapsed threads header only reports a count.
 	threadsCollapsed bool
+
+	// hoveredPanelThread is the index (into panelThreads/panelThreadRects)
+	// of the thread block currently under the pointer, -1 for none. Set
+	// from tea.MouseMotionMsg, read by drawSessionPanel for hover styling.
+	hoveredPanelThread int
+	// panelThreadRects/panelThreads are parallel slices — the on-screen
+	// rect and source thread for each currently visible thread block —
+	// rebuilt on every drawSessionPanel call. Used by the MouseClickMsg
+	// hit-test (drill into the clicked thread) and MouseMotionMsg hover
+	// tracking.
+	panelThreadRects []uv.Rectangle
+	panelThreads     []proto.Thread
+	// panelTodosHover / panelTodosHeaderRect mirror childPanelHover /
+	// childPanelButtonRect for the todos header row's click-to-toggle
+	// affordance.
+	panelTodosHover      bool
+	panelTodosHeaderRect uv.Rectangle
+	// panelThreadsHover / panelThreadsHeaderRect mirror the todos pair for
+	// the threads section's own collapse header.
+	panelThreadsHover      bool
+	panelThreadsHeaderRect uv.Rectangle
+	// panelTodosListRect is the on-screen area of the (possibly scrollable)
+	// todo rows below the header, rebuilt on every drawSessionPanel call —
+	// the mouse-wheel handler in Update hit-tests against this to decide
+	// whether a wheel event scrolls the todos section instead of the chat.
+	panelTodosListRect uv.Rectangle
+	// panelTodosScrollOffset is the expanded todos section's own scroll
+	// position — an index into the concatenated in-progress+pending+done
+	// row list (see sessionPanelTodosContent), independent of chat/sidebar
+	// scrolling. sessionPanelPlan never drops todosDone/todosPending to fit
+	// the panel's row budget anymore (see session_panel.go); when the
+	// section's natural size exceeds what's granted, this offset is what
+	// reveals the rest instead. drawSessionPanel clamps it to
+	// [0, max(0, contentRows-viewportRows)] every frame, so a stale offset
+	// left over from a shorter list (todos completed/removed) never
+	// dangles out of range.
+	panelTodosScrollOffset int
+
+	// Todo spinner
+	panelSpinner    spinner.Model
+	panelIsSpinning bool
 }
 
 // hasIncompleteTodos returns true if there are any non-completed todos.
@@ -261,7 +303,7 @@ type sessionPanelPlan struct {
 	// todosViewportRows is how many of those rows the budget actually
 	// grants for painting; when it's less than todosContentRows the
 	// section is scrollable (todosScrollable) and drawSessionPanel windows
-	// the list by m.panelTodosScrollOffset instead of truncating it — see
+	// the list by m.panel.panelTodosScrollOffset instead of truncating it — see
 	// the sessionPanelPlan doc comment.
 	todosContentRows  int
 	todosViewportRows int
@@ -286,7 +328,7 @@ type sessionPanelPlan struct {
 // todosPending, and todosDone always hold the full lists; todosViewportRows
 // is the (possibly smaller) number of those rows the budget actually grants
 // for painting this frame, and todosScrollable signals drawSessionPanel to
-// render a scrollbar and window the list by m.panelTodosScrollOffset
+// render a scrollbar and window the list by m.panel.panelTodosScrollOffset
 // instead of truncating it. Concretely: (1) if the expanded todos section's
 // natural size doesn't fit, shrink its viewport (not its data); (2) if
 // still over, truncate the queue tail; (3) if still over, shrink the
@@ -490,7 +532,7 @@ func threadBlockGeometry(area uv.Rectangle, threads []proto.Thread) []uv.Rectang
 // time — not lagged behind whatever the last Draw call happened to cache)
 // call this instead of duplicating the row-advancing math. todosListRect is
 // the area of the (possibly scrollable) todo rows below the header, for the
-// mouse-wheel hit-test that adjusts m.panelTodosScrollOffset.
+// mouse-wheel hit-test that adjusts m.panel.panelTodosScrollOffset.
 func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects []uv.Rectangle, todosHeaderRect, todosListRect, threadsHeaderRect uv.Rectangle) {
 	if area.Dy() <= 0 || area.Dx() <= 0 {
 		return nil, uv.Rectangle{}, uv.Rectangle{}, uv.Rectangle{}
@@ -604,7 +646,7 @@ func sessionPanelTodosContent(plan sessionPanelPlan) []session.Todo {
 // clampPanelTodosScrollOffset clamps offset to [0, max(0,
 // contentRows-viewportRows)] — the range sessionPanelPlan's todosContentRows
 // and todosViewportRows report for the current render. Shared by
-// drawSessionPanel (which self-corrects m.panelTodosScrollOffset every
+// drawSessionPanel (which self-corrects m.panel.panelTodosScrollOffset every
 // frame — the same "cosmetic state that tolerates staleness" pattern the
 // panel already uses for hover rects, so a stale offset left over from a
 // shorter list never dangles past the new bounds) and the mouse-wheel
@@ -618,7 +660,7 @@ func clampPanelTodosScrollOffset(offset int, plan sessionPanelPlan) int {
 // header (plus list when expanded and budget allows), then the queue tail
 // — all from sessionPanelPlan(area.Dy()), so it never paints a different
 // row count than sessionPanelHeight reserved for this exact area. Also
-// caches m.panelThreadRects/m.panelThreads/m.panelTodosHeaderRect for
+// caches m.panel.panelThreadRects/m.panel.panelThreads/m.panel.panelTodosHeaderRect for
 // hover-highlight rendering (block-name underline, panelTodosHover's
 // style swap) — cosmetic state that can tolerate one frame of staleness.
 // The click hit-test itself does NOT read these fields: it recomputes the
@@ -626,11 +668,11 @@ func clampPanelTodosScrollOffset(offset int, plan sessionPanelPlan) int {
 // before this function has ever run for the current layout (see ui.go's
 // tea.MouseClickMsg handler).
 func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
-	m.panelThreadRects = nil
-	m.panelThreads = nil
-	m.panelTodosHeaderRect = uv.Rectangle{}
-	m.panelThreadsHeaderRect = uv.Rectangle{}
-	m.panelTodosListRect = uv.Rectangle{}
+	m.panel.panelThreadRects = nil
+	m.panel.panelThreads = nil
+	m.panel.panelTodosHeaderRect = uv.Rectangle{}
+	m.panel.panelThreadsHeaderRect = uv.Rectangle{}
+	m.panel.panelTodosListRect = uv.Rectangle{}
 	if area.Dy() <= 0 || area.Dx() <= 0 {
 		return
 	}
@@ -649,21 +691,21 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 			// responds to a click has to look like it does.
 			headerView := common.SectionStyled(t, t.Section.Title,
 				sessionPanelThreadsHeaderText(plan.threadsActive, plan.threadsExpanded), width)
-			if m.panelThreadsHover {
+			if m.panel.panelThreadsHover {
 				headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
 			}
 			headerRow := area
 			headerRow.Min.Y = row.Min.Y
 			headerRow.Max.Y = row.Min.Y + 1
 			uv.NewStyledString(headerView).Draw(scr, headerRow)
-			m.panelThreadsHeaderRect = headerRow
+			m.panel.panelThreadsHeaderRect = headerRow
 			row.Min.Y++
 			row.Max.Y = row.Min.Y
 		}
 		threadsArea := area
 		threadsArea.Min.Y = row.Min.Y
 		threadsArea.Max.Y = min(row.Min.Y+plan.threadsRows, area.Max.Y)
-		m.panelThreadRects = m.drawPanelBlocks(scr, threadsArea, m.hoveredPanelThread, panelBlockDrawSpec{
+		m.panel.panelThreadRects = m.drawPanelBlocks(scr, threadsArea, m.panel.hoveredPanelThread, panelBlockDrawSpec{
 			count: len(plan.threads), more: plan.threadsMore, footer: "…and %d more threads",
 			name: func(i int) string {
 				item := plan.threads[i]
@@ -690,7 +732,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(threadDockStatusText(item, m.threadsDock.activity[item.ID].value))
 			},
 		})
-		m.panelThreads = plan.threads
+		m.panel.panelThreads = plan.threads
 		row.Min.Y = threadsArea.Max.Y
 		row.Max.Y = row.Min.Y
 	}
@@ -703,12 +745,12 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		// full row rather than only changing the title.
 		titleStyle := t.Section.Title
 		headerView := common.SectionStyled(t, titleStyle, header, width)
-		if m.panelTodosHover {
+		if m.panel.panelTodosHover {
 			headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
 		}
 		uv.NewStyledString(headerView).Draw(scr, headerRow)
-		m.panelTodosHeaderRect = headerRow
-		m.panelTodosListRect = todosListRect
+		m.panel.panelTodosHeaderRect = headerRow
+		m.panel.panelTodosListRect = todosListRect
 		row.Min.Y++
 		row.Max.Y = row.Min.Y
 
@@ -719,8 +761,8 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		// Collapsed mode is never scrollable (todosViewportRows ==
 		// todosContentRows == 0 there), so offset is always 0 and this
 		// loop paints nothing — the header stands alone.
-		offset := clampPanelTodosScrollOffset(m.panelTodosScrollOffset, plan)
-		m.panelTodosScrollOffset = offset
+		offset := clampPanelTodosScrollOffset(m.panel.panelTodosScrollOffset, plan)
+		m.panel.panelTodosScrollOffset = offset
 		all := sessionPanelTodosContent(plan)
 		end := min(len(all), offset+plan.todosViewportRows)
 
@@ -823,7 +865,7 @@ func (m *UI) toggleTodosExpanded() tea.Cmd {
 	// A fresh expand always starts scrolled to the top (in-progress rows
 	// first) rather than resuming wherever a previous expand left off,
 	// which would be surprising after the list has likely changed shape.
-	m.panelTodosScrollOffset = 0
+	m.panel.panelTodosScrollOffset = 0
 	m.updateLayoutAndSize()
 
 	// Follow scroll if enabled, same as the old togglePillsExpanded — this
