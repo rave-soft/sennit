@@ -9,6 +9,7 @@ import (
 
 // Map is a concurrent map implementation that provides thread-safe access.
 type Map[K comparable, V any] struct {
+	schemaAlias[K, V]
 	inner map[K]V
 	mu    sync.RWMutex
 }
@@ -150,10 +151,17 @@ var (
 	_ json.Marshaler   = &Map[string, any]{}
 )
 
+// schemaAlias carries JSONSchemaAlias for Map. It exists as a separate
+// zero-size type because the method needs a value receiver — jsonschema
+// checks interface satisfaction on the non-pointer type after stripping
+// pointers (reflect.go, refOrReflectTypeToSchema) — and a value receiver on
+// Map itself would copy Map's RWMutex on every call, which go vet's
+// copylocks rightly flags. Embedding promotes the method into Map's method
+// set while the call copies only this empty struct.
+type schemaAlias[K comparable, V any] struct{}
+
 // JSONSchemaAlias returns the underlying map type for JSON schema generation.
-// Value receiver is required because github.com/invopop/jsonschema checks
-// interface satisfaction on the non-pointer type after stripping pointers.
-func (Map[K, V]) JSONSchemaAlias() any { //nolint
+func (schemaAlias[K, V]) JSONSchemaAlias() any {
 	m := map[K]V{}
 	return m
 }
