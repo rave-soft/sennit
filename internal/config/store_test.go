@@ -898,10 +898,10 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 	)
 
 	errs := make(chan error, numGoroutines)
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			kv := make(map[string]any, fieldsPerRoutine)
-			for j := 0; j < fieldsPerRoutine; j++ {
+			for j := range fieldsPerRoutine {
 				key := fmt.Sprintf("goroutine_%d_field_%d", id, j)
 				kv[key] = fmt.Sprintf("value_%d_%d", id, j)
 			}
@@ -909,7 +909,7 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		require.NoError(t, <-errs)
 	}
 
@@ -917,8 +917,8 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 	data, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 
-	for i := 0; i < numGoroutines; i++ {
-		for j := 0; j < fieldsPerRoutine; j++ {
+	for i := range numGoroutines {
+		for j := range fieldsPerRoutine {
 			key := fmt.Sprintf("goroutine_%d_field_%d", i, j)
 			expectedValue := fmt.Sprintf("value_%d_%d", i, j)
 			result := gjson.Get(string(data), key)
