@@ -102,5 +102,18 @@ func CharmtonePantera() Styles {
 		Foreground(charmtone.Hazy)
 	s.Files.Additions = s.Files.Additions.Foreground(charmtone.Guac)
 
+	// Check marks are green everywhere they appear. `success` stays Smoke
+	// so success-colored *text* (dialog titles, resource notes, link text)
+	// keeps the restrained neutral scheme, but a ✓ is a discrete semantic
+	// mark rather than decoration: against muted or struck-through text a
+	// gray check reads as "also grayed out" instead of "done". Only the
+	// glyph carries the color; the row text around it stays as it was.
+	checkGreen := charmtone.Guac
+	s.ToolCallSuccess = s.ToolCallSuccess.Foreground(checkGreen)
+	s.Tool.IconSuccess = s.Tool.IconSuccess.Foreground(checkGreen)
+	s.Tool.JobIconSuccess = s.Tool.JobIconSuccess.Foreground(checkGreen)
+	s.Tool.TodoCompletedIcon = s.Tool.TodoCompletedIcon.Foreground(checkGreen)
+	s.Status.SuccessIndicator = s.Status.SuccessIndicator.Foreground(checkGreen)
+
 	return s
 }
