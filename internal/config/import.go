@@ -376,7 +376,7 @@ func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (Import
 		comments = append(comments, fmt.Sprintf("# original top_p: %v (not supported by braid agents)", *meta.TopP))
 	}
 
-	// See TECHDEBT.md "Ограничения перенесённых определений агентов":
+	// See TECHDEBT.md, "Limitations of imported agent definitions":
 	// permission blocks were never enforced even when the source directory
 	// was auto-discovered, and that hasn't changed for import.
 	if !meta.Permission.IsZero() {
