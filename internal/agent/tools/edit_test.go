@@ -3,18 +3,22 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/braid/internal/filetracker"
 	"github.com/stretchr/testify/require"
 )
 
 type mockEditFileTracker struct {
 	lastRead time.Time
 	reads    []string
+	partial  filetracker.Coverage
 }
 
 func (m *mockEditFileTracker) RecordRead(ctx context.Context, sessionID, path string) {
@@ -27,6 +31,20 @@ func (m *mockEditFileTracker) LastReadTime(ctx context.Context, sessionID, path 
 
 func (m *mockEditFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
 	return m.reads, nil
+}
+
+func (m *mockEditFileTracker) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
+	m.partial = m.partial.Add(filetracker.LineRange{Start: start, End: end})
+}
+
+// ReadCoverage reports whatever coverage the test set up; the zero value
+// is "fully read", which is what every test predating range tracking
+// assumes.
+func (m *mockEditFileTracker) ReadCoverage(ctx context.Context, sessionID, path string) filetracker.Coverage {
+	if m.partial.Empty() {
+		return filetracker.FullCoverage
+	}
+	return m.partial
 }
 
 func TestReplaceContentPreservesCRLFAndMetadata(t *testing.T) {
@@ -84,4 +102,109 @@ func TestDeleteContentRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
 	require.Equal(t, "alpha\nbeta\nalpha\n", string(content))
+}
+
+// TestChangedLineSpan pins the span an edit is checked against. It is
+// derived from before/after content rather than from old_string, so it
+// holds for every path that produces an edit.
+func TestChangedLineSpan(t *testing.T) {
+	t.Parallel()
+
+	const before = "one\ntwo\nthree\nfour\nfive\n"
+
+	start, end, ok := changedLineSpan(before, "one\ntwo\nTHREE\nfour\nfive\n")
+	require.True(t, ok)
+	require.Equal(t, 3, start)
+	require.Equal(t, 3, end)
+
+	start, end, ok = changedLineSpan(before, "one\nTWO\nTHREE\nfour\nfive\n")
+	require.True(t, ok)
+	require.Equal(t, 2, start)
+	require.Equal(t, 3, end)
+
+	// A deletion spans the lines that disappeared.
+	start, end, ok = changedLineSpan(before, "one\nfour\nfive\n")
+	require.True(t, ok)
+	require.Equal(t, 2, start)
+	require.Equal(t, 3, end)
+
+	// A pure insertion anchors on the line it lands against, so it still
+	// requires that neighborhood to have been read.
+	start, end, ok = changedLineSpan(before, "one\ntwo\ninserted\nthree\nfour\nfive\n")
+	require.True(t, ok)
+	require.Equal(t, 3, start)
+	require.Equal(t, 3, end)
+
+	_, _, ok = changedLineSpan(before, before)
+	require.False(t, ok, "identical content is not a change")
+}
+
+// TestReplaceContentRejectsEditOutsideReadWindow is the hole this closes:
+// reading the head of a long file used to authorize an edit anywhere in
+// it, because the tracker only recorded that the file had been read at
+// all.
+func TestReplaceContentRejectsEditOutsideReadWindow(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "long.txt")
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	tracker := &mockEditFileTracker{lastRead: time.Now().Add(time.Second)}
+	tracker.RecordPartialRead(t.Context(), "session", filePath, 1, 50)
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: tracker,
+		workingDir:  dir,
+	}
+
+	resp, err := replaceContent(edit, filePath, "line 190", "LINE 190", false, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "an edit outside the read window must be refused")
+	require.Contains(t, resp.Content, "lines 190-190")
+	require.Contains(t, resp.Content, "1-50", "the message names what was actually read")
+
+	// The file is untouched.
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "line 190\n")
+}
+
+// TestReplaceContentAllowsEditInsideReadWindow is the other half: an edit
+// within a window that was served goes through, so partial reads remain a
+// usable way to work on a large file.
+func TestReplaceContentAllowsEditInsideReadWindow(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "long.txt")
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	tracker := &mockEditFileTracker{lastRead: time.Now().Add(time.Second)}
+	tracker.RecordPartialRead(t.Context(), "session", filePath, 150, 200)
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: tracker,
+		workingDir:  dir,
+	}
+
+	resp, err := replaceContent(edit, filePath, "line 190", "LINE 190", false, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "content: %s", resp.Content)
+
+	content, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "LINE 190\n")
 }

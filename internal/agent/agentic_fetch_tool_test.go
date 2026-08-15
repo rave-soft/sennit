@@ -10,6 +10,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/braid/internal/filetracker"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/stretchr/testify/require"
 )
@@ -26,6 +27,12 @@ func (fakeFileTracker) LastReadTime(context.Context, string, string) time.Time {
 
 func (fakeFileTracker) ListReadFiles(context.Context, string) ([]string, error) {
 	return nil, nil
+}
+
+func (fakeFileTracker) RecordPartialRead(context.Context, string, string, int, int) {}
+
+func (fakeFileTracker) ReadCoverage(context.Context, string, string) filetracker.Coverage {
+	return filetracker.FullCoverage
 }
 
 // TestAgenticFetchSubAgentView_OutsideWorkdirRequiresPermission guards the

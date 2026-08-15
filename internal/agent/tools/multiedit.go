@@ -247,6 +247,10 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 
 	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(oldContent, params.Edits, 0)
 
+	if resp, ok := requireReadCoverage(edit, sessionID, params.FilePath, oldContent, currentContent); !ok {
+		return resp, nil
+	}
+
 	// Check if content actually changed
 	if oldContent == currentContent {
 		// If we have failed edits, report them
