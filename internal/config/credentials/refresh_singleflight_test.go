@@ -1,4 +1,4 @@
-package config
+package credentials
 
 import (
 	"context"
@@ -10,14 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/csync"
 	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
 
 // writeTokenToDisk persists token as the copilot provider credential in the
-// config file at path, mimicking what another crush instance would leave
-// behind after a successful refresh.
+// fake config file at path, mimicking what another crush instance would
+// leave behind after a successful refresh.
 func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 	t.Helper()
 	configContent := fmt.Sprintf(`{
@@ -36,32 +37,21 @@ func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 	require.NoError(t, os.WriteFile(path, []byte(configContent), 0o600))
 }
 
-// newRefreshTestStore builds a ConfigStore whose copilot provider holds an
-// expired OAuth token, persisted both in memory and on disk at configPath.
-// Stores that share a configPath also share the per-provider refresh lock,
-// which lets a single test process faithfully simulate two crush instances:
-// lock.File opens a fresh descriptor per call, so two stores block each
-// other on the same lock file exactly as two processes would.
+// newRefreshTestManager builds a Manager, backed by a fakeStore, whose
+// copilot provider holds an expired OAuth token, persisted both in memory
+// and on disk at configPath. Managers that share a configPath also share
+// the per-provider refresh lock (RefreshLockPath derives from lockDir,
+// shared across the fakeStores here), which lets a single test process
+// faithfully simulate two crush instances: lock.File opens a fresh
+// descriptor per call, so two managers block each other on the same lock
+// file exactly as two processes would.
 //
-// The fixture uses "copilot" rather than a made-up provider ID because a
-// successful exchange writes only the credential fields to disk
-// (SetConfigFields) and then reloads the whole config from disk
-// (reloadFromDisk). A provider outside the embedded catalog would be
-// re-validated as a custom provider on that reload and dropped for lacking
-// base_url/models; copilot survives because
-// configureProviders restores type/base_url/models for known providers from
-// the embedded catalog regardless of what is on disk.
-//
-// BRAID_GLOBAL_CONFIG and BRAID_GLOBAL_DATA are pointed at fresh tmp dirs so
-// the reload this triggers reads back configPath instead of falling through
-// to the real user config at ~/.config/braid/braid.json. Because t.Setenv
-// cannot be combined with t.Parallel, callers must not mark these tests
-// parallel.
-func newRefreshTestStore(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) *ConfigStore {
+// The fixture uses "copilot" rather than a made-up provider ID for
+// parity with the original ConfigStore-based test, though nothing here
+// depends on the embedded catalog: the fake Store's PersistRefreshedToken
+// always persists the credential fields regardless of catalog membership.
+func newRefreshTestManager(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) *Manager {
 	t.Helper()
-
-	t.Setenv("BRAID_GLOBAL_CONFIG", t.TempDir())
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Dir(configPath))
 
 	expired := &oauth.Token{
 		AccessToken:  "at0",
@@ -71,24 +61,18 @@ func newRefreshTestStore(t *testing.T, configPath string, exchange func(ctx cont
 	}
 	writeTokenToDisk(t, configPath, expired)
 
-	providers := csync.NewMap[string, ProviderConfig]()
-	providers.Set("copilot", ProviderConfig{
+	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers.Set("copilot", config.ProviderConfig{
 		ID:         "copilot",
 		Name:       "GitHub Copilot",
 		APIKey:     expired.AccessToken,
 		OAuthToken: expired,
 	})
 
-	// workingDir is a separate empty tmp dir, not configPath's own directory:
-	// lookupConfigs walks workingDir upward looking for a braid.json, and if
-	// that walk reached the dir holding configPath, the same file would load
-	// twice (once as the project config, once as global data).
-	return &ConfigStore{
-		config:         &Config{Providers: providers},
-		globalDataPath: configPath,
-		workingDir:     t.TempDir(),
-		exchangeToken:  exchange,
-	}
+	store := newFakeStore(&config.Config{Providers: providers}, configPath, filepath.Join(filepath.Dir(configPath), "locks"))
+	m := New(store)
+	m.exchangeToken = exchange
+	return m
 }
 
 // TestRefreshOAuthToken_InProcessSingleFlight verifies that a storm of
@@ -98,7 +82,7 @@ func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "braid.json")
 
 	var exchanges atomic.Int64
-	store := newRefreshTestStore(t, configPath, func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	mgr := newRefreshTestManager(t, configPath, func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
 		exchanges.Add(1)
 		time.Sleep(50 * time.Millisecond) // hold the flight open so peers join
 		return &oauth.Token{
@@ -116,7 +100,7 @@ func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
 	for range goroutines {
 		wg.Go(func() {
 			<-start
-			errs <- store.RefreshOAuthToken(context.Background(), ScopeGlobal, "copilot")
+			errs <- mgr.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "copilot")
 		})
 	}
 	close(start)
@@ -128,7 +112,7 @@ func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
 	}
 	require.Equal(t, int64(1), exchanges.Load(), "concurrent refreshes should collapse into one exchange")
 
-	pc, ok := store.config.Providers.Get("copilot")
+	pc, ok := mgr.store.Config().Providers.Get("copilot")
 	require.True(t, ok)
 	require.Equal(t, "at1", pc.OAuthToken.AccessToken)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)
@@ -167,18 +151,18 @@ func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
 		}, nil
 	}
 
-	// Two stores sharing the same config file and refresh lock = two
+	// Two managers sharing the same config file and refresh lock = two
 	// "processes".
-	a := newRefreshTestStore(t, configPath, exchange)
-	b := newRefreshTestStore(t, configPath, exchange)
+	a := newRefreshTestManager(t, configPath, exchange)
+	b := newRefreshTestManager(t, configPath, exchange)
 
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	errs := make(chan error, 2)
-	for _, s := range []*ConfigStore{a, b} {
+	for _, m := range []*Manager{a, b} {
 		wg.Go(func() {
 			<-start
-			errs <- s.RefreshOAuthToken(context.Background(), ScopeGlobal, "copilot")
+			errs <- m.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "copilot")
 		})
 	}
 	close(start)
@@ -193,8 +177,8 @@ func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
 	require.Equal(t, int64(0), reuseErrors.Load(), "no instance should reuse a rotated refresh token")
 
 	// Both instances converge on the rotated token.
-	for name, s := range map[string]*ConfigStore{"a": a, "b": b} {
-		pc, ok := s.config.Providers.Get("copilot")
+	for name, m := range map[string]*Manager{"a": a, "b": b} {
+		pc, ok := m.store.Config().Providers.Get("copilot")
 		require.True(t, ok, name)
 		require.Equal(t, "at1", pc.OAuthToken.AccessToken, name)
 		require.Equal(t, "rt1", pc.OAuthToken.RefreshToken, name)
@@ -242,7 +226,7 @@ func rotatingExchange(live string, next int) (exchange func(ctx context.Context,
 func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "braid.json")
 	exchange, exchanges, reuse := rotatingExchange("rt3", 4)
-	store := newRefreshTestStore(t, configPath, exchange)
+	mgr := newRefreshTestManager(t, configPath, exchange)
 
 	// Disk holds the peer's third rotation, whose access token has also
 	// expired. In memory we are still back on the original credential.
@@ -253,11 +237,11 @@ func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
 		ExpiresAt:    time.Now().Add(-time.Minute).Unix(),
 	})
 
-	require.NoError(t, store.RefreshOAuthToken(context.Background(), ScopeGlobal, "copilot"))
+	require.NoError(t, mgr.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "copilot"))
 	require.Equal(t, int64(1), exchanges.Load())
 	require.Equal(t, int64(0), reuse.Load(), "must not present its own revoked refresh token")
 
-	pc, ok := store.config.Providers.Get("copilot")
+	pc, ok := mgr.store.Config().Providers.Get("copilot")
 	require.True(t, ok)
 	require.Equal(t, "at4", pc.OAuthToken.AccessToken)
 	require.Equal(t, "rt4", pc.OAuthToken.RefreshToken)
@@ -270,7 +254,7 @@ func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
 func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "braid.json")
 	exchange, exchanges, _ := rotatingExchange("rt9", 10)
-	store := newRefreshTestStore(t, configPath, exchange)
+	mgr := newRefreshTestManager(t, configPath, exchange)
 
 	writeTokenToDisk(t, configPath, &oauth.Token{
 		AccessToken:  "at9",
@@ -279,10 +263,10 @@ func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
 		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
 	})
 
-	require.NoError(t, store.RefreshOAuthToken(context.Background(), ScopeGlobal, "copilot"))
+	require.NoError(t, mgr.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "copilot"))
 	require.Equal(t, int64(0), exchanges.Load(), "a usable peer token needs no exchange")
 
-	pc, ok := store.config.Providers.Get("copilot")
+	pc, ok := mgr.store.Config().Providers.Get("copilot")
 	require.True(t, ok)
 	require.Equal(t, "at9", pc.OAuthToken.AccessToken)
 	require.Equal(t, "at9", pc.APIKey)
@@ -294,7 +278,7 @@ func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
 func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "braid.json")
 	exchange, exchanges, reuse := rotatingExchange("rt0", 1)
-	store := newRefreshTestStore(t, configPath, exchange)
+	mgr := newRefreshTestManager(t, configPath, exchange)
 
 	writeTokenToDisk(t, configPath, &oauth.Token{
 		AccessToken:  "ancient",
@@ -303,11 +287,11 @@ func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
 		ExpiresAt:    time.Now().Add(-24 * time.Hour).Unix(),
 	})
 
-	require.NoError(t, store.RefreshOAuthToken(context.Background(), ScopeGlobal, "copilot"))
+	require.NoError(t, mgr.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "copilot"))
 	require.Equal(t, int64(1), exchanges.Load())
 	require.Equal(t, int64(0), reuse.Load())
 
-	pc, ok := store.config.Providers.Get("copilot")
+	pc, ok := mgr.store.Config().Providers.Get("copilot")
 	require.True(t, ok)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/tools"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/config/credentials"
 	"github.com/rave-soft/braid/internal/filetracker"
 	"github.com/rave-soft/braid/internal/history"
 	"github.com/rave-soft/braid/internal/hooks"
@@ -113,6 +114,7 @@ type Coordinator interface {
 
 type coordinator struct {
 	cfg         *config.ConfigStore
+	credentials *credentials.Manager
 	sessions    session.Service
 	messages    message.Service
 	permissions permission.Service
@@ -254,7 +256,13 @@ func (c *coordinator) Close(ctx context.Context) error {
 // struct keeps the constructor self-documenting and avoids a long
 // positional parameter list.
 type CoordinatorOptions struct {
-	Config      *config.ConfigStore
+	Config *config.ConfigStore
+	// Credentials is this process's single OAuth credentials manager
+	// (see credentials.Manager's doc comment on why there must be
+	// exactly one). Required: WaitForTokenChange and RefreshOAuthToken
+	// are called on it during interactive re-authentication and 401
+	// retry handling.
+	Credentials *credentials.Manager
 	Sessions    session.Service
 	Messages    message.Service
 	Permissions permission.Service
@@ -308,6 +316,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 
 	c := &coordinator{
 		cfg:          opts.Config,
+		credentials:  opts.Credentials,
 		sessions:     opts.Sessions,
 		messages:     opts.Messages,
 		permissions:  opts.Permissions,

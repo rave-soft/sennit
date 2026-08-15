@@ -520,7 +520,7 @@ func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, 
 	if err := w.store.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
 		return err
 	}
-	w.store.SignalAuthComplete(providerID)
+	w.app.Credentials().SignalAuthComplete(providerID)
 	return nil
 }
 
@@ -533,11 +533,11 @@ func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {
 }
 
 func (w *AppWorkspace) ImportCopilot() (*oauth.Token, bool) {
-	return w.store.ImportCopilot()
+	return w.app.Credentials().ImportCopilot()
 }
 
 func (w *AppWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
-	return w.store.RefreshOAuthToken(ctx, scope, providerID)
+	return w.app.Credentials().RefreshOAuthToken(ctx, scope, providerID)
 }
 
 // -- Project lifecycle --

@@ -75,7 +75,7 @@ func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID s
 	waitCtx, waitCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	defer waitCancel()
 	slog.Info("Blocking on WaitForTokenChange", "provider", providerID)
-	if waitErr := c.cfg.WaitForTokenChange(waitCtx, providerID); waitErr != nil {
+	if waitErr := c.credentials.WaitForTokenChange(waitCtx, providerID); waitErr != nil {
 		slog.Info("WaitForTokenChange returned error", "provider", providerID, "error", waitErr)
 		return waitErr
 	}
@@ -126,7 +126,7 @@ func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig,
 }
 
 func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config.ProviderConfig) error {
-	if err := c.cfg.RefreshOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID); err != nil {
+	if err := c.credentials.RefreshOAuthToken(ctx, config.ScopeGlobal, providerCfg.ID); err != nil {
 		slog.Error("Failed to refresh OAuth token after 401 error", "provider", providerCfg.ID, "error", err)
 		return err
 	}

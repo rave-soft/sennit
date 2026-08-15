@@ -41,7 +41,7 @@ func TestConfigPathInvariant_MatchesReloadReadSet(t *testing.T) {
 		}
 
 		for _, scope := range []Scope{ScopeGlobal, ScopeWorkspace} {
-			path, err := store.configPath(scope)
+			path, err := store.ConfigPath(scope)
 			if err != nil {
 				t.Fatalf("configPath(%s): %v", scope, err)
 			}
@@ -89,7 +89,7 @@ func TestConfigPathInvariant_WorkspaceScopeReadableViaLookupConfigs(t *testing.T
 		t.Fatalf("Load(%q): %v", workingDir, err)
 	}
 
-	path, err := store.configPath(ScopeWorkspace)
+	path, err := store.ConfigPath(ScopeWorkspace)
 	if err != nil {
 		t.Fatalf("configPath(ScopeWorkspace): %v", err)
 	}

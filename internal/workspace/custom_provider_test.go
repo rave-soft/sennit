@@ -10,6 +10,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/config/credentials"
 	"github.com/rave-soft/braid/internal/oauth"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -18,9 +19,13 @@ import (
 // testConfigAccessor adapts a *config.ConfigStore to the ConfigAccessor
 // interface. ConfigStore.OverridePreferredModel has no error return (an
 // in-memory-only operation), so it needs the same thin wrapper AppWorkspace
-// uses in production.
+// uses in production. credentials is this accessor's own Manager, built
+// over the same store — fine for a test double even though production
+// requires exactly one Manager per process (see credentials.Manager's doc
+// comment), since each test constructs its own isolated store.
 type testConfigAccessor struct {
-	store *config.ConfigStore
+	store       *config.ConfigStore
+	credentials *credentials.Manager
 }
 
 func (a *testConfigAccessor) Config() *config.Config            { return a.store.Config() }
@@ -53,11 +58,11 @@ func (a *testConfigAccessor) RemoveConfigField(scope config.Scope, key string) e
 }
 
 func (a *testConfigAccessor) ImportCopilot() (*oauth.Token, bool) {
-	return a.store.ImportCopilot()
+	return a.credentials.ImportCopilot()
 }
 
 func (a *testConfigAccessor) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
-	return a.store.RefreshOAuthToken(ctx, scope, providerID)
+	return a.credentials.RefreshOAuthToken(ctx, scope, providerID)
 }
 
 var _ ConfigAccessor = (*testConfigAccessor)(nil)
@@ -85,7 +90,7 @@ func newTestConfigAccessor(t *testing.T) (accessor *testConfigAccessor, globalDa
 
 	store, err := config.Load(workDir, dataDir, false)
 	require.NoError(t, err)
-	return &testConfigAccessor{store: store}, configPath
+	return &testConfigAccessor{store: store, credentials: credentials.New(store)}, configPath
 }
 
 func TestConfigureCustomProvider_WritesFieldsAndDiscoversModels(t *testing.T) {

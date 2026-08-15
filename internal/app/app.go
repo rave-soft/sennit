@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
 	"github.com/rave-soft/braid/internal/clipboard"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/config/credentials"
 	"github.com/rave-soft/braid/internal/db"
 	"github.com/rave-soft/braid/internal/event"
 	"github.com/rave-soft/braid/internal/filetracker"
@@ -129,6 +130,15 @@ type App struct {
 	lastConfigBypass bool
 
 	config *config.ConfigStore
+
+	// credentials is the single, process-wide OAuth credentials manager
+	// for this store, constructed once in New. Every consumer — the
+	// workspace (SignalAuthComplete, RefreshOAuthToken, ImportCopilot)
+	// and the agent coordinator (WaitForTokenChange, RefreshOAuthToken)
+	// — must go through the same instance, since SignalAuthComplete and
+	// WaitForTokenChange communicate through channels private to it. See
+	// Credentials and credentials.Manager's doc comment.
+	credentials *credentials.Manager
 
 	serviceEventsWG *sync.WaitGroup
 	eventsCtx       context.Context
@@ -257,6 +267,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 		lastConfigBypass: configBypass,
 		config:           store,
+		credentials:      credentials.New(store),
 
 		events:             pubsub.NewBroker[any](),
 		serviceEventsWG:    &sync.WaitGroup{},
@@ -367,6 +378,12 @@ func (app *App) Config() *config.Config {
 // Store returns the config store.
 func (app *App) Store() *config.ConfigStore {
 	return app.config
+}
+
+// Credentials returns this App's single OAuth credentials manager. See
+// the credentials field doc for why callers must not construct their own.
+func (app *App) Credentials() *credentials.Manager {
+	return app.credentials
 }
 
 // SetThreads wires the thread manager owning this workspace's parallel
@@ -708,6 +725,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 	var err error
 	app.AgentCoordinator, err = agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:           app.config,
+		Credentials:      app.credentials,
 		Sessions:         app.sessions,
 		Messages:         app.messages,
 		Permissions:      app.permissions,

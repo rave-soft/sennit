@@ -12,6 +12,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/config/credentials"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/session"
@@ -66,6 +67,7 @@ func NewCoordinator(
 
 	return agent.NewCoordinator(ctx, agent.CoordinatorOptions{
 		Config:           cfg,
+		Credentials:      credentials.New(cfg),
 		Sessions:         sessions,
 		Messages:         messages,
 		Permissions:      permission.NewPermissionService(workingDir, true, nil),

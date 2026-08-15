@@ -6,6 +6,8 @@ import (
 
 	"github.com/rave-soft/braid/internal/agent"
 	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/config/credentials"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/permission"
 	"github.com/rave-soft/braid/internal/pubsub"
@@ -24,6 +26,16 @@ func (app *App) SetMessagesForTest(m message.Service)       { app.messages = m }
 func (app *App) MessagesForTest() message.Service           { return app.messages }
 func (app *App) SetPermissionsForTest(p permission.Service) { app.permissions = p }
 func (app *App) PermissionsForTest() permission.Service     { return app.permissions }
+
+// SetConfigForTest installs store as this App's config store and rebuilds
+// its credentials manager to match, mirroring how New wires the two
+// together. It exists for tests (outside this package) that need a real
+// App.Credentials() without booting a full New (database, LSP, MCP,
+// agent coordinator).
+func (app *App) SetConfigForTest(store *config.ConfigStore) {
+	app.config = store
+	app.credentials = credentials.New(store)
+}
 
 // NewForTest constructs a minimal [App] suitable for in-process tests
 // that need a working event broker and permission service without
