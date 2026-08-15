@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/pubsub"
 )
 
@@ -149,6 +150,38 @@ func (a *sessionAgent) publishQueueChanged(sessionID string) {
 		SessionID: sessionID,
 		Type:      notify.TypeQueueChanged,
 	})
+}
+
+// persistCanceledTurn writes the user/assistant records for a turn that
+// was canceled before (or just as) streaming would have produced them.
+// It creates the user message only when it was not already created by an
+// earlier createUserMessage call (userMsgCreated) and this is not a
+// continuation (whose Prompt is a placeholder, never persisted - see
+// SessionAgentCall.Continuation - so there is never a user message to
+// create here even on this fallback path), then writes an assistant
+// message with FinishReasonCanceled. Both writes use
+// context.WithoutCancel(ctx) so workspace shutdown (which cancels the run
+// context) can't drop them.
+func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgentCall, userMsgCreated bool) error {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if !userMsgCreated && !call.Continuation {
+		if _, err := a.createUserMessage(writeCtx, call); err != nil {
+			return err
+		}
+	}
+	model := a.model.Get()
+	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
+		Role:     message.Assistant,
+		Parts:    []message.ContentPart{},
+		Model:    model.ModelCfg.Model,
+		Provider: model.ModelCfg.Provider,
+	})
+	if err != nil {
+		return err
+	}
+	assistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+	return a.messages.Update(writeCtx, assistant)
 }
 
 // Cancel cancels sessionID's active run (if any) and any accepted or
