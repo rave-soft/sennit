@@ -34,6 +34,22 @@ type attemptID struct {
 	seq uint64
 }
 
+// ConfigProvider is the slice of *config.ConfigStore this package needs: the
+// dictionary reads (Config, Resolver, Overrides) and the MCP OAuth token
+// mutation calls. Declaring it here rather than accepting the concrete
+// *config.ConfigStore keeps this package's dependency on config narrow (ISP;
+// see ARCHITECTURE_REVIEW.md section S4).
+type ConfigProvider interface {
+	Config() *config.Config
+	Resolver() config.VariableResolver
+	Overrides() *config.RuntimeOverrides
+	ReserveMCPTokenMutation(name string, expected config.MCPConfig) (config.MCPTokenMutation, bool)
+	SetMCPToken(reservation *config.MCPTokenMutation, token *oauth.Token) (bool, error)
+	ClearMCPToken(reservation *config.MCPTokenMutation, expectedToken *oauth.Token) (bool, error)
+}
+
+var _ ConfigProvider = (*config.ConfigStore)(nil)
+
 func (a attemptID) valid() bool { return a.seq != 0 }
 
 type tokenWriteOwner struct {
@@ -89,14 +105,14 @@ type Registry struct {
 
 	tokenWrites        map[tokenWriteOwner]map[*tokenWrite]struct{}
 	tokenReservations  map[tokenWriteOwner]*config.MCPTokenMutation
-	tokenPersist       func(context.Context, *config.ConfigStore, string, any) error
-	tokenCommit        func(*config.ConfigStore, *config.MCPTokenMutation, *oauth.Token) error
+	tokenPersist       func(context.Context, ConfigProvider, string, any) error
+	tokenCommit        func(ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error
 	beforeTokenPersist func()
 
 	// newSession creates a client session. It is a seam so tests can exercise
 	// renewal concurrency without spawning a real transport.
-	newSession    func(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error)
-	runAuth       func(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID) error
+	newSession    func(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error)
+	runAuth       func(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID) error
 	ping          func(ctx context.Context, session *ClientSession, timeout time.Duration) error
 	listResources func(ctx context.Context, session *ClientSession) ([]*Resource, error)
 
@@ -147,8 +163,8 @@ func NewRegistry() *Registry {
 	r.runAuth = r.runAuthFlow
 	r.ping = r.pingSession
 	r.listResources = getResources
-	r.tokenPersist = func(context.Context, *config.ConfigStore, string, any) error { return nil }
-	r.tokenCommit = func(cfg *config.ConfigStore, reservation *config.MCPTokenMutation, token *oauth.Token) error {
+	r.tokenPersist = func(context.Context, ConfigProvider, string, any) error { return nil }
+	r.tokenCommit = func(cfg ConfigProvider, reservation *config.MCPTokenMutation, token *oauth.Token) error {
 		_, err := cfg.SetMCPToken(reservation, token)
 		return err
 	}
@@ -364,7 +380,7 @@ func GetState(name string) (ClientInfo, bool) { return defaultRegistry.GetState(
 func (r *Registry) GetState(name string) (ClientInfo, bool) { return r.states.Get(name) }
 
 // Initialize initializes MCP clients based on the provided configuration.
-func (r *Registry) Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
+func (r *Registry) Initialize(ctx context.Context, permissions permission.Service, cfg ConfigProvider) {
 	r.markInitStarted()
 	slog.Info("Initializing MCP clients")
 

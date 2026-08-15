@@ -24,7 +24,7 @@ func (r *Registry) createTransport(ctx context.Context, m config.MCPConfig, reso
 	return r.createTransportFor(ctx, nil, name, m, r.currentGen(name), r.authAttempt.Add(1), resolver)
 }
 
-func (r *Registry) buildHTTPTransport(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver) (string, http.RoundTripper, *mcpoauth.Handler, error) {
+func (r *Registry) buildHTTPTransport(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver) (string, http.RoundTripper, *mcpoauth.Handler, error) {
 	url, err := m.ResolvedURL(resolver)
 	if err != nil {
 		return "", nil, nil, err
@@ -48,7 +48,7 @@ func (r *Registry) buildHTTPTransport(ctx context.Context, cfg *config.ConfigSto
 	return url, transport, oauthHandler, nil
 }
 
-func (r *Registry) createTransportFor(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver) (mcp.Transport, *mcpoauth.Handler, error) {
+func (r *Registry) createTransportFor(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver) (mcp.Transport, *mcpoauth.Handler, error) {
 	switch m.Type {
 	case config.MCPStdio:
 		command, err := resolver.ResolveValue(m.Command)

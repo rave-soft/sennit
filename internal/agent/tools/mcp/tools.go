@@ -37,7 +37,7 @@ func (r *Registry) Tools() iter.Seq2[string, []*Tool] {
 }
 
 // RunTool runs an MCP tool with the given input parameters.
-func (r *Registry) RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
+func (r *Registry) RunTool(ctx context.Context, cfg ConfigProvider, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
 		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
@@ -114,7 +114,7 @@ func (r *Registry) RunTool(ctx context.Context, cfg *config.ConfigStore, name, t
 
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
-func (r *Registry) RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
+func (r *Registry) RefreshTools(ctx context.Context, cfg ConfigProvider, name string) {
 	owner, session, ok := r.sessionOwner(name)
 	if !ok {
 		slog.Warn("Refresh tools: no session", "name", name)
@@ -154,7 +154,7 @@ func (r *Registry) RefreshTools(ctx context.Context, cfg *config.ConfigStore, na
 // (re)connected session's tools enter the registry, so both the initial
 // connect and a lazy renew repopulate the tool list the agent sends to the LLM
 // instead of leaving it empty.
-func (r *Registry) registerSessionTools(ctx context.Context, cfg *config.ConfigStore, name string, sess *ClientSession) (int, error) {
+func (r *Registry) registerSessionTools(ctx context.Context, cfg ConfigProvider, name string, sess *ClientSession) (int, error) {
 	tools, err := getTools(ctx, sess)
 	if err != nil {
 		return 0, err
@@ -173,7 +173,7 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	return result.Tools, nil
 }
 
-func (r *Registry) updateTools(cfg *config.ConfigStore, name string, tools []*Tool) int {
+func (r *Registry) updateTools(cfg ConfigProvider, name string, tools []*Tool) int {
 	r.catalogMu.Lock()
 	defer r.catalogMu.Unlock()
 	mcpCfg, ok := cfg.Config().MCP[name]

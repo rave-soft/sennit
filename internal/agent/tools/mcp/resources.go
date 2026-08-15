@@ -8,7 +8,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rave-soft/braid/internal/config"
 )
 
 type Resource = mcp.Resource
@@ -28,7 +27,7 @@ func (r *Registry) Resources() iter.Seq2[string, []*Resource] {
 }
 
 // ListResources returns the current resources for an MCP server.
-func (r *Registry) ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([]*Resource, error) {
+func (r *Registry) ListResources(ctx context.Context, cfg ConfigProvider, name string) ([]*Resource, error) {
 	session, err := r.getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err
@@ -61,7 +60,7 @@ func (r *Registry) ListResources(ctx context.Context, cfg *config.ConfigStore, n
 }
 
 // ReadResource reads the contents of a resource from an MCP server.
-func (r *Registry) ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string) ([]*ResourceContents, error) {
+func (r *Registry) ReadResource(ctx context.Context, cfg ConfigProvider, name, uri string) ([]*ResourceContents, error) {
 	session, err := r.getOrRenewClient(ctx, cfg, name)
 	if err != nil {
 		return nil, err

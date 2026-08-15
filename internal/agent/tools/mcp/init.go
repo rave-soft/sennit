@@ -13,7 +13,7 @@ import (
 	mcpoauth "github.com/rave-soft/braid/internal/oauth/mcp"
 )
 
-func (r *Registry) InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore) error {
+func (r *Registry) InitializeSingle(ctx context.Context, name string, cfg ConfigProvider) error {
 	m, exists := cfg.Config().MCP[name]
 	if !exists {
 		return fmt.Errorf("mcp '%s' not found in configuration", name)
@@ -36,7 +36,7 @@ func (r *Registry) InitializeSingle(ctx context.Context, name string, cfg *confi
 // StateNeedsAuth. It creates the OAuth handler (which starts a local
 // callback server), connects to the server (which triggers the browser
 // auth flow on 401), and transitions to StateConnected on success.
-func (r *Registry) AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) error {
+func (r *Registry) AuthenticateMCP(ctx context.Context, cfg ConfigProvider, name string) error {
 	m, exists := cfg.Config().MCP[name]
 	if !exists {
 		return fmt.Errorf("mcp '%s' not found in configuration", name)
@@ -67,7 +67,7 @@ func (r *Registry) AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore,
 // gen is the server generation captured when the attempt was launched; the
 // resulting session is only committed if the generation is still current, so
 // a config change that restarts the server mid-connect discards this attempt.
-func (r *Registry) initClient(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver) error {
+func (r *Registry) initClient(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver) error {
 	defer r.detachAuth(name, owner, nil).Close()
 	if usesOAuth(m) && !r.reserveTokenMutation(cfg, name, m, owner) {
 		return context.Canceled
@@ -119,7 +119,7 @@ func (r *Registry) initClient(ctx context.Context, cfg *config.ConfigStore, name
 // is closed and discarded instead of being registered over whatever the
 // newer attempt is doing. This is what makes a config change that lands
 // mid-connect converge on the latest config rather than a stale one.
-func (r *Registry) connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) error {
+func (r *Registry) connectAndRegister(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) error {
 	if usesOAuth(m) && !r.reserveTokenMutation(cfg, name, m, owner) {
 		return context.Canceled
 	}
@@ -212,7 +212,7 @@ func (r *Registry) publishSession(ctx context.Context, name string, m config.MCP
 // config so it survives restarts.
 
 // DisableSingle disables and closes a single MCP client by name.
-func (r *Registry) DisableSingle(cfg *config.ConfigStore, name string) error {
+func (r *Registry) DisableSingle(cfg ConfigProvider, name string) error {
 	// teardown bumps the generation, invalidating any in-flight connect, and
 	// the StateDisabled transition clears the recorded config so a later
 	// re-enable (even with an unchanged config) is seen as new and restarts.
@@ -228,7 +228,7 @@ func (r *Registry) DisableSingle(cfg *config.ConfigStore, name string) error {
 // (success or failure); Initialize uses it to await startup. The goroutine
 // captures the server's generation at launch so a concurrent teardown
 // invalidates its result rather than letting it register a stale session.
-func (r *Registry) goInitClient(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, wg *sync.WaitGroup) {
+func (r *Registry) goInitClient(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, wg *sync.WaitGroup) {
 	owner, err := r.beginAttempt(name)
 	if err != nil {
 		if wg != nil {
@@ -278,7 +278,7 @@ func (r *Registry) clearMCPDataFor(name string, owner attemptID) {
 	r.detachAuth(name, owner, nil).Close()
 }
 
-func (r *Registry) getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string) (*ClientSession, error) {
+func (r *Registry) getOrRenewClient(ctx context.Context, cfg ConfigProvider, name string) (*ClientSession, error) {
 	m := cfg.Config().MCP[name]
 	timeout := mcpTimeout(m)
 

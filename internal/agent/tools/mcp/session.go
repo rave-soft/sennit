@@ -149,7 +149,7 @@ func (r *Registry) closeSession(name string, s *ClientSession) {
 	r.closeSessionContext(ctx, name, s)
 }
 
-func (r *Registry) createSession(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
+func (r *Registry) createSession(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
 	timeout := mcpTimeout(m)
 	mcpCtx, cancel := context.WithCancel(ctx)
 	cancelTimer := time.AfterFunc(timeout, cancel)
@@ -293,7 +293,7 @@ func maybeTimeoutErr(err error, timeout time.Duration) error {
 	return err
 }
 
-func (r *Registry) oauthSetup(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver, url string) (*mcpoauth.Handler, error) {
+func (r *Registry) oauthSetup(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver, url string) (*mcpoauth.Handler, error) {
 	clientID, err := resolver.ResolveValue(m.OAuthClientID)
 	if err != nil {
 		return nil, fmt.Errorf("oauth_client_id: %w", err)

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rave-soft/braid/internal/config"
 )
 
 type Prompt = mcp.Prompt
@@ -24,7 +23,7 @@ func (r *Registry) Prompts() iter.Seq2[string, []*Prompt] {
 }
 
 // GetPromptMessages retrieves the content of an MCP prompt with the given arguments.
-func (r *Registry) GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName, promptName string, args map[string]string) ([]string, error) {
+func (r *Registry) GetPromptMessages(ctx context.Context, cfg ConfigProvider, clientName, promptName string, args map[string]string) ([]string, error) {
 	c, err := r.getOrRenewClient(ctx, cfg, clientName)
 	if err != nil {
 		return nil, err

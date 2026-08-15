@@ -38,7 +38,7 @@ func (r *Registry) MCPAuthURL(name string) string {
 }
 
 // PendingAuthMCPs returns MCP servers in StateNeedsAuth with their URLs.
-func (r *Registry) PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer {
+func (r *Registry) PendingAuthMCPs(cfg ConfigProvider) []PendingAuthServer {
 	var pending []PendingAuthServer
 	for name, info := range r.states.Seq2() {
 		if info.State == StateNeedsAuth {
@@ -64,7 +64,7 @@ func (r *Registry) PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer 
 // Only one browser-suppressed flow per server may be in progress. The
 // returned cancel function aborts the flow without waiting; use it when the
 // caller's context is cancelled.
-func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Context) error, cancel context.CancelFunc, err error) {
+func BeginAuth(cfg ConfigProvider, name string) (finish func(ctx context.Context) error, cancel context.CancelFunc, err error) {
 	return defaultRegistry.BeginAuth(cfg, name)
 }
 
@@ -100,7 +100,7 @@ type authFlow struct {
 	finishOnce sync.Once
 }
 
-func (r *Registry) BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Context) error, cancel context.CancelFunc, err error) {
+func (r *Registry) BeginAuth(cfg ConfigProvider, name string) (finish func(ctx context.Context) error, cancel context.CancelFunc, err error) {
 	m, exists := cfg.Config().MCP[name]
 	if !exists {
 		return nil, nil, fmt.Errorf("mcp '%s' not found in configuration", name)
@@ -157,7 +157,7 @@ func (r *Registry) BeginAuth(cfg *config.ConfigStore, name string) (finish func(
 
 // runAuthFlow executes the OAuth connect for BeginAuth with browser
 // suppression enabled on the freshly created handler.
-func (r *Registry) runAuthFlow(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID) error {
+func (r *Registry) runAuthFlow(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
 	r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
 	err := r.connectAndRegister(ctx, cfg, name, m, owner, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	r.setAuthTerminal(name, owner, err)
@@ -285,7 +285,7 @@ func isOAuthInitErr(err error) bool {
 // clearOAuthToken removes the persisted OAuth token for a named MCP
 // server from the global config so subsequent startups don't retry
 // with a known-bad refresh token.
-func (r *Registry) clearOAuthToken(cfg *config.ConfigStore, name string, owner attemptID, expected *oauth.Token) {
+func (r *Registry) clearOAuthToken(cfg ConfigProvider, name string, owner attemptID, expected *oauth.Token) {
 	r.publishMu.Lock()
 	if !r.ownsLocked(name, owner) {
 		r.publishMu.Unlock()

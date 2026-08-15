@@ -27,7 +27,7 @@ func (r *Registry) beginAttempt(name string) (attemptID, error) {
 	return owner, nil
 }
 
-func (r *Registry) reserveTokenMutation(cfg *config.ConfigStore, name string, m config.MCPConfig, owner attemptID) bool {
+func (r *Registry) reserveTokenMutation(cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID) bool {
 	r.publishMu.Lock()
 	defer r.publishMu.Unlock()
 	if !r.ownsLocked(name, owner) {
@@ -87,7 +87,7 @@ func (r *Registry) finishTokenWrite(name string, owner attemptID, write *tokenWr
 	r.publishMu.Unlock()
 }
 
-func (r *Registry) persistOAuthToken(ctx context.Context, cfg *config.ConfigStore, name string, owner attemptID, tok *oauth.Token) {
+func (r *Registry) persistOAuthToken(ctx context.Context, cfg ConfigProvider, name string, owner attemptID, tok *oauth.Token) {
 	if m, ok := cfg.Config().MCP[name]; ok && !r.reserveTokenMutation(cfg, name, m, owner) {
 		return
 	}

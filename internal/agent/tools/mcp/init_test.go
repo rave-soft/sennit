@@ -900,7 +900,7 @@ func TestBeginAuth_HungWorkerRetainsExecutionSlotUntilExit(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{}, 2)
 	var sideEffects atomic.Int32
-	r.runAuth = func(context.Context, *config.ConfigStore, string, config.MCPConfig, attemptID) error {
+	r.runAuth = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID) error {
 		started <- struct{}{}
 		sideEffects.Add(1)
 		<-release
@@ -933,7 +933,7 @@ func TestBeginAuth_HungWorkerRetainsExecutionSlotUntilExit(t *testing.T) {
 	r.authMu.Unlock()
 	require.False(t, active, "worker must remove its exact auth flow on exit")
 
-	r.runAuth = func(context.Context, *config.ConfigStore, string, config.MCPConfig, attemptID) error {
+	r.runAuth = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID) error {
 		started <- struct{}{}
 		sideEffects.Add(1)
 		return nil
@@ -951,7 +951,7 @@ func TestBeginAuth_CancelSettlesExactStartingOwner(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	started := make(chan struct{})
 	exited := make(chan struct{})
-	r.runAuth = func(ctx context.Context, _ *config.ConfigStore, name string, m config.MCPConfig, owner attemptID) error {
+	r.runAuth = func(ctx context.Context, _ ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
 		r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
 		close(started)
 		<-ctx.Done()
@@ -991,7 +991,7 @@ func TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState(t *testing.T) {
 			cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 			started := make(chan struct{})
 			release := make(chan struct{})
-			r.runAuth = func(context.Context, *config.ConfigStore, string, config.MCPConfig, attemptID) error {
+			r.runAuth = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID) error {
 				close(started)
 				<-release
 				return context.Canceled
@@ -1026,7 +1026,7 @@ func TestBeginAuth_PanicClosesPublishedHandlerOnce(t *testing.T) {
 	r := NewRegistry()
 	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	var closes atomic.Int32
-	r.runAuth = func(_ context.Context, _ *config.ConfigStore, name string, _ config.MCPConfig, owner attemptID) error {
+	r.runAuth = func(_ context.Context, _ ConfigProvider, name string, _ config.MCPConfig, owner attemptID) error {
 		auth := &ownedAuthHandler{closeFn: func() { closes.Add(1) }}
 		r.publishMu.Lock()
 		r.authURLs.Set(name, authPublication{auth: auth, gen: owner.gen, attempt: owner.seq})
@@ -1134,7 +1134,7 @@ func TestOAuthTokenPersistenceCurrentOwnerPersistsOnce(t *testing.T) {
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
 	var writes atomic.Int32
-	r.tokenPersist = func(_ context.Context, _ *config.ConfigStore, key string, value any) error {
+	r.tokenPersist = func(_ context.Context, _ ConfigProvider, key string, value any) error {
 		writes.Add(1)
 		require.Equal(t, "mcp.token-owner.oauth_token", key)
 		require.Equal(t, "fresh", value.(*oauth.Token).AccessToken)
@@ -1159,7 +1159,7 @@ func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T
 			release := make(chan struct{})
 			r.beforeTokenPersist = func() { close(blocked); <-release }
 			var writes atomic.Int32
-			r.tokenPersist = func(context.Context, *config.ConfigStore, string, any) error {
+			r.tokenPersist = func(context.Context, ConfigProvider, string, any) error {
 				writes.Add(1)
 				return nil
 			}
@@ -1201,7 +1201,7 @@ func TestOAuthTokenPersistenceReservedWriteDelaysTeardown(t *testing.T) {
 	r.updateStateFor(name, owner, StateStarting, nil)
 	started := make(chan struct{})
 	release := make(chan struct{})
-	r.tokenPersist = func(context.Context, *config.ConfigStore, string, any) error {
+	r.tokenPersist = func(context.Context, ConfigProvider, string, any) error {
 		close(started)
 		<-release
 		return nil
@@ -1347,7 +1347,7 @@ func TestBeginAuth_FinishTimeoutRestoresStateNeedsAuth(t *testing.T) {
 	r := NewRegistry()
 	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	started := make(chan struct{})
-	r.runAuth = func(ctx context.Context, _ *config.ConfigStore, name string, m config.MCPConfig, owner attemptID) error {
+	r.runAuth = func(ctx context.Context, _ ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
 		r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
 		close(started)
 		<-ctx.Done()

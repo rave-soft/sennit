@@ -92,7 +92,7 @@ func reconcile(current config.MCPs, running map[string]ClientInfo) map[string]re
 // pick up the newer state. This coalesces a burst of rapid writes into at
 // most two reconciles instead of queueing a redundant no-op pass per write,
 // while still guaranteeing the final state reflects the latest config.
-func (r *Registry) Reinitialize(ctx context.Context, cfg *config.ConfigStore) {
+func (r *Registry) Reinitialize(ctx context.Context, cfg ConfigProvider) {
 	r.reinitMu.Lock()
 	if r.reinitRunning {
 		r.reinitDirty = true
@@ -117,7 +117,7 @@ func (r *Registry) Reinitialize(ctx context.Context, cfg *config.ConfigStore) {
 }
 
 // reconcileOnce applies one reconciliation pass against the current config.
-func (r *Registry) reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
+func (r *Registry) reconcileOnce(ctx context.Context, cfg ConfigProvider) {
 	current := cfg.Config().MCP
 	actions := reconcile(current, r.states.Copy())
 	for name, action := range actions {
