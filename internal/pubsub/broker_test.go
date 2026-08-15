@@ -203,9 +203,7 @@ func TestBroker_ConcurrentPublishAndSubscribeNoRace(t *testing.T) {
 	}()
 
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 20 {
 				ctx, cancel := context.WithCancel(context.Background())
 				ch := b.Subscribe(ctx)
@@ -217,7 +215,7 @@ func TestBroker_ConcurrentPublishAndSubscribeNoRace(t *testing.T) {
 				}
 				cancel()
 			}
-		}()
+		})
 	}
 
 	time.Sleep(100 * time.Millisecond)

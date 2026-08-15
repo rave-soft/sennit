@@ -1327,13 +1327,11 @@ func TestSuppressLockConcurrentAccess(t *testing.T) {
 		results[i] = make([]*sync.Mutex, goroutines)
 	}
 	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			for name := 0; name < names; name++ {
+		wg.Go(func() {
+			for name := range names {
 				results[name][i] = r.suppressLock(fmt.Sprintf("name-%d", name))
 			}
-		}(i)
+		})
 	}
 	wg.Wait()
 	for name := 0; name < names; name++ {

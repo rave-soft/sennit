@@ -118,9 +118,7 @@ func TestListen_LiveSocketNotRemoved(t *testing.T) {
 	// Drain accepts so the listener stays alive and responsive without
 	// blocking the test on a stray connection.
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			c, err := ln1.Accept()
 			if err != nil {
@@ -128,7 +126,7 @@ func TestListen_LiveSocketNotRemoved(t *testing.T) {
 			}
 			_ = c.Close()
 		}
-	}()
+	})
 	t.Cleanup(func() {
 		_ = ln1.Close()
 		wg.Wait()

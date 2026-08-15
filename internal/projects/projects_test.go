@@ -201,12 +201,10 @@ func TestRegisterConcurrent(t *testing.T) {
 	errs := make([]error, n)
 
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			path := fmt.Sprintf("/home/user/project%d", i)
 			errs[i] = Register(path, path+"/.braid")
-		}(i)
+		})
 	}
 	wg.Wait()
 

@@ -340,11 +340,9 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	results := make([]*ClientSession, workers)
 	errs := make([]error, workers)
 	for i := range workers {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			results[i], errs[i] = defaultRegistry.getOrRenewClient(context.Background(), cfg, name)
-		}(i)
+		})
 	}
 	wg.Wait()
 

@@ -74,11 +74,9 @@ func TestValue_ConcurrentAccess(t *testing.T) {
 
 	// Concurrent writers.
 	for i := range 100 {
-		wg.Add(1)
-		go func(val int) {
-			defer wg.Done()
-			v.Set(val)
-		}(i)
+		wg.Go(func() {
+			v.Set(i)
+		})
 	}
 
 	// Concurrent readers.

@@ -254,9 +254,7 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	errs := make([]error, n)
 
 	for i := range n {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			content := fmt.Sprintf("content-%d", i)
 			id := sessionID
@@ -269,7 +267,7 @@ func TestCreateVersionConcurrent(t *testing.T) {
 				versions[i] = f.Version
 				contents[i] = f.Content
 			}
-		}(i)
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -312,9 +310,7 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	secondVersions := make([]int64, secondRound)
 	secondErrs := make([]error, secondRound)
 	for i := range secondRound {
-		wg2.Add(1)
-		go func(i int) {
-			defer wg2.Done()
+		wg2.Go(func() {
 			<-start2
 			content := fmt.Sprintf("second-round-%d", i)
 			f, createErr := services[i].CreateVersion(t.Context(), sessionID, "concurrent.go", content)
@@ -322,7 +318,7 @@ func TestCreateVersionConcurrent(t *testing.T) {
 			if createErr == nil {
 				secondVersions[i] = f.Version
 			}
-		}(i)
+		})
 	}
 	close(start2)
 	wg2.Wait()

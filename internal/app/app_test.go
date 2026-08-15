@@ -421,11 +421,9 @@ func TestApp_Shutdown_MCPInitBeforeCloseAndDB(t *testing.T) {
 	a := NewForTest(t.Context())
 	initStopped := make(chan struct{})
 	a.mcpInitCancel = func() { close(initStopped) }
-	a.mcpInitWG.Add(1)
-	go func() {
-		defer a.mcpInitWG.Done()
+	a.mcpInitWG.Go(func() {
 		<-initStopped
-	}()
+	})
 
 	var order []string
 	a.mcpClose = func(context.Context) error {

@@ -167,10 +167,7 @@ func TestClientServerSpawnRace(t *testing.T) {
 	}()
 
 	for i := range numClients {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-
+		wg.Go(func() {
 			// Each client gets its own working directory so the
 			// per-client workspace registration paths don't collide
 			// in confusing ways.
@@ -207,7 +204,7 @@ func TestClientServerSpawnRace(t *testing.T) {
 				stdout: outBuf.String(),
 				stderr: errBuf.String(),
 			}
-		}(i)
+		})
 	}
 
 	close(start) // release all clients as simultaneously as possible
