@@ -33,9 +33,3 @@ func TestLogoutCmd_ValidArgs(t *testing.T) {
 	require.True(t, validPlatforms["github"])
 	require.True(t, validPlatforms["github-copilot"])
 }
-
-func TestLogoutContext_CreatesValidContext(t *testing.T) {
-	ctx := getLogoutContext()
-	require.NotNil(t, ctx)
-	require.NoError(t, ctx.Err())
-}

@@ -10,8 +10,8 @@ import (
 // registered as a local root flag (rootCmd.Flags) rather than a persistent
 // one. When local, `braid run --channels server:webhook` fails with
 // "unknown flag" because runCmd does not inherit root's local flags. The
-// flag must be persistent so non-interactive and client/server runs can opt
-// in to channels too.
+// flag must be persistent so non-interactive runs can opt in to channels
+// too.
 func TestChannelsFlagAvailableOnRunCmd(t *testing.T) {
 	t.Parallel()
 

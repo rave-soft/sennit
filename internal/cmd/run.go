@@ -88,36 +88,16 @@ braid run --continue "Follow up on your last response"
 			event.SetContinueLastSession(true)
 		}
 
-		var ws workspace.Workspace
+		ws, cleanup, err := setupLocalWorkspace(cmd)
+		if err != nil {
+			return err
+		}
+		defer cleanup()
 
-		if useClientServer() {
-			c, protoWs, cleanup, err := connectToServer(cmd)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
+		event.AppInitialized()
 
-			event.AppInitialized()
-
-			if !protoWs.Config.IsConfigured() {
-				return fmt.Errorf("no providers configured - please run 'braid' to set up a provider interactively")
-			}
-
-			ws = workspace.NewClientWorkspace(c, *protoWs)
-		} else {
-			localWs, cleanup, err := setupLocalWorkspace(cmd)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-
-			event.AppInitialized()
-
-			if !localWs.Config().IsConfigured() {
-				return fmt.Errorf("no providers configured - please run 'braid' to set up a provider interactively")
-			}
-
-			ws = localWs
+		if !ws.Config().IsConfigured() {
+			return fmt.Errorf("no providers configured - please run 'braid' to set up a provider interactively")
 		}
 
 		if verbose {
@@ -262,8 +242,8 @@ func runAgent(
 }
 
 // overrideModel resolves the model string and updates the workspace
-// configuration. Shared by both Workspace implementations so
-// client/server and local mode apply -m/--model identically. Helper
+// configuration. Works against the Workspace interface so -m/--model
+// applies uniformly regardless of the concrete implementation. Helper
 // (small) model resolution is fully automatic and needs no CLI-side
 // override.
 func overrideModel(ctx context.Context, ws workspace.Workspace, model string) error {

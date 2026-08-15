@@ -15,17 +15,16 @@ import (
 )
 
 // TestBuildAgentReadinessSurvivesCallerCancellation is a regression test for
-// the BRAID_CLIENT_SERVER=1 "new session hangs" bug.
+// the "new session hangs" bug.
 //
 // buildAgent starts readiness goroutines that run mcp.WaitForInit before
-// building the tool list. Several server entry points build an agent from a
-// short-lived HTTP request context — the InitAgent/UpdateAgent handlers, and
-// the sub-agent build reached through UpdateModels -> buildTools -> agentTool.
-// When a slow MCP server kept initialization in flight, that request context
-// was canceled the moment the handler returned; WaitForInit then observed the
-// cancellation, the readyWg errgroup recorded context.Canceled, and every
-// later coordinator.run failed at readyWg.Wait() before emitting anything —
-// the session hung with no visible LLM response.
+// building the tool list. Callers may build an agent from a short-lived
+// context — for example the sub-agent build reached through UpdateModels ->
+// buildTools -> agentTool. When a slow MCP server kept initialization in
+// flight, that context was canceled the moment the caller returned;
+// WaitForInit then observed the cancellation, the readyWg errgroup recorded
+// context.Canceled, and every later coordinator.run failed at readyWg.Wait()
+// before emitting anything — the session hung with no visible LLM response.
 //
 // The fix detaches the readiness work from the caller context via
 // context.WithoutCancel, so canceling the context that triggered the build no

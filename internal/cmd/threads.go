@@ -80,8 +80,8 @@ func init() {
 }
 
 // runThreadsList prints every known thread as a table (or JSON with
-// --json). Goes through setupWorkspace so it transparently works whether
-// braid is running in local or client/server mode.
+// --json). Goes through setupWorkspaceWithProgressBar for the same
+// initialization and progress-bar behavior as the other commands.
 func runThreadsList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
