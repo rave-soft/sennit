@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
@@ -89,4 +91,112 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 	}
 	return cmds, false
+}
+
+// runShellCommand executes a shell command server-side without triggering
+// the LLM. The result is displayed as a tool-style item in the chat.
+func (m *UI) runShellCommand(command string) tea.Cmd {
+	if m.viewingChildSession() {
+		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
+	}
+	if m.session != nil {
+		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
+			content:        command,
+			sessionID:      m.session.ID,
+			loadGeneration: m.sessionLoadGen,
+			bang:           true,
+		})
+		return func() tea.Msg { return sendPendingQueueMsg{} }
+	}
+	return m.runShellCommandInternal(command, true)
+}
+
+// runShellCommandInternal is the shared implementation for bang-mode shell
+// execution. isFirstMessage indicates the command is the first user message
+// in a newly created session, which triggers title generation.
+func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cmd {
+	var cmds []tea.Cmd
+	if !m.hasSession() {
+		if m.editor.pendingSendLoading {
+			m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{content: command, generation: m.editor.pendingSendGen, bang: true})
+			return nil
+		}
+		m.editor.pendingSendLoading = true
+		m.editor.pendingSendGen++
+		generation := m.editor.pendingSendGen
+		workspace := m.com.Workspace
+		cmds = append(cmds, func() tea.Msg {
+			newSession, err := workspace.CreateSession(context.Background(), "New Session")
+			if err != nil {
+				return sendMessageErrorMsg{Err: err, generation: generation, creating: true}
+			}
+			return bangSessionCreatedMsg{session: newSession, command: command, isFirstMessage: isFirstMessage, generation: generation}
+		})
+		return tea.Batch(cmds...)
+	}
+
+	sessionID := m.session.ID
+	loadGeneration := m.sessionLoadGen
+	contentWidth := min(m.layout.main.Dx()-2, 120)
+
+	// Append a pending shell item immediately so the user sees feedback.
+	pendingItem := chat.NewPendingShellItem(m.com.Styles, command)
+	m.chat.AppendMessages(pendingItem)
+	if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if cmd := pendingItem.StartAnimation(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
+	// Stream output via channel. The progress callback writes chunks
+	// to streamCh; a reader cmd converts them to shellStreamMsg values.
+	streamCh := make(chan string, 64)
+	pendingID := pendingItem.ID()
+
+	onProgress := func(chunk string) {
+		select {
+		case streamCh <- chunk:
+		default:
+			// Drop if UI can't keep up.
+		}
+	}
+
+	// Reader cmd: drains streamCh into shellStreamMsg until closed.
+	cmds = append(cmds, func() tea.Msg {
+		chunk, ok := <-streamCh
+		if !ok {
+			return nil
+		}
+		return shellStreamMsg{PendingID: pendingID, Chunk: chunk, streamCh: streamCh}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m.editor.bangCancel = cancel
+
+	workspace := m.com.Workspace
+	cmds = append(cmds, func() tea.Msg {
+		resp, err := workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
+		close(streamCh)
+		result := shellResultMsg{
+			PendingID:  pendingID,
+			Command:    command,
+			Output:     resp.Output,
+			sessionID:  sessionID,
+			generation: loadGeneration,
+		}
+		if errors.Is(err, context.Canceled) {
+			result.Canceled = true
+			result.ExitCode = 130
+			return result
+		}
+		if err != nil {
+			result.Err = err
+			result.ExitCode = 1
+			return result
+		}
+		result.ExitCode = resp.ExitCode
+		return result
+	})
+	return tea.Batch(cmds...)
 }
