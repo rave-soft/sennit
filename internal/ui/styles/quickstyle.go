@@ -802,6 +802,32 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Section.Title = subtle
 	s.Section.Line = base.Foreground(o.separator)
 
+	// Threads dashboard. This is an operations screen — a list of live
+	// work someone is about to act on — so unlike the chat's chrome it
+	// leans on state being readable at a glance: each status class gets a
+	// distinct color rather than the one muted tone Status.*Message
+	// collapses to, and the toolbar's buttons carry a real fill so they
+	// read as pressable.
+	s.Threads.Title = base.Bold(true)
+	s.Threads.Subtle = muted
+	s.Threads.Rule = base.Foreground(o.separator)
+	s.Threads.ColumnHeader = subtle
+	s.Threads.RowBase = base
+	s.Threads.RowSelected = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgHover)
+	s.Threads.StatusRunning = base.Foreground(o.accent)
+	s.Threads.StatusIdle = muted
+	s.Threads.StatusDone = base.Foreground(o.ansiGreen)
+	s.Threads.StatusWarn = base.Foreground(o.warning)
+	s.Threads.StatusError = base.Foreground(o.error)
+	s.Threads.TabActive = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.primary).Padding(0, 1)
+	s.Threads.TabInactive = muted.Padding(0, 1)
+	s.Threads.ButtonIdle = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible).Padding(0, 1)
+	s.Threads.ButtonHover = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.accent).Padding(0, 1)
+	s.Threads.ButtonDanger = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.destructive).Padding(0, 1)
+	s.Threads.ButtonDisabled = lipgloss.NewStyle().Foreground(o.fgMostSubtle).Background(o.bgLeastVisible).Padding(0, 1)
+	s.Threads.DetailLabel = subtle
+	s.Threads.DetailValue = base
+
 	// ChildBanner styles the child-session panel (see
 	// UI.drawChildSessionPanel): a muted breadcrumb trail leading up to a
 	// bold, accent-colored subagent name — the "where am I" cue — plus a

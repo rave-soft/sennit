@@ -219,6 +219,37 @@ type Styles struct {
 		Line  lipgloss.Style
 	}
 
+	// Threads is the threads dashboard: an operations screen where the
+	// list is acted on, not just read. Status colors are per-class (not
+	// the single muted tone Status.*Message uses) so a failed or running
+	// delegation is findable at a glance, and the toolbar buttons carry a
+	// fill so they read as pressable rather than as labels.
+	Threads struct {
+		Title        lipgloss.Style
+		Subtle       lipgloss.Style
+		Rule         lipgloss.Style
+		ColumnHeader lipgloss.Style
+		RowBase      lipgloss.Style
+		RowSelected  lipgloss.Style
+
+		StatusRunning lipgloss.Style
+		StatusIdle    lipgloss.Style
+		StatusDone    lipgloss.Style
+		StatusWarn    lipgloss.Style
+		StatusError   lipgloss.Style
+
+		TabActive   lipgloss.Style
+		TabInactive lipgloss.Style
+
+		ButtonIdle     lipgloss.Style
+		ButtonHover    lipgloss.Style
+		ButtonDanger   lipgloss.Style
+		ButtonDisabled lipgloss.Style
+
+		DetailLabel lipgloss.Style
+		DetailValue lipgloss.Style
+	}
+
 	// Initialize
 	Initialize struct {
 		Header  lipgloss.Style

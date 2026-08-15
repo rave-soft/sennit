@@ -173,6 +173,11 @@ func BraidDark() Styles {
 	// that one is tuned for remapped shell output and reads as neon here.
 	s.Resource.EnabledIcon = s.Resource.EnabledIcon.Foreground(BrandSuccess)
 
+	// A finished thread on the dashboard is marked with the same green as
+	// a finished todo. Left on the default neutral it was pixel-identical
+	// to idle, which is the one distinction that screen exists to make.
+	s.Threads.StatusDone = s.Threads.StatusDone.Foreground(BrandSuccess)
+
 	s.ToolCallSuccess = s.ToolCallSuccess.Foreground(BrandSuccess)
 	s.Tool.IconSuccess = s.Tool.IconSuccess.Foreground(BrandSuccess)
 	s.Tool.JobIconSuccess = s.Tool.JobIconSuccess.Foreground(BrandSuccess)

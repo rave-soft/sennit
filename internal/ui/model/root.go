@@ -224,6 +224,15 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return r, r.removeThreadCmd(msg.id)
 	case cancelDelegationMsg:
 		return r, r.cancelDelegationCmd(msg.id, msg.kind)
+	case leaveDashboardMsg:
+		// The dashboard's Back button. Same transition esc takes (see
+		// handleKeyPress), raised as a message because the dashboard does
+		// not own the screen stack — the router does.
+		if r.active != screenDashboard {
+			return r, nil
+		}
+		r.active = screenMain
+		return r, r.dashboard.SetActive(false)
 	case openThreadCreateMsg:
 		r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
 		return r, nil
@@ -300,7 +309,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return r, nil
 		case screenDashboard:
-			return r, nil
+			return r.handleDashboardMsg(msg)
 		default:
 			_, cmd := r.main.Update(msg)
 			return r, cmd
@@ -368,6 +377,38 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		_, cmd := r.main.Update(msg)
 		return r, cmd
 	}
+}
+
+// handleDashboardMsg routes messages the dashboard screen cares about but
+// that are not key presses — mouse input, which the screen's toolbar,
+// filter tabs and table all respond to. Anything else is dropped, as it
+// was before the dashboard grew a mouse surface.
+func (r *Root) handleDashboardMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if r.dashboard == nil {
+		return r, nil
+	}
+	// An open dialog owns the pointer: clicking "through" a modal onto the
+	// toolbar behind it would act on a screen the user cannot see.
+	if r.dashboardDialog.HasDialogs() {
+		if _, ok := msg.(tea.MouseMsg); ok {
+			action := r.dashboardDialog.Update(msg)
+			return r, r.handleDashboardDialogAction(action)
+		}
+		return r, nil
+	}
+
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		_, cmd := r.dashboard.HandleMouseClick(msg)
+		return r, cmd
+	case tea.MouseMotionMsg:
+		r.dashboard.HandleMouseMotion(msg)
+		return r, nil
+	case tea.MouseWheelMsg:
+		r.dashboard.HandleMouseWheel(msg)
+		return r, nil
+	}
+	return r, nil
 }
 
 // handleDashboardKey routes a key press while the dashboard screen is
