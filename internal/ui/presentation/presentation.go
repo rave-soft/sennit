@@ -5,6 +5,7 @@ package presentation
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -117,4 +118,56 @@ func RenderTodoRow(todo session.Todo, sty *styles.Styles, width int, opts TodoRo
 		text = todo.ActiveForm
 	}
 	return ansi.Truncate(prefix+textStyle.Render(text), width, "…")
+}
+
+// IsLikelyPath reports whether s looks unambiguously like a filesystem
+// path, and so should be truncated from the left rather than the right.
+// Absolute paths qualify, as do relative ones containing a separator;
+// anything carrying shell-ish characters or whitespace does not, since a
+// command's meaning lives in its head.
+func IsLikelyPath(s string) bool {
+	if s == "" || strings.ContainsAny(s, " \t\n¶'\"|&;<>$`*?(){}[]\\") {
+		return false
+	}
+	if filepath.IsAbs(s) {
+		return true
+	}
+	return strings.Contains(s, "/")
+}
+
+// TruncatePath fits a filesystem path into width, eliding the head rather
+// than the tail: the file name is what identifies the file, so
+// "…/chat/tools_render.go" is useful where "internal/ui/chat/tools_re…"
+// is not. When even the file name alone does not fit it is cut on the
+// right as a last resort — half a name still beats a bare ellipsis.
+//
+// Callers that may hold something other than a path should gate on
+// IsLikelyPath first; this function assumes its input is one.
+func TruncatePath(path string, width int) string {
+	if width < 0 || ansi.StringWidth(path) <= width {
+		return path
+	}
+	base := filepath.Base(path)
+	// One cell goes to the leading "…"; if the name cannot fit beside it,
+	// there is nothing left to preserve.
+	if ansi.StringWidth(base)+1 > width {
+		return ansi.Truncate(base, width, "…")
+	}
+	// ansi.TruncateLeft removes n graphemes from the start; pick n so the
+	// result plus the "…" prefix fits exactly in width.
+	n := ansi.StringWidth(path) - width + 1
+	return ansi.TruncateLeft(path, n, "…")
+}
+
+// TruncatePathAware truncates s from the left when it is a path and from
+// the right otherwise — the rule most one-line UI rows want when a value
+// may be either.
+func TruncatePathAware(s string, width int) string {
+	if width < 0 || ansi.StringWidth(s) <= width {
+		return s
+	}
+	if IsLikelyPath(s) {
+		return TruncatePath(s, width)
+	}
+	return ansi.Truncate(s, width, "…")
 }

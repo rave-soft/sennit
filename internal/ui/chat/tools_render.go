@@ -2,13 +2,13 @@ package chat
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/anim"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -134,32 +134,13 @@ func toolParamList(sty *styles.Styles, params []string, width int) string {
 }
 
 // truncateToolParam fits a tool header's main param into width. A path is
-// truncated from the left ("…/internal/ui/chat/tools_render.go") rather
-// than the right: the file name is the part being looked for, and a header
-// reading "internal/ui/chat/tools_re…" identifies nothing. Anything that
-// is not unambiguously a path (a bash command, a prompt, a URL) keeps the
+// truncated from the left ("…/chat/tools_render.go") rather than the
+// right: the file name is the part being looked for, and a header reading
+// "internal/ui/chat/tools_re…" identifies nothing. Anything that is not
+// unambiguously a path (a bash command, a prompt, a URL) keeps the
 // ordinary right truncation, where the head is what carries the meaning.
-//
-// When even the file name alone does not fit, it is truncated on the right
-// as a last resort — half a name still beats a bare ellipsis.
 func truncateToolParam(s string, width int) string {
-	if width < 0 || ansi.StringWidth(s) <= width {
-		return s
-	}
-	if !isLikelyPath(s) {
-		return ansi.Truncate(s, width, "…")
-	}
-
-	base := filepath.Base(s)
-	// One cell for the leading "…"; if the name cannot fit beside it,
-	// there is nothing left to preserve.
-	if ansi.StringWidth(base)+1 > width {
-		return ansi.Truncate(base, width, "…")
-	}
-	// ansi.TruncateLeft removes n graphemes from the start; pick n so the
-	// result plus the "…" prefix fits exactly in width.
-	n := ansi.StringWidth(s) - width + 1
-	return ansi.TruncateLeft(s, n, "…")
+	return presentation.TruncatePathAware(s, width)
 }
 
 // toolHeader builds the tool header line: "● ToolName params...". Always a

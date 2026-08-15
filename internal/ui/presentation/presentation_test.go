@@ -1,6 +1,7 @@
 package presentation
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -66,4 +67,61 @@ func TestJoinStatusPartsFiltersAndTruncates(t *testing.T) {
 	t.Parallel()
 	require.Equal(t, "one · two", JoinStatusParts([]string{"one", "", "two"}, 80))
 	require.Equal(t, "one…", JoinStatusParts([]string{"one", "two"}, 4))
+}
+
+// TestTruncatePath_KeepsFileName pins the rule every one-line path row
+// follows: the head is what gets elided, so the file name — the part that
+// identifies the file — always survives.
+func TestTruncatePath_KeepsFileName(t *testing.T) {
+	t.Parallel()
+
+	path := "internal/ui/chat/very/deeply/nested/tools_render.go"
+	out := TruncatePath(path, 24)
+	require.LessOrEqual(t, ansi.StringWidth(out), 24)
+	require.Contains(t, out, "tools_render.go")
+	require.True(t, strings.HasPrefix(out, "…"), "got %q", out)
+}
+
+// TestTruncatePath_FitsUnchanged proves a path that already fits gets no
+// gratuitous ellipsis.
+func TestTruncatePath_FitsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	path := "internal/ui/chat/tools_render.go"
+	require.Equal(t, path, TruncatePath(path, 80))
+}
+
+// TestTruncatePath_FileNameAloneTooLong covers the last resort: with no
+// room even for the name, it is cut on the right rather than leaving a
+// bare ellipsis.
+func TestTruncatePath_FileNameAloneTooLong(t *testing.T) {
+	t.Parallel()
+
+	out := TruncatePath("internal/ui/a-very-long-file-name.go", 10)
+	require.LessOrEqual(t, ansi.StringWidth(out), 10)
+	require.True(t, strings.HasPrefix(out, "a-very"), "got %q", out)
+}
+
+// TestTruncatePathAware_NonPathTruncatesRight proves the left-truncation
+// rule is scoped to paths: a command carries its meaning in the head.
+func TestTruncatePathAware_NonPathTruncatesRight(t *testing.T) {
+	t.Parallel()
+
+	out := TruncatePathAware("go test ./internal/ui/... -timeout 600s", 20)
+	require.LessOrEqual(t, ansi.StringWidth(out), 20)
+	require.True(t, strings.HasPrefix(out, "go test"), "got %q", out)
+	require.True(t, strings.HasSuffix(out, "…"), "got %q", out)
+}
+
+// TestIsLikelyPath covers the gate: absolute and separator-bearing
+// relative paths qualify; a bare word or anything shell-ish does not.
+func TestIsLikelyPath(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, IsLikelyPath("/etc/hosts"))
+	require.True(t, IsLikelyPath("internal/ui/chat/file.go"))
+	require.False(t, IsLikelyPath("file.go"), "no separator, nothing to elide")
+	require.False(t, IsLikelyPath("ls -la /tmp"))
+	require.False(t, IsLikelyPath("cat a.txt | grep x"))
+	require.False(t, IsLikelyPath(""))
 }
