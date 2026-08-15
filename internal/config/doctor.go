@@ -81,9 +81,19 @@ func Doctor(cfg *Config) []Problem {
 // providers.<id>.models before discovery started filtering it out. Purely
 // a string check on the already-loaded config: no network, so it is cheap
 // enough to run on every Doctor call.
+//
+// Providers with an explicit discover_models: false are skipped. There the
+// model list is hand-written by definition, and a llama-server really does
+// serve its single model under the --model path as the only ID that
+// endpoint accepts — so the path is the user's deliberate, correct choice,
+// and the hint below ("define models explicitly") is already followed with
+// no way left to silence the warning.
 func doctorJunkModelIDs(cfg *Config) []Problem {
 	var problems []Problem
 	for id, pc := range cfg.providersOrEmpty() {
+		if pc.AutoDiscoverModels != nil && !*pc.AutoDiscoverModels {
+			continue
+		}
 		for _, m := range pc.Models {
 			if strings.HasPrefix(m.ID, "/") || strings.HasSuffix(strings.ToLower(m.ID), ".gguf") {
 				problems = append(problems, Problem{

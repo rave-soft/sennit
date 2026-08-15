@@ -3,8 +3,8 @@ package model
 // The session panel is the merged strip between chat and the editor that
 // replaces the old, separately-wired "pills" (todo progress + queued-prompt
 // pills) and "threads dock" (active background threads). It paints, top to
-// bottom: up to threadsDockVisibleCap active-thread blocks, a collapsible
-// todos section, and an always-visible queued-prompts list.
+// bottom: one block per active thread, a collapsible todos section, and an
+// always-visible queued-prompts list.
 //
 // sessionPanelPlan is the single source of truth for how many rows each
 // section gets and what it contains. sessionPanelHeight and drawSessionPanel
@@ -108,8 +108,8 @@ type sessionPanelState struct {
 	// threadsCollapsed hides the threads section's blocks, leaving its
 	// header. Default false, so threads keep showing as they always have
 	// until someone collapses them; the todos section defaults the other
-	// way because its collapsed form still shows what is in progress,
-	// whereas a collapsed threads section shows nothing but its count.
+	// way, since its header's completed/total ratio still reports the whole
+	// list's state while a collapsed threads header only reports a count.
 	threadsCollapsed bool
 }
 
@@ -133,10 +133,8 @@ func hasInProgressTodo(todos []session.Todo) bool {
 // chat.FormatTodosList's completed-first ordering: that function renders a
 // single tool call's transcript, where reading top-down chronologically
 // makes sense; the panel is a persistent status view, where what's
-// happening now belongs above what's already done. The three-way split
-// (rather than a merged "active" set) lets the panel keep in-progress rows
-// visible even while collapsed, without leaking pending rows too — see
-// sessionPanelPlan's todosInProgress/todosPending/todosDone.
+// happening now belongs above what's already done — see sessionPanelPlan's
+// todosInProgress/todosPending/todosDone.
 func splitTodosByStatus(todos []session.Todo) (inProgress, pending, completed []session.Todo) {
 	buckets := presentation.BucketTodos(todos)
 	return buckets.InProgress, buckets.Pending, buckets.Completed
@@ -249,20 +247,17 @@ type sessionPanelPlan struct {
 	// the visible cap or the collapse state — what the header reports.
 	threadsActive int
 
-	todosVisible   bool // at least one incomplete todo exists
-	todosExpanded  bool // m.panel.expanded, verbatim — budget shedding never forces this false anymore
-	todosCompleted int  // for the header ratio — independent of what's dropped below
-	todosTotal     int
-	// todosInProgress is always shown, expanded or not — collapsing the
-	// panel is never total: whatever is actively running right now stays
-	// visible so a user never has to expand the panel just to check.
-	todosInProgress []session.Todo
+	todosVisible    bool // at least one incomplete todo exists
+	todosExpanded   bool // m.panel.expanded, verbatim — budget shedding never forces this false anymore
+	todosCompleted  int  // for the header ratio — independent of what's dropped below
+	todosTotal      int
+	todosInProgress []session.Todo // populated only when todosExpanded; never shed by budget
 	todosPending    []session.Todo // populated only when todosExpanded; never shed by budget
 	todosDone       []session.Todo // populated only when todosExpanded; never shed by budget
 
 	// todosContentRows is the expanded todos section's full row count
-	// (todosInProgress+todosPending+todosDone concatenated in that order,
-	// or just todosInProgress while collapsed — collapsed never scrolls).
+	// (todosInProgress+todosPending+todosDone concatenated in that order;
+	// zero while collapsed — collapsed is header-only and never scrolls).
 	// todosViewportRows is how many of those rows the budget actually
 	// grants for painting; when it's less than todosContentRows the
 	// section is scrollable (todosScrollable) and drawSessionPanel windows
@@ -302,9 +297,8 @@ type sessionPanelPlan struct {
 // budget even when budget itself is smaller than one row — this still
 // leaves the todo slices themselves populated, just undrawn this frame.
 //
-// Collapsed mode (todosExpanded == false) is unchanged: only the header and
-// the always-visible in-progress rows count toward its content, and it
-// never scrolls — see todosInProgress's doc comment.
+// Collapsed mode (todosExpanded == false) is header-only: no todo rows at
+// all count toward its content, in-progress included, and it never scrolls.
 //
 // Row counts never depend on rendering width — only per-row text
 // truncation does, decided at draw time — matching threadsDockHeight's
@@ -343,14 +337,15 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	plan.todosVisible = hasIncompleteTodos(todos)
 	if plan.todosVisible {
 		plan.todosExpanded = m.panel.expanded
-		// Collapsing the panel is never total: whatever is actively in
-		// progress right now stays visible whether expanded or not, so a
-		// user never has to expand the panel just to see what's currently
-		// running. Only pending and completed rows are gated on expanded,
-		// and — unlike threads/queue — budget shedding below never clears
-		// them; it only ever narrows the viewport that paints them.
-		plan.todosInProgress = inProgress
+		// Collapsing is total: the header alone is left, in-progress rows
+		// included. Keeping those pinned open made "collapsed" mean
+		// different heights at different moments — the one thing a
+		// disclosure toggle should never do — and the header already
+		// carries the completed/total ratio, so nothing is silently lost.
+		// Budget shedding below never clears these slices; it only ever
+		// narrows the viewport that paints them.
 		if plan.todosExpanded {
+			plan.todosInProgress = inProgress
 			plan.todosPending = pending
 			plan.todosDone = completed
 		}
@@ -396,11 +391,10 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	// Shedding priority, highest to lowest: threads >
 	// todos-in-progress (never touched — see the floor below) > todos
 	// pending/done (display-windowed via todosViewportRows, but never
-	// dropped from the plan) > queue tail > threads row budget. The viewport never shrinks below
-	// len(todosInProgress): the in-progress rows are what "collapsing is
-	// never total" always guaranteed, and that guarantee carries over here
-	// as "the default (unscrolled) viewport always shows every in-progress
-	// row" — only pending/done ever have to be reached by scrolling.
+	// dropped from the plan) > queue tail > threads row budget. The viewport
+	// never shrinks below len(todosInProgress): once the section is open,
+	// the default (unscrolled) viewport always shows every in-progress row
+	// — only pending/done ever have to be reached by scrolling.
 	if plan.todosExpanded {
 		if o := over(); o > 0 {
 			floor := len(plan.todosInProgress)
@@ -723,8 +717,8 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		// offset rather than truncated: no todo is ever silently
 		// unreachable, only scrolled out of the currently-painted rows.
 		// Collapsed mode is never scrollable (todosViewportRows ==
-		// todosContentRows == len(todosInProgress) there), so offset is
-		// always 0 and this paints exactly what it always has.
+		// todosContentRows == 0 there), so offset is always 0 and this
+		// loop paints nothing — the header stands alone.
 		offset := clampPanelTodosScrollOffset(m.panelTodosScrollOffset, plan)
 		m.panelTodosScrollOffset = offset
 		all := sessionPanelTodosContent(plan)

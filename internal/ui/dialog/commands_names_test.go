@@ -26,7 +26,7 @@ func (w *commandsNamesTestWorkspace) Config() *config.Config {
 
 func newCommandsNamesTestCommon(t *testing.T) *common.Common {
 	t.Helper()
-	s := styles.CharmtonePantera()
+	s := styles.BraidDark()
 	cfg := &config.Config{
 		Options:   &config.Options{TUI: &config.TUIOptions{}},
 		Providers: csync.NewMap[string, config.ProviderConfig](),

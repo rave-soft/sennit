@@ -10,7 +10,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/diff"
 	"github.com/rave-soft/braid/internal/fsext"
@@ -19,6 +18,7 @@ import (
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/rave-soft/braid/internal/ui/util"
 	"github.com/rave-soft/braid/internal/workspace"
@@ -330,7 +330,10 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 			suffix = " " + extraContent
 		}
 		maxPathWidth := max(width-lipgloss.Width(suffix), 0)
-		filePath = ansi.Truncate(filePath, maxPathWidth, "…")
+		// Left truncation: DirTrim above has already shortened the middle
+		// directories, so what is left to give up is the head — the file
+		// name is the whole point of the row.
+		filePath = presentation.TruncatePath(filePath, maxPathWidth)
 
 		line := t.Files.Path.Render(filePath)
 		if extraContent != "" {

@@ -156,9 +156,10 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		}), nil
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, "", content); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, "", content); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
+	recordWholeFileRead(edit.ctx, edit.filetracker, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
@@ -200,6 +201,90 @@ func findAndReplace(content, old, new string, replaceAll bool) (string, bool, er
 	return "", false, notFoundError(content, old)
 }
 
+// changedLineSpan reports the 1-based, inclusive span of oldContent's
+// lines that differ from newContent, by trimming the common prefix and
+// suffix. ok is false when the two are identical.
+//
+// It works off the before/after content rather than off old_string, so it
+// covers every path that produces an edit — a literal replacement, a
+// replace-all, the whitespace-normalized fuzzy fallback, and a multi-edit
+// batch — instead of only the ones where old_string appears verbatim.
+//
+// A pure insertion (nothing in oldContent removed) reports the line the
+// text is inserted after, clamped into the file: an insertion still needs
+// its neighborhood to have been read to be placed correctly.
+func changedLineSpan(oldContent, newContent string) (start, end int, ok bool) {
+	if oldContent == newContent {
+		return 0, 0, false
+	}
+	oldLines := strings.Split(oldContent, "\n")
+	newLines := strings.Split(newContent, "\n")
+
+	prefix := 0
+	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(oldLines)-prefix && suffix < len(newLines)-prefix &&
+		oldLines[len(oldLines)-1-suffix] == newLines[len(newLines)-1-suffix] {
+		suffix++
+	}
+
+	start = prefix + 1
+	end = len(oldLines) - suffix
+	if end < start {
+		// Pure insertion: no old line was consumed. Anchor on the line it
+		// lands against so the check still asks for context.
+		end = start
+	}
+	if start > len(oldLines) {
+		start = len(oldLines)
+		end = start
+	}
+	return start, end, true
+}
+
+// requireReadCoverage refuses an edit that touches lines this session
+// never read. loadExistingFile already established that the file was read
+// at all; this is the finer-grained half of the same rule, since the read
+// tool serves windows — "I read this file" can mean fifty of its two
+// thousand lines.
+func requireReadCoverage(edit editContext, sessionID, filePath, oldContent, newContent string) (fantasy.ToolResponse, bool) {
+	start, end, ok := changedLineSpan(oldContent, newContent)
+	if !ok {
+		return fantasy.ToolResponse{}, true
+	}
+	coverage := edit.filetracker.ReadCoverage(edit.ctx, sessionID, filePath)
+	if coverage.Covers(start, end) {
+		return fantasy.ToolResponse{}, true
+	}
+	return fantasy.NewTextErrorResponse(fmt.Sprintf(
+		"cannot edit %s at lines %d-%d: that part of the file has not been read in this session.\n\n"+
+			"Reads serve a window of the file, and only the lines in it were seen — %s. "+
+			"Editing outside that window means old_string was recalled rather than copied, "+
+			"which is how an edit silently lands on the wrong occurrence.\n\n"+
+			"Read %s around line %d (use the offset parameter), then retry this edit.",
+		filePath, start, end,
+		describeCoverage(coverage),
+		filePath, start,
+	)), false
+}
+
+// describeCoverage renders coverage as a phrase for the error above.
+func describeCoverage(c filetracker.Coverage) string {
+	if len(c.Ranges) == 0 {
+		return "no line range is on record"
+	}
+	parts := make([]string, 0, len(c.Ranges))
+	for _, r := range c.Ranges {
+		parts = append(parts, fmt.Sprintf("%d-%d", r.Start, r.End))
+	}
+	if len(parts) == 1 {
+		return "so far that is line range " + parts[0]
+	}
+	return "so far those are line ranges " + strings.Join(parts, ", ")
+}
+
 // withWhitespaceNote appends the whitespace auto-correction note to a tool
 // response message when the edit did not match the file byte-for-byte.
 func withWhitespaceNote(message string, whitespaceCorrected bool) string {
@@ -239,17 +324,30 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 
 	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
 	if lastRead.IsZero() {
-		return "", "", false, fantasy.NewTextErrorResponse("you must read the file before editing it. Use the read tool first"), nil
+		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"cannot edit %s: it has not been read in this session.\n\n"+
+				"Edit replaces old_string with new_string literally, so old_string has to be "+
+				"copied from the file as it is on disk right now — not recalled or guessed. "+
+				"Reading it also records a baseline, which is how a later edit can tell that "+
+				"the file changed underneath it.\n\n"+
+				"Read %s, then retry this edit.",
+			filePath, filePath,
+		)), nil
 	}
 
 	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
-		return "", "", false, fantasy.NewTextErrorResponse(
-			fmt.Sprintf(
-				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
-				filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			),
-		), nil
+		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"cannot edit %s: it changed on disk after you read it "+
+				"(modified %s, last read %s).\n\n"+
+				"Something outside this edit — the user, a formatter, a build step, another "+
+				"agent — has written to the file, so old_string may no longer match what is "+
+				"there, and editing now would overwrite that change.\n\n"+
+				"Read %s again to see the current content, then redo the edit against it.",
+			filePath,
+			modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
+			filePath,
+		)), nil
 	}
 
 	content, err := os.ReadFile(filePath)
@@ -273,6 +371,9 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	newContent, whitespaceCorrected, err := findAndReplace(oldContent, oldString, "", replaceAll)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+	if resp, ok := requireReadCoverage(edit, sessionID, filePath, oldContent, newContent); !ok {
+		return resp, nil
 	}
 
 	_, additions, removals := diff.GenerateDiff(
@@ -311,9 +412,10 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, oldContent, writeContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
+	recordEditedSpan(edit.ctx, edit.filetracker, sessionID, filePath, oldContent, newContent)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(withWhitespaceNote("Content deleted from file: "+filePath, whitespaceCorrected)),
@@ -341,6 +443,9 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	}
 	if result == oldContent {
 		return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
+	}
+	if resp, ok := requireReadCoverage(edit, sessionID, filePath, oldContent, result); !ok {
+		return resp, nil
 	}
 
 	_, additions, removals := diff.GenerateDiff(
@@ -379,9 +484,10 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, oldContent, writeContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
+	recordEditedSpan(edit.ctx, edit.filetracker, sessionID, filePath, oldContent, result)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(withWhitespaceNote("Content replaced in file: "+filePath, whitespaceCorrected)),

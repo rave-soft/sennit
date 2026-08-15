@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/message"
 	"github.com/rave-soft/braid/internal/ui/anim"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -113,12 +114,16 @@ func toolParamList(sty *styles.Styles, params []string, width int) string {
 		}
 	}
 
-	// Try to include key=value pairs if there's enough space.
-	output := mainParam
+	// Try to include key=value pairs if there's enough space. The main
+	// param is fitted to its own budget first, before the pairs are
+	// appended: truncating the composed string afterwards would eat the
+	// pairs off the end, and for a path main param it is the head, not
+	// the tail, that has to go — see truncateToolParam.
+	output := truncateToolParam(mainParam, width)
 	if len(kvPairs) > 0 {
 		partsStr := strings.Join(kvPairs, ", ")
 		if remaining := width - lipgloss.Width(partsStr) - 3; remaining >= minSpaceForMainParam {
-			output = fmt.Sprintf("%s (%s)", mainParam, partsStr)
+			output = fmt.Sprintf("%s (%s)", truncateToolParam(mainParam, remaining), partsStr)
 		}
 	}
 
@@ -126,6 +131,16 @@ func toolParamList(sty *styles.Styles, params []string, width int) string {
 		output = ansi.Truncate(output, width, "…")
 	}
 	return sty.Tool.ParamMain.Render(output)
+}
+
+// truncateToolParam fits a tool header's main param into width. A path is
+// truncated from the left ("…/chat/tools_render.go") rather than the
+// right: the file name is the part being looked for, and a header reading
+// "internal/ui/chat/tools_re…" identifies nothing. Anything that is not
+// unambiguously a path (a bash command, a prompt, a URL) keeps the
+// ordinary right truncation, where the head is what carries the meaning.
+func truncateToolParam(s string, width int) string {
+	return presentation.TruncatePathAware(s, width)
 }
 
 // toolHeader builds the tool header line: "● ToolName params...". Always a

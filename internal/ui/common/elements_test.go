@@ -12,7 +12,7 @@ import (
 func TestFormatTokensAndCostPrefixesEstimatedUsage(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 
 	rendered := formatTokensAndCost(&sty, 120, 1000, 0, true)
 	actual := ansi.Strip(rendered)
@@ -26,7 +26,7 @@ func TestFormatTokensAndCostPrefixesEstimatedUsage(t *testing.T) {
 func TestFormatTokensAndCostOmitsEstimatedPrefix(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 
 	actual := ansi.Strip(formatTokensAndCost(&sty, 120, 1000, 0, false))
 

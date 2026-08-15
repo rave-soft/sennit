@@ -239,7 +239,19 @@ func NewReadTool(
 			}
 			output += "\n</file>\n"
 			output += getDiagnostics(filePath, lspManager)
-			filetracker.RecordRead(ctx, sessionID, filePath)
+
+			// Record what was actually served, not merely that the file
+			// was touched: this read is a window (offset/limit, or a body
+			// cut short by maxContentSize), and edit.go only lets an edit
+			// touch lines the session has seen. Recording a windowed read
+			// as a full one is what let an edit land blind on line 1900 of
+			// a file whose first 50 lines had been read.
+			lineCount := len(strings.Split(content, "\n"))
+			if params.Offset == 0 && !hasMore {
+				filetracker.RecordRead(ctx, sessionID, filePath)
+			} else {
+				filetracker.RecordPartialRead(ctx, sessionID, filePath, params.Offset+1, params.Offset+lineCount)
+			}
 
 			meta := ReadResponseMetadata{
 				FilePath: filePath,

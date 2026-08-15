@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/braid/internal/filetracker"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,6 +23,16 @@ func (m mockFileTrackerService) LastReadTime(ctx context.Context, sessionID, pat
 
 func (m mockFileTrackerService) ListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
 	return nil, nil
+}
+
+func (m mockFileTrackerService) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
+}
+
+func (m mockFileTrackerService) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
+}
+
+func (m mockFileTrackerService) ReadCoverage(ctx context.Context, sessionID, path string) filetracker.Coverage {
+	return filetracker.FullCoverage
 }
 
 func TestWriteToolWritesEmptyNewFile(t *testing.T) {

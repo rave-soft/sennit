@@ -3,7 +3,6 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -12,6 +11,7 @@ import (
 	"github.com/rave-soft/braid/internal/hooks"
 	"github.com/rave-soft/braid/internal/stringext"
 	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/braid/internal/ui/presentation"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
@@ -147,35 +147,11 @@ func toolOutputHookIndicator(sty *styles.Styles, metadata string, width int) str
 	return strings.Join(lines, "\n")
 }
 
-// truncateHookName truncates a hook name to fit within maxWidth cells,
-// using left-truncation for absolute paths (e.g. `…/format.sh`) and
-// right-truncation for everything else. Left-truncation is only applied
-// when the name looks unambiguously like a path: absolute, single-line,
-// and contains no spaces.
+// truncateHookName truncates a hook name to fit within maxWidth cells:
+// from the left for a path (`…/format.sh`), from the right for anything
+// else — the same rule tool headers and the sidebar's file list follow.
 func truncateHookName(name string, maxWidth int) string {
-	if ansi.StringWidth(name) <= maxWidth {
-		return name
-	}
-	if isLikelyPath(name) {
-		// ansi.TruncateLeft removes n graphemes from the start; pick n
-		// so the result plus the "…" prefix fits in maxWidth.
-		n := ansi.StringWidth(name) - maxWidth + 1
-		return ansi.TruncateLeft(name, n, "…")
-	}
-	return ansi.Truncate(name, maxWidth, "…")
-}
-
-// isLikelyPath reports whether s looks unambiguously like a filesystem
-// path, suitable for left-truncation. We accept absolute paths and
-// relative paths that contain a separator and no shell-ish characters.
-func isLikelyPath(s string) bool {
-	if s == "" || strings.ContainsAny(s, " \t\n¶'\"|&;<>$`*?(){}[]\\") {
-		return false
-	}
-	if filepath.IsAbs(s) {
-		return true
-	}
-	return strings.Contains(s, "/")
+	return presentation.TruncatePathAware(name, maxWidth)
 }
 
 // renderHookLine renders a single hook indicator line with aligned columns.

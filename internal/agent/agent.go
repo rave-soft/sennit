@@ -302,38 +302,6 @@ func NewSessionAgent(
 // AcceptedRun and BeginAccepted/endAccepted live in dispatch.go as part of
 // the dispatcher type.
 
-// persistCanceledTurn writes the user/assistant records for a turn that
-// was canceled before (or just as) streaming would have produced them.
-// It creates the user message only when it was not already created by an
-// earlier createUserMessage call (userMsgCreated) and this is not a
-// continuation (whose Prompt is a placeholder, never persisted - see
-// SessionAgentCall.Continuation - so there is never a user message to
-// create here even on this fallback path), then writes an assistant
-// message with FinishReasonCanceled. Both writes use
-// context.WithoutCancel(ctx) so workspace shutdown (which cancels the run
-// context) can't drop them.
-func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgentCall, userMsgCreated bool) error {
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if !userMsgCreated && !call.Continuation {
-		if _, err := a.createUserMessage(writeCtx, call); err != nil {
-			return err
-		}
-	}
-	model := a.model.Get()
-	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
-		Role:     message.Assistant,
-		Parts:    []message.ContentPart{},
-		Model:    model.ModelCfg.Model,
-		Provider: model.ModelCfg.Provider,
-	})
-	if err != nil {
-		return err
-	}
-	assistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
-	return a.messages.Update(writeCtx, assistant)
-}
-
 // publishRunComplete emits the authoritative terminal event for a turn.
 // It honors the per-call OnComplete hook when set (so the coordinator can
 // coalesce retries) and otherwise falls back to the RunComplete broker.
@@ -569,26 +537,11 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		return SteerRan, nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 
-	// Generate title from the first real (non-shell) user prompt.
-	// can take tens of seconds. Blocking Run on it delays the
-	// response to the caller. Use a detached context so the title
-	// goroutine survives Run's cancel. Never for a continuation: its
-	// Prompt is a placeholder (see continuationPromptPlaceholder), not
-	// something to title a session from, and a continuation only ever
-	// runs on a session that already has real conversation behind it.
 	if !call.Continuation && !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
 		go a.generateTitle(titleCtx, call.SessionID, call.Prompt, model, promptPrefix)
 	}
 
-	// Add the user message to the session - except for a continuation,
-	// whose Prompt is a placeholder standing in for fantasy's own
-	// non-empty-prompt requirement, not real content (see
-	// continuationPromptPlaceholder and SessionAgentCall.Continuation).
-	// Persisting it would put a message in history the user never wrote;
-	// PrepareStep strips the placeholder from the model's own view of
-	// this step and folds in the completion inbox instead, the same way
-	// it already does for the mid-turn fold case.
 	if !call.Continuation {
 		_, err = a.createUserMessage(ctx, call)
 		if err != nil {
@@ -597,39 +550,13 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		userMsgCreated = true
 	}
 
-	// Add the session to the context. The run context (genCtx) and its
-	// cancel func were already created and registered under the dispatch
-	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	// reporter delivers this turn's terminal RunComplete exactly once,
-	// regardless of whether it comes from the defer below (the
-	// normal/error/panic-recovery catch-all) or from the explicit
-	// publish on the queued-recursion tail path (which must win: it
-	// carries this turn's own retErr before the recursive Run
-	// clobbers the named return).
 	reporter := newCompletionReporter(a, call)
-	// t owns the streaming-callback state (currentAssistant, stepMessages,
-	// currentSession, etc.) that PrepareStep and the other
-	// fantasy.AgentStreamCall callbacks below read and write. It's
-	// declared here so the deferred RunComplete publish below can read
-	// t.currentAssistant, which PrepareStep will (re)assign once per
-	// streaming step. The final assistant message of the turn is the
-	// value reachable through that field when the defer runs.
 	t := newRunTurn(a, call, ctx, genCtx, model, agentTools, promptPrefix, disableAutoSummarize, currentSession, userMsgCreated)
-	// Drain any debounced message updates before returning. message.Service
-	// already flushes synchronously on terminal updates, but a defer here
-	// guarantees the contract at every Run exit (success, error, panic
-	// recovery upstream) without callers needing to know.
-	//
-	// After the flush completes — meaning all per-message
-	// Publish(UpdatedEvent) calls have fired and been buffered into
-	// every subscriber's channel — publish the authoritative
-	// RunComplete event for this turn. The flush-then-publish order
-	// gives well-behaved clients the best chance of seeing the final
-	// message event before RunComplete; the embedded Text field
-	// reconciles for clients that observe the events out of order
-	// (the pubsub broker fan-in does not serialize publishes from
-	// different upstream brokers).
+	// message.Service already flushes synchronously on terminal updates;
+	// the defer guarantees it at every Run exit without callers needing
+	// to know, and publishes the authoritative RunComplete for this
+	// turn after the flush.
 	defer func() {
 		// Use a context detached from the run context: workspace
 		// shutdown cancels ctx before this goroutine returns, but the
@@ -663,10 +590,8 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		reporter.publish(ctx, complete)
 	}()
 
-	// Carried-over history goes in front of this session's own messages
-	// and is deliberately not folded into msgs above: msgs drives the
-	// title decision and this session's summarize bookkeeping, neither
-	// of which owns messages that belong to earlier sessions.
+	// Carried-over history goes in front of this session's own
+	// messages.
 	history, files := a.preparePrompt(withPriorMessages(call.PriorMessages, msgs), model.CatalogCfg.SupportsImages, call.Attachments...)
 
 	// Only this session's own messages, not the carried ones: a summary

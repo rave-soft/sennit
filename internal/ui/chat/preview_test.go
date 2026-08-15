@@ -18,7 +18,7 @@ import (
 func TestToolMessageItem_CollapsedByDefaultIsOneLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 
 	longFile := strings.Repeat("line of code\n", 300)
 
@@ -70,7 +70,7 @@ func TestToolMessageItem_CollapsedByDefaultIsOneLine(t *testing.T) {
 func TestToolMessageItem_ExpandableBodyPreview(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	longFile := strings.Repeat("line of code\n", 300)
 
 	tests := []struct {
@@ -114,7 +114,7 @@ func TestToolMessageItem_ExpandableBodyPreview(t *testing.T) {
 func TestToolMessageItem_NoExpand(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	longFile := strings.Repeat("line of code\n", 300)
 
 	tc := message.ToolCall{ID: "1", Name: "view", Input: `{"file_path":"internal/foo.go"}`, Finished: true}
@@ -135,7 +135,7 @@ func TestToolMessageItem_NoExpand(t *testing.T) {
 func TestToolMessageItem_ErrorShowsStderrTail(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	tc := message.ToolCall{ID: "1", Name: "bash", Input: `{"command":"go build ./..."}`, Finished: true}
 	result := &message.ToolResult{
 		ToolCallID: "1",

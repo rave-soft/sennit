@@ -141,7 +141,7 @@ func ensureParentDir(filePath string) error {
 // content that changed on disk outside of Braid, and stores the new
 // version. Used by write/edit/multiedit whenever a tool commits file
 // content, whether creating the file (oldContent == "") or overwriting it.
-func writeFileWithHistory(ctx context.Context, files history.Service, filetracker filetracker.Service, sessionID, filePath, oldContent, newContent string) error {
+func writeFileWithHistory(ctx context.Context, files history.Service, sessionID, filePath, oldContent, newContent string) error {
 	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
@@ -162,8 +162,33 @@ func writeFileWithHistory(ctx context.Context, files history.Service, filetracke
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	filetracker.RecordRead(ctx, sessionID, filePath)
 	return nil
+}
+
+// recordWholeFileRead marks the file as fully seen by this session. Only
+// for writes where the caller supplied the entire content (Write, and
+// creating a file through Edit/Multi-Edit): it saw everything it just
+// wrote.
+func recordWholeFileRead(ctx context.Context, filetracker filetracker.Service, sessionID, filePath string) {
+	filetracker.RecordRead(ctx, sessionID, filePath)
+}
+
+// recordEditedSpan marks the lines an edit replaced as seen, and nothing
+// else. An edit is not a read: the agent supplied old_string and a
+// replacement, not the file. Recording a full read here would hand back
+// exactly the blind-edit hole that read-coverage exists to close — read
+// fifty lines, edit one of them, and the rest of the file would count as
+// read from then on.
+//
+// oldContent/newContent must both be in the tool's normalized (LF) form,
+// so the span matches the line numbers the read tool reported.
+func recordEditedSpan(ctx context.Context, filetracker filetracker.Service, sessionID, filePath, oldContent, newContent string) {
+	start, end, ok := changedLineSpan(oldContent, newContent)
+	if !ok {
+		return
+	}
+	delta := strings.Count(newContent, "\n") - strings.Count(oldContent, "\n")
+	filetracker.RecordEdit(ctx, sessionID, filePath, start, end, max(start, end+delta))
 }
 
 // newHTTPClient builds an http.Client tuned for outbound fetch/download

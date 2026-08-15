@@ -76,8 +76,18 @@ func NewWriteTool(
 				modTime := fileInfo.ModTime().Truncate(time.Second)
 				lastRead := filetracker.LastReadTime(ctx, sessionID, filePath)
 				if modTime.After(lastRead) {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",
-						filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339))), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf(
+						"cannot write %s: it changed on disk after you last read it "+
+							"(modified %s, last read %s).\n\n"+
+							"Write replaces the whole file, so doing it now would discard "+
+							"whatever was just written there by the user, a formatter, or "+
+							"another agent.\n\n"+
+							"Read %s to see the current content, then write the version that "+
+							"keeps those changes.",
+						filePath,
+						modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
+						filePath,
+					)), nil
 				}
 
 				oldContent, readErr := os.ReadFile(filePath)
@@ -130,9 +140,10 @@ func NewWriteTool(
 				}), nil
 			}
 
-			if err := writeFileWithHistory(ctx, files, filetracker, sessionID, filePath, oldContent, params.Content); err != nil {
+			if err := writeFileWithHistory(ctx, files, sessionID, filePath, oldContent, params.Content); err != nil {
 				return fantasy.ToolResponse{}, err
 			}
+			recordWholeFileRead(ctx, filetracker, sessionID, filePath)
 
 			notifyLSPs(ctx, lspManager, params.FilePath)
 

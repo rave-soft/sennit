@@ -39,7 +39,7 @@ func (w *modelsTestWorkspace) SetConfigField(scope config.Scope, field string, v
 
 func newModelsTestCommon(t *testing.T, cfg *config.Config) *common.Common {
 	t.Helper()
-	s := styles.CharmtonePantera()
+	s := styles.BraidDark()
 	return &common.Common{
 		Styles:    &s,
 		Workspace: &modelsTestWorkspace{cfg: cfg},
@@ -157,7 +157,7 @@ func TestSetProviderItems_EmptyStateShowsPlaceholderAndNoPanic(t *testing.T) {
 
 func TestModelGroup_RenderNoLongerShowsConfiguredBadge(t *testing.T) {
 	t.Parallel()
-	s := styles.CharmtonePantera()
+	s := styles.BraidDark()
 	g := NewModelGroup(&s, "Anthropic")
 	rendered := g.Render(60)
 	require.NotContains(t, rendered, "Configured")
