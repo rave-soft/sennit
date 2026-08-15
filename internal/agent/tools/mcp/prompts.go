@@ -12,8 +12,6 @@ import (
 type Prompt = mcp.Prompt
 
 // Prompts returns all available MCP prompts.
-func Prompts() iter.Seq2[string, []*Prompt] { return defaultRegistry.Prompts() }
-
 func (r *Registry) Prompts() iter.Seq2[string, []*Prompt] {
 	snapshot := r.CatalogSnapshot()
 	return func(yield func(string, []*Prompt) bool) {
@@ -26,10 +24,6 @@ func (r *Registry) Prompts() iter.Seq2[string, []*Prompt] {
 }
 
 // GetPromptMessages retrieves the content of an MCP prompt with the given arguments.
-func GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName, promptName string, args map[string]string) ([]string, error) {
-	return defaultRegistry.GetPromptMessages(ctx, cfg, clientName, promptName, args)
-}
-
 func (r *Registry) GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName, promptName string, args map[string]string) ([]string, error) {
 	c, err := r.getOrRenewClient(ctx, cfg, clientName)
 	if err != nil {
@@ -57,8 +51,6 @@ func (r *Registry) GetPromptMessages(ctx context.Context, cfg *config.ConfigStor
 
 // RefreshPrompts gets the updated list of prompts from the MCP and updates the
 // global state.
-func RefreshPrompts(ctx context.Context, name string) { defaultRegistry.RefreshPrompts(ctx, name) }
-
 func (r *Registry) RefreshPrompts(ctx context.Context, name string) {
 	owner, session, ok := r.sessionOwner(name)
 	if !ok {

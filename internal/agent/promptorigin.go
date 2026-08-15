@@ -14,19 +14,8 @@ import (
 // WithRunID / RunIDFromContext.
 type promptOriginContextKey struct{}
 
-// WithPromptOrigin returns ctx tagged so the prompt dispatched through it
-// is persisted with the given message.Origin instead of the default
-// message.OriginPerson. Used by thread/task dispatch to mark a
-// delegation's goal or a thread_send/task_send follow-up as
-// message.OriginAgent: it is still persisted with Role == message.User and
-// reaches the model exactly like any other user turn (Origin has zero
-// effect on what the model sees - see Message.ToAIMessage), but the UI can
-// use it to mark the message as not the person's own words.
-func WithPromptOrigin(ctx context.Context, origin message.Origin) context.Context {
-	return context.WithValue(ctx, promptOriginContextKey{}, origin)
-}
-
-// PromptOriginFromContext returns the origin set by [WithPromptOrigin], or
+// PromptOriginFromContext returns the origin set by a previous prompt
+// dispatch (see threadorigin.go's promptOriginContextKey usage), or
 // "" if none was set. Exported because the coordinator needs to read it;
 // safe to call on any context. An empty result means "caller did not tag
 // this dispatch"; downstream code treats that as message.OriginPerson.

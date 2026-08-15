@@ -25,8 +25,6 @@ type ToolResult struct {
 }
 
 // Tools returns all available MCP tools.
-func Tools() iter.Seq2[string, []*Tool] { return defaultRegistry.Tools() }
-
 func (r *Registry) Tools() iter.Seq2[string, []*Tool] {
 	snapshot := r.CatalogSnapshot()
 	return func(yield func(string, []*Tool) bool) {
@@ -39,10 +37,6 @@ func (r *Registry) Tools() iter.Seq2[string, []*Tool] {
 }
 
 // RunTool runs an MCP tool with the given input parameters.
-func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
-	return defaultRegistry.RunTool(ctx, cfg, name, toolName, input)
-}
-
 func (r *Registry) RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
@@ -120,10 +114,6 @@ func (r *Registry) RunTool(ctx context.Context, cfg *config.ConfigStore, name, t
 
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
-func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
-	defaultRegistry.RefreshTools(ctx, cfg, name)
-}
-
 func (r *Registry) RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
 	owner, session, ok := r.sessionOwner(name)
 	if !ok {

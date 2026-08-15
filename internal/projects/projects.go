@@ -47,14 +47,6 @@ func Load() (*ProjectList, error) {
 	return loadLocked()
 }
 
-// Save writes the projects list to disk.
-func Save(list *ProjectList) error {
-	mu.Lock()
-	defer mu.Unlock()
-
-	return saveLocked(list)
-}
-
 // loadLocked reads the projects list from disk. Callers must hold mu.
 func loadLocked() (*ProjectList, error) {
 	path := projectsFilePath()

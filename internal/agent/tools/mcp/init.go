@@ -168,11 +168,6 @@ type ClientInfo struct {
 	PendingConfig *config.MCPConfig
 }
 
-// InitializeSingle initializes a single MCP client by name.
-func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore) error {
-	return defaultRegistry.InitializeSingle(ctx, name, cfg)
-}
-
 func (r *Registry) InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore) error {
 	m, exists := cfg.Config().MCP[name]
 	if !exists {
@@ -196,10 +191,6 @@ func (r *Registry) InitializeSingle(ctx context.Context, name string, cfg *confi
 // StateNeedsAuth. It creates the OAuth handler (which starts a local
 // callback server), connects to the server (which triggers the browser
 // auth flow on 401), and transitions to StateConnected on success.
-func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) error {
-	return defaultRegistry.AuthenticateMCP(ctx, cfg, name)
-}
-
 func (r *Registry) AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) error {
 	m, exists := cfg.Config().MCP[name]
 	if !exists {
@@ -235,8 +226,6 @@ type PendingAuthServer struct {
 
 // MCPAuthURL returns the current OAuth authorization URL for the named
 // MCP, or empty if none is in progress.
-func MCPAuthURL(name string) string { return defaultRegistry.MCPAuthURL(name) }
-
 func (r *Registry) MCPAuthURL(name string) string {
 	r.publishMu.Lock()
 	defer r.publishMu.Unlock()
@@ -248,10 +237,6 @@ func (r *Registry) MCPAuthURL(name string) string {
 }
 
 // PendingAuthMCPs returns MCP servers in StateNeedsAuth with their URLs.
-func PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer {
-	return defaultRegistry.PendingAuthMCPs(cfg)
-}
-
 func (r *Registry) PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer {
 	var pending []PendingAuthServer
 	for name, info := range r.states.Seq2() {
@@ -533,10 +518,6 @@ func (r *Registry) publishSession(ctx context.Context, name string, m config.MCP
 // config so it survives restarts.
 
 // DisableSingle disables and closes a single MCP client by name.
-func DisableSingle(cfg *config.ConfigStore, name string) error {
-	return defaultRegistry.DisableSingle(cfg, name)
-}
-
 func (r *Registry) DisableSingle(cfg *config.ConfigStore, name string) error {
 	// teardown bumps the generation, invalidating any in-flight connect, and
 	// the StateDisabled transition clears the recorded config so a later

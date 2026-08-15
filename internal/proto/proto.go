@@ -158,11 +158,6 @@ type AgentInfo struct {
 	ModelCfg config.SelectedModel `json:"model_cfg"`
 }
 
-// IsZero checks if the AgentInfo is zero-valued.
-func (a AgentInfo) IsZero() bool {
-	return !a.IsBusy && !a.IsReady && a.Model.ID == ""
-}
-
 // AgentMessage represents a message sent to the agent.
 //
 // RunID, when non-empty, is echoed back on the [RunComplete] event
@@ -201,11 +196,6 @@ type ShellCommandResponse struct {
 type AgentSession struct {
 	Session
 	IsBusy bool `json:"is_busy"`
-}
-
-// IsZero checks if the AgentSession is zero-valued.
-func (a AgentSession) IsZero() bool {
-	return a.ID == "" && !a.IsBusy
 }
 
 // PermissionAction represents an action taken on a permission request.

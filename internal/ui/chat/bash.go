@@ -202,23 +202,6 @@ func bashDurationSummary(meta tools.BashResponseMetadata) string {
 // Job Output Tool
 // -----------------------------------------------------------------------------
 
-// JobOutputToolMessageItem is a message item for job_output tool calls.
-type JobOutputToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*JobOutputToolMessageItem)(nil)
-
-// NewJobOutputToolMessageItem creates a new [JobOutputToolMessageItem].
-func NewJobOutputToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &JobOutputToolRenderContext{}, canceled)
-}
-
 // JobOutputToolRenderContext renders job_output tool messages.
 type JobOutputToolRenderContext struct{}
 
@@ -252,23 +235,6 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 // -----------------------------------------------------------------------------
 // Job Kill Tool
 // -----------------------------------------------------------------------------
-
-// JobKillToolMessageItem is a message item for job_kill tool calls.
-type JobKillToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*JobKillToolMessageItem)(nil)
-
-// NewJobKillToolMessageItem creates a new [JobKillToolMessageItem].
-func NewJobKillToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &JobKillToolRenderContext{}, canceled)
-}
 
 // JobKillToolRenderContext renders job_kill tool messages.
 type JobKillToolRenderContext struct{}

@@ -3,27 +3,9 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/rave-soft/braid/internal/message"
 	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
-
-// DefinitionToolMessageItem is a message item that represents a definition tool call.
-type DefinitionToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*DefinitionToolMessageItem)(nil)
-
-// NewDefinitionToolMessageItem creates a new [DefinitionToolMessageItem].
-func NewDefinitionToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &DefinitionToolRenderContext{}, canceled)
-}
 
 // registerLSPToolRenderers registers the LSP tool renderers.
 func registerLSPToolRenderers() {

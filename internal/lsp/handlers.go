@@ -78,11 +78,6 @@ type FileWatchRegistrationHandler func(id string, watchers []protocol.FileSystem
 // fileWatchHandler holds the current handler for file watch registrations
 var fileWatchHandler FileWatchRegistrationHandler
 
-// RegisterFileWatchHandler sets the handler for file watch registrations
-func RegisterFileWatchHandler(handler FileWatchRegistrationHandler) {
-	fileWatchHandler = handler
-}
-
 // notifyFileWatchRegistration notifies the handler about new file watch registrations
 func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatcher) {
 	if fileWatchHandler != nil {

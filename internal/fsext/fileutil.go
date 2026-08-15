@@ -84,13 +84,6 @@ func (w *FastGlobWalker) ShouldSkipDir(path string) bool {
 	return w.directoryLister.shouldIgnore(path, nil, true)
 }
 
-// Glob globs files.
-//
-// Does not respect gitignore.
-func Glob(pattern string, cwd string, limit int) ([]string, bool, error) {
-	return globWithDoubleStar(context.Background(), pattern, cwd, limit, false)
-}
-
 // GlobGitignoreAware globs files respecting gitignore.
 func GlobGitignoreAware(pattern string, cwd string, limit int) ([]string, bool, error) {
 	return globWithDoubleStar(context.Background(), pattern, cwd, limit, true)

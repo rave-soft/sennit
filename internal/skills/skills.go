@@ -3,7 +3,6 @@
 package skills
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -73,11 +72,6 @@ type Event struct {
 }
 
 var broker = pubsub.NewBroker[Event]()
-
-// SubscribeEvents returns a channel that receives events when skill discovery state changes.
-func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
-	return broker.Subscribe(ctx)
-}
 
 // PublishStates publishes a skill discovery event with the given states.
 func PublishStates(states []*SkillState) {

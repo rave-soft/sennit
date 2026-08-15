@@ -4,27 +4,9 @@ import (
 	"encoding/json"
 
 	"github.com/rave-soft/braid/internal/fsext"
-	"github.com/rave-soft/braid/internal/message"
 	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
-
-// ReferencesToolMessageItem is a message item that represents a references tool call.
-type ReferencesToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*ReferencesToolMessageItem)(nil)
-
-// NewReferencesToolMessageItem creates a new [ReferencesToolMessageItem].
-func NewReferencesToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ReferencesToolRenderContext{}, canceled)
-}
 
 // ReferencesToolRenderContext renders references tool messages.
 type ReferencesToolRenderContext struct{}
