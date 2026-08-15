@@ -235,6 +235,44 @@ func TestDoctorProviderMissingAPIKey(t *testing.T) {
 	require.Equal(t, "local", problems[0].Subject)
 }
 
+// TestDoctorJunkModelIDDiscovered covers the case the check exists for: a
+// gguf path that reached a discovering provider's model list from a
+// llama.cpp /v1/models response.
+func TestDoctorJunkModelIDDiscovered(t *testing.T) {
+	discover := true
+	providers := csync.NewMap[string, ProviderConfig]()
+	providers.Set("local", ProviderConfig{
+		ID:                 "local",
+		AutoDiscoverModels: &discover,
+		Models:             []catwalk.Model{{ID: "/models/Qwen3.8-27B/Qwen3.8-27B-Q8_0.gguf"}},
+	})
+	cfg := &Config{Options: &Options{}, Providers: providers}
+
+	problems := Doctor(cfg)
+	require.Len(t, problems, 1)
+	require.Equal(t, AreaProvider, problems[0].Area)
+	require.Equal(t, "local", problems[0].Subject)
+	require.Contains(t, problems[0].Message, "looks like a file path")
+}
+
+// TestDoctorJunkModelIDExplicitProviderSkipped guards the qwen36-local
+// case: with discover_models: false the model list is hand-written, and a
+// llama-server's only accepted model ID really is the --model path. The
+// user has already done what the hint asks, so warning again is noise with
+// no remedy.
+func TestDoctorJunkModelIDExplicitProviderSkipped(t *testing.T) {
+	discover := false
+	providers := csync.NewMap[string, ProviderConfig]()
+	providers.Set("qwen36-local", ProviderConfig{
+		ID:                 "qwen36-local",
+		AutoDiscoverModels: &discover,
+		Models:             []catwalk.Model{{ID: "/models/Qwen3.8-27B/Qwen3.8-27B-Q8_0.gguf"}},
+	})
+	cfg := &Config{Options: &Options{}, Providers: providers}
+
+	require.Empty(t, Doctor(cfg))
+}
+
 // TestDoctorReportsJSONAgentsBlock is the end-to-end version of
 // TestSetupAgentsIgnoresJSONAgentsBlock: it loads a real braid.json with an
 // "agents" block off disk through loadFromConfigPaths (not a hand-built

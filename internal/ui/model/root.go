@@ -19,10 +19,12 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/common"
 	"github.com/rave-soft/braid/internal/ui/dialog"
 	"github.com/rave-soft/braid/internal/ui/util"
@@ -267,6 +269,28 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if _, ok := msg.(mainScreenMsg); ok {
 			_, cmd := r.main.Update(msg)
 			return r, cmd
+		}
+		switch msg.(type) {
+		case spinner.TickMsg, anim.StepMsg:
+			// Animation ticks keep themselves alive: the handler that
+			// receives one returns the command that schedules the next.
+			// Route one by active screen and the loop does not stall, it
+			// dies — the main screen's panel spinners freeze mid-frame and
+			// nothing re-arms them, since syncPanelSpinner only fires on
+			// the stopped→spinning edge and the tick that would have
+			// cleared panelIsSpinning never arrived. Drilling into a thread
+			// once was enough to freeze the panel behind you for the rest
+			// of the session. Both message types are id-stamped and every
+			// handler drops ticks that aren't its own, so broadcasting to
+			// each screen that owns an animation is safe.
+			var cmds []tea.Cmd
+			_, cmd := r.main.Update(msg)
+			cmds = append(cmds, cmd)
+			if r.thread != nil {
+				_, cmd := r.thread.ui.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+			return r, tea.Batch(cmds...)
 		}
 		switch r.active {
 		case screenThread:
