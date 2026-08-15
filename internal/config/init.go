@@ -114,14 +114,3 @@ func MarkProjectInitialized(store *ConfigStore) error {
 
 	return nil
 }
-
-func HasInitialDataConfig(store *ConfigStore) bool {
-	if store == nil {
-		return false
-	}
-	cfgPath := GlobalConfigData()
-	if _, err := os.Stat(cfgPath); err != nil {
-		return false
-	}
-	return store.Config().IsConfigured()
-}

@@ -6,27 +6,9 @@ import (
 
 	"github.com/rave-soft/braid/internal/diff"
 	"github.com/rave-soft/braid/internal/fsext"
-	"github.com/rave-soft/braid/internal/message"
 	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
-
-// ReplaceSymbolToolMessageItem is a message item that represents a replace symbol tool call.
-type ReplaceSymbolToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*ReplaceSymbolToolMessageItem)(nil)
-
-// NewReplaceSymbolToolMessageItem creates a new [ReplaceSymbolToolMessageItem].
-func NewReplaceSymbolToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ReplaceSymbolToolRenderContext{}, canceled)
-}
 
 // ReplaceSymbolToolRenderContext renders replace symbol tool messages.
 type ReplaceSymbolToolRenderContext struct{}

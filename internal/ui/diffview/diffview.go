@@ -114,12 +114,6 @@ func (dv *DiffView) After(path, content string) *DiffView {
 	return dv
 }
 
-// FileName sets the file name header to display above the diff.
-func (dv *DiffView) FileName(name string) *DiffView {
-	dv.fileName = name
-	return dv
-}
-
 // clearCaches clears all caches when content or major settings change.
 func (dv *DiffView) clearCaches() {
 	dv.cachedLexer = nil

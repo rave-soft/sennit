@@ -18,9 +18,8 @@ const OriginAgent = message.OriginAgent
 
 // WithAgentDispatch returns ctx tagged so the prompt dispatched through
 // it is persisted with Origin message.OriginAgent instead of the default
-// message.OriginPerson. It is the thread-domain spelling of
-// [WithPromptOrigin]: the tag still lands in the same context key, so
-// [coordinator.run] reads it through the unchanged
+// message.OriginPerson. It tags the same context key used elsewhere for
+// prompt origin, so [coordinator.run] reads it through the unchanged
 // [PromptOriginFromContext] path and persistence behavior is identical.
 // It is still persisted with Role == message.User and reaches the model
 // exactly like any other user turn (Origin has zero effect on what the

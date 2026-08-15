@@ -12,23 +12,6 @@ import (
 // Fetch Tool
 // -----------------------------------------------------------------------------
 
-// FetchToolMessageItem is a message item that represents a fetch tool call.
-type FetchToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*FetchToolMessageItem)(nil)
-
-// NewFetchToolMessageItem creates a new [FetchToolMessageItem].
-func NewFetchToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &FetchToolRenderContext{}, canceled)
-}
-
 // registerFetchToolRenderers registers the fetch, web_fetch and
 // web_search tool renderers.
 func registerFetchToolRenderers() {
@@ -80,23 +63,6 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 // WebFetch Tool
 // -----------------------------------------------------------------------------
 
-// WebFetchToolMessageItem is a message item that represents a web_fetch tool call.
-type WebFetchToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*WebFetchToolMessageItem)(nil)
-
-// NewWebFetchToolMessageItem creates a new [WebFetchToolMessageItem].
-func NewWebFetchToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &WebFetchToolRenderContext{}, canceled)
-}
-
 // WebFetchToolRenderContext renders web_fetch tool messages.
 type WebFetchToolRenderContext struct{}
 
@@ -132,23 +98,6 @@ func (w *WebFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 // -----------------------------------------------------------------------------
 // WebSearch Tool
 // -----------------------------------------------------------------------------
-
-// WebSearchToolMessageItem is a message item that represents a web_search tool call.
-type WebSearchToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*WebSearchToolMessageItem)(nil)
-
-// NewWebSearchToolMessageItem creates a new [WebSearchToolMessageItem].
-func NewWebSearchToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &WebSearchToolRenderContext{}, canceled)
-}
 
 // WebSearchToolRenderContext renders web_search tool messages.
 type WebSearchToolRenderContext struct{}

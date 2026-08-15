@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"image/color"
-	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -122,28 +121,6 @@ func formatTokensAndCost(t *styles.Styles, tokens, contextWindow int64, cost flo
 	}
 
 	return fmt.Sprintf("%s %s", formattedTokens, formattedCost)
-}
-
-// FormatCredits formats an integer with comma separators for thousands.
-func FormatCredits(n int) string {
-	s := strconv.FormatInt(int64(n), 10)
-	if n < 1000 {
-		return s
-	}
-	// Calculate how many digits before the first comma.
-	firstGroup := len(s) % 3
-	if firstGroup == 0 {
-		firstGroup = 3
-	}
-	var b []byte
-	for i := 0; i < len(s); i++ {
-		if i > 0 && i == firstGroup {
-			b = append(b, ',')
-			firstGroup += 3
-		}
-		b = append(b, s[i])
-	}
-	return string(b)
 }
 
 // StatusOpts defines options for rendering a status line with icon, title,

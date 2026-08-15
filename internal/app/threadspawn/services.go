@@ -138,12 +138,6 @@ func (a *MessageAdapter) List(ctx context.Context, sessionID string) ([]thread.M
 	return out, nil
 }
 
-// NewSessionService adapts a real session service to the thread domain's
-// narrow [thread.SessionService].
-func NewSessionService(full session.Service) thread.SessionService {
-	return &SessionAdapter{full: full}
-}
-
 // NewMessageService adapts a real message service to the thread domain's
 // narrow [thread.MessageService].
 func NewMessageService(full message.Service) thread.MessageService {

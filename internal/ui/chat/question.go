@@ -11,23 +11,6 @@ import (
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
 
-// QuestionToolMessageItem renders question tool calls in the chat.
-type QuestionToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*QuestionToolMessageItem)(nil)
-
-// NewQuestionToolMessageItem creates a new [QuestionToolMessageItem].
-func NewQuestionToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &QuestionToolRenderContext{}, canceled)
-}
-
 // QuestionToolRenderContext renders question tool messages.
 type QuestionToolRenderContext struct{}
 

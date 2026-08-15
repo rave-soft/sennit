@@ -4,27 +4,9 @@ import (
 	"encoding/json"
 
 	"github.com/rave-soft/braid/internal/fsext"
-	"github.com/rave-soft/braid/internal/message"
 	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
-
-// RenameToolMessageItem is a message item that represents a rename tool call.
-type RenameToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*RenameToolMessageItem)(nil)
-
-// NewRenameToolMessageItem creates a new [RenameToolMessageItem].
-func NewRenameToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &RenameToolRenderContext{}, canceled)
-}
 
 // RenameToolRenderContext renders rename tool messages.
 type RenameToolRenderContext struct{}

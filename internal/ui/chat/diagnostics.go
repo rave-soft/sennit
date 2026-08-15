@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 
 	"github.com/rave-soft/braid/internal/fsext"
-	"github.com/rave-soft/braid/internal/message"
 	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
@@ -12,23 +11,6 @@ import (
 // -----------------------------------------------------------------------------
 // Diagnostics Tool
 // -----------------------------------------------------------------------------
-
-// DiagnosticsToolMessageItem is a message item that represents a diagnostics tool call.
-type DiagnosticsToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*DiagnosticsToolMessageItem)(nil)
-
-// NewDiagnosticsToolMessageItem creates a new [DiagnosticsToolMessageItem].
-func NewDiagnosticsToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &DiagnosticsToolRenderContext{}, canceled)
-}
 
 // DiagnosticsToolRenderContext renders diagnostics tool messages.
 type DiagnosticsToolRenderContext struct{}

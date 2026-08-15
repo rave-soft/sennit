@@ -384,23 +384,6 @@ func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 // Download Tool
 // -----------------------------------------------------------------------------
 
-// DownloadToolMessageItem is a message item that represents a download tool call.
-type DownloadToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*DownloadToolMessageItem)(nil)
-
-// NewDownloadToolMessageItem creates a new [DownloadToolMessageItem].
-func NewDownloadToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &DownloadToolRenderContext{}, canceled)
-}
-
 // DownloadToolRenderContext renders download tool messages.
 type DownloadToolRenderContext struct{}
 

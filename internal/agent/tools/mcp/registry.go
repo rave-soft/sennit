@@ -356,8 +356,6 @@ func (r *Registry) SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Even
 }
 
 // GetStates returns the current state of all MCP clients.
-func GetStates() map[string]ClientInfo { return defaultRegistry.GetStates() }
-
 func (r *Registry) GetStates() map[string]ClientInfo { return r.states.Copy() }
 
 // GetState returns the state of a specific MCP client.
@@ -366,10 +364,6 @@ func GetState(name string) (ClientInfo, bool) { return defaultRegistry.GetState(
 func (r *Registry) GetState(name string) (ClientInfo, bool) { return r.states.Get(name) }
 
 // Initialize initializes MCP clients based on the provided configuration.
-func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
-	defaultRegistry.Initialize(ctx, permissions, cfg)
-}
-
 func (r *Registry) Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
 	r.markInitStarted()
 	slog.Info("Initializing MCP clients")

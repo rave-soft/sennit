@@ -3,27 +3,9 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/rave-soft/braid/internal/message"
 	tools "github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/ui/styles"
 )
-
-// SymbolsToolMessageItem is a message item that represents a symbols tool call.
-type SymbolsToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*SymbolsToolMessageItem)(nil)
-
-// NewSymbolsToolMessageItem creates a new [SymbolsToolMessageItem].
-func NewSymbolsToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &SymbolsToolRenderContext{}, canceled)
-}
 
 // SymbolsToolRenderContext renders symbols tool messages.
 type SymbolsToolRenderContext struct{}

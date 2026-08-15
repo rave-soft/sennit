@@ -187,25 +187,3 @@ func ToStyle(lgStyle lipgloss.Style) uv.Style {
 
 	return uvStyle
 }
-
-// AdjustArea adjusts the given area rectangle by subtracting margins, borders,
-// and padding from the style.
-func AdjustArea(area image.Rectangle, style lipgloss.Style) image.Rectangle {
-	topMargin, rightMargin, bottomMargin, leftMargin := style.GetMargin()
-	topBorder, rightBorder, bottomBorder, leftBorder := style.GetBorderTopSize(),
-		style.GetBorderRightSize(),
-		style.GetBorderBottomSize(),
-		style.GetBorderLeftSize()
-	topPadding, rightPadding, bottomPadding, leftPadding := style.GetPadding()
-
-	return image.Rectangle{
-		Min: image.Point{
-			X: area.Min.X + leftMargin + leftBorder + leftPadding,
-			Y: area.Min.Y + topMargin + topBorder + topPadding,
-		},
-		Max: image.Point{
-			X: area.Max.X - (rightMargin + rightBorder + rightPadding),
-			Y: area.Max.Y - (bottomMargin + bottomBorder + bottomPadding),
-		},
-	}
-}

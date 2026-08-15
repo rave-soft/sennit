@@ -98,18 +98,6 @@ func NewGrepToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &GrepToolRenderContext{title: "Grep"}, canceled)
 }
 
-// NewRipgrepToolMessageItem creates a message item for a ripgrep tool call.
-// It shares the grep renderer: the two tools differ only in backend and in
-// the extra case_insensitive parameter.
-func NewRipgrepToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &GrepToolRenderContext{title: "Ripgrep"}, canceled)
-}
-
 // GrepToolRenderContext renders grep and ripgrep tool messages.
 type GrepToolRenderContext struct {
 	title string
@@ -164,23 +152,6 @@ func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 // -----------------------------------------------------------------------------
 // LS Tool
 // -----------------------------------------------------------------------------
-
-// LSToolMessageItem is a message item that represents an ls tool call.
-type LSToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*LSToolMessageItem)(nil)
-
-// NewLSToolMessageItem creates a new [LSToolMessageItem].
-func NewLSToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &LSToolRenderContext{}, canceled)
-}
 
 // LSToolRenderContext renders ls tool messages.
 type LSToolRenderContext struct{}
