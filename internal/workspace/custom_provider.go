@@ -26,8 +26,8 @@ type ConfigureCustomProviderParams struct {
 // identical discovery behavior without duplicating it.
 //
 // It takes a [ConfigAccessor] rather than the full [Workspace] interface so
-// it works transparently against both [AppWorkspace] and [ClientWorkspace]
-// without any new RPC plumbing.
+// it works against any [Workspace] implementation without depending on the
+// rest of that interface.
 //
 // Discovery runs first, against params directly, before anything is
 // persisted. The result then decides how fields are ordered: every config

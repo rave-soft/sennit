@@ -33,8 +33,7 @@ import (
 )
 
 // AppWorkspace implements the Workspace interface by delegating
-// directly to an in-process [app.App] instance. This is the default
-// mode when the client/server architecture is not enabled.
+// directly to an in-process [app.App] instance.
 type AppWorkspace struct {
 	app   *app.App
 	store *config.ConfigStore
@@ -130,16 +129,14 @@ func (w *AppWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSession
 // -- Agent --
 
 // AgentRun dispatches a prompt fire-and-forget through the App's
-// AgentDispatcher and returns as soon as it is accepted, matching
-// ClientWorkspace.AgentRun's contract: structural/refusal errors
-// (empty prompt, missing session, an uninitialized coordinator, or a
+// AgentDispatcher and returns as soon as it is accepted: structural/refusal
+// errors (empty prompt, missing session, an uninitialized coordinator, or a
 // dispatcher already closing) come back synchronously, while a failure
 // in the turn itself reaches observers later as a notify.TypeAgentError
 // notification instead of through this return value. The interactive
 // TUI does not consume notify.RunComplete for completion detection (it
 // observes message events directly), so passing an empty RunID is
-// correct here — matching ClientWorkspace.AgentRun's runID for the
-// same reason: it skips the correlator stamping path without
+// correct here: it skips the correlator stamping path without
 // functional consequences.
 func (w *AppWorkspace) AgentRun(_ context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
 	dispatcher := w.app.AgentDispatcher()
@@ -697,9 +694,7 @@ func (w *AppWorkspace) Subscribe(program *tea.Program) {
 // pubsub.Event[thread.Event] the Manager itself publishes, because
 // ForwardEvents is generic over T and has no way to convert on the way
 // in. Convert here, at the UI-facing boundary, into
-// pubsub.Event[proto.Thread] — the same shape
-// ClientWorkspace.translateEvent produces for client/server mode's
-// SSE-decoded equivalent — so threads_dock.go, thread_indicator.go,
+// pubsub.Event[proto.Thread] so threads_dock.go, thread_indicator.go,
 // thread_completion.go and threads.go (the dashboard) see live updates
 // instead of relying solely on their TTL-poll fallback. Any other
 // message passes through unchanged.
@@ -732,8 +727,7 @@ func (w *AppWorkspace) translateEvent(msg any) any {
 		return msg
 	}
 	// The manager (still attached — it's what published this event) can
-	// resolve the thread's live WorkspaceID; client/server mode's
-	// wrapEvent can't (see its own doc comment) and passes "" instead.
+	// resolve the thread's live WorkspaceID.
 	workspaceID := ""
 	if mgr, ok := w.threadManager(); ok {
 		workspaceID = mgr.WorkspaceID(e.Payload.Thread.ID)

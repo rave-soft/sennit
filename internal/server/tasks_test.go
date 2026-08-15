@@ -2,18 +2,14 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"testing"
 
 	"github.com/rave-soft/braid/internal/app/threadspawn"
-	"github.com/rave-soft/braid/internal/client"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/thread"
-	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -209,48 +205,4 @@ func TestTaskEvent_DeliveredOverSSE(t *testing.T) {
 			t.Fatal("timed out waiting for the task cancellation event over SSE")
 		}
 	}
-}
-
-// TestClientWorkspace_TasksRoundTrip proves ClientWorkspace.ListTasks and
-// CancelTask actually round-trip over HTTP against a real test server —
-// real client SDK, real routes, real JSON — in the style of
-// internal/workspace's threads_clientworkspace_test.go tests. It lives
-// here rather than in internal/workspace because, unlike a thread, a
-// task has no HTTP creation route to seed one through a bare
-// ClientWorkspace (by design — see this file's other tests' doc
-// comments): seeding it needs direct in-process access to a
-// *thread.TaskManager, which only this package's test harness has. The
-// ClientWorkspace under test is otherwise a completely ordinary one,
-// pointed at the same httptest server every other test in this file
-// uses.
-func TestClientWorkspace_TasksRoundTrip(t *testing.T) {
-	t.Parallel()
-	h, tasks := newTaskTestHarness(t)
-
-	created, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do it", ParentSessionID: "parent-sess"})
-	require.NoError(t, err)
-
-	u, err := url.Parse(h.httpSrv.URL)
-	require.NoError(t, err)
-	c, err := client.NewClient(h.ws.Path, "tcp", u.Host)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = c.RetireClient(context.Background()) })
-
-	supported := true
-	ws := workspace.NewClientWorkspace(c, proto.Workspace{ID: h.ws.ID, TasksSupported: &supported})
-	require.True(t, ws.SupportsTasks())
-
-	list, err := ws.ListTasks(t.Context())
-	require.NoError(t, err)
-	require.Len(t, list, 1)
-	require.Equal(t, created.ID, list[0].ID)
-	require.Equal(t, "task", list[0].Kind)
-
-	require.NoError(t, ws.CancelTask(t.Context(), created.ID, "done over http"))
-
-	list, err = ws.ListTasks(t.Context())
-	require.NoError(t, err)
-	require.Len(t, list, 1)
-	require.Equal(t, "cancelled", list[0].Status)
-	require.Equal(t, "done over http", list[0].Error)
 }

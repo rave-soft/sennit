@@ -417,8 +417,7 @@ func TestAppWorkspace_AttachThread_LiveThread(t *testing.T) {
 
 // TestAppWorkspace_TranslateEvent_ThreadLifecycle drives a real
 // *thread.Manager through a create-then-remove lifecycle and verifies
-// that AppWorkspace.translateEvent (the local-mode counterpart of
-// ClientWorkspace.translateEvent's proto.ThreadEvent case) turns each
+// that AppWorkspace.translateEvent turns each
 // raw pubsub.Event[thread.Event] the Manager publishes into the
 // pubsub.Event[proto.Thread] that root.go/ui.go's Update() actually
 // switches on. Before this fix, AppWorkspace.Subscribe forwarded the raw

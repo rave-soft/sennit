@@ -50,10 +50,10 @@ func (c *blockingAgentRunCoordinator) Cancel(sessionID string) {}
 func (c *blockingAgentRunCoordinator) IsBusy() bool { return false }
 
 // TestAppWorkspace_AgentRun_ReturnsBeforeTurnCompletes proves
-// AppWorkspace.AgentRun now dispatches fire-and-forget the same way
-// ClientWorkspace.AgentRun does: it must return once the prompt is
-// accepted, not once the LLM turn finishes. The fake coordinator blocks
-// inside RunAccepted until the test releases it, so "AgentRun returned"
+// AppWorkspace.AgentRun dispatches fire-and-forget: it must return once
+// the prompt is accepted, not once the LLM turn finishes. The fake
+// coordinator blocks inside RunAccepted until the test releases it, so
+// "AgentRun returned"
 // is observed strictly before "the turn completed" — a timer-based
 // version of this test could pass even if AgentRun still blocked for
 // the whole turn, as long as the turn happened to finish quickly; this
@@ -97,8 +97,7 @@ func TestAppWorkspace_AgentRun_ReturnsBeforeTurnCompletes(t *testing.T) {
 // TestAppWorkspace_AgentRun_ValidationErrorIsSynchronous asserts that
 // structural refusal errors (here, agent.ValidateCall's empty-prompt
 // check) are still returned directly from AgentRun rather than only
-// reaching observers as a notification, matching
-// ClientWorkspace.AgentRun's contract for the same class of error.
+// reaching observers as a notification.
 func TestAppWorkspace_AgentRun_ValidationErrorIsSynchronous(t *testing.T) {
 	t.Parallel()
 

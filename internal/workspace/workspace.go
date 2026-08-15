@@ -78,8 +78,8 @@ var (
 	ErrTasksNotSupported = errors.New("workspace does not support tasks")
 )
 
-// ConnectionState describes the health of the client-server link as
-// reported by the [ClientWorkspace] subscription loop.
+// ConnectionState describes the health of a workspace's event
+// subscription loop.
 type ConnectionState int
 
 const (
@@ -173,9 +173,7 @@ type SessionStore interface {
 	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
 	// SetCurrentSession reports the session this client is currently
 	// viewing. Empty sessionID clears the entry (e.g. landing screen).
-	// In single-client local mode this is a no-op. In client/server
-	// mode it informs the server's per-client presence map so other
-	// observers can compute attached-client counts per session.
+	// For AppWorkspace this is a no-op.
 	SetCurrentSession(ctx context.Context, sessionID string) error
 	SetCurrentSessionGeneration(ctx context.Context, sessionID string, generation uint64) error
 
@@ -191,10 +189,9 @@ type SessionStore interface {
 type AgentController interface {
 	// AgentRun accepts prompt as a fire-and-forget turn and returns once
 	// it is accepted, not once the turn completes. ctx governs only
-	// delivery of the request (e.g. the client/server HTTP call), not
-	// the lifetime of the dispatched turn: cancelling it does not stop
-	// an already-accepted run in either mode. The turn is owned by the
-	// workspace/App and is stopped with AgentCancel instead.
+	// delivery of the request, not the lifetime of the dispatched turn:
+	// cancelling it does not stop an already-accepted run. The turn is
+	// owned by the workspace/App and is stopped with AgentCancel instead.
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
