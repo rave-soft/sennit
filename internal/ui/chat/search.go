@@ -30,6 +30,15 @@ func NewGlobToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &GlobToolRenderContext{}, canceled)
 }
 
+// registerSearchToolRenderers registers the glob, grep, ripgrep and ls
+// tool renderers.
+func registerSearchToolRenderers() {
+	registerToolRenderer(tools.GlobToolName, &GlobToolRenderContext{})
+	registerToolRenderer(tools.GrepToolName, &GrepToolRenderContext{title: "Grep"})
+	registerToolRenderer(tools.RipgrepToolName, &GrepToolRenderContext{title: "Ripgrep"})
+	registerToolRenderer(tools.LSToolName, &LSToolRenderContext{})
+}
+
 // GlobToolRenderContext renders glob tool messages.
 type GlobToolRenderContext struct{}
 

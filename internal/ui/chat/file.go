@@ -33,6 +33,36 @@ func NewReadToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &ReadToolRenderContext{}, canceled)
 }
 
+// registerReadToolRenderer registers the read tool renderer, including
+// the legacy pre-rename tool name so old sessions keep rendering.
+func registerReadToolRenderer() {
+	registerToolRenderer(tools.ReadToolName, &ReadToolRenderContext{})
+	// Sessions recorded before the rename still hold calls under the old
+	// name; render them the same way. See [tools.LegacyReadToolName].
+	registerToolRenderer(tools.LegacyReadToolName, &ReadToolRenderContext{})
+}
+
+// registerEditToolRenderers registers the write, edit, multi-edit and
+// download tool renderers.
+func registerEditToolRenderers() {
+	registerToolItemFactory(tools.WriteToolName,
+		func(sty *styles.Styles, tc message.ToolCall, res *message.ToolResult, canceled bool) ToolMessageItem {
+			return NewWriteToolMessageItem(sty, tc, res, canceled)
+		},
+		&WriteToolRenderContext{})
+	registerToolItemFactory(tools.EditToolName,
+		func(sty *styles.Styles, tc message.ToolCall, res *message.ToolResult, canceled bool) ToolMessageItem {
+			return NewEditToolMessageItem(sty, tc, res, canceled)
+		},
+		&EditToolRenderContext{})
+	registerToolItemFactory(tools.MultiEditToolName,
+		func(sty *styles.Styles, tc message.ToolCall, res *message.ToolResult, canceled bool) ToolMessageItem {
+			return NewMultiEditToolMessageItem(sty, tc, res, canceled)
+		},
+		&MultiEditToolRenderContext{})
+	registerToolRenderer(tools.DownloadToolName, &DownloadToolRenderContext{})
+}
+
 // ReadToolRenderContext renders view tool messages.
 type ReadToolRenderContext struct{}
 

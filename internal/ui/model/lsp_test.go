@@ -13,7 +13,7 @@ import (
 func TestLSPDiagnosticsUsesReadableLabels(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	got := stripANSI(lspDiagnostics(&sty, map[protocol.DiagnosticSeverity]int{
 		protocol.SeverityError:   1,
 		protocol.SeverityWarning: 2,
@@ -26,7 +26,7 @@ func TestLSPDiagnosticsUsesReadableLabels(t *testing.T) {
 func TestLSPListShowsReadyAndCleanStatus(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	got := stripANSI(lspList(&sty, []LSPInfo{{
 		LSPClientInfo: workspace.LSPClientInfo{Name: "gopls", State: lsp.StateReady},
 		Diagnostics:   map[protocol.DiagnosticSeverity]int{},

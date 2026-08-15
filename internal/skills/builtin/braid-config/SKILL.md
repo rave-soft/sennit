@@ -471,7 +471,7 @@ braid import claude|opencode [--skills] [--agents] [--dry-run] [--global] [--for
 ```
 
 Braid does not auto-discover another tool's config directories (see
-[Ограничения перенесённых определений агентов](../../../../TECHDEBT.md) in
+[Limitations of imported agent definitions](../../../../TECHDEBT.md) in
 TECHDEBT.md for why). `braid import` is the supported way to bring files in:
 
 - `--skills` copies `<tool>/skills/<name>/SKILL.md` (and any other files in

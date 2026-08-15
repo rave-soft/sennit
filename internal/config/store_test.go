@@ -898,10 +898,10 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 	)
 
 	errs := make(chan error, numGoroutines)
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		go func(id int) {
 			kv := make(map[string]any, fieldsPerRoutine)
-			for j := 0; j < fieldsPerRoutine; j++ {
+			for j := range fieldsPerRoutine {
 				key := fmt.Sprintf("goroutine_%d_field_%d", id, j)
 				kv[key] = fmt.Sprintf("value_%d_%d", id, j)
 			}
@@ -909,7 +909,7 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 		}(i)
 	}
 
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		require.NoError(t, <-errs)
 	}
 
@@ -917,8 +917,8 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 	data, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 
-	for i := 0; i < numGoroutines; i++ {
-		for j := 0; j < fieldsPerRoutine; j++ {
+	for i := range numGoroutines {
+		for j := range fieldsPerRoutine {
 			key := fmt.Sprintf("goroutine_%d_field_%d", i, j)
 			expectedValue := fmt.Sprintf("value_%d_%d", i, j)
 			result := gjson.Get(string(data), key)
@@ -1138,12 +1138,10 @@ func TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu(t *testing.T) {
 		"other config mutators must remain usable while discovery is in flight")
 
 	// Regardless of the assertion above, confirm the reload eventually
-	// completes successfully so the test doesn't leak a goroutine. The
-	// Lock/Unlock pair is intentionally empty: it's a synchronization
-	// barrier that blocks until any in-flight ReloadFromDisk releases
-	// writeMu, not a mistakenly-discarded critical section.
-	store.writeMu.Lock()
-	store.writeMu.Unlock() //nolint:staticcheck // SA2001: deliberate barrier, see comment above
+	// completes successfully so the test doesn't leak a goroutine. Receiving
+	// from reloadDone is enough to synchronize: ReloadFromDisk releases
+	// writeMu before it returns (see reloadFromDisk), so the send happens
+	// after the unlock.
 	require.NoError(t, <-reloadDone)
 }
 

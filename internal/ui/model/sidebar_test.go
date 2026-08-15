@@ -14,7 +14,7 @@ import (
 func TestBackgroundJobsInfo(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	const width = 24
 	info := backgroundJobsInfo(&sty, shell.BackgroundJobCounts{Active: 3, Completed: 7}, width)
 	plain := ansi.Strip(info)

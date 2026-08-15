@@ -1,7 +1,10 @@
 package chat
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
@@ -12,19 +15,20 @@ import (
 
 // toolsHandledOutsideFactoryMap lists built-in tools with a dedicated
 // renderer that NewToolMessageItem special-cases before consulting
-// toolMessageItemFactories, instead of registering a map entry — because
-// their constructor needs an argument (cfg, to resolve a delegation's
-// display name and model/effort override) that toolMessageItemFactory's
-// signature has no room for. See the map's comment on tools.AgentToolName.
+// toolRenderers, instead of registering a map entry — because their
+// constructor needs an argument (cfg, to resolve a delegation's display
+// name and model/effort override) that the registry's signature has no
+// room for. See the comment on tools.AgentToolName in
+// registerAgentToolRenderers.
 var toolsHandledOutsideFactoryMap = []string{
 	tools.AgentToolName,
 }
 
 // toolsWithoutDedicatedRenderer lists the built-in tools (from
 // config.AllToolNames, the actual source of truth for what tools exist)
-// that intentionally have no entry in toolMessageItemFactories and fall
-// back to the generic renderer. Anything not on this list (and not in
-// toolsHandledOutsideFactoryMap) must have a dedicated factory.
+// that intentionally have no entry in toolRenderers and fall back to the
+// generic renderer. Anything not on this list (and not in
+// toolsHandledOutsideFactoryMap) must have a dedicated renderer.
 var toolsWithoutDedicatedRenderer = []string{
 	tools.BraidInfoToolName,
 	tools.BraidLogsToolName,
@@ -53,7 +57,7 @@ var toolsWithoutDedicatedRenderer = []string{
 }
 
 // TestToolMessageItemFactories_MatchExpectedNames checks
-// toolMessageItemFactories against config.AllToolNames instead of a
+// toolRenderers against config.AllToolNames instead of a
 // second, hand-maintained list of tool names living in this test file.
 // Two hand-maintained lists drift silently: a new tool can be added to
 // allToolNames() without anyone remembering to update a duplicate here,
@@ -73,17 +77,17 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 
 	for _, name := range config.AllToolNames() {
 		if specialCased[name] {
-			require.NotContainsf(t, toolMessageItemFactories, name,
-				"tool %q is listed in toolsHandledOutsideFactoryMap but also has a map entry; the map entry is unreachable dead code, remove one or the other", name)
+			require.NotContainsf(t, toolRenderers, name,
+				"tool %q is listed in toolsHandledOutsideFactoryMap but also has a registry entry; the entry is unreachable dead code, remove one or the other", name)
 			continue
 		}
 		if noRenderer[name] {
-			require.NotContainsf(t, toolMessageItemFactories, name,
+			require.NotContainsf(t, toolRenderers, name,
 				"tool %q is listed as having no dedicated renderer, but one is registered; remove it from toolsWithoutDedicatedRenderer", name)
 			continue
 		}
-		require.Containsf(t, toolMessageItemFactories, name,
-			"tool %q has no registered factory and will fall back to the generic renderer", name)
+		require.Containsf(t, toolRenderers, name,
+			"tool %q has no registered renderer and will fall back to the generic renderer", name)
 	}
 
 	// toolsHandledOutsideFactoryMap's whole premise is that
@@ -91,7 +95,7 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	// verify that dispatch actually happens, not just that the map omits
 	// them (which noRenderer-listed tools also do, for the opposite
 	// reason).
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	item := NewToolMessageItem(&sty, "msg", message.ToolCall{ID: "tc-agent", Name: tools.AgentToolName, Input: "{}"}, nil, false, nil)
 	require.IsType(t, &AgentToolMessageItem{}, item,
 		"the built-in agent tool must dispatch to AgentToolMessageItem, not fall back to the generic renderer")
@@ -109,9 +113,9 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	for _, name := range config.AllToolNames() {
 		known[name] = true
 	}
-	for name := range toolMessageItemFactories {
+	for name := range toolRenderers {
 		require.Truef(t, known[name] || known[config.CanonicalToolName(name)],
-			"tool %q has a registered factory but is neither in config.AllToolNames() nor a legacy name of a tool that is", name)
+			"tool %q has a registered renderer but is neither in config.AllToolNames() nor a legacy name of a tool that is", name)
 	}
 }
 
@@ -123,7 +127,7 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 func TestNewToolMessageItem_RendersALegacyToolName(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
 		ID:       "tc-1",
 		Name:     tools.LegacyReadToolName,
@@ -140,7 +144,7 @@ func TestNewToolMessageItem_RendersALegacyToolName(t *testing.T) {
 func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	for _, test := range []struct {
 		name      string
 		toolName  string
@@ -174,7 +178,7 @@ func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {
 func TestNewToolMessageItem_CustomAgentDispatch(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	cfg := &config.Config{
 		Agents: map[string]config.Agent{
 			config.AgentCoder: {ID: config.AgentCoder},
@@ -245,7 +249,7 @@ func TestOneLine(t *testing.T) {
 func TestToolParamList_MultilineMainParamStaysOneLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	out := toolParamList(&sty, []string{"line one\nline two\nline three"}, 80)
 	require.NotContains(t, out, "\n")
 	require.Contains(t, out, "line one line two line three")
@@ -258,7 +262,7 @@ func TestToolParamList_MultilineMainParamStaysOneLine(t *testing.T) {
 func TestAppendResultSummary_NeverPrintsJunkPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	header := "header"
 
 	for _, junk := range []string{"", "None", "none", "  NULL  ", "n/a", "N/A", "nil", "-", "undefined"} {
@@ -269,4 +273,70 @@ func TestAppendResultSummary_NeverPrintsJunkPlaceholder(t *testing.T) {
 	out := appendResultSummary(&sty, header, "2.1s")
 	require.NotEqual(t, header, out, "a real summary must still be appended")
 	require.Contains(t, out, "2.1s")
+}
+
+// TestToolParamList_LongPathKeepsFileName is the point of path-aware
+// truncation: a header narrow enough to cut the path must lose the head of
+// it, not the file name. "…/tools_render.go" says which file; the old
+// right truncation produced "internal/ui/chat/tool…", which says none.
+func TestToolParamList_LongPathKeepsFileName(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.BraidDark()
+	path := "internal/ui/chat/very/deeply/nested/package/tools_render.go"
+
+	out := ansi.Strip(toolParamList(&sty, []string{path}, 30))
+	require.LessOrEqual(t, ansi.StringWidth(out), 30)
+	require.Contains(t, out, "tools_render.go")
+	require.True(t, strings.HasPrefix(out, "…"), "the head of the path is what gets elided: %q", out)
+}
+
+// TestToolParamList_LongPathWithParamsKeepsFileName covers the same rule
+// when key=value pairs share the line: the main param is fitted to its own
+// budget, so the pairs cannot push the file name off the end.
+func TestToolParamList_LongPathWithParamsKeepsFileName(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.BraidDark()
+	path := "internal/ui/chat/very/deeply/nested/package/tools_render.go"
+
+	out := ansi.Strip(toolParamList(&sty, []string{path, "edits", "3"}, 60))
+	require.LessOrEqual(t, ansi.StringWidth(out), 60)
+	require.Contains(t, out, "tools_render.go")
+	require.Contains(t, out, "edits=3")
+}
+
+// TestToolParamList_NonPathTruncatesOnTheRight proves the rule is scoped to
+// paths: a bash command carries its meaning in the head, so it keeps the
+// ordinary right truncation.
+func TestToolParamList_NonPathTruncatesOnTheRight(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.BraidDark()
+	cmd := "go test ./internal/ui/chat/ -run TestSomethingWithAVeryLongName -timeout 120s"
+
+	out := ansi.Strip(toolParamList(&sty, []string{cmd}, 30))
+	require.LessOrEqual(t, ansi.StringWidth(out), 30)
+	require.True(t, strings.HasPrefix(out, "go test "), "got %q", out)
+	require.True(t, strings.HasSuffix(out, "…"), "got %q", out)
+}
+
+// TestTruncateToolParam_FileNameAloneTooLong covers the last resort: when
+// even the file name does not fit, it is cut on the right rather than
+// leaving a bare ellipsis.
+func TestTruncateToolParam_FileNameAloneTooLong(t *testing.T) {
+	t.Parallel()
+
+	out := truncateToolParam("internal/ui/chat/a-very-long-file-name-indeed.go", 12)
+	require.LessOrEqual(t, ansi.StringWidth(out), 12)
+	require.True(t, strings.HasPrefix(out, "a-very"), "got %q", out)
+}
+
+// TestTruncateToolParam_FitsUnchanged proves a path that already fits is
+// returned untouched — no gratuitous ellipsis.
+func TestTruncateToolParam_FitsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	path := "internal/ui/chat/tools_render.go"
+	require.Equal(t, path, truncateToolParam(path, 80))
 }

@@ -35,7 +35,7 @@ func (w *apiKeyTestWorkspace) SetProviderAPIKey(_ config.Scope, providerID strin
 
 func newAPIKeyTestCommon(t *testing.T) (*common.Common, *apiKeyTestWorkspace) {
 	t.Helper()
-	s := styles.CharmtonePantera()
+	s := styles.BraidDark()
 	ws := &apiKeyTestWorkspace{}
 	return &common.Common{Styles: &s, Workspace: ws}, ws
 }

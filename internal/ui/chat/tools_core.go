@@ -2,7 +2,6 @@ package chat
 
 import (
 	"strings"
-	"time"
 
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
@@ -208,58 +207,11 @@ func newBaseToolMessageItem(
 	return t
 }
 
-var toolMessageItemFactories = map[string]ToolRenderer{
-	tools.BashToolName:      &BashToolRenderContext{},
-	tools.JobOutputToolName: &JobOutputToolRenderContext{},
-	tools.JobKillToolName:   &JobKillToolRenderContext{},
-	tools.ReadToolName:      &ReadToolRenderContext{},
-	// Sessions recorded before the rename still hold calls under the old
-	// name; render them the same way. See [tools.LegacyReadToolName].
-	tools.LegacyReadToolName:    &ReadToolRenderContext{},
-	tools.WriteToolName:         &WriteToolRenderContext{},
-	tools.EditToolName:          &EditToolRenderContext{},
-	tools.MultiEditToolName:     &MultiEditToolRenderContext{},
-	tools.GlobToolName:          &GlobToolRenderContext{},
-	tools.GrepToolName:          &GrepToolRenderContext{title: "Grep"},
-	tools.RipgrepToolName:       &GrepToolRenderContext{title: "Ripgrep"},
-	tools.LSToolName:            &LSToolRenderContext{},
-	tools.DownloadToolName:      &DownloadToolRenderContext{},
-	tools.FetchToolName:         &FetchToolRenderContext{},
-	tools.AgenticFetchToolName:  &AgenticFetchToolRenderContext{},
-	tools.DiagnosticsToolName:   &DiagnosticsToolRenderContext{},
-	tools.WebFetchToolName:      &WebFetchToolRenderContext{},
-	tools.WebSearchToolName:     &WebSearchToolRenderContext{},
-	tools.TodosToolName:         &TodosToolRenderContext{},
-	tools.QuestionToolName:      &QuestionToolRenderContext{},
-	tools.ReferencesToolName:    &ReferencesToolRenderContext{},
-	tools.DefinitionToolName:    &DefinitionToolRenderContext{},
-	tools.RenameToolName:        &RenameToolRenderContext{},
-	tools.ReplaceSymbolToolName: &ReplaceSymbolToolRenderContext{},
-	tools.CallHierarchyToolName: &CallHierarchyToolRenderContext{},
-	tools.SymbolsToolName:       &SymbolsToolRenderContext{},
-	tools.LSPRestartToolName:    &LSPRestartToolRenderContext{},
-}
-
 func newRegisteredToolMessageItem(sty *styles.Styles, toolCall message.ToolCall, result *message.ToolResult, renderer ToolRenderer, canceled bool) ToolMessageItem {
-	switch renderer.(type) {
-	case *BashToolRenderContext:
-		return &BashToolMessageItem{newBaseToolMessageItem(sty, toolCall, result, renderer, canceled)}
-	case *AgenticFetchToolRenderContext:
-		item := &AgenticFetchToolMessageItem{startTime: time.Now()}
-		item.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgenticFetchToolRenderContext{fetch: item}, canceled)
-		item.spinningFunc = func(state SpinningState) bool {
-			return !state.HasResult() && !state.IsCanceled()
-		}
-		return item
-	case *WriteToolRenderContext:
-		return &WriteToolMessageItem{newBaseToolMessageItem(sty, toolCall, result, renderer, canceled)}
-	case *EditToolRenderContext:
-		return &EditToolMessageItem{newBaseToolMessageItem(sty, toolCall, result, renderer, canceled)}
-	case *MultiEditToolRenderContext:
-		return &MultiEditToolMessageItem{newBaseToolMessageItem(sty, toolCall, result, renderer, canceled)}
-	default:
-		return newBaseToolMessageItem(sty, toolCall, result, renderer, canceled)
+	if factory, ok := toolItemFactories[toolCall.Name]; ok {
+		return factory(sty, toolCall, result, canceled)
 	}
+	return newBaseToolMessageItem(sty, toolCall, result, renderer, canceled)
 }
 
 // NewToolMessageItem creates a new [ToolMessageItem] based on the tool call name.
@@ -282,8 +234,6 @@ func NewToolMessageItem(
 	switch {
 	case toolCall.Name == tools.AgentToolName:
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled, cfg)
-	case toolMessageItemFactories[toolCall.Name] != nil:
-		item = newRegisteredToolMessageItem(sty, toolCall, result, toolMessageItemFactories[toolCall.Name], canceled)
 	case IsDockerMCPTool(toolCall.Name):
 		item = NewDockerMCPToolMessageItem(sty, toolCall, result, canceled)
 	case strings.HasPrefix(toolCall.Name, "mcp_"):
@@ -297,7 +247,11 @@ func NewToolMessageItem(
 		// child session.
 		item = NewAgentToolMessageItem(sty, toolCall, result, canceled, cfg)
 	default:
-		item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
+		if renderer, _, ok := lookupToolRenderer(toolCall.Name); ok {
+			item = newRegisteredToolMessageItem(sty, toolCall, result, renderer, canceled)
+		} else {
+			item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
+		}
 	}
 	item.SetMessageID(messageID)
 	return item

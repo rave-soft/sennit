@@ -12,7 +12,7 @@ import (
 )
 
 func newTestRenderer() *Renderer {
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	return NewRenderer(
 		sty.Attachments.Normal,
 		sty.Attachments.Deleting,
@@ -37,7 +37,7 @@ func TestRender_IncludesRemoveButton(t *testing.T) {
 func TestSetHoverHighlightsRemoveButton(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	r := NewRenderer(
 		sty.Attachments.Normal,
 		sty.Attachments.Deleting,

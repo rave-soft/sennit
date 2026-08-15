@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/braid/internal/commands"
@@ -23,6 +24,7 @@ import (
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/shell"
 	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/attachments"
 	"github.com/rave-soft/braid/internal/ui/chat"
 	"github.com/rave-soft/braid/internal/ui/common"
@@ -481,6 +483,22 @@ func driveCmdStep(m *UI, cmd tea.Cmd) (tea.Msg, tea.Cmd) {
 	return msg, next
 }
 
+// selfPerpetuatingTick reports whether msg is an animation tick, whose
+// handler answers with the command that schedules the next one. Draining a
+// command tree means following every returned command to its end, and an
+// animation loop by design has no end: enqueueing the next tick makes these
+// helpers spin (sleeping out each tick's delay) until the test times out.
+// They run one such tick through Update — the state change is what tests
+// care about — and stop there.
+func selfPerpetuatingTick(msg tea.Msg) bool {
+	switch msg.(type) {
+	case spinner.TickMsg, anim.StepMsg:
+		return true
+	default:
+		return false
+	}
+}
+
 // runCmdTree executes a tea.Cmd like the Bubble Tea runtime. Every leaf,
 // including unknown messages, is routed through Update. afterUpdate runs
 // before any command returned by Update, so callers can assert intermediate
@@ -508,7 +526,7 @@ func runCmdTree(m *UI, cmd tea.Cmd, afterUpdate func(tea.Msg, tea.Cmd)) []tea.Ms
 		if afterUpdate != nil {
 			afterUpdate(msg, next)
 		}
-		if next != nil {
+		if next != nil && !selfPerpetuatingTick(msg) {
 			stack = append(stack, next)
 		}
 	}

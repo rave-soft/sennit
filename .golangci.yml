@@ -28,6 +28,10 @@ linters:
   settings:
     depguard:
       rules:
+        # C3 UI boundary inventory/rationale: the deny-list forbids orchestration and
+        # runtime packages (agent, thread, backend, db, app, server, client). Remaining
+        # domain imports in internal/ui are allowed only as event/DTO contracts; all
+        # domain operations must go through the Workspace facade, never called directly.
         ui-boundary:
           files:
             - "**/internal/ui/**/*.go"

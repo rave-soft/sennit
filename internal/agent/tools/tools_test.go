@@ -97,9 +97,8 @@ func TestWriteFileWithHistoryCreatesNewFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "new.txt")
 	files := &mockHistoryService{}
-	tracker := mockFileTrackerService{}
 
-	err := writeFileWithHistory(context.Background(), files, tracker, "session", filePath, "", "hello")
+	err := writeFileWithHistory(context.Background(), files, "session", filePath, "", "hello")
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filePath)

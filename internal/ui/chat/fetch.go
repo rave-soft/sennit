@@ -29,6 +29,14 @@ func NewFetchToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &FetchToolRenderContext{}, canceled)
 }
 
+// registerFetchToolRenderers registers the fetch, web_fetch and
+// web_search tool renderers.
+func registerFetchToolRenderers() {
+	registerToolRenderer(tools.FetchToolName, &FetchToolRenderContext{})
+	registerToolRenderer(tools.WebFetchToolName, &WebFetchToolRenderContext{})
+	registerToolRenderer(tools.WebSearchToolName, &WebSearchToolRenderContext{})
+}
+
 // FetchToolRenderContext renders fetch tool messages.
 type FetchToolRenderContext struct{}
 

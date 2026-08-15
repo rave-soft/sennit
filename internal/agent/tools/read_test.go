@@ -252,6 +252,16 @@ func (m mockFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([
 	return nil, nil
 }
 
+func (m mockFileTracker) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
+}
+
+func (m mockFileTracker) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
+}
+
+func (m mockFileTracker) ReadCoverage(ctx context.Context, sessionID, path string) filetracker.Coverage {
+	return filetracker.FullCoverage
+}
+
 func newReadToolForTest(workingDir string) fantasy.AgentTool {
 	permissions := &mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	return NewReadTool(nil, permissions, mockFileTracker{}, nil, workingDir)

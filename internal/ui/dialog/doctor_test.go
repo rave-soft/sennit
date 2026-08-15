@@ -29,7 +29,7 @@ func (w *doctorTestWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo 
 
 func newDoctorTestCommon(t *testing.T, cfg *config.Config, states map[string]workspace.MCPClientInfo) *common.Common {
 	t.Helper()
-	s := styles.CharmtonePantera()
+	s := styles.BraidDark()
 	return &common.Common{
 		Styles:    &s,
 		Workspace: &doctorTestWorkspace{cfg: cfg, states: states},
