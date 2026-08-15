@@ -48,7 +48,7 @@ func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 // (SetConfigFields) and then reloads the whole config from disk
 // (reloadFromDisk). A provider outside the embedded catalog would be
 // re-validated as a custom provider on that reload and dropped for lacking
-// base_url/models (see TECHDEBT.md); copilot survives because
+// base_url/models; copilot survives because
 // configureProviders restores type/base_url/models for known providers from
 // the embedded catalog regardless of what is on disk.
 //

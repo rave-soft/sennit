@@ -33,9 +33,10 @@ type Message struct {
 }
 
 type ReadFile struct {
-	SessionID string `json:"session_id"`
-	Path      string `json:"path"`
-	ReadAt    int64  `json:"read_at"`
+	SessionID  string `json:"session_id"`
+	Path       string `json:"path"`
+	ReadAt     int64  `json:"read_at"`
+	ReadRanges string `json:"read_ranges"`
 }
 
 type Session struct {

@@ -1,21 +1,27 @@
 package model
 
-// threadsDashboard is the threads list view (added in a later step to the
-// main router). It wraps a list.List over the memoized thread cache
-// (threads_cache.go) the same way Chat wraps a list.List over messages:
-// items are rebuilt from the cache on load/event, never fetched directly
-// from Draw/HandleKey.
+// threadsDashboard is the threads administration screen. It wraps a
+// list.List over the memoized thread cache (threads_cache.go) the same way
+// Chat wraps a list.List over messages: items are rebuilt from the cache
+// on load/event, never fetched directly from Draw/HandleKey.
 //
-// Status badges reuse the existing Status.*Message semantic styles rather
-// than a live per-row spinner: an anim.Anim only advances when something
-// drives it with anim.StepMsg on a ticker (see chat/assistant.go, driven by
-// Chat.Animate from the main Update loop), and this dashboard has no such
-// driver wired in yet — that lands in step 4 alongside the router. Wiring
-// an anim here now would render a permanently frozen first frame, which is
-// worse than a static badge.
+// The screen is operated, not just read, so it is built as a table with
+// chrome around it rather than a bare list: a toolbar whose buttons
+// enable and disable with the selection, status filter tabs, and a detail
+// pane carrying the fields a row cannot hold (the full goal, and the error
+// a failed thread left behind). Buttons and shortcuts both go through
+// runAction, so what a button offers is exactly what a key can do. The
+// chrome that responds to a pointer is described in threads_admin.go.
+//
+// Statuses render as a colored cell rather than a live per-row spinner: an
+// anim.Anim only advances when something drives it with anim.StepMsg on a
+// ticker (see chat/assistant.go, driven by Chat.Animate from the main
+// Update loop), and this screen has no such driver, so an anim here would
+// render a permanently frozen first frame.
 
 import (
 	"fmt"
+	"image"
 	"strings"
 	"time"
 
@@ -67,6 +73,11 @@ type confirmRemoveThreadMsg struct {
 	id, name string
 }
 
+// leaveDashboardMsg requests closing the dashboard and returning to the
+// main screen — what the Back button raises. Consumed by the router
+// (root.go), which owns the screen stack.
+type leaveDashboardMsg struct{}
+
 // cancelDelegationMsg requests cancelling a delegation's (task or thread)
 // in-flight run. Consumed by the router (root.go), which calls
 // Workspace.CancelTask or Workspace.CancelThread depending on kind — a
@@ -80,14 +91,16 @@ type cancelDelegationMsg struct {
 // is intentionally separate from the app-wide KeyMap in keys.go: these
 // bindings only apply while the dashboard has focus.
 type threadsKeyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Enter  key.Binding
-	New    key.Binding
-	Merge  key.Binding
-	Remove key.Binding
-	Cancel key.Binding
-	Reload key.Binding
+	Up         key.Binding
+	Down       key.Binding
+	Enter      key.Binding
+	New        key.Binding
+	Merge      key.Binding
+	Remove     key.Binding
+	Cancel     key.Binding
+	Reload     key.Binding
+	NextFilter key.Binding
+	AllFilter  key.Binding
 }
 
 // defaultThreadsKeyMap returns the threads dashboard's key bindings.
@@ -125,23 +138,55 @@ func defaultThreadsKeyMap() threadsKeyMap {
 			key.WithKeys("r"),
 			key.WithHelp("r", "refresh"),
 		),
+		NextFilter: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "filter"),
+		),
+		AllFilter: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "all"),
+		),
 	}
 }
 
 // ShortHelp implements [help.KeyMap] so the footer can be built with the
 // same shared help machinery other views use.
 func (k threadsKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Enter, k.New, k.Merge, k.Remove, k.Cancel, k.Reload}
+	// Up/Down are deliberately absent: arrow keys in a list need no
+	// explaining, and the footer is one line — every binding it lists is
+	// one an operator might not guess.
+	return []key.Binding{
+		k.Enter, k.New, k.Merge, k.Cancel, k.Remove, k.Reload, k.NextFilter,
+	}
 }
 
-// threadsDashboard renders the thread list: a header line with the thread
-// count, the scrollable list itself (or an empty-state message), and a
-// footer help line.
+// threadsDashboard is the threads administration screen: a title bar with
+// a Back button, a toolbar of action buttons, status filter tabs, the
+// thread table, a detail pane for the selected thread, and a help footer.
+//
+// Buttons and tabs are hit-tested from zones recomputed on every Draw
+// (threadsHitZone), the same recompute-don't-cache approach the session
+// panel's row hit-test uses: the layout depends on size, filter, and
+// selection, so a stale rect would send a click to the wrong action.
 type threadsDashboard struct {
 	com    *common.Common
 	list   *list.List
 	cache  threadsCacheState
 	keyMap threadsKeyMap
+
+	filter threadsFilter
+	// visible is the filtered slice the list currently shows, in list
+	// order — the bridge between a selected row index and the thread it
+	// stands for.
+	visible []proto.Thread
+
+	// zones, hovered and columns are draw-time state read back by the
+	// mouse handlers between frames.
+	zones   []threadsHitZone
+	hovered int // index into zones, -1 for none
+	columns threadsColumns
+	// listRect is where the table body landed, for row hit-testing.
+	listRect image.Rectangle
 
 	width, height int
 	active        bool
@@ -153,26 +198,67 @@ func newThreadsDashboard(com *common.Common) *threadsDashboard {
 	l.RegisterRenderCallback(list.FocusedRenderCallback(l))
 	l.Focus()
 	return &threadsDashboard{
-		com:    com,
-		list:   l,
-		keyMap: defaultThreadsKeyMap(),
+		com:     com,
+		list:    l,
+		keyMap:  defaultThreadsKeyMap(),
+		hovered: -1,
 	}
 }
 
-// threadsHeaderHeight and threadsFooterHeight are the fixed rows reserved
-// around the list for the count header and the help footer.
+// Fixed row counts for the chrome around the table. The detail pane is
+// sized from its content (threadsDetailHeight), everything else is
+// constant.
 const (
-	threadsHeaderHeight = 1
-	threadsFooterHeight = 1
+	threadsTitleHeight   = 1
+	threadsToolbarHeight = 1
+	threadsTabsHeight    = 1
+	threadsColumnsHeight = 1
+	threadsRuleHeight    = 1
+	threadsFooterHeight  = 1
+	// threadsDetailMaxRows caps the detail pane so a long goal or error
+	// can never crowd out the table it describes.
+	threadsDetailMaxRows = 4
 )
 
-// SetSize resizes the dashboard, leaving room for the header and footer
-// lines around the list.
+// chromeHeight is every row the screen spends on something other than the
+// table body, for the current selection.
+func (m *threadsDashboard) chromeHeight() int {
+	h := threadsTitleHeight + threadsToolbarHeight + threadsTabsHeight +
+		threadsColumnsHeight + threadsRuleHeight + threadsFooterHeight
+	if d := m.detailHeight(); d > 0 {
+		h += d + threadsRuleHeight
+	}
+	return h
+}
+
+// detailHeight is how many rows the detail pane needs right now: none when
+// nothing is selected, otherwise one row per populated field.
+func (m *threadsDashboard) detailHeight() int {
+	sel := m.selected()
+	if sel == nil {
+		return 0
+	}
+	return min(threadsDetailMaxRows, len(threadsDetailLines(m.com.Styles, sel, m.width)))
+}
+
+// selected returns the thread under the list's selection, or nil when the
+// (filtered) list is empty.
+func (m *threadsDashboard) selected() *proto.Thread {
+	idx := m.list.Selected()
+	if idx < 0 || idx >= len(m.visible) {
+		return nil
+	}
+	return &m.visible[idx]
+}
+
+// SetSize resizes the dashboard, leaving room for the chrome around the
+// table.
 func (m *threadsDashboard) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	listHeight := max(0, height-threadsHeaderHeight-threadsFooterHeight)
-	m.list.SetSize(width, listHeight)
+	m.columns = computeThreadsColumns(max(0, width-2))
+	m.list.SetSize(max(0, width-2), max(0, height-m.chromeHeight()))
+	m.rebuildItems()
 }
 
 // SetActive sets whether the dashboard is showing. Becoming active
@@ -189,31 +275,211 @@ func (m *threadsDashboard) SetActive(active bool) tea.Cmd {
 	return m.cache.dispatchThreadsRefresh(m.com)
 }
 
-// Draw renders the dashboard into area: header, list (or empty state), then
-// footer, following the header+content+footer layout in sidebar.go and the
-// uv.NewStyledString(str).Draw(scr, rect) convention from chat.go.
+// Draw renders the administration screen top to bottom: title bar with a
+// Back button, toolbar, filter tabs, column header, table, an optional
+// detail pane for the selection, and the help footer. Hit zones for every
+// button and tab are rebuilt here, so a click always lands on what the
+// last frame actually painted.
 func (m *threadsDashboard) Draw(scr uv.Screen, area uv.Rectangle) {
 	t := m.com.Styles
+	m.zones = m.zones[:0]
 
-	var headerRect, listRect, footerRect uv.Rectangle
-	layout.Vertical(
-		layout.Len(threadsHeaderHeight),
+	detailRows := m.detailHeight()
+	sections := []layout.Constraint{
+		layout.Len(threadsTitleHeight),
+		layout.Len(threadsToolbarHeight),
+		layout.Len(threadsTabsHeight),
+		layout.Len(threadsColumnsHeight),
 		layout.Fill(1),
-		layout.Len(threadsFooterHeight),
-	).Split(area).Assign(&headerRect, &listRect, &footerRect)
+	}
+	var titleRect, toolbarRect, tabsRect, columnsRect, listRect uv.Rectangle
+	var detailRuleRect, detailRect uv.Rectangle
+	var ruleRect, footerRect uv.Rectangle
+	if detailRows > 0 {
+		sections = append(sections, layout.Len(threadsRuleHeight), layout.Len(detailRows))
+	}
+	sections = append(sections, layout.Len(threadsRuleHeight), layout.Len(threadsFooterHeight))
 
-	header := fmt.Sprintf("Threads (%d)", len(m.cache.cache.value))
-	uv.NewStyledString(t.Status.Help.Render(header)).Draw(scr, headerRect)
+	targets := []*uv.Rectangle{&titleRect, &toolbarRect, &tabsRect, &columnsRect, &listRect}
+	if detailRows > 0 {
+		targets = append(targets, &detailRuleRect, &detailRect)
+	}
+	targets = append(targets, &ruleRect, &footerRect)
+	layout.Vertical(sections...).Split(area).Assign(targets...)
 
-	if len(m.cache.cache.value) == 0 {
-		empty := "No threads yet — press n to create one."
-		uv.NewStyledString(t.Status.Help.Render(empty)).Draw(scr, listRect)
+	m.listRect = image.Rect(listRect.Min.X, listRect.Min.Y, listRect.Max.X, listRect.Max.Y)
+
+	m.drawTitle(scr, titleRect)
+	m.drawToolbar(scr, toolbarRect)
+	m.drawTabs(scr, tabsRect)
+
+	uv.NewStyledString(renderThreadsColumnHeader(t, m.columns, columnsRect.Dx()-2)).
+		Draw(scr, indentRect(columnsRect))
+
+	// The table body is indented to the same column as its header, so a
+	// row's cells line up under the labels naming them.
+	if len(m.visible) == 0 {
+		uv.NewStyledString(t.Threads.Subtle.Render(m.emptyText())).Draw(scr, indentRect(listRect))
 	} else {
-		uv.NewStyledString(m.list.Render()).Draw(scr, listRect)
+		uv.NewStyledString(m.list.Render()).Draw(scr, indentRect(listRect))
 	}
 
-	footer := shortHelpText(m.keyMap.ShortHelp(), footerRect.Dx())
-	uv.NewStyledString(t.Status.Help.Render(footer)).Draw(scr, footerRect)
+	if detailRows > 0 {
+		m.drawRule(scr, detailRuleRect)
+		lines := threadsDetailLines(t, m.selected(), detailRect.Dx()-2)
+		row := detailRect.Min.Y
+		for _, line := range lines[:min(len(lines), detailRows)] {
+			lineRect := uv.Rectangle{
+				Min: uv.Position{X: detailRect.Min.X + 1, Y: row},
+				Max: uv.Position{X: detailRect.Max.X, Y: row + 1},
+			}
+			uv.NewStyledString(line).Draw(scr, lineRect)
+			row++
+		}
+	}
+
+	m.drawRule(scr, ruleRect)
+	footer := shortHelpText(m.keyMap.ShortHelp(), footerRect.Dx()-2)
+	uv.NewStyledString(t.Threads.Subtle.Render(footer)).Draw(scr, indentRect(footerRect))
+}
+
+// emptyText is the message shown in place of the table. It names the
+// reason the table is empty — no threads at all, versus a filter hiding
+// them — since the two need different next steps from the operator.
+func (m *threadsDashboard) emptyText() string {
+	if len(m.cache.cache.value) == 0 {
+		return "No threads yet — press n or click + New to start one."
+	}
+	return fmt.Sprintf("No %s threads — press a to show all.", strings.ToLower(m.filter.label()))
+}
+
+// indentRect insets a full-width row by one cell on each side, so text
+// does not start hard against the terminal edge.
+func indentRect(r uv.Rectangle) uv.Rectangle {
+	r.Min.X = min(r.Min.X+1, r.Max.X)
+	r.Max.X = max(r.Max.X-1, r.Min.X)
+	return r
+}
+
+// drawRule paints a full-width horizontal separator.
+func (m *threadsDashboard) drawRule(scr uv.Screen, rect uv.Rectangle) {
+	if rect.Dx() <= 0 {
+		return
+	}
+	line := strings.Repeat("─", rect.Dx())
+	uv.NewStyledString(m.com.Styles.Threads.Rule.Render(line)).Draw(scr, rect)
+}
+
+// drawTitle paints the screen title, the total count, and the Back button
+// right-aligned on the same row.
+func (m *threadsDashboard) drawTitle(scr uv.Screen, rect uv.Rectangle) {
+	t := m.com.Styles
+	title := t.Threads.Title.Render("Threads")
+	count := t.Threads.Subtle.Render(fmt.Sprintf("  %d total", len(m.cache.cache.value)))
+	uv.NewStyledString(title+count).Draw(scr, indentRect(rect))
+
+	back := m.renderButton(actionBack, true)
+	backWidth := ansi.StringWidth(back)
+	if backWidth+2 > rect.Dx() {
+		return
+	}
+	x := rect.Max.X - 1 - backWidth
+	buttonRect := uv.Rectangle{
+		Min: uv.Position{X: x, Y: rect.Min.Y},
+		Max: uv.Position{X: rect.Max.X - 1, Y: rect.Min.Y + 1},
+	}
+	uv.NewStyledString(back).Draw(scr, buttonRect)
+	m.zones = append(m.zones, threadsHitZone{
+		rect:    image.Rect(buttonRect.Min.X, buttonRect.Min.Y, buttonRect.Max.X, buttonRect.Max.Y),
+		action:  actionBack,
+		enabled: true,
+	})
+}
+
+// drawToolbar paints the action buttons left to right, registering a hit
+// zone for each. Disabled buttons stay in place rather than disappearing:
+// a toolbar whose buttons move as the selection changes is one you have to
+// re-read every time.
+func (m *threadsDashboard) drawToolbar(scr uv.Screen, rect uv.Rectangle) {
+	sel := m.selected()
+	x := rect.Min.X + 1
+	for _, action := range threadsToolbarActions {
+		enabled := action.enabledFor(sel)
+		label := m.renderButton(action, enabled)
+		w := ansi.StringWidth(label)
+		if x+w > rect.Max.X {
+			return
+		}
+		buttonRect := uv.Rectangle{
+			Min: uv.Position{X: x, Y: rect.Min.Y},
+			Max: uv.Position{X: x + w, Y: rect.Min.Y + 1},
+		}
+		uv.NewStyledString(label).Draw(scr, buttonRect)
+		m.zones = append(m.zones, threadsHitZone{
+			rect:    image.Rect(buttonRect.Min.X, buttonRect.Min.Y, buttonRect.Max.X, buttonRect.Max.Y),
+			action:  action,
+			enabled: enabled,
+		})
+		x += w + 1
+	}
+}
+
+// renderButton styles one button for its current state. Hover is resolved
+// against the zone list from the previous frame, which is what the mouse
+// handler wrote into m.hovered.
+func (m *threadsDashboard) renderButton(action threadAction, enabled bool) string {
+	t := m.com.Styles
+	style := t.Threads.ButtonIdle
+	switch {
+	case !enabled:
+		style = t.Threads.ButtonDisabled
+	case m.isHovered(action):
+		style = t.Threads.ButtonHover
+		if action.destructive() {
+			style = t.Threads.ButtonDanger
+		}
+	}
+	return style.Render(action.label())
+}
+
+// isHovered reports whether the pointer is currently over the button for
+// action.
+func (m *threadsDashboard) isHovered(action threadAction) bool {
+	if m.hovered < 0 || m.hovered >= len(m.zones) {
+		return false
+	}
+	z := m.zones[m.hovered]
+	return !z.isFilter && z.action == action
+}
+
+// drawTabs paints the status filter tabs with their counts.
+func (m *threadsDashboard) drawTabs(scr uv.Screen, rect uv.Rectangle) {
+	t := m.com.Styles
+	all := m.cache.cache.value
+	x := rect.Min.X + 1
+	for _, f := range threadsFilters {
+		style := t.Threads.TabInactive
+		if f == m.filter {
+			style = t.Threads.TabActive
+		}
+		label := style.Render(fmt.Sprintf("%s %d", f.label(), len(filterThreads(all, f))))
+		w := ansi.StringWidth(label)
+		if x+w > rect.Max.X {
+			return
+		}
+		tabRect := uv.Rectangle{
+			Min: uv.Position{X: x, Y: rect.Min.Y},
+			Max: uv.Position{X: x + w, Y: rect.Min.Y + 1},
+		}
+		uv.NewStyledString(label).Draw(scr, tabRect)
+		m.zones = append(m.zones, threadsHitZone{
+			rect:     image.Rect(tabRect.Min.X, tabRect.Min.Y, tabRect.Max.X, tabRect.Max.Y),
+			filter:   f,
+			isFilter: true,
+			enabled:  true,
+		})
+		x += w + 1
+	}
 }
 
 // shortHelpText joins a set of key bindings into a single-line help
@@ -266,64 +532,208 @@ func (m *threadsDashboard) Tick(active bool, com *common.Common) tea.Cmd {
 	return m.cache.staleThreadsRefreshCmd(com, active)
 }
 
-// rebuildItems converts the cached thread list into list.Items and applies
-// them to the wrapped list.
+// rebuildItems applies the active filter to the cache and converts the
+// surviving threads into list items. The selection is kept on the same
+// thread across rebuilds where possible — a list that jumps back to the
+// top every time a status event lands is unusable while anything is
+// running.
 func (m *threadsDashboard) rebuildItems() {
-	items := make([]list.Item, len(m.cache.cache.value))
-	for i, s := range m.cache.cache.value {
-		items[i] = newThreadItem(m.com.Styles, s)
+	var selectedID string
+	if sel := m.selected(); sel != nil {
+		selectedID = sel.ID
+	}
+
+	m.visible = filterThreads(m.cache.cache.value, m.filter)
+	items := make([]list.Item, len(m.visible))
+	for i, s := range m.visible {
+		items[i] = newThreadItem(m.com.Styles, s, m.columns)
 	}
 	m.list.SetItems(items...)
+
+	for i, s := range m.visible {
+		if selectedID != "" && s.ID == selectedID {
+			m.list.SetSelected(i)
+			return
+		}
+	}
+
+	// Nothing to restore: land on the first row. A table whose toolbar is
+	// entirely disabled because no row is selected is a dead screen, and
+	// the list also renders nothing until its window is placed (SetItems
+	// alone leaves it unset).
+	if len(m.visible) > 0 {
+		m.list.SetSelected(0)
+		m.list.ScrollToTop()
+	}
 }
 
-// HandleKey handles a key press while the dashboard has focus.
+// setFilter switches the visible status class and rebuilds the table.
+func (m *threadsDashboard) setFilter(f threadsFilter) {
+	if m.filter == f {
+		return
+	}
+	m.filter = f
+	m.rebuildItems()
+	m.list.SetSelected(0)
+	m.list.ScrollToTop()
+	// The detail pane appears or disappears with the selection, so the
+	// table's height can change with the filter.
+	m.list.SetSize(max(0, m.width-2), max(0, m.height-m.chromeHeight()))
+}
+
+// HandleMouseMotion updates hover feedback for the toolbar and tabs.
+func (m *threadsDashboard) HandleMouseMotion(msg tea.MouseMotionMsg) {
+	pt := image.Pt(msg.X, msg.Y)
+	m.hovered = -1
+	for i, z := range m.zones {
+		if pt.In(z.rect) {
+			m.hovered = i
+			return
+		}
+	}
+}
+
+// HandleMouseClick routes a click to a button, a tab, or a table row.
+// Clicking a row only selects it — the action buttons are how a click
+// acts, so a mis-aimed click can never merge or remove anything.
+func (m *threadsDashboard) HandleMouseClick(msg tea.MouseClickMsg) (handled bool, cmd tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return false, nil
+	}
+	pt := image.Pt(msg.X, msg.Y)
+
+	for _, z := range m.zones {
+		if !pt.In(z.rect) {
+			continue
+		}
+		switch {
+		case z.isFilter:
+			m.setFilter(z.filter)
+			return true, nil
+		case !z.enabled:
+			// A disabled button still swallows the click: falling through
+			// to the row hit-test would move the selection under the
+			// pointer, which is not what clicking a dimmed button means.
+			return true, nil
+		default:
+			return true, m.runAction(z.action)
+		}
+	}
+
+	if idx, ok := m.rowAt(pt); ok {
+		m.list.SetSelected(idx)
+		m.list.SetSize(max(0, m.width-2), max(0, m.height-m.chromeHeight()))
+		return true, nil
+	}
+	return false, nil
+}
+
+// HandleMouseWheel scrolls the table.
+func (m *threadsDashboard) HandleMouseWheel(msg tea.MouseWheelMsg) bool {
+	if !image.Pt(msg.X, msg.Y).In(m.listRect) {
+		return false
+	}
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		m.list.ScrollBy(-3)
+	case tea.MouseWheelDown:
+		m.list.ScrollBy(3)
+	default:
+		return false
+	}
+	return true
+}
+
+// rowAt maps a point inside the table body onto a thread index. Rows are
+// exactly one line tall with no gap, so the index is the scroll offset
+// plus the row's distance from the top of the body.
+func (m *threadsDashboard) rowAt(pt image.Point) (int, bool) {
+	if !pt.In(m.listRect) || len(m.visible) == 0 {
+		return 0, false
+	}
+	idx := m.list.Offset() + (pt.Y - m.listRect.Min.Y)
+	if idx < 0 || idx >= len(m.visible) {
+		return 0, false
+	}
+	return idx, true
+}
+
+// runAction performs a toolbar action against the current selection. Key
+// bindings route here too, so a shortcut and its button can never drift.
+func (m *threadsDashboard) runAction(action threadAction) tea.Cmd {
+	sel := m.selected()
+	if !action.enabledFor(sel) {
+		return nil
+	}
+	switch action {
+	case actionNew:
+		return func() tea.Msg { return openThreadCreateMsg{} }
+	case actionOpen:
+		id, sessionID, name := sel.ID, sel.SessionID, sel.Name
+		return func() tea.Msg { return enterThreadMsg{id: id, sessionID: sessionID, name: name} }
+	case actionMerge:
+		id := sel.ID
+		return func() tea.Msg { return mergeThreadMsg{id: id} }
+	case actionCancel:
+		id, kind := sel.ID, sel.Kind
+		return func() tea.Msg { return cancelDelegationMsg{id: id, kind: kind} }
+	case actionRemove:
+		id, name := sel.ID, sel.Name
+		return func() tea.Msg { return confirmRemoveThreadMsg{id: id, name: name} }
+	case actionRefresh:
+		return m.cache.dispatchThreadsRefresh(m.com)
+	case actionBack:
+		return func() tea.Msg { return leaveDashboardMsg{} }
+	default:
+		return nil
+	}
+}
+
+// HandleKey handles a key press while the dashboard has focus. Every
+// action key goes through runAction, the same entry point the toolbar
+// buttons use, so the two can never disagree about what is allowed.
 func (m *threadsDashboard) HandleKey(msg tea.KeyPressMsg) (handled bool, cmd tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keyMap.Up):
 		m.list.SelectPrev()
+		m.list.SetSize(max(0, m.width-2), max(0, m.height-m.chromeHeight()))
 		return true, nil
 	case key.Matches(msg, m.keyMap.Down):
 		m.list.SelectNext()
+		m.list.SetSize(max(0, m.width-2), max(0, m.height-m.chromeHeight()))
 		return true, nil
 	case key.Matches(msg, m.keyMap.Enter):
-		item, ok := m.list.SelectedItem().(*threadItem)
-		if !ok {
-			return true, nil
-		}
-		id, sessionID, name := item.thread.ID, item.thread.SessionID, item.thread.Name
-		return true, func() tea.Msg { return enterThreadMsg{id: id, sessionID: sessionID, name: name} }
+		return true, m.runAction(actionOpen)
 	case key.Matches(msg, m.keyMap.New):
-		return true, func() tea.Msg { return openThreadCreateMsg{} }
+		return true, m.runAction(actionNew)
 	case key.Matches(msg, m.keyMap.Merge):
-		item, ok := m.list.SelectedItem().(*threadItem)
-		if !ok || !threadMergeable(item.thread.Kind, item.thread.Status) {
-			return true, nil
-		}
-		id := item.thread.ID
-		return true, func() tea.Msg { return mergeThreadMsg{id: id} }
+		return true, m.runAction(actionMerge)
 	case key.Matches(msg, m.keyMap.Remove):
-		item, ok := m.list.SelectedItem().(*threadItem)
-		if !ok {
-			return true, nil
-		}
-		id, name := item.thread.ID, item.thread.Name
-		return true, func() tea.Msg { return confirmRemoveThreadMsg{id: id, name: name} }
+		return true, m.runAction(actionRemove)
 	case key.Matches(msg, m.keyMap.Cancel):
-		item, ok := m.list.SelectedItem().(*threadItem)
-		if !ok {
-			return true, nil
-		}
-		// An already-terminal delegation (of either kind) has nothing left
-		// to cancel.
-		if proto.ThreadStatus(item.thread.Status).Terminal() {
-			return true, nil
-		}
-		id, kind := item.thread.ID, item.thread.Kind
-		return true, func() tea.Msg { return cancelDelegationMsg{id: id, kind: kind} }
+		return true, m.runAction(actionCancel)
 	case key.Matches(msg, m.keyMap.Reload):
-		return true, m.cache.dispatchThreadsRefresh(m.com)
+		return true, m.runAction(actionRefresh)
+	case key.Matches(msg, m.keyMap.NextFilter):
+		m.setFilter(nextThreadsFilter(m.filter, 1))
+		return true, nil
+	case key.Matches(msg, m.keyMap.AllFilter):
+		m.setFilter(filterAll)
+		return true, nil
 	}
 	return false, nil
+}
+
+// nextThreadsFilter steps the tab selection by delta, wrapping around.
+func nextThreadsFilter(current threadsFilter, delta int) threadsFilter {
+	for i, f := range threadsFilters {
+		if f != current {
+			continue
+		}
+		next := (i + delta + len(threadsFilters)) % len(threadsFilters)
+		return threadsFilters[next]
+	}
+	return filterAll
 }
 
 // threadMergeable reports whether a delegation in the given kind/status is
@@ -343,23 +753,28 @@ func threadMergeable(kind, status string) bool {
 	}
 }
 
-// threadItem renders a single row of the threads dashboard: name, status
-// badge, branch, relative last-activity time, and goal (truncated to fit).
+// threadItem renders a single row of the threads table: name, status,
+// branch, relative last-activity time, and goal, each in its own fixed
+// column so the table can be read down a column instead of parsed line by
+// line.
 type threadItem struct {
 	*list.Versioned
 	thread  proto.Thread
 	sty     *styles.Styles
+	columns threadsColumns
 	focused bool
 }
 
 var _ list.Item = (*threadItem)(nil)
 
-// newThreadItem creates a new threadItem for s.
-func newThreadItem(sty *styles.Styles, s proto.Thread) *threadItem {
+// newThreadItem creates a new threadItem for s under the given column
+// layout.
+func newThreadItem(sty *styles.Styles, s proto.Thread, columns threadsColumns) *threadItem {
 	return &threadItem{
 		Versioned: list.NewVersioned(),
 		thread:    s,
 		sty:       sty,
+		columns:   columns,
 	}
 }
 
@@ -380,61 +795,39 @@ func (it *threadItem) Finished() bool {
 	return true
 }
 
-// threadBadge renders a status badge reusing the existing semantic
-// Status.*Message styles (styles.go) rather than inventing new colors.
-func threadBadge(sty *styles.Styles, status string) string {
-	label := strings.ToUpper(status)
-	style := sty.Status.InfoMessage
-	switch proto.ThreadStatus(status) {
-	case proto.ThreadStatusCompleted, proto.ThreadStatusMerged:
-		style = sty.Status.SuccessMessage
-	case proto.ThreadStatusMerging, proto.ThreadStatusInterrupted, proto.ThreadStatusCancelled:
-		style = sty.Status.WarnMessage
-	case proto.ThreadStatusConflict, proto.ThreadStatusMergeBlocked, proto.ThreadStatusFailed:
-		style = sty.Status.ErrorMessage
-	case proto.ThreadStatusIdle:
-		// Explicit, not the default fallthrough: idle must not read as
-		// "done" (SuccessMessage) or as a warning — it's a live delegation
-		// with no run in flight. InfoMessage is already this palette's
-		// muted/neutral tone (fgSubtle, see quickstyle.go), which is what
-		// "waiting" should look like here.
-		style = sty.Status.InfoMessage
-	}
-	return style.Render(label)
-}
-
-// Render implements list.Item. The row is: name • status badge • branch •
-// relative last-activity time • goal — with the goal truncated to whatever
-// width remains after the fixed-form fields.
+// Render implements list.Item, painting one table row into the column
+// layout. Cells are padded to their column width rather than joined with
+// separators, so every field starts at the same x on every row — the
+// point of a table over a list. Only the status cell is colored; the rest
+// of the row stays neutral so the color means "state", not "row".
+//
+// A task has no branch of its own (see TaskController's doc comment); its
+// branch cell is simply blank, which keeps the columns aligned where the
+// old separator-joined line would have collapsed them.
 func (it *threadItem) Render(width int) string {
-	style := it.sty.Dialog.NormalItem
+	style := it.sty.Threads.RowBase
 	if it.focused {
-		style = it.sty.Dialog.SelectedItem
+		style = it.sty.Threads.RowSelected
 	}
-	// Content must fit within width minus the style's own padding, or the
-	// padding pushes the rendered line past width (see sessions_item.go's
-	// renderItem for the same accounting).
 	lineWidth := max(0, width-style.GetHorizontalFrameSize())
 
 	s := it.thread
-	badge := threadBadge(it.sty, s.Status)
-	ago := humanize.Time(time.Unix(s.UpdatedAt, 0))
+	c := it.columns
 
-	// A task has no branch (see TaskController's doc comment) — build the
-	// field list conditionally rather than a fixed-format string, so its
-	// row doesn't carry a stray double-space where the branch would be.
-	fields := []string{s.Name, badge}
-	if s.Branch != "" {
-		fields = append(fields, s.Branch)
+	var b strings.Builder
+	b.WriteString(padTo(s.Name, c.name))
+	b.WriteString("  ")
+	statusCell := padTo(strings.ToUpper(s.Status), c.status)
+	b.WriteString(threadStatusStyle(it.sty, s.Status).Render(statusCell))
+	if c.branch > 0 {
+		b.WriteString("  " + padTo(s.Branch, c.branch))
 	}
-	fields = append(fields, ago)
-	fixed := strings.Join(fields, "  ")
-	fixedWidth := ansi.StringWidth(fixed)
-
-	line := fixed
-	if remaining := lineWidth - fixedWidth - 2; remaining > 0 && s.Goal != "" {
-		line += "  " + ansi.Truncate(s.Goal, remaining, "…")
+	if c.updated > 0 {
+		b.WriteString("  " + padTo(humanize.Time(time.Unix(s.UpdatedAt, 0)), c.updated))
+	}
+	if c.goal > 0 {
+		b.WriteString("  " + padTo(s.Goal, c.goal))
 	}
 
-	return style.Render(ansi.Truncate(line, lineWidth, "…"))
+	return style.Render(ansi.Truncate(b.String(), lineWidth, "…"))
 }

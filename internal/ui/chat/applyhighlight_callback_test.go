@@ -82,7 +82,7 @@ func (r *renderCountingItem) Highlight() (int, int, int, int) {
 func TestList_CallbackDrivenHighlightUnfreezeAndReFreeze(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 
 	// Build three finished assistant messages so all three are
 	// candidates for freezing. Real items (per Round 2 spec) — the

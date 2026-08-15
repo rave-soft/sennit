@@ -33,7 +33,7 @@ func buildThinkingBlock(paragraphs int) string {
 // After the fix, the stable-prefix cache seeds and each tick only
 // re-renders the trailing delta.
 func BenchmarkStreamingThinking(b *testing.B) {
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	width := 80
 
 	renderer, err := glamour.NewTermRenderer(
@@ -68,7 +68,7 @@ func BenchmarkStreamingThinking(b *testing.B) {
 // path where the thinking block is already large and each tick appends
 // a small delta. This is the hot path during actual streaming.
 func BenchmarkStreamingThinkingSteadyState(b *testing.B) {
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	width := 80
 
 	renderer, err := glamour.NewTermRenderer(

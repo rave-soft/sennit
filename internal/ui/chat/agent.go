@@ -623,6 +623,19 @@ func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
+// registerAgentToolRenderers registers the agentic_fetch tool renderer.
+// The built-in agent tool is deliberately not in the registry: its
+// constructor needs cfg (to resolve the delegation's display name and
+// model/effort override) that the registry's signature has no room for,
+// so NewToolMessageItem special-cases it.
+func registerAgentToolRenderers() {
+	registerToolItemFactory(tools.AgenticFetchToolName,
+		func(sty *styles.Styles, tc message.ToolCall, res *message.ToolResult, canceled bool) ToolMessageItem {
+			return NewAgenticFetchToolMessageItem(sty, tc, res, canceled)
+		},
+		&AgenticFetchToolRenderContext{})
+}
+
 // AgenticFetchToolRenderContext renders agentic fetch tool messages.
 type AgenticFetchToolRenderContext struct {
 	fetch *AgenticFetchToolMessageItem

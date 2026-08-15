@@ -13,8 +13,25 @@ import (
 
 // Service defines the interface for tracking file reads in sessions.
 type Service interface {
-	// RecordRead records when a file was read.
+	// RecordRead records that the whole file was read.
 	RecordRead(ctx context.Context, sessionID, path string)
+
+	// RecordPartialRead records that lines [start, end] of the file were
+	// read — the read tool serves windows, and an edit is only allowed to
+	// touch lines that were actually served. Ranges accumulate across
+	// reads of the same file.
+	RecordPartialRead(ctx context.Context, sessionID, path string, start, end int)
+
+	// RecordEdit records an edit that replaced the file's lines
+	// [start, end] with newEnd-start+1 of them: the edited span becomes
+	// covered (the session was just shown that text), and everything
+	// recorded below the edit is renumbered to follow the lines it
+	// describes. It does not widen coverage to the whole file — an edit
+	// teaches the session about the region it touched, nothing more.
+	RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int)
+
+	// ReadCoverage returns which lines of the file this session has read.
+	ReadCoverage(ctx context.Context, sessionID, path string) Coverage
 
 	// LastReadTime returns when a file was last read.
 	// Returns zero time if never read.
@@ -38,11 +55,43 @@ func NewService(q *db.Queries, workingDir string) Service {
 	return &service{q: q, workingDir: workingDir}
 }
 
-// RecordRead records when a file was read.
+// RecordRead records that the whole file was read, superseding whatever
+// partial ranges were recorded before.
 func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
-	if err := s.q.RecordFileRead(ctx, db.RecordFileReadParams{
+	s.record(ctx, sessionID, path, FullCoverage)
+}
+
+// RecordPartialRead records a window of the file as read, merged into
+// whatever this session had already seen.
+func (s *service) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
+	s.record(ctx, sessionID, path, s.ReadCoverage(ctx, sessionID, path).Add(LineRange{Start: start, End: end}))
+}
+
+// RecordEdit records the span an edit replaced, renumbering the coverage
+// below it.
+func (s *service) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
+	coverage := s.ReadCoverage(ctx, sessionID, path)
+	coverage = coverage.Shift(start, end, newEnd-end).Add(LineRange{Start: start, End: newEnd})
+	s.record(ctx, sessionID, path, coverage)
+}
+
+// ReadCoverage returns which lines of the file this session has read.
+func (s *service) ReadCoverage(ctx context.Context, sessionID, path string) Coverage {
+	readFile, err := s.q.GetFileRead(ctx, db.GetFileReadParams{
 		SessionID: sessionID,
 		Path:      s.relpath(path),
+	})
+	if err != nil {
+		return Coverage{}
+	}
+	return decodeRanges(readFile.ReadRanges)
+}
+
+func (s *service) record(ctx context.Context, sessionID, path string, coverage Coverage) {
+	if err := s.q.RecordFileRead(ctx, db.RecordFileReadParams{
+		SessionID:  sessionID,
+		Path:       s.relpath(path),
+		ReadRanges: encodeRanges(coverage),
 	}); err != nil {
 		slog.Error("Error recording file read", "error", err, "file", path)
 	}

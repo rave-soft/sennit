@@ -1,11 +1,14 @@
 package model
 
 import (
+	"image"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/braid/internal/proto"
 	"github.com/rave-soft/braid/internal/pubsub"
@@ -28,7 +31,7 @@ func TestThreadItemRenderRespectsWidth(t *testing.T) {
 		Status: "running",
 		Branch: "thread/add-auth",
 		Goal:   "Implement OAuth login end to end across every service",
-	})
+	}, computeThreadsColumns(120))
 
 	for _, width := range []int{40, 120} {
 		require.NotPanics(t, func() {
@@ -48,7 +51,7 @@ func TestThreadItemRenderTruncatesGoal(t *testing.T) {
 		Status: "running",
 		Branch: "thread/add-auth",
 		Goal:   longGoal,
-	})
+	}, computeThreadsColumns(60))
 
 	rendered := item.Render(60)
 	require.LessOrEqual(t, ansi.StringWidth(rendered), 60)
@@ -76,16 +79,38 @@ func TestThreadMergeableThreadUnaffected(t *testing.T) {
 	require.False(t, threadMergeable("thread", "merging"))
 }
 
-// TestThreadBadgeIdleIsExplicitAndNotDone proves the dashboard's idle badge
-// takes its own explicit path rather than reading as a finished
-// (SuccessMessage-styled) delegation.
-func TestThreadBadgeIdleIsExplicitAndNotDone(t *testing.T) {
+// TestThreadStatusStyleIdleIsNeitherDoneNorError proves idle takes its own
+// neutral color rather than reading as a finished or broken delegation:
+// it is a live thread with no run in flight.
+func TestThreadStatusStyleIdleIsNeitherDoneNorError(t *testing.T) {
 	t.Parallel()
 
 	sty := testStyles()
-	idle := threadBadge(sty, "idle")
-	require.Contains(t, idle, "IDLE")
-	require.NotEqual(t, threadBadge(sty, "completed"), idle)
+	idle := threadStatusStyle(sty, "idle")
+	require.Equal(t, sty.Threads.StatusIdle, idle)
+	require.NotEqual(t, threadStatusStyle(sty, "completed"), idle)
+	require.NotEqual(t, threadStatusStyle(sty, "failed"), idle)
+}
+
+// TestThreadStatusStyleClasses pins each status onto its color class — the
+// dashboard is scanned by color before it is read.
+func TestThreadStatusStyleClasses(t *testing.T) {
+	t.Parallel()
+
+	sty := testStyles()
+	for status, want := range map[string]lipgloss.Style{
+		"running":       sty.Threads.StatusRunning,
+		"merging":       sty.Threads.StatusRunning,
+		"completed":     sty.Threads.StatusDone,
+		"merged":        sty.Threads.StatusDone,
+		"failed":        sty.Threads.StatusError,
+		"conflict":      sty.Threads.StatusError,
+		"merge_blocked": sty.Threads.StatusError,
+		"cancelled":     sty.Threads.StatusWarn,
+		"interrupted":   sty.Threads.StatusWarn,
+	} {
+		require.Equalf(t, want, threadStatusStyle(sty, status), "status=%s", status)
+	}
 }
 
 func newTestThreadsDashboard(t *testing.T, ws *threadsTestWorkspace) *threadsDashboard {
@@ -356,4 +381,217 @@ func TestThreadsDashboardApplyThreadEventRebuildsItems(t *testing.T) {
 	})
 	require.Equal(t, 1, m.list.Len())
 	require.NotNil(t, cmd, "active dashboard should re-arm a refresh after the event invalidates the TTL")
+}
+
+// dashboardWith builds a dashboard sized 120x30 over the given threads,
+// drawn once so its hit zones exist — clicking is only meaningful against
+// a frame that was actually painted.
+func dashboardWith(t *testing.T, threads ...proto.Thread) *threadsDashboard {
+	t.Helper()
+	m := newTestThreadsDashboard(t, &threadsTestWorkspace{supported: true})
+	m.SetSize(120, 30)
+	m.cache.cache.value = threads
+	m.rebuildItems()
+	scr := uv.NewScreenBuffer(120, 30)
+	m.Draw(scr, scr.Bounds())
+	return m
+}
+
+// zoneFor returns the hit zone of a toolbar button, so a test can click
+// exactly where the last frame drew it.
+func zoneFor(t *testing.T, m *threadsDashboard, action threadAction) threadsHitZone {
+	t.Helper()
+	for _, z := range m.zones {
+		if !z.isFilter && z.action == action {
+			return z
+		}
+	}
+	t.Fatalf("no hit zone for action %v", action)
+	return threadsHitZone{}
+}
+
+// zoneForFilter returns the hit zone of a filter tab.
+func zoneForFilter(t *testing.T, m *threadsDashboard, f threadsFilter) threadsHitZone {
+	t.Helper()
+	for _, z := range m.zones {
+		if z.isFilter && z.filter == f {
+			return z
+		}
+	}
+	t.Fatalf("no hit zone for filter %v", f)
+	return threadsHitZone{}
+}
+
+func clickAt(m *threadsDashboard, pt image.Point) (bool, tea.Cmd) {
+	return m.HandleMouseClick(tea.MouseClickMsg{X: pt.X, Y: pt.Y, Button: tea.MouseLeft})
+}
+
+// TestThreadsToolbarEnablementFollowsSelection is the contract the toolbar
+// and the key bindings share: an action is offered exactly when it can
+// actually run. A dimmed button and a working shortcut (or the reverse)
+// would be the bug.
+func TestThreadsToolbarEnablementFollowsSelection(t *testing.T) {
+	t.Parallel()
+
+	running := proto.Thread{ID: "t1", Kind: "thread", Status: "running"}
+	merged := proto.Thread{ID: "t2", Kind: "thread", Status: "merged"}
+	task := proto.Thread{ID: "t3", Kind: "task", Status: "running"}
+
+	require.True(t, actionNew.enabledFor(nil), "new never needs a selection")
+	require.True(t, actionRefresh.enabledFor(nil))
+	require.True(t, actionBack.enabledFor(nil))
+	require.False(t, actionOpen.enabledFor(nil), "nothing selected, nothing to open")
+	require.False(t, actionMerge.enabledFor(nil))
+	require.False(t, actionCancel.enabledFor(nil))
+	require.False(t, actionRemove.enabledFor(nil))
+
+	require.True(t, actionMerge.enabledFor(&running))
+	require.False(t, actionMerge.enabledFor(&merged), "already merged")
+	require.False(t, actionMerge.enabledFor(&task), "a task has no branch to merge")
+
+	require.True(t, actionCancel.enabledFor(&running))
+	require.False(t, actionCancel.enabledFor(&merged), "terminal, nothing in flight")
+}
+
+// TestThreadsDashboardClickRunsAction proves a toolbar click produces the
+// same message the keyboard shortcut does.
+func TestThreadsDashboardClickRunsAction(t *testing.T) {
+	t.Parallel()
+
+	m := dashboardWith(t, proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running", SessionID: "sess"})
+
+	z := zoneFor(t, m, actionOpen)
+	handled, cmd := clickAt(m, z.rect.Min)
+	require.True(t, handled)
+	require.NotNil(t, cmd)
+	msg, ok := cmd().(enterThreadMsg)
+	require.True(t, ok)
+	require.Equal(t, "t1", msg.id)
+	require.Equal(t, "sess", msg.sessionID)
+}
+
+// TestThreadsDashboardClickDisabledButtonDoesNothing proves a dimmed
+// button is inert and — crucially — swallows the click rather than letting
+// it fall through to the row underneath.
+func TestThreadsDashboardClickDisabledButtonDoesNothing(t *testing.T) {
+	t.Parallel()
+
+	m := dashboardWith(t, proto.Thread{ID: "t1", Name: "one", Kind: "task", Status: "running"})
+
+	z := zoneFor(t, m, actionMerge)
+	require.False(t, z.enabled, "a task is never mergeable")
+	handled, cmd := clickAt(m, z.rect.Min)
+	require.True(t, handled)
+	require.Nil(t, cmd)
+}
+
+// TestThreadsDashboardClickTabFilters proves the tabs narrow the table and
+// that the counts they carry match what filtering actually yields.
+func TestThreadsDashboardClickTabFilters(t *testing.T) {
+	t.Parallel()
+
+	m := dashboardWith(t,
+		proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running"},
+		proto.Thread{ID: "t2", Name: "two", Kind: "thread", Status: "merged"},
+		proto.Thread{ID: "t3", Name: "three", Kind: "thread", Status: "failed"},
+	)
+	require.Equal(t, 3, m.list.Len())
+
+	z := zoneForFilter(t, m, filterFailed)
+	handled, cmd := clickAt(m, z.rect.Min)
+	require.True(t, handled)
+	require.Nil(t, cmd)
+	require.Equal(t, filterFailed, m.filter)
+	require.Equal(t, 1, m.list.Len())
+	require.Equal(t, "t3", m.selected().ID)
+}
+
+// TestThreadsDashboardClickRowSelectsOnly proves clicking a row moves the
+// selection and nothing else: acting is what the buttons are for, so a
+// stray click can never merge or remove a thread.
+func TestThreadsDashboardClickRowSelectsOnly(t *testing.T) {
+	t.Parallel()
+
+	m := dashboardWith(t,
+		proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running"},
+		proto.Thread{ID: "t2", Name: "two", Kind: "thread", Status: "running"},
+	)
+	require.Equal(t, "t1", m.selected().ID)
+
+	second := image.Pt(m.listRect.Min.X+2, m.listRect.Min.Y+1)
+	handled, cmd := clickAt(m, second)
+	require.True(t, handled)
+	require.Nil(t, cmd)
+	require.Equal(t, "t2", m.selected().ID)
+}
+
+// TestThreadsDashboardSelectionSurvivesRefresh proves a status event
+// landing mid-triage does not throw the operator's selection back to the
+// top of the list.
+func TestThreadsDashboardSelectionSurvivesRefresh(t *testing.T) {
+	t.Parallel()
+
+	m := dashboardWith(t,
+		proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running"},
+		proto.Thread{ID: "t2", Name: "two", Kind: "thread", Status: "running"},
+	)
+	m.list.SetSelected(1)
+	require.Equal(t, "t2", m.selected().ID)
+
+	m.cache.cache.value = []proto.Thread{
+		{ID: "t1", Name: "one", Kind: "thread", Status: "running"},
+		{ID: "t2", Name: "two", Kind: "thread", Status: "completed"},
+	}
+	m.rebuildItems()
+	require.Equal(t, "t2", m.selected().ID)
+}
+
+// TestComputeThreadsColumnsDropsColumnsWhenNarrow proves the table sheds
+// columns from the right as the terminal narrows, so name and status —
+// the two fields the screen is scanned by — always survive.
+func TestComputeThreadsColumnsDropsColumnsWhenNarrow(t *testing.T) {
+	t.Parallel()
+
+	wide := computeThreadsColumns(140)
+	require.Positive(t, wide.branch)
+	require.Positive(t, wide.updated)
+	require.Positive(t, wide.goal)
+
+	medium := computeThreadsColumns(70)
+	require.Zero(t, medium.branch, "branch is the first column to go")
+	require.Positive(t, medium.name)
+
+	narrow := computeThreadsColumns(30)
+	require.Zero(t, narrow.branch)
+	require.Zero(t, narrow.updated)
+	require.Positive(t, narrow.name)
+	require.Positive(t, narrow.status)
+}
+
+// TestThreadsDashboardBackButtonLeaves proves the Back button raises the
+// same transition esc does, as a message for the router to act on.
+func TestThreadsDashboardBackButtonLeaves(t *testing.T) {
+	t.Parallel()
+
+	m := dashboardWith(t, proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running"})
+	z := zoneFor(t, m, actionBack)
+	handled, cmd := clickAt(m, z.rect.Min)
+	require.True(t, handled)
+	require.NotNil(t, cmd)
+	_, ok := cmd().(leaveDashboardMsg)
+	require.True(t, ok)
+}
+
+// TestThreadsDashboardEmptyStateNamesTheReason proves the empty table
+// distinguishes "nothing exists" from "a filter is hiding it" — the two
+// need different next steps.
+func TestThreadsDashboardEmptyStateNamesTheReason(t *testing.T) {
+	t.Parallel()
+
+	m := dashboardWith(t)
+	require.Contains(t, m.emptyText(), "No threads yet")
+
+	m = dashboardWith(t, proto.Thread{ID: "t1", Name: "one", Kind: "thread", Status: "running"})
+	m.setFilter(filterFailed)
+	require.Contains(t, m.emptyText(), "failed")
 }

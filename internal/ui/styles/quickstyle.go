@@ -11,7 +11,6 @@ import (
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/rave-soft/braid/internal/ui/diffview"
 )
 
@@ -242,7 +241,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Unticked:       "[ ] ",
 		},
 		Link: ansi.StylePrimitive{
-			Color:     hex(charmtone.Zinc),
+			Color:     hex(SyntaxLink),
 			Underline: new(true),
 		},
 		LinkText: ansi.StylePrimitive{
@@ -250,7 +249,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Bold:  new(true),
 		},
 		Image: ansi.StylePrimitive{
-			Color:     hex(charmtone.Cheeky),
+			Color:     hex(SyntaxBuiltin),
 			Underline: new(true),
 		},
 		ImageText: ansi.StylePrimitive{
@@ -283,22 +282,22 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgMostSubtle),
 				},
 				CommentPreproc: ansi.StylePrimitive{
-					Color: hex(charmtone.Bengal),
+					Color: hex(SyntaxPreproc),
 				},
 				Keyword: ansi.StylePrimitive{
 					Color: hex(o.info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(SyntaxKeyword),
 				},
 				KeywordNamespace: ansi.StylePrimitive{
-					Color: hex(charmtone.Pony),
+					Color: hex(SyntaxKeyword),
 				},
 				KeywordType: ansi.StylePrimitive{
-					Color: hex(charmtone.Guppy),
+					Color: hex(SyntaxType),
 				},
 				Operator: ansi.StylePrimitive{
-					Color: hex(charmtone.Salmon),
+					Color: hex(SyntaxOperator),
 				},
 				Punctuation: ansi.StylePrimitive{
 					Color: hex(o.warningSubtle),
@@ -307,21 +306,21 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgSubtle),
 				},
 				NameBuiltin: ansi.StylePrimitive{
-					Color: hex(charmtone.Cheeky),
+					Color: hex(SyntaxBuiltin),
 				},
 				NameTag: ansi.StylePrimitive{
-					Color: hex(charmtone.Mauve),
+					Color: hex(SyntaxTag),
 				},
 				NameAttribute: ansi.StylePrimitive{
-					Color: hex(charmtone.Hazy),
+					Color: hex(SyntaxAttribute),
 				},
 				NameClass: ansi.StylePrimitive{
-					Color:     hex(charmtone.Salt),
+					Color:     hex(SyntaxClass),
 					Underline: new(true),
 					Bold:      new(true),
 				},
 				NameDecorator: ansi.StylePrimitive{
-					Color: hex(charmtone.Citron),
+					Color: hex(SyntaxDecorator),
 				},
 				NameFunction: ansi.StylePrimitive{
 					Color: hex(o.successMostSubtle),
@@ -330,7 +329,7 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.success),
 				},
 				LiteralString: ansi.StylePrimitive{
-					Color: hex(charmtone.Cumin),
+					Color: hex(SyntaxString),
 				},
 				LiteralStringEscape: ansi.StylePrimitive{
 					Color: hex(o.successMoreSubtle),
@@ -802,6 +801,32 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Section
 	s.Section.Title = subtle
 	s.Section.Line = base.Foreground(o.separator)
+
+	// Threads dashboard. This is an operations screen — a list of live
+	// work someone is about to act on — so unlike the chat's chrome it
+	// leans on state being readable at a glance: each status class gets a
+	// distinct color rather than the one muted tone Status.*Message
+	// collapses to, and the toolbar's buttons carry a real fill so they
+	// read as pressable.
+	s.Threads.Title = base.Bold(true)
+	s.Threads.Subtle = muted
+	s.Threads.Rule = base.Foreground(o.separator)
+	s.Threads.ColumnHeader = subtle
+	s.Threads.RowBase = base
+	s.Threads.RowSelected = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgHover)
+	s.Threads.StatusRunning = base.Foreground(o.accent)
+	s.Threads.StatusIdle = muted
+	s.Threads.StatusDone = base.Foreground(o.ansiGreen)
+	s.Threads.StatusWarn = base.Foreground(o.warning)
+	s.Threads.StatusError = base.Foreground(o.error)
+	s.Threads.TabActive = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.primary).Padding(0, 1)
+	s.Threads.TabInactive = muted.Padding(0, 1)
+	s.Threads.ButtonIdle = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible).Padding(0, 1)
+	s.Threads.ButtonHover = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.accent).Padding(0, 1)
+	s.Threads.ButtonDanger = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.destructive).Padding(0, 1)
+	s.Threads.ButtonDisabled = lipgloss.NewStyle().Foreground(o.fgMostSubtle).Background(o.bgLeastVisible).Padding(0, 1)
+	s.Threads.DetailLabel = subtle
+	s.Threads.DetailValue = base
 
 	// ChildBanner styles the child-session panel (see
 	// UI.drawChildSessionPanel): a muted breadcrumb trail leading up to a

@@ -11,8 +11,8 @@ import (
 // separately-read workspace file) drifting apart. If configPath(scope) ever
 // pointed somewhere reloadFromDisk does not also read, a write through
 // that scope would silently vanish on the next reload -- exactly the kind of
-// bug that made the refresh_singleflight_test.go fixtures non-hermetic (see
-// TECHDEBT.md): they wrote to a tmp file that reload never looked at, so the
+// bug that made the refresh_singleflight_test.go fixtures non-hermetic:
+// they wrote to a tmp file that reload never looked at, so the
 // reload silently fell back to the real ~/.config/braid/braid.json.
 //
 // The check runs for several independent working directories so it is not

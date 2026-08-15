@@ -211,9 +211,10 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 		}), nil
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, params.FilePath, "", currentContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, params.FilePath, "", currentContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
+	recordWholeFileRead(edit.ctx, edit.filetracker, sessionID, params.FilePath)
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -246,6 +247,10 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 	}
 
 	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(oldContent, params.Edits, 0)
+
+	if resp, ok := requireReadCoverage(edit, sessionID, params.FilePath, oldContent, currentContent); !ok {
+		return resp, nil
+	}
 
 	// Check if content actually changed
 	if oldContent == currentContent {
@@ -304,9 +309,10 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, params.FilePath, oldContent, writeContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, params.FilePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
+	recordEditedSpan(edit.ctx, edit.filetracker, sessionID, params.FilePath, oldContent, currentContent)
 
 	var message string
 	if len(failedEdits) > 0 {

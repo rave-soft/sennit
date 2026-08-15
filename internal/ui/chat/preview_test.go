@@ -12,13 +12,13 @@ import (
 // TestToolMessageItem_CollapsedByDefaultIsOneLine covers the core UX fix:
 // a finished tool call must render as a single line by default — no body,
 // no wall of content — across every major tool class (file, search,
-// network). Regression target: "жму init — улетает портянка вверх". Bash
+// network). Regression target: "I hit init and a wall of text scrolls by". Bash
 // and Write are the deliberate exceptions: they show a capped content
 // preview under their header (see TestToolMessageItem_ExpandableBodyPreview).
 func TestToolMessageItem_CollapsedByDefaultIsOneLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 
 	longFile := strings.Repeat("line of code\n", 300)
 
@@ -70,7 +70,7 @@ func TestToolMessageItem_CollapsedByDefaultIsOneLine(t *testing.T) {
 func TestToolMessageItem_ExpandableBodyPreview(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	longFile := strings.Repeat("line of code\n", 300)
 
 	tests := []struct {
@@ -114,7 +114,7 @@ func TestToolMessageItem_ExpandableBodyPreview(t *testing.T) {
 func TestToolMessageItem_NoExpand(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	longFile := strings.Repeat("line of code\n", 300)
 
 	tc := message.ToolCall{ID: "1", Name: "view", Input: `{"file_path":"internal/foo.go"}`, Finished: true}
@@ -135,7 +135,7 @@ func TestToolMessageItem_NoExpand(t *testing.T) {
 func TestToolMessageItem_ErrorShowsStderrTail(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	tc := message.ToolCall{ID: "1", Name: "bash", Input: `{"command":"go build ./..."}`, Finished: true}
 	result := &message.ToolResult{
 		ToolCallID: "1",

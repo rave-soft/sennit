@@ -67,7 +67,7 @@ func runRootCmdTree(r *Root, cmd tea.Cmd) *Root {
 		}
 		model, next := r.Update(msg)
 		r = model.(*Root)
-		if next != nil {
+		if next != nil && !selfPerpetuatingTick(msg) {
 			stack = append(stack, next)
 		}
 	}

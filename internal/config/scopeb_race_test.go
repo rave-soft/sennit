@@ -62,7 +62,7 @@ func TestScopeB_InPlaceMutationRace(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			_ = store.SetCompactMode(ScopeGlobal, i%2 == 0)
 		}
 		close(stop)

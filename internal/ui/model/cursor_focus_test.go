@@ -154,7 +154,7 @@ func TestDrawCursor_VisibleOnlyWhenEditorFocused(t *testing.T) {
 }
 
 // TestClickOnPlainToolItem_DoesNotMoveFocus is the regression test for the
-// "фокус/курсор уходит туда" complaint: clicking a plain tool call (view,
+// "focus/cursor jumps over there" complaint: clicking a plain tool call (view,
 // bash, grep, ...) used to both expand it AND steal focus from the editor
 // (any click inside the chat pane focuses uiFocusMain, which hides the
 // terminal cursor — see TestDrawCursor_VisibleOnlyWhenEditorFocused).
