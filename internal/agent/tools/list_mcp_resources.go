@@ -28,7 +28,20 @@ const ListMCPResourcesToolName = "list_mcp_resources"
 //go:embed list_mcp_resources.md
 var listMCPResourcesDescription string
 
-func NewListMCPResourcesTool(cfg *config.ConfigStore, reg *mcp.Registry, permissions permission.Service) fantasy.AgentTool {
+// mcpResourceConfig is the slice of *config.ConfigStore the MCP resource
+// tools (list_mcp_resources, read_mcp_resource) need: the working directory
+// for permission-path resolution, plus whatever mcp.Registry's
+// ListResources/ReadResource require. Declaring it here rather than
+// accepting the concrete *config.ConfigStore keeps this package's
+// dependency on config narrow (ISP; see ARCHITECTURE_REVIEW.md section S4).
+type mcpResourceConfig interface {
+	mcp.ConfigProvider
+	WorkingDir() string
+}
+
+var _ mcpResourceConfig = (*config.ConfigStore)(nil)
+
+func NewListMCPResourcesTool(cfg mcpResourceConfig, reg *mcp.Registry, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ListMCPResourcesToolName,
 		listMCPResourcesDescription,

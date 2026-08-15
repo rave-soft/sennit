@@ -7,7 +7,6 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
-	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/permission"
 )
 
@@ -22,7 +21,7 @@ var whitelistDockerTools = []string{
 
 // GetMCPTools gets all the currently available MCP tools from reg, the
 // caller's per-workspace MCP registry.
-func GetMCPTools(reg *mcp.Registry, permissions permission.Service, cfg *config.ConfigStore, wd string) []*Tool {
+func GetMCPTools(reg *mcp.Registry, permissions permission.Service, cfg mcp.ConfigProvider, wd string) []*Tool {
 	if reg == nil {
 		return nil
 	}
@@ -46,7 +45,7 @@ func GetMCPTools(reg *mcp.Registry, permissions permission.Service, cfg *config.
 type Tool struct {
 	mcpName         string
 	tool            *mcp.Tool
-	cfg             *config.ConfigStore
+	cfg             mcp.ConfigProvider
 	permissions     permission.Service
 	workingDir      string
 	providerOptions fantasy.ProviderOptions

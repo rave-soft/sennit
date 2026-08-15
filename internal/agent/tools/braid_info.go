@@ -23,8 +23,22 @@ type BraidInfoParams struct {
 	ModelsFor string `json:"models_for,omitempty" description:"Provider ID (e.g. \"anthropic\", \"xl0.ru\") to list that provider's available model IDs instead of the full state dump. Use this to verify a model ID is real before writing it into an agent file or model config."`
 }
 
+// BraidInfoConfig is the slice of *config.ConfigStore this tool needs: the
+// dictionary read, the runtime overrides, the loaded config paths, and the
+// staleness snapshot. Declaring it here rather than accepting the concrete
+// *config.ConfigStore keeps this tool's dependency on config narrow (ISP;
+// see ARCHITECTURE_REVIEW.md section S4).
+type BraidInfoConfig interface {
+	Config() *config.Config
+	Overrides() *config.RuntimeOverrides
+	LoadedPaths() []string
+	ConfigStaleness() config.StalenessResult
+}
+
+var _ BraidInfoConfig = (*config.ConfigStore)(nil)
+
 func NewBraidInfoTool(
-	cfg *config.ConfigStore,
+	cfg BraidInfoConfig,
 	reg *mcp.Registry,
 	lspManager *lsp.Manager,
 	allSkills []*skills.Skill,
@@ -54,7 +68,7 @@ const modelsForCap = 50
 // braid_info{"models_for": "..."} — before writing provider/model-id into
 // an agent file, instead of guessing. The full braid_info dump only reports
 // a per-provider count ([providers]), not the IDs themselves.
-func buildModelsFor(cfg *config.ConfigStore, providerID string) string {
+func buildModelsFor(cfg BraidInfoConfig, providerID string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[models_for.%s]\n", providerID)
 
@@ -90,7 +104,7 @@ func buildModelsFor(cfg *config.ConfigStore, providerID string) string {
 	return b.String()
 }
 
-func buildBraidInfo(cfg *config.ConfigStore, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
+func buildBraidInfo(cfg BraidInfoConfig, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
 	var b strings.Builder
 
 	var mcpStates map[string]mcp.ClientInfo
@@ -115,7 +129,7 @@ func buildBraidInfo(cfg *config.ConfigStore, reg *mcp.Registry, lspManager *lsp.
 	return b.String()
 }
 
-func writeConfigFiles(b *strings.Builder, cfg *config.ConfigStore) {
+func writeConfigFiles(b *strings.Builder, cfg BraidInfoConfig) {
 	b.WriteString("[config_files]\n")
 	paths := cfg.LoadedPaths()
 	for _, p := range paths {
@@ -124,7 +138,7 @@ func writeConfigFiles(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("\n")
 }
 
-func writeConfigStaleness(b *strings.Builder, cfg *config.ConfigStore) {
+func writeConfigStaleness(b *strings.Builder, cfg BraidInfoConfig) {
 	staleness := cfg.ConfigStaleness()
 
 	b.WriteString("[config]\n")
@@ -159,7 +173,7 @@ func writeConfigStaleness(b *strings.Builder, cfg *config.ConfigStore) {
 // sub-agent on the wrong model?" (or "why can't I use that MCP tool?") can
 // answer from its own braid_info output instead of a log file it never
 // sees.
-func writeProblems(b *strings.Builder, cfg *config.ConfigStore, mcpStates map[string]mcp.ClientInfo) {
+func writeProblems(b *strings.Builder, cfg BraidInfoConfig, mcpStates map[string]mcp.ClientInfo) {
 	problems := config.Doctor(cfg.Config())
 	for name, info := range mcpStates {
 		if info.State != mcp.StateError && info.State != mcp.StateNeedsAuth {
@@ -193,7 +207,7 @@ func writeProblems(b *strings.Builder, cfg *config.ConfigStore, mcpStates map[st
 	b.WriteString("\n")
 }
 
-func writeModels(b *strings.Builder, cfg *config.ConfigStore) {
+func writeModels(b *strings.Builder, cfg BraidInfoConfig) {
 	c := cfg.Config()
 	if c.Model.Model == "" {
 		return
@@ -203,7 +217,7 @@ func writeModels(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("\n")
 }
 
-func writeProviders(b *strings.Builder, cfg *config.ConfigStore) {
+func writeProviders(b *strings.Builder, cfg BraidInfoConfig) {
 	c := cfg.Config()
 	type pv struct {
 		name  string
@@ -227,7 +241,7 @@ func writeProviders(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("\n")
 }
 
-func writeLSP(b *strings.Builder, lspManager *lsp.Manager, cfg *config.ConfigStore) {
+func writeLSP(b *strings.Builder, lspManager *lsp.Manager, cfg BraidInfoConfig) {
 	// Write runtime LSP clients
 	if lspManager != nil && lspManager.Clients().Len() > 0 {
 		type entry struct {
@@ -298,7 +312,7 @@ func writeLSP(b *strings.Builder, lspManager *lsp.Manager, cfg *config.ConfigSto
 	}
 }
 
-func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.ConfigStore) {
+func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg BraidInfoConfig) {
 	// Write runtime MCP states
 	if len(states) > 0 {
 		type entry struct {
@@ -384,7 +398,7 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 	}
 }
 
-func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*skills.Skill, tracker *skills.Tracker, cfg *config.ConfigStore) {
+func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*skills.Skill, tracker *skills.Tracker, cfg BraidInfoConfig) {
 	var disabled []string
 	if cfg.Config().Options != nil {
 		disabled = cfg.Config().Options.DisabledSkills
@@ -438,7 +452,7 @@ func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*
 	b.WriteString("\n")
 }
 
-func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {
+func writePermissions(b *strings.Builder, cfg BraidInfoConfig) {
 	c := cfg.Config()
 	overrides := cfg.Overrides()
 
@@ -461,7 +475,7 @@ func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("\n")
 }
 
-func writeDisabledTools(b *strings.Builder, cfg *config.ConfigStore) {
+func writeDisabledTools(b *strings.Builder, cfg BraidInfoConfig) {
 	c := cfg.Config()
 	if c.Options == nil || len(c.Options.DisabledTools) == 0 {
 		return
@@ -473,7 +487,7 @@ func writeDisabledTools(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("\n")
 }
 
-func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
+func writeOptions(b *strings.Builder, cfg BraidInfoConfig) {
 	c := cfg.Config()
 	if c.Options == nil {
 		return
@@ -499,7 +513,7 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("\n")
 }
 
-func writeAttribution(b *strings.Builder, cfg *config.ConfigStore) {
+func writeAttribution(b *strings.Builder, cfg BraidInfoConfig) {
 	c := cfg.Config()
 	if c.Options == nil || c.Options.Attribution == nil {
 		return
@@ -514,7 +528,7 @@ func writeAttribution(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("\n")
 }
 
-func writeHooks(b *strings.Builder, cfg *config.ConfigStore) {
+func writeHooks(b *strings.Builder, cfg BraidInfoConfig) {
 	c := cfg.Config()
 	if len(c.Hooks) == 0 {
 		return

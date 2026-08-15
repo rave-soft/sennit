@@ -10,7 +10,6 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/braid/internal/agent/tools/mcp"
-	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/filepathext"
 	"github.com/rave-soft/braid/internal/permission"
 )
@@ -30,7 +29,7 @@ const ReadMCPResourceToolName = "read_mcp_resource"
 //go:embed read_mcp_resource.md
 var readMCPResourceDescription string
 
-func NewReadMCPResourceTool(cfg *config.ConfigStore, reg *mcp.Registry, permissions permission.Service) fantasy.AgentTool {
+func NewReadMCPResourceTool(cfg mcpResourceConfig, reg *mcp.Registry, permissions permission.Service) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ReadMCPResourceToolName,
 		readMCPResourceDescription,
