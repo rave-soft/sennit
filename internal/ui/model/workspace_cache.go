@@ -337,13 +337,13 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 }
 
 func (m *UI) toggleYoloMode() tea.Cmd {
-	if m.yoloLoading {
+	if m.ops.yoloLoading {
 		return util.ReportWarn("Yolo mode is already being updated")
 	}
 	desired := !m.yoloModeCached()
-	m.yoloLoading = true
-	m.yoloGeneration++
-	generation := m.yoloGeneration
+	m.ops.yoloLoading = true
+	m.ops.yoloGeneration++
+	generation := m.ops.yoloGeneration
 	workspace := m.com.Workspace
 	return func() tea.Msg {
 		workspace.PermissionSetSkipRequests(desired)

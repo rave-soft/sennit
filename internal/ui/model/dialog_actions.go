@@ -45,15 +45,15 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		cmds = append(cmds, m.toggleYoloMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
-		if m.notificationLoading {
+		if m.ops.notificationLoading {
 			cmds = append(cmds, util.ReportWarn("Notification settings are already being updated"))
 			break
 		}
 		style := msg.Style
 		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
-			m.notificationLoading = true
-			m.notificationGeneration++
-			generation := m.notificationGeneration
+			m.ops.notificationLoading = true
+			m.ops.notificationGeneration++
+			generation := m.ops.notificationGeneration
 			workspace := m.com.Workspace
 			cmds = append(cmds, func() tea.Msg {
 				return notificationStyleSetMsg{Err: workspace.SetConfigField(config.ScopeGlobal, "options.notifications", style), Style: style, generation: generation}
@@ -68,7 +68,7 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		}
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
-		if m.modelOperationLoading {
+		if m.ops.modelOperationLoading {
 			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
 			break
 		}
@@ -87,9 +87,9 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		if currentModel.Think {
 			status = "enabled"
 		}
-		m.modelOperationLoading = true
-		m.modelOperationGeneration++
-		generation := m.modelOperationGeneration
+		m.ops.modelOperationLoading = true
+		m.ops.modelOperationGeneration++
+		generation := m.ops.modelOperationGeneration
 		workspace := m.com.Workspace
 		ctx := m.com.Context()
 		cmds = append(cmds, func() tea.Msg {
@@ -100,7 +100,7 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleTransparentBackground:
-		if m.transparentLoading {
+		if m.ops.transparentLoading {
 			cmds = append(cmds, util.ReportWarn("Transparency is already being updated"))
 			break
 		}
@@ -110,9 +110,9 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			break
 		}
 		desired := cfg.Options == nil || cfg.Options.TUI.Transparent == nil || !*cfg.Options.TUI.Transparent
-		m.transparentLoading = true
-		m.transparentGeneration++
-		generation := m.transparentGeneration
+		m.ops.transparentLoading = true
+		m.ops.transparentGeneration++
+		generation := m.ops.transparentGeneration
 		workspace := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
 			return transparentToggledMsg{Err: workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", desired), Enabled: desired, generation: generation}
@@ -129,7 +129,7 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.ThemeID)
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectReasoningEffort:
-		if m.modelOperationLoading {
+		if m.ops.modelOperationLoading {
 			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
 			break
 		}
@@ -156,9 +156,9 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		currentModel.ReasoningEffort = msg.Effort
 		effort := msg.Effort
 
-		m.modelOperationLoading = true
-		m.modelOperationGeneration++
-		generation := m.modelOperationGeneration
+		m.ops.modelOperationLoading = true
+		m.ops.modelOperationGeneration++
+		generation := m.ops.modelOperationGeneration
 		workspace := m.com.Workspace
 		ctx := m.com.Context()
 		cmds = append(cmds, func() tea.Msg {
@@ -209,16 +209,16 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionPermissionResponse:
-		if m.permissionLoading {
+		if m.ops.permissionLoading {
 			cmds = append(cmds, util.ReportWarn("Permission response is already being submitted"))
 			break
 		}
-		m.permissionLoading = true
-		m.permissionGeneration++
-		generation := m.permissionGeneration
+		m.ops.permissionLoading = true
+		m.ops.permissionGeneration++
+		generation := m.ops.permissionGeneration
 		action := msg.Action
 		perm := msg.Permission
-		m.permissionID = perm.ID
+		m.ops.permissionID = perm.ID
 		permissionID := perm.ID
 		workspace := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
@@ -275,7 +275,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			return dialog.ActionCustomProviderResult{ProviderID: msg.ID, Err: err}
 		})
 	case dialog.ActionProviderConfigured:
-		if m.modelOperationLoading {
+		if m.ops.modelOperationLoading {
 			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
 			break
 		}
@@ -313,9 +313,9 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		// Move UpdatePreferredModel into a tea.Cmd so it does not block
 		// Update.  The result (providerConfiguredResult) is handled in
 		// Update and only calls initAgentAndReportModel on success.
-		m.modelOperationLoading = true
-		m.modelOperationGeneration++
-		generation := m.modelOperationGeneration
+		m.ops.modelOperationLoading = true
+		m.ops.modelOperationGeneration++
+		generation := m.ops.modelOperationGeneration
 		capturedModel := model
 		cmds = append(cmds, func() tea.Msg {
 			if err := ws.UpdatePreferredModel(config.ScopeGlobal, capturedModel); err != nil {

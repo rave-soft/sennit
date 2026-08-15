@@ -29,32 +29,32 @@ import (
 func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case providerConfiguredResult:
-		if msg.generation != m.modelOperationGeneration {
+		if msg.generation != m.ops.modelOperationGeneration {
 			break
 		}
 		if msg.Err != nil {
-			m.modelOperationLoading = false
+			m.ops.modelOperationLoading = false
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
 		}
 		cmds = append(cmds, m.initAgentAndReportModel(true, msg.Model, msg.generation))
 
 	case modelSelectResult:
-		if msg.generation != m.modelOperationGeneration {
+		if msg.generation != m.ops.modelOperationGeneration {
 			break
 		}
 		if msg.Err != nil {
-			m.modelOperationLoading = false
+			m.ops.modelOperationLoading = false
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
 		}
 		cmds = append(cmds, m.initAgentAndReportModel(msg.Onboarding, msg.Model, msg.generation))
 
 	case agentModelInitializedMsg:
-		if msg.generation != m.modelOperationGeneration {
+		if msg.generation != m.ops.modelOperationGeneration {
 			break
 		}
-		m.modelOperationLoading = false
+		m.ops.modelOperationLoading = false
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
@@ -71,10 +71,10 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Model changed to %s", modelName)), func() tea.Msg { return agentModelChangedMsg{} })
 
 	case modelSettingUpdatedMsg:
-		if msg.generation != m.modelOperationGeneration {
+		if msg.generation != m.ops.modelOperationGeneration {
 			break
 		}
-		m.modelOperationLoading = false
+		m.ops.modelOperationLoading = false
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 		} else {
@@ -82,10 +82,10 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 
 	case transparentToggledMsg:
-		if msg.generation != m.transparentGeneration {
+		if msg.generation != m.ops.transparentGeneration {
 			break
 		}
-		m.transparentLoading = false
+		m.ops.transparentLoading = false
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
@@ -94,7 +94,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case themeSetMsg:
-		if msg.generation != m.themeGeneration {
+		if msg.generation != m.ops.themeGeneration {
 			break
 		}
 		if msg.Err != nil {
@@ -107,10 +107,10 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, util.ReportInfo("Theme set to: "+styles.PaletteByID(msg.ID).Name))
 
 	case compactModeToggledMsg:
-		if msg.generation != m.compactModeGeneration {
+		if msg.generation != m.ops.compactModeGeneration {
 			break
 		}
-		m.compactModeLoading = false
+		m.ops.compactModeLoading = false
 		if msg.Err == nil {
 			m.forceCompactMode = msg.Enabled
 			m.isCompact = msg.Enabled
@@ -121,10 +121,10 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 
 	case notificationStyleSetMsg:
-		if msg.generation != m.notificationGeneration {
+		if msg.generation != m.ops.notificationGeneration {
 			break
 		}
-		m.notificationLoading = false
+		m.ops.notificationLoading = false
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
@@ -134,10 +134,10 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, util.ReportInfo("Notifications set to: "+msg.Style))
 
 	case permissionResponseMsg:
-		if msg.generation != m.permissionGeneration || msg.Permission != m.permissionID {
+		if msg.generation != m.ops.permissionGeneration || msg.Permission != m.ops.permissionID {
 			break
 		}
-		m.permissionLoading = false
+		m.ops.permissionLoading = false
 		if !msg.Accepted {
 			cmds = append(cmds, util.ReportError(errors.New("permission response was not accepted")))
 			break
@@ -145,10 +145,10 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.PermissionsID)
 
 	case yoloToggledMsg:
-		if msg.generation != m.yoloGeneration {
+		if msg.generation != m.ops.yoloGeneration {
 			break
 		}
-		m.yoloLoading = false
+		m.ops.yoloLoading = false
 		if msg.Err != nil {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
@@ -166,7 +166,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.updateNotificationBackend()
 
 	case importCopilotResult:
-		if msg.generation != m.modelOperationGeneration {
+		if msg.generation != m.ops.modelOperationGeneration {
 			break
 		}
 		// ImportCopilot completed (successfully or not). Now check
@@ -178,7 +178,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			return ok
 		}
 		if !isConfigured() {
-			m.modelOperationLoading = false
+			m.ops.modelOperationLoading = false
 			m.dialog.CloseDialog(dialog.ModelsID)
 			provider := catwalk.Provider{ID: catwalk.InferenceProvider(msg.providerID)}
 			if cmd := m.openAuthenticationDialog(provider, msg.model); cmd != nil {

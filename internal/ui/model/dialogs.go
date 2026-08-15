@@ -374,9 +374,9 @@ func (m *UI) openFilesDialog() tea.Cmd {
 //
 //nolint:unparam // always nil today, but matches the tea.Cmd signature shared by the other open*Dialog methods
 func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
-	m.permissionGeneration++
-	m.permissionLoading = false
-	m.permissionID = perm.ID
+	m.ops.permissionGeneration++
+	m.ops.permissionLoading = false
+	m.ops.permissionID = perm.ID
 	// Close any existing permissions dialog first.
 	m.dialog.CloseDialog(dialog.PermissionsID)
 

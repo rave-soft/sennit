@@ -245,15 +245,13 @@ type (
 	}
 )
 
-// UI represents the main user interface model.
-type UI struct {
-	com          *common.Common
-	session      *session.Session
-	sessionFiles []SessionFile
-
-	// keeps track of read files while we don't have a session id
-	sessionFileReads []string
-
+// settingsOps holds the generation counters and in-flight flags for the
+// settings that apply asynchronously (compact mode, notifications, yolo,
+// model, transparency, theme, permission responses). A generation is
+// bumped each time an operation starts, and the result handler discards
+// any reply whose generation doesn't match the latest one, so a stale
+// response from a superseded operation can't clobber a newer one.
+type settingsOps struct {
 	compactModeGeneration    uint64
 	notificationGeneration   uint64
 	yoloGeneration           uint64
@@ -268,6 +266,18 @@ type UI struct {
 	permissionLoading        bool
 	permissionGeneration     uint64
 	permissionID             string
+}
+
+// UI represents the main user interface model.
+type UI struct {
+	com          *common.Common
+	session      *session.Session
+	sessionFiles []SessionFile
+
+	// keeps track of read files while we don't have a session id
+	sessionFileReads []string
+
+	ops settingsOps
 
 	// initialSessionID is set when loading a specific session on startup.
 	initialSessionID string
@@ -934,7 +944,7 @@ type sessionNavFrame struct {
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	var cmds []tea.Cmd
 
-	if m.modelOperationLoading {
+	if m.ops.modelOperationLoading {
 		return util.ReportWarn("Model settings are already being updated")
 	}
 
@@ -960,9 +970,9 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	// re-check whether the provider is configured and decide auth vs model
 	// flow — never batch the import with the subsequent steps.
 	if isCopilot && !msg.ReAuthenticate {
-		m.modelOperationLoading = true
-		m.modelOperationGeneration++
-		generation := m.modelOperationGeneration
+		m.ops.modelOperationLoading = true
+		m.ops.modelOperationGeneration++
+		generation := m.ops.modelOperationGeneration
 		ws := m.com.Workspace
 		cmds = append(cmds, func() tea.Msg {
 			ws.ImportCopilot()
@@ -986,9 +996,9 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	// Move UpdatePreferredModel into the cmd; the result is handled by a
 	// modelSelectResult case that only calls initAgentAndReportModel on success.
-	m.modelOperationLoading = true
-	m.modelOperationGeneration++
-	generation := m.modelOperationGeneration
+	m.ops.modelOperationLoading = true
+	m.ops.modelOperationGeneration++
+	generation := m.ops.modelOperationGeneration
 	capturedModel := msg.Model
 	ws := m.com.Workspace
 	cmds = append(cmds, func() tea.Msg {
@@ -1057,13 +1067,13 @@ func (m *UI) currentModelSupportsImages() bool {
 // The actual SetCompactMode I/O runs inside the returned cmd; the UI state
 // is updated only when the result lands via compactModeToggledMsg.
 func (m *UI) toggleCompactMode() tea.Cmd {
-	if m.compactModeLoading {
+	if m.ops.compactModeLoading {
 		return util.ReportWarn("Compact mode is already being updated")
 	}
 	desired := !m.forceCompactMode
-	m.compactModeLoading = true
-	m.compactModeGeneration++
-	generation := m.compactModeGeneration
+	m.ops.compactModeLoading = true
+	m.ops.compactModeGeneration++
+	generation := m.ops.compactModeGeneration
 	workspace := m.com.Workspace
 	return func() tea.Msg {
 		return compactModeToggledMsg{Err: workspace.SetCompactMode(config.ScopeGlobal, desired), Enabled: desired, generation: generation}
@@ -1132,8 +1142,8 @@ func (m *UI) applyTheme(id string) tea.Cmd {
 	}
 
 	m.setTheme(id)
-	m.themeGeneration++
-	generation := m.themeGeneration
+	m.ops.themeGeneration++
+	generation := m.ops.themeGeneration
 	ws := m.com.Workspace
 	return func() tea.Msg {
 		return themeSetMsg{
