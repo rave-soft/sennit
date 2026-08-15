@@ -987,9 +987,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmds, done = m.updateSession(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case lspStatesMsg:
-		if cmd := m.applyLSPStates(msg); cmd != nil {
-			cmds = append(cmds, cmd)
+	case lspStatesMsg, userCommandsLoadedMsg, mcpStateChangedMsg, mcpPromptsLoadedMsg, promptHistoryLoadedMsg, pubsub.Event[workspace.LSPEvent], pubsub.Event[skills.Event], dialog.ActionMCPAuthStarted, dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
+		var done bool
+		if cmds, done = m.updateIntegrations(msg, cmds); done {
+			return m, tea.Batch(cmds...)
 		}
 	case agentModelChangedMsg:
 		// The coordinator model changed (selection, thinking, reasoning):
@@ -1025,53 +1026,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}}, m.editor.pendingSendQueue...)
 		return m, m.requestSessionLoad(msg.session.ID)
 
-	case userCommandsLoadedMsg:
-		m.customCommands = msg.Commands
-		dia := m.dialog.Dialog(dialog.CommandsID)
-		if dia == nil {
-			break
-		}
-
-		commands, ok := dia.(*dialog.Commands)
-		if ok {
-			commands.SetCustomCommands(m.customCommands)
-		}
-
-	case mcpStateChangedMsg:
-		m.mcpStates = msg.states
-		// Auto-open the MCP auth dialog if any servers need authentication.
-		if cmd := m.openMCPAuthDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case mcpPromptsLoadedMsg:
-		m.mcpPrompts = msg.Prompts
-		dia := m.dialog.Dialog(dialog.CommandsID)
-		if dia == nil {
-			break
-		}
-
-		commands, ok := dia.(*dialog.Commands)
-		if ok {
-			commands.SetMCPPrompts(m.mcpPrompts)
-		}
-
-	case promptHistoryLoadedMsg:
-		m.editor.promptHistory.messages = msg.messages
-		m.editor.promptHistory.index = -1
-		m.editor.promptHistory.draft = ""
-
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
 
-	case pubsub.Event[workspace.LSPEvent]:
-		// Refresh the memoized LSP state off-thread: LSPGetStates is a
-		// synchronous HTTP round-trip in client/server mode and diagnostics
-		// events can arrive per edited file.
-		if cmd := m.requestLSPRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case pubsub.Event[skills.Event]:
-		m.skillStates = msg.Payload.States
 	case pubsub.Event[workspace.MCPEvent]:
 		switch msg.Payload.Type {
 		case workspace.MCPEventStateChanged:
@@ -1178,37 +1135,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ttl = DefaultStatusTTL
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
-	case pubsub.Event[proto.Thread]:
-		// Root fans this to both screens (see root.go); the main screen
-		// only cares about keeping the header badge's count current.
-		m.threadIndicator.applyEvent(msg)
-		m.threadsDock.applyThreadEvent(msg)
-		cmds = append(cmds, m.threadViewsRefreshCmds()...)
-		// A thread's edge transition into a terminal status (merged,
-		// failed, ...) gets a toast — see thread_completion.go for why a
-		// toast rather than a persisted chat entry.
-		if cmd := m.notifyThreadCompletion(msg.Payload); cmd != nil {
-			cmds = append(cmds, cmd)
+	case pubsub.Event[proto.Thread], threadIndicatorLoadedMsg, threadsDockLoadedMsg, threadDockActivityLoadedMsg:
+		var done bool
+		if cmds, done = m.updateThreads(msg, cmds); done {
+			return m, tea.Batch(cmds...)
 		}
-		// A thread starting or finishing changes whether the panel has
-		// live work to animate.
-		if cmd := m.syncPanelSpinner(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case threadIndicatorLoadedMsg:
-		if cmd := m.threadIndicator.applyLoaded(m.com, msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case threadsDockLoadedMsg:
-		if cmd := m.threadsDock.applyThreadsDockLoaded(m.com, msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		// The freshly listed threads may introduce (or retire) live work.
-		if cmd := m.syncPanelSpinner(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case threadDockActivityLoadedMsg:
-		m.threadsDock.applyThreadActivityLoaded(msg)
 	case workspace.UpdateAvailableMsg:
 		text := fmt.Sprintf("Braid update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
@@ -1228,14 +1159,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case completions.CompletionItemsLoadedMsg:
 		if m.editor.completionsOpen {
 			m.editor.completions.SetItems(msg.Files, msg.Resources)
-		}
-	case dialog.ActionMCPAuthStarted:
-		cmds = append(cmds, m.authenticateMCP(msg.Ctx, msg.Name))
-	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
-		if m.dialog.HasDialogs() {
-			if cmd := m.handleDialogMsg(msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
 		}
 	case fimage.PreviewPreparedMsg:
 		if action := m.dialog.UpdateDialog(dialog.FilePickerID, msg); action != nil {
