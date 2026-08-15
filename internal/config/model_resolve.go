@@ -2,8 +2,13 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"maps"
+	"reflect"
+	"slices"
 	"strings"
 
+	"charm.land/catwalk/pkg/catwalk"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 )
 
@@ -112,4 +117,142 @@ func ValidateModelMatches(matches []ModelMatch, modelID, label string) (ModelMat
 		)
 	}
 	return matches[0], nil
+}
+
+func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (model SelectedModel, err error) {
+	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
+		err = fmt.Errorf("no providers configured, please configure at least one provider")
+		return model, err
+	}
+
+	// Use the first provider enabled based on the known providers order
+	// if no provider found that is known use the first provider configured
+	for _, p := range knownProviders {
+		providerConfig, ok := c.Providers.Get(string(p.ID))
+		if !ok || providerConfig.Disable {
+			continue
+		}
+		defaultModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
+		if defaultModel == nil {
+			slog.Warn("Default model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+			if len(providerConfig.Models) == 0 {
+				return model, fmt.Errorf("default model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+			}
+			defaultModel = &providerConfig.Models[0]
+		}
+		model = SelectedModel{
+			Provider:        string(p.ID),
+			Model:           defaultModel.ID,
+			MaxTokens:       defaultModel.DefaultMaxTokens,
+			ReasoningEffort: defaultModel.DefaultReasoningEffort,
+		}
+		return model, err
+	}
+
+	enabledProviders := c.EnabledProviders()
+	slices.SortFunc(enabledProviders, func(a, b ProviderConfig) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+
+	if len(enabledProviders) == 0 {
+		err = fmt.Errorf("no providers configured, please configure at least one provider")
+		return model, err
+	}
+
+	providerConfig := enabledProviders[0]
+	if len(providerConfig.Models) == 0 {
+		err = fmt.Errorf("provider %s has no models configured", providerConfig.ID)
+		return model, err
+	}
+	defaultModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
+	model = SelectedModel{
+		Provider:  providerConfig.ID,
+		Model:     defaultModel.ID,
+		MaxTokens: defaultModel.DefaultMaxTokens,
+	}
+	return model, err
+}
+
+// resolvedModel holds the result of resolving the user-configured model
+// selection against the provider catalog.
+type resolvedModel struct {
+	Model    SelectedModel
+	Fallback bool // true if Model was corrected to a default
+}
+
+// resolveSelectedModel validates the user's configured model selection
+// against the provider catalog, falling back to a default when the model ID
+// is invalid. It is pure resolution logic: it does not mutate the store or
+// touch disk. The caller assigns the result to cfg.Model and persists any
+// fallback correction as appropriate.
+func resolveSelectedModel(cfg *Config, knownProviders []catwalk.Provider) (resolvedModel, error) {
+	var result resolvedModel
+	def, err := cfg.defaultModelSelection(knownProviders)
+	if err != nil {
+		return result, fmt.Errorf("failed to select default model: %w", err)
+	}
+	selected := def
+
+	modelSelected := cfg.Model
+	// The zero SelectedModel{} is the "unset" sentinel (Config.Model has no
+	// map to check key presence against anymore), so any field the user set
+	// — even just max_tokens, with provider/model left to inherit the
+	// default — marks the model as configured.
+	modelConfigured := !reflect.DeepEqual(modelSelected, SelectedModel{})
+	if modelConfigured {
+		if modelSelected.Model != "" {
+			selected.Model = modelSelected.Model
+		}
+		if modelSelected.Provider != "" {
+			selected.Provider = modelSelected.Provider
+		}
+		model := cfg.GetModel(selected.Provider, selected.Model)
+		if model == nil {
+			cfg.addProblem(Problem{
+				Severity: SeverityError,
+				Area:     AreaModel,
+				Subject:  modelSelected.Provider + "/" + modelSelected.Model,
+				Message: fmt.Sprintf(
+					"configured main model %s/%s not found — falling back to %s/%s",
+					modelSelected.Provider, modelSelected.Model, def.Provider, def.Model,
+				),
+				Hint: "run 'braid models' to see available provider/model pairs",
+			})
+			selected = def
+			result.Fallback = true
+		} else {
+			if modelSelected.MaxTokens > 0 {
+				selected.MaxTokens = modelSelected.MaxTokens
+			} else {
+				selected.MaxTokens = model.DefaultMaxTokens
+			}
+			if modelSelected.ReasoningEffort != "" {
+				selected.ReasoningEffort = modelSelected.ReasoningEffort
+			} else {
+				selected.ReasoningEffort = model.DefaultReasoningEffort
+			}
+			selected.Think = modelSelected.Think
+			if modelSelected.Temperature != nil {
+				selected.Temperature = modelSelected.Temperature
+			}
+			if modelSelected.TopP != nil {
+				selected.TopP = modelSelected.TopP
+			}
+			if modelSelected.TopK != nil {
+				selected.TopK = modelSelected.TopK
+			}
+			if modelSelected.FrequencyPenalty != nil {
+				selected.FrequencyPenalty = modelSelected.FrequencyPenalty
+			}
+			if modelSelected.PresencePenalty != nil {
+				selected.PresencePenalty = modelSelected.PresencePenalty
+			}
+			if modelSelected.ProviderOptions != nil {
+				selected.ProviderOptions = maps.Clone(modelSelected.ProviderOptions)
+			}
+		}
+	}
+
+	result.Model = selected
+	return result, nil
 }
