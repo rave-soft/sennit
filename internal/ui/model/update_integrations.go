@@ -1,7 +1,11 @@
 package model
 
 import (
+	"context"
+	"log/slog"
+
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/pubsub"
 	"github.com/rave-soft/braid/internal/skills"
 	"github.com/rave-soft/braid/internal/ui/dialog"
@@ -81,6 +85,37 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				cmds = append(cmds, cmd)
 			}
 		}
+	case pubsub.Event[workspace.MCPEvent]:
+		switch msg.Payload.Type {
+		case workspace.MCPEventStateChanged:
+			cmds = append(cmds, tea.Batch(
+				m.handleStateChanged(),
+				m.loadMCPrompts,
+			))
+			return cmds, true
+		case workspace.MCPEventPromptsListChanged:
+			cmds = append(cmds, handleMCPPromptsEvent(m.com.Workspace, msg.Payload.Name))
+			return cmds, true
+		case workspace.MCPEventToolsListChanged:
+			cmds = append(cmds, handleMCPToolsEvent(m.com.Workspace, msg.Payload.Name))
+			return cmds, true
+		case workspace.MCPEventResourcesListChanged:
+			cmds = append(cmds, handleMCPResourcesEvent(m.com.Workspace, msg.Payload.Name))
+			return cmds, true
+		}
 	}
 	return cmds, false
+}
+
+// loadMCPrompts loads the MCP prompts asynchronously.
+func (m *UI) loadMCPrompts() tea.Msg {
+	prompts, err := m.com.Workspace.ListMCPPrompts(context.Background())
+	if err != nil {
+		slog.Error("Failed to load MCP prompts", "error", err)
+	}
+	if prompts == nil {
+		// flag them as loaded even if there is none or an error
+		prompts = []commands.MCPPrompt{}
+	}
+	return mcpPromptsLoadedMsg{Prompts: prompts}
 }

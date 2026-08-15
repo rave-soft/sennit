@@ -7,7 +7,6 @@ import (
 	"image"
 	"log/slog"
 	"runtime"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -15,7 +14,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
-	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/rave-soft/braid/internal/commands"
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/history"
@@ -761,19 +759,6 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 	}
 }
 
-// loadMCPrompts loads the MCP prompts asynchronously.
-func (m *UI) loadMCPrompts() tea.Msg {
-	prompts, err := m.com.Workspace.ListMCPPrompts(context.Background())
-	if err != nil {
-		slog.Error("Failed to load MCP prompts", "error", err)
-	}
-	if prompts == nil {
-		// flag them as loaded even if there is none or an error
-		prompts = []commands.MCPPrompt{}
-	}
-	return mcpPromptsLoadedMsg{Prompts: prompts}
-}
-
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -797,16 +782,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmds, done = m.updateSystem(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case pubsub.Event[workspace.AgentNotification]:
-		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case sessionsLoadedMsg, busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, loadSessionMsg, requestSessionLoad, sessionFilesUpdatesMsg, sendMessageMsg, pubsub.Event[session.Session], pubsub.Event[message.Message], pubsub.Event[history.File], sendMessageErrorMsg, sendPendingQueueMsg, bangSessionCreatedMsg:
+	case sessionsLoadedMsg, busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, loadSessionMsg, requestSessionLoad, sessionFilesUpdatesMsg, sendMessageMsg, pubsub.Event[session.Session], pubsub.Event[message.Message], pubsub.Event[history.File], sendMessageErrorMsg, sendPendingQueueMsg, bangSessionCreatedMsg, createSessionMsg:
 		var done bool
 		if cmds, done = m.updateSession(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case lspStatesMsg, userCommandsLoadedMsg, mcpStateChangedMsg, mcpPromptsLoadedMsg, promptHistoryLoadedMsg, pubsub.Event[workspace.LSPEvent], pubsub.Event[skills.Event], dialog.ActionMCPAuthStarted, dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
+	case lspStatesMsg, userCommandsLoadedMsg, mcpStateChangedMsg, mcpPromptsLoadedMsg, promptHistoryLoadedMsg, pubsub.Event[workspace.LSPEvent], pubsub.Event[skills.Event], dialog.ActionMCPAuthStarted, dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored, pubsub.Event[workspace.MCPEvent]:
 		var done bool
 		if cmds, done = m.updateIntegrations(msg, cmds); done {
 			return m, tea.Batch(cmds...)
@@ -818,89 +799,18 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case createSessionMsg:
-		if !m.editor.pendingSendLoading || msg.generation != m.editor.pendingSendGen {
-			break
+	case closeDialogMsg, pubsub.Event[permission.PermissionRequest], pubsub.Event[permission.PermissionNotification], pubsub.Event[question.Request], pubsub.Event[question.Notification]:
+		var done bool
+		if cmds, done = m.updatePrompts(msg, cmds); done {
+			return m, tea.Batch(cmds...)
 		}
-		expectedLoadGeneration := m.sessionLoadGen + 1
-		for i := range m.editor.pendingSendQueue {
-			if m.editor.pendingSendQueue[i].generation == msg.generation {
-				m.editor.pendingSendQueue[i].sessionID = msg.session.ID
-				m.editor.pendingSendQueue[i].loadGeneration = expectedLoadGeneration
-			}
-		}
-		if m.forceCompactMode {
-			m.isCompact = true
-		}
-		m.session = &msg.session
-		m.setState(uiChat, m.focus)
-		// Request loading the chat for the new session, then dispatch
-		// sendMessage once the session is loaded.
-		m.editor.pendingSendQueue = append([]sendQueueItem{{
-			content:        msg.content,
-			attachments:    msg.attachments,
-			generation:     msg.generation,
-			sessionID:      msg.session.ID,
-			loadGeneration: expectedLoadGeneration,
-		}}, m.editor.pendingSendQueue...)
-		return m, m.requestSessionLoad(msg.session.ID)
-
-	case closeDialogMsg:
-		m.dialog.CloseFrontDialog()
-
-	case pubsub.Event[workspace.MCPEvent]:
-		switch msg.Payload.Type {
-		case workspace.MCPEventStateChanged:
-			return m, tea.Batch(
-				m.handleStateChanged(),
-				m.loadMCPrompts,
-			)
-		case workspace.MCPEventPromptsListChanged:
-			return m, handleMCPPromptsEvent(m.com.Workspace, msg.Payload.Name)
-		case workspace.MCPEventToolsListChanged:
-			return m, handleMCPToolsEvent(m.com.Workspace, msg.Payload.Name)
-		case workspace.MCPEventResourcesListChanged:
-			return m, handleMCPResourcesEvent(m.com.Workspace, msg.Payload.Name)
-		}
-	case pubsub.Event[permission.PermissionRequest]:
-		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if cmd := m.sendNotification(notification.Notification{
-			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
-			Message: notificationBodyPermission(msg.Payload.ToolName),
-		}); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case pubsub.Event[permission.PermissionNotification]:
-		m.handlePermissionNotification(msg.Payload)
-	case pubsub.Event[question.Request]:
-		m.openBatchFormDialog(msg.Payload)
-		if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if cmd := m.sendNotification(notification.Notification{
-			Title:   notificationTitle(m.com.Workspace.WorkingDir()),
-			Message: notificationBodyQuestions(len(msg.Payload.Questions)),
-		}); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case pubsub.Event[question.Notification]:
-		m.handleQuestionNotification(msg.Payload)
 	case providerConfiguredResult, modelSelectResult, agentModelInitializedMsg, modelSettingUpdatedMsg, transparentToggledMsg, themeSetMsg, compactModeToggledMsg, notificationStyleSetMsg, permissionResponseMsg, yoloToggledMsg, notificationSentMsg, importCopilotResult:
 		var done bool
 		if cmds, done = m.updateSettings(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case cancelTimerExpiredMsg:
-		m.isCanceling = false
 	case tea.TerminalVersionMsg:
-		termVersion := strings.ToLower(msg.Name)
-		// Only enable progress bar for the following terminals.
-		if !m.sendProgressBar {
-			m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "iterm2", "rio")
-		}
-		return m, nil
+		return m.updateTerminalVersion(msg)
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
 	case DelayedClickMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
@@ -929,52 +839,16 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmds, done = m.updateShell(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case util.InfoMsg:
-		if msg.Type == util.InfoTypeError {
-			slog.Error("Error reported", "error", msg.Msg)
+	case util.InfoMsg, util.ClearStatusMsg, pubsub.Event[proto.ServerNotice], workspace.UpdateAvailableMsg, workspace.ConnectionEvent, pubsub.Event[workspace.AgentNotification], cancelTimerExpiredMsg:
+		var done bool
+		if cmds, done = m.updateStatus(msg, cmds); done {
+			return m, tea.Batch(cmds...)
 		}
-		m.status.SetInfoMsg(msg)
-		ttl := msg.TTL
-		if ttl <= 0 {
-			ttl = DefaultStatusTTL
-		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
-	case pubsub.Event[proto.ServerNotice]:
-		// Server-originated notices (e.g. a client/server version
-		// mismatch) arrive as the transport-neutral proto.ServerNotice
-		// so backend code doesn't need to depend on internal/ui; convert
-		// to util.InfoMsg here at the boundary.
-		info := util.InfoMsg{
-			Type: serverNoticeLevelToInfoType(msg.Payload.Level),
-			Msg:  msg.Payload.Message,
-		}
-		m.status.SetInfoMsg(info)
-		ttl := info.TTL
-		if ttl <= 0 {
-			ttl = DefaultStatusTTL
-		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case pubsub.Event[proto.Thread], threadIndicatorLoadedMsg, threadsDockLoadedMsg, threadDockActivityLoadedMsg:
 		var done bool
 		if cmds, done = m.updateThreads(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case workspace.UpdateAvailableMsg:
-		text := fmt.Sprintf("Braid update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
-		if msg.IsDevelopment {
-			text = fmt.Sprintf("This is a development version of Braid. The latest version is v%s.", msg.LatestVersion)
-		}
-		ttl := 10 * time.Second
-		m.status.SetInfoMsg(util.InfoMsg{
-			Type: util.InfoTypeUpdate,
-			Msg:  text,
-			TTL:  ttl,
-		})
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
-	case workspace.ConnectionEvent:
-		cmds = append(cmds, m.handleConnectionEvent(msg)...)
-	case util.ClearStatusMsg:
-		m.status.ClearInfoMsg()
 	case completions.CompletionItemsLoadedMsg:
 		if m.editor.completionsOpen {
 			m.editor.completions.SetItems(msg.Files, msg.Resources)
@@ -1021,19 +895,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// should return all cmds anyway.
 	_ = m.editor.attachments.Update(msg)
 	return m, tea.Batch(cmds...)
-}
-
-// serverNoticeLevelToInfoType maps the transport-neutral
-// proto.ServerNoticeLevel to the UI's own status-line severity type.
-func serverNoticeLevelToInfoType(level proto.ServerNoticeLevel) util.InfoType {
-	switch level {
-	case proto.ServerNoticeLevelWarn:
-		return util.InfoTypeWarn
-	case proto.ServerNoticeLevelError:
-		return util.InfoTypeError
-	default:
-		return util.InfoTypeInfo
-	}
 }
 
 // handleConnectionEvent reports the health of the client-server link and,

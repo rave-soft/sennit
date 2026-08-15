@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"log/slog"
 	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/rave-soft/braid/internal/ui/anim"
 	"github.com/rave-soft/braid/internal/ui/common"
 )
@@ -132,4 +134,16 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 	}
 	return cmds, false
+}
+
+// updateTerminalVersion handles tea.TerminalVersionMsg. It always returns m,
+// nil, bypassing Update's common tail exactly as the original inline case
+// did.
+func (m *UI) updateTerminalVersion(msg tea.TerminalVersionMsg) (tea.Model, tea.Cmd) {
+	termVersion := strings.ToLower(msg.Name)
+	// Only enable progress bar for the following terminals.
+	if !m.sendProgressBar {
+		m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "iterm2", "rio")
+	}
+	return m, nil
 }

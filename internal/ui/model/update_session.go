@@ -113,6 +113,34 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		m.updateLayoutAndSize()
 
+	case createSessionMsg:
+		if !m.editor.pendingSendLoading || msg.generation != m.editor.pendingSendGen {
+			return cmds, false
+		}
+		expectedLoadGeneration := m.sessionLoadGen + 1
+		for i := range m.editor.pendingSendQueue {
+			if m.editor.pendingSendQueue[i].generation == msg.generation {
+				m.editor.pendingSendQueue[i].sessionID = msg.session.ID
+				m.editor.pendingSendQueue[i].loadGeneration = expectedLoadGeneration
+			}
+		}
+		if m.forceCompactMode {
+			m.isCompact = true
+		}
+		m.session = &msg.session
+		m.setState(uiChat, m.focus)
+		// Request loading the chat for the new session, then dispatch
+		// sendMessage once the session is loaded.
+		m.editor.pendingSendQueue = append([]sendQueueItem{{
+			content:        msg.content,
+			attachments:    msg.attachments,
+			generation:     msg.generation,
+			sessionID:      msg.session.ID,
+			loadGeneration: expectedLoadGeneration,
+		}}, m.editor.pendingSendQueue...)
+		cmds = append(cmds, m.requestSessionLoad(msg.session.ID))
+		return cmds, true
+
 	case requestSessionLoad:
 		cmds = append(cmds, m.beginSessionLoad(msg.sessionID))
 
