@@ -145,8 +145,8 @@ type Styles struct {
 		PromptQuestionIconBlurred lipgloss.Style
 
 		// Question choice styling.
-		QuestionSelected   lipgloss.Style // Active choice text (Dolly).
-		QuestionUnselected lipgloss.Style // Inactive header text (Sash).
+		QuestionSelected   lipgloss.Style // Active choice text (secondary).
+		QuestionUnselected lipgloss.Style // Inactive header text (subtle fg).
 		QuestionBody       lipgloss.Style // Description/body text.
 		QuestionConfirm    lipgloss.Style // Confirm tab title (primary).
 		QuestionNote       lipgloss.Style // Saved note text (dimmer than body).

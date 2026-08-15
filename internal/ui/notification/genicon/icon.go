@@ -16,16 +16,15 @@ import (
 // Size is the width and height, in pixels, of the generated icon.
 const Size = 256
 
-// Brand colors, matching styles.CharmtonePantera's primary/secondary/accent
-// tokens (charmtone.Charple/Dolly/Bok) and its dark base background
-// (charmtone.Pepper). Hardcoded here rather than imported: the styles
-// package pulls in the full TUI theme graph, which this small,
-// dependency-free generator has no business depending on.
+// Brand colors, matching styles.BraidDark's BrandPrimary/BrandSecondary/
+// BrandAccent tokens and its base background. Hardcoded here rather than
+// imported: the styles package pulls in the full TUI theme graph, which
+// this small, dependency-free generator has no business depending on.
 var (
-	colorBackground = color.RGBA{R: 0x20, G: 0x1F, B: 0x26, A: 0xFF} // Pepper
-	colorStrand1    = color.RGBA{R: 0x6B, G: 0x50, B: 0xFF, A: 0xFF} // Charple (primary)
-	colorStrand2    = color.RGBA{R: 0xFF, G: 0x60, B: 0xFF, A: 0xFF} // Dolly (secondary)
-	colorStrand3    = color.RGBA{R: 0x68, G: 0xFF, B: 0xD6, A: 0xFF} // Bok (accent)
+	colorBackground = color.RGBA{R: 0x15, G: 0x1A, B: 0x20, A: 0xFF} // BrandBgLeast
+	colorStrand1    = color.RGBA{R: 0x4A, G: 0x8F, B: 0xA8, A: 0xFF} // BrandPrimary
+	colorStrand2    = color.RGBA{R: 0x6E, G: 0xCB, B: 0xD6, A: 0xFF} // BrandSecondary
+	colorStrand3    = color.RGBA{R: 0x7F, G: 0xA8, B: 0xC9, A: 0xFF} // BrandKeyword
 )
 
 // strand is one diagonal band of the braid mark.
