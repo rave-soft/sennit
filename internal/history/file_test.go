@@ -298,6 +298,58 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	}
 	require.Equal(t, seenVersions, persistedVersions)
 	require.Equal(t, seenContents, persistedContents)
+
+	deleted, err := files.ListBySessionTree(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, deleted, n)
+	for _, file := range deleted {
+		require.NoError(t, files.Delete(t.Context(), file.ID))
+	}
+
+	const secondRound = 10
+	var wg2 sync.WaitGroup
+	start2 := make(chan struct{})
+	secondVersions := make([]int64, secondRound)
+	secondErrs := make([]error, secondRound)
+	for i := range secondRound {
+		wg2.Add(1)
+		go func(i int) {
+			defer wg2.Done()
+			<-start2
+			content := fmt.Sprintf("second-round-%d", i)
+			f, createErr := services[i].CreateVersion(t.Context(), sessionID, "concurrent.go", content)
+			secondErrs[i] = createErr
+			if createErr == nil {
+				secondVersions[i] = f.Version
+			}
+		}(i)
+	}
+	close(start2)
+	wg2.Wait()
+
+	for _, createErr := range secondErrs {
+		require.NoError(t, createErr)
+	}
+	secondSeen := make(map[int64]bool, secondRound)
+	for _, v := range secondVersions {
+		require.False(t, secondSeen[v], "duplicate second-round version %d", v)
+		secondSeen[v] = true
+	}
+	require.Len(t, secondSeen, secondRound)
+
+	resurrected, err := files.ListBySessionTree(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, resurrected, secondRound)
+	resurrectedVersions := make(map[int64]bool, secondRound)
+	resurrectedContents := make(map[string]bool, secondRound)
+	for _, file := range resurrected {
+		resurrectedVersions[file.Version] = true
+		resurrectedContents[file.Content] = true
+	}
+	require.Equal(t, secondSeen, resurrectedVersions)
+	for i := range secondRound {
+		require.True(t, resurrectedContents[fmt.Sprintf("second-round-%d", i)], "lost second-round content")
+	}
 }
 
 func TestListBySessionTreeSharesFilesAcrossAgents(t *testing.T) {

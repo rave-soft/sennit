@@ -72,9 +72,11 @@ func (d *YesNo) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.answer(d.respond(!d.selectedNo))
 		return true, nil
 	case key.Matches(msg, d.keyYes):
+		d.selectedNo = false
 		d.answer(d.respond(true))
 		return true, nil
 	case key.Matches(msg, d.keyNo):
+		d.selectedNo = true
 		d.answer(d.respond(false))
 		return true, nil
 	case key.Matches(msg, d.keyNote):
