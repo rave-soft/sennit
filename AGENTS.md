@@ -75,14 +75,12 @@ internal/
   - The following pre-existing canonical wire contracts are deliberate,
     narrow exceptions; do not extend them. `tools.*PermissionsParams` remains
     aliased because permission consumers assert its concrete Go type after a
-    JSON round trip. `config.Config`, `config.Scope`, and
-    `config.SelectedModel` remain in workspace and config request payloads
-    because their local DTO replacement requires conversions at the
-    workspace boundary. The existing LSP wire contracts use
-    `lsp.ServerState` in `LSPEvent` and alias `lsp.ClientInfo` to preserve their
-    established numeric state and error encoding. `lsp.ClientInfo` is not a
+    JSON round trip. `config.Scope` remains in `ConfigProviderKeyRequest`
+    because its local DTO replacement requires conversions at the
+    workspace boundary. `proto.LSPClientInfo` aliases `lsp.ClientInfo` to
+    preserve its established error encoding; `lsp.ClientInfo` is not a
     leaf type because it carries a runtime `Client` reference excluded from
-    JSON; replacing these types locally requires conversions across the LSP
+    JSON; replacing it locally requires conversions across the LSP
     and workspace boundary. New types from these packages must
     use DTOs unless a reviewed boundary change establishes an equally
     necessary wire contract.

@@ -7,22 +7,6 @@ package proto
 // the UI asserts on.
 import "github.com/rave-soft/braid/internal/agent/tools"
 
-// ToolResponseType represents the type of tool response.
-type ToolResponseType string
-
-const (
-	ToolResponseTypeText  ToolResponseType = "text"
-	ToolResponseTypeImage ToolResponseType = "image"
-)
-
-// ToolResponse represents a response from a tool.
-type ToolResponse struct {
-	Type     ToolResponseType `json:"type"`
-	Content  string           `json:"content"`
-	Metadata string           `json:"metadata,omitempty"`
-	IsError  bool             `json:"is_error"`
-}
-
 const BashToolName = "bash"
 
 // BashParams represents the parameters for the bash tool.
@@ -121,14 +105,6 @@ type GlobResponseMetadata struct {
 
 const GrepToolName = "grep"
 
-// GrepParams represents the parameters for the grep tool.
-type GrepParams struct {
-	Pattern     string `json:"pattern"`
-	Path        string `json:"path"`
-	Include     string `json:"include"`
-	LiteralText bool   `json:"literal_text"`
-}
-
 // GrepResponseMetadata represents the metadata for a grep tool response.
 type GrepResponseMetadata struct {
 	NumberOfMatches int  `json:"number_of_matches"`
@@ -146,10 +122,6 @@ type RipgrepParams struct {
 	CaseInsensitive bool   `json:"case_insensitive"`
 }
 
-// RipgrepResponseMetadata represents the metadata for a ripgrep tool
-// response; it matches the grep tool's metadata shape.
-type RipgrepResponseMetadata = GrepResponseMetadata
-
 const LSToolName = "ls"
 
 // LSParams represents the parameters for the ls tool.
@@ -160,14 +132,6 @@ type LSParams struct {
 
 // LSPermissionsParams represents the permission parameters for the ls tool.
 type LSPermissionsParams = tools.LSPermissionsParams
-
-// TreeNode represents a node in a directory tree.
-type TreeNode struct {
-	Name     string      `json:"name"`
-	Path     string      `json:"path"`
-	Type     string      `json:"type"`
-	Children []*TreeNode `json:"children,omitempty"`
-}
 
 // LSResponseMetadata represents the metadata for an ls tool response.
 type LSResponseMetadata struct {
@@ -249,10 +213,3 @@ type WriteParams struct {
 
 // WritePermissionsParams represents the permission parameters for the write tool.
 type WritePermissionsParams = tools.WritePermissionsParams
-
-// WriteResponseMetadata represents the metadata for a write tool response.
-type WriteResponseMetadata struct {
-	Diff      string `json:"diff"`
-	Additions int    `json:"additions"`
-	Removals  int    `json:"removals"`
-}

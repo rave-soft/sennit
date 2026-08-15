@@ -7,15 +7,6 @@ import (
 	"github.com/rave-soft/braid/internal/message"
 )
 
-// CreateMessageParams represents parameters for creating a message.
-type CreateMessageParams struct {
-	Role     MessageRole   `json:"role"`
-	Parts    []ContentPart `json:"parts"`
-	Model    string        `json:"model"`
-	Provider string        `json:"provider,omitempty"`
-	Origin   Origin        `json:"origin,omitempty"`
-}
-
 // Message represents a message in the proto layer.
 type Message struct {
 	ID        string        `json:"id"`
@@ -165,47 +156,6 @@ type Attachment struct {
 	FileName string `json:"file_name"`
 	MimeType string `json:"mime_type"`
 	Content  []byte `json:"content"`
-}
-
-// ToMessage converts a proto Attachment to a [message.Attachment].
-func (a Attachment) ToMessage() message.Attachment {
-	return message.Attachment{
-		FilePath: a.FilePath,
-		FileName: a.FileName,
-		MimeType: a.MimeType,
-		Content:  a.Content,
-	}
-}
-
-// AttachmentFromMessage converts a [message.Attachment] to a proto
-// Attachment.
-func AttachmentFromMessage(a message.Attachment) Attachment {
-	return Attachment{
-		FilePath: a.FilePath,
-		FileName: a.FileName,
-		MimeType: a.MimeType,
-		Content:  a.Content,
-	}
-}
-
-// AttachmentsToMessage converts a slice of proto Attachments to a slice
-// of [message.Attachment].
-func AttachmentsToMessage(as []Attachment) []message.Attachment {
-	out := make([]message.Attachment, len(as))
-	for i, a := range as {
-		out[i] = a.ToMessage()
-	}
-	return out
-}
-
-// AttachmentsFromMessage converts a slice of [message.Attachment] to a
-// slice of proto Attachments.
-func AttachmentsFromMessage(as []message.Attachment) []Attachment {
-	out := make([]Attachment, len(as))
-	for i, a := range as {
-		out[i] = AttachmentFromMessage(a)
-	}
-	return out
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

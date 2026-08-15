@@ -83,26 +83,10 @@ type CreateThreadRequest struct {
 	ParentSessionID string `json:"parent_session_id,omitempty"`
 }
 
-// SendThreadRequest is the request body for sending a follow-up message to
-// a thread's session.
-type SendThreadRequest struct {
-	Message string `json:"message"`
-}
-
 // RemoveThreadOptions controls thread removal.
 type RemoveThreadOptions struct {
 	Force        bool `json:"force,omitempty"`
 	DeleteBranch bool `json:"delete_branch,omitempty"`
-}
-
-// CancelDelegationRequest is the request body for cancelling a delegation
-// (task or thread) — both kinds' cancel routes take the same shape, since
-// the underlying mechanics are shared (see internal/thread.lifecycle.cancel,
-// under TaskManager.Cancel and Manager.Cancel).
-type CancelDelegationRequest struct {
-	// Reason is recorded as the delegation's terminal Error. Empty
-	// defaults to "cancelled" server-side.
-	Reason string `json:"reason,omitempty"`
 }
 
 // ThreadEventType identifies the kind of lifecycle change carried by a

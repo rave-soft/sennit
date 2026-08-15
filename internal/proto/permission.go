@@ -4,17 +4,6 @@ import (
 	"encoding/json"
 )
 
-// CreatePermissionRequest represents a request to create a permission.
-type CreatePermissionRequest struct {
-	SessionID   string `json:"session_id"`
-	ToolCallID  string `json:"tool_call_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description"`
-	Action      string `json:"action"`
-	Params      any    `json:"params"`
-	Path        string `json:"path"`
-}
-
 // PermissionNotification represents a notification about a permission change.
 type PermissionNotification struct {
 	ToolCallID string `json:"tool_call_id"`
@@ -50,29 +39,6 @@ type PermissionRequest struct {
 // its appropriate type based on the [PermissionRequest.ToolName].
 func (p *PermissionRequest) UnmarshalJSON(data []byte) error {
 	type Alias PermissionRequest
-	aux := &struct {
-		Params json.RawMessage `json:"params"`
-		*Alias
-	}{
-		Alias: (*Alias)(p),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	params, err := unmarshalToolParams(p.ToolName, aux.Params)
-	if err != nil {
-		return err
-	}
-	p.Params = params
-	return nil
-}
-
-// UnmarshalJSON implements the json.Unmarshaler interface. This is needed
-// because the Params field is of type any, so we need to unmarshal it into
-// its appropriate type based on the [CreatePermissionRequest.ToolName].
-func (p *CreatePermissionRequest) UnmarshalJSON(data []byte) error {
-	type Alias CreatePermissionRequest
 	aux := &struct {
 		Params json.RawMessage `json:"params"`
 		*Alias
