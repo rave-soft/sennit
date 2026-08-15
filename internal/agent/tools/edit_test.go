@@ -37,6 +37,10 @@ func (m *mockEditFileTracker) RecordPartialRead(ctx context.Context, sessionID, 
 	m.partial = m.partial.Add(filetracker.LineRange{Start: start, End: end})
 }
 
+func (m *mockEditFileTracker) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
+	m.partial = m.partial.Shift(start, end, newEnd-end).Add(filetracker.LineRange{Start: start, End: newEnd})
+}
+
 // ReadCoverage reports whatever coverage the test set up; the zero value
 // is "fully read", which is what every test predating range tracking
 // assumes.
@@ -71,7 +75,10 @@ func TestReplaceContentPreservesCRLFAndMetadata(t *testing.T) {
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
 	require.Equal(t, "alpha\r\nBETA\r\n", string(content))
-	require.Equal(t, []string{filePath}, tracker.reads)
+	// An edit records the span it touched, not a whole-file read — see
+	// recordEditedSpan.
+	require.Empty(t, tracker.reads)
+	require.True(t, tracker.ReadCoverage(t.Context(), "session", filePath).Covers(2, 2))
 
 	var meta EditResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
@@ -164,7 +171,7 @@ func TestReplaceContentRejectsEditOutsideReadWindow(t *testing.T) {
 		workingDir:  dir,
 	}
 
-	resp, err := replaceContent(edit, filePath, "line 190", "LINE 190", false, fantasy.ToolCall{ID: "call"})
+	resp, err := replaceContent(edit, filePath, "line 190\n", "LINE 190\n", false, fantasy.ToolCall{ID: "call"})
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "an edit outside the read window must be refused")
 	require.Contains(t, resp.Content, "lines 190-190")
@@ -200,11 +207,88 @@ func TestReplaceContentAllowsEditInsideReadWindow(t *testing.T) {
 		workingDir:  dir,
 	}
 
-	resp, err := replaceContent(edit, filePath, "line 190", "LINE 190", false, fantasy.ToolCall{ID: "call"})
+	resp, err := replaceContent(edit, filePath, "line 190\n", "LINE 190\n", false, fantasy.ToolCall{ID: "call"})
 	require.NoError(t, err)
 	require.False(t, resp.IsError, "content: %s", resp.Content)
 
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
 	require.Contains(t, string(content), "LINE 190\n")
+}
+
+// TestEditDoesNotWidenCoverageToWholeFile guards the trap in recording
+// coverage on write: an edit is not a read. Writing the file used to mark
+// it fully read, so reading fifty lines and editing one of them handed
+// back the whole file — the exact hole range tracking closes. Only the
+// edited span becomes covered.
+func TestEditDoesNotWidenCoverageToWholeFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "long.txt")
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	tracker := &mockEditFileTracker{lastRead: time.Now().Add(time.Second)}
+	tracker.RecordPartialRead(t.Context(), "session", filePath, 1, 50)
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: tracker,
+		workingDir:  dir,
+	}
+
+	resp, err := replaceContent(edit, filePath, "line 10\n", "LINE 10\n", false, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "content: %s", resp.Content)
+
+	coverage := tracker.ReadCoverage(t.Context(), "session", filePath)
+	require.False(t, coverage.Full, "an edit must not mark the whole file read")
+	require.True(t, coverage.Covers(1, 50), "what was read stays read")
+	require.False(t, coverage.Covers(190, 190), "what was never read stays unread")
+
+	// And the follow-up blind edit is still refused.
+	resp, err = replaceContent(edit, filePath, "line 190\n", "LINE 190\n", false, fantasy.ToolCall{ID: "call2"})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "has not been read in this session")
+}
+
+// TestEditShiftsCoverageBelowIt proves coverage follows the text it stands
+// for: an edit that adds lines near the top moves every range recorded
+// below it, so a later edit far down is judged against the right lines.
+func TestEditShiftsCoverageBelowIt(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "long.txt")
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+
+	tracker := &mockEditFileTracker{lastRead: time.Now().Add(time.Second)}
+	tracker.RecordPartialRead(t.Context(), "session", filePath, 1, 20)
+	tracker.RecordPartialRead(t.Context(), "session", filePath, 100, 120)
+	edit := editContext{
+		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
+		permissions: &mockPermissionService{},
+		files:       &mockHistoryService{},
+		filetracker: tracker,
+		workingDir:  dir,
+	}
+
+	// Replace one line with three: everything below moves down by two.
+	resp, err := replaceContent(edit, filePath, "line 10\n", "a\nb\nc\n", false, fantasy.ToolCall{ID: "call"})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "content: %s", resp.Content)
+
+	coverage := tracker.ReadCoverage(t.Context(), "session", filePath)
+	require.True(t, coverage.Covers(102, 122), "the lower window followed its text")
+	require.False(t, coverage.Covers(99, 99), "and did not stretch to cover new ground")
 }

@@ -140,9 +140,10 @@ func NewWriteTool(
 				}), nil
 			}
 
-			if err := writeFileWithHistory(ctx, files, filetracker, sessionID, filePath, oldContent, params.Content); err != nil {
+			if err := writeFileWithHistory(ctx, files, sessionID, filePath, oldContent, params.Content); err != nil {
 				return fantasy.ToolResponse{}, err
 			}
+			recordWholeFileRead(ctx, filetracker, sessionID, filePath)
 
 			notifyLSPs(ctx, lspManager, params.FilePath)
 

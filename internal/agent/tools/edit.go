@@ -156,9 +156,10 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		}), nil
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, "", content); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, "", content); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
+	recordWholeFileRead(edit.ctx, edit.filetracker, sessionID, filePath)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse("File created: "+filePath),
@@ -411,9 +412,10 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, oldContent, writeContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
+	recordEditedSpan(edit.ctx, edit.filetracker, sessionID, filePath, oldContent, newContent)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(withWhitespaceNote("Content deleted from file: "+filePath, whitespaceCorrected)),
@@ -482,9 +484,10 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, edit.filetracker, sessionID, filePath, oldContent, writeContent); err != nil {
+	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, oldContent, writeContent); err != nil {
 		return fantasy.ToolResponse{}, err
 	}
+	recordEditedSpan(edit.ctx, edit.filetracker, sessionID, filePath, oldContent, result)
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(withWhitespaceNote("Content replaced in file: "+filePath, whitespaceCorrected)),

@@ -92,6 +92,40 @@ func (c Coverage) Add(r LineRange) Coverage {
 	return Coverage{Ranges: out}
 }
 
+// Shift returns the coverage renumbered after an edit that replaced the
+// lines [start, end] with delta more (or, negative, fewer) of them.
+// Coverage is line numbers, so it has to move when the lines under it do:
+// without this, editing near the top of a file silently slides every
+// range recorded below the edit out of alignment with the text it stands
+// for.
+//
+// A range overlapping the edit keeps its start and absorbs the delta: the
+// session read that whole region and has just been shown the replacement,
+// so it is still covered. Ranges wholly below the edit move by delta;
+// ranges wholly above are untouched.
+func (c Coverage) Shift(start, end, delta int) Coverage {
+	if c.Full || delta == 0 || len(c.Ranges) == 0 {
+		return c
+	}
+	out := make([]LineRange, 0, len(c.Ranges))
+	for _, r := range c.Ranges {
+		switch {
+		case r.End < start:
+			// Wholly above the edit.
+		case r.Start > end:
+			r.Start += delta
+			r.End += delta
+		default:
+			r.End += delta
+		}
+		if r.End < r.Start {
+			r.End = r.Start
+		}
+		out = append(out, r)
+	}
+	return Coverage{Ranges: out}
+}
+
 // encodeRanges serializes coverage for storage: the empty string for a
 // full read (which is also what rows written before ranges existed hold,
 // so old sessions read back as fully covered rather than as unreadable).

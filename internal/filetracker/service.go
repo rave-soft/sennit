@@ -22,6 +22,14 @@ type Service interface {
 	// reads of the same file.
 	RecordPartialRead(ctx context.Context, sessionID, path string, start, end int)
 
+	// RecordEdit records an edit that replaced the file's lines
+	// [start, end] with newEnd-start+1 of them: the edited span becomes
+	// covered (the session was just shown that text), and everything
+	// recorded below the edit is renumbered to follow the lines it
+	// describes. It does not widen coverage to the whole file — an edit
+	// teaches the session about the region it touched, nothing more.
+	RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int)
+
 	// ReadCoverage returns which lines of the file this session has read.
 	ReadCoverage(ctx context.Context, sessionID, path string) Coverage
 
@@ -57,6 +65,14 @@ func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
 // whatever this session had already seen.
 func (s *service) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
 	s.record(ctx, sessionID, path, s.ReadCoverage(ctx, sessionID, path).Add(LineRange{Start: start, End: end}))
+}
+
+// RecordEdit records the span an edit replaced, renumbering the coverage
+// below it.
+func (s *service) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
+	coverage := s.ReadCoverage(ctx, sessionID, path)
+	coverage = coverage.Shift(start, end, newEnd-end).Add(LineRange{Start: start, End: newEnd})
+	s.record(ctx, sessionID, path, coverage)
 }
 
 // ReadCoverage returns which lines of the file this session has read.

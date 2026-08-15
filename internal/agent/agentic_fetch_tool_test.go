@@ -31,6 +31,8 @@ func (fakeFileTracker) ListReadFiles(context.Context, string) ([]string, error) 
 
 func (fakeFileTracker) RecordPartialRead(context.Context, string, string, int, int) {}
 
+func (fakeFileTracker) RecordEdit(context.Context, string, string, int, int, int) {}
+
 func (fakeFileTracker) ReadCoverage(context.Context, string, string) filetracker.Coverage {
 	return filetracker.FullCoverage
 }

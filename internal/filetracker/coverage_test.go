@@ -69,3 +69,25 @@ func TestRangesRoundTrip(t *testing.T) {
 
 	require.True(t, decodeRanges("not json").Full, "unparseable ranges fail open, not closed")
 }
+
+// TestCoverageShift proves coverage follows the text it describes when an
+// edit changes how many lines precede it. Without this, editing near the
+// top of a file leaves every range below it pointing at the wrong lines.
+func TestCoverageShift(t *testing.T) {
+	t.Parallel()
+
+	c := Coverage{}.Add(LineRange{Start: 1, End: 20}).Add(LineRange{Start: 100, End: 120})
+
+	// Line 10 became three lines: everything wholly below moves down two,
+	// the range containing the edit absorbs the delta.
+	shifted := c.Shift(10, 10, 2)
+	require.Equal(t, []LineRange{{Start: 1, End: 22}, {Start: 102, End: 122}}, shifted.Ranges)
+
+	// An edit below a range leaves it alone.
+	require.Equal(t, []LineRange{{Start: 1, End: 20}, {Start: 100, End: 125}},
+		c.Shift(110, 110, 5).Ranges)
+
+	// A full read stays full, and a no-op delta changes nothing.
+	require.True(t, FullCoverage.Shift(1, 1, 5).Full)
+	require.Equal(t, c.Ranges, c.Shift(10, 10, 0).Ranges)
+}

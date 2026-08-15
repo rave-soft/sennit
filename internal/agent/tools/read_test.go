@@ -255,6 +255,9 @@ func (m mockFileTracker) ListReadFiles(ctx context.Context, sessionID string) ([
 func (m mockFileTracker) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
 }
 
+func (m mockFileTracker) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
+}
+
 func (m mockFileTracker) ReadCoverage(ctx context.Context, sessionID, path string) filetracker.Coverage {
 	return filetracker.FullCoverage
 }
