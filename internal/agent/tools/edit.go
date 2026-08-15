@@ -239,17 +239,30 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 
 	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
 	if lastRead.IsZero() {
-		return "", "", false, fantasy.NewTextErrorResponse("you must read the file before editing it. Use the read tool first"), nil
+		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"cannot edit %s: it has not been read in this session.\n\n"+
+				"Edit replaces old_string with new_string literally, so old_string has to be "+
+				"copied from the file as it is on disk right now — not recalled or guessed. "+
+				"Reading it also records a baseline, which is how a later edit can tell that "+
+				"the file changed underneath it.\n\n"+
+				"Read %s, then retry this edit.",
+			filePath, filePath,
+		)), nil
 	}
 
 	modTime := fileInfo.ModTime().Truncate(time.Second)
 	if modTime.After(lastRead) {
-		return "", "", false, fantasy.NewTextErrorResponse(
-			fmt.Sprintf(
-				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
-				filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			),
-		), nil
+		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"cannot edit %s: it changed on disk after you read it "+
+				"(modified %s, last read %s).\n\n"+
+				"Something outside this edit — the user, a formatter, a build step, another "+
+				"agent — has written to the file, so old_string may no longer match what is "+
+				"there, and editing now would overwrite that change.\n\n"+
+				"Read %s again to see the current content, then redo the edit against it.",
+			filePath,
+			modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
+			filePath,
+		)), nil
 	}
 
 	content, err := os.ReadFile(filePath)
