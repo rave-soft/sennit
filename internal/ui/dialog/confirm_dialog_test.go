@@ -9,7 +9,7 @@ import (
 )
 
 func confirmTestCommon() *common.Common {
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	return &common.Common{Styles: &sty}
 }
 

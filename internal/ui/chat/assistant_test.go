@@ -23,7 +23,7 @@ import (
 func TestAssistantMessageItemExpandable(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	// Short thinking: under the tail-window cap, so the cycle is
 	// collapsed -> full -> collapsed (tail-window is skipped).
 	msg := thinkingMessage("m1", "step one\nstep two\nstep three", "")
@@ -52,7 +52,7 @@ func TestAssistantMessageItemExpandable(t *testing.T) {
 func TestAssistantMessageItemExpandableEmptyThinkingNoOp(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	msg := &message.Message{ID: "m1-empty", Role: message.Assistant}
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 
@@ -82,7 +82,7 @@ func TestAssistantMessageItemExpandableEmptyThinkingNoOp(t *testing.T) {
 func TestAssistantMessageItemTailWindowBoundary(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 
 	atCap := buildLines(maxExpandedThinkingTailLines)
 	overCap := buildLines(maxExpandedThinkingTailLines + 1)
@@ -121,7 +121,7 @@ func buildLines(n int) string {
 func TestAssistantMessageItemHandleMouseClick(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	msg := &message.Message{ID: "m2", Role: message.Assistant}
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 	item.thinkingBoxHeight = 5
@@ -144,7 +144,7 @@ func TestAssistantMessageItemHandleMouseClick(t *testing.T) {
 func TestAssistantMessageItemHoverMatchesClickTarget(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	item := NewAssistantMessageItem(&sty, &message.Message{ID: "m3", Role: message.Assistant}).(*AssistantMessageItem)
 	item.thinkingBoxHeight = 3
 

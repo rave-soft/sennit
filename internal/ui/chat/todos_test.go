@@ -23,7 +23,7 @@ import (
 func TestTodosRenderTool_UpdateWithNoDeltaStillShowsBody(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 
 	todos := []session.Todo{
 		{Content: "write the plan", Status: session.TodoStatusCompleted},

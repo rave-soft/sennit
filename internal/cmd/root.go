@@ -17,7 +17,6 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/braid/internal/app"
@@ -33,6 +32,7 @@ import (
 	"github.com/rave-soft/braid/internal/session"
 	"github.com/rave-soft/braid/internal/ui/common"
 	ui "github.com/rave-soft/braid/internal/ui/model"
+	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/rave-soft/braid/internal/version"
 	"github.com/rave-soft/braid/internal/workspace"
 	"github.com/spf13/cobra"
@@ -142,7 +142,7 @@ braid --continue
 	},
 }
 
-var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
+var heartbit = lipgloss.NewStyle().Foreground(styles.BrandAccent).SetString(`
     ▄▄▄▄▄▄▄▄    ▄▄▄▄▄▄▄▄
   ███████████  ███████████
 ████████████████████████████

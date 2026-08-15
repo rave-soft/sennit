@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/braid/internal/ui/styles"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +58,7 @@ func collectDirs(cmd *cobra.Command) []string {
 }
 
 func printDirs(dirs []string) {
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(charmtone.Charple)
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.BrandPrimary)
 
 	labels := make([]string, len(dirs))
 	longest := 0
@@ -76,7 +76,7 @@ func printDirs(dirs []string) {
 			" " + d)
 	}
 
-	_, _ = lipgloss.Println(lipgloss.NewStyle().Foreground(charmtone.Squid).Render("Configs merge from top to bottom")) // terminal output
+	_, _ = lipgloss.Println(lipgloss.NewStyle().Foreground(styles.BrandFgMoreSubtle).Render("Configs merge from top to bottom")) // terminal output
 }
 
 func dirLabel(i int) string {

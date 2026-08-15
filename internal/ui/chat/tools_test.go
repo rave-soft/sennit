@@ -92,7 +92,7 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	// verify that dispatch actually happens, not just that the map omits
 	// them (which noRenderer-listed tools also do, for the opposite
 	// reason).
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	item := NewToolMessageItem(&sty, "msg", message.ToolCall{ID: "tc-agent", Name: tools.AgentToolName, Input: "{}"}, nil, false, nil)
 	require.IsType(t, &AgentToolMessageItem{}, item,
 		"the built-in agent tool must dispatch to AgentToolMessageItem, not fall back to the generic renderer")
@@ -124,7 +124,7 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 func TestNewToolMessageItem_RendersALegacyToolName(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
 		ID:       "tc-1",
 		Name:     tools.LegacyReadToolName,
@@ -141,7 +141,7 @@ func TestNewToolMessageItem_RendersALegacyToolName(t *testing.T) {
 func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	for _, test := range []struct {
 		name      string
 		toolName  string
@@ -175,7 +175,7 @@ func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {
 func TestNewToolMessageItem_CustomAgentDispatch(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	cfg := &config.Config{
 		Agents: map[string]config.Agent{
 			config.AgentCoder: {ID: config.AgentCoder},
@@ -246,7 +246,7 @@ func TestOneLine(t *testing.T) {
 func TestToolParamList_MultilineMainParamStaysOneLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	out := toolParamList(&sty, []string{"line one\nline two\nline three"}, 80)
 	require.NotContains(t, out, "\n")
 	require.Contains(t, out, "line one line two line three")
@@ -259,7 +259,7 @@ func TestToolParamList_MultilineMainParamStaysOneLine(t *testing.T) {
 func TestAppendResultSummary_NeverPrintsJunkPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
+	sty := styles.BraidDark()
 	header := "header"
 
 	for _, junk := range []string{"", "None", "none", "  NULL  ", "n/a", "N/A", "nil", "-", "undefined"} {
