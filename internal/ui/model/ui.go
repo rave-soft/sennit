@@ -1,7 +1,6 @@
 package model
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -974,20 +973,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch msg := msg.(type) {
-	case tea.EnvMsg:
-		// Is this Windows Terminal?
-		if !m.sendProgressBar {
-			m.sendProgressBar = slices.Contains(msg, "WT_SESSION")
+	case tea.EnvMsg, tea.ModeReportMsg, uv.UnknownOscEvent, tea.FocusMsg, tea.BlurMsg, tea.WindowSizeMsg, tea.KeyboardEnhancementsMsg, anim.StepMsg, scrollbarHideMsg, chatWarmMsg, sidebarScrollbarHideMsg, spinner.TickMsg, uv.KittyGraphicsEvent:
+		var done bool
+		if cmds, done = m.updateSystem(msg, cmds); done {
+			return m, tea.Batch(cmds...)
 		}
-		cmds = append(cmds, common.QueryCmd(uv.Environ(msg)))
-	case tea.ModeReportMsg:
-		m.updateNotificationBackend()
-	case uv.UnknownOscEvent:
-		m.updateNotificationBackend()
-	case tea.FocusMsg:
-		m.notifyWindowFocused = true
-	case tea.BlurMsg:
-		m.notifyWindowFocused = false
 	case pubsub.Event[workspace.AgentNotification]:
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1135,32 +1125,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sendProgressBar = xstrings.ContainsAnyOf(termVersion, "ghostty", "iterm2", "rio")
 		}
 		return m, nil
-	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		// Suppress the chat's full-height scan during the resize so a drag
-		// only reflows visible items; it settles (and recomputes) shortly
-		// after the last resize event.
-		if m.state == uiChat {
-			cmds = append(cmds, m.chat.BeginResize())
-		}
-		m.updateLayoutAndSize()
-		if m.state == uiChat && m.chat.Follow() {
-			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-	case tea.KeyboardEnhancementsMsg:
-		m.keyenh = msg
-		if msg.SupportsKeyDisambiguation() {
-			if slices.Contains(m.keyMap.Models.Keys(), "ctrl+m") {
-				m.keyMap.Models.SetHelp("ctrl+m", "models")
-			} else if slices.Contains(m.keyMap.Models.Keys(), "super+m") {
-				m.keyMap.Models.SetHelp("super+m", "models")
-			}
-			if slices.Contains(m.keyMap.Editor.Newline.Keys(), "shift+enter") {
-				m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
-			}
-		}
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
 	case DelayedClickMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
@@ -1168,60 +1132,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmds, done = m.updateMouse(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case anim.StepMsg:
-		if m.state == uiChat {
-			if cmd := m.chat.Animate(msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			if m.chat.Follow() {
-				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			}
-		}
-	case scrollbarHideMsg:
-		if m.state == uiChat {
-			m.chat.HideScrollbar(msg.seq)
-		}
-	case chatWarmMsg:
-		// A resize has settled; warm the message cache one batch at a time
-		// so the scrollbar recompute never blocks the UI thread.
-		if m.state == uiChat {
-			cmd, done := m.chat.WarmStep(msg.seq)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			} else if done {
-				// Heights are cached now, so the final layout pass (scrollbar
-				// reservation) is cheap.
-				m.updateLayoutAndSize()
-			}
-		}
-	case sidebarScrollbarHideMsg:
-		if msg.seq == m.sidebar.scrollbarSeq {
-			m.sidebar.hideScrollbar()
-		}
-	case spinner.TickMsg:
-		if m.dialog.HasDialogs() {
-			// route to dialog
-			if cmd := m.handleDialogMsg(msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-		// Stop the tick loop when nothing live is left (or the chat screen
-		// isn't showing); syncPanelSpinner re-arms it on the next relevant
-		// event. Letting the loop die and be restarted beats ticking
-		// forever behind an idle screen.
-		if m.panelIsSpinning && (m.state != uiChat || !m.panelSpinnerWanted()) {
-			m.panelIsSpinning = false
-		}
-		if m.panelIsSpinning {
-			var cmd tea.Cmd
-			m.panelSpinner, cmd = m.panelSpinner.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-
 	case tea.KeyPressMsg:
 		if cmd := m.handleKeyPressMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1238,69 +1148,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handlePasteMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case openEditorMsg:
-		prevHeight := m.editor.textarea.Height()
-		m.editor.textarea.SetValue(msg.Text)
-		m.editor.textarea.MoveToEnd()
-		m.syncBangModeFromTextarea()
-		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
-	case shellStreamMsg:
-		if item := m.chat.MessageItem(msg.PendingID); item != nil {
-			if shellItem, ok := item.(*chat.ShellItem); ok {
-				shellItem.AppendOutput(msg.Chunk)
-				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			}
-		}
-		// Continue draining the stream channel.
-		if msg.streamCh != nil {
-			ch := msg.streamCh
-			pid := msg.PendingID
-			cmds = append(cmds, func() tea.Msg {
-				chunk, ok := <-ch
-				if !ok {
-					return nil
-				}
-				return shellStreamMsg{PendingID: pid, Chunk: chunk, streamCh: ch}
-			})
-		}
-	case shellResultMsg:
-		if (m.sessionLoadExpectedID != "" && msg.sessionID != m.sessionLoadExpectedID) || msg.generation != m.sessionLoadGen {
-			break
-		}
-		m.editor.pendingSendActive = false
-		// Clear the bang cancel func — command is done.
-		if m.editor.bangCancel != nil {
-			m.editor.bangCancel()
-			m.editor.bangCancel = nil
-		}
-		// Complete the pending shell item if it exists, otherwise create a new one.
-		completed := false
-		if msg.PendingID != "" {
-			if item := m.chat.MessageItem(msg.PendingID); item != nil {
-				if shellItem, ok := item.(*chat.ShellItem); ok {
-					shellItem.Complete(msg.Output, msg.ExitCode)
-					if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-					completed = true
-				}
-			}
-		}
-		if msg.Err != nil {
-			cmds = append(cmds, util.ReportError(fmt.Errorf("shell command failed: %w", msg.Err)))
-		}
-		if !completed {
-			item := chat.NewShellItem(m.com.Styles, msg.Command, msg.Output, msg.ExitCode)
-			m.chat.AppendMessages(item)
-			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-		cmds = append(cmds, m.loadPromptHistory())
-		if len(m.editor.pendingSendQueue) > 0 {
-			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
+	case openEditorMsg, shellStreamMsg, shellResultMsg:
+		var done bool
+		if cmds, done = m.updateShell(msg, cmds); done {
+			return m, tea.Batch(cmds...)
 		}
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
@@ -1377,12 +1228,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case completions.CompletionItemsLoadedMsg:
 		if m.editor.completionsOpen {
 			m.editor.completions.SetItems(msg.Files, msg.Resources)
-		}
-	case uv.KittyGraphicsEvent:
-		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
-			slog.Warn("Unexpected Kitty graphics response",
-				"response", string(msg.Payload),
-				"options", msg.Options)
 		}
 	case dialog.ActionMCPAuthStarted:
 		cmds = append(cmds, m.authenticateMCP(msg.Ctx, msg.Name))
