@@ -1041,6 +1041,69 @@ func TestBeginAuth_PanicClosesPublishedHandlerOnce(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestAuthenticateMCP_NoTokenStartsInteractiveFlow pins the primary
+// interactive scenario: an OAuth server with no cached token must enter
+// StateStarting and create a live OAuth handler (which arms the browser
+// callback server), not short-circuit to StateNeedsAuth without one.
+// AuthenticateMCP is user-initiated, so it must not defer to the UI the
+// way startup does; the handler is created and published.
+func TestAuthenticateMCP_NoTokenStartsInteractiveFlow(t *testing.T) {
+	const name = "auth-no-token"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
+	// A cancelled context makes createSession fail fast without network,
+	// exercising the full AuthenticateMCP → connectAndRegister → setAuthTerminal
+	// path. The handler is created and published before the connect attempt.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	err := r.AuthenticateMCP(ctx, cfg, name)
+	require.ErrorIs(t, err, context.Canceled)
+	// A cancelled interactive flow settles back in StateNeedsAuth, not
+	// StateError: the user can re-trigger the flow.
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateNeedsAuth, info.State)
+	// The handler was detached from the publication by the attempt's defer.
+	_, ok = r.authURLs.Get(name)
+	require.False(t, ok)
+}
+
+// TestAuthenticateMCP_CancelReturnsCancelledAndSettlesNeedsAuth pins that
+// a cancelled interactive OAuth flow returns context.Canceled to the caller
+// (AuthenticateMCP propagates it) while still settling the server in
+// StateNeedsAuth so the user can re-trigger.
+func TestAuthenticateMCP_CancelReturnsCancelledAndSettlesNeedsAuth(t *testing.T) {
+	const name = "auth-cancel"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	err := r.AuthenticateMCP(ctx, cfg, name)
+	require.ErrorIs(t, err, context.Canceled)
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateNeedsAuth, info.State)
+}
+
+// TestInitClient_NonOAuthCancellationIsError pins the startup semantics: a
+// cancelled non-OAuth connect must surface context.Canceled to the caller
+// and settle in StateError, NOT StateNeedsAuth (which is reserved for
+// OAuth). Guards against a blanket Canceled->NeedsAuth rewrite of initClient.
+func TestInitClient_NonOAuthCancellationIsError(t *testing.T) {
+	const name = "non-oauth-cancel"
+	r := NewRegistry()
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp"}}})
+	owner, err := r.beginAttempt(name)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	err = r.initClient(ctx, cfg, name, cfg.Config().MCP[name], owner, cfg.Resolver())
+	require.ErrorIs(t, err, context.Canceled)
+	info, ok := r.states.Get(name)
+	require.True(t, ok)
+	require.Equal(t, StateError, info.State)
+}
+
 func TestPublishSessionFailureCleansDetachedAuthOnce(t *testing.T) {
 	const name = "post-connect-failure"
 	r := NewRegistry()
