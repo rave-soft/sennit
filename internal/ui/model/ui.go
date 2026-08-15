@@ -71,6 +71,17 @@ type transparentToggledMsg struct {
 	generation uint64
 }
 
+// themeSetMsg carries the result of persisting a theme selection. The
+// palette itself is swapped synchronously when the user picks it, so this
+// message only reports whether the choice survived to disk; Previous is the
+// palette to fall back to if it did not.
+type themeSetMsg struct {
+	Err        error
+	ID         string
+	Previous   string
+	generation uint64
+}
+
 // compactModeToggledMsg carries the result of a compact-mode config mutation.
 type compactModeToggledMsg struct {
 	Err        error
@@ -299,6 +310,7 @@ type UI struct {
 	notificationLoading      bool
 	transparentLoading       bool
 	transparentGeneration    uint64
+	themeGeneration          uint64
 	compactModeLoading       bool
 	yoloLoading              bool
 	permissionLoading        bool
@@ -1368,6 +1380,19 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.isTransparent = msg.Enabled
 		m.dialog.CloseDialog(dialog.CommandsID)
+
+	case themeSetMsg:
+		if msg.generation != m.themeGeneration {
+			break
+		}
+		if msg.Err != nil {
+			// The palette was swapped optimistically; put it back so what
+			// is on screen matches what is on disk.
+			m.setTheme(msg.Previous)
+			cmds = append(cmds, util.ReportError(msg.Err))
+			break
+		}
+		cmds = append(cmds, util.ReportInfo("Theme set to: "+styles.PaletteByID(msg.ID).Name))
 
 	case compactModeToggledMsg:
 		if msg.generation != m.compactModeGeneration {
@@ -3051,6 +3076,12 @@ func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
 		if cmd := m.handleSelectModel(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionSelectTheme:
+		if cmd := m.applyTheme(msg.ID); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		m.dialog.CloseDialog(dialog.ThemeID)
+		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectReasoningEffort:
 		if m.modelOperationLoading {
 			cmds = append(cmds, util.ReportWarn("Model settings are already being updated"))
@@ -5086,6 +5117,50 @@ func (m *UI) editorAttachmentsRowOffset() int {
 	return 0
 }
 
+// applyTheme switches the live palette and persists the choice. The swap is
+// synchronous so the next frame is already in the new colors; the write to
+// disk happens off the Update goroutine and reverts the swap if it fails,
+// rather than leaving the UI in a palette the config does not agree with.
+func (m *UI) applyTheme(id string) tea.Cmd {
+	if !styles.IsKnownPaletteID(id) {
+		return util.ReportError(fmt.Errorf("unknown theme %q", id))
+	}
+	previous := styles.PaletteByID(m.com.Config().ThemeID()).ID
+	if id == previous {
+		return nil
+	}
+
+	m.setTheme(id)
+	m.themeGeneration++
+	generation := m.themeGeneration
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		return themeSetMsg{
+			Err:        ws.SetConfigField(config.ScopeGlobal, "options.tui.theme", id),
+			ID:         id,
+			Previous:   previous,
+			generation: generation,
+		}
+	}
+}
+
+// setTheme replaces the styles every component shares and drops the render
+// caches that hold strings colored by the old palette. Most of the UI reads
+// com.Styles at draw time and needs nothing; only the caches and the few
+// widgets that copied a style at construction do.
+func (m *UI) setTheme(id string) {
+	*m.com.Styles = styles.Theme(id)
+
+	if m.status != nil {
+		m.status.Restyle()
+	}
+	if m.chat != nil {
+		m.chat.InvalidateRenderCaches()
+	}
+	m.cacheSidebarLogo(m.layout.sidebar.Dx())
+	m.updateLayoutAndSize()
+}
+
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
 	m.sidebar.logo = renderLogo(m.com.Styles, true, width)
@@ -5420,6 +5495,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ThemeID:
+		if cmd := m.openThemeDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ProvidersID:
 		if cmd := m.openProvidersDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -5550,6 +5629,23 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(reasoningDialog)
+	return nil
+}
+
+// openThemeDialog opens the color theme picker — see the "select_theme"
+// entry in dialog/commands.go ("/theme").
+func (m *UI) openThemeDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ThemeID) {
+		m.dialog.BringToFront(dialog.ThemeID)
+		return nil
+	}
+
+	themeDialog, err := dialog.NewTheme(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(themeDialog)
 	return nil
 }
 

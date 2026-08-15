@@ -35,6 +35,13 @@ func NewStatus(com *common.Common, km help.KeyMap) *Status {
 	return s
 }
 
+// Restyle re-reads the styles the help model copied at construction. Every
+// other style the status bar uses is read at draw time, so this is all a
+// theme switch has to refresh here.
+func (s *Status) Restyle() {
+	s.help.Styles = s.com.Styles.Help
+}
+
 // SetInfoMsg sets the status info message.
 func (s *Status) SetInfoMsg(msg util.InfoMsg) {
 	s.msg = msg

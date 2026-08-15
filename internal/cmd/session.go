@@ -443,11 +443,11 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 }
 
 func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {
-	var providerID string
+	var themeID string
 	if cfg != nil {
-		providerID = cfg.Config().Model.Provider
+		themeID = cfg.Config().ThemeID()
 	}
-	styles := styles.ThemeForProvider(providerID)
+	styles := styles.Theme(themeID)
 	toolResults := chat.BuildToolResultMap(msgs)
 
 	width := sessionOutputWidth

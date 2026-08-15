@@ -81,6 +81,20 @@ type quickStyleOpts struct {
 	ansiBrightMagenta color.Color
 	ansiBrightCyan    color.Color
 	ansiBrightWhite   color.Color
+
+	// Syntax highlighting for markdown code blocks (chroma) and the few
+	// markdown elements — links, images — that are colored like code.
+	syntaxKeyword   color.Color
+	syntaxType      color.Color
+	syntaxBuiltin   color.Color
+	syntaxTag       color.Color
+	syntaxAttribute color.Color
+	syntaxOperator  color.Color
+	syntaxClass     color.Color
+	syntaxString    color.Color
+	syntaxDecorator color.Color
+	syntaxPreproc   color.Color
+	syntaxLink      color.Color
 }
 
 // quickStyle builds the default Styles (that is, the default theme, Charmtone
@@ -241,7 +255,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Unticked:       "[ ] ",
 		},
 		Link: ansi.StylePrimitive{
-			Color:     hex(SyntaxLink),
+			Color:     hex(o.syntaxLink),
 			Underline: new(true),
 		},
 		LinkText: ansi.StylePrimitive{
@@ -249,7 +263,7 @@ func quickStyle(o quickStyleOpts) Styles {
 			Bold:  new(true),
 		},
 		Image: ansi.StylePrimitive{
-			Color:     hex(SyntaxBuiltin),
+			Color:     hex(o.syntaxBuiltin),
 			Underline: new(true),
 		},
 		ImageText: ansi.StylePrimitive{
@@ -282,22 +296,22 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgMostSubtle),
 				},
 				CommentPreproc: ansi.StylePrimitive{
-					Color: hex(SyntaxPreproc),
+					Color: hex(o.syntaxPreproc),
 				},
 				Keyword: ansi.StylePrimitive{
 					Color: hex(o.info),
 				},
 				KeywordReserved: ansi.StylePrimitive{
-					Color: hex(SyntaxKeyword),
+					Color: hex(o.syntaxKeyword),
 				},
 				KeywordNamespace: ansi.StylePrimitive{
-					Color: hex(SyntaxKeyword),
+					Color: hex(o.syntaxKeyword),
 				},
 				KeywordType: ansi.StylePrimitive{
-					Color: hex(SyntaxType),
+					Color: hex(o.syntaxType),
 				},
 				Operator: ansi.StylePrimitive{
-					Color: hex(SyntaxOperator),
+					Color: hex(o.syntaxOperator),
 				},
 				Punctuation: ansi.StylePrimitive{
 					Color: hex(o.warningSubtle),
@@ -306,21 +320,21 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.fgSubtle),
 				},
 				NameBuiltin: ansi.StylePrimitive{
-					Color: hex(SyntaxBuiltin),
+					Color: hex(o.syntaxBuiltin),
 				},
 				NameTag: ansi.StylePrimitive{
-					Color: hex(SyntaxTag),
+					Color: hex(o.syntaxTag),
 				},
 				NameAttribute: ansi.StylePrimitive{
-					Color: hex(SyntaxAttribute),
+					Color: hex(o.syntaxAttribute),
 				},
 				NameClass: ansi.StylePrimitive{
-					Color:     hex(SyntaxClass),
+					Color:     hex(o.syntaxClass),
 					Underline: new(true),
 					Bold:      new(true),
 				},
 				NameDecorator: ansi.StylePrimitive{
-					Color: hex(SyntaxDecorator),
+					Color: hex(o.syntaxDecorator),
 				},
 				NameFunction: ansi.StylePrimitive{
 					Color: hex(o.successMostSubtle),
@@ -329,7 +343,7 @@ func quickStyle(o quickStyleOpts) Styles {
 					Color: hex(o.success),
 				},
 				LiteralString: ansi.StylePrimitive{
-					Color: hex(SyntaxString),
+					Color: hex(o.syntaxString),
 				},
 				LiteralStringEscape: ansi.StylePrimitive{
 					Color: hex(o.successMoreSubtle),

@@ -196,7 +196,7 @@ func runAgent(
 
 	var spinner *format.Spinner
 	if !hideSpinner && stderrTTY {
-		t := styles.ThemeForProvider(ws.Config().Model.Provider)
+		t := styles.Theme(ws.Config().ThemeID())
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,

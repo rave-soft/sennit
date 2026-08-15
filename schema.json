@@ -817,6 +817,17 @@
           ],
           "description": "Diff mode for the TUI interface"
         },
+        "theme": {
+          "type": "string",
+          "enum": [
+            "steel-teal",
+            "graphite-amber",
+            "ink-sage",
+            "mono-steel"
+          ],
+          "description": "Color palette for the TUI, chosen with the /theme command. An unknown value falls back to the default theme",
+          "default": "steel-teal"
+        },
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"

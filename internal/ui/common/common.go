@@ -51,11 +51,11 @@ func (c *Common) Context() context.Context {
 	return c.Ctx
 }
 
-// DefaultCommon returns the default common UI configurations. When the
-// workspace has a model selected, the theme is chosen based on its
-// provider; otherwise the default theme is used.
+// DefaultCommon returns the default common UI configurations, styled with
+// the theme the workspace's config selects (see the "/theme" command). An
+// unset or unknown theme resolves to Braid's default palette.
 func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
-	s := styles.ThemeForProvider(modelProviderID(ws))
+	s := styles.Theme(ThemeID(ws))
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
@@ -63,17 +63,14 @@ func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
 	}
 }
 
-// modelProviderID returns the provider ID of the currently selected model,
-// or the empty string if none is set or the workspace is nil.
-func modelProviderID(ws workspace.ConfigAccessor) string {
+// ThemeID returns the theme configured for the workspace, or the empty
+// string when there is no workspace or no config yet — both of which
+// styles.Theme maps onto the default palette.
+func ThemeID(ws workspace.ConfigAccessor) string {
 	if ws == nil {
 		return ""
 	}
-	cfg := ws.Config()
-	if cfg == nil {
-		return ""
-	}
-	return cfg.Model.Provider
+	return ws.Config().ThemeID()
 }
 
 // CenterRect returns a new [Rectangle] centered within the given area with the

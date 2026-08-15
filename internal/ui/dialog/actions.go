@@ -65,6 +65,11 @@ type (
 	ActionSelectReasoningEffort struct {
 		Effort string
 	}
+	// ActionSelectTheme is a message indicating a color palette has been
+	// selected in the theme dialog. ID is a styles palette ID.
+	ActionSelectTheme struct {
+		ID string
+	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest
 		Action     PermissionAction

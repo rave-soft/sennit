@@ -3,7 +3,7 @@
 //
 // The call sites are kept as no-ops rather than deleted so that adding a
 // self-hosted sink later is a change in one file instead of a hunt through
-// nine, and so the fork stays easy to diff against upstream.
+// nine.
 package event
 
 // send is where an event would be recorded. It does nothing.

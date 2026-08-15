@@ -284,8 +284,12 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
+	// Theme names the color palette the TUI renders in, as chosen by the
+	// "/theme" command. The palettes themselves live in internal/ui/styles;
+	// config deliberately does not know their IDs, so an unknown or stale
+	// value here falls back to Braid's default scheme rather than failing
+	// to load (see styles.PaletteByID).
+	Theme string `json:"theme,omitempty" jsonschema:"description=Color palette for the TUI\\, chosen with the /theme command. An unknown value falls back to the default theme,enum=steel-teal,enum=graphite-amber,enum=ink-sage,enum=mono-steel,default=steel-teal"`
 
 	Completions Completions         `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool               `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
@@ -851,6 +855,17 @@ func (c *Config) cloneForWrite() *Config {
 		nc.Options = &opts
 	}
 	return &nc
+}
+
+// ThemeID returns the configured TUI theme, or the empty string when none is
+// set. Callers resolve it through styles.PaletteByID, which maps both the
+// empty string and an unknown ID onto the default palette, so this never has
+// to guess a name config does not own.
+func (c *Config) ThemeID() string {
+	if c == nil || c.Options == nil || c.Options.TUI == nil {
+		return ""
+	}
+	return c.Options.TUI.Theme
 }
 
 // ensureTUI returns c.Options.TUI, allocating Options and TUI as needed so

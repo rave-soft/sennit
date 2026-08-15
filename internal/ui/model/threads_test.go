@@ -18,7 +18,7 @@ import (
 )
 
 func testStyles() *styles.Styles {
-	s := styles.ThemeForProvider("")
+	s := styles.BraidDark()
 	return &s
 }
 
