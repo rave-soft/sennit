@@ -1,7 +1,10 @@
 package chat
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/rave-soft/braid/internal/config"
 	"github.com/rave-soft/braid/internal/message"
@@ -270,4 +273,70 @@ func TestAppendResultSummary_NeverPrintsJunkPlaceholder(t *testing.T) {
 	out := appendResultSummary(&sty, header, "2.1s")
 	require.NotEqual(t, header, out, "a real summary must still be appended")
 	require.Contains(t, out, "2.1s")
+}
+
+// TestToolParamList_LongPathKeepsFileName is the point of path-aware
+// truncation: a header narrow enough to cut the path must lose the head of
+// it, not the file name. "…/tools_render.go" says which file; the old
+// right truncation produced "internal/ui/chat/tool…", which says none.
+func TestToolParamList_LongPathKeepsFileName(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.BraidDark()
+	path := "internal/ui/chat/very/deeply/nested/package/tools_render.go"
+
+	out := ansi.Strip(toolParamList(&sty, []string{path}, 30))
+	require.LessOrEqual(t, ansi.StringWidth(out), 30)
+	require.Contains(t, out, "tools_render.go")
+	require.True(t, strings.HasPrefix(out, "…"), "the head of the path is what gets elided: %q", out)
+}
+
+// TestToolParamList_LongPathWithParamsKeepsFileName covers the same rule
+// when key=value pairs share the line: the main param is fitted to its own
+// budget, so the pairs cannot push the file name off the end.
+func TestToolParamList_LongPathWithParamsKeepsFileName(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.BraidDark()
+	path := "internal/ui/chat/very/deeply/nested/package/tools_render.go"
+
+	out := ansi.Strip(toolParamList(&sty, []string{path, "edits", "3"}, 60))
+	require.LessOrEqual(t, ansi.StringWidth(out), 60)
+	require.Contains(t, out, "tools_render.go")
+	require.Contains(t, out, "edits=3")
+}
+
+// TestToolParamList_NonPathTruncatesOnTheRight proves the rule is scoped to
+// paths: a bash command carries its meaning in the head, so it keeps the
+// ordinary right truncation.
+func TestToolParamList_NonPathTruncatesOnTheRight(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.BraidDark()
+	cmd := "go test ./internal/ui/chat/ -run TestSomethingWithAVeryLongName -timeout 120s"
+
+	out := ansi.Strip(toolParamList(&sty, []string{cmd}, 30))
+	require.LessOrEqual(t, ansi.StringWidth(out), 30)
+	require.True(t, strings.HasPrefix(out, "go test "), "got %q", out)
+	require.True(t, strings.HasSuffix(out, "…"), "got %q", out)
+}
+
+// TestTruncateToolParam_FileNameAloneTooLong covers the last resort: when
+// even the file name does not fit, it is cut on the right rather than
+// leaving a bare ellipsis.
+func TestTruncateToolParam_FileNameAloneTooLong(t *testing.T) {
+	t.Parallel()
+
+	out := truncateToolParam("internal/ui/chat/a-very-long-file-name-indeed.go", 12)
+	require.LessOrEqual(t, ansi.StringWidth(out), 12)
+	require.True(t, strings.HasPrefix(out, "a-very"), "got %q", out)
+}
+
+// TestTruncateToolParam_FitsUnchanged proves a path that already fits is
+// returned untouched — no gratuitous ellipsis.
+func TestTruncateToolParam_FitsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	path := "internal/ui/chat/tools_render.go"
+	require.Equal(t, path, truncateToolParam(path, 80))
 }
