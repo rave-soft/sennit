@@ -47,10 +47,6 @@ func (w *AppWorkspace) SupportsThreads() bool {
 	return ok
 }
 
-// InitializeThreadsCapability is deliberately a cheap no-op for local
-// workspaces: their thread manager is already available in-process.
-func (w *AppWorkspace) InitializeThreadsCapability(context.Context) error { return nil }
-
 func (w *AppWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) {
 	mgr, ok := w.threadManager()
 	if !ok {
