@@ -71,10 +71,6 @@ var threadsDockActivityTTL = 8 * time.Second
 // resolve on their own in seconds.
 var threadsRefreshBackoff = 30 * time.Second
 
-// threadsDockVisibleCap is the maximum number of active threads the dock
-// renders (and therefore the maximum it ever fetches live activity for).
-const threadsDockVisibleCap = 5
-
 // threadDockActivity is a per-thread live snapshot fetched from the
 // thread's own session via AttachThread + GetSession.
 type threadDockActivity struct {
@@ -257,14 +253,16 @@ func activeDockThreads(threads []proto.Thread) []proto.Thread {
 	return active
 }
 
-// visibleDockThreads splits active into the threads the dock actually
-// renders (capped at threadsDockVisibleCap) and a count of how many more
-// active threads exist beyond that cap.
+// visibleDockThreads returns the threads the dock renders: all of them.
+// There used to be a fixed cap of 5 here, with the remainder reported as an
+// "…and N more threads" footer — but the panel is the live view of what is
+// running right now, and a running thread the panel refuses to name is
+// exactly the one a user goes looking for. Fitting the list on screen is
+// the row budget's job (sessionPanelPlan sheds thread blocks only after
+// todos and the queue, i.e. only in a genuinely short terminal), not a
+// policy cap applied while the space is still there.
 func visibleDockThreads(active []proto.Thread) (visible []proto.Thread, moreCount int) {
-	if len(active) <= threadsDockVisibleCap {
-		return active, 0
-	}
-	return active[:threadsDockVisibleCap], len(active) - threadsDockVisibleCap
+	return active, 0
 }
 
 // threadDockActivityLoadedMsg delivers the result of an off-thread

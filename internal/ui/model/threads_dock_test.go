@@ -88,7 +88,11 @@ func TestDispatchThreadsDockRefreshMergesTasks(t *testing.T) {
 	require.ElementsMatch(t, []string{"thr-1", "task-1"}, dockThreadIDs(active))
 }
 
-func TestVisibleDockThreadsCapsAndReportsMore(t *testing.T) {
+// TestVisibleDockThreadsReturnsEveryThread pins the removal of the old
+// fixed visible cap: however many threads are active, the panel names all
+// of them and never reports a hidden remainder. Only the row budget may
+// still shed blocks, and that is decided in sessionPanelPlan, not here.
+func TestVisibleDockThreadsReturnsEveryThread(t *testing.T) {
 	t.Parallel()
 
 	mk := func(n int) []proto.Thread {
@@ -105,10 +109,10 @@ func TestVisibleDockThreadsCapsAndReportsMore(t *testing.T) {
 		wantMoreCount int
 	}{
 		{0, 0, 0},
-		{threadsDockVisibleCap - 2, threadsDockVisibleCap - 2, 0},
-		{threadsDockVisibleCap, threadsDockVisibleCap, 0},
-		{threadsDockVisibleCap + 1, threadsDockVisibleCap, 1},
-		{threadsDockVisibleCap + 5, threadsDockVisibleCap, 5},
+		{3, 3, 0},
+		{5, 5, 0},
+		{6, 6, 0},
+		{10, 10, 0},
 	}
 	for _, tc := range cases {
 		visible, more := visibleDockThreads(mk(tc.n))
