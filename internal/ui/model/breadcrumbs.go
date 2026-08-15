@@ -38,14 +38,14 @@ type leaveThreadRequestedMsg struct{}
 // one level per sub-agent session that has been drilled into. Returns nil
 // at the top level, which is what keeps the rule plain there.
 func (m *UI) breadcrumbCrumbs() []string {
-	if m.crumbRoot == "" && len(m.navStack) == 0 {
+	if m.crumbRoot == "" && len(m.sess.navStack) == 0 {
 		return nil
 	}
 	crumbs := []string{breadcrumbRootName}
 	if m.crumbRoot != "" {
 		crumbs = append(crumbs, m.crumbRoot)
 	}
-	for _, frame := range m.navStack {
+	for _, frame := range m.sess.navStack {
 		crumbs = append(crumbs, childSessionLevelName(frame))
 	}
 	return crumbs
@@ -257,7 +257,7 @@ func (m *UI) drawBreadcrumbBar(scr uv.Screen, area uv.Rectangle) bool {
 // breadcrumbBarRow is the rule row the bar lives on: the one directly above
 // the editor. Zero-height when there is no editor area to sit above.
 func (m *UI) breadcrumbBarRow() image.Rectangle {
-	e := m.layout.editor
+	e := m.lay.layout.editor
 	if e.Dx() <= 0 {
 		return image.Rectangle{}
 	}

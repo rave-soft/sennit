@@ -22,8 +22,8 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 		var messages []message.Message
 		var err error
 
-		if m.session != nil {
-			messages, err = m.com.Workspace.ListUserMessages(ctx, m.session.ID)
+		if m.sess.session != nil {
+			messages, err = m.com.Workspace.ListUserMessages(ctx, m.sess.session.ID)
 		} else {
 			messages, err = m.com.Workspace.ListAllUserMessages(ctx)
 		}

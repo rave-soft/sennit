@@ -136,11 +136,11 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	}
 
 	var sessionID string
-	hasSession := m.session != nil
+	hasSession := m.sess.session != nil
 	if hasSession {
-		sessionID = m.session.ID
+		sessionID = m.sess.session.ID
 	}
-	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
+	hasTodos := hasSession && hasIncompleteTodos(m.sess.session.Todos)
 	hasQueue := m.wsCache.promptQueue > 0
 
 	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
@@ -158,11 +158,11 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 // Commands palette dialog uses, so the two never list different commands.
 func (m *UI) commandCompletionItems() []completions.CommandCompletionValue {
 	var sessionID string
-	hasSession := m.session != nil
+	hasSession := m.sess.session != nil
 	if hasSession {
-		sessionID = m.session.ID
+		sessionID = m.sess.session.ID
 	}
-	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
+	hasTodos := hasSession && hasIncompleteTodos(m.sess.session.Todos)
 	hasQueue := m.wsCache.promptQueue > 0
 
 	var dockerMCPAvailable *bool
@@ -170,7 +170,7 @@ func (m *UI) commandCompletionItems() []completions.CommandCompletionValue {
 		dockerMCPAvailable = &available
 	}
 
-	items := dialog.BuildCommandItems(m.com, sessionID, hasSession, hasTodos, hasQueue, m.width, dockerMCPAvailable, m.customCommands, m.mcpPrompts)
+	items := dialog.BuildCommandItems(m.com, sessionID, hasSession, hasTodos, hasQueue, m.lay.width, dockerMCPAvailable, m.customCommands, m.mcpPrompts)
 	values := make([]completions.CommandCompletionValue, 0, len(items))
 	for _, item := range items {
 		values = append(values, completions.CommandCompletionValue{
@@ -324,19 +324,19 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		m.dialog.BringToFront(dialog.SessionsID)
 		return nil
 	}
-	if m.sessionsDialogLoading {
+	if m.sess.sessionsDialogLoading {
 		// A fetch is already in flight; don't stack another one.
 		return nil
 	}
 
 	selectedSessionID := ""
-	if m.session != nil {
-		selectedSessionID = m.session.ID
+	if m.sess.session != nil {
+		selectedSessionID = m.sess.session.ID
 	}
 
-	m.sessionsDialogLoading = true
-	m.sessionsDialogGen++
-	gen := m.sessionsDialogGen
+	m.sess.sessionsDialogLoading = true
+	m.sess.sessionsDialogGen++
+	gen := m.sess.sessionsDialogGen
 	ws := m.com.Workspace
 	ctx := m.com.Context()
 	return func() tea.Msg {
@@ -417,5 +417,5 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 // in its collapsed one-line view. This is true only when the form is
 // unfocused and would consume more than half the terminal height.
 func (m *UI) shouldCollapseQuestion(qf *dialog.QuestionForm) bool {
-	return m.focus != uiFocusEditor && m.height > 0 && qf.Height(m.editorContentWidth()) > m.height*2/5
+	return m.focus != uiFocusEditor && m.lay.height > 0 && qf.Height(m.editorContentWidth()) > m.lay.height*2/5
 }

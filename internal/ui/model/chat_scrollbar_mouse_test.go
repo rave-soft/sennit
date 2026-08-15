@@ -53,9 +53,9 @@ func TestScrollbarDrag_MovesOffsetProportionally(t *testing.T) {
 	trackHeight := u.chat.scrollbarTrackHeight
 	require.Positive(t, trackHeight)
 
-	screenX := u.layout.main.Min.X + colX
-	topY := u.layout.main.Min.Y
-	bottomY := u.layout.main.Min.Y + trackHeight - 1
+	screenX := u.lay.layout.main.Min.X + colX
+	topY := u.lay.layout.main.Min.Y
+	bottomY := u.lay.layout.main.Min.Y + trackHeight - 1
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{X: screenX, Y: topY, Button: uv.MouseLeft}))
 	require.True(t, u.chat.scrollbarDragging, "clicking the scrollbar column must start a drag")
@@ -168,9 +168,9 @@ func TestTextSelection_UnaffectedByScrollbarDrag(t *testing.T) {
 	)
 	u.updateLayoutAndSize()
 
-	downX := u.layout.main.Min.X
-	downY := u.layout.main.Min.Y
-	dragX := u.layout.main.Min.X + 5
+	downX := u.lay.layout.main.Min.X
+	downY := u.lay.layout.main.Min.Y
+	dragX := u.lay.layout.main.Min.X + 5
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{X: downX, Y: downY, Button: uv.MouseLeft}))
 	_, _ = u.Update(tea.MouseMotionMsg(tea.Mouse{X: dragX, Y: downY, Button: uv.MouseLeft}))
@@ -194,9 +194,9 @@ func TestScrollbarDrag_DoesNotMoveFocus(t *testing.T) {
 
 	colX := u.chat.scrollbarColX
 	trackHeight := u.chat.scrollbarTrackHeight
-	screenX := u.layout.main.Min.X + colX
-	topY := u.layout.main.Min.Y
-	bottomY := u.layout.main.Min.Y + trackHeight - 1
+	screenX := u.lay.layout.main.Min.X + colX
+	topY := u.lay.layout.main.Min.Y
+	bottomY := u.lay.layout.main.Min.Y + trackHeight - 1
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{X: screenX, Y: topY, Button: uv.MouseLeft}))
 	_, _ = u.Update(tea.MouseMotionMsg(tea.Mouse{X: screenX, Y: bottomY, Button: uv.MouseLeft}))
@@ -254,10 +254,10 @@ func TestScrollbarDrag_StartedFromWidenedZone_MovesOffset(t *testing.T) {
 	trackHeight := u.chat.scrollbarTrackHeight
 	require.GreaterOrEqual(t, colX, 1)
 
-	screenX := u.layout.main.Min.X + colX
+	screenX := u.lay.layout.main.Min.X + colX
 	wideX := screenX - 1
-	topY := u.layout.main.Min.Y
-	bottomY := u.layout.main.Min.Y + trackHeight - 1
+	topY := u.lay.layout.main.Min.Y
+	bottomY := u.lay.layout.main.Min.Y + trackHeight - 1
 
 	_, _ = u.Update(tea.MouseMotionMsg(tea.Mouse{X: wideX, Y: topY, Button: uv.MouseLeft}))
 	require.True(t, u.chat.scrollbarHover)
@@ -283,7 +283,7 @@ func TestScrollbarThumbOverlay_RendersWhenHovered(t *testing.T) {
 	t.Parallel()
 
 	u := scrollbarOverflowUI(t)
-	w, h := u.layout.main.Dx(), u.layout.main.Dy()
+	w, h := u.lay.layout.main.Dx(), u.lay.layout.main.Dy()
 	area := uv.Rect(0, 0, w, h)
 
 	colX := u.chat.scrollbarColX

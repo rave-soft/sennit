@@ -90,7 +90,7 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
 		}
-		m.isTransparent = msg.Enabled
+		m.lay.isTransparent = msg.Enabled
 		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case themeSetMsg:
@@ -112,8 +112,8 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		m.ops.compactModeLoading = false
 		if msg.Err == nil {
-			m.forceCompactMode = msg.Enabled
-			m.isCompact = msg.Enabled
+			m.lay.forceCompactMode = msg.Enabled
+			m.lay.isCompact = msg.Enabled
 			m.updateLayoutAndSize()
 			m.dialog.CloseDialog(dialog.CommandsID)
 		} else {

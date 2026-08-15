@@ -127,10 +127,10 @@ func agentModelChangedCmd() tea.Msg { return agentModelChangedMsg{} }
 
 // currentSessionID returns the active session's ID, or "" when none.
 func (m *UI) currentSessionID() string {
-	if m.session == nil {
+	if m.sess.session == nil {
 		return ""
 	}
-	return m.session.ID
+	return m.sess.session.ID
 }
 
 // invalidateBusyCaches marks all memoized workspace probe state stale and
@@ -241,7 +241,7 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	}
 	m.wsCache.promptQueueInFlight = true
 	ws := m.com.Workspace
-	sessionID := m.session.ID
+	sessionID := m.sess.session.ID
 	gen := m.wsCache.promptQueueGen
 	return func() tea.Msg {
 		msg := promptQueueMsg{forSession: sessionID, gen: gen}

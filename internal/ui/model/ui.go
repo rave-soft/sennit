@@ -268,16 +268,14 @@ type settingsOps struct {
 	permissionID             string
 }
 
-// UI represents the main user interface model.
-type UI struct {
-	com          *common.Common
+// sessionState holds the active session and the bookkeeping around loading,
+// continuing, and navigating between sessions.
+type sessionState struct {
 	session      *session.Session
 	sessionFiles []SessionFile
 
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
-
-	ops settingsOps
 
 	// initialSessionID is set when loading a specific session on startup.
 	initialSessionID string
@@ -286,12 +284,52 @@ type UI struct {
 
 	lastUserMessageTime int64
 
+	sessionLoadGen        uint64
+	sessionLoadExpectedID string
+
+	// sessionsDialogLoading / sessionsDialogGen track the off-thread
+	// ListSessions fetch dispatched by openSessionsDialog; see
+	// sessionsLoadedMsg.
+	sessionsDialogLoading bool
+	sessionsDialogGen     uint64
+
+	// navStack tracks sub-agent session navigation: each frame records
+	// where alt+up should return to and the sibling delegations
+	// alt+left/alt+right can cycle through, without re-scanning the
+	// (possibly no-longer-loaded) parent chat. See enterChildSession.
+	navStack []sessionNavFrame
+}
+
+// layoutState holds the terminal dimensions and the derived compact/details
+// layout mode.
+type layoutState struct {
 	// The width and height of the terminal in cells.
 	width  int
 	height int
 	layout uiLayout
 
+	// forceCompactMode tracks whether compact mode is forced by user toggle
+	forceCompactMode bool
+
+	// isCompact tracks whether we're currently in compact layout mode (either
+	// by user toggle or auto-switch based on window size)
+	isCompact bool
+
+	// detailsOpen tracks whether the details panel is open (in compact mode)
+	detailsOpen bool
+
 	isTransparent bool
+}
+
+// UI represents the main user interface model.
+type UI struct {
+	com *common.Common
+
+	sess sessionState
+
+	ops settingsOps
+
+	lay layoutState
 
 	// embedded is true for a UI instance attached to a thread's own
 	// workspace rather than the top-level session — it skips
@@ -337,12 +375,6 @@ type UI struct {
 	// Chat components
 	chat *Chat
 
-	// navStack tracks sub-agent session navigation: each frame records
-	// where alt+up should return to and the sibling delegations
-	// alt+left/alt+right can cycle through, without re-scanning the
-	// (possibly no-longer-loaded) parent chat. See enterChildSession.
-	navStack []sessionNavFrame
-
 	// crumbRoot names the thread this UI is embedded in, for the second
 	// crumb of the breadcrumb bar ("main › <crumbRoot> › …"). Empty on the
 	// top-level UI, which has no thread above it. Set by the router when it
@@ -384,16 +416,6 @@ type UI struct {
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 
-	// forceCompactMode tracks whether compact mode is forced by user toggle
-	forceCompactMode bool
-
-	// isCompact tracks whether we're currently in compact layout mode (either
-	// by user toggle or auto-switch based on window size)
-	isCompact bool
-
-	// detailsOpen tracks whether the details panel is open (in compact mode)
-	detailsOpen bool
-
 	// panel holds the expand state of the merged session panel (threads +
 	// todos + queue, between chat and the editor). See session_panel.go.
 	panel sessionPanelState
@@ -415,15 +437,6 @@ type UI struct {
 	// activity shown by the session panel's threads section. See
 	// threads_dock.go / session_panel.go.
 	threadsDock threadsDockState
-
-	// sessionsDialogLoading / sessionsDialogGen track the off-thread
-	// ListSessions fetch dispatched by openSessionsDialog; see
-	// sessionsLoadedMsg.
-	sessionsDialogLoading bool
-	sessionsDialogGen     uint64
-
-	sessionLoadGen        uint64
-	sessionLoadExpectedID string
 
 	// mouse highlighting related state
 	lastClickTime time.Time
@@ -548,9 +561,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		mcpStates:           make(map[string]workspace.MCPClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
-		initialSessionID:    initialSessionID,
-		continueLastSession: continueLast,
-		skillStates:         skills.GetLatestStates(),
+		sess: sessionState{
+			initialSessionID:    initialSessionID,
+			continueLastSession: continueLast,
+		},
+		skillStates: skills.GetLatestStates(),
 	}
 	for _, opt := range opts {
 		opt(ui)
@@ -577,7 +592,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	ui.status = status
 
 	// Initialize compact mode from config
-	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
+	ui.lay.forceCompactMode = com.Config().Options.TUI.CompactMode
 
 	// set onboarding state defaults
 	ui.onboarding.yesInitializeSelected = true
@@ -601,7 +616,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	// disable indeterminate progress bar
 	ui.progressBarEnabled = cfgOpts.Progress == nil || *cfgOpts.Progress
 	// enable transparent mode
-	ui.isTransparent = cfgOpts.TUI.Transparent != nil && *cfgOpts.TUI.Transparent
+	ui.lay.isTransparent = cfgOpts.TUI.Transparent != nil && *cfgOpts.TUI.Transparent
 	if ui.embedded {
 		// Only one UI instance may own the terminal's progress bar.
 		ui.progressBarEnabled = false
@@ -676,9 +691,9 @@ func (m *UI) loadInitialSession() tea.Cmd {
 	case m.state != uiLanding:
 		// Only load if we're in landing state (i.e., fully configured)
 		return nil
-	case m.initialSessionID != "":
-		return m.requestSessionLoad(m.initialSessionID)
-	case m.continueLastSession:
+	case m.sess.initialSessionID != "":
+		return m.requestSessionLoad(m.sess.initialSessionID)
+	case m.sess.continueLastSession:
 		ws := m.com.Workspace
 		return func() tea.Msg {
 			sessions, err := ws.ListSessions(context.Background())
@@ -696,7 +711,7 @@ func (m *UI) loadInitialSession() tea.Cmd {
 func (m *UI) setState(state uiState, focus uiFocusState) {
 	if state == uiLanding {
 		// Always turn off compact mode when going to landing
-		m.isCompact = false
+		m.lay.isCompact = false
 	}
 	m.state = state
 	m.focus = focus
@@ -886,8 +901,8 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	}
 	m.status.SetInfoMsg(info)
 	cmds := []tea.Cmd{clearInfoMsgCmd(info.TTL)}
-	if msg.State == workspace.ConnectionRecovered && m.session != nil {
-		cmds = append(cmds, m.requestSessionLoad(m.session.ID))
+	if msg.State == workspace.ConnectionRecovered && m.sess.session != nil {
+		cmds = append(cmds, m.requestSessionLoad(m.sess.session.ID))
 	}
 	return cmds
 }
@@ -901,12 +916,12 @@ type childSessionRef struct {
 }
 
 // sessionNavFrame is one level of the sub-agent session-navigation stack
-// (m.navStack): where alt+up should return to, and the sibling
+// (m.sess.navStack): where alt+up should return to, and the sibling
 // delegations in that parent chat that alt+left/alt+right cycle through.
 type sessionNavFrame struct {
 	parentSessionID string
 	// parentTitle is the parent session's title, captured at
-	// enterChildSession time. m.session is repointed to the child as soon
+	// enterChildSession time. m.sess.session is repointed to the child as soon
 	// as navigation starts, so this is the only cheap way to recover the
 	// parent's title later (e.g. for the breadcrumb) without extra IO.
 	parentTitle string
@@ -1070,7 +1085,7 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 	if m.ops.compactModeLoading {
 		return util.ReportWarn("Compact mode is already being updated")
 	}
-	desired := !m.forceCompactMode
+	desired := !m.lay.forceCompactMode
 	m.ops.compactModeLoading = true
 	m.ops.compactModeGeneration++
 	generation := m.ops.compactModeGeneration
@@ -1125,7 +1140,7 @@ func (m *UI) isAgentBusy() bool {
 
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
-	return m.session != nil && m.session.ID != ""
+	return m.sess.session != nil && m.sess.session.ID != ""
 }
 
 // applyTheme switches the live palette and persists the choice. The swap is
@@ -1168,7 +1183,7 @@ func (m *UI) setTheme(id string) {
 	if m.chat != nil {
 		m.chat.InvalidateRenderCaches()
 	}
-	m.cacheSidebarLogo(m.layout.sidebar.Dx())
+	m.cacheSidebarLogo(m.lay.layout.sidebar.Dx())
 	m.updateLayoutAndSize()
 }
 
@@ -1247,12 +1262,12 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
-	m.sessionLoadGen++
-	m.sessionLoadExpectedID = ""
-	m.session = nil
+	m.sess.sessionLoadGen++
+	m.sess.sessionLoadExpectedID = ""
+	m.sess.session = nil
 	m.sidebar.offset = 0
-	m.sessionFiles = nil
-	m.sessionFileReads = nil
+	m.sess.sessionFiles = nil
+	m.sess.sessionFileReads = nil
 	m.editor.pendingSendQueue = nil
 	m.editor.pendingSendGen = 0
 	m.editor.pendingSendLoading = false

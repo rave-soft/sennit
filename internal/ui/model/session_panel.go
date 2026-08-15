@@ -49,7 +49,7 @@ func (m *UI) panelSpinnerWanted() bool {
 	if !m.hasSession() {
 		return false
 	}
-	if m.isAgentBusy() && hasInProgressTodo(m.session.Todos) {
+	if m.isAgentBusy() && hasInProgressTodo(m.sess.session.Todos) {
 		return true
 	}
 	for _, t := range m.threadsDock.cache.value {
@@ -368,7 +368,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		}
 	}
 
-	todos := m.session.Todos
+	todos := m.sess.session.Todos
 	plan.todosTotal = len(todos)
 	inProgress, pending, completed := splitTodosByStatus(todos)
 	plan.todosCompleted = len(completed)
@@ -476,7 +476,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 // sessionPanelHeight reports how many rows the merged session panel needs,
 // capped at sessionPanelBudgetFraction of available — the space actually
 // contested between chat and the panel (mainRect.Dy() at the call site in
-// generateLayout), not the whole-terminal m.height. Budgeting off the full
+// generateLayout), not the whole-terminal m.lay.height. Budgeting off the full
 // terminal height would make the 40% cap far tighter than intended on a
 // typical screen (e.g. 40% of an 80x24 terminal is 9 rows total, including
 // the header/editor/help chrome that never competes with the panel), which
@@ -835,10 +835,10 @@ func (m *UI) autoExpandTodosIfReasonable() tea.Cmd {
 	if m.activeInline != nil {
 		return nil
 	}
-	if m.height < sessionPanelHeightReasonableTerminalHeight {
+	if m.lay.height < sessionPanelHeightReasonableTerminalHeight {
 		return nil
 	}
-	if !hasIncompleteTodos(m.session.Todos) {
+	if !hasIncompleteTodos(m.sess.session.Todos) {
 		return nil
 	}
 	if m.panel.expanded || m.panel.autoExpanded {
@@ -858,7 +858,7 @@ func (m *UI) autoExpandTodosIfReasonable() tea.Cmd {
 //
 //nolint:unparam // always nil today, but keeps the tea.Cmd signature shared with the other panel handlers callers check for a non-nil cmd
 func (m *UI) toggleTodosExpanded() tea.Cmd {
-	if !m.hasSession() || !hasIncompleteTodos(m.session.Todos) {
+	if !m.hasSession() || !hasIncompleteTodos(m.sess.session.Todos) {
 		return nil
 	}
 	m.panel.expanded = !m.panel.expanded

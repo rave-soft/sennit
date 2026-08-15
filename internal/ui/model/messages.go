@@ -48,7 +48,7 @@ func sessionMessageItems(sty *styles.Styles, cfg *config.Config, msgs []message.
 
 func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageTime int64) tea.Cmd {
 	var cmds []tea.Cmd
-	m.lastUserMessageTime = lastUserMessageTime
+	m.sess.lastUserMessageTime = lastUserMessageTime
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
 	// being busy: a session that was killed mid-generation can persist an
@@ -74,7 +74,7 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 	// todos, same as the pubsub session-update handler does for
 	// already-loaded items.
 	if m.hasSession() {
-		m.chat.SetTodosCompact(hasIncompleteTodos(m.session.Todos))
+		m.chat.SetTodosCompact(hasIncompleteTodos(m.sess.session.Todos))
 	}
 	if cmd := m.chat.RestartPausedVisibleAnimations(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -84,8 +84,8 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 }
 
 func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
-	if m.session != nil {
-		_ = loadNestedToolCalls(context.Background(), m.com.Workspace, m.com.Styles, m.com.Config(), m.session.ID, m.sessionLoadGen, items)
+	if m.sess.session != nil {
+		_ = loadNestedToolCalls(context.Background(), m.com.Workspace, m.com.Styles, m.com.Config(), m.sess.session.ID, m.sess.sessionLoadGen, items)
 	}
 }
 
@@ -193,7 +193,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		if hasShellCmd {
 			return nil
 		}
-		m.lastUserMessageTime = msg.CreatedAt
+		m.sess.lastUserMessageTime = msg.CreatedAt
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Config())
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
@@ -222,7 +222,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 		if msg.FinishPart() != nil && msg.FinishPart().Reason == message.FinishReasonEndTurn {
-			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+			infoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.sess.lastUserMessageTime, 0))
 			m.chat.AppendMessages(infoItem)
 			if m.chat.Follow() {
 				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
@@ -302,7 +302,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	if isEndTurn {
 		if infoItem := m.chat.MessageItem(chat.AssistantInfoID(msg.ID)); infoItem == nil {
-			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
+			newInfoItem := chat.NewAssistantInfoItem(m.com.Styles, &msg, m.com.Config(), time.Unix(m.sess.lastUserMessageTime, 0))
 			m.chat.AppendMessages(newInfoItem)
 		}
 	}

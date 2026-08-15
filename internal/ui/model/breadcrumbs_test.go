@@ -16,8 +16,8 @@ import (
 // breadcrumb bar takes over — and returns it as plain text.
 func drawSeparatorRow(t *testing.T, u *UI) string {
 	t.Helper()
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChatSeparators(scr, u.layout.editor)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawChatSeparators(scr, u.lay.layout.editor)
 	row := u.breadcrumbBarRow()
 	var b []rune
 	for x := row.Min.X; x < row.Max.X; x++ {
@@ -38,7 +38,7 @@ func TestBreadcrumbBar_TopLevelStaysAPlainRule(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack = nil
+	u.sess.navStack = nil
 	u.updateLayoutAndSize()
 
 	row := drawSeparatorRow(t, u)
@@ -82,7 +82,7 @@ func TestBreadcrumbBar_ThreadIsALevelOfItsOwn(t *testing.T) {
 
 	// And at the top of that thread, with no sub-agent open, the trail is
 	// still there — the thread itself is somewhere you can leave.
-	u.navStack = nil
+	u.sess.navStack = nil
 	require.Equal(t, []string{"main", "fix-hang"}, u.breadcrumbCrumbs())
 }
 
@@ -98,10 +98,10 @@ func TestBreadcrumbBack_UnwindsOneLevelAtATime(t *testing.T) {
 	u.crumbRoot = "fix-hang"
 
 	require.NotNil(t, u.breadcrumbBack())
-	require.Len(t, u.navStack, 1, "one sub-agent level popped, the thread untouched")
+	require.Len(t, u.sess.navStack, 1, "one sub-agent level popped, the thread untouched")
 
 	require.NotNil(t, u.breadcrumbBack())
-	require.Empty(t, u.navStack)
+	require.Empty(t, u.sess.navStack)
 
 	cmd := u.breadcrumbBack()
 	require.NotNil(t, cmd, "at the top of a thread, Back must leave the thread")
@@ -115,7 +115,7 @@ func TestBreadcrumbBack_TopLevelHasNowhereToGo(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack = nil
+	u.sess.navStack = nil
 
 	require.Nil(t, u.breadcrumbBack())
 }
@@ -137,7 +137,7 @@ func TestBreadcrumbBar_ClickOnBackGoesUp(t *testing.T) {
 		Button: uv.MouseLeft,
 	}))
 
-	require.Len(t, u.navStack, 1, "clicking Back must pop exactly one level")
+	require.Len(t, u.sess.navStack, 1, "clicking Back must pop exactly one level")
 	require.NotNil(t, cmd, "must return the loadSession cmd for the level above")
 }
 
@@ -151,7 +151,7 @@ func TestBreadcrumbBar_ClickBesideTheButtonIsNotBack(t *testing.T) {
 	row := u.breadcrumbBarRow()
 
 	u.Update(tea.MouseClickMsg(tea.Mouse{X: row.Min.X, Y: row.Min.Y, Button: uv.MouseLeft}))
-	require.Len(t, u.navStack, 2, "clicking the trail must not navigate")
+	require.Len(t, u.sess.navStack, 2, "clicking the trail must not navigate")
 }
 
 // TestBreadcrumbBar_ButtonHover: pointing at the button highlights it,
@@ -178,7 +178,7 @@ func TestBreadcrumbBar_KeepsTheWayOutWhenTooNarrowForTheTrail(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.width = ansi.StringWidth(u.breadcrumbButtonLabel()) + 8
+	u.lay.width = ansi.StringWidth(u.breadcrumbButtonLabel()) + 8
 	u.updateLayoutAndSize()
 
 	plan, ok := u.planBreadcrumbBar(u.breadcrumbBarRow())
@@ -200,7 +200,7 @@ func TestBreadcrumbBar_FallsBackToAPlainRuleWhenEvenTheButtonCannotFit(t *testin
 	_, ok := u.planBreadcrumbBar(row)
 	require.False(t, ok)
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	require.False(t, u.drawBreadcrumbBar(scr, row))
 }
 
@@ -234,7 +234,7 @@ func TestBreadcrumbText_CollapsesMiddleLevels(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].label = "" // no activity, to isolate the path
+	u.sess.navStack[len(u.sess.navStack)-1].label = "" // no activity, to isolate the path
 	crumbs := u.breadcrumbCrumbs()
 
 	full := crumbs[0] + " › " + crumbs[1] + " › " + crumbs[2]
@@ -255,7 +255,7 @@ func TestBreadcrumbText_DropsAncestorsKeepsCurrentName(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].label = ""
+	u.sess.navStack[len(u.sess.navStack)-1].label = ""
 
 	out := ansi.Strip(u.breadcrumbText(u.breadcrumbCrumbs(), len("task")+1))
 	require.Equal(t, "task", out)
@@ -268,8 +268,8 @@ func TestBreadcrumbText_HardTruncatesCurrentName(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].agentName = "a-very-long-subagent-name"
-	u.navStack[len(u.navStack)-1].label = ""
+	u.sess.navStack[len(u.sess.navStack)-1].agentName = "a-very-long-subagent-name"
+	u.sess.navStack[len(u.sess.navStack)-1].label = ""
 
 	out := ansi.Strip(u.breadcrumbText(u.breadcrumbCrumbs(), 6))
 	require.LessOrEqual(t, ansi.StringWidth(out), 6)

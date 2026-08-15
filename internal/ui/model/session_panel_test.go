@@ -58,7 +58,7 @@ func TestThreadDockStatusText(t *testing.T) {
 // the session panel without a real workspace.
 func sessionUI() *UI {
 	u := newTestUI()
-	u.session = &session.Session{ID: "s1"}
+	u.sess.session = &session.Session{ID: "s1"}
 	return u
 }
 
@@ -98,8 +98,8 @@ func TestDrawSessionPanel_RendersEveryThreadBlock(t *testing.T) {
 	// line above them. No footer row.
 	require.Equal(t, 6*2+1, height)
 
-	scr := uv.NewScreenBuffer(u.width, height)
-	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: height}}
+	scr := uv.NewScreenBuffer(u.lay.width, height)
+	area := uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: height}}
 	u.drawSessionPanel(scr, area)
 	out := ansi.Strip(scr.Render())
 
@@ -132,8 +132,8 @@ func TestDrawSessionPanel_RunningTaskRendersIdentityAndElapsed(t *testing.T) {
 	}}
 
 	height := u.sessionPanelPlan(100).totalRows
-	scr := uv.NewScreenBuffer(u.width, height)
-	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: height}}
+	scr := uv.NewScreenBuffer(u.lay.width, height)
+	area := uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: height}}
 	u.drawSessionPanel(scr, area)
 	out := ansi.Strip(scr.Render())
 
@@ -152,7 +152,7 @@ func TestDrawSessionPanel_NoOpOnZeroArea(t *testing.T) {
 	u := sessionUI()
 	u.threadsDock.cache.value = mkDockThreads(1)
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	require.NotPanics(t, func() {
 		u.drawSessionPanel(scr, uv.Rectangle{})
 	})
@@ -166,7 +166,7 @@ func TestSessionPanelPlan_TodosOrderingActiveFirstThenCompleted(t *testing.T) {
 
 	u := sessionUI()
 	u.panel.expanded = true
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Content: "done first", Status: session.TodoStatusCompleted},
 		{Content: "pending one", Status: session.TodoStatusPending},
 		{Content: "working now", Status: session.TodoStatusInProgress},
@@ -210,7 +210,7 @@ func TestSessionPanelPlan_AllInProgressTodosGetMarker(t *testing.T) {
 
 	u := sessionUI()
 	u.panel.expanded = true
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Content: "first task", Status: session.TodoStatusInProgress},
 		{Content: "second task", Status: session.TodoStatusInProgress},
 	}
@@ -218,8 +218,8 @@ func TestSessionPanelPlan_AllInProgressTodosGetMarker(t *testing.T) {
 	plan := u.sessionPanelPlan(100)
 	require.Len(t, plan.todosInProgress, 2)
 
-	scr := uv.NewScreenBuffer(u.width, 10)
-	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: 10}}
+	scr := uv.NewScreenBuffer(u.lay.width, 10)
+	area := uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: 10}}
 	u.drawSessionPanel(scr, area)
 	out := ansi.Strip(scr.Render())
 
@@ -237,7 +237,7 @@ func TestSessionPanelPlan_HeaderTextCollapsedVsExpanded(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Status: session.TodoStatusCompleted, Content: "a"},
 		{Status: session.TodoStatusPending, Content: "b"},
 	}
@@ -269,7 +269,7 @@ func TestSessionPanelPlan_QueueAlwaysVisibleRegardlessOfTodosExpand(t *testing.T
 	collapsed := u.sessionPanelPlan(100)
 	require.Equal(t, []string{"do this", "then that"}, collapsed.queue)
 
-	u.session.Todos = []session.Todo{{Status: session.TodoStatusPending, Content: "x"}}
+	u.sess.session.Todos = []session.Todo{{Status: session.TodoStatusPending, Content: "x"}}
 	u.panel.expanded = true
 	withTodos := u.sessionPanelPlan(100)
 	require.Equal(t, []string{"do this", "then that"}, withTodos.queue)
@@ -290,7 +290,7 @@ func TestSessionPanelPlan_BudgetCapAndPriorityOrder(t *testing.T) {
 	u := sessionUI()
 	u.threadsDock.cache.value = mkDockThreads(2) // 4 rows
 	u.panel.expanded = true
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Status: session.TodoStatusInProgress, Content: "active 1"},
 		{Status: session.TodoStatusPending, Content: "active 2"},
 		{Status: session.TodoStatusPending, Content: "active 3"},
@@ -375,13 +375,13 @@ func TestSessionPanelHeight_ZeroContentMatchesBaseline(t *testing.T) {
 	baseline.updateLayoutAndSize()
 
 	u := sessionUI()
-	u.session.Todos = nil
+	u.sess.session.Todos = nil
 	u.threadsDock.cache.value = nil
 	u.wsCache.promptQueueItems = nil
 	u.updateLayoutAndSize()
 
 	require.Zero(t, u.sessionPanelHeight(100))
-	require.Zero(t, u.layout.panel, "panel must occupy zero space with no threads/todos/queue")
+	require.Zero(t, u.lay.layout.panel, "panel must occupy zero space with no threads/todos/queue")
 }
 
 // TestSessionPanelPlan_PanelHidesOnceAllTodosCompleted covers the panel's
@@ -395,7 +395,7 @@ func TestSessionPanelPlan_PanelHidesOnceAllTodosCompleted(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Content: "a", Status: session.TodoStatusCompleted},
 		{Content: "b", Status: session.TodoStatusCompleted},
 	}
@@ -403,7 +403,7 @@ func TestSessionPanelPlan_PanelHidesOnceAllTodosCompleted(t *testing.T) {
 
 	plan := u.sessionPanelPlan(100)
 	require.False(t, plan.todosVisible, "an all-completed list must no longer occupy the panel")
-	require.Zero(t, u.layout.panel, "panel must occupy zero space once every todo is completed")
+	require.Zero(t, u.lay.layout.panel, "panel must occupy zero space once every todo is completed")
 
 	// Nothing left to toggle: an all-completed list can't be expanded via
 	// the panel (it isn't there to expand).
@@ -421,7 +421,7 @@ func TestDrawSessionPanel_CollapsedHidesEveryTodo(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Content: "in flight", Status: session.TodoStatusInProgress, ActiveForm: "Doing the in-flight task"},
 		{Content: "not started", Status: session.TodoStatusPending},
 		{Content: "already done", Status: session.TodoStatusCompleted},
@@ -432,8 +432,8 @@ func TestDrawSessionPanel_CollapsedHidesEveryTodo(t *testing.T) {
 	require.False(t, plan.todosExpanded)
 	require.Equal(t, 1, plan.totalRows, "the header alone")
 
-	scr := uv.NewScreenBuffer(u.width, 3)
-	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: 3}}
+	scr := uv.NewScreenBuffer(u.lay.width, 3)
+	area := uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: 3}}
 	u.drawSessionPanel(scr, area)
 	out := ansi.Strip(scr.Render())
 
@@ -442,8 +442,8 @@ func TestDrawSessionPanel_CollapsedHidesEveryTodo(t *testing.T) {
 	require.NotContains(t, out, "already done", "completed todo must stay hidden while collapsed")
 
 	u.toggleTodosExpanded()
-	scr = uv.NewScreenBuffer(u.width, 5)
-	area = uv.Rectangle{Max: uv.Position{X: u.width, Y: 5}}
+	scr = uv.NewScreenBuffer(u.lay.width, 5)
+	area = uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: 5}}
 	u.drawSessionPanel(scr, area)
 	out = ansi.Strip(scr.Render())
 
@@ -454,11 +454,11 @@ func TestDrawSessionPanel_CollapsedHidesEveryTodo(t *testing.T) {
 
 // TestSessionPanelPlan_RealisticTerminalNoSheddingForEverydayTodoList is the
 // regression test for the 40%-budget bug: sessionPanelHeight used to
-// compute its 40% cap against the whole-terminal m.height, which includes
+// compute its 40% cap against the whole-terminal m.lay.height, which includes
 // rows (header, editor, help) that never compete with the panel for space.
 // Since generateLayout also hard-clamps the result against mainRect.Dy()
 // (the space actually split between chat and the panel) immediately
-// afterward, basing the 40% budget on m.height instead of that same
+// afterward, basing the 40% budget on m.lay.height instead of that same
 // mainRect.Dy() made the internal budget check inconsistent with the real
 // downstream constraint — a small, everyday todo list could get shed
 // (completed rows dropped) even though nothing else was competing for the
@@ -489,14 +489,14 @@ func TestSessionPanelPlan_RealisticTerminalNoSheddingForEverydayTodoList(t *test
 			t.Parallel()
 
 			u := sessionUI()
-			u.width, u.height = tc.width, tc.height
+			u.lay.width, u.lay.height = tc.width, tc.height
 			u.panel.expanded = true
-			u.session.Todos = todos
+			u.sess.session.Todos = todos
 
 			u.dialog = dialog.NewOverlay()
 			u.updateLayoutAndSize()
 
-			plan := u.sessionPanelPlan(u.layout.panel.Dy())
+			plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
 			require.True(t, plan.todosExpanded, "no shedding: list must stay expanded")
 			require.Len(t, plan.todosInProgress, 1, "no shedding: in-progress rows must all be present")
 			require.Len(t, plan.todosPending, 2, "no shedding: pending rows must all be present")
@@ -524,8 +524,8 @@ func TestMouseClick_ThreadBlockEntersThread(t *testing.T) {
 	// Populate the hit-test state the same way Draw's uiChat case does,
 	// without going through the full Draw (newTestUI's minimal setup
 	// doesn't wire the sidebar machinery Draw also touches).
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawSessionPanel(scr, u.layout.panel)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawSessionPanel(scr, u.lay.layout.panel)
 	require.Len(t, u.panel.panelThreadRects, 1)
 
 	rect := u.panel.panelThreadRects[0]
@@ -555,17 +555,17 @@ func TestMouseClick_TodosHeaderTogglesWithoutPriorDraw(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Content: "write tests", Status: session.TodoStatusPending},
 	}
 	u.updateLayoutAndSize()
-	require.NotZero(t, u.layout.panel, "panel must occupy space with an incomplete todo present")
+	require.NotZero(t, u.lay.layout.panel, "panel must occupy space with an incomplete todo present")
 	require.False(t, u.panel.expanded)
 
 	// Derive the header's expected coordinates the same way the fixed click
 	// handler does, independently of any cached Draw-time field.
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	_, headerRect, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
+	_, headerRect, _, _ := sessionPanelRowLayout(u.lay.layout.panel, plan)
 	require.NotZero(t, headerRect, "expected a non-empty todos header rect")
 
 	_, cmd := u.Update(tea.MouseClickMsg{X: headerRect.Min.X, Y: headerRect.Min.Y, Button: tea.MouseLeft})
@@ -588,8 +588,8 @@ func TestMouseClick_ThreadBlockEntersThreadWithoutPriorDraw(t *testing.T) {
 	u.updateLayoutAndSize()
 	require.Empty(t, u.panel.panelThreadRects, "must not have been populated by any Draw call yet")
 
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	threadRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
+	threadRects, _, _, _ := sessionPanelRowLayout(u.lay.layout.panel, plan)
 	require.Len(t, threadRects, 1)
 
 	rect := threadRects[0]
@@ -633,13 +633,13 @@ func TestSessionPanelPlan_SmallTerminalNeverDropsTodosOnlyWindows(t *testing.T) 
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.width, u.height = 80, 24
+	u.lay.width, u.lay.height = 80, 24
 	u.panel.expanded = true
 	u.threadsDock.cache.value = mkDockThreads(1)
-	u.session.Todos = nineTodosThreeDone()
+	u.sess.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
 	require.True(t, plan.todosExpanded)
 	require.Equal(t, 2, plan.threadsRows, "the competing thread block must not be shed by this scenario")
 	require.Len(t, plan.todosInProgress, 2)
@@ -662,14 +662,14 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.width, u.height = 80, 24
+	u.lay.width, u.lay.height = 80, 24
 	u.panel.expanded = true
 	u.threadsDock.cache.value = mkDockThreads(1)
-	u.session.Todos = nineTodosThreeDone()
+	u.sess.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawSessionPanel(scr, u.layout.panel)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawSessionPanel(scr, u.lay.layout.panel)
 	atTop := ansi.Strip(scr.Render())
 	require.Contains(t, atTop, "in progress 1", "the viewport floor always shows in-progress rows")
 	require.NotContains(t, atTop, "done 1", "completed rows start out scrolled off-screen on this small terminal")
@@ -679,8 +679,8 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 	// Locate the todos list area the same way a real mouse wheel event
 	// would hit-test it, then drive enough wheel-down events through
 	// Update to reach the bottom of the section.
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	_, _, todosListRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
+	_, _, todosListRect, _ := sessionPanelRowLayout(u.lay.layout.panel, plan)
 	require.NotZero(t, todosListRect, "expected a non-empty todos list rect to scroll")
 
 	maxOffset := plan.todosContentRows - plan.todosViewportRows
@@ -693,8 +693,8 @@ func TestDrawSessionPanel_TodosScrollRevealsHiddenRows(t *testing.T) {
 	}
 	require.Equal(t, maxOffset, u.panel.panelTodosScrollOffset, "wheel-down must reach the section's bottom")
 
-	scr = uv.NewScreenBuffer(u.width, u.height)
-	u.drawSessionPanel(scr, u.layout.panel)
+	scr = uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawSessionPanel(scr, u.lay.layout.panel)
 	scrolled := ansi.Strip(scr.Render())
 	require.Contains(t, scrolled, "done 1", "scrolling to the bottom must reveal every completed todo")
 	require.Contains(t, scrolled, "done 2")
@@ -725,19 +725,19 @@ func TestRenderSessionTodoLine_CompletedStyleSurvivesBudgetConstrainedPlan(t *te
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.width, u.height = 80, 24
+	u.lay.width, u.lay.height = 80, 24
 	u.panel.expanded = true
 	u.threadsDock.cache.value = mkDockThreads(1)
-	u.session.Todos = nineTodosThreeDone()
+	u.sess.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
 	require.Len(t, plan.todosDone, 3)
 
 	maxOffset := plan.todosContentRows - plan.todosViewportRows
 	u.panel.panelTodosScrollOffset = maxOffset
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawSessionPanel(scr, u.layout.panel)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawSessionPanel(scr, u.lay.layout.panel)
 	out := scr.Render()
 
 	require.Contains(t, ansi.Strip(out), "done 1")
@@ -767,7 +767,7 @@ func allSectionsUI(t *testing.T) *UI {
 	u.threadsDock.cache.value = mkDockThreads(1)
 
 	u.panel.expanded = true
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Status: session.TodoStatusInProgress, Content: "in flight"},
 		{Status: session.TodoStatusCompleted, Content: "already done"},
 	}
@@ -788,9 +788,9 @@ func TestDrawSessionPanel_AllSectionsGetSeparatorHeaders(t *testing.T) {
 
 	u := allSectionsUI(t)
 
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
-	scr := uv.NewScreenBuffer(u.width, plan.totalRows)
-	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: plan.totalRows}}
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
+	scr := uv.NewScreenBuffer(u.lay.width, plan.totalRows)
+	area := uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: plan.totalRows}}
 	u.drawSessionPanel(scr, area)
 	out := ansi.Strip(scr.Render())
 	lines := strings.Split(out, "\n")
@@ -867,12 +867,12 @@ func TestDrawSessionPanel_EmptySectionRendersNoHeader(t *testing.T) {
 	u.wsCache.promptQueueItems = []string{"only the queue"}
 	u.updateLayoutAndSize()
 
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
 	require.Zero(t, plan.threadsHeaderRows)
 	require.Equal(t, 1, plan.queueHeaderRows)
 
-	scr := uv.NewScreenBuffer(u.width, plan.totalRows)
-	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: plan.totalRows}}
+	scr := uv.NewScreenBuffer(u.lay.width, plan.totalRows)
+	area := uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: plan.totalRows}}
 	u.drawSessionPanel(scr, area)
 	out := ansi.Strip(scr.Render())
 
@@ -895,12 +895,12 @@ func TestMouseClick_ThreadBlockEntersThreadBelowItsHeader(t *testing.T) {
 	}
 	u.updateLayoutAndSize()
 
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
 	require.Equal(t, 1, plan.threadsHeaderRows)
-	threadRects, _, _, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	threadRects, _, _, _ := sessionPanelRowLayout(u.lay.layout.panel, plan)
 	require.Len(t, threadRects, 1)
 	// The block must sit below the "threads" header row, not overlap it.
-	require.Greater(t, threadRects[0].Min.Y, u.layout.panel.Min.Y)
+	require.Greater(t, threadRects[0].Min.Y, u.lay.layout.panel.Min.Y)
 
 	rect := threadRects[0]
 	_, cmd := u.Update(tea.MouseClickMsg{X: rect.Min.X, Y: rect.Min.Y, Button: tea.MouseLeft})
@@ -923,14 +923,14 @@ func TestMouseClick_TodosHeaderTogglesWithHeaderStyling(t *testing.T) {
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
 	u.threadsDock.cache.value = mkDockThreads(1)
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Content: "write tests", Status: session.TodoStatusPending},
 	}
 	u.updateLayoutAndSize()
 	require.False(t, u.panel.expanded)
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawSessionPanel(scr, u.layout.panel)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawSessionPanel(scr, u.lay.layout.panel)
 	require.NotZero(t, u.panel.panelTodosHeaderRect)
 
 	rect := u.panel.panelTodosHeaderRect
@@ -950,25 +950,25 @@ func TestDrawSessionPanel_TodosScrollWithThreadsAndDelegationsAbove(t *testing.T
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.width, u.height = 80, 30
+	u.lay.width, u.lay.height = 80, 30
 	u.panel.expanded = true
 	u.threadsDock.cache.value = mkDockThreads(1)
 	item := chat.NewAgentToolMessageItem(u.com.Styles,
 		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"do the thing"}`, Finished: false}, nil, false, nil)
 	item.SetMessageID("m1")
 	u.chat.SetMessages(item)
-	u.session.Todos = nineTodosThreeDone()
+	u.sess.session.Todos = nineTodosThreeDone()
 	u.updateLayoutAndSize()
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawSessionPanel(scr, u.layout.panel)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawSessionPanel(scr, u.lay.layout.panel)
 	atTop := ansi.Strip(scr.Render())
 	require.Contains(t, atTop, "in progress 1")
 	require.NotContains(t, atTop, "done 1", "completed rows start scrolled off-screen")
 
-	plan := u.sessionPanelPlan(u.layout.panel.Dy())
+	plan := u.sessionPanelPlan(u.lay.layout.panel.Dy())
 	require.Equal(t, 1, plan.threadsHeaderRows)
-	_, _, todosListRect, _ := sessionPanelRowLayout(u.layout.panel, plan)
+	_, _, todosListRect, _ := sessionPanelRowLayout(u.lay.layout.panel, plan)
 	require.NotZero(t, todosListRect, "expected a non-empty todos list rect to scroll")
 
 	maxOffset := plan.todosContentRows - plan.todosViewportRows
@@ -981,8 +981,8 @@ func TestDrawSessionPanel_TodosScrollWithThreadsAndDelegationsAbove(t *testing.T
 	}
 	require.Equal(t, maxOffset, u.panel.panelTodosScrollOffset, "wheel-down must reach the section's bottom")
 
-	scr = uv.NewScreenBuffer(u.width, u.height)
-	u.drawSessionPanel(scr, u.layout.panel)
+	scr = uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawSessionPanel(scr, u.lay.layout.panel)
 	scrolled := ansi.Strip(scr.Render())
 	// The viewport is narrower here than in the threads-only scroll test
 	// (delegations also compete for rows), so scrolling to the bottom may

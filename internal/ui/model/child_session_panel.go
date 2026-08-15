@@ -61,8 +61,8 @@ func childSessionLevelName(frame sessionNavFrame) string {
 // enterChildSession time. Returns "" if there's nothing to show.
 func (m *UI) childSessionCurrentActivity() string {
 	var parts []string
-	if len(m.navStack) > 0 {
-		if label := m.navStack[len(m.navStack)-1].label; label != "" && label != "subagent" {
+	if len(m.sess.navStack) > 0 {
+		if label := m.sess.navStack[len(m.sess.navStack)-1].label; label != "" && label != "subagent" {
 			parts = append(parts, label)
 		}
 	}
@@ -92,12 +92,12 @@ func (m *UI) childSessionCurrentActivity() string {
 // (breadcrumbs.go) already says which delegation this is and carries the
 // Back button, and it does so on every screen rather than only here.
 func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
-	if area.Dy() <= 0 || area.Dx() <= 0 || len(m.navStack) == 0 {
+	if area.Dy() <= 0 || area.Dx() <= 0 || len(m.sess.navStack) == 0 {
 		return
 	}
 	sty := &m.com.Styles.ChildBanner
 	width := area.Dx()
-	frame := m.navStack[len(m.navStack)-1]
+	frame := m.sess.navStack[len(m.sess.navStack)-1]
 
 	// Row 1: model/effort override — "default model" when the delegation
 	// has none (agentic_fetch, or an agent tool inheriting the app's
@@ -114,7 +114,7 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	// percentage, plus a live elapsed time while still running or the
 	// frozen total once done.
 	if area.Dy() >= 2 {
-		line := childPanelTokensLine(m.session)
+		line := childPanelTokensLine(m.sess.session)
 		if pct := m.childPanelContextPercent(frame); pct != "" {
 			line += " · " + pct
 		}
@@ -169,10 +169,10 @@ func childPanelTokensLine(session *session.Session) string {
 // Returns "" when nothing has been used yet or the delegation's model
 // (and thus its window size) can't be resolved.
 func (m *UI) childPanelContextPercent(frame sessionNavFrame) string {
-	if m.session == nil {
+	if m.sess.session == nil {
 		return ""
 	}
-	used := m.session.PromptTokens + m.session.CompletionTokens
+	used := m.sess.session.PromptTokens + m.sess.session.CompletionTokens
 	if used <= 0 {
 		return ""
 	}

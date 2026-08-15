@@ -36,7 +36,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	case promptQueueMsg:
 		cmds = append(cmds, m.applyPromptQueue(msg)...)
 	case agentRunSubmittedMsg:
-		if m.sessionLoadExpectedID != "" && (msg.sessionID != m.sessionLoadExpectedID || msg.loadGeneration != m.sessionLoadGen) {
+		if m.sess.sessionLoadExpectedID != "" && (msg.sessionID != m.sess.sessionLoadExpectedID || msg.loadGeneration != m.sess.sessionLoadGen) {
 			break
 		}
 		// A prompt was just accepted (run started or enqueued): fetch the
@@ -55,7 +55,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 		}
 	case loadSessionMsg:
-		if msg.gen != m.sessionLoadGen || msg.sessionID != m.sessionLoadExpectedID {
+		if msg.gen != m.sess.sessionLoadGen || msg.sessionID != m.sess.sessionLoadExpectedID {
 			break
 		}
 		if msg.err != nil {
@@ -66,13 +66,13 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, util.ReportError(msg.err))
 			break
 		}
-		if m.forceCompactMode {
-			m.isCompact = true
+		if m.lay.forceCompactMode {
+			m.lay.isCompact = true
 		}
 		m.setState(uiChat, m.focus)
-		m.session = msg.session
+		m.sess.session = msg.session
 		m.sidebar.offset = 0
-		m.sessionFiles = msg.files
+		m.sess.sessionFiles = msg.files
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
@@ -99,7 +99,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			cmds = append(cmds, cmd)
 		}
 		cmds = append(cmds, m.reportCurrentSession(msg.sessionID))
-		if hasInProgressTodo(m.session.Todos) {
+		if hasInProgressTodo(m.sess.session.Todos) {
 			m.updateLayoutAndSize()
 		}
 		// Reload prompt history for the new session.
@@ -117,17 +117,17 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if !m.editor.pendingSendLoading || msg.generation != m.editor.pendingSendGen {
 			return cmds, false
 		}
-		expectedLoadGeneration := m.sessionLoadGen + 1
+		expectedLoadGeneration := m.sess.sessionLoadGen + 1
 		for i := range m.editor.pendingSendQueue {
 			if m.editor.pendingSendQueue[i].generation == msg.generation {
 				m.editor.pendingSendQueue[i].sessionID = msg.session.ID
 				m.editor.pendingSendQueue[i].loadGeneration = expectedLoadGeneration
 			}
 		}
-		if m.forceCompactMode {
-			m.isCompact = true
+		if m.lay.forceCompactMode {
+			m.lay.isCompact = true
 		}
-		m.session = &msg.session
+		m.sess.session = &msg.session
 		m.setState(uiChat, m.focus)
 		// Request loading the chat for the new session, then dispatch
 		// sendMessage once the session is loaded.
@@ -145,7 +145,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, m.beginSessionLoad(msg.sessionID))
 
 	case sessionFilesUpdatesMsg:
-		m.sessionFiles = msg.sessionFiles
+		m.sess.sessionFiles = msg.sessionFiles
 		var paths []string
 		for _, f := range msg.sessionFiles {
 			paths = append(paths, f.LatestVersion.Path)
@@ -157,24 +157,24 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.DeletedEvent {
-			if m.session != nil && m.session.ID == msg.Payload.ID {
+			if m.sess.session != nil && m.sess.session.ID == msg.Payload.ID {
 				if cmd := m.newSession(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			}
 			break
 		}
-		if m.session != nil && msg.Payload.ID == m.session.ID {
-			prevTodosLen := len(m.session.Todos)
+		if m.sess.session != nil && msg.Payload.ID == m.sess.session.ID {
+			prevTodosLen := len(m.sess.session.Todos)
 			// mainRect.Dy() as of the last layout pass — main and panel
 			// together reconstruct it, since generateLayout splits mainRect
 			// into exactly those two rects. Only used here to detect
 			// whether the panel's footprint changed, not as an actual
 			// layout budget, so approximating off the last computed layout
 			// (rather than recomputing mainRect from scratch) is fine.
-			available := m.layout.main.Dy() + m.layout.panel.Dy()
+			available := m.lay.layout.main.Dy() + m.lay.layout.panel.Dy()
 			prevPanelHeight := m.sessionPanelHeight(available)
-			m.session = &msg.Payload
+			m.sess.session = &msg.Payload
 			// syncPanelSpinner is idempotent and self-guarding — no need
 			// to pre-compute the in-progress edge here.
 			if cmd := m.syncPanelSpinner(); cmd != nil {
@@ -196,7 +196,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// only) instead of duplicating the full list; once every todo
 			// is completed and the panel disappears, the transcript
 			// becomes the permanent record again.
-			m.chat.SetTodosCompact(hasIncompleteTodos(m.session.Todos))
+			m.chat.SetTodosCompact(hasIncompleteTodos(m.sess.session.Todos))
 			// A brand new list (0 -> N todos) always opens the panel,
 			// unconditionally — distinct from autoExpandTodosIfReasonable
 			// below, which is a gentler one-shot-per-session, tall-enough-
@@ -204,7 +204,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// an active list" case. This only fires on the transition
 			// itself: a later update to the same list (items added,
 			// statuses changed) must respect a user's manual collapse.
-			if prevTodosLen == 0 && len(m.session.Todos) > 0 {
+			if prevTodosLen == 0 && len(m.sess.session.Todos) > 0 {
 				m.panel.expanded = true
 			}
 			m.autoExpandTodosIfReasonable()
@@ -216,10 +216,10 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 	case pubsub.Event[message.Message]:
 		// Check if this is a child session message for an agent tool.
-		if m.session == nil {
+		if m.sess.session == nil {
 			break
 		}
-		if msg.Payload.SessionID != m.session.ID {
+		if msg.Payload.SessionID != m.sess.session.ID {
 			// This might be a child session message from an agent tool.
 			if cmd := m.handleChildSessionMessage(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -257,7 +257,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 
 	case sendMessageErrorMsg:
-		if !msg.creating && m.sessionLoadExpectedID != "" && (msg.sessionID != m.sessionLoadExpectedID || msg.loadGeneration != m.sessionLoadGen) {
+		if !msg.creating && m.sess.sessionLoadExpectedID != "" && (msg.sessionID != m.sess.sessionLoadExpectedID || msg.loadGeneration != m.sess.sessionLoadGen) {
 			break
 		}
 		m.editor.pendingSendActive = false
@@ -272,12 +272,12 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 
 	case sendPendingQueueMsg:
-		if m.editor.pendingSendActive || len(m.editor.pendingSendQueue) == 0 || m.session == nil {
+		if m.editor.pendingSendActive || len(m.editor.pendingSendQueue) == 0 || m.sess.session == nil {
 			break
 		}
 		item := m.editor.pendingSendQueue[0]
 		m.editor.pendingSendQueue = m.editor.pendingSendQueue[1:]
-		if item.sessionID != m.session.ID || item.loadGeneration != m.sessionLoadGen {
+		if item.sessionID != m.sess.session.ID || item.loadGeneration != m.sess.sessionLoadGen {
 			if len(m.editor.pendingSendQueue) > 0 {
 				cmds = append(cmds, func() tea.Msg { return sendPendingQueueMsg{} })
 			}
@@ -294,7 +294,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if !m.editor.pendingSendLoading || msg.generation != m.editor.pendingSendGen {
 			break
 		}
-		expectedLoadGeneration := m.sessionLoadGen + 1
+		expectedLoadGeneration := m.sess.sessionLoadGen + 1
 		for i := range m.editor.pendingSendQueue {
 			if m.editor.pendingSendQueue[i].generation == msg.generation {
 				m.editor.pendingSendQueue[i].sessionID = msg.session.ID
@@ -309,7 +309,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			bang:           true,
 			isFirstMessage: msg.isFirstMessage,
 		}}, m.editor.pendingSendQueue...)
-		m.session = &msg.session
+		m.sess.session = &msg.session
 		m.setState(uiChat, m.focus)
 		cmds = append(cmds, m.requestSessionLoad(msg.session.ID))
 	}
@@ -322,10 +322,10 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 // landed), so the stale result is dropped instead of popping the dialog
 // open unexpectedly.
 func (m *UI) applySessionsLoaded(msg sessionsLoadedMsg) tea.Cmd {
-	if msg.gen != m.sessionsDialogGen {
+	if msg.gen != m.sess.sessionsDialogGen {
 		return nil
 	}
-	m.sessionsDialogLoading = false
+	m.sess.sessionsDialogLoading = false
 	if msg.err != nil {
 		return util.ReportError(msg.err)
 	}

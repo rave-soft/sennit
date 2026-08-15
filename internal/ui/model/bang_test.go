@@ -49,7 +49,7 @@ func TestBangEnterClearsBangModeAndDispatchesShell(t *testing.T) {
 	t.Parallel()
 
 	u := newSlashTestUI(t)
-	u.session = &session.Session{ID: "sess-1"} // has a session already; skip CreateSession
+	u.sess.session = &session.Session{ID: "sess-1"} // has a session already; skip CreateSession
 	typeText(u, "!echo hi")
 	require.True(t, u.editor.bangMode)
 

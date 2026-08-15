@@ -160,7 +160,7 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 
 	require.Equal(t, 120, r.width)
 	require.Equal(t, 40, r.height)
-	require.Equal(t, 120, r.main.width)
+	require.Equal(t, 120, r.main.lay.width)
 	require.Equal(t, 120, r.dashboard.width)
 	require.Equal(t, 40, r.dashboard.height)
 }
@@ -203,8 +203,8 @@ func TestThreadEventMsgReachesAttachedThread(t *testing.T) {
 		cmd()
 	}
 
-	require.Equal(t, 80, threadUI.width)
-	require.Equal(t, 24, threadUI.height)
+	require.Equal(t, 80, threadUI.lay.width)
+	require.Equal(t, 24, threadUI.lay.height)
 }
 
 // TestAltUpAtThreadTopLevelReturnsToMain covers the new handleKeyPress

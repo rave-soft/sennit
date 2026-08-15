@@ -63,14 +63,14 @@ func newSessionPanelBenchUI() *UI {
 		u.com.Styles.Attachments.Skill,
 		u.com.Styles.Attachments.Remove,
 	), attachments.Keymap{})
-	u.session = &session.Session{ID: "bench-session"}
-	u.width, u.height = 140, 45
+	u.sess.session = &session.Session{ID: "bench-session"}
+	u.lay.width, u.lay.height = 140, 45
 	// Compact layout skips the sidebar, which needs a real workspace
 	// (m.com.Workspace.WorkingDir()) that this synthetic fixture has none
 	// of — the session panel's own draw path is identical either way.
 	// forceCompactMode (not a direct isCompact assignment) survives
 	// updateLayoutAndSize's own width-based recompute below.
-	u.forceCompactMode = true
+	u.lay.forceCompactMode = true
 
 	// Long chat history: plain filler items plus two running delegations
 	// (top-level agent tool calls with no result yet), scattered through
@@ -102,7 +102,7 @@ func newSessionPanelBenchUI() *UI {
 
 	// Nine todos: a few in-progress (exercises the spinner path), some
 	// pending, some completed.
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Status: session.TodoStatusInProgress, Content: "in progress 1", ActiveForm: "Working on 1"},
 		{Status: session.TodoStatusInProgress, Content: "in progress 2", ActiveForm: "Working on 2"},
 		{Status: session.TodoStatusPending, Content: "pending 1"},
@@ -132,7 +132,7 @@ func BenchmarkSessionPanelDraw(b *testing.B) {
 	} {
 		b.Run(size.name, func(b *testing.B) {
 			u := newSessionPanelBenchUI()
-			u.width, u.height = size.w, size.h
+			u.lay.width, u.lay.height = size.w, size.h
 			u.updateLayoutAndSize()
 			scr := uv.NewScreenBuffer(size.w, size.h)
 			area := uv.Rectangle{Max: uv.Position{X: size.w, Y: size.h}}
@@ -181,8 +181,8 @@ func TestSessionPanelDrawFrameBudget(t *testing.T) {
 	// assertion, and running alongside other parallel tests would add
 	// scheduling noise that has nothing to do with the code under test.
 	u := newSessionPanelBenchUI()
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	area := uv.Rectangle{Max: uv.Position{X: u.width, Y: u.height}}
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	area := uv.Rectangle{Max: uv.Position{X: u.lay.width, Y: u.lay.height}}
 
 	// Warm caches once (mirrors real usage: the first frame after a
 	// layout/session change is allowed to be pricier; steady-state ticks

@@ -163,7 +163,7 @@ func TestSlashCompactRunsSummarize(t *testing.T) {
 	t.Parallel()
 
 	u := newSlashTestUI(t)
-	u.session = &session.Session{ID: "sess-1"}
+	u.sess.session = &session.Session{ID: "sess-1"}
 	items := u.commandCompletionItems()
 
 	var found bool

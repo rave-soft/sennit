@@ -39,9 +39,9 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 	m.header.drawHeader(
 		scr,
 		area,
-		m.session,
-		m.isCompact,
-		m.detailsOpen,
+		m.sess.session,
+		m.lay.isCompact,
+		m.lay.detailsOpen,
 		area.Dx(),
 		m.lspErrorCount(),
 		m.activeThreadBadgeCount(),
@@ -53,12 +53,12 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
 
-	if m.layout != layout {
-		m.layout = layout
+	if m.lay.layout != layout {
+		m.lay.layout = layout
 		m.updateSize()
 	}
 
-	if m.state == uiChat && m.hasSession() && !m.isCompact {
+	if m.state == uiChat && m.hasSession() && !m.lay.isCompact {
 		m.updateSidebarScrollState()
 	}
 
@@ -101,7 +101,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 	case uiChat:
-		if m.isCompact {
+		if m.lay.isCompact {
 			m.drawHeader(scr, layout.header)
 		} else {
 			m.drawSidebar(scr, layout.sidebar)
@@ -131,7 +131,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			}
 		} else {
 			editorWidth := scr.Bounds().Dx()
-			if !m.isCompact {
+			if !m.lay.isCompact {
 				editorWidth -= layout.sidebar.Dx()
 			}
 			editor := uv.NewStyledString(m.renderEditorView(editorWidth))
@@ -144,7 +144,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.drawChatSeparators(scr, layout.editor)
 
 		// Draw details overlay in compact mode when open
-		if m.isCompact && m.detailsOpen {
+		if m.lay.isCompact && m.lay.detailsOpen {
 			m.drawSessionDetails(scr, layout.sessionDetails)
 		}
 	}
@@ -194,19 +194,19 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	switch m.focus {
 	case uiFocusEditor:
-		if m.layout.editor.Dy() <= 0 {
+		if m.lay.layout.editor.Dy() <= 0 {
 			// Don't show cursor if editor is not visible
 			return nil
 		}
-		if m.detailsOpen && m.isCompact {
+		if m.lay.detailsOpen && m.lay.isCompact {
 			// Don't show cursor if details overlay is open
 			return nil
 		}
 
 		if m.activeInline != nil {
 			if cur := m.inlineCursor; cur != nil {
-				cur.X++                        // Adjust for app margins
-				cur.Y += m.layout.editor.Min.Y // Inline editor draws from area top
+				cur.X++                            // Adjust for app margins
+				cur.Y += m.lay.layout.editor.Min.Y // Inline editor draws from area top
 				return cur
 			}
 			return nil
@@ -215,7 +215,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		if m.editor.textarea.Focused() {
 			cur := m.editor.textarea.Cursor()
 			cur.X++ // Adjust for app margins
-			cur.Y += m.layout.editor.Min.Y + m.editorAttachmentsRowOffset()
+			cur.Y += m.lay.layout.editor.Min.Y + m.editorAttachmentsRowOffset()
 			return cur
 		}
 	}
@@ -248,17 +248,17 @@ func (m *UI) drawChatSeparators(scr uv.Screen, editorArea uv.Rectangle) {
 func (m *UI) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
-	if !m.isTransparent {
+	if !m.lay.isTransparent {
 		v.BackgroundColor = m.com.Styles.Background
 	}
 	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = "braid " + home.Short(m.com.Workspace.WorkingDir())
-	if m.hasSession() && m.session.Title != "" {
-		v.WindowTitle += " — " + m.session.Title
+	if m.hasSession() && m.sess.session.Title != "" {
+		v.WindowTitle += " — " + m.sess.session.Title
 	}
 
-	canvas := uv.NewScreenBuffer(m.width, m.height)
+	canvas := uv.NewScreenBuffer(m.lay.width, m.lay.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
 	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines
@@ -284,24 +284,24 @@ func (m *UI) View() tea.View {
 func (m *UI) updateLayoutAndSize() {
 	// Determine if we should be in compact mode
 	if m.state == uiChat {
-		if m.forceCompactMode {
-			m.isCompact = true
-		} else if m.width < compactModeWidthBreakpoint || m.height < compactModeHeightBreakpoint {
-			m.isCompact = true
+		if m.lay.forceCompactMode {
+			m.lay.isCompact = true
+		} else if m.lay.width < compactModeWidthBreakpoint || m.lay.height < compactModeHeightBreakpoint {
+			m.lay.isCompact = true
 		} else {
-			m.isCompact = false
+			m.lay.isCompact = false
 		}
 	}
 
 	// First pass sizes components from the current textarea height.
-	m.layout = m.generateLayout(m.width, m.height)
+	m.lay.layout = m.generateLayout(m.lay.width, m.lay.height)
 	prevHeight := m.editor.textarea.Height()
 	m.updateSize()
 
 	// SetWidth can change textarea height due to soft-wrap recalculation.
 	// If that happens, run one reconciliation pass with the new height.
 	if m.editor.textarea.Height() != prevHeight {
-		m.layout = m.generateLayout(m.width, m.height)
+		m.lay.layout = m.generateLayout(m.lay.width, m.lay.height)
 		m.updateSize()
 	}
 }
@@ -309,17 +309,17 @@ func (m *UI) updateLayoutAndSize() {
 // updateSize updates the sizes of UI components based on the current layout.
 func (m *UI) updateSize() {
 	// Set status width
-	m.status.SetWidth(m.layout.status.Dx())
+	m.status.SetWidth(m.lay.layout.status.Dx())
 
-	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
+	m.chat.SetSize(m.lay.layout.main.Dx(), m.lay.layout.main.Dy())
 	m.editor.textarea.MaxHeight = TextareaMaxHeight
-	m.editor.textarea.SetWidth(m.layout.editor.Dx())
+	m.editor.textarea.SetWidth(m.lay.layout.editor.Dx())
 
 	// Handle different app states
 	switch m.state {
 	case uiChat:
-		if !m.isCompact {
-			m.cacheSidebarLogo(m.layout.sidebar.Dx())
+		if !m.lay.isCompact {
+			m.cacheSidebarLogo(m.lay.layout.sidebar.Dx())
 		}
 	}
 }
@@ -438,7 +438,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		uiLayout.editor = editorRect
 
 	case uiChat:
-		if m.isCompact {
+		if m.lay.isCompact {
 			// Layout
 			//
 			// compact-header
@@ -570,9 +570,9 @@ func (m *UI) drawGhostText(scr uv.Screen) {
 	// editorAttachmentsRowOffset() for the attachments line renderEditorView
 	// conditionally prepends above the textarea (mirrors the offset applied
 	// where the completions popup position is used, above).
-	x := m.layout.editor.Min.X + cur.X
-	y := m.layout.editor.Min.Y + cur.Y + m.editorAttachmentsRowOffset()
-	if x >= m.layout.editor.Max.X || y >= m.layout.editor.Max.Y {
+	x := m.lay.layout.editor.Min.X + cur.X
+	y := m.lay.layout.editor.Min.Y + cur.Y + m.editorAttachmentsRowOffset()
+	if x >= m.lay.layout.editor.Max.X || y >= m.lay.layout.editor.Max.Y {
 		return
 	}
 
@@ -588,7 +588,7 @@ func (m *UI) drawGhostText(scr uv.Screen) {
 	ghost.Tail = "…" // mark truncation if it overflows the editor width
 	ghost.Draw(scr, image.Rectangle{
 		Min: image.Pt(x, y),
-		Max: image.Pt(m.layout.editor.Max.X, y+1),
+		Max: image.Pt(m.lay.layout.editor.Max.X, y+1),
 	})
 }
 
@@ -597,13 +597,13 @@ func (m *UI) completionsPosition() image.Point {
 	cur := m.editor.textarea.Cursor()
 	if cur == nil {
 		return image.Point{
-			X: m.layout.editor.Min.X,
-			Y: m.layout.editor.Min.Y,
+			X: m.lay.layout.editor.Min.X,
+			Y: m.lay.layout.editor.Min.Y,
 		}
 	}
 	return image.Point{
-		X: cur.X + m.layout.editor.Min.X,
-		Y: m.layout.editor.Min.Y + cur.Y,
+		X: cur.X + m.lay.layout.editor.Min.X,
+		Y: m.lay.layout.editor.Min.Y + cur.Y,
 	}
 }
 
@@ -652,8 +652,8 @@ func (m *UI) cacheSidebarLogo(width int) {
 // of truth for the inline editor width used by both layout sizing
 // and Height() queries.
 func (m *UI) editorContentWidth() int {
-	width := m.width - 2 // appRect horizontal margins
-	if m.state == uiChat && !m.isCompact {
+	width := m.lay.width - 2 // appRect horizontal margins
+	if m.state == uiChat && !m.lay.isCompact {
 		width -= 30 // sidebar column
 	}
 	return width
@@ -664,7 +664,7 @@ func (m *UI) editorContentWidth() int {
 // editor's own content width, since completionsPosition anchors the popup
 // to the editor's cursor column.
 func (m *UI) completionsMaxWidth() int {
-	maxW := m.width * 6 / 10
+	maxW := m.lay.width * 6 / 10
 	if ew := m.editorContentWidth(); ew > 0 && ew < maxW {
 		maxW = ew
 	}
@@ -673,7 +673,7 @@ func (m *UI) completionsMaxWidth() int {
 
 // drawSessionDetails draws the session details in compact mode.
 func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
-	if m.session == nil {
+	if m.sess.session == nil {
 		return
 	}
 
@@ -682,7 +682,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx() - s.CompactDetails.View.GetHorizontalFrameSize()
 	height := area.Dy() - s.CompactDetails.View.GetVerticalFrameSize()
 
-	title := s.CompactDetails.Title.Width(width).MaxHeight(2).Render(m.session.Title)
+	title := s.CompactDetails.Title.Width(width).MaxHeight(2).Render(m.sess.session.Title)
 	blocks := []string{
 		title,
 		"",

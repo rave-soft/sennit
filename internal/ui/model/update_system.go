@@ -46,7 +46,7 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.notifyWindowFocused = false
 
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+		m.lay.width, m.lay.height = msg.Width, msg.Height
 		// Suppress the chat's full-height scan during the resize so a drag
 		// only reflows visible items; it settles (and recomputes) shortly
 		// after the last resize event.

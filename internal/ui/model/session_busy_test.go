@@ -161,13 +161,15 @@ func newBusyUI(ws workspace.Workspace) *UI {
 			textarea:    textarea.New(),
 			attachments: attachments.New(nil, attachments.Keymap{}),
 		},
-		state:   uiChat,
-		focus:   uiFocusEditor,
-		width:   140,
-		height:  45,
-		session: &session.Session{ID: "s1"},
-		keyMap:  DefaultKeyMap(),
-		dialog:  dialog.NewOverlay(),
+		state: uiChat,
+		focus: uiFocusEditor,
+		lay: layoutState{
+			width:  140,
+			height: 45,
+		},
+		sess:   sessionState{session: &session.Session{ID: "s1"}},
+		keyMap: DefaultKeyMap(),
+		dialog: dialog.NewOverlay(),
 	}
 }
 

@@ -36,9 +36,9 @@ func newAttachmentClickTestUI(t *testing.T) (*UI, int) {
 	u.editor.attachments = attachments.New(renderer, attachments.Keymap{})
 	u.updateLayoutAndSize()
 	require.True(t, u.editor.attachments.Update(message.Attachment{FileName: "test.txt"}))
-	_ = u.editor.attachments.Render(u.layout.editor.Dx())
+	_ = u.editor.attachments.Render(u.lay.layout.editor.Dx())
 
-	for x := range u.layout.editor.Dx() {
+	for x := range u.lay.layout.editor.Dx() {
 		if renderer.HitTestRemove(u.editor.attachments.List(), x) == 0 {
 			return u, x
 		}
@@ -60,8 +60,8 @@ func TestAttachmentClickIgnoredWhileInlineEditorIsActive(t *testing.T) {
 	})
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
-		X:      u.layout.editor.Min.X + removeX,
-		Y:      u.layout.editor.Min.Y,
+		X:      u.lay.layout.editor.Min.X + removeX,
+		Y:      u.lay.layout.editor.Min.Y,
 		Button: uv.MouseLeft,
 	}))
 
@@ -87,8 +87,8 @@ func TestAttachmentClickRequiresLeftMouseButton(t *testing.T) {
 
 			u, removeX := newAttachmentClickTestUI(t)
 			_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
-				X:      u.layout.editor.Min.X + removeX,
-				Y:      u.layout.editor.Min.Y,
+				X:      u.lay.layout.editor.Min.X + removeX,
+				Y:      u.lay.layout.editor.Min.Y,
 				Button: tt.button,
 			}))
 

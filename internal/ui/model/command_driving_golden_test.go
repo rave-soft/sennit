@@ -22,9 +22,9 @@ func newCmdDrivenGoldenUI(ws *cmdDrivingWorkspace) *UI {
 	m := New(common.DefaultCommon(context.Background(), ws), "", false)
 	m.state = uiChat
 	m.focus = uiFocusEditor
-	m.width = 140
-	m.height = 45
-	m.session = &session.Session{ID: "s1"}
+	m.lay.width = 140
+	m.lay.height = 45
+	m.sess.session = &session.Session{ID: "s1"}
 	m.readyPlaceholder = "Ready!"
 	m.workingPlaceholder = "Working!"
 	m.editor.textarea.Placeholder = m.readyPlaceholder
@@ -33,7 +33,7 @@ func newCmdDrivenGoldenUI(ws *cmdDrivingWorkspace) *UI {
 }
 
 func renderCmdDrivenUI(m *UI) []byte {
-	canvas := uv.NewScreenBuffer(m.width, m.height)
+	canvas := uv.NewScreenBuffer(m.lay.width, m.lay.height)
 	m.Draw(canvas, canvas.Bounds())
 	return []byte(canvas.Render())
 }
@@ -152,8 +152,8 @@ func TestCmdDrivingGolden(t *testing.T) {
 		_, cmd := m.Update(requestSessionLoad{sessionID: "s-loaded"})
 		runCmdTree(m, cmd, nil)
 
-		require.Equal(t, "s-loaded", m.session.ID)
-		require.Equal(t, "Loaded Session", m.session.Title)
+		require.Equal(t, "s-loaded", m.sess.session.ID)
+		require.Equal(t, "Loaded Session", m.sess.session.Title)
 		require.Equal(t, 2, m.chat.Len())
 		golden.RequireEqual(t, renderCmdDrivenUI(m))
 	})
@@ -170,7 +170,7 @@ func TestCmdDrivingGolden(t *testing.T) {
 			}},
 		}
 		m := newCmdDrivenGoldenUI(ws)
-		m.width, m.height = 100, 24
+		m.lay.width, m.lay.height = 100, 24
 		r := &Root{
 			com:             m.com,
 			main:            m,

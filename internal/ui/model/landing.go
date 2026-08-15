@@ -26,7 +26,7 @@ func (m *UI) selectedModel() *workspace.AgentModel {
 // directory, model information, and LSP/MCP status in a two-column layout.
 func (m *UI) landingView() string {
 	t := m.com.Styles
-	width := m.layout.main.Dx()
+	width := m.lay.layout.main.Dx()
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 
 	parts := []string{
@@ -40,7 +40,7 @@ func (m *UI) landingView() string {
 	layout.Vertical(
 		layout.Len(lipgloss.Height(infoSection)+1),
 		layout.Fill(1),
-	).Split(m.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
+	).Split(m.lay.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
 
 	mcpLspSectionWidth := min(30, (width-2)/3)
 
@@ -52,7 +52,7 @@ func (m *UI) landingView() string {
 
 	return lipgloss.NewStyle().
 		Width(width).
-		Height(m.layout.main.Dy() - 1).
+		Height(m.lay.layout.main.Dy() - 1).
 		PaddingTop(1).
 		Render(
 			lipgloss.JoinVertical(lipgloss.Left, infoSection, "", content),

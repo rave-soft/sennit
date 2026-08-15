@@ -65,7 +65,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// threads dashboard — the badge rendered there (see header.go's
 		// renderHeaderDetails) is the only visible hint threads are running
 		// while on the main screen, so it doubles as a button.
-		if msg.Button == tea.MouseLeft && m.activeThreadBadgeCount() > 0 && image.Pt(msg.X, msg.Y).In(m.layout.header) {
+		if msg.Button == tea.MouseLeft && m.activeThreadBadgeCount() > 0 && image.Pt(msg.X, msg.Y).In(m.lay.layout.header) {
 			cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
 			return cmds, true
 		}
@@ -88,7 +88,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// the threads dashboard (see Root.attachThreadCmd), not
 		// enterChildSession/navStack, which point at the wrong workspace.
 		//
-		// Hit-test rects are recomputed here from m.layout.panel +
+		// Hit-test rects are recomputed here from m.lay.layout.panel +
 		// m.sessionPanelPlan (via sessionPanelRowLayout), NOT read from
 		// m.panel.panelTodosHeaderRect/m.panel.panelThreadRects: those are only
 		// populated as a side effect of drawSessionPanel, which runs inside
@@ -99,8 +99,8 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// stale or zero and silently swallow the click.
 		if msg.Button == tea.MouseLeft && m.state == uiChat && m.hasSession() {
 			pt := image.Pt(msg.X, msg.Y)
-			plan := m.sessionPanelPlan(m.layout.panel.Dy())
-			threadBlockRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
+			plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
+			threadBlockRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.lay.layout.panel, plan)
 			if pt.In(todosHeaderRect) {
 				if cmd := m.toggleTodosExpanded(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -124,8 +124,8 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// Check if the click landed on an attachment's remove button.
 		// The attachment chips are rendered on the first row of the
 		// editor layout area, above the textarea.
-		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.editor.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
-			relX := msg.X - m.layout.editor.Min.X
+		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.editor.attachments.List()) > 0 && msg.Y == m.lay.layout.editor.Min.Y {
+			relX := msg.X - m.lay.layout.editor.Min.X
 			if m.editor.attachments.HandleClick(relX) {
 				return cmds, true
 			}
@@ -135,9 +135,9 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		case uiChat:
 			x, y := msg.X, msg.Y
 			// Adjust for chat area position
-			x -= m.layout.main.Min.X
-			y -= m.layout.main.Min.Y
-			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
+			x -= m.lay.layout.main.Min.X
+			y -= m.lay.layout.main.Min.Y
+			if !image.Pt(msg.X, msg.Y).In(m.lay.layout.sidebar) {
 				if handled, cmd := m.chat.HandleScrollbarMouseDown(x, y); handled {
 					if cmd != nil {
 						cmds = append(cmds, cmd)
@@ -161,8 +161,8 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// Hover feedback for the breadcrumb bar's Back button.
 		m.breadcrumbHover = m.breadcrumbButtonHit(image.Pt(msg.X, msg.Y))
 
-		if m.activeInline == nil && len(m.editor.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
-			m.editor.attachments.SetHover(msg.X - m.layout.editor.Min.X)
+		if m.activeInline == nil && len(m.editor.attachments.List()) > 0 && msg.Y == m.lay.layout.editor.Min.Y {
+			m.editor.attachments.SetHover(msg.X - m.lay.layout.editor.Min.X)
 		} else {
 			m.editor.attachments.SetHover(-1)
 		}
@@ -172,8 +172,8 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// panel's hover pattern above.
 		if m.state == uiChat {
 			pt := image.Pt(msg.X, msg.Y)
-			plan := m.sessionPanelPlan(m.layout.panel.Dy())
-			threadRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.layout.panel, plan)
+			plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
+			threadRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.lay.layout.panel, plan)
 			m.panel.panelTodosHover = pt.In(todosHeaderRect)
 			m.panel.panelThreadsHover = pt.In(threadsHeaderRect)
 			m.panel.hoveredPanelThread = -1
@@ -207,8 +207,8 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 
 			x, y := msg.X, msg.Y
 			// Adjust for chat area position
-			x -= m.layout.main.Min.X
-			y -= m.layout.main.Min.Y
+			x -= m.lay.layout.main.Min.X
+			y -= m.lay.layout.main.Min.Y
 
 			// An active scrollbar drag takes over the whole gesture: it
 			// tracks the cursor directly and must not also trigger the
@@ -259,8 +259,8 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		case uiChat:
 			x, y := msg.X, msg.Y
 			// Adjust for chat area position
-			x -= m.layout.main.Min.X
-			y -= m.layout.main.Min.Y
+			x -= m.lay.layout.main.Min.X
+			y -= m.lay.layout.main.Min.Y
 			if m.chat.HandleScrollbarMouseUp() {
 				// Scrollbar drag ended; nothing else to do.
 			} else if m.chat.HandleMouseUp(x, y) && m.chat.HasHighlight() {
@@ -276,7 +276,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// Route wheel events to active inline editor only when the
 		// mouse is over the editor area, so scrolling over the chat
 		// still scrolls the chat.
-		if m.activeInline != nil && image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.layout.editor) {
+		if m.activeInline != nil && image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.lay.layout.editor) {
 			if we, ok := m.activeInline.(common.WheelScrollable); ok {
 				we.HandleWheel(msg.DeltaX, msg.DeltaY)
 				return cmds, true
@@ -298,7 +298,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// When the mouse is hovering the sidebar, route wheel events to
 			// sidebar scrolling. Focus never enters the sidebar (see
 			// uiFocusState), so this is purely a hover check.
-			if m.sidebar.scrollable && image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.layout.sidebar) {
+			if m.sidebar.scrollable && image.Pt(msg.Mouse.X, msg.Mouse.Y).In(m.lay.layout.sidebar) {
 				lines := int(msg.DeltaY)
 				if lines != 0 {
 					seq := m.sidebar.scrollByWheel(lines)
@@ -314,9 +314,9 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// can arrive before drawSessionPanel has painted the current
 			// layout.
 			if m.hasSession() {
-				plan := m.sessionPanelPlan(m.layout.panel.Dy())
+				plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
 				if plan.todosScrollable {
-					_, _, todosListRect, _ := sessionPanelRowLayout(m.layout.panel, plan)
+					_, _, todosListRect, _ := sessionPanelRowLayout(m.lay.layout.panel, plan)
 					if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(todosListRect) {
 						lines := int(msg.DeltaY)
 						if lines != 0 {

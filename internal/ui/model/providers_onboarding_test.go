@@ -208,8 +208,10 @@ func newOnboardingTestUI(ws *onboardingTestWorkspace, state uiState, action dial
 		editor: editorState{textarea: textarea.New()},
 		state:  state,
 		focus:  uiFocusEditor,
-		width:  140,
-		height: 45,
+		lay: layoutState{
+			width:  140,
+			height: 45,
+		},
 		keyMap: DefaultKeyMap(),
 		dialog: overlay,
 	}

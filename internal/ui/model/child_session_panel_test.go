@@ -16,7 +16,7 @@ import (
 
 // newChildSessionPanelTestUI builds a UI in uiChat with a two-level-deep
 // nav stack (developer-junior -> task), mirroring what enterChildSession
-// leaves behind after two descents, and a real layout so u.layout.editor
+// leaves behind after two descents, and a real layout so u.lay.layout.editor
 // is a real rectangle sized for the panel. The top-level frame has 3
 // siblings (this is the 3rd), the current frame has none, matching the
 // target example: "developer-junior (3/3) › task (...)".
@@ -26,8 +26,8 @@ func newChildSessionPanelTestUI(t *testing.T) *UI {
 	u.com.Workspace = agentSessionWorkspace{}
 	u.dialog = dialog.NewOverlay()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
-	u.session = &session.Session{ID: "grandchild-session", PromptTokens: 800, CompletionTokens: 200}
-	u.navStack = []sessionNavFrame{
+	u.sess.session = &session.Session{ID: "grandchild-session", PromptTokens: 800, CompletionTokens: 200}
+	u.sess.navStack = []sessionNavFrame{
 		{
 			parentSessionID: "main-session", parentTitle: "main",
 			label: "fix the login bug", agentName: "developer-junior",
@@ -42,7 +42,7 @@ func newChildSessionPanelTestUI(t *testing.T) *UI {
 	// Wide enough that the full activity parenthetical fits in row 1
 	// without invoking the width-pressure fallbacks (those are covered on
 	// their own by the TestChildSessionHeaderText_* tests below).
-	u.width = 220
+	u.lay.width = 220
 	u.updateLayoutAndSize()
 	return u
 }
@@ -73,13 +73,13 @@ func TestChildSessionPanelReplacesEditor(t *testing.T) {
 
 	u := newTestUI()
 	u.updateLayoutAndSize()
-	require.NotEqual(t, childSessionPanelHeight, u.layout.editor.Dy(),
+	require.NotEqual(t, childSessionPanelHeight, u.lay.layout.editor.Dy(),
 		"outside child-session view the editor must size to the textarea, not the panel")
 
-	u.navStack = []sessionNavFrame{{parentSessionID: "parent", parentTitle: "main", agentName: "agent1"}}
+	u.sess.navStack = []sessionNavFrame{{parentSessionID: "parent", parentTitle: "main", agentName: "agent1"}}
 	u.updateLayoutAndSize()
 
-	require.Equal(t, childSessionPanelHeight, u.layout.editor.Dy(),
+	require.Equal(t, childSessionPanelHeight, u.lay.layout.editor.Dy(),
 		"viewing a child session must give the editor area the panel's fixed height")
 }
 
@@ -94,8 +94,8 @@ func TestDrawChildSessionPanel_ShowsModelEffortTokensAndNoNavigation(t *testing.
 	u := newChildSessionPanelTestUI(t)
 	u.wsCache.agentBusyCache.set(true)
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChildSessionPanel(scr, u.layout.editor)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawChildSessionPanel(scr, u.lay.layout.editor)
 	out := ansi.Strip(scr.Render())
 
 	require.Contains(t, out, "claude-sonnet-5")
@@ -133,11 +133,11 @@ func TestDrawChildSessionPanel_NoModelEffortShowsDefaultModel(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].model = ""
-	u.navStack[len(u.navStack)-1].effort = ""
+	u.sess.navStack[len(u.sess.navStack)-1].model = ""
+	u.sess.navStack[len(u.sess.navStack)-1].effort = ""
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChildSessionPanel(scr, u.layout.editor)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawChildSessionPanel(scr, u.lay.layout.editor)
 	out := ansi.Strip(scr.Render())
 
 	require.Contains(t, out, "default model")
@@ -151,12 +151,12 @@ func TestDrawChildSessionPanel_RunningShowsTickingElapsed(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].delegationStart = time.Now().Add(-45 * time.Second)
-	u.navStack[len(u.navStack)-1].delegationDuration = 0
+	u.sess.navStack[len(u.sess.navStack)-1].delegationStart = time.Now().Add(-45 * time.Second)
+	u.sess.navStack[len(u.sess.navStack)-1].delegationDuration = 0
 	u.wsCache.agentBusyCache.set(true)
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChildSessionPanel(scr, u.layout.editor)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawChildSessionPanel(scr, u.lay.layout.editor)
 	out := ansi.Strip(scr.Render())
 
 	require.Contains(t, out, "45s elapsed")
@@ -170,12 +170,12 @@ func TestDrawChildSessionPanel_DoneShowsFrozenDuration(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].delegationStart = time.Now().Add(-10 * time.Minute)
-	u.navStack[len(u.navStack)-1].delegationDuration = 83 * time.Second
+	u.sess.navStack[len(u.sess.navStack)-1].delegationStart = time.Now().Add(-10 * time.Minute)
+	u.sess.navStack[len(u.sess.navStack)-1].delegationDuration = 83 * time.Second
 	u.wsCache.agentBusyCache.set(false)
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChildSessionPanel(scr, u.layout.editor)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawChildSessionPanel(scr, u.lay.layout.editor)
 	out := ansi.Strip(scr.Render())
 
 	require.Contains(t, out, "1m23s")
@@ -191,12 +191,12 @@ func TestDrawChildSessionPanel_UnknownDurationOmitsTime(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	u.navStack[len(u.navStack)-1].delegationStart = time.Time{}
-	u.navStack[len(u.navStack)-1].delegationDuration = 0
+	u.sess.navStack[len(u.sess.navStack)-1].delegationStart = time.Time{}
+	u.sess.navStack[len(u.sess.navStack)-1].delegationDuration = 0
 	u.wsCache.agentBusyCache.set(false)
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChildSessionPanel(scr, u.layout.editor)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawChildSessionPanel(scr, u.lay.layout.editor)
 	out := ansi.Strip(scr.Render())
 
 	require.Contains(t, out, "800", "tokens must still render")
@@ -211,10 +211,10 @@ func TestChildSessionPanelHeight_OneRowAreaOmitsTokens(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionPanelTestUI(t)
-	area := u.layout.editor
+	area := u.lay.layout.editor
 	area.Max.Y = area.Min.Y + 1
 
-	scr := uv.NewScreenBuffer(u.width, u.height)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	require.NotPanics(t, func() {
 		u.drawChildSessionPanel(scr, area)
 	})

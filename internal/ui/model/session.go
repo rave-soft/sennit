@@ -29,13 +29,13 @@ func (m *UI) requestSessionLoad(sessionID string) tea.Cmd {
 }
 
 func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
-	m.sessionLoadGen++
-	if m.sessionLoadExpectedID != "" && m.sessionLoadExpectedID != sessionID {
+	m.sess.sessionLoadGen++
+	if m.sess.sessionLoadExpectedID != "" && m.sess.sessionLoadExpectedID != sessionID {
 		m.editor.pendingSendQueue = nil
 		m.editor.pendingSendActive = false
 	}
-	m.sessionLoadExpectedID = sessionID
-	generation := m.sessionLoadGen
+	m.sess.sessionLoadExpectedID = sessionID
+	generation := m.sess.sessionLoadGen
 	ctx := m.com.Context()
 	workspace := m.com.Workspace
 	styles := m.com.Styles
@@ -164,7 +164,7 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 // state.
 func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	workspace := m.com.Workspace
-	generation := m.sessionLoadGen
+	generation := m.sess.sessionLoadGen
 	return func() tea.Msg {
 		if err := workspace.SetCurrentSessionGeneration(context.Background(), sessionID, generation); err != nil {
 			slog.Debug("Failed to report current session", "session_id", sessionID, "error", err)
@@ -240,12 +240,12 @@ func (m *UI) loadModifiedFiles(sessionID string) ([]SessionFile, error) {
 // handleFileEvent processes file change events and updates the session file
 // list with new or updated file information.
 func (m *UI) handleFileEvent(file history.File) tea.Cmd {
-	if m.session == nil || file.SessionID != m.session.ID {
+	if m.sess.session == nil || file.SessionID != m.sess.session.ID {
 		return nil
 	}
 
 	return func() tea.Msg {
-		sessionFiles, err := m.loadModifiedFiles(m.session.ID)
+		sessionFiles, err := m.loadModifiedFiles(m.sess.session.ID)
 		// could not load session files
 		if err != nil {
 			return util.NewErrorMsg(err)
@@ -257,10 +257,10 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 }
 
 func (m *UI) refreshModifiedFiles() tea.Cmd {
-	if m.session == nil {
+	if m.sess.session == nil {
 		return nil
 	}
-	sessionID := m.session.ID
+	sessionID := m.sess.session.ID
 	return func() tea.Msg {
 		files, err := m.loadModifiedFiles(sessionID)
 		if err != nil {
@@ -281,7 +281,7 @@ func (m *UI) filesInfo(cwd string, width, maxItems int, isSection bool) string {
 	}
 	list := t.Files.EmptyMessage.Render("None")
 	var filesWithChanges []SessionFile
-	for _, f := range m.sessionFiles {
+	for _, f := range m.sess.sessionFiles {
 		if !f.Uncommitted && f.Additions == 0 && f.Deletions == 0 {
 			continue
 		}

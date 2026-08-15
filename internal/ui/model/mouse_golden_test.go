@@ -68,7 +68,7 @@ func TestMouseGolden(t *testing.T) {
 		// The item is the only one in the chat, so it sits at the top of
 		// the viewport — click its header, which HandleMouseDown maps back
 		// to item index 0 (see the coordinate translation in ui.go).
-		downX, downY := m.layout.main.Min.X, m.layout.main.Min.Y
+		downX, downY := m.lay.layout.main.Min.X, m.lay.layout.main.Min.Y
 		_, cmd := m.Update(tea.MouseClickMsg(tea.Mouse{X: downX, Y: downY, Button: uv.MouseLeft}))
 		require.NotNil(t, cmd, "a single click on a tool item must schedule the delayed expand action")
 		runCmdTree(m, cmd, nil)
@@ -105,9 +105,9 @@ func TestMouseGolden(t *testing.T) {
 		trackHeight := m.chat.scrollbarTrackHeight
 		require.Positive(t, trackHeight)
 
-		screenX := m.layout.main.Min.X + colX
-		topY := m.layout.main.Min.Y
-		bottomY := m.layout.main.Min.Y + trackHeight - 1
+		screenX := m.lay.layout.main.Min.X + colX
+		topY := m.lay.layout.main.Min.Y
+		bottomY := m.lay.layout.main.Min.Y + trackHeight - 1
 
 		_, cmd := m.Update(tea.MouseClickMsg(tea.Mouse{X: screenX, Y: topY, Button: uv.MouseLeft}))
 		runCmdTree(m, cmd, nil)

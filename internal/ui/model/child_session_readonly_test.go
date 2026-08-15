@@ -22,7 +22,7 @@ func TestSendMessageBlockedWhileViewingChildSession(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.navStack = append(u.navStack, sessionNavFrame{parentSessionID: "parent"})
+	u.sess.navStack = append(u.sess.navStack, sessionNavFrame{parentSessionID: "parent"})
 
 	var cmd tea.Cmd
 	require.NotPanics(t, func() {
@@ -46,7 +46,7 @@ func TestEnterChildSessionForcesReadOnlyFocus(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
+	u.sess.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
 	u.focus = uiFocusEditor
 	u.editor.textarea = textarea.New()
 	u.editor.textarea.Focus()
@@ -74,7 +74,7 @@ func TestEnterExitChildSession_NeverSetsStatusInfoMsg(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
+	u.sess.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
 	u.editor.textarea = textarea.New()
 	u.chat.AppendMessages(
 		newAgentItem(u.com.Styles, "tc-1"),
@@ -99,7 +99,7 @@ func TestExitChildSessionRestoresEditorFocus(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
+	u.sess.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
 	u.editor.textarea = textarea.New()
 	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
 
@@ -255,7 +255,7 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 
 	u := newCursorTestUI(t)
 	u.com.Workspace = drillInWorkspace{}
-	u.session = &session.Session{ID: "parent-session", Title: "Parent"}
+	u.sess.session = &session.Session{ID: "parent-session", Title: "Parent"}
 
 	for i := range 3 {
 		u.chat.AppendMessages(chat.NewToolMessageItem(u.com.Styles, "msg-plain",
@@ -281,8 +281,8 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 	require.GreaterOrEqual(t, clickY, 0, "must find a screen row for the delegation item")
 
 	_, cmd := u.Update(tea.MouseClickMsg(tea.Mouse{
-		X:      u.layout.main.Min.X,
-		Y:      u.layout.main.Min.Y + clickY,
+		X:      u.lay.layout.main.Min.X,
+		Y:      u.lay.layout.main.Min.Y + clickY,
 		Button: uv.MouseLeft,
 	}))
 	require.NotNil(t, cmd, "the click must schedule a delayed-click command")
@@ -310,7 +310,7 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 
 	_, _ = u.Update(delayedMsg)
 
-	require.Len(t, u.navStack, 1, "clicking a finished delegation must push a child-session nav frame")
-	require.Equal(t, "parent-session", u.navStack[0].parentSessionID)
+	require.Len(t, u.sess.navStack, 1, "clicking a finished delegation must push a child-session nav frame")
+	require.Equal(t, "parent-session", u.sess.navStack[0].parentSessionID)
 	require.Equal(t, uiFocusMain, u.focus)
 }

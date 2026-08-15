@@ -115,8 +115,8 @@ func (m *UI) handleGlobalKeys(msg tea.KeyPressMsg, cmds []tea.Cmd) ([]tea.Cmd, b
 		}
 		cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
 		return cmds, true
-	case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
-		m.detailsOpen = !m.detailsOpen
+	case key.Matches(msg, m.keyMap.Chat.Details) && m.lay.isCompact:
+		m.lay.detailsOpen = !m.lay.detailsOpen
 		m.updateLayoutAndSize()
 		return cmds, true
 	case key.Matches(msg, m.keyMap.Chat.TogglePills):
@@ -405,8 +405,8 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 	}
 
 	// remove the details if they are open when user starts typing
-	if m.detailsOpen {
-		m.detailsOpen = false
+	if m.lay.detailsOpen {
+		m.lay.detailsOpen = false
 		m.updateLayoutAndSize()
 	}
 

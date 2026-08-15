@@ -37,7 +37,7 @@ func fullHelpKeyByHelpText(binds [][]key.Binding, helpKey string) bool {
 func newHelpTestUI(t *testing.T) *UI {
 	t.Helper()
 	u := newChildSessionTestUI(t)
-	u.session = &session.Session{ID: "parent-session"}
+	u.sess.session = &session.Session{ID: "parent-session"}
 	u.state = uiChat
 	u.focus = uiFocusMain
 	u.keyMap = DefaultKeyMap()
@@ -82,7 +82,7 @@ func TestShortFullHelpShowAllChildSessionNavWithMultipleSiblings(t *testing.T) {
 	t.Parallel()
 
 	u := newHelpTestUI(t)
-	u.navStack = []sessionNavFrame{
+	u.sess.navStack = []sessionNavFrame{
 		{
 			parentSessionID: "parent-session",
 			siblings: []childSessionRef{
@@ -106,7 +106,7 @@ func TestShortFullHelpHidePrevNextWithSingleSibling(t *testing.T) {
 	t.Parallel()
 
 	u := newHelpTestUI(t)
-	u.navStack = []sessionNavFrame{
+	u.sess.navStack = []sessionNavFrame{
 		{
 			parentSessionID: "parent-session",
 			siblings: []childSessionRef{

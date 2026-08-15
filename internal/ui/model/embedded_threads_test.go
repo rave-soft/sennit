@@ -118,5 +118,5 @@ func TestRoot_ScreenBoundMessagesStillFollowTheActiveScreen(t *testing.T) {
 	r.active = screenThread
 
 	r.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	require.Equal(t, 100, threadUI.width, "the visible screen still gets its own messages")
+	require.Equal(t, 100, threadUI.lay.width, "the visible screen still gets its own messages")
 }

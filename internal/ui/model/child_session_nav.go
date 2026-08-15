@@ -17,17 +17,17 @@ import (
 // sessions read-only and to keep the editor from stealing focus while one
 // is being viewed.
 func (m *UI) viewingChildSession() bool {
-	return len(m.navStack) > 0
+	return len(m.sess.navStack) > 0
 }
 
 // childSessionSiblingCount returns the number of sibling delegations in the
 // top nav-stack frame, i.e. how many sub-agents alt+left/alt+right can cycle
 // through. Zero when not viewing a child session.
 func (m *UI) childSessionSiblingCount() int {
-	if len(m.navStack) == 0 {
+	if len(m.sess.navStack) == 0 {
 		return 0
 	}
-	return len(m.navStack[len(m.navStack)-1].siblings)
+	return len(m.sess.navStack[len(m.sess.navStack)-1].siblings)
 }
 
 // childSessionBreadcrumbMaxLen is the approximate max length of the prompt
@@ -72,10 +72,10 @@ func childSessionLabel(item chat.ToolMessageItem) string {
 func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	childID := m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID)
 
-	// m.session still refers to the parent here — loadSession is async and
+	// m.sess.session still refers to the parent here — loadSession is async and
 	// doesn't repoint it synchronously — so this is the last cheap chance
 	// to capture the parent's title for the breadcrumb.
-	parentTitle := m.session.Title
+	parentTitle := m.sess.session.Title
 
 	siblings := m.chat.NestedToolContainerRefs()
 	siblingIndex := 0
@@ -95,8 +95,8 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 		agentName, model, effort, delegationStart, delegationDuration = delegationInfo(item)
 	}
 
-	m.navStack = append(m.navStack, sessionNavFrame{
-		parentSessionID:    m.session.ID,
+	m.sess.navStack = append(m.sess.navStack, sessionNavFrame{
+		parentSessionID:    m.sess.session.ID,
 		parentTitle:        parentTitle,
 		label:              label,
 		siblings:           siblings,
@@ -127,12 +127,12 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 // that loads the session it points back to. No-op if the stack is empty
 // (e.g. alt+up pressed on a top-level session).
 func (m *UI) exitChildSession() tea.Cmd {
-	if len(m.navStack) == 0 {
+	if len(m.sess.navStack) == 0 {
 		return nil
 	}
-	frame := m.navStack[len(m.navStack)-1]
-	m.navStack = m.navStack[:len(m.navStack)-1]
-	if len(m.navStack) == 0 {
+	frame := m.sess.navStack[len(m.sess.navStack)-1]
+	m.sess.navStack = m.sess.navStack[:len(m.sess.navStack)-1]
+	if len(m.sess.navStack) == 0 {
 		// Back at a top-level session: restore normal editor focus, since
 		// Tab no longer offers a manual way back in.
 		m.focus = uiFocusEditor
@@ -149,10 +149,10 @@ func (m *UI) exitChildSession() tea.Cmd {
 // siblings under the same parent. No-op if there's no active frame or
 // fewer than two siblings to cycle through.
 func (m *UI) cycleChildSession(delta int) tea.Cmd {
-	if len(m.navStack) == 0 {
+	if len(m.sess.navStack) == 0 {
 		return nil
 	}
-	frame := &m.navStack[len(m.navStack)-1]
+	frame := &m.sess.navStack[len(m.sess.navStack)-1]
 	n := len(frame.siblings)
 	if n < 2 {
 		return nil

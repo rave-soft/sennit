@@ -84,15 +84,15 @@ func TestUpdate_SessionEvent_SyncsTodosCompactWithPanelVisibility(t *testing.T) 
 	u.chat.SetSize(80, 40)
 	item := newTestTodosToolItem(t, u)
 	u.chat.SetMessages(item)
-	u.session.Todos = []session.Todo{
+	u.sess.session.Todos = []session.Todo{
 		{Content: "write the plan", Status: session.TodoStatusInProgress},
 		{Content: "ship it", Status: session.TodoStatusPending},
 	}
 
-	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.session})
+	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.session})
 	require.NotContains(t, item.Render(80), "Writing the plan", "panel is showing incomplete todos: transcript must be compact")
 
-	completed := *u.session
+	completed := *u.sess.session
 	completed.Todos = []session.Todo{
 		{Content: "write the plan", Status: session.TodoStatusCompleted},
 		{Content: "ship it", Status: session.TodoStatusCompleted},
@@ -113,11 +113,11 @@ func TestUpdate_SessionEvent_NewTodosListForcesExpand(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
-	u.height = 10 // Below autoExpandTodosIfReasonable's height gate, on purpose.
+	u.lay.height = 10 // Below autoExpandTodosIfReasonable's height gate, on purpose.
 	require.False(t, u.panel.expanded)
 
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: session.Session{
-		ID: u.session.ID,
+		ID: u.sess.session.ID,
 		Todos: []session.Todo{
 			{Content: "write the plan", Status: session.TodoStatusPending},
 		},
@@ -127,7 +127,7 @@ func TestUpdate_SessionEvent_NewTodosListForcesExpand(t *testing.T) {
 	// A manual collapse must stick across further updates to the same list.
 	u.panel.expanded = false
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: session.Session{
-		ID: u.session.ID,
+		ID: u.sess.session.ID,
 		Todos: []session.Todo{
 			{Content: "write the plan", Status: session.TodoStatusPending},
 			{Content: "ship it", Status: session.TodoStatusPending},

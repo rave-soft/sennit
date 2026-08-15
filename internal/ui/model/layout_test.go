@@ -24,11 +24,11 @@ func TestDrawChatSeparatorsAboveAndBelowChat(t *testing.T) {
 	u := newTestUI()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
 	u.updateLayoutAndSize()
-	scr := uv.NewScreenBuffer(u.width, u.height)
-	u.drawChatSeparators(scr, u.layout.editor)
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawChatSeparators(scr, u.lay.layout.editor)
 
-	for _, y := range []int{u.layout.editor.Min.Y - 1, u.layout.editor.Max.Y} {
-		for x := u.layout.editor.Min.X; x < u.layout.editor.Max.X; x++ {
+	for _, y := range []int{u.lay.layout.editor.Min.Y - 1, u.lay.layout.editor.Max.Y} {
+		for x := u.lay.layout.editor.Min.X; x < u.lay.layout.editor.Max.X; x++ {
 			cell := scr.CellAt(x, y)
 			require.NotNil(t, cell)
 			require.Equal(t, styles.SectionSeparator, cell.Content, "missing chat separator at (%d,%d)", x, y)
@@ -41,7 +41,7 @@ func TestEditorHasReservedSeparatorRows(t *testing.T) {
 
 	u := newTestUI()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
-	area := u.generateLayout(u.width, u.height)
+	area := u.generateLayout(u.lay.width, u.lay.height)
 
 	require.Equal(t, area.editor.Min.Y-1, area.main.Max.Y,
 		"content must leave exactly one separator row before the editor")
@@ -87,8 +87,10 @@ func newTestUI() *UI {
 		editor: editorState{textarea: ta},
 		state:  uiChat,
 		focus:  uiFocusEditor,
-		width:  140,
-		height: 45,
+		lay: layoutState{
+			width:  140,
+			height: 45,
+		},
 		panel: sessionPanelState{
 			hoveredPanelThread: -1,
 		},
@@ -104,8 +106,8 @@ func TestUpdateLayoutAndSize_EditorGrowthShrinksChat(t *testing.T) {
 	u := newTestUI()
 	u.updateLayoutAndSize()
 
-	initialEditorHeight := u.layout.editor.Dy()
-	initialChatHeight := u.layout.main.Dy()
+	initialEditorHeight := u.lay.layout.editor.Dy()
+	initialChatHeight := u.lay.layout.main.Dy()
 
 	// Increase textarea content enough to trigger growth, then run the
 	// same resize hook used in the real update path.
@@ -114,11 +116,11 @@ func TestUpdateLayoutAndSize_EditorGrowthShrinksChat(t *testing.T) {
 	u.editor.textarea.MoveToEnd()
 	_ = u.handleTextareaHeightChange(prevHeight)
 
-	if got := u.layout.editor.Dy(); got <= initialEditorHeight {
+	if got := u.lay.layout.editor.Dy(); got <= initialEditorHeight {
 		t.Fatalf("expected editor to grow: got %d, want > %d", got, initialEditorHeight)
 	}
 
-	if got := u.layout.main.Dy(); got >= initialChatHeight {
+	if got := u.lay.layout.main.Dy(); got >= initialChatHeight {
 		t.Fatalf("expected chat to shrink: got %d, want < %d", got, initialChatHeight)
 	}
 }
@@ -134,7 +136,7 @@ func TestEditorHeight_EmptyIsOneRowNoAttachments(t *testing.T) {
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
 	u.updateLayoutAndSize()
 
-	require.Equal(t, 1, u.layout.editor.Dy())
+	require.Equal(t, 1, u.lay.layout.editor.Dy())
 	require.Equal(t, "", u.editor.textarea.Value())
 }
 
@@ -148,19 +150,19 @@ func TestEditorHeight_GrowsWithLineCountUpToCap(t *testing.T) {
 	u := newTestUI()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
 	u.updateLayoutAndSize()
-	require.Equal(t, 1, u.layout.editor.Dy(), "baseline: empty editor is one row")
+	require.Equal(t, 1, u.lay.layout.editor.Dy(), "baseline: empty editor is one row")
 
 	prevHeight := u.editor.textarea.Height()
 	u.editor.textarea.SetValue("line1\nline2\nline3")
 	u.editor.textarea.MoveToEnd()
 	_ = u.handleTextareaHeightChange(prevHeight)
-	require.Equal(t, 3, u.layout.editor.Dy(), "three lines of text must grow the editor to three rows")
+	require.Equal(t, 3, u.lay.layout.editor.Dy(), "three lines of text must grow the editor to three rows")
 
 	prevHeight = u.editor.textarea.Height()
 	u.editor.textarea.SetValue(strings.Repeat("line\n", 30))
 	u.editor.textarea.MoveToEnd()
 	_ = u.handleTextareaHeightChange(prevHeight)
-	require.Equal(t, TextareaMaxHeight, u.layout.editor.Dy(),
+	require.Equal(t, TextareaMaxHeight, u.lay.layout.editor.Dy(),
 		"growth must cap at TextareaMaxHeight; beyond that the textarea scrolls internally")
 }
 
@@ -175,17 +177,17 @@ func TestEditorHeight_AttachmentsRowOnlyWhenPresent(t *testing.T) {
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
 	u.updateLayoutAndSize()
 	require.Equal(t, 0, u.editorAttachmentsRowOffset(), "no attachments: no reserved row")
-	heightNoAttachments := u.layout.editor.Dy()
+	heightNoAttachments := u.lay.layout.editor.Dy()
 
 	u.editor.attachments.Update(message.Attachment{FileName: "a.txt", MimeType: "text/plain"})
 	u.updateLayoutAndSize()
 	require.Equal(t, 1, u.editorAttachmentsRowOffset())
-	require.Equal(t, heightNoAttachments+1, u.layout.editor.Dy(),
+	require.Equal(t, heightNoAttachments+1, u.lay.layout.editor.Dy(),
 		"one attachment must add exactly one row")
 
 	u.editor.attachments.Reset()
 	u.updateLayoutAndSize()
-	require.Equal(t, heightNoAttachments, u.layout.editor.Dy(),
+	require.Equal(t, heightNoAttachments, u.lay.layout.editor.Dy(),
 		"clearing attachments must give the row back to chat")
 }
 
@@ -248,8 +250,8 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		t.Parallel()
 
 		u := newTestUI()
-		u.height = 50
-		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		u.lay.height = 50
+		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 			{Status: session.TodoStatusPending, Content: "do more"},
 		}}
@@ -265,8 +267,8 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		t.Parallel()
 
 		u := newTestUI()
-		u.height = 30
-		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		u.lay.height = 30
+		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
 
@@ -281,8 +283,8 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		t.Parallel()
 
 		u := newTestUI()
-		u.height = 50
-		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		u.lay.height = 50
+		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusCompleted, Content: "done"},
 		}}
 
@@ -297,9 +299,9 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		t.Parallel()
 
 		u := newTestUI()
-		u.height = 50
+		u.lay.height = 50
 		u.panel.expanded = true
-		u.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
 		u.updateLayoutAndSize()
@@ -315,8 +317,8 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		t.Parallel()
 
 		u := newTestUI()
-		u.height = 50
-		u.session = &session.Session{ID: "s1", Todos: []session.Todo{}}
+		u.lay.height = 50
+		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{}}
 		u.wsCache.promptQueue = 2
 
 		u.autoExpandTodosIfReasonable()
@@ -330,8 +332,8 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		t.Parallel()
 
 		u := newTestUI()
-		u.height = 50
-		u.session = nil
+		u.lay.height = 50
+		u.sess.session = nil
 
 		u.autoExpandTodosIfReasonable()
 

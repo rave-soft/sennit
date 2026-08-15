@@ -609,7 +609,7 @@ func (r *Root) createThreadCmd(name, goal string) tea.Cmd {
 	ws := r.com.Workspace
 	parentSessionID := ""
 	if r.main != nil && r.main.hasSession() {
-		parentSessionID = r.main.session.ID
+		parentSessionID = r.main.sess.session.ID
 	}
 	return func() tea.Msg {
 		thread, err := ws.CreateThread(ctx, proto.CreateThreadRequest{

@@ -96,11 +96,11 @@ func (m *UI) initializeView() string {
 	}, " ")
 
 	// max width 60 so the text is compact
-	width := min(m.layout.main.Dx(), 60)
+	width := min(m.lay.layout.main.Dx(), 60)
 
 	return lipgloss.NewStyle().
 		Width(width).
-		Height(m.layout.main.Dy()).
+		Height(m.lay.layout.main.Dy()).
 		PaddingBottom(1).
 		AlignVertical(lipgloss.Bottom).
 		Render(strings.Join(

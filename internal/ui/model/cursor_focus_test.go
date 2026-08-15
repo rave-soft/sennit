@@ -34,7 +34,7 @@ func (w *cursorTestWorkspace) WorkingDir() string     { return "/tmp" }
 // editor, and compact mode forced on so Draw() renders the header instead of
 // the virtual-scrolling sidebar (which needs a much heavier workspace stub).
 // Compact mode does not affect the focus/cursor invariant under test: the
-// cursor gating in Draw is keyed on m.focus, not m.isCompact.
+// cursor gating in Draw is keyed on m.focus, not m.lay.isCompact.
 func newCursorTestUI(t *testing.T) *UI {
 	t.Helper()
 
@@ -63,24 +63,26 @@ func newCursorTestUI(t *testing.T) *UI {
 			textarea:    ta,
 			attachments: attachments.New(nil, attachments.Keymap{}),
 		},
-		state:            uiChat,
-		focus:            uiFocusEditor,
-		width:            140,
-		height:           45,
-		keyMap:           DefaultKeyMap(),
-		dialog:           dialog.NewOverlay(),
-		header:           newHeader(com),
-		forceCompactMode: true,
+		state:  uiChat,
+		focus:  uiFocusEditor,
+		keyMap: DefaultKeyMap(),
+		dialog: dialog.NewOverlay(),
+		header: newHeader(com),
+		lay: layoutState{
+			width:            140,
+			height:           45,
+			forceCompactMode: true,
+		},
 	}
 	u.status.helpKm = u
 	u.chat.Focus()
-	u.session = &session.Session{ID: "s1"}
+	u.sess.session = &session.Session{ID: "s1"}
 	u.updateLayoutAndSize()
 	return u
 }
 
 func (u *UI) drawForCursor() *tea.Cursor {
-	canvas := uv.NewScreenBuffer(u.width, u.height)
+	canvas := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	return u.Draw(canvas, canvas.Bounds())
 }
 
@@ -88,7 +90,7 @@ func TestViewWindowTitleIncludesSession(t *testing.T) {
 	t.Parallel()
 
 	u := newCursorTestUI(t)
-	u.session.Title = "Fix Kitty title"
+	u.sess.session.Title = "Fix Kitty title"
 
 	require.Equal(t, "braid /tmp — Fix Kitty title", u.View().WindowTitle)
 }
@@ -174,8 +176,8 @@ func TestClickOnPlainToolItem_DoesNotMoveFocus(t *testing.T) {
 	u.updateLayoutAndSize()
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
-		X:      u.layout.main.Min.X,
-		Y:      u.layout.main.Min.Y,
+		X:      u.lay.layout.main.Min.X,
+		Y:      u.lay.layout.main.Min.Y,
 		Button: uv.MouseLeft,
 	}))
 
@@ -208,8 +210,8 @@ func TestClickOnAssistantText_DoesNotMoveFocus(t *testing.T) {
 	u.updateLayoutAndSize()
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
-		X:      u.layout.main.Min.X,
-		Y:      u.layout.main.Min.Y,
+		X:      u.lay.layout.main.Min.X,
+		Y:      u.lay.layout.main.Min.Y,
 		Button: uv.MouseLeft,
 	}))
 
@@ -253,8 +255,8 @@ func TestClickWhileBrowsingChat_DoesNotMoveFocusStripe(t *testing.T) {
 	u.chat.SetSelected(0)
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
-		X:      u.layout.main.Min.X,
-		Y:      u.layout.main.Min.Y + 2,
+		X:      u.lay.layout.main.Min.X,
+		Y:      u.lay.layout.main.Min.Y + 2,
 		Button: uv.MouseLeft,
 	}))
 

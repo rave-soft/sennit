@@ -62,7 +62,7 @@ func TestDrawSessionPanel_CollapsedThreadsHeaderIsClickable(t *testing.T) {
 	u.toggleThreadsCollapsed()
 
 	area := uv.Rect(0, 0, 60, 6)
-	u.layout.panel = area
+	u.lay.layout.panel = area
 	plan := u.sessionPanelPlan(area.Dy())
 	_, _, _, threadsHeaderRect := sessionPanelRowLayout(area, plan)
 	require.False(t, threadsHeaderRect.Empty(), "a collapsed section still needs a hit target")

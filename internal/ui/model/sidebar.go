@@ -83,12 +83,12 @@ func (m *UI) modelInfo(width int) string {
 	}
 
 	var modelContext *common.ModelContextInfo
-	if model != nil && m.session != nil {
+	if model != nil && m.sess.session != nil {
 		modelContext = &common.ModelContextInfo{
-			ContextUsed:    m.session.CompletionTokens + m.session.PromptTokens,
-			Cost:           m.session.Cost,
+			ContextUsed:    m.sess.session.CompletionTokens + m.sess.session.PromptTokens,
+			Cost:           m.sess.session.Cost,
 			ModelContext:   model.CatalogCfg.ContextWindow,
-			EstimatedUsage: m.session.EstimatedUsage,
+			EstimatedUsage: m.sess.session.EstimatedUsage,
 		}
 	}
 	var modelName string
@@ -108,19 +108,19 @@ func backgroundJobsInfo(t *styles.Styles, counts shell.BackgroundJobCounts, widt
 // state (scrollability, max offset, clamp) before drawing. This keeps all
 // state mutation in the update path rather than in the draw function.
 func (m *UI) updateSidebarScrollState() {
-	if m.session == nil || m.isCompact {
+	if m.sess.session == nil || m.lay.isCompact {
 		return
 	}
 
 	const logoHeightBreakpoint = 30
 
 	t := m.com.Styles
-	width := m.layout.sidebar.Dx()
-	height := m.layout.sidebar.Dy()
+	width := m.lay.layout.sidebar.Dx()
+	height := m.lay.layout.sidebar.Dy()
 
 	contentWidth := max(width-2, 1)
 
-	title := t.Sidebar.SessionTitle.Width(contentWidth).MaxHeight(2).Render(m.session.Title)
+	title := t.Sidebar.SessionTitle.Width(contentWidth).MaxHeight(2).Render(m.sess.session.Title)
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), contentWidth)
 	sidebarLogo := m.sidebar.logo
 	if height < logoHeightBreakpoint {
@@ -131,7 +131,7 @@ func (m *UI) updateSidebarScrollState() {
 	layout.Vertical(
 		layout.Len(lipgloss.Height(sidebarLogo)),
 		layout.Fill(1),
-	).Split(m.layout.sidebar).Assign(&logoRect, &contentRect)
+	).Split(m.lay.layout.sidebar).Assign(&logoRect, &contentRect)
 
 	contentHeight := contentRect.Dy()
 
@@ -139,7 +139,7 @@ func (m *UI) updateSidebarScrollState() {
 	lspSection := m.lspInfo(contentWidth, len(m.lsp.lspStates), true)
 	mcpSection := m.mcpInfo(contentWidth, mcpCount(m.com.Config().MCP.Sorted(), m.mcpStates), true)
 	skillsSection := m.skillsInfo(contentWidth, len(m.skillStatusItems()), true)
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sessionFiles), true)
+	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), contentWidth, fileChangeCount(m.sess.sessionFiles), true)
 
 	// Build the scrollable content.
 	content := lipgloss.JoinVertical(
@@ -180,7 +180,7 @@ func (m *UI) updateSidebarScrollState() {
 // virtual-scrolling content area with an auto-hiding scrollbar. While the
 // sidebar is focused, the scrollbar stays visible.
 func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
-	if m.session == nil {
+	if m.sess.session == nil {
 		return
 	}
 
