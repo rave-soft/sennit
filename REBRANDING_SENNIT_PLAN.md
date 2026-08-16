@@ -175,8 +175,9 @@ Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в �
 - [ ] Перевести глобальный config/data/cache на каталоги `sennit` на Unix,
   Windows и при использовании XDG overrides.
 - [ ] Переименовать `braid.db`, логи, credentials/state и project registry.
-- [ ] Пересмотреть существующую legacy-миграцию `.braid/braid.db`: без
-  требований совместимости этот код удаляется целиком.
+- [x] Пересмотреть существующую legacy-миграцию `.braid/braid.db`: без
+  требований совместимости этот код удаляется целиком. `internal/db/legacy_import.go`
+  и вызов из `internal/app/bootstrap.go` удалены.
 - [ ] Перевести lock-файлы, panic/server logs, Unix socket/Windows pipe и
   внутренний host `api.braid.localhost` на Sennit.
 - [ ] Проверить, что Sennit не открывает и не блокирует старые пути, поэтому
@@ -186,8 +187,7 @@ Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в �
 
 Критичные текущие точки: `internal/config/config.go`,
 `internal/config/load.go`, `internal/db/connect.go`,
-`internal/db/legacy_import.go`, `internal/db/datadirlock.go` и
-`internal/projects/projects.go`.
+`internal/db/datadirlock.go` и `internal/projects/projects.go`.
 
 ## Этап 4. Код и технические идентификаторы
 

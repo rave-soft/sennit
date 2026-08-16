@@ -200,12 +200,15 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	// parent_session_id carries no foreign key (the legacy importer
-	// inserts children before their parents, so it cannot), which means
-	// nothing cascades from a session to its sub-sessions. Delete the
-	// whole subtree explicitly or every agent-tool and title session
-	// under it is left orphaned, invisible to the UI and reachable only
-	// by `sennit gc`.
+	// parent_session_id carries no foreign key, so nothing cascades from
+	// a session to its sub-sessions. Adding one would mean rebuilding
+	// the sessions table, and renaming it away with foreign keys on
+	// rewrites the references in messages, files and read_files to point
+	// at the renamed copy; the usual PRAGMA foreign_keys = OFF around
+	// that is silently ignored inside the transaction goose runs a
+	// migration in. So the subtree is deleted here instead: without it
+	// every agent-tool and title session under this one is left
+	// orphaned, invisible to the UI and reachable only by `sennit gc`.
 	treeIDs, err := qtx.ListSessionTreeIDs(ctx, dbSession.ID)
 	if err != nil {
 		return fmt.Errorf("listing session tree: %w", err)

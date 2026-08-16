@@ -138,14 +138,6 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		}
 	}()
 
-	// One-time, best-effort import of this project's legacy per-project
-	// database (from before every project moved to one shared database).
-	// Never blocks Bootstrap: a failure here just means the project's old
-	// history isn't visible yet, not that the workspace can't start.
-	if err := db.ImportLegacyProjectDB(ctx, cfg.Config().Options.DataDirectory, cfg.WorkingDir(), conn); err != nil {
-		slog.Warn("Failed to import legacy project database", "error", err)
-	}
-
 	if opts.PostConnect != nil {
 		if err := opts.PostConnect(cfg); err != nil {
 			return nil, err

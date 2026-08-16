@@ -2,8 +2,9 @@
 -- +goose StatementBegin
 -- Auto-bump updated_at only when the writer did not set it explicitly
 -- (NEW = OLD means the UPDATE statement left the column untouched).
--- Writers that DO set updated_at — the legacy import restoring original
--- timestamps, tests fabricating old sessions — keep their value.
+-- Writers that DO set updated_at — tests fabricating old sessions, and
+-- back then a legacy per-project importer restoring original timestamps
+-- — keep their value.
 DROP TRIGGER IF EXISTS update_sessions_updated_at;
 
 CREATE TRIGGER update_sessions_updated_at

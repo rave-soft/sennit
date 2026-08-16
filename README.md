@@ -103,10 +103,9 @@ SQLite database at `~/.config/sennit/sennit.db` (or `$SENNIT_GLOBAL_CONFIG`'s
 directory, when set), with each row tagged by the project's absolute path —
 there is no more one database per project. Logs are similarly unified at
 `~/.config/sennit/logs/sennit.log`. A project's own `.sennit/` directory now
-only holds its config overrides, a single-instance lock file, and (until
-migrated) a pre-upgrade project's old `.sennit/sennit.db`, which is imported
-into the shared database automatically the first time that project is
-opened and then kept around as `sennit.db.imported`.
+only holds its config overrides and a single-instance lock file. Nothing
+imports a per-project database from before that move: Sennit ships no
+compatibility layer, so any such file is simply ignored and can be deleted.
 
 ## Building
 
