@@ -170,17 +170,17 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 		if m.hasSession() {
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := m.com.Workspace.FileTrackerLastReadTime(context.Background(), m.sess.session.ID, absPath)
+			lastRead := m.com.Workspace.FileTrackerLastReadTime(context.Background(), m.sess.current.ID, absPath)
 			if !lastRead.IsZero() {
 				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
 					return nil
 				}
 			}
-		} else if slices.Contains(m.sess.sessionFileReads, absPath) {
+		} else if slices.Contains(m.sess.fileReads, absPath) {
 			return nil
 		}
 
-		m.sess.sessionFileReads = append(m.sess.sessionFileReads, absPath)
+		m.sess.fileReads = append(m.sess.fileReads, absPath)
 
 		// Add file as attachment.
 		content, err := os.ReadFile(path)

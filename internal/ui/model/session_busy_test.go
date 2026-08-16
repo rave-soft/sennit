@@ -167,7 +167,7 @@ func newBusyUI(ws workspace.Workspace) *UI {
 			width:  140,
 			height: 45,
 		},
-		sess:   sessionState{session: &session.Session{ID: "s1"}},
+		sess:   sessionState{current: &session.Session{ID: "s1"}},
 		keyMap: DefaultKeyMap(),
 		dialog: dialog.NewOverlay(),
 	}
@@ -192,7 +192,7 @@ func warmCaches(m *UI, busy bool) {
 	m.wsCache.yoloCache.set(false)
 	m.wsCache.agentReady = true
 	m.wsCache.promptQueueCheckedAt = time.Now()
-	m.lsp.lspCheckedAt = time.Now()
+	m.lsp.checkedAt = time.Now()
 }
 
 // runCmds executes a command tree the way the Bubble Tea runtime would,
@@ -660,10 +660,10 @@ func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
 	m := newBusyUI(ws)
 	m.wsCache.agentReady = true
-	m.lsp.lspStates = map[string]workspace.LSPClientInfo{
+	m.lsp.states = map[string]workspace.LSPClientInfo{
 		"gopls": {Name: "gopls", State: lsp.StateReady, DiagnosticCount: 3},
 	}
-	m.lsp.lspDiagnostics = map[string]lsp.DiagnosticCounts{
+	m.lsp.diagnostics = map[string]lsp.DiagnosticCounts{
 		"gopls": {Error: 2, Warning: 1},
 	}
 
@@ -783,7 +783,7 @@ func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 		Payload: workspace.LSPEvent{Type: workspace.LSPEventDiagnosticsChanged, Name: "gopls"},
 	})
 	require.Zero(t, ws.syncProbes(), "the LSP event handler must not probe synchronously")
-	require.True(t, m.lsp.lspFetchInFlight, "an LSP event must schedule an off-thread refresh")
+	require.True(t, m.lsp.fetchInFlight, "an LSP event must schedule an off-thread refresh")
 
 	// A second event while the fetch is in flight queues a re-fetch instead
 	// of stacking another dispatch.
@@ -791,13 +791,13 @@ func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 		Payload: workspace.LSPEvent{Type: workspace.LSPEventDiagnosticsChanged, Name: "gopls"},
 	})
 	require.Zero(t, ws.syncProbes())
-	require.True(t, m.lsp.lspRefreshQueued, "an event during an in-flight fetch must queue a re-fetch")
+	require.True(t, m.lsp.refreshQueued, "an event during an in-flight fetch must queue a re-fetch")
 
 	runCmds(m, cmd)
-	require.False(t, m.lsp.lspFetchInFlight)
-	require.False(t, m.lsp.lspRefreshQueued, "the queued flag must clear once the re-dispatched fetch lands")
-	require.Equal(t, 3, m.lsp.lspStates["gopls"].DiagnosticCount, "fetched states must land in the cache")
-	require.Equal(t, 2, m.lsp.lspDiagnostics["gopls"].Error, "fetched severity counts must land in the cache")
+	require.False(t, m.lsp.fetchInFlight)
+	require.False(t, m.lsp.refreshQueued, "the queued flag must clear once the re-dispatched fetch lands")
+	require.Equal(t, 3, m.lsp.states["gopls"].DiagnosticCount, "fetched states must land in the cache")
+	require.Equal(t, 2, m.lsp.diagnostics["gopls"].Error, "fetched severity counts must land in the cache")
 	require.Equal(t, 3, m.lspErrorCount())
 	require.Equal(t, 2, ws.lspStateCalls, "one fetch plus the queued re-fetch")
 }

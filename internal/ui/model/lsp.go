@@ -19,19 +19,19 @@ import (
 // lspState holds the memoized workspace LSP state and per-server diagnostic
 // counts, plus the off-thread fetch bookkeeping that keeps it fresh.
 type lspState struct {
-	// lspStates / lspDiagnostics memoize the workspace LSP state and
+	// states / diagnostics memoize the workspace LSP state and
 	// per-server severity counts (each probe behind them is treated as IO,
 	// and the sidebar, landing view, and compact header render them every
 	// frame). LSP events refresh them off-thread with a TTL backstop; see
 	// lsp.go.
-	lspStates        map[string]workspace.LSPClientInfo
-	lspDiagnostics   map[string]lsp.DiagnosticCounts
-	lspFetchInFlight bool
-	// lspRefreshQueued records that an LSP event arrived while a fetch was
+	states        map[string]workspace.LSPClientInfo
+	diagnostics   map[string]lsp.DiagnosticCounts
+	fetchInFlight bool
+	// refreshQueued records that an LSP event arrived while a fetch was
 	// already in flight; applyLSPStates re-dispatches so the freshest state
 	// still lands.
-	lspRefreshQueued bool
-	lspCheckedAt     time.Time
+	refreshQueued bool
+	checkedAt     time.Time
 }
 
 // lspStatesTTL bounds how long the memoized LSP state may go without a
@@ -60,8 +60,8 @@ type LSPInfo struct {
 // state. While a fetch is already in flight it only marks the state dirty;
 // applyLSPStates re-dispatches so the freshest data still lands.
 func (m *UI) requestLSPRefresh() tea.Cmd {
-	if m.lsp.lspFetchInFlight {
-		m.lsp.lspRefreshQueued = true
+	if m.lsp.fetchInFlight {
+		m.lsp.refreshQueued = true
 		return nil
 	}
 	return m.dispatchLSPRefresh()
@@ -73,13 +73,13 @@ func (m *UI) requestLSPRefresh() tea.Cmd {
 // in flight. The closure captures only locals (never m) so it is safe
 // off-thread.
 func (m *UI) dispatchLSPRefresh() tea.Cmd {
-	if m.lsp.lspFetchInFlight || m.com == nil || m.com.Workspace == nil {
+	if m.lsp.fetchInFlight || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
-	m.lsp.lspFetchInFlight = true
+	m.lsp.fetchInFlight = true
 	// Stamp the check time at dispatch too so the TTL backstop doesn't
 	// keep re-requesting while this fetch is in flight.
-	m.lsp.lspCheckedAt = time.Now()
+	m.lsp.checkedAt = time.Now()
 	ws := m.com.Workspace
 	return func() tea.Msg {
 		states := ws.LSPGetStates()
@@ -94,12 +94,12 @@ func (m *UI) dispatchLSPRefresh() tea.Cmd {
 // applyLSPStates stores an off-thread LSP fetch result and re-dispatches
 // when events arrived while it was in flight. Runs on the Update goroutine.
 func (m *UI) applyLSPStates(msg lspStatesMsg) tea.Cmd {
-	m.lsp.lspFetchInFlight = false
-	m.lsp.lspCheckedAt = time.Now()
-	m.lsp.lspStates = msg.states
-	m.lsp.lspDiagnostics = msg.diagnostics
-	if m.lsp.lspRefreshQueued {
-		m.lsp.lspRefreshQueued = false
+	m.lsp.fetchInFlight = false
+	m.lsp.checkedAt = time.Now()
+	m.lsp.states = msg.states
+	m.lsp.diagnostics = msg.diagnostics
+	if m.lsp.refreshQueued {
+		m.lsp.refreshQueued = false
 		return m.dispatchLSPRefresh()
 	}
 	return nil
@@ -109,7 +109,7 @@ func (m *UI) applyLSPStates(msg lspStatesMsg) tea.Cmd {
 // states, shown in the compact header.
 func (m *UI) lspErrorCount() int {
 	count := 0
-	for _, info := range m.lsp.lspStates {
+	for _, info := range m.lsp.states {
 		count += info.DiagnosticCount
 	}
 	return count
@@ -123,13 +123,13 @@ func (m *UI) lspErrorCount() int {
 func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
-	states := slices.SortedFunc(maps.Values(m.lsp.lspStates), func(a, b workspace.LSPClientInfo) int {
+	states := slices.SortedFunc(maps.Values(m.lsp.states), func(a, b workspace.LSPClientInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
 	var lsps []LSPInfo
 	for _, state := range states {
-		counts := m.lsp.lspDiagnostics[state.Name]
+		counts := m.lsp.diagnostics[state.Name]
 		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: map[protocol.DiagnosticSeverity]int{
 			protocol.SeverityError:       counts.Error,
 			protocol.SeverityWarning:     counts.Warning,

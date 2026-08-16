@@ -39,7 +39,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 	m.header.drawHeader(
 		scr,
 		area,
-		m.sess.session,
+		m.sess.current,
 		m.lay.isCompact,
 		m.lay.detailsOpen,
 		area.Dx(),
@@ -254,8 +254,8 @@ func (m *UI) View() tea.View {
 	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = "braid " + home.Short(m.com.Workspace.WorkingDir())
-	if m.hasSession() && m.sess.session.Title != "" {
-		v.WindowTitle += " — " + m.sess.session.Title
+	if m.hasSession() && m.sess.current.Title != "" {
+		v.WindowTitle += " — " + m.sess.current.Title
 	}
 
 	canvas := uv.NewScreenBuffer(m.lay.width, m.lay.height)
@@ -673,7 +673,7 @@ func (m *UI) completionsMaxWidth() int {
 
 // drawSessionDetails draws the session details in compact mode.
 func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
-	if m.sess.session == nil {
+	if m.sess.current == nil {
 		return
 	}
 
@@ -682,7 +682,7 @@ func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx() - s.CompactDetails.View.GetHorizontalFrameSize()
 	height := area.Dy() - s.CompactDetails.View.GetVerticalFrameSize()
 
-	title := s.CompactDetails.Title.Width(width).MaxHeight(2).Render(m.sess.session.Title)
+	title := s.CompactDetails.Title.Width(width).MaxHeight(2).Render(m.sess.current.Title)
 	blocks := []string{
 		title,
 		"",

@@ -46,7 +46,7 @@ func TestEnterChildSessionForcesReadOnlyFocus(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.sess.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
+	u.sess.current = &session.Session{ID: "parent-session", Title: "My Parent Session"}
 	u.focus = uiFocusEditor
 	u.editor.textarea = textarea.New()
 	u.editor.textarea.Focus()
@@ -74,7 +74,7 @@ func TestEnterExitChildSession_NeverSetsStatusInfoMsg(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.sess.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
+	u.sess.current = &session.Session{ID: "parent-session", Title: "My Parent Session"}
 	u.editor.textarea = textarea.New()
 	u.chat.AppendMessages(
 		newAgentItem(u.com.Styles, "tc-1"),
@@ -99,7 +99,7 @@ func TestExitChildSessionRestoresEditorFocus(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.sess.session = &session.Session{ID: "parent-session", Title: "My Parent Session"}
+	u.sess.current = &session.Session{ID: "parent-session", Title: "My Parent Session"}
 	u.editor.textarea = textarea.New()
 	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
 
@@ -255,7 +255,7 @@ func TestClickOnFinishedDelegation_EntersChildSession(t *testing.T) {
 
 	u := newCursorTestUI(t)
 	u.com.Workspace = drillInWorkspace{}
-	u.sess.session = &session.Session{ID: "parent-session", Title: "Parent"}
+	u.sess.current = &session.Session{ID: "parent-session", Title: "Parent"}
 
 	for i := range 3 {
 		u.chat.AppendMessages(chat.NewToolMessageItem(u.com.Styles, "msg-plain",

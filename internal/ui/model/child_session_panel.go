@@ -114,7 +114,7 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	// percentage, plus a live elapsed time while still running or the
 	// frozen total once done.
 	if area.Dy() >= 2 {
-		line := childPanelTokensLine(m.sess.session)
+		line := childPanelTokensLine(m.sess.current)
 		if pct := m.childPanelContextPercent(frame); pct != "" {
 			line += " · " + pct
 		}
@@ -169,10 +169,10 @@ func childPanelTokensLine(session *session.Session) string {
 // Returns "" when nothing has been used yet or the delegation's model
 // (and thus its window size) can't be resolved.
 func (m *UI) childPanelContextPercent(frame sessionNavFrame) string {
-	if m.sess.session == nil {
+	if m.sess.current == nil {
 		return ""
 	}
-	used := m.sess.session.PromptTokens + m.sess.session.CompletionTokens
+	used := m.sess.current.PromptTokens + m.sess.current.CompletionTokens
 	if used <= 0 {
 		return ""
 	}

@@ -72,10 +72,10 @@ func childSessionLabel(item chat.ToolMessageItem) string {
 func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	childID := m.com.Workspace.CreateAgentToolSessionID(messageID, toolCallID)
 
-	// m.sess.session still refers to the parent here — loadSession is async and
+	// m.sess.current still refers to the parent here — loadSession is async and
 	// doesn't repoint it synchronously — so this is the last cheap chance
 	// to capture the parent's title for the breadcrumb.
-	parentTitle := m.sess.session.Title
+	parentTitle := m.sess.current.Title
 
 	siblings := m.chat.NestedToolContainerRefs()
 	siblingIndex := 0
@@ -96,7 +96,7 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	}
 
 	m.sess.navStack = append(m.sess.navStack, sessionNavFrame{
-		parentSessionID:    m.sess.session.ID,
+		parentSessionID:    m.sess.current.ID,
 		parentTitle:        parentTitle,
 		label:              label,
 		siblings:           siblings,

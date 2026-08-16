@@ -74,7 +74,7 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 	// todos, same as the pubsub session-update handler does for
 	// already-loaded items.
 	if m.hasSession() {
-		m.chat.SetTodosCompact(hasIncompleteTodos(m.sess.session.Todos))
+		m.chat.SetTodosCompact(hasIncompleteTodos(m.sess.current.Todos))
 	}
 	if cmd := m.chat.RestartPausedVisibleAnimations(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -84,8 +84,8 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 }
 
 func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
-	if m.sess.session != nil {
-		_ = loadNestedToolCalls(context.Background(), m.com.Workspace, m.com.Styles, m.com.Config(), m.sess.session.ID, m.sess.sessionLoadGen, items)
+	if m.sess.current != nil {
+		_ = loadNestedToolCalls(context.Background(), m.com.Workspace, m.com.Styles, m.com.Config(), m.sess.current.ID, m.sess.loadGen, items)
 	}
 }
 

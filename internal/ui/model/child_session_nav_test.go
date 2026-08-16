@@ -33,7 +33,7 @@ func TestEnterChildSessionPushesFrame(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.sess.session = &session.Session{ID: "parent-session"}
+	u.sess.current = &session.Session{ID: "parent-session"}
 	u.chat.AppendMessages(
 		newAgentItem(u.com.Styles, "tc-1"),
 		newAgentItem(u.com.Styles, "tc-2"),
@@ -59,7 +59,7 @@ func TestCycleChildSessionWrapsAndReplacesTopFrame(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.sess.session = &session.Session{ID: "parent-session"}
+	u.sess.current = &session.Session{ID: "parent-session"}
 	u.chat.AppendMessages(
 		newAgentItem(u.com.Styles, "tc-1"),
 		newAgentItem(u.com.Styles, "tc-2"),
@@ -99,7 +99,7 @@ func TestCycleChildSessionNoOpWithoutFrameOrSiblings(t *testing.T) {
 	u := newChildSessionTestUI(t)
 	require.Nil(t, u.cycleChildSession(1), "no active frame")
 
-	u.sess.session = &session.Session{ID: "parent-session"}
+	u.sess.current = &session.Session{ID: "parent-session"}
 	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
 	require.NotNil(t, u.enterChildSession("msg1", "tc-1"))
 	require.Nil(t, u.cycleChildSession(1), "only one sibling, nothing to cycle to")
@@ -119,7 +119,7 @@ func TestExitChildSessionPopsStack(t *testing.T) {
 		require.Nil(t, cmd)
 	})
 
-	u.sess.session = &session.Session{ID: "parent-session"}
+	u.sess.current = &session.Session{ID: "parent-session"}
 	u.editor.textarea = textarea.New()
 	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"))
 	require.NotNil(t, u.enterChildSession("msg1", "tc-1"))
@@ -137,7 +137,7 @@ func TestEnterChildSessionKeyNoOpOnNonNestedItem(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.sess.session = &session.Session{ID: "parent-session"}
+	u.sess.current = &session.Session{ID: "parent-session"}
 	u.state = uiChat
 	u.focus = uiFocusMain
 	u.keyMap = DefaultKeyMap()
@@ -166,7 +166,7 @@ func TestAltUpExitsChildSessionThroughUpdate(t *testing.T) {
 	t.Parallel()
 
 	u := newChildSessionTestUI(t)
-	u.sess.session = &session.Session{ID: "parent-session", Title: "Parent"}
+	u.sess.current = &session.Session{ID: "parent-session", Title: "Parent"}
 	u.state = uiChat
 	u.keyMap = DefaultKeyMap()
 	u.dialog = dialog.NewOverlay()

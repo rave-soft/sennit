@@ -92,7 +92,7 @@ func newTestUI() *UI {
 			height: 45,
 		},
 		panel: sessionPanelState{
-			hoveredPanelThread: -1,
+			hoveredThread: -1,
 		},
 	}
 
@@ -251,7 +251,7 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.lay.height = 50
-		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		u.sess.current = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 			{Status: session.TodoStatusPending, Content: "do more"},
 		}}
@@ -268,7 +268,7 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.lay.height = 30
-		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		u.sess.current = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
 
@@ -284,7 +284,7 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.lay.height = 50
-		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		u.sess.current = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusCompleted, Content: "done"},
 		}}
 
@@ -301,7 +301,7 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		u := newTestUI()
 		u.lay.height = 50
 		u.panel.expanded = true
-		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{
+		u.sess.current = &session.Session{ID: "s1", Todos: []session.Todo{
 			{Status: session.TodoStatusInProgress, Content: "do work"},
 		}}
 		u.updateLayoutAndSize()
@@ -318,7 +318,7 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.lay.height = 50
-		u.sess.session = &session.Session{ID: "s1", Todos: []session.Todo{}}
+		u.sess.current = &session.Session{ID: "s1", Todos: []session.Todo{}}
 		u.wsCache.promptQueue = 2
 
 		u.autoExpandTodosIfReasonable()
@@ -333,7 +333,7 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 
 		u := newTestUI()
 		u.lay.height = 50
-		u.sess.session = nil
+		u.sess.current = nil
 
 		u.autoExpandTodosIfReasonable()
 

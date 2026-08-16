@@ -435,7 +435,7 @@ func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
 			width:  140,
 			height: 45,
 		},
-		sess:   sessionState{session: &session.Session{ID: "s1"}},
+		sess:   sessionState{current: &session.Session{ID: "s1"}},
 		keyMap: DefaultKeyMap(),
 		dialog: dialog.NewOverlay(),
 	}
@@ -448,7 +448,7 @@ func warmCmdDrivenCaches(m *UI) {
 	m.wsCache.yoloCache.set(false)
 	m.wsCache.agentReady = true
 	m.wsCache.promptQueueCheckedAt = time.Now()
-	m.lsp.lspCheckedAt = time.Now()
+	m.lsp.checkedAt = time.Now()
 }
 
 // sequenceMsgType is the exact unexported wrapper type returned by
@@ -788,9 +788,9 @@ func TestCmdDriving_EnterWhenNoSession_CreatesSession(t *testing.T) {
 			"sess-New Session": {ID: "sess-New Session", Title: "New Session"},
 		},
 	}
-	// No session set — m.sess.session is nil.
+	// No session set — m.sess.current is nil.
 	m := newCmdDrivenUI(ws)
-	m.sess.session = nil
+	m.sess.current = nil
 	warmCmdDrivenCaches(m)
 	m.editor.textarea.SetValue("first message")
 
@@ -1069,7 +1069,7 @@ func TestCmdDriving_LoadSession_FreshResultApplied(t *testing.T) {
 	require.Equal(t, "s-new", got.sessionID)
 	require.Equal(t, "New Session", got.session.Title)
 	require.Len(t, got.items, 1)
-	require.Equal(t, "s-new", m.sess.session.ID, "session must be set")
+	require.Equal(t, "s-new", m.sess.current.ID, "session must be set")
 	require.GreaterOrEqual(t, m.chat.Len(), 1, "chat must contain the loaded message")
 	require.GreaterOrEqual(t, ws.agentReadyCalls, 1, "must probe AgentIsReady")
 	require.True(t, m.wsCache.agentReady, "ready state must be cached")
@@ -1282,17 +1282,17 @@ func TestCmdDriving_LoadSession_StaleResultDiscarded(t *testing.T) {
 	oldResult := oldCmd().(loadSessionMsg)
 	runCmdTree(m, freshCmd, nil)
 
-	sessionID, sessionTitle := m.sess.session.ID, m.sess.session.Title
-	chatLen, filesLen := m.chat.Len(), len(m.sess.sessionFiles)
+	sessionID, sessionTitle := m.sess.current.ID, m.sess.current.Title
+	chatLen, filesLen := m.chat.Len(), len(m.sess.files)
 	lspCalls, historyCalls := ws.lspStartCalls, ws.listSessionHistoryCalls
 	presenceCalls, errorInfo := ws.setCurrentSessionCalls, m.status.InfoMsg()
 
 	_, staleCmd := m.Update(oldResult)
 	require.Nil(t, staleCmd)
-	require.Equal(t, sessionID, m.sess.session.ID)
-	require.Equal(t, sessionTitle, m.sess.session.Title)
+	require.Equal(t, sessionID, m.sess.current.ID)
+	require.Equal(t, sessionTitle, m.sess.current.Title)
 	require.Equal(t, chatLen, m.chat.Len())
-	require.Equal(t, filesLen, len(m.sess.sessionFiles))
+	require.Equal(t, filesLen, len(m.sess.files))
 	require.Equal(t, lspCalls, ws.lspStartCalls)
 	require.Equal(t, historyCalls, ws.listSessionHistoryCalls)
 	require.Equal(t, presenceCalls, ws.setCurrentSessionCalls)
@@ -1351,11 +1351,11 @@ func TestCmdDriving_LoadSession_StaleErrorDiscarded(t *testing.T) {
 	require.Error(t, oldResult.err)
 	runCmdTree(m, freshCmd, nil)
 
-	sessionID, chatLen, errorInfo := m.sess.session.ID, m.chat.Len(), m.status.InfoMsg()
+	sessionID, chatLen, errorInfo := m.sess.current.ID, m.chat.Len(), m.status.InfoMsg()
 	presenceCalls, lspCalls, historyCalls := ws.setCurrentSessionCalls, ws.lspStartCalls, ws.listSessionHistoryCalls
 	_, staleCmd := m.Update(oldResult)
 	require.Nil(t, staleCmd)
-	require.Equal(t, sessionID, m.sess.session.ID)
+	require.Equal(t, sessionID, m.sess.current.ID)
 	require.Equal(t, chatLen, m.chat.Len())
 	require.Equal(t, errorInfo, m.status.InfoMsg())
 	require.Equal(t, presenceCalls, ws.setCurrentSessionCalls)
@@ -1411,7 +1411,7 @@ func TestCmdDriving_SendMessage_CreateSessionError(t *testing.T) {
 	}
 	ws.createSessionErr = fmt.Errorf("DB full")
 	m := newCmdDrivenUI(ws)
-	m.sess.session = nil // No session → triggers CreateSession
+	m.sess.current = nil // No session → triggers CreateSession
 	warmCmdDrivenCaches(m)
 
 	_, cmd := m.Update(sendMessageMsg{Content: "test"})

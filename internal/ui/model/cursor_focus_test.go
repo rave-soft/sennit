@@ -76,7 +76,7 @@ func newCursorTestUI(t *testing.T) *UI {
 	}
 	u.status.helpKm = u
 	u.chat.Focus()
-	u.sess.session = &session.Session{ID: "s1"}
+	u.sess.current = &session.Session{ID: "s1"}
 	u.updateLayoutAndSize()
 	return u
 }
@@ -90,7 +90,7 @@ func TestViewWindowTitleIncludesSession(t *testing.T) {
 	t.Parallel()
 
 	u := newCursorTestUI(t)
-	u.sess.session.Title = "Fix Kitty title"
+	u.sess.current.Title = "Fix Kitty title"
 
 	require.Equal(t, "braid /tmp — Fix Kitty title", u.View().WindowTitle)
 }

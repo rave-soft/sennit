@@ -115,12 +115,12 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// isn't showing); syncPanelSpinner re-arms it on the next relevant
 		// event. Letting the loop die and be restarted beats ticking
 		// forever behind an idle screen.
-		if m.panel.panelIsSpinning && (m.state != uiChat || !m.panelSpinnerWanted()) {
-			m.panel.panelIsSpinning = false
+		if m.panel.isSpinning && (m.state != uiChat || !m.panelSpinnerWanted()) {
+			m.panel.isSpinning = false
 		}
-		if m.panel.panelIsSpinning {
+		if m.panel.isSpinning {
 			var cmd tea.Cmd
-			m.panel.panelSpinner, cmd = m.panel.panelSpinner.Update(msg)
+			m.panel.spinner, cmd = m.panel.spinner.Update(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}

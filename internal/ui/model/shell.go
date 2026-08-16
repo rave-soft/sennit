@@ -53,7 +53,7 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			})
 		}
 	case shellResultMsg:
-		if (m.sess.sessionLoadExpectedID != "" && msg.sessionID != m.sess.sessionLoadExpectedID) || msg.generation != m.sess.sessionLoadGen {
+		if (m.sess.loadExpectedID != "" && msg.sessionID != m.sess.loadExpectedID) || msg.generation != m.sess.loadGen {
 			break
 		}
 		m.editor.pendingSendActive = false
@@ -99,11 +99,11 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 	if m.viewingChildSession() {
 		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
 	}
-	if m.sess.session != nil {
+	if m.sess.current != nil {
 		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
 			content:        command,
-			sessionID:      m.sess.session.ID,
-			loadGeneration: m.sess.sessionLoadGen,
+			sessionID:      m.sess.current.ID,
+			loadGeneration: m.sess.loadGen,
 			bang:           true,
 		})
 		return func() tea.Msg { return sendPendingQueueMsg{} }
@@ -135,8 +135,8 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		return tea.Batch(cmds...)
 	}
 
-	sessionID := m.sess.session.ID
-	loadGeneration := m.sess.sessionLoadGen
+	sessionID := m.sess.current.ID
+	loadGeneration := m.sess.loadGen
 	contentWidth := min(m.lay.layout.main.Dx()-2, 120)
 
 	// Append a pending shell item immediately so the user sees feedback.

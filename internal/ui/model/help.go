@@ -70,7 +70,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		}
 	default:
 		// TODO: other states
-		// if m.sess.session == nil {
+		// if m.sess.current == nil {
 		// no session selected
 		binds = append(
 			binds,
@@ -196,7 +196,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			}
 		}
 	default:
-		if m.sess.session == nil {
+		if m.sess.current == nil {
 			// no session selected
 			binds = append(
 				binds,

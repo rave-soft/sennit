@@ -90,7 +90,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		//
 		// Hit-test rects are recomputed here from m.lay.layout.panel +
 		// m.sessionPanelPlan (via sessionPanelRowLayout), NOT read from
-		// m.panel.panelTodosHeaderRect/m.panel.panelThreadRects: those are only
+		// m.panel.todosHeaderRect/m.panel.threadRects: those are only
 		// populated as a side effect of drawSessionPanel, which runs inside
 		// Draw/View. A click can be delivered by Update before View has
 		// ever painted the current layout (e.g. right after
@@ -174,12 +174,12 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			pt := image.Pt(msg.X, msg.Y)
 			plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
 			threadRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.lay.layout.panel, plan)
-			m.panel.panelTodosHover = pt.In(todosHeaderRect)
-			m.panel.panelThreadsHover = pt.In(threadsHeaderRect)
-			m.panel.hoveredPanelThread = -1
+			m.panel.todosHover = pt.In(todosHeaderRect)
+			m.panel.threadsHover = pt.In(threadsHeaderRect)
+			m.panel.hoveredThread = -1
 			for i, rect := range threadRects {
 				if pt.In(rect) {
-					m.panel.hoveredPanelThread = i
+					m.panel.hoveredThread = i
 					break
 				}
 			}
@@ -309,7 +309,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// When the mouse is hovering the session panel's scrollable
 			// todos rows, the wheel scrolls that section's own offset
 			// instead of the chat — recomputed fresh from
-			// sessionPanelRowLayout (not the m.panel.panelTodosListRect cache),
+			// sessionPanelRowLayout (not the m.panel.todosListRect cache),
 			// same rationale as the click hit-test above: a wheel event
 			// can arrive before drawSessionPanel has painted the current
 			// layout.
@@ -320,7 +320,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 					if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(todosListRect) {
 						lines := int(msg.DeltaY)
 						if lines != 0 {
-							m.panel.panelTodosScrollOffset = clampPanelTodosScrollOffset(m.panel.panelTodosScrollOffset+lines, plan)
+							m.panel.todosScrollOffset = clampPanelTodosScrollOffset(m.panel.todosScrollOffset+lines, plan)
 						}
 						break
 					}

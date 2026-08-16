@@ -271,11 +271,11 @@ type settingsOps struct {
 // sessionState holds the active session and the bookkeeping around loading,
 // continuing, and navigating between sessions.
 type sessionState struct {
-	session      *session.Session
-	sessionFiles []SessionFile
+	current *session.Session
+	files   []SessionFile
 
 	// keeps track of read files while we don't have a session id
-	sessionFileReads []string
+	fileReads []string
 
 	// initialSessionID is set when loading a specific session on startup.
 	initialSessionID string
@@ -284,14 +284,14 @@ type sessionState struct {
 
 	lastUserMessageTime int64
 
-	sessionLoadGen        uint64
-	sessionLoadExpectedID string
+	loadGen        uint64
+	loadExpectedID string
 
-	// sessionsDialogLoading / sessionsDialogGen track the off-thread
+	// dialogLoading / dialogGen track the off-thread
 	// ListSessions fetch dispatched by openSessionsDialog; see
 	// sessionsLoadedMsg.
-	sessionsDialogLoading bool
-	sessionsDialogGen     uint64
+	dialogLoading bool
+	dialogGen     uint64
 
 	// navStack tracks sub-agent session navigation: each frame records
 	// where alt+up should return to and the sibling delegations
@@ -552,11 +552,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		chat:   ch,
 		header: header,
 		panel: sessionPanelState{
-			panelSpinner:       panelSpinner,
-			hoveredPanelThread: -1,
+			spinner:       panelSpinner,
+			hoveredThread: -1,
 		},
 		lsp: lspState{
-			lspStates: make(map[string]workspace.LSPClientInfo),
+			states: make(map[string]workspace.LSPClientInfo),
 		},
 		mcpStates:           make(map[string]workspace.MCPClientInfo),
 		notifyBackend:       notification.NoopBackend{},
@@ -888,7 +888,7 @@ type childSessionRef struct {
 type sessionNavFrame struct {
 	parentSessionID string
 	// parentTitle is the parent session's title, captured at
-	// enterChildSession time. m.sess.session is repointed to the child as soon
+	// enterChildSession time. m.sess.current is repointed to the child as soon
 	// as navigation starts, so this is the only cheap way to recover the
 	// parent's title later (e.g. for the breadcrumb) without extra IO.
 	parentTitle string
@@ -1107,7 +1107,7 @@ func (m *UI) isAgentBusy() bool {
 
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
-	return m.sess.session != nil && m.sess.session.ID != ""
+	return m.sess.current != nil && m.sess.current.ID != ""
 }
 
 // applyTheme switches the live palette and persists the choice. The swap is
@@ -1229,12 +1229,12 @@ func (m *UI) newSession() tea.Cmd {
 		return nil
 	}
 
-	m.sess.sessionLoadGen++
-	m.sess.sessionLoadExpectedID = ""
-	m.sess.session = nil
+	m.sess.loadGen++
+	m.sess.loadExpectedID = ""
+	m.sess.current = nil
 	m.sidebar.offset = 0
-	m.sess.sessionFiles = nil
-	m.sess.sessionFileReads = nil
+	m.sess.files = nil
+	m.sess.fileReads = nil
 	m.editor.pendingSendQueue = nil
 	m.editor.pendingSendGen = 0
 	m.editor.pendingSendLoading = false
@@ -1244,7 +1244,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.chat.ClearMessages()
 	m.panel.expanded = false
 	m.panel.autoExpanded = false
-	m.panel.panelTodosScrollOffset = 0
+	m.panel.todosScrollOffset = 0
 	m.wsCache.promptQueue = 0
 	m.wsCache.promptQueueItems = nil
 	m.wsCache.promptQueueCheckedAt = time.Now()

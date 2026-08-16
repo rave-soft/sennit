@@ -84,15 +84,15 @@ func TestUpdate_SessionEvent_SyncsTodosCompactWithPanelVisibility(t *testing.T) 
 	u.chat.SetSize(80, 40)
 	item := newTestTodosToolItem(t, u)
 	u.chat.SetMessages(item)
-	u.sess.session.Todos = []session.Todo{
+	u.sess.current.Todos = []session.Todo{
 		{Content: "write the plan", Status: session.TodoStatusInProgress},
 		{Content: "ship it", Status: session.TodoStatusPending},
 	}
 
-	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.session})
+	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
 	require.NotContains(t, item.Render(80), "Writing the plan", "panel is showing incomplete todos: transcript must be compact")
 
-	completed := *u.sess.session
+	completed := *u.sess.current
 	completed.Todos = []session.Todo{
 		{Content: "write the plan", Status: session.TodoStatusCompleted},
 		{Content: "ship it", Status: session.TodoStatusCompleted},
@@ -117,7 +117,7 @@ func TestUpdate_SessionEvent_NewTodosListForcesExpand(t *testing.T) {
 	require.False(t, u.panel.expanded)
 
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: session.Session{
-		ID: u.sess.session.ID,
+		ID: u.sess.current.ID,
 		Todos: []session.Todo{
 			{Content: "write the plan", Status: session.TodoStatusPending},
 		},
@@ -127,7 +127,7 @@ func TestUpdate_SessionEvent_NewTodosListForcesExpand(t *testing.T) {
 	// A manual collapse must stick across further updates to the same list.
 	u.panel.expanded = false
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: session.Session{
-		ID: u.sess.session.ID,
+		ID: u.sess.current.ID,
 		Todos: []session.Todo{
 			{Content: "write the plan", Status: session.TodoStatusPending},
 			{Content: "ship it", Status: session.TodoStatusPending},

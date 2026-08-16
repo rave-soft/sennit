@@ -26,7 +26,7 @@ func newChildSessionPanelTestUI(t *testing.T) *UI {
 	u.com.Workspace = agentSessionWorkspace{}
 	u.dialog = dialog.NewOverlay()
 	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
-	u.sess.session = &session.Session{ID: "grandchild-session", PromptTokens: 800, CompletionTokens: 200}
+	u.sess.current = &session.Session{ID: "grandchild-session", PromptTokens: 800, CompletionTokens: 200}
 	u.sess.navStack = []sessionNavFrame{
 		{
 			parentSessionID: "main-session", parentTitle: "main",

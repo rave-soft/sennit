@@ -20,22 +20,22 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	if m.viewingChildSession() {
 		return util.ReportWarn("viewing subagent session · " + m.exitChildSessionShortcut() + " to return")
 	}
-	if m.sess.session != nil && m.sess.sessionLoadExpectedID != "" && m.sess.sessionLoadExpectedID != m.sess.session.ID {
+	if m.sess.current != nil && m.sess.loadExpectedID != "" && m.sess.loadExpectedID != m.sess.current.ID {
 		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
 			content:        content,
 			attachments:    attachments,
-			sessionID:      m.sess.sessionLoadExpectedID,
-			loadGeneration: m.sess.sessionLoadGen,
+			sessionID:      m.sess.loadExpectedID,
+			loadGeneration: m.sess.loadGen,
 		})
 		return nil
 	}
-	if m.sess.session != nil {
+	if m.sess.current != nil {
 		if m.editor.pendingSendActive {
 			m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{
 				content:        content,
 				attachments:    attachments,
-				sessionID:      m.sess.session.ID,
-				loadGeneration: m.sess.sessionLoadGen,
+				sessionID:      m.sess.current.ID,
+				loadGeneration: m.sess.loadGen,
 			})
 			return nil
 		}
@@ -45,25 +45,25 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 }
 
 func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) tea.Cmd {
-	if m.sess.session == nil && m.editor.pendingSendLoading {
+	if m.sess.current == nil && m.editor.pendingSendLoading {
 		m.editor.pendingSendQueue = append(m.editor.pendingSendQueue, sendQueueItem{content: content, attachments: attachments, generation: m.editor.pendingSendGen})
 		return nil
 	}
 
 	ws := m.com.Workspace
 	styles := m.com.Styles
-	reads := append([]string(nil), m.sess.sessionFileReads...)
+	reads := append([]string(nil), m.sess.fileReads...)
 	ctx := context.Background()
 	sessionID := ""
 	generation := m.editor.pendingSendGen
-	loadGeneration := m.sess.sessionLoadGen
-	creating := m.sess.session == nil
+	loadGeneration := m.sess.loadGen
+	creating := m.sess.current == nil
 	if creating {
 		m.editor.pendingSendLoading = true
 		m.editor.pendingSendGen++
 		generation = m.editor.pendingSendGen
 	} else {
-		sessionID = m.sess.session.ID
+		sessionID = m.sess.current.ID
 		m.wsCache.agentBusyCache.set(true)
 		m.wsCache.busyFetchGen++
 		m.invalidatePromptQueue()
@@ -129,12 +129,12 @@ func (m *UI) cancelAgent() tea.Cmd {
 			m.editor.bangCancel = nil
 		}
 
-		m.com.Workspace.AgentCancel(m.sess.session.ID)
+		m.com.Workspace.AgentCancel(m.sess.current.ID)
 		// Stop the spinning todo indicator and drop the memoized busy
 		// state the cancel just changed; the session panel reads
-		// m.panel.panelIsSpinning fresh on every draw, and again once the
+		// m.panel.isSpinning fresh on every draw, and again once the
 		// off-thread refresh (and the agent's own events) land.
-		m.panel.panelIsSpinning = false
+		m.panel.isSpinning = false
 		m.invalidateBusyCaches()
 		return m.dispatchBusyRefresh()
 	}
@@ -142,7 +142,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 	// Queued prompts pending: esc clears the queue. Decide from the cached
 	// count (event-driven) instead of a synchronous workspace probe.
 	if m.wsCache.promptQueue > 0 {
-		m.com.Workspace.AgentClearQueue(m.sess.session.ID)
+		m.com.Workspace.AgentClearQueue(m.sess.current.ID)
 		m.wsCache.promptQueue = 0
 		m.wsCache.promptQueueItems = nil
 		m.wsCache.promptQueueCheckedAt = time.Now()

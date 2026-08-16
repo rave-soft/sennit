@@ -24,7 +24,7 @@ func newCmdDrivenGoldenUI(ws *cmdDrivingWorkspace) *UI {
 	m.focus = uiFocusEditor
 	m.lay.width = 140
 	m.lay.height = 45
-	m.sess.session = &session.Session{ID: "s1"}
+	m.sess.current = &session.Session{ID: "s1"}
 	m.readyPlaceholder = "Ready!"
 	m.workingPlaceholder = "Working!"
 	m.editor.textarea.Placeholder = m.readyPlaceholder
@@ -152,8 +152,8 @@ func TestCmdDrivingGolden(t *testing.T) {
 		_, cmd := m.Update(requestSessionLoad{sessionID: "s-loaded"})
 		runCmdTree(m, cmd, nil)
 
-		require.Equal(t, "s-loaded", m.sess.session.ID)
-		require.Equal(t, "Loaded Session", m.sess.session.Title)
+		require.Equal(t, "s-loaded", m.sess.current.ID)
+		require.Equal(t, "Loaded Session", m.sess.current.Title)
 		require.Equal(t, 2, m.chat.Len())
 		golden.RequireEqual(t, renderCmdDrivenUI(m))
 	})

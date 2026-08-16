@@ -63,7 +63,7 @@ func newSessionPanelBenchUI() *UI {
 		u.com.Styles.Attachments.Skill,
 		u.com.Styles.Attachments.Remove,
 	), attachments.Keymap{})
-	u.sess.session = &session.Session{ID: "bench-session"}
+	u.sess.current = &session.Session{ID: "bench-session"}
 	u.lay.width, u.lay.height = 140, 45
 	// Compact layout skips the sidebar, which needs a real workspace
 	// (m.com.Workspace.WorkingDir()) that this synthetic fixture has none
@@ -102,7 +102,7 @@ func newSessionPanelBenchUI() *UI {
 
 	// Nine todos: a few in-progress (exercises the spinner path), some
 	// pending, some completed.
-	u.sess.session.Todos = []session.Todo{
+	u.sess.current.Todos = []session.Todo{
 		{Status: session.TodoStatusInProgress, Content: "in progress 1", ActiveForm: "Working on 1"},
 		{Status: session.TodoStatusInProgress, Content: "in progress 2", ActiveForm: "Working on 2"},
 		{Status: session.TodoStatusPending, Content: "pending 1"},
@@ -114,7 +114,7 @@ func newSessionPanelBenchUI() *UI {
 		{Status: session.TodoStatusCompleted, Content: "done 4"},
 	}
 	u.panel.expanded = true
-	u.panel.panelIsSpinning = true
+	u.panel.isSpinning = true
 
 	u.updateLayoutAndSize()
 	return u
@@ -151,7 +151,7 @@ func BenchmarkSessionPanelDraw(b *testing.B) {
 // ui.go's spinner.TickMsg case).
 func BenchmarkSessionPanelUpdateTick(b *testing.B) {
 	u := newSessionPanelBenchUI()
-	msg := spinner.TickMsg{Time: time.Now(), ID: u.panel.panelSpinner.ID()}
+	msg := spinner.TickMsg{Time: time.Now(), ID: u.panel.spinner.ID()}
 
 	b.ReportAllocs()
 	for b.Loop() {

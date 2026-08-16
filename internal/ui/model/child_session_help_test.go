@@ -37,7 +37,7 @@ func fullHelpKeyByHelpText(binds [][]key.Binding, helpKey string) bool {
 func newHelpTestUI(t *testing.T) *UI {
 	t.Helper()
 	u := newChildSessionTestUI(t)
-	u.sess.session = &session.Session{ID: "parent-session"}
+	u.sess.current = &session.Session{ID: "parent-session"}
 	u.state = uiChat
 	u.focus = uiFocusMain
 	u.keyMap = DefaultKeyMap()

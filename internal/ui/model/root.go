@@ -287,7 +287,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// dies — the main screen's panel spinners freeze mid-frame and
 			// nothing re-arms them, since syncPanelSpinner only fires on
 			// the stopped→spinning edge and the tick that would have
-			// cleared panelIsSpinning never arrived. Drilling into a thread
+			// cleared isSpinning never arrived. Drilling into a thread
 			// once was enough to freeze the panel behind you for the rest
 			// of the session. Both message types are id-stamped and every
 			// handler drops ticks that aren't its own, so broadcasting to
@@ -609,7 +609,7 @@ func (r *Root) createThreadCmd(name, goal string) tea.Cmd {
 	ws := r.com.Workspace
 	parentSessionID := ""
 	if r.main != nil && r.main.hasSession() {
-		parentSessionID = r.main.sess.session.ID
+		parentSessionID = r.main.sess.current.ID
 	}
 	return func() tea.Msg {
 		thread, err := ws.CreateThread(ctx, proto.CreateThreadRequest{

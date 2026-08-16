@@ -136,11 +136,11 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	}
 
 	var sessionID string
-	hasSession := m.sess.session != nil
+	hasSession := m.sess.current != nil
 	if hasSession {
-		sessionID = m.sess.session.ID
+		sessionID = m.sess.current.ID
 	}
-	hasTodos := hasSession && hasIncompleteTodos(m.sess.session.Todos)
+	hasTodos := hasSession && hasIncompleteTodos(m.sess.current.Todos)
 	hasQueue := m.wsCache.promptQueue > 0
 
 	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
@@ -158,11 +158,11 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 // Commands palette dialog uses, so the two never list different commands.
 func (m *UI) commandCompletionItems() []completions.CommandCompletionValue {
 	var sessionID string
-	hasSession := m.sess.session != nil
+	hasSession := m.sess.current != nil
 	if hasSession {
-		sessionID = m.sess.session.ID
+		sessionID = m.sess.current.ID
 	}
-	hasTodos := hasSession && hasIncompleteTodos(m.sess.session.Todos)
+	hasTodos := hasSession && hasIncompleteTodos(m.sess.current.Todos)
 	hasQueue := m.wsCache.promptQueue > 0
 
 	var dockerMCPAvailable *bool
@@ -323,19 +323,19 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		m.dialog.BringToFront(dialog.SessionsID)
 		return nil
 	}
-	if m.sess.sessionsDialogLoading {
+	if m.sess.dialogLoading {
 		// A fetch is already in flight; don't stack another one.
 		return nil
 	}
 
 	selectedSessionID := ""
-	if m.sess.session != nil {
-		selectedSessionID = m.sess.session.ID
+	if m.sess.current != nil {
+		selectedSessionID = m.sess.current.ID
 	}
 
-	m.sess.sessionsDialogLoading = true
-	m.sess.sessionsDialogGen++
-	gen := m.sess.sessionsDialogGen
+	m.sess.dialogLoading = true
+	m.sess.dialogGen++
+	gen := m.sess.dialogGen
 	ws := m.com.Workspace
 	ctx := m.com.Context()
 	return func() tea.Msg {
