@@ -48,6 +48,13 @@ func NewTheme(com *common.Common) (*Theme, error) {
 		onSelect: func(id string) Action {
 			return ActionSelectTheme{ID: id}
 		},
+		// Walking the list repaints the UI in the highlighted palette, so
+		// the choice is made by looking at it rather than by its name. The
+		// UI restores the previous palette if the dialog is closed without
+		// a selection.
+		onMove: func(id string) Action {
+			return ActionPreviewTheme{ID: id}
+		},
 	})
 	if err != nil {
 		return nil, err

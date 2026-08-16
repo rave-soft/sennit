@@ -438,13 +438,29 @@ func (m *Chat) Len() int {
 // InvalidateRenderCaches drops cached rendered output on every message
 // item so the next draw re-renders with the current styles.
 func (m *Chat) InvalidateRenderCaches() {
+	chat.ClearItemCaches(m.messageItems())
+}
+
+// Restyle repaints the whole conversation in the current palette: cached
+// renders are dropped and items that baked palette colors into state Render
+// cannot re-read (spinner gradients) are rebuilt. The returned command
+// re-arms the animations that had to be rebuilt.
+func (m *Chat) Restyle() tea.Cmd {
+	items := m.messageItems()
+	chat.ClearItemCaches(items)
+	m.list.InvalidateAll()
+	return chat.RestyleItems(items)
+}
+
+// messageItems returns the list's items as [chat.MessageItem]s.
+func (m *Chat) messageItems() []chat.MessageItem {
 	items := make([]chat.MessageItem, 0, m.list.Len())
 	for i := range m.list.Len() {
 		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
 			items = append(items, item)
 		}
 	}
-	chat.ClearItemCaches(items)
+	return items
 }
 
 // SetMessages sets the chat messages to the provided list of message items.

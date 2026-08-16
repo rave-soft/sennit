@@ -167,6 +167,19 @@ func (c *CompletionItem) SetTitleColumn(col int) {
 	c.Bump()
 }
 
+// SetStyles replaces the styles the item was built with and drops its
+// render cache. [Completions.SetStyles] calls it on every item it holds so
+// an open popup follows a live theme switch instead of staying in the
+// palette it was opened in.
+func (c *CompletionItem) SetStyles(normal, focused, match, muted lipgloss.Style) {
+	c.normalStyle = normal
+	c.focusedStyle = focused
+	c.matchStyle = match
+	c.mutedStyle = muted
+	c.cache = nil
+	c.Bump()
+}
+
 // Render implements [list.Item].
 func (c *CompletionItem) Render(width int) string {
 	return renderItem(

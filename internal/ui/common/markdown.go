@@ -23,16 +23,35 @@ func init() {
 	formatters.Register(formatterName, xchroma.Formatter(zero, nil))
 }
 
-// mdCacheMu guards mdCache and quietMDCache.
+// mdCacheMu guards mdCache, quietMDCache and mdCacheRev.
 var (
-	mdCacheMu    sync.Mutex
+	mdCacheMu sync.Mutex
+	// mdCacheRev is the palette build the cached renderers were made
+	// from. A glamour renderer bakes in the style config it was built
+	// with, so a width-only key would keep rendering markdown in the
+	// previous palette after a theme switch. Both caches are dropped
+	// wholesale when the revision moves.
+	mdCacheRev   uint64
 	mdCache      = map[int]*glamour.TermRenderer{}
 	quietMDCache = map[int]*glamour.TermRenderer{}
 )
 
+// resetMDCachesForRev drops both renderer caches when sty comes from a
+// different palette build than the one they were populated for. Callers
+// must hold mdCacheMu.
+func resetMDCachesForRev(sty *styles.Styles) {
+	rev := sty.Rev()
+	if rev == mdCacheRev {
+		return
+	}
+	mdCacheRev = rev
+	clear(mdCache)
+	clear(quietMDCache)
+}
+
 // MarkdownRenderer returns a glamour [glamour.TermRenderer] configured with
-// the given styles and width. Renderers are memoized per width and shared
-// across callers.
+// the given styles and width. Renderers are memoized per width (and
+// palette build, see resetMDCachesForRev) and shared across callers.
 //
 // The returned renderer is NOT safe for concurrent Render calls
 // (goldmark's BlockStack carries state across the public Render
@@ -43,6 +62,7 @@ var (
 func MarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 	mdCacheMu.Lock()
 	defer mdCacheMu.Unlock()
+	resetMDCachesForRev(sty)
 	if r, ok := mdCache[width]; ok {
 		return r
 	}
@@ -57,11 +77,12 @@ func MarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 
 // QuietMarkdownRenderer returns a glamour [glamour.TermRenderer] with no colors
 // (plain text with structure) and the given width. Renderers are memoized per
-// width and shared across callers. Same concurrency contract as
+// width (and palette build) and shared across callers. Same concurrency contract as
 // [MarkdownRenderer]: serialize via [LockMarkdownRenderer].
 func QuietMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 	mdCacheMu.Lock()
 	defer mdCacheMu.Unlock()
+	resetMDCachesForRev(sty)
 	if r, ok := quietMDCache[width]; ok {
 		return r
 	}

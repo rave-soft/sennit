@@ -36,6 +36,11 @@ type selectDialogConfig struct {
 	// onSelect builds the Action to return when the item with the given ID
 	// is chosen.
 	onSelect func(id string) Action
+
+	// onMove, when set, builds an Action for the item the selection moved
+	// onto — highlighted, not chosen. The theme dialog uses it to preview
+	// a palette while the user walks the list.
+	onMove func(id string) Action
 }
 
 // selectDialog is the shared machinery behind the notification style and
@@ -110,6 +115,17 @@ func newSelectDialog(com *common.Common, cfg selectDialogConfig) (*selectDialog,
 	}
 
 	return d, nil
+}
+
+// Restyle implements [Restyler]. The help footer and the filter input copy
+// their styles at construction, and every row caches its rendered string,
+// so a live theme switch has to refresh all three. The item set and the
+// active filter are left alone: this repaints the dialog, it does not
+// reopen it.
+func (d *selectDialog) Restyle() {
+	d.help.Styles = d.com.Styles.DialogHelpStyles()
+	d.input.SetStyles(d.com.Styles.TextInput)
+	d.list.InvalidateAll()
 }
 
 // reloadItems re-runs cfg.buildItems and resets the list to its result.
@@ -203,7 +219,7 @@ func (d *selectDialog) handleNavigation(msg tea.KeyPressMsg, selectAction func(L
 			d.list.SelectPrev()
 			d.list.ScrollToSelected()
 		}
-		return nil
+		return d.moveAction()
 	case key.Matches(msg, d.keyMap.Next):
 		d.list.Focus()
 		if d.list.IsSelectedLast() {
@@ -213,7 +229,7 @@ func (d *selectDialog) handleNavigation(msg tea.KeyPressMsg, selectAction func(L
 			d.list.SelectNext()
 			d.list.ScrollToSelected()
 		}
-		return nil
+		return d.moveAction()
 	default:
 		if action, handled := d.handleSelect(msg, selectAction); handled {
 			return action
@@ -224,8 +240,24 @@ func (d *selectDialog) handleNavigation(msg tea.KeyPressMsg, selectAction func(L
 		d.list.SetFilter(d.input.Value())
 		d.list.ScrollToTop()
 		d.list.SetSelected(0)
-		return ActionCmd{Cmd: cmd}
+		// Filtering moves the selection too, so the move action rides
+		// along with the input's own command.
+		return batchActions(ActionCmd{Cmd: cmd}, d.moveAction())
 	}
+}
+
+// moveAction builds the configured onMove action for the currently selected
+// item. It returns nil when the dialog has no onMove or nothing is
+// selected.
+func (d *selectDialog) moveAction() Action {
+	if d.cfg.onMove == nil {
+		return nil
+	}
+	id := d.selectedID()
+	if id == "" {
+		return nil
+	}
+	return d.cfg.onMove(id)
 }
 
 // ID implements Dialog.

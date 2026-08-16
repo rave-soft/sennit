@@ -261,11 +261,20 @@ type settingsOps struct {
 	transparentLoading       bool
 	transparentGeneration    uint64
 	themeGeneration          uint64
-	compactModeLoading       bool
-	yoloLoading              bool
-	permissionLoading        bool
-	permissionGeneration     uint64
-	permissionID             string
+	// themeLive is the palette ID currently on screen. It can differ from
+	// the configured one while the theme picker previews a highlighted
+	// palette, which is exactly why the live value is tracked separately
+	// instead of being read back from config.
+	themeLive string
+	// themePreviewFrom is the palette to restore when a preview is
+	// abandoned (the picker closed without a choice). Empty means no
+	// preview is in progress.
+	themePreviewFrom     string
+	compactModeLoading   bool
+	yoloLoading          bool
+	permissionLoading    bool
+	permissionGeneration uint64
+	permissionID         string
 }
 
 // sessionState holds the active session and the bookkeeping around loading,
@@ -1116,42 +1125,131 @@ func (m *UI) hasSession() bool {
 // rather than leaving the UI in a palette the config does not agree with.
 func (m *UI) applyTheme(id string) tea.Cmd {
 	if !styles.IsKnownPaletteID(id) {
+		m.cancelThemePreview()
 		return util.ReportError(fmt.Errorf("unknown theme %q", id))
 	}
+	// A preview that ends in a choice is kept, so the palette to fall back
+	// to on a failed write is the configured one, not whatever the cursor
+	// happened to be resting on.
 	previous := styles.PaletteByID(m.com.Config().ThemeID()).ID
-	if id == previous {
+	m.ops.themePreviewFrom = ""
+	if id == previous && m.liveThemeID() == previous {
 		return nil
 	}
 
-	m.setTheme(id)
+	cmd := m.setTheme(id)
 	m.ops.themeGeneration++
 	generation := m.ops.themeGeneration
 	ws := m.com.Workspace
-	return func() tea.Msg {
+	return tea.Batch(cmd, func() tea.Msg {
 		return themeSetMsg{
 			Err:        ws.SetConfigField(config.ScopeGlobal, "options.tui.theme", id),
 			ID:         id,
 			Previous:   previous,
 			generation: generation,
 		}
+	})
+}
+
+// liveThemeID returns the palette currently drawn, which is the previewed
+// one while the theme picker is browsing and the configured one otherwise.
+func (m *UI) liveThemeID() string {
+	if m.ops.themeLive != "" {
+		return m.ops.themeLive
 	}
+	return styles.PaletteByID(m.com.Config().ThemeID()).ID
+}
+
+// previewTheme paints the whole UI in the palette the theme picker is
+// resting on, without touching config. Nothing is persisted until the user
+// confirms; [UI.cancelThemePreview] puts the previous palette back if they
+// walk away instead.
+func (m *UI) previewTheme(id string) tea.Cmd {
+	if !styles.IsKnownPaletteID(id) {
+		return nil
+	}
+	if m.ops.themePreviewFrom == "" {
+		m.ops.themePreviewFrom = m.liveThemeID()
+	}
+	if id == m.liveThemeID() {
+		return nil
+	}
+	return m.setTheme(id)
+}
+
+// cancelThemePreview restores the palette that was live before the theme
+// picker started previewing. It is a no-op when no preview is in progress.
+func (m *UI) cancelThemePreview() tea.Cmd {
+	from := m.ops.themePreviewFrom
+	m.ops.themePreviewFrom = ""
+	if from == "" || from == m.liveThemeID() {
+		return nil
+	}
+	return m.setTheme(from)
 }
 
 // setTheme replaces the styles every component shares and drops the render
 // caches that hold strings colored by the old palette. Most of the UI reads
-// com.Styles at draw time and needs nothing; only the caches and the few
-// widgets that copied a style at construction do.
-func (m *UI) setTheme(id string) {
+// com.Styles at draw time and needs nothing; the rest — cached renders and
+// the widgets that copied a style at construction — is refreshed here.
+// Anything added to this list must also be reachable from a widget that
+// outlives a theme switch; short-lived views rebuild themselves anyway.
+//
+// The returned command re-arms the animations that had to be rebuilt (see
+// [Chat.Restyle]); it is nil when nothing was animating.
+func (m *UI) setTheme(id string) tea.Cmd {
 	*m.com.Styles = styles.Theme(id)
+	m.ops.themeLive = styles.PaletteByID(id).ID
+	t := m.com.Styles
 
+	var cmd tea.Cmd
 	if m.status != nil {
 		m.status.Restyle()
 	}
-	if m.chat != nil {
-		m.chat.InvalidateRenderCaches()
+	if m.header != nil {
+		// The wordmark's gradient is rendered once and cached.
+		m.header.refresh()
 	}
+	if m.chat != nil {
+		cmd = m.chat.Restyle()
+	}
+
+	// Editor widgets copy their styles at construction and live for the
+	// whole session, so they keep the old palette unless told otherwise.
+	m.editor.textarea.SetStyles(t.Editor.Textarea)
+	if m.editor.completions != nil {
+		m.editor.completions.SetStyles(completions.PopupStyles{
+			Normal:         t.Completions.Normal,
+			Focused:        t.Completions.Focused,
+			Match:          t.Completions.Match,
+			Muted:          t.Completions.Muted,
+			Border:         t.Completions.Border,
+			ScrollbarThumb: t.Dialog.ScrollbarThumb,
+			ScrollbarTrack: t.Dialog.ScrollbarTrack,
+		})
+	}
+	if m.editor.attachments != nil {
+		m.editor.attachments.Renderer().SetStyles(
+			t.Attachments.Normal,
+			t.Attachments.Deleting,
+			t.Attachments.Image,
+			t.Attachments.Text,
+			t.Attachments.Skill,
+			t.Attachments.Remove,
+			t.Attachments.RemoveHover,
+		)
+	}
+	m.panel.spinner.Style = t.Pills.TodoSpinner
+
+	// Dialogs are usually rebuilt on open, but the theme picker (and the
+	// commands palette behind it) are on screen while the palette changes.
+	if m.dialog != nil {
+		m.dialog.Restyle()
+	}
+
 	m.cacheSidebarLogo(m.lay.layout.sidebar.Dx())
 	m.updateLayoutAndSize()
+	return cmd
 }
 
 // attachSkill reads a skill's content by ID and returns it as a markdown

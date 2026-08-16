@@ -242,6 +242,27 @@ func (d *Overlay) Update(msg tea.Msg) tea.Msg {
 	return dialog.HandleMsg(msg)
 }
 
+// Restyler is implemented by dialogs that copied palette-dependent state at
+// construction (a help model's styles, a text input's styles, a spinner's
+// color, cached rendered rows) instead of reading Common.Styles at draw
+// time. Those copies survive a live theme switch and have to be refreshed;
+// see [Overlay.Restyle].
+type Restyler interface {
+	Restyle()
+}
+
+// Restyle refreshes every open dialog that implements [Restyler]. It is
+// called after the shared styles are swapped, so a dialog that is on screen
+// during a theme switch (the theme picker itself, most obviously) repaints
+// in the new palette instead of half of it.
+func (d *Overlay) Restyle() {
+	for _, dlg := range d.dialogs {
+		if r, ok := dlg.(Restyler); ok {
+			r.Restyle()
+		}
+	}
+}
+
 // StartLoading starts the loading state for the front dialog if it
 // implements [LoadingDialog].
 func (d *Overlay) StartLoading() tea.Cmd {

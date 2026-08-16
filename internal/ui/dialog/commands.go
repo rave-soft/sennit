@@ -79,6 +79,13 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasTodos, has
 	return c, nil
 }
 
+// Restyle implements [Restyler]: the shared select-dialog chrome plus the
+// loading spinner, whose color is copied at construction.
+func (c *Commands) Restyle() {
+	c.selectDialog.Restyle()
+	c.spinner.Style = c.com.Styles.Dialog.Spinner
+}
+
 func (c *Commands) commandItems() ([]list.FilterableItem, int, error) {
 	var items []list.FilterableItem
 	switch c.selected {

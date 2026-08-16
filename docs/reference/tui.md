@@ -144,7 +144,9 @@ option ui completions-max-depth 4
 option ui completions-max-items 200
 ```
 
-Themes are switched from the `theme` command rather than config.
+Themes are switched from the `theme` command rather than config. Moving
+through the list previews each palette on the whole screen; `enter` keeps
+the highlighted one, `esc` restores the one you started with.
 
 ## Notifications
 

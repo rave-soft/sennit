@@ -17,20 +17,25 @@ import (
 // highlighting, an optional background override), so we memoize it.
 var (
 	chromaStyleMu   sync.Mutex
-	chromaStyleFor  *styles.Styles
+	chromaStyleFor  uint64
 	chromaStyleBase *chroma.Style
 	chromaStyleByBg map[[3]uint8]*chroma.Style
 )
 
 // ChromaStyle returns the chroma style for the given theme, memoized. When
 // bg is non-nil the style's background is overridden with it (also
-// memoized per color). The cache resets whenever the active theme changes.
+// memoized per color). The cache resets whenever the active palette
+// changes, tracked by [styles.Styles.Rev].
 func ChromaStyle(st *styles.Styles, bg color.Color) *chroma.Style {
 	chromaStyleMu.Lock()
 	defer chromaStyleMu.Unlock()
 
-	if chromaStyleFor != st {
-		chromaStyleFor = st
+	// Keyed by the palette build, not the pointer: live theme switching
+	// overwrites the shared *Styles in place, so the pointer stays equal
+	// across a switch and a pointer-keyed cache would keep serving the
+	// previous palette's colors.
+	if rev := st.Rev(); chromaStyleFor != rev {
+		chromaStyleFor = rev
 		chromaStyleBase = nil
 		chromaStyleByBg = nil
 	}
