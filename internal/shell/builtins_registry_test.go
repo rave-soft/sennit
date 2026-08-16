@@ -13,15 +13,15 @@ import (
 // via RegisterBuiltin is dispatched through the stateless Run path, receiving
 // the full args slice and the I/O streams from the interpreter context.
 func TestRegisterBuiltin_DispatchedThroughRun(t *testing.T) {
-	RegisterBuiltin("braidtest-echo", func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	RegisterBuiltin("sennittest-echo", func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		_, _ = io.WriteString(stdout, "builtin:"+args[1])
 		return nil
 	})
-	t.Cleanup(func() { delete(builtins, "braidtest-echo") })
+	t.Cleanup(func() { delete(builtins, "sennittest-echo") })
 
 	var stdout bytes.Buffer
 	err := Run(t.Context(), RunOptions{
-		Command: "braidtest-echo hello",
+		Command: "sennittest-echo hello",
 		Cwd:     t.TempDir(),
 		Stdout:  &stdout,
 	})
@@ -38,27 +38,27 @@ func TestRegisterBuiltin_DispatchedThroughRun(t *testing.T) {
 // the stated design intent of builtinHandler sitting ahead of the exec layer.
 func TestRegisterBuiltin_OverridesPATHBinary(t *testing.T) {
 	dir := t.TempDir()
-	// Put a fake "braidtest-shadowed" binary on PATH that would print
+	// Put a fake "sennittest-shadowed" binary on PATH that would print
 	// "from-path" if it ran.
 	binDir := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(binDir, "braidtest-shadowed")
+	script := filepath.Join(binDir, "sennittest-shadowed")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho from-path\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	RegisterBuiltin("braidtest-shadowed", func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	RegisterBuiltin("sennittest-shadowed", func(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		_, _ = io.WriteString(stdout, "from-builtin")
 		return nil
 	})
-	t.Cleanup(func() { delete(builtins, "braidtest-shadowed") })
+	t.Cleanup(func() { delete(builtins, "sennittest-shadowed") })
 
 	var stdout bytes.Buffer
 	err := Run(t.Context(), RunOptions{
-		Command: "braidtest-shadowed",
+		Command: "sennittest-shadowed",
 		Cwd:     dir,
 		Env:     os.Environ(),
 		Stdout:  &stdout,

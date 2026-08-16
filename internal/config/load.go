@@ -185,7 +185,7 @@ func mustMarshalConfig(cfg *Config) []byte {
 	return data
 }
 
-func PushPopBraidEnv() func() {
+func PushPopEnvOverrides() func() {
 	var found []string
 	for _, ev := range os.Environ() {
 		if strings.HasPrefix(ev, brand.EnvPrefix) {

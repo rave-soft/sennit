@@ -25,7 +25,7 @@ func writeConfigFile(t *testing.T, root, name, content string) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(content), 0o644))
 }
 
-func TestDiscoverBraidAgent(t *testing.T) {
+func TestDiscoverSennitAgent(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".sennit/agents", "reviewer.md", `---
 name: reviewer
@@ -47,10 +47,10 @@ You review Go code.`)
 }
 
 // "large"/"small" carry no special meaning for an agent's model anymore, not
-// even in Braid's own agent files: with no provider named "small", this
+// even in Sennit's own agent files: with no provider named "small", this
 // resolves like any other unrecognised model and falls back to empty (the
 // app's main model), with a debug log fired.
-func TestDiscoverBraidAgentSlotWordsAreNotSpecial(t *testing.T) {
+func TestDiscoverSennitAgentSlotWordsAreNotSpecial(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".sennit/agents", "reviewer.md", `---
 name: reviewer
@@ -68,8 +68,8 @@ You review Go code.`)
 
 // A foreign provider/model reference that resolves against a configured
 // provider is honoured, normalized to "provider/model-id", when it appears
-// in Braid's own agent directory (e.g. a hand-authored file, or one dropped
-// there by `braid import`).
+// in Sennit's own agent directory (e.g. a hand-authored file, or one dropped
+// there by `sennit import`).
 func TestDiscoverAgentResolvesForeignProviderModel(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".sennit/agents", "reviewer-dba.md", `---
@@ -94,7 +94,7 @@ You review databases.`)
 }
 
 // Only .sennit/agents is auto-discovered. Agent files written for other
-// tools are not picked up on their own — they need `braid import` to bring
+// tools are not picked up on their own — they need `sennit import` to bring
 // them in (see TECHDEBT.md and cmd/import.go).
 func TestDiscoverIgnoresForeignDirs(t *testing.T) {
 	root := t.TempDir()
@@ -105,15 +105,15 @@ func TestDiscoverIgnoresForeignDirs(t *testing.T) {
 	require.NotContains(t, got, "reviewer")
 }
 
-func TestDiscoverPrefersBraidAgentsOverForeignDirs(t *testing.T) {
+func TestDiscoverPrefersSennitAgentsOverForeignDirs(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".opencode/agent", "reviewer.md", "---\ndescription: from opencode\n---\nopencode body")
 	writeAgent(t, root, ".claude/agents", "reviewer.md", "---\nname: reviewer\ndescription: from claude\n---\nclaude body")
-	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\ndescription: from braid\n---\nbraid body")
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\ndescription: from sennit\n---\nsennit body")
 
 	got := discoverMarkdownAgents(root, nil)
-	require.Equal(t, "from braid", got["reviewer"].Description)
-	require.Equal(t, "braid body", got["reviewer"].Prompt)
+	require.Equal(t, "from sennit", got["reviewer"].Description)
+	require.Equal(t, "sennit body", got["reviewer"].Prompt)
 }
 
 // mode: primary is still respected for files that live in .sennit/agents
@@ -126,10 +126,10 @@ func TestDiscoverSkipsPrimaryMode(t *testing.T) {
 }
 
 // Tool names are no longer translated during regular discovery — that only
-// happens in `braid import` now. A .sennit/agents file naming Claude Code's
+// happens in `sennit import` now. A .sennit/agents file naming Claude Code's
 // tools verbatim keeps those names as-is, which grants nothing useful, but
 // that's the user's file to fix (or re-run the importer).
-func TestDiscoverBraidAgentDoesNotTranslateToolNames(t *testing.T) {
+func TestDiscoverSennitAgentDoesNotTranslateToolNames(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".sennit/agents", "reviewer.md", `---
 name: reviewer
@@ -166,7 +166,7 @@ func TestDiscoverIgnoresMissingDirs(t *testing.T) {
 // Markdown files under .sennit/agents are the only source of user-defined
 // agents: a JSON "agents" entry of the same id must not win, or even be
 // read at all. This is the direct regression test for the incident that
-// prompted the JSON surface's removal — a braid agent once wrote a junk
+// prompted the JSON surface's removal — a sennit agent once wrote a junk
 // model into a *global* JSON agents block that silently shadowed a clean
 // project markdown agent of the same name.
 func TestSetupAgentsIgnoresJSONAgentsBlock(t *testing.T) {

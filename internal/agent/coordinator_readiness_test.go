@@ -39,7 +39,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	// succeed. No MCP servers are configured, so initialization would complete
 	// instantly if we let it — we deliberately do not, so WaitForInit stays
 	// blocked for the duration of the assertion.
-	braidJSON := `{
+	sennitJSON := `{
   "options": {"disable_default_providers": true},
   "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
     "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
@@ -47,7 +47,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
   "models": {"large": {"provider": "mock", "model": "mock-model"},
              "small": {"provider": "mock", "model": "mock-model"}}
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "sennit.json"), []byte(braidJSON), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "sennit.json"), []byte(sennitJSON), 0o644))
 
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)

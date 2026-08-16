@@ -9,21 +9,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// loadBraidSh writes a braid.sh into an isolated project and loads it through
+// loadSennitSh writes a sennit.sh into an isolated project and loads it through
 // the real config pipeline (discovery -> shell execution -> merge -> typed
 // Config). Asserting on the resulting *config.Config is a black-box test of
 // what a shell config command actually produces, and it stays valid across
 // internal changes to how config is assembled.
-func loadBraidSh(t *testing.T, script string) *config.ConfigStore {
+func loadSennitSh(t *testing.T, script string) *config.ConfigStore {
 	t.Helper()
-	store, err := loadBraidShErr(t, script)
+	store, err := loadSennitShErr(t, script)
 	require.NoError(t, err)
 	return store
 }
 
-// loadBraidShErr is loadBraidSh without asserting success, for cases that are
+// loadSennitShErr is loadSennitSh without asserting success, for cases that are
 // expected to fail at load time.
-func loadBraidShErr(t *testing.T, script string) (*config.ConfigStore, error) {
+func loadSennitShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	t.Helper()
 	// Isolate from the developer's real global config so only the script
 	// under test contributes. No t.Parallel(): these tests set env vars.
@@ -31,8 +31,8 @@ func loadBraidShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	t.Setenv("HOME", isolated)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
-	t.Setenv("SENNIT_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "braid"))
-	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "braid"))
+	t.Setenv("SENNIT_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "sennit"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "sennit"))
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
@@ -42,14 +42,14 @@ func loadBraidShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 }
 
 func TestShellConfigPermissionsAllow(t *testing.T) {
-	store := loadBraidSh(t, `permissions allow bash read`)
+	store := loadSennitSh(t, `permissions allow bash read`)
 
 	require.NotNil(t, store.Config().Permissions)
 	require.ElementsMatch(t, []string{"bash", "read"}, store.Config().Permissions.AllowedTools)
 }
 
 func TestShellConfigPermissionsAccumulateAndDedup(t *testing.T) {
-	store := loadBraidSh(t, `permissions allow bash
+	store := loadSennitSh(t, `permissions allow bash
 permissions allow read
 permissions allow bash`)
 
@@ -57,20 +57,20 @@ permissions allow bash`)
 }
 
 func TestShellConfigPermissionsLegacyFlagFails(t *testing.T) {
-	_, err := loadBraidShErr(t, `permissions --allow bash`)
+	_, err := loadSennitShErr(t, `permissions --allow bash`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown subcommand")
 }
 
 func TestShellConfigPermissionsAllowRequiresTool(t *testing.T) {
-	_, err := loadBraidShErr(t, `permissions allow`)
+	_, err := loadSennitShErr(t, `permissions allow`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "usage: permissions allow")
 }
 
 // deny hides tools from the agent by writing options.disabled_tools.
 func TestShellConfigPermissionsDeny(t *testing.T) {
-	store := loadBraidSh(t, `permissions deny bash download
+	store := loadSennitSh(t, `permissions deny bash download
 permissions deny bash`)
 
 	require.Equal(t, []string{"bash", "download"}, store.Config().Options.DisabledTools)
@@ -80,7 +80,7 @@ permissions deny bash`)
 // disabled_tools which removes it from the agent entirely, regardless of
 // its presence in the allow-list.
 func TestShellConfigPermissionsDenyWinsOverAllow(t *testing.T) {
-	store := loadBraidSh(t, `permissions allow bash read
+	store := loadSennitSh(t, `permissions allow bash read
 permissions deny bash`)
 
 	require.ElementsMatch(t, []string{"bash", "read"}, store.Config().Permissions.AllowedTools)

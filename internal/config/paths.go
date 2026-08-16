@@ -71,8 +71,8 @@ func lookupConfigs(cwd string) []string {
 
 // GlobalConfig returns the global configuration file path for the application.
 func GlobalConfig() string {
-	if braidGlobal := os.Getenv(brand.EnvPrefix + "GLOBAL_CONFIG"); braidGlobal != "" {
-		return filepath.Join(braidGlobal, fmt.Sprintf("%s.json", appName))
+	if globalOverride := os.Getenv(brand.EnvPrefix + "GLOBAL_CONFIG"); globalOverride != "" {
+		return filepath.Join(globalOverride, fmt.Sprintf("%s.json", appName))
 	}
 	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
 }
@@ -114,8 +114,8 @@ func ProjectConfigs(cwd string) []string {
 // GlobalConfigData returns the path to the main data directory for the application.
 // this config is used when the app overrides configurations instead of updating the global config.
 func GlobalConfigData() string {
-	if braidData := os.Getenv(brand.EnvPrefix + "GLOBAL_DATA"); braidData != "" {
-		return filepath.Join(braidData, fmt.Sprintf("%s.json", appName))
+	if dataOverride := os.Getenv(brand.EnvPrefix + "GLOBAL_DATA"); dataOverride != "" {
+		return filepath.Join(dataOverride, fmt.Sprintf("%s.json", appName))
 	}
 	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
 		return filepath.Join(xdgDataHome, appName, fmt.Sprintf("%s.json", appName))
@@ -219,8 +219,8 @@ func projectBoundary(dir string) string {
 // which copies them into .sennit/skills with validation instead of trusting a
 // foreign directory implicitly.
 func GlobalSkillsDirs() []string {
-	if braidSkills := os.Getenv(brand.EnvPrefix + "SKILLS_DIR"); braidSkills != "" {
-		return []string{braidSkills}
+	if skillsOverride := os.Getenv(brand.EnvPrefix + "SKILLS_DIR"); skillsOverride != "" {
+		return []string{skillsOverride}
 	}
 
 	paths := []string{

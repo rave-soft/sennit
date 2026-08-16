@@ -1,6 +1,6 @@
 # Main development commands. Mirrors CI (.github/workflows) and the
 # pre-commit hook (.githooks/pre-commit); Taskfile.yaml remains for the
-# charm-inherited extras (profiling, catwalk, release helpers).
+# Extras inherited from the upstream project (profiling, catwalk, release helpers).
 
 GO       ?= go
 BINARY   ?= sennit

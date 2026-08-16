@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAcquireWorkspaceLock_FailsWhenContended simulates a second braid
+// TestAcquireWorkspaceLock_FailsWhenContended simulates a second sennit
 // process by taking the workspace lock directly via the OS primitive on
 // a separate file descriptor and then asserting that
 // AcquireWorkspaceLock surfaces a clean ErrWorkspaceLocked instead of

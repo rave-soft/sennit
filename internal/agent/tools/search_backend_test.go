@@ -56,7 +56,7 @@ func TestTavilyBackendSearch(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"results": []map[string]string{
-				{"title": "Braid", "url": "https://example.com/braid", "content": "A terminal AI agent.", "raw_content": "# Braid\n\nFull page text."},
+				{"title": "Sennit", "url": "https://example.com/sennit", "content": "A terminal AI agent.", "raw_content": "# Sennit\n\nFull page text."},
 				{"title": "Other", "url": "https://example.com/other", "content": "Something else."},
 			},
 		})
@@ -70,21 +70,21 @@ func TestTavilyBackendSearch(t *testing.T) {
 	}, nil, nil)
 	require.NoError(t, err)
 
-	results, err := backend.Search(context.Background(), "braid coding agent", 5)
+	results, err := backend.Search(context.Background(), "sennit coding agent", 5)
 	require.NoError(t, err)
 
 	require.Equal(t, http.MethodPost, gotMethod)
 	require.Equal(t, "application/json", gotContentType)
 	require.Equal(t, "Bearer test-key", gotAuth)
-	require.Equal(t, "braid coding agent", gotBody.Query)
+	require.Equal(t, "sennit coding agent", gotBody.Query)
 	require.Equal(t, 5, gotBody.MaxResults)
 	require.Equal(t, "markdown", gotBody.IncludeRawContent)
 
 	require.Len(t, results, 2)
-	require.Equal(t, "Braid", results[0].Title)
-	require.Equal(t, "https://example.com/braid", results[0].Link)
+	require.Equal(t, "Sennit", results[0].Title)
+	require.Equal(t, "https://example.com/sennit", results[0].Link)
 	require.Equal(t, "A terminal AI agent.", results[0].Snippet)
-	require.Equal(t, "# Braid\n\nFull page text.", results[0].Content)
+	require.Equal(t, "# Sennit\n\nFull page text.", results[0].Content)
 	require.Equal(t, 1, results[0].Position)
 	require.Empty(t, results[1].Content)
 }

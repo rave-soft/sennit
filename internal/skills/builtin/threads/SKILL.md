@@ -100,7 +100,7 @@ the DST boundary, keep the exported API unchanged" is.
 - **`failed`** — the thread's agent run errored out. `thread_status` gives
   the error. Decide whether to `thread_send` a fix-up instruction to retry,
   or `thread_remove` (with `force` if needed) and report the failure.
-- **`interrupted`** — the thread's process was torn down mid-run (e.g. Braid
+- **`interrupted`** — the thread's process was torn down mid-run (e.g. Sennit
   restarted) rather than the task failing. `thread_send` a message to resume
   it — this respawns its agent session in the same worktree with the
   message as new input.

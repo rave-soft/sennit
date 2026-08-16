@@ -17,7 +17,7 @@ func TestMigration_RenameStrandsToThreads(t *testing.T) {
 	t.Cleanup(ResetPool)
 
 	dataDir := t.TempDir()
-	dbPath := filepath.Join(dataDir, "braid.db")
+	dbPath := filepath.Join(dataDir, "sennit.db")
 
 	conn, err := openDB(dbPath)
 	require.NoError(t, err)

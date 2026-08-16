@@ -47,7 +47,7 @@ type fakeEnv struct {
 
 func testEnv(t *testing.T) fakeEnv {
 	t.Helper()
-	return testEnvAt(t, filepath.Join(os.TempDir(), "braid-test-", t.Name()))
+	return testEnvAt(t, filepath.Join(os.TempDir(), "sennit-test-", t.Name()))
 }
 
 func testEnvAt(t *testing.T, workingDir string) fakeEnv {
@@ -198,7 +198,7 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 	}
 
 	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
-	// independently of user config on `$HOME/.config/braid/braid.json`.
+	// independently of user config on `$HOME/.config/sennit/sennit.json`.
 	cfg.Config().Options.Attribution = &config.Attribution{
 		TrailerStyle:  "assisted-by",
 		GeneratedWith: true,

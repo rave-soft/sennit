@@ -16,9 +16,9 @@ import (
 // up by the poll loop, reloaded, and reported via OnExternalChange.
 func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 	dir := t.TempDir()
-	braidDir := filepath.Join(dir, ".sennit")
-	require.NoError(t, os.MkdirAll(braidDir, 0o755))
-	configPath := filepath.Join(braidDir, "sennit.json")
+	sennitDir := filepath.Join(dir, ".sennit")
+	require.NoError(t, os.MkdirAll(sennitDir, 0o755))
+	configPath := filepath.Join(sennitDir, "sennit.json")
 
 	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
 	t.Setenv("SENNIT_GLOBAL_DATA", dir)
@@ -102,9 +102,9 @@ func TestExternalChangeDetected_NewCandidateFile(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, store.externalChangeDetected())
 
-	braidDir := filepath.Join(dir, ".sennit")
-	require.NoError(t, os.MkdirAll(braidDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(braidDir, "sennit.json"), []byte(`{}`), 0o600))
+	sennitDir := filepath.Join(dir, ".sennit")
+	require.NoError(t, os.MkdirAll(sennitDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sennitDir, "sennit.json"), []byte(`{}`), 0o600))
 
 	require.True(t, store.externalChangeDetected(),
 		"a freshly-created .sennit/sennit.json should be detected even though it wasn't a tracked candidate before")

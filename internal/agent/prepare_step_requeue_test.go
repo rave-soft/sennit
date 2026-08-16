@@ -130,7 +130,7 @@ func TestPrepareStep_FoldPersistSuccessDrainsQueue(t *testing.T) {
 // since only RunID-less calls fold) interleaved with RunID-less
 // follow-ups (which fold). Requeuing a failed fold's remainder must merge
 // it back by acceptSeq, not just prepend it, or a RunID-bearing call - a
-// `braid run` caller waiting on its own RunComplete - can end up behind a
+// `sennit run` caller waiting on its own RunComplete - can end up behind a
 // steering message typed after it.
 func TestPrepareStep_FoldPersistFailureRequeuesInAcceptOrder(t *testing.T) {
 	t.Parallel()

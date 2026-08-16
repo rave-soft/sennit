@@ -82,7 +82,7 @@ func TestWatchForChanges_DetectsAddEditRemove(t *testing.T) {
 
 // TestWatchForChanges_DetectsRootCreatedLater verifies that a discovery
 // root that does not exist when the watcher starts (a project's first
-// .braid/skills) is still picked up once it's created mid-session.
+// .sennit/skills) is still picked up once it's created mid-session.
 func TestWatchForChanges_DetectsRootCreatedLater(t *testing.T) {
 	t.Parallel()
 

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 // BenchmarkUpdatePreferredModel measures the full write cost of a single
@@ -15,7 +17,8 @@ func BenchmarkUpdatePreferredModel(b *testing.B) {
 	dir := b.TempDir()
 	configPath := filepath.Join(dir, "sennit.json")
 
-	hermeticGlobalDirs(b, dir, dir)
+	b.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", dir)
+	b.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dir)
 
 	cfg := `{
 		"model": {"provider": "openai", "model": "gpt-4"},
@@ -71,7 +74,8 @@ func BenchmarkReloadFromDisk(b *testing.B) {
 	dir := b.TempDir()
 	configPath := filepath.Join(dir, "sennit.json")
 
-	hermeticGlobalDirs(b, dir, dir)
+	b.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", dir)
+	b.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dir)
 
 	cfg := `{
 		"model": {"provider": "openai", "model": "gpt-4"},

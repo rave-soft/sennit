@@ -148,7 +148,7 @@ func TestConfigureCustomProvider_NoModelsFoundKeepsFieldsPersisted(t *testing.T)
 	// the config loader (see discoverCustomProviderModels /
 	// validateCustomProviders in internal/config/load.go), but the
 	// base_url/type fields we wrote must still be on disk despite the
-	// error, so the user can retry via `braid models refresh` without
+	// error, so the user can retry via `sennit models refresh` without
 	// reconfiguring from scratch.
 	raw, err := os.ReadFile(configPath)
 	require.NoError(t, err)

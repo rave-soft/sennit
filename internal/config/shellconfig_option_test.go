@@ -7,7 +7,7 @@ import (
 )
 
 func TestShellConfigOptionBooleans(t *testing.T) {
-	store := loadBraidSh(t, `option debug true
+	store := loadSennitSh(t, `option debug true
 option progress false
 option auto-lsp false`)
 
@@ -22,18 +22,18 @@ option auto-lsp false`)
 // Config phrases this field negatively (disable_metrics) but the command
 // exposes it positively. "metrics false" must land as disable_metrics = true.
 func TestShellConfigOptionPositiveMetricsFalse(t *testing.T) {
-	store := loadBraidSh(t, `option metrics false`)
+	store := loadSennitSh(t, `option metrics false`)
 	require.True(t, store.Config().Options.DisableMetrics, "metrics off => disable_metrics true")
 }
 
 // The bare positive form defaults to true, which inverts to disable = false.
 func TestShellConfigOptionPositiveMetricsBare(t *testing.T) {
-	store := loadBraidSh(t, `option metrics`)
+	store := loadSennitSh(t, `option metrics`)
 	require.False(t, store.Config().Options.DisableMetrics, "metrics on => disable_metrics false")
 }
 
 func TestShellConfigOptionUI(t *testing.T) {
-	store := loadBraidSh(t, `option ui compact true
+	store := loadSennitSh(t, `option ui compact true
 option ui diff split
 option ui transparent false
 option ui scrollbar always
@@ -54,7 +54,7 @@ option ui completions-max-items 200`)
 }
 
 func TestShellConfigOptionUIKeybindings(t *testing.T) {
-	store := loadBraidSh(t, `option ui keybinding commands super+p
+	store := loadSennitSh(t, `option ui keybinding commands super+p
 option ui keybinding chat.exit_child_session super+up alt+up`)
 
 	bindings := store.Config().Options.TUI.Keybindings
@@ -63,13 +63,13 @@ option ui keybinding chat.exit_child_session super+up alt+up`)
 }
 
 func TestShellConfigOptionUIRejectsInvalidValue(t *testing.T) {
-	_, err := loadBraidShErr(t, `option ui diff side-by-side`)
+	_, err := loadSennitShErr(t, `option ui diff side-by-side`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "expects unified or split")
 }
 
 func TestShellConfigOptionAttribution(t *testing.T) {
-	store := loadBraidSh(t, `option attribution-trailer-style none
+	store := loadSennitSh(t, `option attribution-trailer-style none
 option attribution-generated-with false`)
 
 	attribution := store.Config().Options.Attribution
@@ -79,7 +79,7 @@ option attribution-generated-with false`)
 }
 
 func TestShellConfigOptionAttributionTrailerStylePreservesGeneratedWithDefault(t *testing.T) {
-	store := loadBraidSh(t, `option attribution-trailer-style assisted-by`)
+	store := loadSennitSh(t, `option attribution-trailer-style assisted-by`)
 
 	attribution := store.Config().Options.Attribution
 	require.NotNil(t, attribution)
@@ -88,20 +88,20 @@ func TestShellConfigOptionAttributionTrailerStylePreservesGeneratedWithDefault(t
 }
 
 func TestShellConfigOptionAttributionGeneratedWithCaseInsensitive(t *testing.T) {
-	store := loadBraidSh(t, `option attribution-generated-with YES`)
+	store := loadSennitSh(t, `option attribution-generated-with YES`)
 
 	require.NotNil(t, store.Config().Options.Attribution)
 	require.True(t, store.Config().Options.Attribution.GeneratedWith)
 }
 
 func TestShellConfigOptionAttributionRejectsInvalidStyle(t *testing.T) {
-	_, err := loadBraidShErr(t, `option attribution-trailer-style bogus`)
+	_, err := loadSennitShErr(t, `option attribution-trailer-style bogus`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "expects none or assisted-by")
 }
 
 func TestShellConfigOptionListAppends(t *testing.T) {
-	store := loadBraidSh(t, `option disable-skill sennit-config
+	store := loadSennitSh(t, `option disable-skill sennit-config
 option disable-skill jq`)
 
 	require.Subset(t, store.Config().Options.DisabledSkills, []string{"sennit-config", "jq"})
@@ -110,7 +110,7 @@ option disable-skill jq`)
 // reset wipes values added earlier (or via source) while keeping anything
 // added after it — observable in the effective config.
 func TestShellConfigOptionReset(t *testing.T) {
-	store := loadBraidSh(t, `option skill-path ./inherited-a
+	store := loadSennitSh(t, `option skill-path ./inherited-a
 option skill-path ./inherited-b
 option reset skill-path
 option skill-path ./mine`)
@@ -122,19 +122,19 @@ option skill-path ./mine`)
 }
 
 func TestShellConfigOptionUnknownKeyFails(t *testing.T) {
-	_, err := loadBraidShErr(t, `option bogus-key value`)
+	_, err := loadSennitShErr(t, `option bogus-key value`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown key")
 }
 
 func TestShellConfigOptionDisableToolRemoved(t *testing.T) {
-	_, err := loadBraidShErr(t, `option disable-tool bash`)
+	_, err := loadSennitShErr(t, `option disable-tool bash`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown key")
 }
 
 func TestShellConfigOptionResetRejectsNonList(t *testing.T) {
-	_, err := loadBraidShErr(t, `option reset debug`)
+	_, err := loadSennitShErr(t, `option reset debug`)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not one")
 }

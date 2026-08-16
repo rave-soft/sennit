@@ -1,4 +1,4 @@
-Braid
+Sennit
 Copyright 2026 rave-soft
 
 This product is a fork of Crush, a terminal-based AI coding agent
@@ -7,7 +7,7 @@ developed by Charmbracelet, Inc.
     Upstream project: https://github.com/charmbracelet/crush
     Copyright 2025-2026 Charmbracelet, Inc.
 
-Braid is a derivative work and is distributed under the same license as
+Sennit is a derivative work and is distributed under the same license as
 the upstream project: the Functional Source License, Version 1.1, MIT
 Future License (FSL-1.1-MIT). The full text is in LICENSE.md.
 
@@ -20,5 +20,5 @@ years after its upstream release date.
 
 "Charm", "Charmbracelet" and "Crush" are trademarks of Charmbracelet,
 Inc. They are used here only to identify the origin of this software.
-Braid is not affiliated with, endorsed by, or supported by
+Sennit is not affiliated with, endorsed by, or supported by
 Charmbracelet, Inc.

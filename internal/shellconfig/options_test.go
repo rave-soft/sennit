@@ -14,7 +14,7 @@ func TestOption_Bool(t *testing.T) {
 	dir := t.TempDir()
 	script := `option debug true
 option progress false`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -34,7 +34,7 @@ func TestOption_BoolCaseInsensitive(t *testing.T) {
 	script := `option debug TRUE
 option progress False
 option metrics YES`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -52,9 +52,9 @@ func TestOption_String(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	script := `option data-directory .braid
+	script := `option data-directory .sennit
 option notifications osc`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ option notifications osc`
 	require.NoError(t, json.Unmarshal(jsonBytes, &result))
 
 	opts := result["options"].(map[string]any)
-	require.Equal(t, ".braid", opts["data_directory"])
+	require.Equal(t, ".sennit", opts["data_directory"])
 	require.Equal(t, "osc", opts["notifications"])
 }
 
@@ -71,7 +71,7 @@ func TestOption_UIKeybinding(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(`option ui keybinding commands super+p
 option ui keybinding editor.newline shift+enter super+j`))
 	require.NoError(t, err)
@@ -88,7 +88,7 @@ func TestOption_UIKeybindingRequiresKey(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui keybinding commands`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "keybinding <action> <key>")
@@ -99,8 +99,8 @@ func TestOption_List(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option context-path .cursorrules
-option context-path BRAID.md`
-	path := filepath.Join(dir, "braidrc")
+option context-path SENNIT.md`
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -112,7 +112,7 @@ option context-path BRAID.md`
 	paths := opts["context_paths"].([]any)
 	require.Len(t, paths, 2)
 	require.Equal(t, ".cursorrules", paths[0])
-	require.Equal(t, "BRAID.md", paths[1])
+	require.Equal(t, "SENNIT.md", paths[1])
 }
 
 func TestOption_Reset(t *testing.T) {
@@ -122,7 +122,7 @@ func TestOption_Reset(t *testing.T) {
 	script := `option skill-path ./a
 option skill-path ./b
 option reset skill-path`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestOption_ResetThenReadd(t *testing.T) {
 option skill-path ./inherited-b
 option reset skill-path
 option skill-path ./mine`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -161,7 +161,7 @@ func TestOption_ResetUnknownKey(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option reset bogus-key`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	_, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.Error(t, err)
@@ -173,7 +173,7 @@ func TestOption_ResetNonListKey(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option reset debug`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	_, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.Error(t, err)
@@ -183,7 +183,7 @@ func TestOption_ResetNonListKey(t *testing.T) {
 func TestOption_UIUnknownKey(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "braidrc")
+	path := filepath.Join(t.TempDir(), "sennitrc")
 	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui bogus true`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown key")
@@ -195,7 +195,7 @@ func TestOption_BoolShorthand(t *testing.T) {
 	dir := t.TempDir()
 	script := `option debug
 option metrics`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -213,7 +213,7 @@ func TestOption_InvertedBool(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option metrics false`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -230,7 +230,7 @@ func TestOption_Int(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option history-retention-days 30`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -247,7 +247,7 @@ func TestOption_IntZero(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option history-retention-days 0`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.NoError(t, err)
@@ -264,7 +264,7 @@ func TestOption_IntInvalid(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option history-retention-days abc`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	_, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.Error(t, err)
@@ -276,7 +276,7 @@ func TestOption_UnknownKey(t *testing.T) {
 
 	dir := t.TempDir()
 	script := `option bogus-key value`
-	path := filepath.Join(dir, "braidrc")
+	path := filepath.Join(dir, "sennitrc")
 
 	_, err := LoadShellConfig(t.Context(), path, []byte(script))
 	require.Error(t, err)

@@ -5,7 +5,7 @@ description: Use when the user needs to query, filter, reshape, extract, create,
 
 # jq — Built-in JSON Processor
 
-Braid ships a built-in `jq` command (via `github.com/itchyny/gojq`) available
+Sennit ships a built-in `jq` command (via `github.com/itchyny/gojq`) available
 in the bash tool. No external binary is required.
 
 ## Supported Flags
@@ -45,7 +45,7 @@ differences:
 
 Extract a field:
 ```sh
-echo '{"name":"braid"}' | jq '.name'
+echo '{"name":"sennit"}' | jq '.name'
 ```
 
 Filter an array:

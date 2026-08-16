@@ -55,7 +55,7 @@ func TestRelease_NoopForUnknownDataDir(t *testing.T) {
 
 // TestConnect_IgnoresContendedWorkspaceLock confirms Connect no longer
 // takes or checks the workspace lock at all: two "processes" can both
-// hold a lock.TryFile on the directory's braid.lock and Connect still
+// hold a lock.TryFile on the directory's sennit.lock and Connect still
 // succeeds. Locking is now a separate, opt-in concern handled by
 // AcquireWorkspaceLock, since a single shared database is opened by
 // many concurrent, legitimately-unrelated project workspaces.

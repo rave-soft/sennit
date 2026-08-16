@@ -58,7 +58,7 @@ func initRepoForWorkspaceThreadsTest(t *testing.T) string {
 	// mitigation, not a root-cause fix: retry the removal briefly and
 	// give up quietly rather than failing a test for a reason unrelated
 	// to what it asserts. Removing the /tmp entry is best-effort anyway.
-	dir, err := os.MkdirTemp("", "braid-threads-test-")
+	dir, err := os.MkdirTemp("", "sennit-threads-test-")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		for range 20 {

@@ -16,11 +16,7 @@ func TestLetterforms(t *testing.T) {
 	t.Parallel()
 
 	letterforms := map[string]letterform{
-		"B": LetterB,
-		"R": LetterR,
-		"A": LetterA,
 		"I": LetterI,
-		"D": LetterD,
 		"E": LetterE,
 		"N": LetterN,
 		"S": LetterS,

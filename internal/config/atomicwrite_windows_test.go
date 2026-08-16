@@ -14,7 +14,7 @@ import (
 
 // Regression test for the windows-latest CI flake where
 // TestConfigStore_SetConfigFields_concurrentInProcess failed with
-// "rename ...braid.json.<rand>.tmp ...braid.json: Access is denied":
+// "rename ...sennit.json.<rand>.tmp ...sennit.json: Access is denied":
 // renaming over a destination while another handle is open on it
 // without sharing must be retried until the handle closes, not
 // surfaced as an error.

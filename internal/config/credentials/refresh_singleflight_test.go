@@ -79,7 +79,7 @@ func newRefreshTestManager(t *testing.T, configPath string, exchange func(ctx co
 // concurrent refresh calls for the same provider collapses into a single
 // token exchange.
 func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "braid.json")
+	configPath := filepath.Join(t.TempDir(), "sennit.json")
 
 	var exchanges atomic.Int64
 	mgr := newRefreshTestManager(t, configPath, func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
@@ -125,7 +125,7 @@ func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
 // refresh token it has already rotated returns an error, so a second
 // exchange would be observable as a failure.
 func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "braid.json")
+	configPath := filepath.Join(t.TempDir(), "sennit.json")
 
 	var (
 		mu          sync.Mutex
@@ -224,7 +224,7 @@ func rotatingExchange(live string, next int) (exchange func(ctx context.Context,
 // disk rather than presenting its own revoked one, which would revoke the
 // whole token family and force the user to log in again.
 func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "braid.json")
+	configPath := filepath.Join(t.TempDir(), "sennit.json")
 	exchange, exchanges, reuse := rotatingExchange("rt3", 4)
 	mgr := newRefreshTestManager(t, configPath, exchange)
 
@@ -252,7 +252,7 @@ func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
 // whose in-memory credential has aged out adopts a peer's still-valid
 // token from disk without spending an exchange at all.
 func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "braid.json")
+	configPath := filepath.Join(t.TempDir(), "sennit.json")
 	exchange, exchanges, _ := rotatingExchange("rt9", 10)
 	mgr := newRefreshTestManager(t, configPath, exchange)
 
@@ -276,7 +276,7 @@ func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
 // backwards: a config file holding an older credential than the one we
 // already have must not be adopted or borrowed from.
 func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "braid.json")
+	configPath := filepath.Join(t.TempDir(), "sennit.json")
 	exchange, exchanges, reuse := rotatingExchange("rt0", 1)
 	mgr := newRefreshTestManager(t, configPath, exchange)
 

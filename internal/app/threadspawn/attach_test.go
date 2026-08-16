@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/brand"
+
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
@@ -19,7 +21,7 @@ import (
 
 func newAttachTestApp(t *testing.T, path string) *app.App {
 	t.Helper()
-	t.Setenv("SENNIT_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", t.TempDir())
 	boot, err := app.Bootstrap(t.Context(), path, app.BootstrapOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() {

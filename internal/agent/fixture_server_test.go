@@ -248,7 +248,7 @@ func fixtureScenarios() map[string]FixtureScenario {
 				},
 				{
 					ToolCalls: []FixtureToolCall{
-						{ID: "call_edit_1", Type: "function", Name: "edit", Args: `{"file_path":"main.go","old_string":"fmt.Println(\"Hello, World!\")","new_string":"fmt.Println(\"hello from braid\")"}`},
+						{ID: "call_edit_1", Type: "function", Name: "edit", Args: `{"file_path":"main.go","old_string":"fmt.Println(\"Hello, World!\")","new_string":"fmt.Println(\"hello from sennit\")"}`},
 					},
 				},
 				{
@@ -327,7 +327,7 @@ func fixtureScenarios() map[string]FixtureScenario {
 				{ToolCalls: []FixtureToolCall{{ID: "call_view_1", Type: "function", Name: "read", Args: `{"file_path":"main.go"}`}}},
 				{
 					ToolCalls: []FixtureToolCall{
-						{ID: "call_medit_1", Type: "function", Name: "multiedit", Args: `{"file_path":"main.go","edits":[{"old_string":"func main() {\n\tfmt.Println(\"Hello, World!\")\n}","new_string":"func main() {\n\t// Greeting\n\tfmt.Println(\"Hello, Braid!\")\n}"}]}`},
+						{ID: "call_medit_1", Type: "function", Name: "multiedit", Args: `{"file_path":"main.go","edits":[{"old_string":"func main() {\n\tfmt.Println(\"Hello, World!\")\n}","new_string":"func main() {\n\t// Greeting\n\tfmt.Println(\"Hello, Sennit!\")\n}"}]}`},
 					},
 				},
 				{

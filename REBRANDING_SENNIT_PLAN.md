@@ -84,8 +84,8 @@ Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в �
 его:
 
 - [ ] Вариант A (рекомендуемый): Sennit стартует с чистым профилем в новых
-  каталогах, старые каталоги Braid не читаются и не удаляются. В release notes
-  и migration guide даются ручные команды переноса.
+  каталогах, старые каталоги Braid не читаются и не удаляются. Ручные команды
+  переноса даются в release notes.
 - [ ] Вариант B: одноразовая явная команда `sennit migrate-from-braid`,
   запускаемая пользователем вручную, вне обычного старта.
 
@@ -156,8 +156,8 @@ Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в �
 - [ ] Обновить marker variables до `SENNIT=1`, `AGENT=sennit`, `AI_AGENT=sennit`.
 - [ ] Перенести специальную логику, где любое `BRAID_<NAME>` становится override
   для `<NAME>`, на префикс `SENNIT_`.
-- [ ] Явно указать в migration guide, что пользовательские hook-скрипты,
-  завязанные на `BRAID_*`, сломаются и требуют правки.
+- [ ] Указать в release notes, что пользовательские hook-скрипты, завязанные
+  на `BRAID_*`, сломаются и требуют правки.
 
 ### Config и context discovery
 
@@ -233,8 +233,9 @@ Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в �
 - [ ] Переписать `README.md`, install snippets, examples и screenshots.
 - [ ] Обновить `AGENTS.md`, repo-local agent definitions и development skills.
 - [ ] Обновить документацию config/hooks, включая таблицы precedence и env vars.
-- [ ] Написать migration guide, который честно говорит: совместимости нет,
-  вот список сломанных контрактов и вот ручные шаги переноса.
+- [x] Migration guide решено не писать. Внешних пользователей у продукта нет,
+  переносить нечего, а документ пришлось бы поддерживать наравне с остальной
+  документацией. Ручной перенос профиля выполнен один раз локально.
 - [ ] Обновить sample config, schema references и editor integration.
 - [ ] Проверить ссылки, repository URLs, support contacts и issue templates.
 - [ ] Сохранить корректную историческую и лицензионную атрибуцию в `NOTICE` и
@@ -263,7 +264,7 @@ Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в �
   предупреждением о breaking change без окна совместимости.
 - [ ] Архивировать или переименовать старый репозиторий с указателем на Sennit.
 - [ ] Отслеживать обращения по config discovery, hooks, packages, PATH и
-  «пропавшей» истории; отвечать ссылкой на migration guide.
+  «пропавшей» истории.
 
 ## Таблица переименований
 
@@ -302,7 +303,7 @@ Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в �
 1. Пользователь устанавливает Sennit с нуля и нигде в штатном UX не видит Braid.
 2. Все официальные пакеты, документация, schema и release assets используют
    согласованные идентификаторы Sennit.
-3. Migration guide явно перечисляет все сломанные контракты.
+3. Release notes явно перечисляют все сломанные контракты.
 4. Для каждого оставшегося упоминания Braid есть документированная причина.
 
 ## Основные риски
@@ -326,7 +327,7 @@ Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в �
 
 - Переключить бренд, CLI, repository/module, хранилище, UI, docs и package names
   одним изменением.
-- Опубликовать migration guide одновременно с релизом.
+- Перечислить сломанные контракты в release notes.
 
 ### Последующие патчи
 

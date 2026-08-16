@@ -36,7 +36,7 @@ func setBootstrapTestEnv(t *testing.T) {
 // DB, skills, and App all come back wired together, and the PostDataDir
 // / PostConnect hooks fire in order with the config being built.
 func TestWorkspaceLockHelperProcess(t *testing.T) {
-	if os.Getenv("SENNIT_TEST_WORKSPACE_LOCK_HELPER") != "1" {
+	if os.Getenv("SENNIT_WORKSPACE_LOCK_HELPER") != "1" {
 		return
 	}
 	lock, err := db.AcquireWorkspaceLock(os.Args[len(os.Args)-1])
@@ -371,7 +371,7 @@ func runWorkspaceGit(t *testing.T, dir string, args ...string) {
 func requireWorkspaceLockContended(t *testing.T, lockDir string) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestWorkspaceLockHelperProcess", "--", lockDir)
-	cmd.Env = append(os.Environ(), "SENNIT_TEST_WORKSPACE_LOCK_HELPER=1")
+	cmd.Env = append(os.Environ(), "SENNIT_WORKSPACE_LOCK_HELPER=1")
 	stdout, err := cmd.StdoutPipe()
 	require.NoError(t, err)
 	stdin, err := cmd.StdinPipe()
@@ -387,7 +387,7 @@ func requireWorkspaceLockContended(t *testing.T, lockDir string) {
 func requireWorkspaceLockAcquired(t *testing.T, lockDir string) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestWorkspaceLockHelperProcess", "--", lockDir)
-	cmd.Env = append(os.Environ(), "SENNIT_TEST_WORKSPACE_LOCK_HELPER=1")
+	cmd.Env = append(os.Environ(), "SENNIT_WORKSPACE_LOCK_HELPER=1")
 	stdout, err := cmd.StdoutPipe()
 	require.NoError(t, err)
 	stdin, err := cmd.StdinPipe()
@@ -401,9 +401,9 @@ func requireWorkspaceLockAcquired(t *testing.T, lockDir string) {
 }
 
 // TestBootstrap_TwoProjectsConcurrentWrites simulates the scenario the
-// shared-database migration exists to support: two independent braid
+// shared-database migration exists to support: two independent sennit
 // "instances" (distinct working directories, distinct project-local
-// .braid data directories, each with its own WorkspaceLock like the
+// .sennit data directories, each with its own WorkspaceLock like the
 // backend takes) bootstrapped in the same process against the SAME
 // global database (HOME/XDG are shared across both goroutines here,
 // unlike setBootstrapTestEnv's usual one-dir-per-test isolation). Both

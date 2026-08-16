@@ -96,7 +96,7 @@ func (s *streamingMarkdown) Render(content string, width int, renderer *glamour.
 	// Incremental boundary search: only scan the delta after the
 	// stable prefix. The cached cumulative state (baseFenceCount,
 	// baseHasListMarker) lets us validate candidates in O(delta)
-	// instead of re-scanning the entire prefix. See CHARM-1785.
+	// instead of re-scanning the entire prefix. See upstream ticket CHARM-1785.
 	boundary := s.findBoundaryAfter(content)
 	if boundary < 0 {
 		// No safe boundary anywhere yet. Full render; do not
@@ -165,7 +165,7 @@ func (s *streamingMarkdown) tryAdvanceFromEmpty(content string, width int, rende
 // that is strictly after the stable prefix. It uses the cached
 // cumulative state (baseFenceCount, baseHasListMarker) to validate
 // candidates without re-scanning the entire prefix, making the search
-// O(delta) instead of O(n) per tick. See CHARM-1785.
+// O(delta) instead of O(n) per tick. See upstream ticket CHARM-1785.
 //
 // Returns -1 when no safe boundary exists after the stable prefix.
 func (s *streamingMarkdown) findBoundaryAfter(content string) int {
@@ -562,7 +562,7 @@ func isSafeBoundaryAt(content string, p int) bool {
 //	   The previous rule rejected on any list marker anywhere in the
 //	   prefix, which killed the streaming cache for every document
 //	   that ever contained a list — the dominant case for LLM
-//	   thinking blocks. See CHARM-1785.
+//	   thinking blocks. See upstream ticket CHARM-1785.
 //
 //	B2 (HTML blocks). CommonMark defines seven HTML-block opener
 //	   patterns (script/pre/style/textarea, comments, processing

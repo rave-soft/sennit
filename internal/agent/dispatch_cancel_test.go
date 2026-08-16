@@ -202,7 +202,7 @@ func TestRun_NormalCompletionClearsStalePendingCancel(t *testing.T) {
 
 // newCancelTestAgentWithRunComplete builds a DB-backed sessionAgent wired
 // to a RunComplete broker so tests can observe the terminal event a
-// RunID-bearing caller (e.g. `braid run`) blocks on.
+// RunID-bearing caller (e.g. `sennit run`) blocks on.
 func newCancelTestAgentWithRunComplete(t *testing.T) (*sessionAgent, fakeEnv, *pubsub.Broker[notify.RunComplete]) {
 	t.Helper()
 	env := testEnv(t)
@@ -220,7 +220,7 @@ func newCancelTestAgentWithRunComplete(t *testing.T) (*sessionAgent, fakeEnv, *p
 // finding: the cancel-on-entry path returned before the streaming defer
 // that publishes RunComplete was installed. A caller that dispatches a
 // run with a RunID and blocks on RunComplete (ignoring message events,
-// like `braid run`) would hang on an immediately-canceled accepted run.
+// like `sennit run`) would hang on an immediately-canceled accepted run.
 // The cancel-on-entry path must publish a terminal RunComplete carrying
 // the originating RunID.
 func TestRun_CancelOnEntryPublishesRunComplete(t *testing.T) {

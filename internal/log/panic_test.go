@@ -15,8 +15,8 @@ func TestPanicLogPathUsesConfiguredLogDir(t *testing.T) {
 	logDir.Store(dir)
 	t.Cleanup(func() { logDir.Store("") })
 
-	got := panicLogPath("braid-panic-test.log")
-	require.Equal(t, filepath.Join(dir, "braid-panic-test.log"), got)
+	got := panicLogPath("sennit-panic-test.log")
+	require.Equal(t, filepath.Join(dir, "sennit-panic-test.log"), got)
 }
 
 func TestRecoverPanicWritesToConfiguredLogDir(t *testing.T) {
