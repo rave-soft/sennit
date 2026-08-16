@@ -27,21 +27,22 @@ func TestLetterforms(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			for _, stretch := range []bool{false, true} {
-				rendered := fn(stretch)
-				lines := strings.Split(rendered, "\n")
-				require.Lenf(t, lines, 3, "letterform %s (stretch=%v) must render exactly 3 lines, got %q", name, stretch, rendered)
+			rendered := fn()
+			lines := strings.Split(rendered, "\n")
+			require.Lenf(t, lines, 3, "letterform %s must render exactly 3 lines, got %q", name, rendered)
 
-				width := lipgloss.Width(lines[0])
-				for i, line := range lines {
-					require.Equalf(t, width, lipgloss.Width(line), "letterform %s (stretch=%v) line %d width mismatch: %q", name, stretch, i, rendered)
-				}
-
-				baseline := lines[2]
-				for _, r := range baseline {
-					require.Containsf(t, "▀ ", string(r), "letterform %s (stretch=%v) baseline row must contain only ▀ or space, got %q", name, stretch, baseline)
-				}
+			width := lipgloss.Width(lines[0])
+			for i, line := range lines {
+				require.Equalf(t, width, lipgloss.Width(line), "letterform %s line %d width mismatch: %q", name, i, rendered)
 			}
+
+			baseline := lines[2]
+			for _, r := range baseline {
+				require.Containsf(t, "▀ ", string(r), "letterform %s baseline row must contain only ▀ or space, got %q", name, baseline)
+			}
+
+			// The letterform must be stable: same size on every render.
+			require.Equalf(t, rendered, fn(), "letterform %s must render identically on every call", name)
 		})
 	}
 }

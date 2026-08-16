@@ -4,7 +4,6 @@ package logo
 import (
 	"fmt"
 	"image/color"
-	"math/rand/v2"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -13,9 +12,9 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
-// letterform represents a letterform. It can be stretched horizontally by
-// a given amount via the boolean argument.
-type letterform func(bool) string
+// letterform represents a letterform. Every letterform renders at a fixed
+// size; none of them stretch.
+type letterform func() string
 
 const diag = `╱`
 
@@ -27,11 +26,6 @@ type Opts struct {
 	VendorColor  color.Color // Vendor text color
 	VersionColor color.Color // version text color
 	Width        int         // width of the rendered logo, used for truncation
-
-	// When true, stretch a random letterform on each render. Has no effect in
-	// compact mode. Mainly for testing. In production you will want to cache
-	// the stretched letterform to keep the logo from jittering on resize.
-	Unstable bool
 }
 
 // Render renders the Sennit logo. Set the argument to true to render the narrow
@@ -57,15 +51,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 		LetterT,
 	}
 
-	stretchIndex := -1 // -1 means no stretching.
-	if !compact && !o.Unstable {
-		// Always stretch the same letterform, which is picked once at random.
-		stretchIndex = cachedRandN(len(sennitLetterforms))
-	} else if !compact && o.Unstable {
-		// Stretch a random letterform on every render.
-		stretchIndex = rand.IntN(len(sennitLetterforms))
-	}
-	sennit := renderWord(spacing, stretchIndex, sennitLetterforms...)
+	sennit := renderWord(spacing, sennitLetterforms...)
 	sennitWidth := lipgloss.Width(sennit)
 	b := new(strings.Builder)
 	for r := range strings.SplitSeq(sennit, "\n") {
