@@ -675,7 +675,7 @@ func TestTaskManager_SendReachesLiveTask(t *testing.T) {
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 
-	require.NoError(t, tasks.Send(t.Context(), st.ID, "follow up"))
+	require.NoError(t, sendErr(tasks.Send(t.Context(), st.ID, "follow up")))
 	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
 
 	coord.mu.Lock()
@@ -706,7 +706,7 @@ func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 	}, time.Second, time.Millisecond)
 	require.Nil(t, mgr.Handle(st.ID), "runtime must have been released once the run completed")
 
-	require.NoError(t, tasks.Send(t.Context(), st.ID, "one more thing"))
+	require.NoError(t, sendErr(tasks.Send(t.Context(), st.ID, "one more thing")))
 
 	h := mgr.Handle(st.ID)
 	require.NotNil(t, h, "Send must reactivate the task")
@@ -735,7 +735,7 @@ func TestTaskManager_SendRefusesCancelledTask(t *testing.T) {
 
 	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "no longer needed"))
 
-	err = tasks.Send(t.Context(), st.ID, "please continue")
+	err = sendErr(tasks.Send(t.Context(), st.ID, "please continue"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cancelled")
 	require.Equal(t, 1, coord.runCount(), "a refused Send must never dispatch")
@@ -746,7 +746,7 @@ func TestTaskManager_SendRejectsThreadID(t *testing.T) {
 	_, tasks, _ := newTestTaskManager(t, store)
 	threadRow := seedThreadRow(t, store)
 
-	err := tasks.Send(t.Context(), threadRow.ID, "hi")
+	err := sendErr(tasks.Send(t.Context(), threadRow.ID, "hi"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "is not a task")
 }

@@ -75,6 +75,14 @@ func (a *coordinatorAdapter) Cancel(sessionID string) {
 	a.inner.Cancel(sessionID)
 }
 
+// SessionQueue forwards the coordinator's own busy/queue-depth reads. The
+// domain port splits them into one call because it only ever wants the
+// pair, and reading them together keeps the answer it reports back to a
+// sender internally consistent.
+func (a *coordinatorAdapter) SessionQueue(sessionID string) (bool, int) {
+	return a.inner.IsSessionBusy(sessionID), a.inner.QueuedPrompts(sessionID)
+}
+
 func (a *coordinatorAdapter) RegisterDelegationParent(sessionID string, parent thread.DelegationParent) {
 	a.inner.RegisterDelegationParent(sessionID, agent.DelegationParent{
 		Parent:          unwrapCoordinator(parent.Parent),

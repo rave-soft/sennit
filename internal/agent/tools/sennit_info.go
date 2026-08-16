@@ -44,6 +44,7 @@ func NewSennitInfoTool(
 	allSkills []*skills.Skill,
 	activeSkills []*skills.Skill,
 	skillTracker *skills.Tracker,
+	skillStates []*skills.SkillState,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		SennitInfoToolName,
@@ -52,7 +53,7 @@ func NewSennitInfoTool(
 			if params.ModelsFor != "" {
 				return fantasy.NewTextResponse(buildModelsFor(cfg, params.ModelsFor)), nil
 			}
-			return fantasy.NewTextResponse(buildSennitInfo(cfg, reg, lspManager, allSkills, activeSkills, skillTracker)), nil
+			return fantasy.NewTextResponse(buildSennitInfo(cfg, reg, lspManager, allSkills, activeSkills, skillTracker, skillStates)), nil
 		},
 	)
 }
@@ -104,7 +105,7 @@ func buildModelsFor(cfg SennitInfoConfig, providerID string) string {
 	return b.String()
 }
 
-func buildSennitInfo(cfg SennitInfoConfig, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
+func buildSennitInfo(cfg SennitInfoConfig, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker, skillStates []*skills.SkillState) string {
 	var b strings.Builder
 
 	var mcpStates map[string]mcp.ClientInfo
@@ -114,7 +115,7 @@ func buildSennitInfo(cfg SennitInfoConfig, reg *mcp.Registry, lspManager *lsp.Ma
 
 	writeConfigFiles(&b, cfg)
 	writeConfigStaleness(&b, cfg)
-	writeProblems(&b, cfg, mcpStates)
+	writeProblems(&b, cfg, mcpStates, skillStates)
 	writeModels(&b, cfg)
 	writeProviders(&b, cfg)
 	writeLSP(&b, lspManager, cfg)
@@ -168,13 +169,15 @@ func writeConfigStaleness(b *strings.Builder, cfg SennitInfoConfig) {
 	b.WriteString("\n")
 }
 
-// writeProblems reports config.Doctor's static findings plus any MCP
-// server stuck in an error/needs-auth state, so an agent asked "why is my
-// sub-agent on the wrong model?" (or "why can't I use that MCP tool?") can
-// answer from its own sennit_info output instead of a log file it never
-// sees.
-func writeProblems(b *strings.Builder, cfg SennitInfoConfig, mcpStates map[string]mcp.ClientInfo) {
+// writeProblems reports config.Doctor's static findings, any MCP server
+// stuck in an error/needs-auth state, and any SKILL.md that failed to
+// parse or validate — so an agent asked "why is my sub-agent on the wrong
+// model?" (or "why can't I use that MCP tool?", or "why did the skill I
+// was told to follow do nothing?") can answer from its own sennit_info
+// output instead of a log file it never sees.
+func writeProblems(b *strings.Builder, cfg SennitInfoConfig, mcpStates map[string]mcp.ClientInfo, skillStates []*skills.SkillState) {
 	problems := config.Doctor(cfg.Config())
+	problems = append(problems, config.SkillProblems(skillStates)...)
 	for name, info := range mcpStates {
 		if info.State != mcp.StateError && info.State != mcp.StateNeedsAuth {
 			continue

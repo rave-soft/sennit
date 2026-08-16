@@ -30,7 +30,10 @@ func (noopThreadManager) Get(context.Context, string) (tools.ThreadInfo, error) 
 	return tools.ThreadInfo{}, nil
 }
 
-func (noopThreadManager) Send(context.Context, string, string) error { return nil }
+func (noopThreadManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
+	return tools.SendOutcome{}, nil
+}
+
 func (noopThreadManager) Wait(context.Context, []string, time.Duration) error {
 	return nil
 }
@@ -44,17 +47,18 @@ func (noopThreadManager) Remove(context.Context, string, bool, bool) error {
 }
 
 // threadToolNames lists the thread_* tools expected under the coder
-// agent's *default* AllowedTools. tools.ThreadWaitToolName is
-// deliberately excluded: it is no longer in the default set (a thread's
-// completion now arrives on its own — see internal/config's
-// allToolNames), though it is still constructed and offered to any
-// agent config that explicitly allows it — see
-// TestBuildTools_ThreadWaitAbsentByDefaultButAvailableWhenExplicitlyAllowed.
+// agent's *default* AllowedTools. tools.ThreadSendToolName is
+// deliberately excluded: it is not in the default set (a running thread
+// does not read a follow-up until its current turn ends, so the steering
+// it looks like it offers is not real — see internal/config's
+// allToolNames), though it is still constructed and offered to any agent
+// config that explicitly allows it — see
+// TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed.
 var threadToolNames = []string{
 	tools.ThreadCreateToolName,
 	tools.ThreadListToolName,
 	tools.ThreadStatusToolName,
-	tools.ThreadSendToolName,
+	tools.ThreadWaitToolName,
 	tools.ThreadMergeToolName,
 	tools.ThreadRemoveToolName,
 }
@@ -146,27 +150,29 @@ func TestBuildTools_ThreadToolsAbsentForSubAgent(t *testing.T) {
 	}
 }
 
-// TestBuildTools_ThreadWaitAbsentByDefaultButAvailableWhenExplicitlyAllowed
+// TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed
 // covers the removal side of the "allowed-tools list is where a tool
-// silently stops existing" trap: dropping thread_wait from the default
+// silently stops existing" trap: dropping thread_send from the default
 // set (internal/config's allToolNames) must not make it uninstallable -
 // buildTools still constructs it unconditionally and offers it to any
 // agent config whose own AllowedTools names it explicitly, exactly like
-// any other tool not in the default set.
-func TestBuildTools_ThreadWaitAbsentByDefaultButAvailableWhenExplicitlyAllowed(t *testing.T) {
+// any other tool not in the default set. That path is what an agent
+// resuming an interrupted thread, or driving conflict resolution inside a
+// thread's worktree, is expected to be configured with.
+func TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, noopThreadManager{})
 
 	built, err := coord.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
-	require.NotContains(t, toolNames(t, built), tools.ThreadWaitToolName,
-		"thread_wait must not be offered under the default AllowedTools")
+	require.NotContains(t, toolNames(t, built), tools.ThreadSendToolName,
+		"thread_send must not be offered under the default AllowedTools")
 
 	allowed := agentCfg
-	allowed.AllowedTools = append(slices.Clone(agentCfg.AllowedTools), tools.ThreadWaitToolName)
+	allowed.AllowedTools = append(slices.Clone(agentCfg.AllowedTools), tools.ThreadSendToolName)
 	built, err = coord.buildTools(t.Context(), allowed, false)
 	require.NoError(t, err)
-	require.Contains(t, toolNames(t, built), tools.ThreadWaitToolName,
-		"thread_wait must still be constructible/registerable when an agent config explicitly allows it")
+	require.Contains(t, toolNames(t, built), tools.ThreadSendToolName,
+		"thread_send must still be constructible/registerable when an agent config explicitly allows it")
 }
 
 func TestCoordinator_SetThreadsTakesEffectOnNextBuild(t *testing.T) {

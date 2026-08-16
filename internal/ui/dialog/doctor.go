@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -221,13 +222,15 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 }
 
 // DoctorProblems collects every config.Problem for this workspace: the
-// static findings from config.Doctor plus any MCP server currently stuck
-// in an error/needs-auth state. This mirrors sennit_info's [problems]
-// section (domain/agent/tools/sennit_info.go's writeProblems) — the same
-// merge, on the UI side of the workspace.Workspace boundary since
-// internal/config cannot import the MCP client package.
+// static findings from config.Doctor, any MCP server currently stuck in an
+// error/needs-auth state, and any SKILL.md that failed to parse or
+// validate. This mirrors sennit_info's [problems] section
+// (domain/agent/tools/sennit_info.go's writeProblems) — the same merge, on
+// the UI side of the workspace.Workspace boundary since internal/config
+// cannot import the MCP client package.
 func DoctorProblems(com *common.Common) []config.Problem {
 	problems := config.Doctor(com.Config())
+	problems = append(problems, config.SkillProblems(skills.GetLatestStates())...)
 	for name, info := range com.Workspace.MCPGetStates() {
 		if info.State != mcptools.MCPStateError && info.State != mcptools.MCPStateNeedsAuth {
 			continue

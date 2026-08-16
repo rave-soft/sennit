@@ -152,6 +152,13 @@ type Coordinator interface {
 	// Cancel stops the run in flight in sessionID (never the whole
 	// coordinator).
 	Cancel(sessionID string)
+	// SessionQueue reports whether sessionID is mid-turn right now and how
+	// many prompts are already waiting behind that turn. It is a snapshot
+	// read taken before a dispatch, purely so the caller can tell the
+	// sender whether the message it just handed over will be read now or
+	// only after the current turn ends — see [SendDisposition]. Nothing in
+	// the lifecycle branches on it.
+	SessionQueue(sessionID string) (busy bool, queued int)
 	// RegisterDelegationParent records that the child session identified by
 	// sessionID reports its completion / resolves mid-run asks against
 	// parent.

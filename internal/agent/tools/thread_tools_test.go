@@ -100,6 +100,12 @@ func (f *fakeCoordinator) CancelAll()                     {}
 func (f *fakeCoordinator) Cancel(sessionID string)        {}
 func (f *fakeCoordinator) SetThreads(tools.ThreadManager) {}
 
+// The send path reads these to report whether a message lands as the next
+// turn or waits behind one in flight (see tools.SendOutcome). This fake
+// never runs anything, so its sessions are never busy.
+func (f *fakeCoordinator) IsSessionBusy(string) bool { return false }
+func (f *fakeCoordinator) QueuedPrompts(string) int  { return 0 }
+
 // fakeHandle/fakeSpawner spawn a real (network/db-free) app.App per thread
 // via app.NewForTest, matching internal/thread/manager_test.go's approach.
 type fakeHandle struct {

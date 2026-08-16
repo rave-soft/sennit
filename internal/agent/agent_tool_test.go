@@ -49,7 +49,9 @@ func (f *fakeTaskManager) Cancel(context.Context, string, string) error {
 	return nil
 }
 
-func (f *fakeTaskManager) Send(context.Context, string, string) error { return nil }
+func (f *fakeTaskManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
+	return tools.SendOutcome{}, nil
+}
 
 func (f *fakeTaskManager) Output(context.Context, string, int) (tools.TaskOutput, error) {
 	return tools.TaskOutput{}, nil

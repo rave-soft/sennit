@@ -461,7 +461,14 @@ func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Conte
 //
 // Callers must hold no locks: send acquires id's own opMu for its
 // duration, the same admission ordering [Manager.Send] always used.
-func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string) error {
+//
+// The returned [SendDisposition] describes which of the two branches the
+// message took and, when it was queued behind a turn already in flight,
+// how many prompts were waiting ahead of it. It is reporting only — no
+// dispatch decision is made from it — and it is read from the coordinator
+// before the dispatch, so it describes the queue the message is joining
+// rather than the one it has already joined.
+func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string) (SendDisposition, error) {
 	// Tag bgCtx so coordinator.run persists this dispatch's user message
 	// with Origin agent.OriginAgent instead of the default
 	// message.OriginPerson — a thread_send/task_send follow-up was not
@@ -482,7 +489,7 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	removed := c.removed
 	c.mu.Unlock()
 	if removed {
-		return fmt.Errorf("thread: %q has been removed", id)
+		return SendDisposition{}, fmt.Errorf("thread: %q has been removed", id)
 	}
 
 	if rt != nil {
@@ -496,8 +503,18 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		// release the workspace out from under the queued turn. For an
 		// idle entity rt.runID was empty, so there is no earlier run to
 		// displace.
+		//
+		// Which of those two it is, is exactly what the sender needs told
+		// back: read it now, before the dispatch below adds this message
+		// to the queue it is describing.
+		var disp SendDisposition
+		if coord := rt.handle.Workspace().Coordinator(); coord != nil {
+			if busy, ahead := coord.SessionQueue(sessionID); busy {
+				disp = SendDisposition{Queued: true, Ahead: ahead}
+			}
+		}
 		if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
-			return err
+			return SendDisposition{}, err
 		}
 		runID := uuid.NewString()
 		c.mu.Lock()
@@ -512,16 +529,16 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 				l.handleRunComplete(bgCtx, id, RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
 			}
 		})
-		return nil
+		return disp, nil
 	}
 
 	handle, err := spawner.Spawn(bgCtx, spawnPath)
 	if err != nil {
-		return fmt.Errorf("thread: respawn workspace: %w", err)
+		return SendDisposition{}, fmt.Errorf("thread: respawn workspace: %w", err)
 	}
 	if err := bgCtx.Err(); err != nil {
 		_ = spawner.Release(context.Background(), handle.ID())
-		return err
+		return SendDisposition{}, err
 	}
 	// This call owns the freshly spawned handle until startRun installs it
 	// as the shared runtime; release it on every earlier exit.
@@ -533,11 +550,13 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	}()
 
 	if _, err := l.setStatus(ctx, id, StatusRunning, "", "", 0); err != nil {
-		return err
+		return SendDisposition{}, err
 	}
 	l.startRun(bgCtx, handle, spawner, id, sessionID, msg)
 	owned = false // Ownership transferred to the shared runtime state.
-	return nil
+	// A workspace that had to be respawned has no turn in flight, so this
+	// message is the one that runs, never a queued follow-up.
+	return SendDisposition{Resumed: true}, nil
 }
 
 // cancel is the generic body behind [TaskManager.Cancel] and

@@ -17,7 +17,12 @@ type skillStatusItem struct {
 	icon  string
 	name  string
 	title string
-	// description is reserved for future use (e.g. showing error details).
+	// description carries the discovery error for a skill that failed to
+	// parse or validate. A broken SKILL.md is not loaded at all, and until
+	// this was shown the only trace of that was a WARN in the log — so an
+	// agent instructed to follow a skill would carry on without it, and
+	// nobody watching had any way to notice. The error icon alone says
+	// "something is wrong"; the reason is what makes it fixable.
 	description string
 }
 
@@ -84,13 +89,16 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 		}
 		stateNames[name] = struct{}{}
 		icon := t.Resource.EnabledIcon.String()
+		var description string
 		if state.State == skills.StateError {
 			icon = t.Resource.ErrorIcon.String()
+			description = skillErrorDescription(state)
 		}
 		items = append(items, skillStatusItem{
-			icon:  icon,
-			name:  name,
-			title: t.Resource.Name.Render(name),
+			icon:        icon,
+			name:        name,
+			title:       t.Resource.Name.Render(name),
+			description: description,
 		})
 	}
 
@@ -117,6 +125,22 @@ func (m *UI) skillStatusItems() []skillStatusItem {
 	})
 
 	return items
+}
+
+// skillErrorDescription renders why a skill failed discovery, in the one
+// line the status row has room for. It leads with the reason rather than
+// the path: the row already names the skill, and the reason ("mapping
+// values are not allowed" — an unquoted colon in the frontmatter) is what
+// tells the reader what to go change.
+func skillErrorDescription(state *skills.SkillState) string {
+	if state.Err == nil {
+		return "failed to load"
+	}
+	msg := strings.TrimSpace(state.Err.Error())
+	if msg == "" {
+		return "failed to load"
+	}
+	return msg
 }
 
 func skillsList(t *styles.Styles, items []skillStatusItem, width, maxItems int) string {

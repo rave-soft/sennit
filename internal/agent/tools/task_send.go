@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"html/template"
 
 	"charm.land/fantasy"
@@ -37,11 +36,12 @@ func NewTaskSendTool(manager TaskManager) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("message is required"), nil
 			}
 
-			if err := manager.Send(ctx, params.ID, params.Message); err != nil {
+			outcome, err := manager.Send(ctx, params.ID, params.Message)
+			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
-			return fantasy.NewTextResponse(fmt.Sprintf("Sent message to task %q", params.ID)), nil
+			return fantasy.NewTextResponse(outcome.Describe("task", params.ID)), nil
 		},
 	)
 }

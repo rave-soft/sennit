@@ -26,7 +26,7 @@ func TestSennitInfo_MinimalConfig(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[providers]")
 	require.NotContains(t, output, "[lsp]")
 	require.NotContains(t, output, "[mcp]")
@@ -42,7 +42,7 @@ func TestSennitInfo_ConfigFiles(t *testing.T) {
 		"/home/user/.config/sennit/sennit.json",
 		"/project/.sennit/sennit.json",
 	)
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config_files]")
 	require.Contains(t, output, "/home/user/.config/sennit/sennit.json")
 	require.Contains(t, output, "/project/.sennit/sennit.json")
@@ -55,7 +55,7 @@ func TestSennitInfo_Models(t *testing.T) {
 		Model:     config.SelectedModel{Model: "claude-sonnet-4-20250514", Provider: "anthropic"},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[model]")
 	require.Contains(t, output, "model = claude-sonnet-4-20250514 (anthropic)")
 }
@@ -68,7 +68,7 @@ func TestSennitInfo_Providers(t *testing.T) {
 	providers.Set("anthropic", config.ProviderConfig{Models: make([]catwalk.Model, 12)})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[providers]")
 	anthropicIdx := strings.Index(output, "anthropic = enabled")
 	openaiIdx := strings.Index(output, "openai = enabled")
@@ -130,7 +130,7 @@ func TestSennitInfo_DisabledProvidersOmitted(t *testing.T) {
 	providers.Set("anthropic", config.ProviderConfig{Models: make([]catwalk.Model, 12)})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "anthropic = enabled")
 	require.NotContains(t, output, "openai")
 }
@@ -150,7 +150,7 @@ func TestSennitInfo_LSPStates(t *testing.T) {
 	mgr.Clients().Set("pyright", errorClient)
 
 	cfg := config.NewTestStore(&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
-	output := buildSennitInfo(cfg, nil, mgr, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, mgr, nil, nil, nil, nil)
 	require.Contains(t, output, "[lsp]")
 	require.Contains(t, output, "gopls = ready")
 	require.Contains(t, output, "pyright = error")
@@ -201,7 +201,7 @@ func TestSennitInfo_YoloMode(t *testing.T) {
 	})
 	cfg.Overrides().SkipPermissionRequests = true
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
 	require.Contains(t, output, "mode = yolo")
 }
@@ -214,7 +214,7 @@ func TestSennitInfo_AllowedTools(t *testing.T) {
 		Permissions: &config.Permissions{AllowedTools: []string{"edit:write", "bash"}},
 	})
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
 	require.Contains(t, output, "allowed_tools = bash, edit:write")
 }
@@ -227,7 +227,7 @@ func TestSennitInfo_DisabledTools(t *testing.T) {
 		Options:   &config.Options{DisabledTools: []string{"download", "agentic_fetch"}},
 	})
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[tools]")
 	require.Contains(t, output, "disabled = agentic_fetch, download")
 }
@@ -244,7 +244,7 @@ func TestSennitInfo_Options(t *testing.T) {
 		},
 	})
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[options]")
 	require.Contains(t, output, "auto_lsp = true")
 	require.Contains(t, output, "auto_summarize = false")
@@ -259,14 +259,14 @@ func TestSennitInfo_AutoSummarizeInversion(t *testing.T) {
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisableAutoSummarize: true},
 	})
-	outputFalse := buildSennitInfo(cfgFalse, nil, nil, nil, nil, nil)
+	outputFalse := buildSennitInfo(cfgFalse, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, outputFalse, "auto_summarize = false")
 
 	cfgTrue := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisableAutoSummarize: false},
 	})
-	outputTrue := buildSennitInfo(cfgTrue, nil, nil, nil, nil, nil)
+	outputTrue := buildSennitInfo(cfgTrue, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, outputTrue, "auto_summarize = true")
 }
 
@@ -280,7 +280,7 @@ func TestSennitInfo_NoSecrets(t *testing.T) {
 	})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "sk-super-secret-key-12345")
 	require.NotContains(t, output, "secret")
 	require.Contains(t, output, "openai = enabled (8 models)")
@@ -316,7 +316,7 @@ func TestSennitInfo_DeterministicOrdering(t *testing.T) {
 	zMcpIdx := strings.Index(mcpOutput, "z-mcp = connected")
 	require.Less(t, aMcpIdx, zMcpIdx)
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 
 	alphaIdx := strings.Index(output, "alpha = enabled")
 	middleIdx := strings.Index(output, "middle = enabled")
@@ -337,7 +337,7 @@ func TestSennitInfo_EmptySectionsOmitted(t *testing.T) {
 		Options:     &config.Options{},
 	})
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[tools]")
 	require.NotContains(t, output, "[permissions]")
 	require.NotContains(t, output, "[lsp]")
@@ -359,7 +359,7 @@ func TestSennitInfo_ConfigStaleness_Clean(t *testing.T) {
 	// Capture snapshot (normally done in Load)
 	store.CaptureStalenessSnapshot([]string{configPath})
 
-	output := buildSennitInfo(store, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(store, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config]")
 	require.Contains(t, output, "dirty = false")
 	require.NotContains(t, output, "changed_paths")
@@ -384,7 +384,7 @@ func TestSennitInfo_ConfigStaleness_Dirty(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": true}`), 0o600))
 
-	output := buildSennitInfo(store, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(store, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config]")
 	require.Contains(t, output, "dirty = true")
 	require.Contains(t, output, "changed_paths")
@@ -408,7 +408,7 @@ func TestSennitInfo_ConfigStaleness_MissingPath(t *testing.T) {
 	// Delete file to trigger missing state
 	require.NoError(t, os.Remove(configPath))
 
-	output := buildSennitInfo(store, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(store, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config]")
 	require.Contains(t, output, "dirty = true")
 	require.Contains(t, output, "missing_paths")
@@ -421,7 +421,7 @@ func TestSennitInfo_Skills_NoSkills(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[skills]")
 }
 
@@ -442,7 +442,7 @@ func TestSennitInfo_Skills_MixedLoadedUnloaded(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker)
+	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker, nil)
 	require.Contains(t, output, "[skills]")
 	require.Contains(t, output, "bash = user, loaded")
 	require.Contains(t, output, "sennit-config = builtin, loaded")
@@ -468,7 +468,7 @@ func TestSennitInfo_Skills_DisabledSkills(t *testing.T) {
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options:   &config.Options{DisabledSkills: []string{"image-convert"}},
 	})
-	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker)
+	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker, nil)
 	require.Contains(t, output, "[skills]")
 	require.Contains(t, output, "bash = user, unloaded")
 	require.Contains(t, output, "sennit-config = builtin, unloaded")
@@ -489,7 +489,7 @@ func TestSennitInfo_Skills_Ordering(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker)
+	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker, nil)
 
 	aIdx := strings.Index(output, "a-skill")
 	mIdx := strings.Index(output, "m-skill")
@@ -511,7 +511,7 @@ func TestSennitInfo_Skills_BuiltinOrigin(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
-	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker)
+	output := buildSennitInfo(cfg, nil, nil, allSkills, activeSkills, tracker, nil)
 	require.Contains(t, output, "sennit-config = builtin, unloaded")
 	require.Contains(t, output, "my-skill = user, unloaded")
 }
@@ -529,7 +529,7 @@ func TestSennitInfo_Hooks(t *testing.T) {
 		},
 	})
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[hooks]")
 	require.Contains(t, output, "PreToolUse (matcher: edit|write) = check-privates.sh")
 	require.Contains(t, output, "PreToolUse = audit.sh")
@@ -542,7 +542,7 @@ func TestSennitInfo_Hooks_NoHooks(t *testing.T) {
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 	})
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[hooks]")
 }
 
@@ -556,7 +556,7 @@ func TestSennitInfo_Problems_None(t *testing.T) {
 		Options:   &config.Options{},
 	})
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[problems]")
 }
 
@@ -584,7 +584,7 @@ func TestSennitInfo_Problems_UnresolvedAgentModel(t *testing.T) {
 	}
 	cfg := config.NewTestStore(c)
 
-	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[problems]")
 	require.Contains(t, output, "agent.reviewer")
 	require.Contains(t, output, "falls back to the main model")
@@ -606,11 +606,38 @@ func TestSennitInfo_Problems_MCPError(t *testing.T) {
 	})
 
 	var b strings.Builder
-	writeProblems(&b, cfg, states)
+	writeProblems(&b, cfg, states, nil)
 	output := b.String()
 	require.Contains(t, output, "[problems]")
 	require.Contains(t, output, "mcp.filesystem")
 	require.Contains(t, output, "connection refused")
+}
+
+// A SKILL.md that fails to parse is not loaded at all, and an agent told
+// to follow it otherwise has no way to find that out: it just proceeds
+// without the skill. So the discovery failure has to reach [problems],
+// where the agent can actually read it.
+func TestSennitInfo_Problems_BrokenSkill(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewTestStore(&config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options:   &config.Options{},
+	})
+	states := []*skills.SkillState{{
+		Path:  "/repo/.sennit/skills/feature-development/SKILL.md",
+		State: skills.StateError,
+		Err:   errors.New("parsing frontmatter: yaml: line 2: mapping values are not allowed in this context"),
+	}}
+
+	var b strings.Builder
+	writeProblems(&b, cfg, nil, states)
+	output := b.String()
+	require.Contains(t, output, "[problems]")
+	// Named after its directory: a skill whose frontmatter did not parse
+	// has no name of its own yet.
+	require.Contains(t, output, "skill.feature-development")
+	require.Contains(t, output, "mapping values are not allowed")
 }
 
 // TestSennitInfo_Providers_CachedCustomProviderModels verifies that a
@@ -647,6 +674,6 @@ func TestSennitInfo_Providers_CachedCustomProviderModels(t *testing.T) {
 	store, err := config.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 
-	output := buildSennitInfo(store, nil, nil, nil, nil, nil)
+	output := buildSennitInfo(store, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "custom = enabled (2 models)")
 }
