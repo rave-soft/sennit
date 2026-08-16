@@ -13,7 +13,7 @@ it as a scratchpad for what's next, not as documentation of current behavior.
 
 ### Motivation
 
-Right now `braidrc` runs once, at startup. If you want to change something
+Right now `sennitrc` runs once, at startup. If you want to change something
 mid-session — swap the model, allow a tool, add an MCP server — you edit
 the file and restart.
 
@@ -23,16 +23,16 @@ session**. The mental model is exactly a shell and its `.bashrc`:
 
 - Running a config command changes the **current session only** — like typing
   `export` or `alias` at a live prompt.
-- To make it stick, you edit your `braidrc` — like editing `.bashrc`.
+- To make it stick, you edit your `sennitrc` — like editing `.bashrc`.
 
-So you could say "Braid, switch to a cheaper model for a bit" and it just
+So you could say "Sennit, switch to a cheaper model for a bit" and it just
 runs `model …`, live, no restart.
 
 > [!IMPORTANT]
 > **Persistence is a non-goal.** The bash tool never writes config files.
 > This is deliberate: a script can't be round-tripped. You don't regenerate
 > your `.bashrc` from the live shell's state, and we won't regenerate
-> `braidrc` from live config state. Want it permanent? Edit `braidrc`.
+> `sennitrc` from live config state. Want it permanent? Edit `sennitrc`.
 
 ### Why it's mostly wiring
 
@@ -113,26 +113,26 @@ larger, later increment.
 
 ### Motivation
 
-Braid currently uses JSON files in data directories as both persisted machine
+Sennit currently uses JSON files in data directories as both persisted machine
 state and high-priority configuration:
 
 ```text
-~/.local/share/braid/braid.json
-.braid/braid.json
+~/.local/share/sennit/sennit.json
+.sennit/sennit.json
 ```
 
 These files hold mutable choices such as preferred/recent models, UI settings,
 workspace overrides, and some credentials. Treating them as ordinary config
 means state enters the same generic JSON merge/reload path as user-authored
-`braidrc` and legacy `braid.json` files.
+`sennitrc` and legacy `sennit.json` files.
 
 The goal is to make the roles explicit:
 
 | Role | Format |
 |---|---|
-| User-authored executable configuration | `braidrc` / `.braidrc` |
-| Legacy user-authored static configuration | `braid.json` / `.braid.json` |
-| Braid-owned persistent preferences and history | versioned `state.json` |
+| User-authored executable configuration | `sennitrc` / `.sennitrc` |
+| Legacy user-authored static configuration | `sennit.json` / `.sennit.json` |
+| Sennit-owned persistent preferences and history | versioned `state.json` |
 | Session-only changes | memory |
 | Credentials/OAuth tokens | dedicated secure storage |
 
@@ -144,10 +144,10 @@ config and being deep-merged through the config pipeline.
 ### Proposed files
 
 ```text
-~/.config/braid/braidrc             global user config
-~/.local/share/braid/state.json     global machine state
-./braidrc / ./.braidrc              project user config
-.braid/state.json                   workspace machine state
+~/.config/sennit/sennitrc             global user config
+~/.local/share/sennit/state.json     global machine state
+./sennitrc / ./.sennitrc              project user config
+.sennit/state.json                   workspace machine state
 ```
 
 State files should be machine-owned, written with `0600`, protected by the
@@ -179,12 +179,12 @@ Explicit user configuration should beat remembered state:
 built-in defaults
 → global state defaults
 → workspace state defaults
-→ global legacy braid.json
-→ global braidrc
-→ project legacy braid.json
-→ project braidrc
-→ project .braid.json
-→ project .braidrc
+→ global legacy sennit.json
+→ global sennitrc
+→ project legacy sennit.json
+→ project sennitrc
+→ project .sennit.json
+→ project .sennitrc
 → runtime-only overrides
 ```
 
@@ -196,9 +196,9 @@ building without participating in precedence.
 User-authored JSON remains a supported config input during this work:
 
 ```text
-~/.config/braid/braid.json
-./braid.json
-./.braid.json
+~/.config/sennit/sennit.json
+./sennit.json
+./.sennit.json
 ```
 
 It must be decoded as configuration, never migrated as state. Only the
@@ -210,7 +210,7 @@ If user JSON is retired later:
 1. Keep reading it for a compatibility period.
 2. Warn only when a user-authored JSON config is loaded.
 3. Provide an explicit conversion command (for example,
-   `braid config convert braid.json > braidrc`).
+   `sennit config convert sennit.json > sennitrc`).
 4. Never rewrite user config automatically.
 
 Using JSON internally for state is independent of deprecating JSON as a user
@@ -250,22 +250,22 @@ func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 Real-time commands run through the Bash tool remain session-only and do not
 write state, preserving the shell/`.bashrc` mental model.
 
-### Typed braidrc builder
+### Typed sennitrc builder
 
 This is related but separate. Today the Bash path is:
 
 ```text
-braidrc → map[string]any → JSON → Config
+sennitrc → map[string]any → JSON → Config
 ```
 
 A later typed-builder phase should become:
 
 ```text
-braidrc → typed ConfigBuilder → Config
+sennitrc → typed ConfigBuilder → Config
 state.json → typed StateStore ───────┘
 ```
 
-Legacy `braid.json` would decode into a typed config patch and apply to the same
+Legacy `sennit.json` would decode into a typed config patch and apply to the same
 builder. This may require moving pure config data types into a dependency-neutral
 package to avoid import cycles.
 
@@ -277,11 +277,11 @@ package to avoid import cycles.
 4. Stop merging global/workspace data JSON as config.
 5. Move provider credentials and OAuth tokens to dedicated secure storage.
 6. Remove generic state callers of `SetConfigField` / dotted JSON paths.
-7. Replace the `braidrc` map/JSON bridge with a typed config builder.
+7. Replace the `sennitrc` map/JSON bridge with a typed config builder.
 
 Migration must preserve unknown legacy fields or warn and leave the original
 file untouched. Successfully migrated files can be renamed to
-`braid.json.migrated`; corrupt files should be quarantined as timestamped
+`sennit.json.migrated`; corrupt files should be quarantined as timestamped
 `state.json.corrupt-*` files and replaced with defaults.
 
 ## Permission-level hard deny
@@ -289,9 +289,9 @@ file untouched. Successfully migrated files can be renamed to
 **Status:** not implemented; probably unnecessary until a real use case
 appears.
 
-Braid currently has three useful tool states across both config formats:
+Sennit currently has three useful tool states across both config formats:
 
-| State | `braidrc` | `braid.json` | Behavior |
+| State | `sennitrc` | `sennit.json` | Behavior |
 |---|---|---|---|
 | Auto-approved | `permissions allow bash` | `permissions.allowed_tools` | Visible; runs without prompting |
 | Prompted | neither list | neither list | Visible; asks the user before running |
@@ -301,7 +301,7 @@ Braid currently has three useful tool states across both config formats:
 block: because the tool is absent from the agent's tool list, the model cannot
 attempt to use it.
 
-The one state Braid does **not** have is "visible but always rejected": the
+The one state Sennit does **not** have is "visible but always rejected": the
 model can see and choose the tool, but the permission engine denies every
 request without prompting. Supporting that would require a separate
 permission-level deny list in both the config schema and permission engine.

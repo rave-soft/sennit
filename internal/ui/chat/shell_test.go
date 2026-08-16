@@ -21,7 +21,7 @@ var benchmarkShellOutput string
 func TestPendingShellItemRendersStreamedOutput(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewPendingShellItem(&sty, "ping -c 3 localhost")
 
 	require.NotContains(t, ansi.Strip(item.Render(80)), "bytes from",
@@ -41,7 +41,7 @@ func TestPendingShellItemRendersStreamedOutput(t *testing.T) {
 func TestPendingShellItemShowsTail(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewPendingShellItem(&sty, "seq 30")
 
 	for i := 1; i <= 30; i++ {
@@ -57,7 +57,7 @@ func TestPendingShellItemShowsTail(t *testing.T) {
 func TestCompletedShellItemRendersOutput(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewPendingShellItem(&sty, "echo hi")
 	item.Complete("hi\n", 0)
 
@@ -67,7 +67,7 @@ func TestCompletedShellItemRendersOutput(t *testing.T) {
 func TestShellItemPreservesOutputAcrossChunks(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewPendingShellItem(&sty, "printf")
 	item.AppendOutput("first\n\x1b[")
 	item.AppendOutput("31msecond\x1b[0m\n")
@@ -79,7 +79,7 @@ func TestShellItemPreservesOutputAcrossChunks(t *testing.T) {
 func TestShellItemCompleteReplacesPartialOutputAndIgnoresLateChunks(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewPendingShellItem(&sty, "printf")
 	item.AppendOutput("partial\n")
 	item.Complete("complete\nresult\n", 0)
@@ -92,7 +92,7 @@ func TestShellItemCompleteReplacesPartialOutputAndIgnoresLateChunks(t *testing.T
 func TestPendingShellItemPreservesANSIBoundaryInCollapsedTail(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewPendingShellItem(&sty, "seq 12")
 	item.AppendOutput("1\n2\n\x1b[")
 	item.AppendOutput("31m3\x1b[0m\n4\n5\n6\n7\n8\n9\n10\n11\n12\n")
@@ -106,7 +106,7 @@ func TestPendingShellItemPreservesANSIBoundaryInCollapsedTail(t *testing.T) {
 func TestCompletedShellItemShowsHeadAndAccurateCount(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewPendingShellItem(&sty, "seq 12")
 	item.Complete("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n\x1b[0m\n", 0)
 
@@ -133,7 +133,7 @@ func TestShellOutputWindows(t *testing.T) {
 func BenchmarkShellItemAppendOutput(b *testing.B) {
 	for _, chunkSize := range []int{100, 1024} {
 		b.Run(strconv.Itoa(chunkSize)+"B_chunks", func(b *testing.B) {
-			sty := styles.BraidDark()
+			sty := styles.SennitDark()
 			chunk := strings.Repeat("x", chunkSize-1) + "\n"
 			const outputSize = 1 << 20
 
@@ -157,7 +157,7 @@ func BenchmarkShellItemAppendOutput(b *testing.B) {
 }
 
 func BenchmarkShellItemCollapsedRender(b *testing.B) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewPendingShellItem(&sty, "benchmark")
 	item.AppendOutput(strings.Repeat("0123456789abcdef\n", (1<<20)/17))
 

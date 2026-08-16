@@ -3,7 +3,7 @@
 > [!NOTE]
 > This document was designed for both humans and agents.
 
-Braid has three ways work can happen alongside — or as a continuation of —
+Sennit has three ways work can happen alongside — or as a continuation of —
 what you're already doing: **steering** a turn that's running, a
 **background task**, and a **thread**. They solve different problems and
 carry very different overhead. This is the one place all three are written
@@ -41,7 +41,7 @@ rather than queued. A task waking a follow-up turn that starts another task
 is capped at 3 levels deep.
 
 Turn the feature off entirely with `options.background_agents: false` in
-`braid.json`: the model can no longer start a background task and the
+`sennit.json`: the model can no longer start a background task and the
 task-management tools stop being offered. A task already running when the
 option is turned off keeps running to completion rather than being killed —
 the switch only blocks new dispatch. Threads are a separate, older feature

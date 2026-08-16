@@ -19,23 +19,23 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 )
 
-const BraidLogsToolName = brand.ToolLogs
+const SennitLogsToolName = brand.ToolLogs
 
-//go:embed braid_logs.md.tpl
-var braidLogsDescriptionTmpl []byte
+//go:embed sennit_logs.md.tpl
+var sennitLogsDescriptionTmpl []byte
 
-var braidLogsDescriptionTpl = template.Must(
-	template.New("braidLogsDescription").
-		Parse(string(braidLogsDescriptionTmpl)),
+var sennitLogsDescriptionTpl = template.Must(
+	template.New("sennitLogsDescription").
+		Parse(string(sennitLogsDescriptionTmpl)),
 )
 
-type braidLogsDescriptionData struct {
+type sennitLogsDescriptionData struct {
 	DefaultLines int
 	MaxLines     int
 }
 
-func braidLogsDescription() string {
-	return renderTemplate(braidLogsDescriptionTpl, braidLogsDescriptionData{
+func sennitLogsDescription() string {
+	return renderTemplate(sennitLogsDescriptionTpl, sennitLogsDescriptionData{
 		DefaultLines: defaultLogLines,
 		MaxLines:     maxLogLines,
 	})
@@ -71,23 +71,23 @@ var sensitiveKeys = []string{
 	"credential",
 }
 
-type BraidLogsParams struct {
+type SennitLogsParams struct {
 	Lines int `json:"lines,omitempty" description:"Number of recent log entries to return (default 50, max 100)"`
 }
 
-func NewBraidLogsTool(logFile string) fantasy.AgentTool {
+func NewSennitLogsTool(logFile string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
-		BraidLogsToolName,
-		braidLogsDescription(),
-		func(ctx context.Context, params BraidLogsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			result := runBraidLogs(logFile, params)
+		SennitLogsToolName,
+		sennitLogsDescription(),
+		func(ctx context.Context, params SennitLogsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			result := runSennitLogs(logFile, params)
 			return fantasy.NewTextResponse(result), nil
 		},
 	)
 }
 
-// runBraidLogs reads and formats the last N log entries from the given file.
-func runBraidLogs(logFile string, params BraidLogsParams) string {
+// runSennitLogs reads and formats the last N log entries from the given file.
+func runSennitLogs(logFile string, params SennitLogsParams) string {
 	// Validate and clamp the lines parameter.
 	lines := params.Lines
 	if lines <= 0 {

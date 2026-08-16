@@ -79,7 +79,7 @@ func TestChatDenseToolGroup_NoGapBetweenConsecutiveOneLinerTools(t *testing.T) {
 func TestChatRendersDelegationAsCompactStubWhilePending(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := chat.NewAgentToolMessageItem(&sty,
 		message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"fix the auth bug"}`, Finished: false}, nil, false, nil)
 	item.AddNestedTool(chat.NewToolMessageItem(&sty, "m1",

@@ -1,11 +1,11 @@
 ---
 name: shell-builtins
-description: Use when creating a new shell builtin command for Braid (internal/shell/), editing an existing one, or when the user needs to understand how commands are intercepted in Braid's embedded shell.
+description: Use when creating a new shell builtin command for Sennit (internal/shell/), editing an existing one, or when the user needs to understand how commands are intercepted in Sennit's embedded shell.
 ---
 
 # Shell Builtins
 
-Braid's shell (`internal/shell/`) uses `mvdan.cc/sh/v3` for POSIX shell
+Sennit's shell (`internal/shell/`) uses `mvdan.cc/sh/v3` for POSIX shell
 emulation. Commands can be intercepted before they reach the OS by adding
 **builtins** — functions handled in-process.
 

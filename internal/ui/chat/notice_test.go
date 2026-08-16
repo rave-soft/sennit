@@ -25,7 +25,7 @@ func noticeTestMessage(text string) *message.Message {
 func TestExtractMessageItems_SystemRoleBecomesANotice(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	styPtr := &sty
 	items := ExtractMessageItems(styPtr, noticeTestMessage(`Thread "tidy-up" merged into main and removed.`), nil, nil)
 	require.Len(t, items, 1)
@@ -42,7 +42,7 @@ func TestExtractMessageItems_SystemRoleBecomesANotice(t *testing.T) {
 func TestExtractMessageItems_EmptySystemMessageRendersNothing(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	styPtr := &sty
 	require.Empty(t, ExtractMessageItems(styPtr, noticeTestMessage("   "), nil, nil))
 }
@@ -53,7 +53,7 @@ func TestExtractMessageItems_EmptySystemMessageRendersNothing(t *testing.T) {
 func TestNoticeItem_StaysOnOneLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	styPtr := &sty
 	long := "Thread " + strings.Repeat("very-long-name-", 20) + " merged into main and removed."
 	item := NewNoticeItem(styPtr, noticeTestMessage(long))

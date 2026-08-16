@@ -43,12 +43,12 @@ func TestRender_ValidPNG(t *testing.T) {
 }
 
 // TestRender_MatchesCommittedAsset guards against the checked-in
-// internal/ui/notification/assets/braid.png going stale relative to the
+// internal/ui/notification/assets/sennit.png going stale relative to the
 // generator: if this fails, someone edited icon.go without running
 // `go generate ./internal/ui/notification/...`.
 func TestRender_MatchesCommittedAsset(t *testing.T) {
 	t.Parallel()
 
 	require.Equal(t, genicon.Render(), notification.Icon,
-		"assets/braid.png is stale; run `go generate ./internal/ui/notification/...`")
+		"assets/sennit.png is stale; run `go generate ./internal/ui/notification/...`")
 }

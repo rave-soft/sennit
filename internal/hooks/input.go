@@ -53,7 +53,7 @@ func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []b
 // It includes all current process env vars plus hook-specific ones.
 func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON string) []string {
 	env := os.Environ()
-	env = append(env, shell.BraidEnvMarkers()...)
+	env = append(env, shell.SennitEnvMarkers()...)
 	env = append(
 		env,
 		fmt.Sprintf(brand.EnvPrefix+"EVENT=%s", eventName),

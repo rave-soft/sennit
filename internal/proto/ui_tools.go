@@ -25,8 +25,8 @@ const (
 	SymbolsToolName          = "lsp_symbols"
 	LSPRestartToolName       = "lsp_restart"
 	DiagnosticsToolName      = "lsp_diagnostics"
-	BraidInfoToolName        = brand.ToolInfo
-	BraidLogsToolName        = brand.ToolLogs
+	SennitInfoToolName       = brand.ToolInfo
+	SennitLogsToolName       = brand.ToolLogs
 	ListMCPResourcesToolName = "list_mcp_resources"
 	ReadMCPResourceToolName  = "read_mcp_resource"
 	ThreadCreateToolName     = "thread_create"

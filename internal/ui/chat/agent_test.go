@@ -49,7 +49,7 @@ func TestFormatElapsed(t *testing.T) {
 func TestAgentDelegationWholeItemIsHoverable(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewAgentToolMessageItem(&sty, message.ToolCall{
 		ID:       "agent-hover",
 		Name:     "agent",
@@ -124,7 +124,7 @@ func TestLastToolSummary(t *testing.T) {
 func TestRenderAgentStatusLine_Content(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	nested := []ToolMessageItem{
 		mkNestedToolCall(t, &sty, "c1", "view", `{"file_path":"internal/foo.go"}`),
 		mkNestedToolCall(t, &sty, "c2", "grep", `{"pattern":"Provider","path":"internal/config"}`),
@@ -159,7 +159,7 @@ func TestRenderAgentStatusLine_Content(t *testing.T) {
 func TestPanelStatusLine_MatchesUnderlyingStatusLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 
 	agentItem := NewAgentToolMessageItem(&sty, message.ToolCall{ID: "a1", Name: "agent", Input: `{}`, Finished: false}, nil, false, nil)
 	agentItem.startTime = time.Now().Add(-30 * time.Second)
@@ -187,7 +187,7 @@ func TestPanelStatusLine_MatchesUnderlyingStatusLine(t *testing.T) {
 func TestRenderAgentStatusLine_NoNestedTools(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	line := renderAgentStatusLine(&sty, 200, time.Now(), nil, 0, 0)
 	plain := ansi.Strip(line)
 
@@ -203,7 +203,7 @@ func TestRenderAgentStatusLine_NoNestedTools(t *testing.T) {
 func TestRenderAgentStatusLine_Truncation(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	nested := []ToolMessageItem{
 		mkNestedToolCall(t, &sty, "c1", "grep", `{"pattern":"a very very long pattern that should get cut off","path":"internal/config/somewhere/deep"}`),
 	}
@@ -224,7 +224,7 @@ func TestRenderAgentStatusLine_Truncation(t *testing.T) {
 func TestAgentToolMessageItem_PendingShowsCurrentActivity(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 	item.startTime = time.Now().Add(-9 * time.Second)
@@ -244,7 +244,7 @@ func TestAgentToolMessageItem_PendingShowsCurrentActivity(t *testing.T) {
 func TestAgentToolMessageItem_FinishedInputWithoutResultShowsCurrentActivity(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewAgentToolMessageItem(&sty,
 		message.ToolCall{ID: "tc-agent", Name: "agent", Input: `{"prompt":"fix it"}`, Finished: true},
 		nil, false, nil)
@@ -263,7 +263,7 @@ func TestAgentToolMessageItem_FinishedInputWithoutResultShowsCurrentActivity(t *
 func TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
@@ -288,7 +288,7 @@ func TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {
 func TestAgentToolRenderPending_ManyNestedToolsStayOneStatusLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
@@ -318,7 +318,7 @@ func TestAgentToolRenderPending_ManyNestedToolsStayOneStatusLine(t *testing.T) {
 func TestAgentToolRenderFinishedCollapses(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase for bug X"}`, Finished: true}
 	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "Found the bug in foo.go.\nMore detail below."}
 	item := NewAgentToolMessageItem(&sty, parent, result, false, nil)
@@ -344,7 +344,7 @@ func TestAgentToolRenderFinishedCollapses(t *testing.T) {
 func TestAgentToolRenderCanceledCollapses(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
 	item := NewAgentToolMessageItem(&sty, parent, nil, true, nil)
 
@@ -361,7 +361,7 @@ func TestAgentToolRenderCanceledCollapses(t *testing.T) {
 func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{
 		ID:       "agent-bg",
 		Name:     "agent",
@@ -410,7 +410,7 @@ func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
 func TestAgentToolToggleExpandedIsNoOp(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: true}
 	result := &message.ToolResult{ToolCallID: "agent-parent", Content: "done"}
 	item := NewAgentToolMessageItem(&sty, parent, result, false, nil)
@@ -424,7 +424,7 @@ func TestAgentToolToggleExpandedIsNoOp(t *testing.T) {
 func TestAgenticFetchToolMessageItem_SetChildSessionTokensBumpsVersion(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{}`, Finished: false}
 	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
 
@@ -448,7 +448,7 @@ func TestAgenticFetchToolMessageItem_SetChildSessionTokensBumpsVersion(t *testin
 func TestAgentDisplayName_BuiltInTask(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
@@ -464,7 +464,7 @@ func TestAgentDisplayName_BuiltInTask(t *testing.T) {
 func TestAgentDisplayName_CustomAgentTool(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	cfg := &config.Config{Agents: map[string]config.Agent{"developer": {ID: "developer"}}}
 	parent := message.ToolCall{ID: "dev-parent", Name: "developer", Input: `{"prompt":"fix the bug"}`, Finished: false}
 	item := NewToolMessageItem(&sty, "msg", parent, nil, false, cfg)
@@ -481,7 +481,7 @@ func TestAgentDisplayName_CustomAgentTool(t *testing.T) {
 func TestAgenticFetchDisplayName_ShowsFetch(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{"prompt":"summarize"}`, Finished: false}
 	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
 
@@ -495,7 +495,7 @@ func TestAgenticFetchDisplayName_ShowsFetch(t *testing.T) {
 func TestRenderAgentSubtitle_Content(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	line := ansi.Strip(renderAgentSubtitle(&sty, 200, "qwen36-local/Qwen3-Coder-Next", "high"))
 	require.Contains(t, line, "qwen36-local/Qwen3-Coder-Next")
 	require.Contains(t, line, "effort high")
@@ -508,7 +508,7 @@ func TestRenderAgentSubtitle_Content(t *testing.T) {
 func TestRenderAgentSubtitle_Empty(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	require.Equal(t, "", renderAgentSubtitle(&sty, 200, "", ""))
 }
 
@@ -518,7 +518,7 @@ func TestRenderAgentSubtitle_Empty(t *testing.T) {
 func TestRenderAgentSubtitle_NarrowWidthDropsProvider(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	line := ansi.Strip(renderAgentSubtitle(&sty, 20, "qwen36-local/Qwen3-Coder-Next", ""))
 	require.Contains(t, line, "Qwen3-Coder-Next")
 	require.NotContains(t, line, "qwen36-local")
@@ -530,7 +530,7 @@ func TestRenderAgentSubtitle_NarrowWidthDropsProvider(t *testing.T) {
 func TestRenderAgentSubtitle_Truncation(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	for _, width := range []int{0, 1, 10, 20, 40} {
 		line := renderAgentSubtitle(&sty, width, "a-very-long-provider-name/a-very-long-model-id", "high")
 		require.LessOrEqualf(t, ansi.StringWidth(ansi.Strip(line)), width,
@@ -545,7 +545,7 @@ func TestRenderAgentSubtitle_Truncation(t *testing.T) {
 func TestAgentToolRender_CustomAgentShowsModelAndEffort(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	cfg := &config.Config{Agents: map[string]config.Agent{
 		"developer": {ID: "developer", Model: "qwen36-local/Qwen3-Coder-Next", ReasoningEffort: "high"},
 	}}
@@ -568,7 +568,7 @@ func TestAgentToolRender_CustomAgentShowsModelAndEffort(t *testing.T) {
 func TestAgentToolRender_NoConfigOverrideShowsNoSubtitle(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect"}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
@@ -583,7 +583,7 @@ func TestAgentToolRender_NoConfigOverrideShowsNoSubtitle(t *testing.T) {
 func TestAgentToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 
@@ -607,7 +607,7 @@ func TestAgentToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing.T) {
 func TestAgenticFetchToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{}`, Finished: false}
 	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
 
@@ -626,7 +626,7 @@ func TestAgenticFetchToolMessageItem_SetChildSessionTodosBumpsVersion(t *testing
 func TestAgentToolRender_RunningHidesTodosFromTranscript(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 	item.SetChildSessionTodos([]session.Todo{
@@ -647,7 +647,7 @@ func TestAgentToolRender_RunningHidesTodosFromTranscript(t *testing.T) {
 func TestAgentToolRender_FinishedHidesTodos(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 	item.SetChildSessionTodos([]session.Todo{

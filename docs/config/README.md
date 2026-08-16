@@ -5,17 +5,17 @@
 
 > [!TIP]
 >
-> Braid can configure itself via a builtin config skill. That is to say,
-> can generally just tell Braid want you want to configure using natural
+> Sennit can configure itself via a builtin config skill. That is to say,
+> can generally just tell Sennit want you want to configure using natural
 > language.
 >
-> If you're migrating from the old JSON format, you can also ask Braid to
+> If you're migrating from the old JSON format, you can also ask Sennit to
 > convert the config for you.
 
-Braid is configured with Bash via a set of Braid-specific builtin commands. By
-default, global config lives at `~/.config/braid/braidrc` on Unix-like systems
-and `%USERPROFILE%\.config\braid\braidrc` on Windows. It works like a `.bashrc`:
-it runs when Braid starts and configures the agent.
+Sennit is configured with Bash via a set of Sennit-specific builtin commands. By
+default, global config lives at `~/.config/sennit/sennitrc` on Unix-like systems
+and `%USERPROFILE%\.config\sennit\sennitrc` on Windows. It works like a `.bashrc`:
+it runs when Sennit starts and configures the agent.
 
 ```bash
 # Add Ollama.
@@ -57,9 +57,9 @@ provider add my-secret-provider \
 
 Two reasons:
 
-1. Braid ships with a first-class Bash interpreter, so we get the logic for
+1. Sennit ships with a first-class Bash interpreter, so we get the logic for
    free.
-2. Ultimately, Braid needs to be able to configure itself, and command-based
+2. Ultimately, Sennit needs to be able to configure itself, and command-based
    config allows both users and the agent to use the same tools.
 
 ## What about JSON?
@@ -70,42 +70,42 @@ be receiving new features. For more see [Legacy JSON](#legacy-json).
 ## Config versioning
 
 Not breaking the config API is really important to us! That said, you can
-target specific Braid versions with `$BRAID_VERSION`:
+target specific Sennit versions with `$SENNIT_VERSION`:
 
 ```bash
-if [[ $BRAID_VERSION == "0.85.*" ]]; then
+if [[ $SENNIT_VERSION == "0.85.*" ]]; then
     option debug true
 fi
 ```
 
 ## Security
 
-Just like `braid.json`, `braidrc` is a trusted file. Guard it carefully and
+Just like `sennit.json`, `sennitrc` is a trusted file. Guard it carefully and
 don't download random configs without reading them first.
 
 ## Where config lives
 
-Braid looks for config in the following places, with lower numbers taking
+Sennit looks for config in the following places, with lower numbers taking
 precedence:
 
-| Priority | Unix-like                        | Windows                           |
-| -------- | -------------------------------- | --------------------------------- |
-| 1        | `./.braidrc`                     | `.\.braidrc`                      |
-| 2        | `./braidrc`                      | `.\braidrc`                       |
-| 3        | `$XDG_CONFIG_HOME/braid/braidrc` | `%XDG_CONFIG_HOME%\braid\braidrc` |
+| Priority | Unix-like                          | Windows                              |
+| -------- | ----------------------------------- | ------------------------------------- |
+| 1        | `./.sennitrc`                       | `.\.sennitrc`                         |
+| 2        | `./sennitrc`                        | `.\sennitrc`                          |
+| 3        | `$XDG_CONFIG_HOME/sennit/sennitrc`  | `%XDG_CONFIG_HOME%\sennit\sennitrc`   |
 
-Legacy JSON uses `.braid.json` / `braid.json` in the same directories as the
+Legacy JSON uses `.sennit.json` / `sennit.json` in the same directories as the
 above. Everything found is merged, with project settings overriding global ones
-and `braidrc` overriding JSON in the same directory. If a folder has both, they
-merge and Braid logs a warning.
+and `sennitrc` overriding JSON in the same directory. If a folder has both, they
+merge and Sennit logs a warning.
 
-Data directories (`~/.local/share/braid` on Unix-like systems and
-`%LOCALAPPDATA%\braid` on Windows) contain machine-owned JSON state. Braid does
-not discover or execute a `braidrc` from those locations.
+Data directories (`~/.local/share/sennit` on Unix-like systems and
+`%LOCALAPPDATA%\sennit` on Windows) contain machine-owned JSON state. Sennit does
+not discover or execute a `sennitrc` from those locations.
 
 > [!NOTE]
-> Braid also stores state data in `$XDG_DATA_HOME/braid`
-> (`%LOCALAPPDATA%\braid` on Windows). This is application state, and should
+> Sennit also stores state data in `$XDG_DATA_HOME/sennit`
+> (`%LOCALAPPDATA%\sennit` on Windows). This is application state, and should
 > not be edited by hand.
 
 ## Command Reference
@@ -122,7 +122,7 @@ Available Commands:
   lsp           Manage language servers
   hook          Manage hooks
   permissions   Configure tool permissions
-  option        Configure general Braid behavior
+  option        Configure general Sennit behavior
 ```
 
 ### provider
@@ -192,7 +192,7 @@ Usage:
 ### model
 
 Manage custom models and the selected model. Model references use the same
-`<provider>/<id>` form printed by `braid models`.
+`<provider>/<id>` form printed by `sennit models`.
 
 ```text
 Usage:
@@ -239,7 +239,7 @@ Usage:
 #### `model`
 
 Set the selected model. With no model argument, print the current selection.
-Braid picks a smaller/cheaper model automatically for internal work like
+Sennit picks a smaller/cheaper model automatically for internal work like
 titles and summarization; that choice is not user-configurable.
 
 ```text
@@ -455,7 +455,7 @@ permissions deny bash
 
 ### option
 
-Configure general Braid behavior, paths, attribution, and the terminal UI.
+Configure general Sennit behavior, paths, attribution, and the terminal UI.
 Boolean values are optional and default to `true`.
 
 ```text
@@ -475,11 +475,11 @@ Boolean Keys:
   metrics                        send anonymous usage metrics
   auto-summarize                 automatically summarize long conversations
   default-providers              include built-in providers
-  attribution-generated-with     add the Generated with Braid line
+  attribution-generated-with     add the Generated with Sennit line
 
 String Keys:
   data-directory string            directory for project data and state
-  initialize-as string             context filename created by braid init
+  initialize-as string             context filename created by sennit init
   notifications string             notification style: auto, native, osc, bell,
                                    or disabled
   attribution-trailer-style string attribution trailer: none, co-authored-by,
@@ -553,7 +553,7 @@ Keybinding action names use the groups `editor.*`, `chat.*`, and
 
 > [!IMPORTANT]
 > These skill paths load by default — you do NOT need `skill-path`
-> for them: `.agents/skills`, `.braid/skills`, `.claude/skills`,
+> for them: `.agents/skills`, `.sennit/skills`, `.claude/skills`,
 > `.cursor/skills`.
 
 ## Composing configs
@@ -561,9 +561,9 @@ Keybinding action names use the groups `editor.*`, `chat.*`, and
 Because it's Bash, a shared base config is just a `source`:
 
 ```bash
-# Unix-like: ~/.config/braid/braidrc
-# Windows:   %USERPROFILE%\.config\braid\braidrc
-source ~/team/braid-base.sh    # sets up providers, a few skills
+# Unix-like: ~/.config/sennit/sennitrc
+# Windows:   %USERPROFILE%\.config\sennit\sennitrc
+source ~/team/sennit-base.sh    # sets up providers, a few skills
 
 # …but on this machine, drop a skill path the base added and add my own.
 option reset skill-path
@@ -575,13 +575,13 @@ script or pulled in via `source`. Later lines win, just like a shell.
 
 ## Legacy JSON
 
-`braid.json` is the original format and is now deprecated. We plan to support
+`sennit.json` is the original format and is now deprecated. We plan to support
 it for the forseeable future, but new configuration options will only be added
 to Bash-based config.
 
 ```jsonc
 {
-  "$schema": "https://charm.land/braid.json",
+  "$schema": "https://charm.land/sennit.json",
   "providers": {
     "anthropic": { "api_key": "$ANTHROPIC_API_KEY" },
   },
@@ -593,11 +593,11 @@ to Bash-based config.
 For a full reference, See the [JSON schema](../../schema.json).
 
 In JSON, only selected string fields (API keys, URLs, MCP/LSP commands and args,
-headers) are shell-expanded at load time. In `braidrc` there's no such list —
+headers) are shell-expanded at load time. In `sennitrc` there's no such list —
 it's all just Bash.
 
 Both formats are trusted code: they run with your shell privileges before the UI
-appears. Don't launch Braid in a directory whose config you haven't read.
+appears. Don't launch Sennit in a directory whose config you haven't read.
 
 ---
 

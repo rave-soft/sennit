@@ -15,7 +15,7 @@ import (
 
 func newTestProviderForm(t *testing.T) *ProviderForm {
 	t.Helper()
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
 	return NewProviderForm(com)
 }

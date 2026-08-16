@@ -87,6 +87,6 @@ func TestTheme_DiffersPerPalette(t *testing.T) {
 	require.Equal(t, PaletteGraphiteAmber.Bg, amber.Background)
 	require.NotEqual(t, steel.Background, amber.Background)
 
-	// BraidDark is the default palette, not a fifth hardcoded theme.
-	require.Equal(t, steel.Background, BraidDark().Background)
+	// SennitDark is the default palette, not a fifth hardcoded theme.
+	require.Equal(t, steel.Background, SennitDark().Background)
 }

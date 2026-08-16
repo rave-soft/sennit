@@ -408,18 +408,18 @@ func TestDiscoverBuiltin(t *testing.T) {
 
 	var found bool
 	for _, s := range discovered {
-		if s.Name == "braid-config" {
+		if s.Name == "sennit-config" {
 			found = true
 			require.True(t, strings.HasPrefix(s.SkillFilePath, BuiltinPrefix))
 			require.True(t, strings.HasPrefix(s.Path, BuiltinPrefix))
-			require.Equal(t, "sennit://skills/braid-config/SKILL.md", s.SkillFilePath)
-			require.Equal(t, "sennit://skills/braid-config", s.Path)
+			require.Equal(t, "sennit://skills/sennit-config/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "sennit://skills/sennit-config", s.Path)
 			require.NotEmpty(t, s.Description)
 			require.NotEmpty(t, s.Instructions)
 			require.True(t, s.Builtin)
 		}
 	}
-	require.True(t, found, "braid-config builtin skill not found")
+	require.True(t, found, "sennit-config builtin skill not found")
 
 	var foundJQ bool
 	for _, s := range discovered {
@@ -436,16 +436,16 @@ func TestDiscoverBuiltin(t *testing.T) {
 
 	var foundHooks bool
 	for _, s := range discovered {
-		if s.Name == "braid-hooks" {
+		if s.Name == "sennit-hooks" {
 			foundHooks = true
-			require.Equal(t, "sennit://skills/braid-hooks/SKILL.md", s.SkillFilePath)
-			require.Equal(t, "sennit://skills/braid-hooks", s.Path)
+			require.Equal(t, "sennit://skills/sennit-hooks/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "sennit://skills/sennit-hooks", s.Path)
 			require.NotEmpty(t, s.Description)
 			require.NotEmpty(t, s.Instructions)
 			require.True(t, s.Builtin)
 		}
 	}
-	require.True(t, foundHooks, "braid-hooks builtin skill not found")
+	require.True(t, foundHooks, "sennit-hooks builtin skill not found")
 }
 
 func TestDeduplicate(t *testing.T) {
@@ -465,10 +465,10 @@ func TestDeduplicate(t *testing.T) {
 		},
 		{
 			name:     "user overrides builtin",
-			input:    []*Skill{{Name: "braid-config", Path: "braid://skills/braid-config"}, {Name: "braid-config", Path: "/user/braid-config"}},
+			input:    []*Skill{{Name: "sennit-config", Path: "braid://skills/sennit-config"}, {Name: "sennit-config", Path: "/user/sennit-config"}},
 			wantLen:  1,
-			wantName: "braid-config",
-			wantPath: "/user/braid-config",
+			wantName: "sennit-config",
+			wantPath: "/user/sennit-config",
 		},
 		{
 			name:    "empty",

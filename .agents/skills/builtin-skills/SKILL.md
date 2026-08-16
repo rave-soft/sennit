@@ -1,14 +1,14 @@
 ---
 name: builtin-skills
 description:
-  Use when creating a new builtin skill for Braid, editing an existing builtin
+  Use when creating a new builtin skill for Sennit, editing an existing builtin
   skill (internal/skills/builtin/), or when the user needs to understand how the
   embedded skill system works.
 ---
 
 # Builtin Skills
 
-Braid embeds skills directly into the binary via `internal/skills/builtin/`.
+Sennit embeds skills directly into the binary via `internal/skills/builtin/`.
 These are always available without user configuration.
 
 ## How It Works
@@ -17,8 +17,8 @@ These are always available without user configuration.
 - The tree is embedded at compile time via `//go:embed builtin/*` in
   `internal/skills/embed.go`.
 - `DiscoverBuiltin()` walks the embedded FS, parses each `SKILL.md`, and sets
-  paths with the `braid://skills/` prefix (e.g., `braid://skills/jq/SKILL.md`).
-- The View tool resolves `braid://` paths from the embedded FS, not disk.
+  paths with the `sennit://skills/` prefix (e.g., `sennit://skills/jq/SKILL.md`).
+- The View tool resolves `sennit://` paths from the embedded FS, not disk.
 - User skills with the same name override builtins (last occurrence wins in
   `Deduplicate()`).
 
@@ -35,8 +35,8 @@ These are always available without user configuration.
 
 ## Existing Builtin Skills
 
-| Skill          | Directory               | Description                                |
-| -------------- | ----------------------- | ------------------------------------------ |
-| `braid-config` | `builtin/braid-config/` | Braid configuration help                   |
-| `braid-hooks`  | `builtin/braid-hooks/`  | Authoring, configuring and debugging hooks |
-| `jq`           | `builtin/jq/`           | jq JSON processor usage guide              |
+| Skill           | Directory                | Description                                |
+| --------------- | ------------------------- | ------------------------------------------ |
+| `sennit-config` | `builtin/sennit-config/`  | Sennit configuration help                  |
+| `sennit-hooks`  | `builtin/sennit-hooks/`   | Authoring, configuring and debugging hooks |
+| `jq`            | `builtin/jq/`             | jq JSON processor usage guide              |

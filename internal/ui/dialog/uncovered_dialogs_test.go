@@ -22,7 +22,7 @@ import (
 
 func newUncoveredDialogCommon(t *testing.T) *common.Common {
 	t.Helper()
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	return &common.Common{Styles: &s}
 }
 
@@ -207,7 +207,7 @@ func TestReasoning_KeyboardSelectionAndNarrowDraw(t *testing.T) {
 func TestQuestionForm_MouseTabsAndNarrowLayout(t *testing.T) {
 	t.Parallel()
 
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	form := NewQuestionForm(&s, question.Request{ID: "batch", Questions: []question.Question{
 		{ID: "one", Type: question.TypeYesNo, Text: "Should this deliberately long first question be accepted?"},
 		{ID: "two", Type: question.TypeSingleChoice, Text: "Choose a deliberately long option", Choices: []question.Choice{{ID: "a", Label: "Alpha"}}},

@@ -40,8 +40,8 @@ var (
 	BrandAttention   = PaletteSteelTeal.Attention
 )
 
-// BraidDark returns Braid's default dark theme.
-func BraidDark() Styles {
+// SennitDark returns Braid's default dark theme.
+func SennitDark() Styles {
 	return Theme(DefaultThemeID)
 }
 

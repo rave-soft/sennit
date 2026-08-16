@@ -24,7 +24,7 @@ type themeTestWorkspace struct {
 func (w *themeTestWorkspace) Config() *config.Config { return w.cfg }
 
 func newThemeTestCommon(themeID string) *common.Common {
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	return &common.Common{
 		Styles: &s,
 		Workspace: &themeTestWorkspace{cfg: &config.Config{

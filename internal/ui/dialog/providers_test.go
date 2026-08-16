@@ -29,7 +29,7 @@ func (w *providersTestWorkspace) Config() *config.Config {
 
 func newProvidersTestCommon(t *testing.T) *common.Common {
 	t.Helper()
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	cfg := &config.Config{
 		Options:   &config.Options{},
 		Providers: csync.NewMap[string, config.ProviderConfig](),
@@ -91,7 +91,7 @@ func TestNewProviders_OnSelectActions(t *testing.T) {
 
 func TestProviderItem_RenderShowsConfiguredBadge(t *testing.T) {
 	t.Parallel()
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	item := &ProviderItem{
 		id:         "my-provider",
 		name:       "My Provider",

@@ -88,7 +88,7 @@ func snapshot(a *AssistantMessageItem) sectionSnapshot {
 // is false on both renders — that's the steady streaming state where
 // the thinking block has finished and content keeps growing.
 func TestAssistantSectionCache_ContentChangeDoesNotInvalidateThinking(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	thinking := "Step 1\nStep 2\nStep 3"
 	msg := thinkingMessage("a1", thinking, "Initial answer.")
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
@@ -116,7 +116,7 @@ func TestAssistantSectionCache_ContentChangeDoesNotInvalidateThinking(t *testing
 // mirror of the previous test: extending thinking text must not force a
 // re-render of the content section.
 func TestAssistantSectionCache_ThinkingChangeDoesNotInvalidateContent(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	content := "Final answer goes here."
 	msg := thinkingMessage("a2", "Step 1", content)
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
@@ -142,7 +142,7 @@ func TestAssistantSectionCache_ThinkingChangeDoesNotInvalidateContent(t *testing
 // messages with different source text hash to different per-section
 // keys, and that messages with identical source text hit the cache.
 func TestAssistantSectionCache_HashKeyDiscrimination(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	msgA := thinkingMessage("a3", "thinking A", "content A")
 	msgB := thinkingMessage("a3", "thinking B", "content B")
 
@@ -173,7 +173,7 @@ func TestAssistantSectionCache_HashKeyDiscrimination(t *testing.T) {
 // the cloned message must produce identical hashes and the section
 // caches must serve byte-identical renders.
 func TestAssistantSectionCache_CloneRoundTrip(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	orig := thinkingMessage("a4", "Reasoning step.", "Answer text.")
 	item := NewAssistantMessageItem(&sty, orig).(*AssistantMessageItem)
 
@@ -193,7 +193,7 @@ func TestAssistantSectionCache_CloneRoundTrip(t *testing.T) {
 // TestAssistantSectionCache_ResizeInvalidatesAll asserts that a width
 // change forces a re-render of every section.
 func TestAssistantSectionCache_ResizeInvalidatesAll(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	msg := errorMessage("a5", "boom", strings.Repeat("detail line\n", 5))
 	// errorMessage returns FinishReasonError; combine with thinking
 	// content so all three sections are exercised.
@@ -225,7 +225,7 @@ func TestAssistantSectionCache_ResizeInvalidatesAll(t *testing.T) {
 // message must not invalidate the other two sections, and editing the
 // content must not invalidate the error section.
 func TestAssistantSectionCache_ErrorIndependentOfThinkingAndContent(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	build := func(thinking, content, errMsg, errDetails string) *message.Message {
 		return &message.Message{
 			ID:   "a6",
@@ -276,7 +276,7 @@ func TestAssistantSectionCache_ErrorIndependentOfThinkingAndContent(t *testing.T
 // underlying section changes. We verify by comparing the F3-cached
 // Render output across SetMessage cycles.
 func TestAssistantSectionCache_PrefixCacheRespectsSectionChanges(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	build := func(content string) *message.Message {
 		return &message.Message{
 			ID:   "a7",
@@ -313,7 +313,7 @@ func TestAssistantSectionCache_PrefixCacheRespectsSectionChanges(t *testing.T) {
 // finish) and compares every step against an independent item rendered
 // from scratch.
 func TestAssistantSectionCache_ByteIdenticalToFreshRender(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	const width = 83
 
 	type step struct {
@@ -387,7 +387,7 @@ func TestAssistantSectionCache_ByteIdenticalToFreshRender(t *testing.T) {
 // output to the cached item — caching must never produce stale or
 // divergent renders.
 func TestAssistantSectionCache_PrefixCacheInvalidatesOnCompositionOnlyChange(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	const width = 87
 
 	build := func(reason message.FinishReason) *message.Message {
@@ -430,7 +430,7 @@ func TestAssistantSectionCache_PrefixCacheInvalidatesOnCompositionOnlyChange(t *
 // footer state all unchanged), render again, and assert the
 // thinkingBoxHeight field is preserved.
 func TestAssistantSectionCache_ThinkingBoxHeightSurvivesCacheHit(t *testing.T) {
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	const width = 71
 
 	thinking := strings.Join([]string{

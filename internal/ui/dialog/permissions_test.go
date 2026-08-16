@@ -14,7 +14,7 @@ import (
 
 func newTestPermissions(t *testing.T) *Permissions {
 	t.Helper()
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
 	perm := permission.PermissionRequest{
 		ID:         "perm-test",

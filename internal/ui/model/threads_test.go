@@ -18,7 +18,7 @@ import (
 )
 
 func testStyles() *styles.Styles {
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	return &s
 }
 

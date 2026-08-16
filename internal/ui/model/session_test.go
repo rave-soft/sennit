@@ -115,7 +115,7 @@ func TestFileList(t *testing.T) {
 func TestModifiedFileAdditionsUseGreen(t *testing.T) {
 	t.Parallel()
 
-	st := styles.BraidDark()
+	st := styles.SennitDark()
 	require.Equal(t, styles.BrandSuccess, st.Files.Additions.GetForeground())
 }
 
@@ -142,7 +142,7 @@ func TestUncommittedSessionFiles(t *testing.T) {
 }
 
 func minimalFileStyles() *styles.Styles {
-	st := styles.BraidDark()
+	st := styles.SennitDark()
 	st.Files.Path = lipgloss.NewStyle()
 	st.Files.Additions = lipgloss.NewStyle()
 	st.Files.Deletions = lipgloss.NewStyle()

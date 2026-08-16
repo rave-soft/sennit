@@ -11,7 +11,7 @@ import (
 
 func newTestThreadCreate(t *testing.T) *ThreadCreate {
 	t.Helper()
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
 	return NewThreadCreate(com)
 }

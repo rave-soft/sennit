@@ -289,11 +289,11 @@ var _ filetracker.Service = mockFileTracker{}
 func TestReadBuiltinFile(t *testing.T) {
 	t.Parallel()
 
-	t.Run("reads braid-config skill", func(t *testing.T) {
+	t.Run("reads sennit-config skill", func(t *testing.T) {
 		t.Parallel()
 
 		resp := readBuiltinFile(ReadParams{
-			FilePath: "sennit://skills/braid-config/SKILL.md",
+			FilePath: "sennit://skills/sennit-config/SKILL.md",
 		}, nil)
 		require.NotEmpty(t, resp.Content)
 		require.Contains(t, resp.Content, "Braid Configuration")
@@ -312,13 +312,13 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp := readBuiltinFile(ReadParams{
-			FilePath: "sennit://skills/braid-config/SKILL.md",
+			FilePath: "sennit://skills/sennit-config/SKILL.md",
 		}, nil)
 
 		var meta ReadResponseMetadata
 		require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 		require.Equal(t, ReadResourceSkill, meta.ResourceType)
-		require.Equal(t, "braid-config", meta.ResourceName)
+		require.Equal(t, "sennit-config", meta.ResourceName)
 		require.NotEmpty(t, meta.ResourceDescription)
 	})
 
@@ -326,7 +326,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp := readBuiltinFile(ReadParams{
-			FilePath: "sennit://skills/braid-config/SKILL.md",
+			FilePath: "sennit://skills/sennit-config/SKILL.md",
 			Offset:   5,
 		}, nil)
 		require.NotContains(t, resp.Content, "     1|")

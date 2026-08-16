@@ -30,8 +30,8 @@ var toolsHandledOutsideFactoryMap = []string{
 // generic renderer. Anything not on this list (and not in
 // toolsHandledOutsideFactoryMap) must have a dedicated renderer.
 var toolsWithoutDedicatedRenderer = []string{
-	tools.BraidInfoToolName,
-	tools.BraidLogsToolName,
+	tools.SennitInfoToolName,
+	tools.SennitLogsToolName,
 	tools.ListMCPResourcesToolName,
 	tools.ReadMCPResourceToolName,
 	// Thread tools (domain/agent/tools/thread_*.go) don't have a
@@ -95,7 +95,7 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	// verify that dispatch actually happens, not just that the map omits
 	// them (which noRenderer-listed tools also do, for the opposite
 	// reason).
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewToolMessageItem(&sty, "msg", message.ToolCall{ID: "tc-agent", Name: tools.AgentToolName, Input: "{}"}, nil, false, nil)
 	require.IsType(t, &AgentToolMessageItem{}, item,
 		"the built-in agent tool must dispatch to AgentToolMessageItem, not fall back to the generic renderer")
@@ -127,7 +127,7 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 func TestNewToolMessageItem_RendersALegacyToolName(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewToolMessageItem(&sty, "msg-1", message.ToolCall{
 		ID:       "tc-1",
 		Name:     tools.LegacyReadToolName,
@@ -144,7 +144,7 @@ func TestNewToolMessageItem_RendersALegacyToolName(t *testing.T) {
 func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	for _, test := range []struct {
 		name      string
 		toolName  string
@@ -178,7 +178,7 @@ func TestNewToolMessageItem_SearchRendererTitles(t *testing.T) {
 func TestNewToolMessageItem_CustomAgentDispatch(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	cfg := &config.Config{
 		Agents: map[string]config.Agent{
 			config.AgentCoder: {ID: config.AgentCoder},
@@ -249,7 +249,7 @@ func TestOneLine(t *testing.T) {
 func TestToolParamList_MultilineMainParamStaysOneLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	out := toolParamList(&sty, []string{"line one\nline two\nline three"}, 80)
 	require.NotContains(t, out, "\n")
 	require.Contains(t, out, "line one line two line three")
@@ -262,7 +262,7 @@ func TestToolParamList_MultilineMainParamStaysOneLine(t *testing.T) {
 func TestAppendResultSummary_NeverPrintsJunkPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	header := "header"
 
 	for _, junk := range []string{"", "None", "none", "  NULL  ", "n/a", "N/A", "nil", "-", "undefined"} {
@@ -282,7 +282,7 @@ func TestAppendResultSummary_NeverPrintsJunkPlaceholder(t *testing.T) {
 func TestToolParamList_LongPathKeepsFileName(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	path := "internal/ui/chat/very/deeply/nested/package/tools_render.go"
 
 	out := ansi.Strip(toolParamList(&sty, []string{path}, 30))
@@ -297,7 +297,7 @@ func TestToolParamList_LongPathKeepsFileName(t *testing.T) {
 func TestToolParamList_LongPathWithParamsKeepsFileName(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	path := "internal/ui/chat/very/deeply/nested/package/tools_render.go"
 
 	out := ansi.Strip(toolParamList(&sty, []string{path, "edits", "3"}, 60))
@@ -312,7 +312,7 @@ func TestToolParamList_LongPathWithParamsKeepsFileName(t *testing.T) {
 func TestToolParamList_NonPathTruncatesOnTheRight(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	cmd := "go test ./internal/ui/chat/ -run TestSomethingWithAVeryLongName -timeout 120s"
 
 	out := ansi.Strip(toolParamList(&sty, []string{cmd}, 30))

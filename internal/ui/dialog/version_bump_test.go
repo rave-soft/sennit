@@ -61,7 +61,7 @@ func equivMatch(seed fuzzy.Match) fuzzy.Match {
 func TestCommandItem_MutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewCommandItem(&sty, "id", "Title", "ctrl+t", nil)
 
 	requireBump(t, "SetFocused[true]", item, func() {
@@ -101,7 +101,7 @@ func TestCommandItem_MutatorsBumpVersion(t *testing.T) {
 func TestModelItem_MutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	prov := catwalk.Provider{ID: "openai", Name: "OpenAI"}
 	model := catwalk.Model{ID: "gpt-4", Name: "GPT-4"}
 	item := NewModelItem(&sty, prov, model, true)
@@ -140,7 +140,7 @@ func TestModelItem_MutatorsBumpVersion(t *testing.T) {
 func TestSessionItem_MutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := &SessionItem{
 		BaseItem: list.NewBaseItem(),
 		Session:  session.Session{ID: "sess-1", Title: "My Session"},
@@ -181,7 +181,7 @@ func TestSessionItem_MutatorsBumpVersion(t *testing.T) {
 func TestReasoningItem_MutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := &ReasoningItem{
 		BaseItem: list.NewBaseItem(),
 		effort:   "medium",

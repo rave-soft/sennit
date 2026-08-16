@@ -1,6 +1,6 @@
 ---
 name: develop
-description: Iterative development loop for Braid - plan the task, delegate implementation to the developer subagent, review the diff, send findings back, and repeat until the acceptance criteria are met. Use when the user asks to implement a feature or fix via /develop <task>.
+description: Iterative development loop for Sennit - plan the task, delegate implementation to the developer subagent, review the diff, send findings back, and repeat until the acceptance criteria are met. Use when the user asks to implement a feature or fix via /develop <task>.
 ---
 
 You are the tech lead. You plan and review; the `developer` subagent writes the

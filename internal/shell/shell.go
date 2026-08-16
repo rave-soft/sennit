@@ -35,13 +35,13 @@ const (
 	ShellTypePowerShell
 )
 
-// BraidEnvMarkers returns a fresh slice of the environment variables that
+// SennitEnvMarkers returns a fresh slice of the environment variables that
 // Braid unconditionally sets on every shell it spawns — both the interactive
 // bash tool's [Shell] and the hook runner's [Run] calls. Tools that want to
 // detect "am I being invoked by an AI agent?" can check any of these.
 // Keeping them in one place guarantees the two shell surfaces cannot drift.
 // A fresh slice is returned on every call so callers may append freely.
-func BraidEnvMarkers() []string {
+func SennitEnvMarkers() []string {
 	return []string{
 		brand.EnvName + "=1",
 		"AGENT=" + brand.Slug,
@@ -101,7 +101,7 @@ func NewShell(opts *Options) *Shell {
 	env = withoutHerdrEnv(env)
 
 	// Allow tools to detect execution by Braid.
-	env = append(env, BraidEnvMarkers()...)
+	env = append(env, SennitEnvMarkers()...)
 
 	logger := opts.Logger
 	if logger == nil {

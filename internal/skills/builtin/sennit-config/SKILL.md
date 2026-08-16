@@ -1,5 +1,5 @@
 ---
-name: braid-config
+name: sennit-config
 description: Use when the user needs help configuring Braid — writing braidrc (the Bash config format) or braid.json, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing Braid behavior.
 ---
 

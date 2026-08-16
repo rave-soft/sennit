@@ -101,10 +101,10 @@ func TestShellConfigOptionAttributionRejectsInvalidStyle(t *testing.T) {
 }
 
 func TestShellConfigOptionListAppends(t *testing.T) {
-	store := loadBraidSh(t, `option disable-skill braid-config
+	store := loadBraidSh(t, `option disable-skill sennit-config
 option disable-skill jq`)
 
-	require.Subset(t, store.Config().Options.DisabledSkills, []string{"braid-config", "jq"})
+	require.Subset(t, store.Config().Options.DisabledSkills, []string{"sennit-config", "jq"})
 }
 
 // reset wipes values added earlier (or via source) while keeping anything

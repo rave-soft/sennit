@@ -58,7 +58,7 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 
 		// Set paths using the BuiltinPrefix. Strip the leading "builtin/"
 		// so the path is relative to the embedded root
-		// (e.g., "sennit://skills/braid-config/SKILL.md").
+		// (e.g., "sennit://skills/sennit-config/SKILL.md").
 		relPath, _ := filepath.Rel("builtin", path)
 		relPath = filepath.ToSlash(relPath)
 		skill.SkillFilePath = BuiltinPrefix + relPath

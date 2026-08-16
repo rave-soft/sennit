@@ -13,7 +13,7 @@ import (
 
 func newTestSingleChoice(t *testing.T) *SingleChoice {
 	t.Helper()
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	req := question.Question{
 		ID:   "q1",
 		Type: question.TypeSingleChoice,
@@ -29,7 +29,7 @@ func newTestSingleChoice(t *testing.T) *SingleChoice {
 
 func newTestMultiChoice(t *testing.T) *MultiChoice {
 	t.Helper()
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	req := question.Question{
 		ID:   "q1",
 		Type: question.TypeMultiChoice,

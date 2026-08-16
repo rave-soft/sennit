@@ -16,7 +16,7 @@ import (
 func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 	t.Parallel()
 
-	st := uistyles.BraidDark()
+	st := uistyles.SennitDark()
 	ui := &UI{
 		com: &common.Common{Styles: &st},
 		skillStates: []*skills.SkillState{
@@ -61,11 +61,11 @@ func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 func TestSkillStatusItemsExcludesDisabledSkills(t *testing.T) {
 	t.Parallel()
 
-	st := uistyles.BraidDark()
+	st := uistyles.SennitDark()
 	ui := &UI{
 		com: &common.Common{
 			Styles:    &st,
-			Workspace: &testWorkspace{cfg: &config.Config{Options: &config.Options{DisabledSkills: []string{"go-doc", "braid-config"}}}},
+			Workspace: &testWorkspace{cfg: &config.Config{Options: &config.Options{DisabledSkills: []string{"go-doc", "sennit-config"}}}},
 		},
 		skillStates: []*skills.SkillState{
 			{Name: "go-doc", Path: "/tmp/go-doc/SKILL.md", State: skills.StateNormal},
@@ -76,6 +76,6 @@ func TestSkillStatusItemsExcludesDisabledSkills(t *testing.T) {
 
 	for _, item := range items {
 		require.NotEqual(t, "go-doc", item.name)
-		require.NotEqual(t, "braid-config", item.name)
+		require.NotEqual(t, "sennit-config", item.name)
 	}
 }

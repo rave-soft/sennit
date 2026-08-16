@@ -367,7 +367,7 @@ type Options struct {
 	AutoLSP                 *bool             `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                *bool             `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications           string            `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
-	DisabledSkills          []string          `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=braid-config"`
+	DisabledSkills          []string          `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=sennit-config"`
 	WebSearch               *WebSearchOptions `json:"web_search,omitempty" jsonschema:"description=Web search backend configuration. Defaults to the keyless DuckDuckGo scraper when omitted."`
 	Threads                 *ThreadsOptions   `json:"threads,omitempty" jsonschema:"description=Threads (parallel agent work stream) configuration."`
 	// BackgroundAgents is a permanent opt-out, not a rollout flag: it stays

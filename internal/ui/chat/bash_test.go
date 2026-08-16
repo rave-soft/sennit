@@ -15,7 +15,7 @@ import (
 func TestExpandableBodyHoverHighlightsOnlyHint(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	normal := expandableBodyContent(&sty, "l1\nl2\nl3\nl4\nl5", 40, false, false)
 	hovered := expandableBodyContent(&sty, "l1\nl2\nl3\nl4\nl5", 40, false, true)
 
@@ -33,7 +33,7 @@ func TestExpandableBodyHoverHighlightsOnlyHint(t *testing.T) {
 func TestExpandableDiffHoverHighlightsOnlyHint(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	oldContent := "l1\nl2\nl3\nl4\nl5\nl6"
 	newContent := "n1\nn2\nn3\nn4\nn5\nn6"
 	normal := expandableDiffContent(&sty, "file.txt", oldContent, newContent, 80, false, false)
@@ -61,7 +61,7 @@ func bashToolCall(t *testing.T) message.ToolCall {
 func TestBashRenderTool_RunningNoResultIsOneLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewBashToolMessageItem(&sty, bashToolCall(t), nil, false)
 	out := item.Render(80)
 
@@ -75,7 +75,7 @@ func TestBashRenderTool_RunningNoResultIsOneLine(t *testing.T) {
 func TestBashRenderTool_FinishedShowsOutputPreview(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	meta, err := json.Marshal(tools.BashResponseMetadata{StartTime: 0, EndTime: 2100, Output: "added 200 packages"})
 	require.NoError(t, err)
 	result := &message.ToolResult{ToolCallID: "tc-bash", Content: "added 200 packages", Metadata: string(meta)}
@@ -97,7 +97,7 @@ func TestBashRenderTool_FinishedShowsOutputPreview(t *testing.T) {
 func TestBashRenderTool_CollapsedCapsAtFourLinesAndToggles(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	output := "l1\nl2\nl3\nl4\nl5\nl6\nl7"
 	meta, err := json.Marshal(tools.BashResponseMetadata{StartTime: 0, EndTime: 2100, Output: output})
 	require.NoError(t, err)
@@ -132,7 +132,7 @@ func TestBashRenderTool_CollapsedCapsAtFourLinesAndToggles(t *testing.T) {
 func TestBashRenderTool_ErrorAddsSingleTailLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	result := &message.ToolResult{ToolCallID: "tc-bash", Content: "npm: command not found", IsError: true}
 
 	item := NewBashToolMessageItem(&sty, bashToolCall(t), result, false)
@@ -152,7 +152,7 @@ func TestBashRenderTool_ErrorAddsSingleTailLine(t *testing.T) {
 func TestBashRenderTool_AwaitingPermissionStillShowsStatus(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	item := NewBashToolMessageItem(&sty, bashToolCall(t), nil, false)
 	item.SetStatus(ToolStatusAwaitingPermission)
 
@@ -168,7 +168,7 @@ func TestBashRenderTool_AwaitingPermissionStillShowsStatus(t *testing.T) {
 func TestBashRenderTool_MultilineCommandIsOneLine(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	script := "import json\nwith open('/tmp/x.json') as f:\n    data = json.load(f)\nprint(data)\n"
 	input, err := json.Marshal(tools.BashParams{Command: `python3 -c "` + script + `"`})
 	require.NoError(t, err)
@@ -189,7 +189,7 @@ func TestBashRenderTool_MultilineCommandIsOneLine(t *testing.T) {
 func TestBashRenderTool_NoMetadataNoJunkSuffix(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	result := &message.ToolResult{ToolCallID: "tc-bash", Content: "some output"}
 
 	item := NewBashToolMessageItem(&sty, bashToolCall(t), result, false)
@@ -209,7 +209,7 @@ func TestBashRenderTool_NoMetadataNoJunkSuffix(t *testing.T) {
 func TestBashRenderTool_BackgroundJunkDescriptionFallsBackToCommand(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	input, err := json.Marshal(tools.BashParams{Command: "long_running_script.sh", RunInBackground: true})
 	require.NoError(t, err)
 	tc := message.ToolCall{ID: "tc-bash", Name: tools.BashToolName, Input: string(input), Finished: true}

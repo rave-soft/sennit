@@ -18,7 +18,7 @@ func BenchmarkResizeSession(b *testing.B) {
 		ptrs[i] = &msgs[i]
 	}
 	toolResults := BuildToolResultMap(ptrs)
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	var items []list.Item
 	for _, msg := range ptrs {
 		for _, item := range ExtractMessageItems(&sty, msg, toolResults, nil) {

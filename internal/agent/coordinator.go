@@ -694,8 +694,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, c.background),
-		tools.NewBraidInfoTool(c.cfg, c.mcp, c.lspManager, allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot),
-		tools.NewBraidLogsTool(logFile),
+		tools.NewSennitInfoTool(c.cfg, c.mcp, c.lspManager, allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot),
+		tools.NewSennitLogsTool(logFile),
 		tools.NewJobOutputTool(c.background),
 		tools.NewJobKillTool(c.background),
 		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),

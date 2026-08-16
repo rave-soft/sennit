@@ -1,15 +1,15 @@
-# Braid Development Guide
+# Sennit Development Guide
 
 ## Project Overview
 
-Braid is a terminal-based AI coding assistant built in Go by
+Sennit is a terminal-based AI coding assistant built in Go by
 [Charm](https://charm.land). It connects to LLMs and gives them tools to read,
 write, and execute code. It supports multiple providers (Anthropic, OpenAI,
 Gemini, Bedrock, Copilot, Hyper, MiniMax, Vercel, and more), integrates with
 LSPs for code intelligence, and supports extensibility via MCP servers and
 agent skills.
 
-The module path is `github.com/rave-soft/braid`.
+The module path is `github.com/rave-soft/sennit`.
 
 ## Architecture
 
@@ -20,9 +20,9 @@ internal/
   cmd/                             CLI commands (root, run, login, models, stats, sessions)
   config/
     config.go                      Config struct, context file paths, agent definitions
-    load.go                        braidrc and braid.json loading and validation
+    load.go                        sennitrc and sennit.json loading and validation
     provider.go                    Provider configuration and model resolution
-  shellconfig/                      Bash-powered config format (braidrc builtins)
+  shellconfig/                      Bash-powered config format (sennitrc builtins)
   agent/
     agent.go                       SessionAgent: runs LLM conversations per session
     coordinator.go                 Coordinator: manages named agents ("coder", "task")
@@ -34,7 +34,7 @@ internal/
   hooks/                           Hook engine: runs user shell commands on hook events
     hooks.go                       Decision types, aggregation logic, event constants
     runner.go                      Parallel hook execution, timeout, dedup
-    input.go                       Stdin payload builder, env vars, stdout parsing (Braid + Claude Code compat)
+    input.go                       Stdin payload builder, env vars, stdout parsing (Sennit + Claude Code compat)
   session/session.go               Session CRUD backed by SQLite
   message/                         Message model and content types
   db/                              SQLite via sqlc, with migrations
@@ -86,13 +86,13 @@ internal/
     necessary wire contract.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`
   with runtime data injected.
-- **Context files**: Braid reads AGENTS.md, BRAID.md, CLAUDE.md, GEMINI.md
+- **Context files**: Sennit reads AGENTS.md, SENNIT.md, CLAUDE.md, GEMINI.md
   (and `.local` variants) from the working directory for project-specific
   instructions.
-- **Bash config format**: Braid's primary config format is `braidrc` — a
+- **Bash config format**: Sennit's primary config format is `sennitrc` — a
   Bash script using builtins (`provider`, `model`, `mcp`, `lsp`,
-  `permissions`, `hook`, `options`) to define config. `braid.json` is still
-  supported but is deprecated in favor of `braidrc` and may be removed in a
+  `permissions`, `hook`, `options`) to define config. `sennit.json` is still
+  supported but is deprecated in favor of `sennitrc` and may be removed in a
   future release. Shell config files are discovered alongside JSON configs
   and deep-merged through the same pipeline. Builtins are registered via
   `shell.RegisterBuiltin` and gated by a `ConfigBuilder` on the context —
@@ -105,7 +105,7 @@ internal/
   are milliseconds.
 - **Pub/sub**: `internal/pubsub` for decoupled communication between agent,
   UI, and services.
-- **Hooks**: User-defined shell commands in `braidrc` (or `braid.json`)
+- **Hooks**: User-defined shell commands in `sennitrc` (or `sennit.json`)
   that fire before tool execution. The engine (`internal/hooks/`) is
   independent of fantasy and agent — it takes inputs, runs commands,
   returns decisions. The `hookedTool` decorator in

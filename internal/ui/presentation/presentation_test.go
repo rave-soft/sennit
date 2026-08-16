@@ -54,7 +54,7 @@ func TestBucketTodosPreservesStabilityAndUnknownFallback(t *testing.T) {
 
 func TestRenderTodoRowContextOptions(t *testing.T) {
 	t.Parallel()
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	active := RenderTodoRow(session.Todo{Content: "content", ActiveForm: "active form", Status: session.TodoStatusInProgress}, &sty, 80, TodoRowOptions{InProgressIcon: "→"})
 	require.Contains(t, ansi.Strip(active), "active form")
 	completed := RenderTodoRow(session.Todo{Content: "done", Status: session.TodoStatusCompleted}, &sty, 80, TodoRowOptions{CompletedMuted: true, CompletedStrikethrough: true})

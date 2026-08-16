@@ -34,7 +34,7 @@ func newTestAttachmentsRenderer(sty *styles.Styles) *attachments.Renderer {
 func TestUserMessageItemRender_OriginAgentIsMarked(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.BraidDark()
+	sty := styles.SennitDark()
 	r := newTestAttachmentsRenderer(&sty)
 	const width = 60
 

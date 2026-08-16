@@ -11,5 +11,5 @@ import _ "embed"
 // directive above) rather than hand-drawn. Used for both native OS
 // notifications (beeep) and OSC 99 escape-sequence notifications.
 //
-//go:embed assets/braid.png
+//go:embed assets/sennit.png
 var Icon []byte

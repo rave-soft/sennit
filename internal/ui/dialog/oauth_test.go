@@ -14,7 +14,7 @@ import (
 // model, confirming a successful OAuth flow produces ActionProviderConfigured
 // instead of ActionSelectModel.
 func TestOAuth_WithoutModelReturnsActionProviderConfigured(t *testing.T) {
-	s := styles.BraidDark()
+	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
 
 	provider := catwalk.Provider{ID: catwalk.InferenceProviderCopilot, Name: "GitHub Copilot"}

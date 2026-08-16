@@ -48,47 +48,48 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 
 	// Title.
 	const spacing = 1
-	braidLetterforms := []letterform{
-		LetterB,
-		LetterR,
-		LetterA,
+	sennitLetterforms := []letterform{
+		LetterS,
+		LetterE,
+		LetterN,
+		LetterN,
 		LetterI,
-		LetterD,
+		LetterT,
 	}
 
 	stretchIndex := -1 // -1 means no stretching.
 	if !compact && !o.Unstable {
 		// Always stretch the same letterform, which is picked once at random.
-		stretchIndex = cachedRandN(len(braidLetterforms))
+		stretchIndex = cachedRandN(len(sennitLetterforms))
 	} else if !compact && o.Unstable {
 		// Stretch a random letterform on every render.
-		stretchIndex = rand.IntN(len(braidLetterforms))
+		stretchIndex = rand.IntN(len(sennitLetterforms))
 	}
-	braid := renderWord(spacing, stretchIndex, braidLetterforms...)
-	braidWidth := lipgloss.Width(braid)
+	sennit := renderWord(spacing, stretchIndex, sennitLetterforms...)
+	sennitWidth := lipgloss.Width(sennit)
 	b := new(strings.Builder)
-	for r := range strings.SplitSeq(braid, "\n") {
+	for r := range strings.SplitSeq(sennit, "\n") {
 		fmt.Fprintln(b, styles.ApplyForegroundGrad(base, r, o.TitleColorA, o.TitleColorB))
 	}
-	braid = b.String()
+	sennit = b.String()
 
 	// Charm and version.
 	metaRowGap := 1
-	maxVersionWidth := braidWidth - lipgloss.Width(charm) - metaRowGap
+	maxVersionWidth := sennitWidth - lipgloss.Width(charm) - metaRowGap
 	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
-	gap := max(0, braidWidth-lipgloss.Width(charm)-lipgloss.Width(version))
+	gap := max(0, sennitWidth-lipgloss.Width(charm)-lipgloss.Width(version))
 	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
 
-	// Join the meta row and big Braid title.
-	braid = strings.TrimSpace(metaRow + "\n" + braid)
+	// Join the meta row and big Sennit title.
+	sennit = strings.TrimSpace(metaRow + "\n" + sennit)
 
 	// Narrow version.
 	if compact {
-		field := fg(o.FieldColor, strings.Repeat(diag, braidWidth))
-		return strings.Join([]string{field, field, braid, field, ""}, "\n")
+		field := fg(o.FieldColor, strings.Repeat(diag, sennitWidth))
+		return strings.Join([]string{field, field, sennit, field, ""}, "\n")
 	}
 
-	fieldHeight := lipgloss.Height(braid)
+	fieldHeight := lipgloss.Height(sennit)
 
 	// Left field.
 	const leftWidth = 6
@@ -99,7 +100,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	}
 
 	// Right field.
-	rightWidth := max(15, o.Width-braidWidth-leftWidth-2) // 2 for the gap.
+	rightWidth := max(15, o.Width-sennitWidth-leftWidth-2) // 2 for the gap.
 	const stepDownAt = 0
 	rightField := new(strings.Builder)
 	for i := range fieldHeight {
@@ -112,7 +113,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 
 	// Return the wide version.
 	const hGap = " "
-	logo := lipgloss.JoinHorizontal(lipgloss.Top, leftField.String(), hGap, braid, hGap, rightField.String())
+	logo := lipgloss.JoinHorizontal(lipgloss.Top, leftField.String(), hGap, sennit, hGap, rightField.String())
 	if o.Width > 0 {
 		// Truncate the logo to the specified width.
 		lines := strings.Split(logo, "\n")

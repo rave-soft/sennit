@@ -15,7 +15,7 @@ import (
 
 func testPicker(t *testing.T) *FilePicker {
 	t.Helper()
-	styles := styles.BraidDark()
+	styles := styles.SennitDark()
 	picker, _ := NewFilePicker(&common.Common{Styles: &styles})
 	picker.imgPrevWidth = 2
 	picker.imgPrevHeight = 1

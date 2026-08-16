@@ -48,14 +48,14 @@ func makeLogEntry(level, msg, source string, line int, extra map[string]any) map
 	return entry
 }
 
-func TestNewBraidLogsTool(t *testing.T) {
+func TestNewSennitLogsTool(t *testing.T) {
 	t.Parallel()
-	tool := NewBraidLogsTool("/tmp/test.log")
+	tool := NewSennitLogsTool("/tmp/test.log")
 	require.NotNil(t, tool)
-	require.Equal(t, BraidLogsToolName, tool.Info().Name)
+	require.Equal(t, SennitLogsToolName, tool.Info().Name)
 }
 
-func TestBraidLogs_HappyPath(t *testing.T) {
+func TestSennitLogs_HappyPath(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("INFO", "Application started", "app.go", 42, map[string]any{"version": "1.0.0"}),
@@ -65,7 +65,7 @@ func TestBraidLogs_HappyPath(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 3})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 3)
@@ -83,7 +83,7 @@ func TestBraidLogs_HappyPath(t *testing.T) {
 	require.Contains(t, lines[2], "db.go:55")
 }
 
-func TestBraidLogs_DefaultLines(t *testing.T) {
+func TestSennitLogs_DefaultLines(t *testing.T) {
 	t.Parallel()
 	// Create 100 log entries.
 	var entries []map[string]any
@@ -94,7 +94,7 @@ func TestBraidLogs_DefaultLines(t *testing.T) {
 	logFile := createTestLogFile(t, entries)
 
 	// Call with Lines: 0 should default to 50.
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 0})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 0})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 50)
@@ -104,7 +104,7 @@ func TestBraidLogs_DefaultLines(t *testing.T) {
 	require.Contains(t, lines[49], "Entry 99")
 }
 
-func TestBraidLogs_MaxCap(t *testing.T) {
+func TestSennitLogs_MaxCap(t *testing.T) {
 	t.Parallel()
 	// Create 200 log entries.
 	var entries []map[string]any
@@ -115,30 +115,30 @@ func TestBraidLogs_MaxCap(t *testing.T) {
 	logFile := createTestLogFile(t, entries)
 
 	// Request 200 lines, but should only get 100 (max cap).
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 200})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 200})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 100)
 }
 
-func TestBraidLogs_MissingFile(t *testing.T) {
+func TestSennitLogs_MissingFile(t *testing.T) {
 	t.Parallel()
-	result := runBraidLogs("/nonexistent/path/braid.log", BraidLogsParams{Lines: 50})
+	result := runSennitLogs("/nonexistent/path/braid.log", SennitLogsParams{Lines: 50})
 	require.Contains(t, result, "No log file found")
 }
 
-func TestBraidLogs_EmptyFile(t *testing.T) {
+func TestSennitLogs_EmptyFile(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "braid.log")
 	_, err := os.Create(logFile)
 	require.NoError(t, err)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 50})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 50})
 	require.Contains(t, result, "Log file is empty")
 }
 
-func TestBraidLogs_MalformedLines(t *testing.T) {
+func TestSennitLogs_MalformedLines(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "braid.log")
@@ -159,7 +159,7 @@ func TestBraidLogs_MalformedLines(t *testing.T) {
 
 	file.Close()
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 10})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 	// Only 2 valid lines should be returned.
@@ -168,7 +168,7 @@ func TestBraidLogs_MalformedLines(t *testing.T) {
 	require.Contains(t, lines[1], "Another valid entry")
 }
 
-func TestBraidLogs_ExtraFieldsSorted(t *testing.T) {
+func TestSennitLogs_ExtraFieldsSorted(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("INFO", "Test message", "app.go", 1, map[string]any{
@@ -180,7 +180,7 @@ func TestBraidLogs_ExtraFieldsSorted(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 1})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
 
 	// Fields should be sorted alphabetically.
 	idxA := strings.Index(result, "a_field=first")
@@ -191,7 +191,7 @@ func TestBraidLogs_ExtraFieldsSorted(t *testing.T) {
 	require.True(t, idxM < idxZ, "m_field should come before z_field")
 }
 
-func TestBraidLogs_NonStringValues(t *testing.T) {
+func TestSennitLogs_NonStringValues(t *testing.T) {
 	t.Parallel()
 	entry := map[string]any{
 		"time":   time.Now().Format(time.RFC3339),
@@ -208,7 +208,7 @@ func TestBraidLogs_NonStringValues(t *testing.T) {
 
 	logFile := createTestLogFile(t, []map[string]any{entry})
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 1})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
 
 	// Numbers should be bare (not quoted).
 	require.Contains(t, result, "count=42")
@@ -225,7 +225,7 @@ func TestBraidLogs_NonStringValues(t *testing.T) {
 	require.Contains(t, result, `arr="[`)
 }
 
-func TestBraidLogs_Redaction(t *testing.T) {
+func TestSennitLogs_Redaction(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("INFO", "API call", "api.go", 10, map[string]any{
@@ -245,7 +245,7 @@ func TestBraidLogs_Redaction(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 1})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
 
 	// All sensitive fields should be redacted.
 	require.Contains(t, result, "authorization=[REDACTED]")
@@ -266,7 +266,7 @@ func TestBraidLogs_Redaction(t *testing.T) {
 	require.NotContains(t, result, "mytoken")
 }
 
-func TestBraidLogs_ReservedFields(t *testing.T) {
+func TestSennitLogs_ReservedFields(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		{
@@ -284,7 +284,7 @@ func TestBraidLogs_ReservedFields(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 1})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
 
 	// Reserved fields (case-insensitive) should not appear in extra fields.
 	require.NotContains(t, result, "Time=")
@@ -298,7 +298,7 @@ func TestBraidLogs_ReservedFields(t *testing.T) {
 	require.Contains(t, result, `extra="should appear"`)
 }
 
-func TestBraidLogs_OversizedLines(t *testing.T) {
+func TestSennitLogs_OversizedLines(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "braid.log")
@@ -330,7 +330,7 @@ func TestBraidLogs_OversizedLines(t *testing.T) {
 
 	file.Close()
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 10})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 
@@ -340,7 +340,7 @@ func TestBraidLogs_OversizedLines(t *testing.T) {
 	require.Contains(t, lines[1], "Second valid entry")
 }
 
-func TestBraidLogs_PartialTrailingLine(t *testing.T) {
+func TestSennitLogs_PartialTrailingLine(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "braid.log")
@@ -359,7 +359,7 @@ func TestBraidLogs_PartialTrailingLine(t *testing.T) {
 	_, _ = file.WriteString(`{"time": "2024-01-15T10:00:00Z", "level": "INFO", "msg": "Truncated`)
 	file.Close()
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 10})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 
@@ -370,7 +370,7 @@ func TestBraidLogs_PartialTrailingLine(t *testing.T) {
 	}
 }
 
-func TestBraidLogs_ValueQuoting(t *testing.T) {
+func TestSennitLogs_ValueQuoting(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("INFO", "Test", "app.go", 1, map[string]any{
@@ -386,7 +386,7 @@ func TestBraidLogs_ValueQuoting(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 1})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
 
 	// Empty strings should be quoted.
 	require.Contains(t, result, `empty=""`)
@@ -410,7 +410,7 @@ func TestBraidLogs_ValueQuoting(t *testing.T) {
 	require.Contains(t, result, "normal=simplevalue")
 }
 
-func TestBraidLogs_ChronologicalOrder(t *testing.T) {
+func TestSennitLogs_ChronologicalOrder(t *testing.T) {
 	t.Parallel()
 	// Create entries with different timestamps.
 	baseTime := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
@@ -437,7 +437,7 @@ func TestBraidLogs_ChronologicalOrder(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 3})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 
@@ -448,7 +448,7 @@ func TestBraidLogs_ChronologicalOrder(t *testing.T) {
 	require.Contains(t, lines[2], "Third")
 }
 
-func TestBraidLogs_TimeOnlyFormat(t *testing.T) {
+func TestSennitLogs_TimeOnlyFormat(t *testing.T) {
 	t.Parallel()
 	entry := map[string]any{
 		"time":   "2024-01-15T15:04:05Z",
@@ -459,13 +459,13 @@ func TestBraidLogs_TimeOnlyFormat(t *testing.T) {
 
 	logFile := createTestLogFile(t, []map[string]any{entry})
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 1})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
 
 	// Should show time-only format.
 	require.True(t, strings.HasPrefix(result, "15:04:05"), "Expected time-only format, got: %s", result)
 }
 
-func TestBraidLogs_LevelVariations(t *testing.T) {
+func TestSennitLogs_LevelVariations(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		makeLogEntry("DEBUG", "Debug message", "app.go", 1, nil),
@@ -477,7 +477,7 @@ func TestBraidLogs_LevelVariations(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 5})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 5})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 5)
@@ -490,7 +490,7 @@ func TestBraidLogs_LevelVariations(t *testing.T) {
 	require.Contains(t, lines[4], "ERROR")
 }
 
-func TestBraidLogs_SourceVariations(t *testing.T) {
+func TestSennitLogs_SourceVariations(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{
 		// Source as object with file and line.
@@ -517,7 +517,7 @@ func TestBraidLogs_SourceVariations(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runBraidLogs(logFile, BraidLogsParams{Lines: 3})
+	result := runSennitLogs(logFile, SennitLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 3)
