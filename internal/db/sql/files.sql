@@ -45,13 +45,12 @@ FROM files
 JOIN session_tree ON files.session_id = session_tree.id
 ORDER BY files.version ASC, files.created_at ASC;
 
--- name: ListFilesByPath :many
-SELECT *
-FROM files
-WHERE path = ?
-ORDER BY version DESC, created_at DESC;
-
 -- name: NextFileVersion :one
+-- Version numbers are allocated per path across every session, which is
+-- what makes ListFilesBySessionTree's cross-session ordering and the
+-- UI's first-to-latest diff meaningful. UNIQUE(path, version) is the key
+-- that holds this up, so callers must allocate inside the same
+-- transaction as the insert.
 SELECT COALESCE(MAX(version), -1) + 1 AS next_version
 FROM files
 WHERE path = ?;
@@ -83,18 +82,18 @@ SELECT COUNT(*) FROM files
 WHERE session_id = ?;
 
 -- name: ListLatestSessionFiles :many
+-- The latest version of each path *within this session*. The maximum has
+-- to be taken over the session's own rows: versions are numbered per
+-- path across all sessions, so a global MAX(version) matches a sibling
+-- session's newer row and this session's files drop out of the result
+-- entirely.
 SELECT f.*
 FROM files f
-INNER JOIN (
-    SELECT path, MAX(version) as max_version, MAX(created_at) as max_created_at
-    FROM files
-    GROUP BY path
-) latest ON f.path = latest.path AND f.version = latest.max_version AND f.created_at = latest.max_created_at
-WHERE f.session_id = ?
+WHERE f.session_id = sqlc.arg(session_id)
+  AND f.version = (
+      SELECT MAX(f2.version)
+      FROM files f2
+      WHERE f2.path = f.path
+        AND f2.session_id = f.session_id
+  )
 ORDER BY f.path;
-
--- name: ListNewFiles :many
-SELECT *
-FROM files
-WHERE is_new = 1
-ORDER BY version DESC, created_at DESC;

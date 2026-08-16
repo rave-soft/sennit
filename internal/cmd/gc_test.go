@@ -353,8 +353,11 @@ func TestGC_VacuumShrinksFile(t *testing.T) {
 		require.NoError(t, err)
 		_, err = conn.ExecContext(t.Context(), `UPDATE sessions SET updated_at = ? WHERE id = ?`, old, id)
 		require.NoError(t, err)
+		// One version per padding session, numbered globally for the
+		// path: UNIQUE(path, version) is what stops two sessions from
+		// both claiming version 0 of "p".
 		_, err = q.CreateFile(t.Context(), sennitdb.CreateFileParams{
-			ID: id + "-f", SessionID: id, Path: "p", Content: string(make([]byte, 8192)), Version: 0,
+			ID: id + "-f", SessionID: id, Path: "p", Content: string(make([]byte, 8192)), Version: int64(i),
 		})
 		require.NoError(t, err)
 	}

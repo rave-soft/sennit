@@ -149,6 +149,46 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error
 	return i, err
 }
 
+const listSessionTreeIDs = `-- name: ListSessionTreeIDs :many
+WITH RECURSIVE tree(id) AS (
+    SELECT sessions.id
+    FROM sessions
+    WHERE sessions.id = ?1
+    UNION ALL
+    SELECT sessions.id
+    FROM sessions
+    JOIN tree ON sessions.parent_session_id = tree.id
+)
+SELECT tree.id FROM tree
+`
+
+// A session and every descendant of it (agent-tool sub-sessions, title
+// sessions, and their own children), which is the unit a delete has to
+// operate on: parent_session_id carries no foreign key, so nothing
+// cascades from a parent to its children on its own.
+func (q *Queries) ListSessionTreeIDs(ctx context.Context, sessionID string) ([]string, error) {
+	rows, err := q.query(ctx, q.listSessionTreeIDsStmt, listSessionTreeIDs, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessions = `-- name: ListSessions :many
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id
 FROM sessions

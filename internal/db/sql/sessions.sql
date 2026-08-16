@@ -91,6 +91,22 @@ WHERE id = ?;
 DELETE FROM sessions
 WHERE id = ?;
 
+-- name: ListSessionTreeIDs :many
+-- A session and every descendant of it (agent-tool sub-sessions, title
+-- sessions, and their own children), which is the unit a delete has to
+-- operate on: parent_session_id carries no foreign key, so nothing
+-- cascades from a parent to its children on its own.
+WITH RECURSIVE tree(id) AS (
+    SELECT sessions.id
+    FROM sessions
+    WHERE sessions.id = sqlc.arg(session_id)
+    UNION ALL
+    SELECT sessions.id
+    FROM sessions
+    JOIN tree ON sessions.parent_session_id = tree.id
+)
+SELECT tree.id FROM tree;
+
 -- name: ListSessionsForGC :many
 -- Every session across every project, trimmed to the columns `sennit gc`
 -- needs to compute its retention set (age filter + parent/child

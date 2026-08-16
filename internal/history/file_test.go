@@ -374,3 +374,56 @@ func TestListBySessionTreeSharesFilesAcrossAgents(t *testing.T) {
 		require.ElementsMatch(t, []string{"root.go", "child.go", "nested.go"}, paths)
 	}
 }
+
+// TestListLatestSessionFilesIgnoresOtherSessions covers the case the old
+// query got wrong: version numbers run globally per path, so taking the
+// maximum across the whole table matched a sibling session's newer row
+// and dropped this session's file out of the result entirely.
+func TestListLatestSessionFilesIgnoresOtherSessions(t *testing.T) {
+	files, sessions, sessionID, _ := newTestService(t)
+	other, err := sessions.CreateTaskSession(t.Context(), "other", sessionID, "other")
+	require.NoError(t, err)
+
+	_, err = files.CreateVersion(t.Context(), sessionID, "shared.go", "mine v0")
+	require.NoError(t, err)
+	mine, err := files.CreateVersion(t.Context(), sessionID, "shared.go", "mine v1")
+	require.NoError(t, err)
+
+	// The other session then writes a strictly newer version of the same
+	// path, which used to hide this session's own latest version.
+	theirs, err := files.CreateVersion(t.Context(), other.ID, "shared.go", "theirs")
+	require.NoError(t, err)
+	require.Greater(t, theirs.Version, mine.Version)
+
+	latest, err := files.ListLatestSessionFiles(t.Context(), sessionID)
+	require.NoError(t, err)
+	require.Len(t, latest, 1)
+	require.Equal(t, mine.ID, latest[0].ID)
+	require.Equal(t, "mine v1", latest[0].Content)
+
+	otherLatest, err := files.ListLatestSessionFiles(t.Context(), other.ID)
+	require.NoError(t, err)
+	require.Len(t, otherLatest, 1)
+	require.Equal(t, theirs.ID, otherLatest[0].ID)
+}
+
+// TestCreateVersionNumbersAcrossSessions pins that one path's versions
+// form a single sequence no matter which session records them, which is
+// what lets the UI diff a file's first version against its latest across
+// a whole session tree.
+func TestCreateVersionNumbersAcrossSessions(t *testing.T) {
+	files, sessions, sessionID, _ := newTestService(t)
+	other, err := sessions.CreateTaskSession(t.Context(), "other", sessionID, "other")
+	require.NoError(t, err)
+
+	first, err := files.CreateVersion(t.Context(), sessionID, "shared.go", "v0")
+	require.NoError(t, err)
+	second, err := files.CreateVersion(t.Context(), other.ID, "shared.go", "v1")
+	require.NoError(t, err)
+	third, err := files.CreateVersion(t.Context(), sessionID, "shared.go", "v2")
+	require.NoError(t, err)
+
+	require.Equal(t, int64(0), first.Version)
+	require.Equal(t, int64(1), second.Version)
+	require.Equal(t, int64(2), third.Version)
+}

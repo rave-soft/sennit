@@ -99,9 +99,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAssistantMessagesSinceStmt, err = db.PrepareContext(ctx, listAssistantMessagesSince); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAssistantMessagesSince: %w", err)
 	}
-	if q.listFilesByPathStmt, err = db.PrepareContext(ctx, listFilesByPath); err != nil {
-		return nil, fmt.Errorf("error preparing query ListFilesByPath: %w", err)
-	}
 	if q.listFilesBySessionStmt, err = db.PrepareContext(ctx, listFilesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesBySession: %w", err)
 	}
@@ -117,11 +114,11 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listMessagesBySessionIDsStmt, err = db.PrepareContext(ctx, listMessagesBySessionIDs); err != nil {
 		return nil, fmt.Errorf("error preparing query ListMessagesBySessionIDs: %w", err)
 	}
-	if q.listNewFilesStmt, err = db.PrepareContext(ctx, listNewFiles); err != nil {
-		return nil, fmt.Errorf("error preparing query ListNewFiles: %w", err)
-	}
 	if q.listSessionReadFilesStmt, err = db.PrepareContext(ctx, listSessionReadFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessionReadFiles: %w", err)
+	}
+	if q.listSessionTreeIDsStmt, err = db.PrepareContext(ctx, listSessionTreeIDs); err != nil {
+		return nil, fmt.Errorf("error preparing query ListSessionTreeIDs: %w", err)
 	}
 	if q.listSessionsStmt, err = db.PrepareContext(ctx, listSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSessions: %w", err)
@@ -307,11 +304,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAssistantMessagesSinceStmt: %w", cerr)
 		}
 	}
-	if q.listFilesByPathStmt != nil {
-		if cerr := q.listFilesByPathStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listFilesByPathStmt: %w", cerr)
-		}
-	}
 	if q.listFilesBySessionStmt != nil {
 		if cerr := q.listFilesBySessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listFilesBySessionStmt: %w", cerr)
@@ -337,14 +329,14 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listMessagesBySessionIDsStmt: %w", cerr)
 		}
 	}
-	if q.listNewFilesStmt != nil {
-		if cerr := q.listNewFilesStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listNewFilesStmt: %w", cerr)
-		}
-	}
 	if q.listSessionReadFilesStmt != nil {
 		if cerr := q.listSessionReadFilesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSessionReadFilesStmt: %w", cerr)
+		}
+	}
+	if q.listSessionTreeIDsStmt != nil {
+		if cerr := q.listSessionTreeIDsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listSessionTreeIDsStmt: %w", cerr)
 		}
 	}
 	if q.listSessionsStmt != nil {
@@ -501,14 +493,13 @@ type Queries struct {
 	getThreadByNameStmt               *sql.Stmt
 	listAllUserMessagesStmt           *sql.Stmt
 	listAssistantMessagesSinceStmt    *sql.Stmt
-	listFilesByPathStmt               *sql.Stmt
 	listFilesBySessionStmt            *sql.Stmt
 	listFilesBySessionTreeStmt        *sql.Stmt
 	listLatestSessionFilesStmt        *sql.Stmt
 	listMessagesBySessionStmt         *sql.Stmt
 	listMessagesBySessionIDsStmt      *sql.Stmt
-	listNewFilesStmt                  *sql.Stmt
 	listSessionReadFilesStmt          *sql.Stmt
+	listSessionTreeIDsStmt            *sql.Stmt
 	listSessionsStmt                  *sql.Stmt
 	listSessionsForGCStmt             *sql.Stmt
 	listSessionsSinceStmt             *sql.Stmt
@@ -558,14 +549,13 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getThreadByNameStmt:               q.getThreadByNameStmt,
 		listAllUserMessagesStmt:           q.listAllUserMessagesStmt,
 		listAssistantMessagesSinceStmt:    q.listAssistantMessagesSinceStmt,
-		listFilesByPathStmt:               q.listFilesByPathStmt,
 		listFilesBySessionStmt:            q.listFilesBySessionStmt,
 		listFilesBySessionTreeStmt:        q.listFilesBySessionTreeStmt,
 		listLatestSessionFilesStmt:        q.listLatestSessionFilesStmt,
 		listMessagesBySessionStmt:         q.listMessagesBySessionStmt,
 		listMessagesBySessionIDsStmt:      q.listMessagesBySessionIDsStmt,
-		listNewFilesStmt:                  q.listNewFilesStmt,
 		listSessionReadFilesStmt:          q.listSessionReadFilesStmt,
+		listSessionTreeIDsStmt:            q.listSessionTreeIDsStmt,
 		listSessionsStmt:                  q.listSessionsStmt,
 		listSessionsForGCStmt:             q.listSessionsForGCStmt,
 		listSessionsSinceStmt:             q.listSessionsSinceStmt,

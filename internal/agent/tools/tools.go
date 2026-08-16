@@ -147,12 +147,16 @@ func writeFileWithHistory(ctx context.Context, files history.Service, sessionID,
 	}
 
 	file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
-	if err != nil {
-		if _, err := files.Create(ctx, sessionID, filePath, oldContent); err != nil {
+	switch {
+	case err != nil:
+		// Nothing recorded for this path in this session yet: the content
+		// that was on disk before this write becomes the baseline. The
+		// two branches are exclusive — writing both would store
+		// oldContent twice in a row.
+		if _, err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
 			return fmt.Errorf("error creating file history: %w", err)
 		}
-	}
-	if file.Content != oldContent {
+	case file.Content != oldContent:
 		// User manually changed the content; store an intermediate version.
 		if _, err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
 			slog.Error("Error creating file history version", "error", err)

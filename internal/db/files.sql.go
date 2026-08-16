@@ -134,44 +134,6 @@ func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPath
 	return i, err
 }
 
-const listFilesByPath = `-- name: ListFilesByPath :many
-SELECT id, session_id, path, content, version, created_at, updated_at
-FROM files
-WHERE path = ?
-ORDER BY version DESC, created_at DESC
-`
-
-func (q *Queries) ListFilesByPath(ctx context.Context, path string) ([]File, error) {
-	rows, err := q.query(ctx, q.listFilesByPathStmt, listFilesByPath, path)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []File{}
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Path,
-			&i.Content,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listFilesBySession = `-- name: ListFilesBySession :many
 SELECT id, session_id, path, content, version, created_at, updated_at
 FROM files
@@ -274,55 +236,23 @@ func (q *Queries) ListFilesBySessionTree(ctx context.Context, sessionID string) 
 const listLatestSessionFiles = `-- name: ListLatestSessionFiles :many
 SELECT f.id, f.session_id, f.path, f.content, f.version, f.created_at, f.updated_at
 FROM files f
-INNER JOIN (
-    SELECT path, MAX(version) as max_version, MAX(created_at) as max_created_at
-    FROM files
-    GROUP BY path
-) latest ON f.path = latest.path AND f.version = latest.max_version AND f.created_at = latest.max_created_at
-WHERE f.session_id = ?
+WHERE f.session_id = ?1
+  AND f.version = (
+      SELECT MAX(f2.version)
+      FROM files f2
+      WHERE f2.path = f.path
+        AND f2.session_id = f.session_id
+  )
 ORDER BY f.path
 `
 
+// The latest version of each path *within this session*. The maximum has
+// to be taken over the session's own rows: versions are numbered per
+// path across all sessions, so a global MAX(version) matches a sibling
+// session's newer row and this session's files drop out of the result
+// entirely.
 func (q *Queries) ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error) {
 	rows, err := q.query(ctx, q.listLatestSessionFilesStmt, listLatestSessionFiles, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []File{}
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Path,
-			&i.Content,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listNewFiles = `-- name: ListNewFiles :many
-SELECT id, session_id, path, content, version, created_at, updated_at
-FROM files
-WHERE is_new = 1
-ORDER BY version DESC, created_at DESC
-`
-
-func (q *Queries) ListNewFiles(ctx context.Context) ([]File, error) {
-	rows, err := q.query(ctx, q.listNewFilesStmt, listNewFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -358,6 +288,11 @@ FROM files
 WHERE path = ?
 `
 
+// Version numbers are allocated per path across every session, which is
+// what makes ListFilesBySessionTree's cross-session ordering and the
+// UI's first-to-latest diff meaningful. UNIQUE(path, version) is the key
+// that holds this up, so callers must allocate inside the same
+// transaction as the insert.
 func (q *Queries) NextFileVersion(ctx context.Context, path string) (int64, error) {
 	row := q.queryRow(ctx, q.nextFileVersionStmt, nextFileVersion, path)
 	var next_version int64

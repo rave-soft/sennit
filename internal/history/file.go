@@ -10,10 +10,6 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
-const (
-	InitialVersion = 0
-)
-
 type File struct {
 	ID        string
 	SessionID string
@@ -27,9 +23,11 @@ type File struct {
 // Service manages file versions and history for sessions.
 type Service interface {
 	pubsub.Subscriber[File]
-	Create(ctx context.Context, sessionID, path, content string) (File, error)
 
-	// CreateVersion creates a new version of a file.
+	// CreateVersion records content as the next version of path. It is
+	// the only way to add a row: an "initial" version is just the first
+	// one allocated for that path, and writing a fixed version 0 for it
+	// would collide with whatever version another session already holds.
 	CreateVersion(ctx context.Context, sessionID, path, content string) (File, error)
 
 	Get(ctx context.Context, id string) (File, error)
@@ -97,29 +95,13 @@ func NewService(q *db.Queries, sqlDB *sql.DB) Service {
 	}
 }
 
-func (s *service) Create(ctx context.Context, sessionID, path, content string) (File, error) {
-	dbFile, err := s.q.CreateFile(ctx, db.CreateFileParams{
-		ID:        uuid.New().String(),
-		SessionID: sessionID,
-		Path:      path,
-		Content:   content,
-		Version:   InitialVersion,
-	})
-	if err != nil {
-		return File{}, err
-	}
-
-	file := s.fromDBItem(dbFile)
-	s.Publish(pubsub.CreatedEvent, file)
-	return file, nil
-}
-
 // CreateVersion creates a new version of a file with auto-incremented version
 // number. If no previous versions exist for the path, it creates the initial
 // version. The provided content is stored as the new version. Version
-// numbers are global per path (shared across sessions, matching
-// ListFilesByPath and ListLatestSessionFiles semantics), so the next version
-// is computed inside the same transaction as the insert to avoid a
+// numbers are global per path — shared across sessions, which is what lets
+// ListBySessionTree order one file's versions across a whole session tree
+// and is enforced by UNIQUE(path, version) — so the next version is
+// computed inside the same transaction as the insert to avoid a
 // read-then-write race between concurrent callers.
 func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
 	tx, err := s.versions.Begin(ctx)

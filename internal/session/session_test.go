@@ -119,3 +119,56 @@ func TestListExcludesAgentToolChildSessions(t *testing.T) {
 	require.Len(t, all, 1, "only the parent session should be listed")
 	require.Equal(t, parent.ID, all[0].ID)
 }
+
+// TestDeleteRemovesDescendantSessions pins the behaviour that
+// parent_session_id cannot express as a foreign key: deleting a session
+// has to take its sub-sessions (and their own children) with it, or they
+// are left orphaned and reachable only by `sennit gc`.
+func TestDeleteRemovesDescendantSessions(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	queries := db.New(conn)
+	sessions := NewService(queries, conn, dataDir)
+
+	parent, err := sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	child, err := sessions.CreateTaskSession(t.Context(), "child-1", parent.ID, "delegation")
+	require.NoError(t, err)
+	grandchild, err := sessions.CreateTaskSession(t.Context(), "child-2", child.ID, "nested delegation")
+	require.NoError(t, err)
+	title, err := sessions.CreateTitleSession(t.Context(), parent.ID)
+	require.NoError(t, err)
+
+	// A message on the grandchild proves the cascade reaches child rows
+	// of a session that was only deleted transitively.
+	_, err = queries.CreateMessage(t.Context(), db.CreateMessageParams{
+		ID: "msg-1", SessionID: grandchild.ID, Role: "user", Parts: "[]",
+	})
+	require.NoError(t, err)
+
+	// An unrelated session must survive.
+	bystander, err := sessions.Create(t.Context(), "bystander")
+	require.NoError(t, err)
+
+	require.NoError(t, sessions.Delete(t.Context(), parent.ID))
+
+	for _, id := range []string{parent.ID, child.ID, grandchild.ID, title.ID} {
+		_, err = sessions.Get(t.Context(), id)
+		require.Error(t, err, "session %s should have been deleted with the tree", id)
+	}
+
+	remaining, err := queries.CountSessionMessages(t.Context(), grandchild.ID)
+	require.NoError(t, err)
+	require.Zero(t, remaining, "messages should cascade from a transitively deleted session")
+
+	survivor, err := sessions.Get(t.Context(), bystander.ID)
+	require.NoError(t, err)
+	require.Equal(t, bystander.ID, survivor.ID)
+}

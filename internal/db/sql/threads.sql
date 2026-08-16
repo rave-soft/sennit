@@ -1,4 +1,12 @@
 -- name: CreateThread :one
+-- project_path is denormalized: once session_id is set, the project is
+-- also derivable through sessions.project_path. It is stored anyway
+-- because a thread exists (and has to be listed and looked up by name)
+-- before it has a session at all. The two are kept from diverging by
+-- construction (threadspawn.NewStore and session.NewService are both
+-- handed the same workspace project path) and by
+-- clear_thread_session_refs_on_session_delete, which drops the reference
+-- rather than letting it point at a deleted session's project.
 INSERT INTO threads (
     id,
     name,

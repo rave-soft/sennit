@@ -47,10 +47,6 @@ type mockHistoryService struct {
 	*pubsub.Broker[history.File]
 }
 
-func (m *mockHistoryService) Create(ctx context.Context, sessionID, path, content string) (history.File, error) {
-	return history.File{Path: path, Content: content}, nil
-}
-
 func (m *mockHistoryService) CreateVersion(ctx context.Context, sessionID, path, content string) (history.File, error) {
 	return history.File{}, nil
 }

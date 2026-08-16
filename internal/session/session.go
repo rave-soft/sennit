@@ -200,21 +200,31 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err = qtx.DeleteSessionMessages(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session messages: %w", err)
+	// parent_session_id carries no foreign key (the legacy importer
+	// inserts children before their parents, so it cannot), which means
+	// nothing cascades from a session to its sub-sessions. Delete the
+	// whole subtree explicitly or every agent-tool and title session
+	// under it is left orphaned, invisible to the UI and reachable only
+	// by `sennit gc`.
+	treeIDs, err := qtx.ListSessionTreeIDs(ctx, dbSession.ID)
+	if err != nil {
+		return fmt.Errorf("listing session tree: %w", err)
 	}
-	if err = qtx.DeleteSessionFiles(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session files: %w", err)
-	}
-	if err = qtx.DeleteSession(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session: %w", err)
+	for _, treeID := range treeIDs {
+		// Messages, files and read_files go with each row through their
+		// own ON DELETE CASCADE.
+		if err = qtx.DeleteSession(ctx, treeID); err != nil {
+			return fmt.Errorf("deleting session %s: %w", treeID, err)
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	session := s.fromDBItem(dbSession)
-	s.clearEstimatedUsageState(dbSession.ID)
+	for _, treeID := range treeIDs {
+		s.clearEstimatedUsageState(treeID)
+	}
 	s.Publish(pubsub.DeletedEvent, session)
 	event.SessionDeleted()
 	return nil

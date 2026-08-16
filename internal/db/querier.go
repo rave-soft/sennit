@@ -16,6 +16,14 @@ type Querier interface {
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	// project_path is denormalized: once session_id is set, the project is
+	// also derivable through sessions.project_path. It is stored anyway
+	// because a thread exists (and has to be listed and looked up by name)
+	// before it has a session at all. The two are kept from diverging by
+	// construction (threadspawn.NewStore and session.NewService are both
+	// handed the same workspace project path) and by
+	// clear_thread_session_refs_on_session_delete, which drops the reference
+	// rather than letting it point at a deleted session's project.
 	CreateThread(ctx context.Context, arg CreateThreadParams) (Thread, error)
 	DeleteFile(ctx context.Context, id string) error
 	DeleteMessage(ctx context.Context, id string) error
@@ -40,14 +48,22 @@ type Querier interface {
 	// and thread sessions carry machine-generated prompts as user-role messages.
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListAssistantMessagesSince(ctx context.Context, arg ListAssistantMessagesSinceParams) ([]ListAssistantMessagesSinceRow, error)
-	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error)
+	// The latest version of each path *within this session*. The maximum has
+	// to be taken over the session's own rows: versions are numbered per
+	// path across all sessions, so a global MAX(version) matches a sibling
+	// session's newer row and this session's files drop out of the result
+	// entirely.
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson string) ([]Message, error)
-	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
+	// A session and every descendant of it (agent-tool sub-sessions, title
+	// sessions, and their own children), which is the unit a delete has to
+	// operate on: parent_session_id carries no foreign key, so nothing
+	// cascades from a parent to its children on its own.
+	ListSessionTreeIDs(ctx context.Context, sessionID string) ([]string, error)
 	ListSessions(ctx context.Context, projectPath string) ([]Session, error)
 	// Every session across every project, trimmed to the columns `sennit gc`
 	// needs to compute its retention set (age filter + parent/child
@@ -87,6 +103,11 @@ type Querier interface {
 	// must not see other delegation kinds sharing this table.
 	ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
+	// Version numbers are allocated per path across every session, which is
+	// what makes ListFilesBySessionTree's cross-session ordering and the
+	// UI's first-to-latest diff meaningful. UNIQUE(path, version) is the key
+	// that holds this up, so callers must allocate inside the same
+	// transaction as the insert.
 	NextFileVersion(ctx context.Context, path string) (int64, error)
 	ProjectStatsSince(ctx context.Context, createdAt int64) ([]ProjectStatsSinceRow, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
