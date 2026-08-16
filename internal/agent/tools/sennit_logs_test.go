@@ -17,7 +17,7 @@ import (
 func createTestLogFile(t *testing.T, entries []map[string]any) string {
 	t.Helper()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "braid.log")
+	logFile := filepath.Join(tempDir, "sennit.log")
 
 	file, err := os.Create(logFile)
 	require.NoError(t, err)
@@ -123,14 +123,14 @@ func TestSennitLogs_MaxCap(t *testing.T) {
 
 func TestSennitLogs_MissingFile(t *testing.T) {
 	t.Parallel()
-	result := runSennitLogs("/nonexistent/path/braid.log", SennitLogsParams{Lines: 50})
+	result := runSennitLogs("/nonexistent/path/sennit.log", SennitLogsParams{Lines: 50})
 	require.Contains(t, result, "No log file found")
 }
 
 func TestSennitLogs_EmptyFile(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "braid.log")
+	logFile := filepath.Join(tempDir, "sennit.log")
 	_, err := os.Create(logFile)
 	require.NoError(t, err)
 
@@ -141,7 +141,7 @@ func TestSennitLogs_EmptyFile(t *testing.T) {
 func TestSennitLogs_MalformedLines(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "braid.log")
+	logFile := filepath.Join(tempDir, "sennit.log")
 
 	file, err := os.Create(logFile)
 	require.NoError(t, err)
@@ -301,7 +301,7 @@ func TestSennitLogs_ReservedFields(t *testing.T) {
 func TestSennitLogs_OversizedLines(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "braid.log")
+	logFile := filepath.Join(tempDir, "sennit.log")
 
 	file, err := os.Create(logFile)
 	require.NoError(t, err)
@@ -343,7 +343,7 @@ func TestSennitLogs_OversizedLines(t *testing.T) {
 func TestSennitLogs_PartialTrailingLine(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "braid.log")
+	logFile := filepath.Join(tempDir, "sennit.log")
 
 	file, err := os.Create(logFile)
 	require.NoError(t, err)

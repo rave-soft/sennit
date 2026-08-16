@@ -10,7 +10,7 @@ import (
 )
 
 // writeForeignAgent drops a foreign agent markdown file at
-// <root>/<sourceDir>/<file>, mirroring the shape braid import reads.
+// <root>/<sourceDir>/<file>, mirroring the shape sennit import reads.
 func writeForeignAgent(t *testing.T, root, sourceDir, file, content string) {
 	t.Helper()
 	dir := filepath.Join(root, sourceDir)
@@ -95,7 +95,7 @@ You review code.`)
 	require.Contains(t, string(written), "model: fakeprovider/fake-model")
 }
 
-// Claude Code's tool names are translated to Braid's own.
+// Claude Code's tool names are translated to Sennit's own.
 func TestRunImport_ClaudeAgent_ToolTranslation(t *testing.T) {
 	root := t.TempDir()
 	writeForeignAgent(t, root, ".claude/agents", "reviewer.md", `---
@@ -121,7 +121,7 @@ You review code.`)
 	require.Contains(t, string(written), "bash")
 }
 
-// A tool name with no Braid equivalent is dropped and reported, not kept
+// A tool name with no Sennit equivalent is dropped and reported, not kept
 // verbatim.
 func TestRunImport_Agent_UnknownToolDropped(t *testing.T) {
 	root := t.TempDir()
@@ -147,7 +147,7 @@ You review code.`)
 }
 
 // opencode's permission block is not enforced — it must be reported and
-// dropped, never silently written into a Braid agent file (there's nowhere
+// dropped, never silently written into a Sennit agent file (there's nowhere
 // for it to go).
 func TestRunImport_OpenCodeAgent_PermissionWarning(t *testing.T) {
 	root := t.TempDir()
@@ -226,7 +226,7 @@ Fill the form.`)
 	require.Contains(t, string(written), "Fill the form.")
 }
 
-// A skill whose name doesn't match its directory fails Braid's own
+// A skill whose name doesn't match its directory fails Sennit's own
 // validation and is skipped with a reason, not partially written.
 func TestRunImport_Skill_InvalidIsSkipped(t *testing.T) {
 	root := t.TempDir()

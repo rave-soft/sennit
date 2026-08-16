@@ -264,7 +264,7 @@ func TestSummarize_QueuedThenCanceledDoesNotRun(t *testing.T) {
 
 	// The dropped follow-up carried a RunID, so its terminal cancelled
 	// RunComplete must still be published - otherwise a caller blocking on
-	// that RunID (e.g. `braid run`) would hang.
+	// that RunID (e.g. `sennit run`) would hang.
 	select {
 	case got := <-ch:
 		require.Equal(t, "run-followup", got.Payload.RunID)

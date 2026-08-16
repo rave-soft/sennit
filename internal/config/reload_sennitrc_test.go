@@ -20,8 +20,8 @@ func isolateReloadEnv(t *testing.T) (workDir, dataDir string) {
 	t.Setenv("HOME", isolated)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
-	t.Setenv("SENNIT_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "braid"))
-	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "braid"))
+	t.Setenv("SENNIT_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "sennit"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "sennit"))
 	return t.TempDir(), t.TempDir()
 }
 

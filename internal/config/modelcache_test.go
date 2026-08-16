@@ -14,7 +14,7 @@ import (
 // clean miss rather than an error.
 func TestModelCache_SaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	globalDataPath := filepath.Join(dir, "braid.json")
+	globalDataPath := filepath.Join(dir, "sennit.json")
 
 	models := []catwalk.Model{
 		{ID: "model-a", Name: "Model A"},
@@ -32,7 +32,7 @@ func TestModelCache_SaveLoadRoundTrip(t *testing.T) {
 // db file doesn't exist at all and when it exists but lacks the row.
 func TestModelCache_LoadMissingProvider(t *testing.T) {
 	dir := t.TempDir()
-	globalDataPath := filepath.Join(dir, "braid.json")
+	globalDataPath := filepath.Join(dir, "sennit.json")
 
 	// No models.db has been created yet.
 	got, ok := loadCachedModels(globalDataPath, "nope")
@@ -51,7 +51,7 @@ func TestModelCache_LoadMissingProvider(t *testing.T) {
 // -race.
 func TestModelCache_ConcurrentAccess(t *testing.T) {
 	dir := t.TempDir()
-	globalDataPath := filepath.Join(dir, "braid.json")
+	globalDataPath := filepath.Join(dir, "sennit.json")
 
 	var wg sync.WaitGroup
 	for i := range 8 {
@@ -74,7 +74,7 @@ func TestModelCache_ConcurrentAccess(t *testing.T) {
 func TestModelCache_RefreshKeepsContextWindow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	globalDataPath := filepath.Join(dir, "braid.json")
+	globalDataPath := filepath.Join(dir, "sennit.json")
 
 	saveCachedModels(globalDataPath, "custom", []catwalk.Model{
 		{ID: "gpt-x", ContextWindow: 1050000, DefaultMaxTokens: 128000, CostPer1MIn: 2, CostPer1MOut: 8},

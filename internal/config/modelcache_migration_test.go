@@ -132,7 +132,7 @@ func TestConfig_Load_SmallManualModelListIsNotMigrated(t *testing.T) {
 	require.False(t, ok)
 
 	// The manual list is what the provider actually loaded with, marked as
-	// config-sourced so `braid models refresh` refuses to replace it.
+	// config-sourced so `sennit models refresh` refuses to replace it.
 	pc, ok := store.config.Providers.Get("qwen36-local")
 	require.True(t, ok)
 	require.Len(t, pc.Models, 3)

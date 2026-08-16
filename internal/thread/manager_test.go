@@ -26,7 +26,7 @@ func TestNewManager_WorktreeDirResolution(t *testing.T) {
 	// something the repository sees as a second, untracked copy of
 	// itself — which is what makes keeping them in-repo workable at all.
 	t.Run("empty defaults to threads inside the data directory", func(t *testing.T) {
-		dataDir := filepath.Join(repoRoot, ".braid")
+		dataDir := filepath.Join(repoRoot, ".sennit")
 		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, DataDir: dataDir})
 		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.worktreeDir)
 	})
@@ -40,7 +40,7 @@ func TestNewManager_WorktreeDirResolution(t *testing.T) {
 	// workspace state, and splitting them from the rest of it would put
 	// a checkout back inside a repo that has no .gitignore covering it.
 	t.Run("a relocated data directory takes the worktrees with it", func(t *testing.T) {
-		dataDir := filepath.Join(string(filepath.Separator), "var", "lib", "braid", "myrepo")
+		dataDir := filepath.Join(string(filepath.Separator), "var", "lib", "sennit", "myrepo")
 		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, DataDir: dataDir})
 		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.worktreeDir)
 	})
@@ -51,7 +51,7 @@ func TestNewManager_WorktreeDirResolution(t *testing.T) {
 	})
 
 	t.Run("absolute is used as-is", func(t *testing.T) {
-		abs := filepath.Join(string(filepath.Separator), "var", "tmp", "braid-threads")
+		abs := filepath.Join(string(filepath.Separator), "var", "tmp", "sennit-threads")
 		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, WorktreeDir: abs})
 		require.Equal(t, abs, mgr.worktreeDir)
 	})

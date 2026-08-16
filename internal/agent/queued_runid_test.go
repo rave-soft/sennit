@@ -76,7 +76,7 @@ func (m *gatedStreamModel) StreamObject(ctx context.Context, call fantasy.Object
 // end-to-end proof of fix 2: a prompt carrying a RunID that is queued
 // behind a busy session must NOT be silently folded into the active turn.
 // It runs as its own turn via the recursive run path and publishes its
-// own terminal RunComplete, so a `braid run` caller blocking on that
+// own terminal RunComplete, so a `sennit run` caller blocking on that
 // RunID does not hang. The active turn keeps its own RunComplete too.
 func TestRun_QueuedRunIDPromptRunsRecursivelyAndPublishesRunComplete(t *testing.T) {
 	t.Parallel()

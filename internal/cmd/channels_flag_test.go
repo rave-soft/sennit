@@ -8,7 +8,7 @@ import (
 
 // TestChannelsFlagAvailableOnRunCmd guards against the --channels flag being
 // registered as a local root flag (rootCmd.Flags) rather than a persistent
-// one. When local, `braid run --channels server:webhook` fails with
+// one. When local, `sennit run --channels server:webhook` fails with
 // "unknown flag" because runCmd does not inherit root's local flags. The
 // flag must be persistent so non-interactive runs can opt in to channels
 // too.
@@ -20,7 +20,7 @@ func TestChannelsFlagAvailableOnRunCmd(t *testing.T) {
 	require.True(t, runCmd.Flags().HasFlags(), "runCmd flags should be accessible")
 
 	flag := runCmd.Flags().Lookup("channels")
-	require.NotNil(t, flag, "the --channels flag must be available on `braid run` (register it as a persistent flag on rootCmd)")
+	require.NotNil(t, flag, "the --channels flag must be available on `sennit run` (register it as a persistent flag on rootCmd)")
 	require.Equal(t, "stringSlice", flag.Value.Type(), "--channels must be a string slice flag")
 }
 
@@ -33,15 +33,15 @@ func TestChannelsFlagAvailableOnRootCmd(t *testing.T) {
 	if flag == nil {
 		flag = rootCmd.PersistentFlags().Lookup("channels")
 	}
-	require.NotNil(t, flag, "the --channels flag must be available on `braid` (rootCmd)")
+	require.NotNil(t, flag, "the --channels flag must be available on `sennit` (rootCmd)")
 }
 
 // TestSmallModelFlagRemovedFromRunCmd guards against --small-model
-// reappearing on `braid run`. Helper (small) model selection is fully
+// reappearing on `sennit run`. Helper (small) model selection is fully
 // automatic now, so it must not be exposed as a CLI override.
 func TestSmallModelFlagRemovedFromRunCmd(t *testing.T) {
 	t.Parallel()
 
 	flag := runCmd.Flags().Lookup("small-model")
-	require.Nil(t, flag, "--small-model must not be registered on `braid run`; helper model selection is automatic")
+	require.Nil(t, flag, "--small-model must not be registered on `sennit run`; helper model selection is automatic")
 }

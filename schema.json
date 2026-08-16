@@ -21,7 +21,7 @@
         },
         "generated_with": {
           "type": "boolean",
-          "description": "Add Generated with Braid line to commit messages and issues and PRs",
+          "description": "Add Generated with Sennit line to commit messages and issues and PRs",
           "default": true
         }
       },
@@ -439,12 +439,12 @@
           "items": {
             "type": "string",
             "examples": [
-              "BRAID.md",
+              "SENNIT.md",
               "CLAUDE.md"
             ]
           },
           "type": "array",
-          "description": "Paths to files containing context information for the AI. Braid auto-loads only its own conventions (AGENTS.md/BRAID.md and casing/local variants); list other tools' files here explicitly (e.g. CLAUDE.md) to have Braid read them too"
+          "description": "Paths to files containing context information for the AI. Sennit auto-loads only its own conventions (AGENTS.md/SENNIT.md and casing/local variants); list other tools' files here explicitly (e.g. CLAUDE.md) to have Sennit read them too"
         },
         "global_context_paths": {
           "items": {
@@ -453,7 +453,7 @@
           "type": "array",
           "description": "Paths to files containing global context information for the AI",
           "default": [
-            "~/.config/braid/BRAID.md",
+            "~/.config/sennit/SENNIT.md",
             "~/.config/AGENTS.md"
           ]
         },
@@ -461,7 +461,7 @@
           "items": {
             "type": "string",
             "examples": [
-              "~/.config/braid/skills",
+              "~/.config/sennit/skills",
               "./skills"
             ]
           },
@@ -490,9 +490,9 @@
         "data_directory": {
           "type": "string",
           "description": "Project-local directory for workspace-scoped state (lock file, config overrides, legacy pre-migration database) — not the shared session/message database. Relative paths are resolved against the working directory; absolute paths are used as-is.",
-          "default": ".braid",
+          "default": ".sennit",
           "examples": [
-            ".braid"
+            ".sennit"
           ]
         },
         "disabled_tools": {
@@ -526,7 +526,7 @@
           "default": "AGENTS.md",
           "examples": [
             "AGENTS.md",
-            "BRAID.md",
+            "SENNIT.md",
             "CLAUDE.md",
             "docs/LLMs.md"
           ]
@@ -578,7 +578,7 @@
         },
         "history_retention_days": {
           "type": "integer",
-          "description": "Age in days after which \"braid gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"braid gc\" (e.g. from cron) to apply it.",
+          "description": "Age in days after which \"sennit gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"sennit gc\" (e.g. from cron) to apply it.",
           "default": 90,
           "examples": [
             30,
@@ -864,9 +864,9 @@
       "properties": {
         "worktree_dir": {
           "type": "string",
-          "description": "Parent directory for thread worktrees (\u003cworktree_dir\u003e/\u003cthread-name\u003e). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to \"threads\" inside the workspace data directory (.braid/threads).",
+          "description": "Parent directory for thread worktrees (\u003cworktree_dir\u003e/\u003cthread-name\u003e). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to \"threads\" inside the workspace data directory (.sennit/threads).",
           "examples": [
-            "/var/tmp/braid-threads",
+            "/var/tmp/sennit-threads",
             "../thread-worktrees"
           ]
         }

@@ -62,7 +62,7 @@ func TestTracker_BuiltinSkillTracking(t *testing.T) {
 
 	// Simulate active skills including a builtin skill (sennit-config).
 	activeSkills := []*Skill{
-		{Name: "sennit-config", Description: "Braid config", Builtin: true},
+		{Name: "sennit-config", Description: "Sennit config", Builtin: true},
 		{Name: "go-doc", Description: "Go docs", Builtin: false},
 	}
 	tracker := NewTracker(activeSkills)
@@ -71,7 +71,7 @@ func TestTracker_BuiltinSkillTracking(t *testing.T) {
 	require.False(t, tracker.IsLoaded("sennit-config"))
 	require.False(t, tracker.IsLoaded("go-doc"))
 
-	// Mark builtin skill as loaded (simulating read via braid://...).
+	// Mark builtin skill as loaded (simulating read via sennit://...).
 	tracker.MarkLoaded("sennit-config")
 	require.True(t, tracker.IsLoaded("sennit-config"))
 

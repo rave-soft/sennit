@@ -23,7 +23,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/event"
-	braidlog "github.com/rave-soft/sennit/internal/log"
+	sennitlog "github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/projects"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -247,7 +247,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 			return nil
 		},
 		PostConnect: func(cfg *config.ConfigStore) error {
-			braidlog.Setup(config.GlobalLogFile(), debug)
+			sennitlog.Setup(config.GlobalLogFile(), debug)
 			return nil
 		},
 		OnAppInitFailure: func(err error) {

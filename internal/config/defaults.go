@@ -48,10 +48,10 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		c.Options.TUI = &TUIOptions{}
 	}
 	if len(c.Options.GlobalContextPaths) == 0 {
-		braidConfigDir := filepath.Dir(GlobalConfig())
+		globalConfigDir := filepath.Dir(GlobalConfig())
 		c.Options.GlobalContextPaths = []string{
-			filepath.Join(braidConfigDir, brand.ContextFile),
-			filepath.Join(filepath.Dir(braidConfigDir), "AGENTS.md"),
+			filepath.Join(globalConfigDir, brand.ContextFile),
+			filepath.Join(filepath.Dir(globalConfigDir), "AGENTS.md"),
 		}
 	}
 	slices.Sort(c.Options.GlobalContextPaths)

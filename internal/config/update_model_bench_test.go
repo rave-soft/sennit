@@ -15,7 +15,7 @@ import (
 // every selection.
 func BenchmarkUpdatePreferredModel(b *testing.B) {
 	dir := b.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	b.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", dir)
 	b.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dir)
@@ -72,7 +72,7 @@ func BenchmarkUpdatePreferredModel(b *testing.B) {
 // BenchmarkUpdatePreferredModel.
 func BenchmarkReloadFromDisk(b *testing.B) {
 	dir := b.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	b.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", dir)
 	b.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dir)

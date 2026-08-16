@@ -256,12 +256,12 @@ func TestDiscardMerged_KeepsTheRowWhenTheWorktreeCannotGo(t *testing.T) {
 // copy of itself.
 //
 // That safety comes from the "*" .gitignore the workspace writes into its
-// data directory on first use (app.ensureDotBraidDir). This test creates
+// data directory on first use (app.ensureDataDir). This test creates
 // that file itself, so if it ever stops being written, this stays green
 // while reality does not — the link is only as strong as that one call.
 func TestThreadWorktreeLivesInsideTheDataDirectory(t *testing.T) {
 	repo := initRepo(t)
-	dataDir := filepath.Join(repo, ".braid")
+	dataDir := filepath.Join(repo, ".sennit")
 	require.NoError(t, os.MkdirAll(dataDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, ".gitignore"), []byte("*\n"), 0o644))
 

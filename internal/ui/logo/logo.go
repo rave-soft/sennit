@@ -1,4 +1,4 @@
-// Package logo renders a Braid wordmark in a stylized way.
+// Package logo renders a Sennit wordmark in a stylized way.
 package logo
 
 import (
@@ -19,7 +19,7 @@ type letterform func(bool) string
 
 const diag = `╱`
 
-// Opts are the options for rendering the Braid title art.
+// Opts are the options for rendering the Sennit title art.
 type Opts struct {
 	FieldColor   color.Color // diagonal lines
 	TitleColorA  color.Color // left gradient ramp point
@@ -34,7 +34,7 @@ type Opts struct {
 	Unstable bool
 }
 
-// Render renders the Braid logo. Set the argument to true to render the narrow
+// Render renders the Sennit logo. Set the argument to true to render the narrow
 // version, intended for use in a sidebar.
 //
 // The compact argument determines whether it renders compact for the sidebar
@@ -125,7 +125,7 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	return logo
 }
 
-// SmallRender renders a smaller version of the Braid logo, suitable for
+// SmallRender renders a smaller version of the Sennit logo, suitable for
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int, o Opts) string {
 	name := brand.Name

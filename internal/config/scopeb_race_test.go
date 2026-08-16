@@ -20,7 +20,7 @@ import (
 // pointer, so a reader always sees an immutable snapshot. Run with -race.
 func TestScopeB_InPlaceMutationRace(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", dir)
 	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dir)

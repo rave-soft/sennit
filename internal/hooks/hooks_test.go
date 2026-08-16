@@ -196,8 +196,8 @@ func TestBuildEnv(t *testing.T) {
 	require.Equal(t, "ls", envMap["SENNIT_TOOL_INPUT_COMMAND"])
 	require.Equal(t, "/tmp/f.txt", envMap["SENNIT_TOOL_INPUT_FILE_PATH"])
 
-	// Shared Braid markers must be present so hook-authored scripts can
-	// detect they're running under Braid the same way bash-tool-invoked
+	// Shared Sennit markers must be present so hook-authored scripts can
+	// detect they're running under Sennit the same way bash-tool-invoked
 	// scripts can.
 	require.Equal(t, "1", envMap["SENNIT"])
 	require.Equal(t, "sennit", envMap["AGENT"])
@@ -746,7 +746,7 @@ func TestParseStdoutClaudeCodeFormat(t *testing.T) {
 		require.Equal(t, DecisionNone, r.Decision)
 	})
 
-	t.Run("braid format still works", func(t *testing.T) {
+	t.Run("sennit format still works", func(t *testing.T) {
 		t.Parallel()
 		r := parseStdout(`{"decision":"allow","context":"hello"}`)
 		require.Equal(t, DecisionAllow, r.Decision)

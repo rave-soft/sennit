@@ -109,9 +109,9 @@ var gitGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 	return parsePatterns(strings.Split(string(bts), "\n"), nil)
 })
 
-// braidGlobalIgnorePatterns returns patterns from the user's
+// globalIgnorePatterns returns patterns from the user's
 // ~/.config/sennit/ignore file.
-var braidGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
+var globalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 	name := filepath.Join(home.Config(), brand.Slug, "ignore")
 	bts, err := os.ReadFile(name)
 	if err != nil {
@@ -200,7 +200,7 @@ func (dl *directoryLister) getCombinedMatcher(dir string) gitignore.Matcher {
 
 		// Add global ignore patterns (git core.excludesFile + sennit global ignore).
 		allPatterns = append(allPatterns, gitGlobalIgnorePatterns()...)
-		allPatterns = append(allPatterns, braidGlobalIgnorePatterns()...)
+		allPatterns = append(allPatterns, globalIgnorePatterns()...)
 
 		// Collect patterns from root to this directory.
 		relDir, _ := filepath.Rel(dl.rootPath, dir)

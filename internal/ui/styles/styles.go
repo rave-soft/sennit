@@ -79,9 +79,9 @@ type Styles struct {
 		WorkingDir        lipgloss.Style // Style for current working directory
 		Separator         lipgloss.Style // Style for separator dots (•)
 		Wrapper           lipgloss.Style // Outer container for the entire header row
-		LogoGradCanvas    lipgloss.Style // Canvas for the compact "BRAID" gradient
-		LogoGradFromColor color.Color    // "BRAID" wordmark gradient start
-		LogoGradToColor   color.Color    // "BRAID" wordmark gradient end
+		LogoGradCanvas    lipgloss.Style // Canvas for the compact "SENNIT" gradient
+		LogoGradFromColor color.Color    // "SENNIT" wordmark gradient start
+		LogoGradToColor   color.Color    // "SENNIT" wordmark gradient end
 	}
 
 	CompactDetails struct {
@@ -188,8 +188,8 @@ type Styles struct {
 		SmallVendor        lipgloss.Style // Vendor label in SmallRender
 		SmallDiagonals     lipgloss.Style // Diagonal line fill in SmallRender
 		GradCanvas         lipgloss.Style // Blank canvas for gradient painting
-		SmallGradFromColor color.Color    // Small "Braid" wordmark gradient start
-		SmallGradToColor   color.Color    // Small "Braid" wordmark gradient end
+		SmallGradFromColor color.Color    // Small "Sennit" wordmark gradient start
+		SmallGradToColor   color.Color    // Small "Sennit" wordmark gradient end
 	}
 
 	// Working indicator gradient (spinners/shimmers on assistant "thinking",

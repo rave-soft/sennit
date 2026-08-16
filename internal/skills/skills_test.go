@@ -364,8 +364,8 @@ func TestToPromptXMLBuiltinType(t *testing.T) {
 	t.Parallel()
 
 	skills := []*Skill{
-		{Name: "builtin-skill", Description: "A builtin.", SkillFilePath: "braid://skills/builtin-skill/SKILL.md", Builtin: true},
-		{Name: "user-skill", Description: "A user skill.", SkillFilePath: "/home/user/.config/braid/skills/user-skill/SKILL.md"},
+		{Name: "builtin-skill", Description: "A builtin.", SkillFilePath: "sennit://skills/builtin-skill/SKILL.md", Builtin: true},
+		{Name: "user-skill", Description: "A user skill.", SkillFilePath: "/home/user/.config/sennit/skills/user-skill/SKILL.md"},
 	}
 	xml := ToPromptXML(skills)
 	require.Contains(t, xml, "<type>builtin</type>")
@@ -465,7 +465,7 @@ func TestDeduplicate(t *testing.T) {
 		},
 		{
 			name:     "user overrides builtin",
-			input:    []*Skill{{Name: "sennit-config", Path: "braid://skills/sennit-config"}, {Name: "sennit-config", Path: "/user/sennit-config"}},
+			input:    []*Skill{{Name: "sennit-config", Path: "sennit://skills/sennit-config"}, {Name: "sennit-config", Path: "/user/sennit-config"}},
 			wantLen:  1,
 			wantName: "sennit-config",
 			wantPath: "/user/sennit-config",

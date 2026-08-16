@@ -14,7 +14,7 @@ func TestWebSearchToolDeniedPermission(t *testing.T) {
 	tool := NewWebSearchTool(perms, t.TempDir(), nil, nil)
 
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
-	resp, err := runWebSearchTool(t, tool, ctx, WebSearchParams{Query: "braid coding agent"})
+	resp, err := runWebSearchTool(t, tool, ctx, WebSearchParams{Query: "sennit coding agent"})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.True(t, resp.StopTurn)

@@ -39,13 +39,13 @@ func TestSennitInfo_ConfigFiles(t *testing.T) {
 
 	cfg := config.NewTestStore(
 		&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()},
-		"/home/user/.config/braid/braid.json",
-		"/project/.braid/braid.json",
+		"/home/user/.config/sennit/sennit.json",
+		"/project/.sennit/sennit.json",
 	)
 	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[config_files]")
-	require.Contains(t, output, "/home/user/.config/braid/braid.json")
-	require.Contains(t, output, "/project/.braid/braid.json")
+	require.Contains(t, output, "/home/user/.config/sennit/sennit.json")
+	require.Contains(t, output, "/project/.sennit/sennit.json")
 }
 
 func TestSennitInfo_Models(t *testing.T) {
@@ -238,7 +238,7 @@ func TestSennitInfo_Options(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
 		Options: &config.Options{
-			DataDirectory:        "/Users/user/project/.braid",
+			DataDirectory:        "/Users/user/project/.sennit",
 			Debug:                true,
 			DisableAutoSummarize: true,
 		},
@@ -248,7 +248,7 @@ func TestSennitInfo_Options(t *testing.T) {
 	require.Contains(t, output, "[options]")
 	require.Contains(t, output, "auto_lsp = true")
 	require.Contains(t, output, "auto_summarize = false")
-	require.Contains(t, output, "data_directory = /Users/user/project/.braid")
+	require.Contains(t, output, "data_directory = /Users/user/project/.sennit")
 	require.Contains(t, output, "debug = true")
 }
 
@@ -349,7 +349,7 @@ func TestSennitInfo_ConfigStaleness_Clean(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
 	store := config.NewTestStore(&config.Config{
@@ -370,7 +370,7 @@ func TestSennitInfo_ConfigStaleness_Dirty(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
 
 	store := config.NewTestStore(&config.Config{
@@ -395,7 +395,7 @@ func TestSennitInfo_ConfigStaleness_MissingPath(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
 	store := config.NewTestStore(&config.Config{
@@ -563,7 +563,7 @@ func TestSennitInfo_Problems_None(t *testing.T) {
 // TestSennitInfo_Problems_UnresolvedAgentModel is the feature's motivating
 // case: a sub-agent pinned to a model that doesn't exist among the
 // providers used to be a silent log warning with a fallback the user never
-// saw. It must now show up in braid_info's [problems] section.
+// saw. It must now show up in sennit_info's [problems] section.
 func TestSennitInfo_Problems_UnresolvedAgentModel(t *testing.T) {
 	t.Parallel()
 
@@ -578,7 +578,7 @@ func TestSennitInfo_Problems_UnresolvedAgentModel(t *testing.T) {
 			{
 				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
 				Message: "agent reviewer: model nope/nope not found — falls back to the main model",
-				Hint:    "run 'braid models' to see available provider/model pairs",
+				Hint:    "run 'sennit models' to see available provider/model pairs",
 			},
 		},
 	}
@@ -616,7 +616,7 @@ func TestSennitInfo_Problems_MCPError(t *testing.T) {
 // TestSennitInfo_Providers_CachedCustomProviderModels verifies that a
 // custom provider's model count shows up in [providers] when those models
 // come from the global model-discovery cache (internal/config's
-// applyCachedModelsForCustomProviders) rather than from braid.json — i.e.
+// applyCachedModelsForCustomProviders) rather than from sennit.json — i.e.
 // that writeProviders needs no changes of its own now that discovered
 // models are cache-backed, since it only ever reads len(pc.Models) off the
 // already-loaded config.
@@ -643,7 +643,7 @@ func TestSennitInfo_Providers_CachedCustomProviderModels(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second, independent load must pick the models up from the cache, with
-	// no models array left in braid.json to source them from.
+	// no models array left in sennit.json to source them from.
 	store, err := config.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 

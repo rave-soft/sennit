@@ -36,7 +36,7 @@ func liveSession(t *testing.T, toolName string) (*ClientSession, context.Context
 	t.Cleanup(func() { _ = serverSession.Close() })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	client := mcp.NewClient(&mcp.Implementation{Name: "braid-test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "sennit-test"}, nil)
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	require.NoError(t, err)
 
@@ -75,7 +75,7 @@ func liveSessionWithCapabilities(t *testing.T, toolName, promptName, resourceURI
 	t.Cleanup(func() { _ = serverSession.Close() })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	client := mcp.NewClient(&mcp.Implementation{Name: "braid-test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "sennit-test"}, nil)
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	require.NoError(t, err)
 
@@ -87,7 +87,7 @@ func liveSessionWithCapabilities(t *testing.T, toolName, promptName, resourceURI
 // close it so its child process/pipes are released, and (3) clear its tools
 // from the registry. Before the fix defaultRegistry.updateState only did a bare
 // defaultRegistry.sessions.Del(name): the session was leaked and its tools lingered, so
-// braid_info kept reading "connected, N tools" while the LLM's tool list and
+// sennit_info kept reading "connected, N tools" while the LLM's tool list and
 // the live session had diverged.
 func TestUpdateState_ErrorClosesSessionAndClearsTools(t *testing.T) {
 	const name = "test-error-cleanup"

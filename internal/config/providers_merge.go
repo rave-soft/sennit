@@ -21,7 +21,7 @@ import (
 // callers (Load, reloadFromDisk) run it before taking writeMu — see those
 // call sites for why that matters.
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
-	restore := PushPopBraidEnv()
+	restore := PushPopEnvOverrides()
 	defer restore()
 
 	// When disable_default_providers is enabled, skip all default/embedded

@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 	// Hermetic global config/data for the whole package: many tests load
 	// config through the real discovery paths, and t.Setenv is off-limits
 	// because the package uses t.Parallel liberally.
-	tmp, err := os.MkdirTemp("", "braid-agent-test-*")
+	tmp, err := os.MkdirTemp("", "sennit-agent-test-*")
 	if err != nil {
 		panic(err)
 	}
@@ -198,7 +198,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "update the main.go file by changing the print to say hello from braid",
+					Prompt:          "update the main.go file by changing the print to say hello from sennit",
 					SessionID:       session.ID,
 					MaxOutputTokens: 10000,
 				})
@@ -241,7 +241,7 @@ func TestCoderAgent(t *testing.T) {
 				mainGoPath := filepath.Join(env.workingDir, "main.go")
 				content, err := os.ReadFile(mainGoPath)
 				require.NoError(t, err)
-				require.Contains(t, strings.ToLower(string(content)), "hello from braid")
+				require.Contains(t, strings.ToLower(string(content)), "hello from sennit")
 			})
 			t.Run("bash tool", func(t *testing.T) {
 				agent, env := setupAgent(t, pair)
@@ -498,7 +498,7 @@ func TestCoderAgent(t *testing.T) {
 				require.NoError(t, err)
 
 				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use multiedit to change 'Hello, World!' to 'Hello, Braid!' and add a comment '// Greeting' above the fmt.Println line in main.go",
+					Prompt:          "use multiedit to change 'Hello, World!' to 'Hello, Sennit!' and add a comment '// Greeting' above the fmt.Println line in main.go",
 					SessionID:       session.ID,
 					MaxOutputTokens: 10000,
 				})
@@ -536,7 +536,7 @@ func TestCoderAgent(t *testing.T) {
 				content, err := os.ReadFile(mainGoPath)
 				require.NoError(t, err)
 				require.Contains(t, string(content), "// Greeting")
-				require.Contains(t, string(content), "Hello, Braid!")
+				require.Contains(t, string(content), "Hello, Sennit!")
 			})
 			t.Run("write tool", func(t *testing.T) {
 				agent, env := setupAgent(t, pair)

@@ -80,7 +80,7 @@ func TestConfig_LoadFromBytes_SingleModel(t *testing.T) {
 // TestConfig_LoadFromBytes_DropsIncompatibleRecentModels verifies that a
 // pre-refactor "recent_models" value (an object keyed by "large"/"small")
 // is dropped instead of failing json.Unmarshal, so old data-dir configs
-// don't stop braid from starting.
+// don't stop sennit from starting.
 func TestConfig_LoadFromBytes_DropsIncompatibleRecentModels(t *testing.T) {
 	data := []byte(`{"recent_models":{"large":[{"provider":"openai","model":"gpt-4o"}]},"providers": {}}`)
 	data = migrate.DropIncompatibleRecentModels(data, "test.json")
@@ -374,11 +374,11 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 			[]byte(`{"options":{"data_directory":"from-dot-json"}}`), 0o644))
 		require.NoError(t, os.MkdirAll(filepath.Join(project, ".sennit"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennit.json"),
-			[]byte(`{"options":{"data_directory":"from-braid-subdir"}}`), 0o644))
+			[]byte(`{"options":{"data_directory":"from-sennit-subdir"}}`), 0o644))
 
 		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project))
 		require.NoError(t, err)
-		require.Equal(t, "from-braid-subdir", cfg.Options.DataDirectory)
+		require.Equal(t, "from-sennit-subdir", cfg.Options.DataDirectory)
 	})
 
 	t.Run(".sennit/sennitrc outranks root sennitrc, .sennitrc, and .sennit/sennit.json", func(t *testing.T) {
@@ -389,13 +389,13 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 			[]byte("option data-directory from-dot-sennitrc\n"), 0o644))
 		require.NoError(t, os.MkdirAll(filepath.Join(project, ".sennit"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennit.json"),
-			[]byte(`{"options":{"data_directory":"from-braid-subdir-json"}}`), 0o644))
+			[]byte(`{"options":{"data_directory":"from-sennit-subdir-json"}}`), 0o644))
 		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennitrc"),
-			[]byte("option data-directory from-braid-subdir-rc\n"), 0o644))
+			[]byte("option data-directory from-sennit-subdir-rc\n"), 0o644))
 
 		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project))
 		require.NoError(t, err)
-		require.Equal(t, "from-braid-subdir-rc", cfg.Options.DataDirectory)
+		require.Equal(t, "from-sennit-subdir-rc", cfg.Options.DataDirectory)
 	})
 
 	t.Run("system config is loaded first", func(t *testing.T) {

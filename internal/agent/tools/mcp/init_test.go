@@ -49,7 +49,7 @@ func TestMCPSession_CancelOnClose(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "braid-test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "sennit-test"}, nil)
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	require.NoError(t, err)
 
@@ -529,7 +529,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 // TestCreateSession_ResolutionFailureUpdatesState pins the user-visible
 // half of the regression fix: when any of command/args/env/headers/url
 // fails to resolve, defaultRegistry.createSession must publish StateError to the state
-// map so braid_info and the TUI's MCP status card can render a real
+// map so sennit_info and the TUI's MCP status card can render a real
 // error instead of the MCP silently sitting in "starting" or being
 // spawned with an empty credential.
 //
@@ -1248,13 +1248,13 @@ func TestOwnedAuthHandlerSharedPublicationAndSessionClosesOnce(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	if os.Getenv("BRAID_STDIO_CHECK_HELPER") == "1" {
+	if os.Getenv("SENNIT_STDIO_CHECK_HELPER") == "1" {
 		got := strings.Join(os.Args[1:], " ")
 		fmt.Printf("args: %s", got)
-		if got != os.Getenv("BRAID_STDIO_CHECK_EXPECTED_ARGS") {
+		if got != os.Getenv("SENNIT_STDIO_CHECK_EXPECTED_ARGS") {
 			os.Exit(4)
 		}
-		if os.Getenv("BRAID_STDIO_CHECK_FAIL") == "1" {
+		if os.Getenv("SENNIT_STDIO_CHECK_FAIL") == "1" {
 			os.Exit(3)
 		}
 		os.Exit(0)
@@ -1268,9 +1268,9 @@ func TestStdioCheckArgv(t *testing.T) {
 		Path: os.Args[0],
 		Args: []string{os.Args[0], "--flag", "value"},
 		Env: append(os.Environ(),
-			"BRAID_STDIO_CHECK_HELPER=1",
-			"BRAID_STDIO_CHECK_EXPECTED_ARGS=--flag value",
-			"BRAID_STDIO_CHECK_FAIL=1"),
+			"SENNIT_STDIO_CHECK_HELPER=1",
+			"SENNIT_STDIO_CHECK_EXPECTED_ARGS=--flag value",
+			"SENNIT_STDIO_CHECK_FAIL=1"),
 	}
 	err := stdioCheck(old)
 	require.Error(t, err)
@@ -1282,8 +1282,8 @@ func TestStdioCheckNilArgs(t *testing.T) {
 	old := &exec.Cmd{
 		Path: os.Args[0],
 		Env: append(os.Environ(),
-			"BRAID_STDIO_CHECK_HELPER=1",
-			"BRAID_STDIO_CHECK_EXPECTED_ARGS="),
+			"SENNIT_STDIO_CHECK_HELPER=1",
+			"SENNIT_STDIO_CHECK_EXPECTED_ARGS="),
 	}
 	require.NoError(t, stdioCheck(old))
 }

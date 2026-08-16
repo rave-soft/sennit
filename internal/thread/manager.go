@@ -65,7 +65,7 @@ type ManagerOptions struct {
 	// DataDir is the workspace's project-local data directory
 	// (<repo>/.sennit by default), which is where thread worktrees live
 	// unless WorktreeDir says otherwise. That directory carries a
-	// "*" .gitignore of its own (see app.ensureDotBraidDir), which is
+	// "*" .gitignore of its own (see app.ensureDataDir), which is
 	// what lets worktrees sit inside the repository without the repo
 	// seeing a second copy of itself as untracked files. Empty falls
 	// back to RepoRoot/.sennit.

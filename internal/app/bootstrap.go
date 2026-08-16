@@ -93,9 +93,9 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		cfg.SetupAgentsWithInherited(opts.InheritedAgents)
 	}
 
-	// ensureDotBraidDir already wraps its own errors with context, so no
+	// ensureDataDir already wraps its own errors with context, so no
 	// further wrapping here.
-	if err := ensureDotBraidDir(cfg.Config().Options.DataDirectory); err != nil {
+	if err := ensureDataDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, err
 	}
 
@@ -213,10 +213,10 @@ func workspaceLockDir(ctx context.Context, workspaceDir, dataDir string) (string
 	return "", fmt.Errorf("failed to resolve repository workspace lock: %w", err)
 }
 
-// ensureDotBraidDir creates the workspace's .sennit data directory and,
+// ensureDataDir creates the workspace's .sennit data directory and,
 // the first time, a .gitignore inside it that excludes the whole thing
 // from the workspace's own git repo.
-func ensureDotBraidDir(dir string) error {
+func ensureDataDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create data directory: %q %w", dir, err)
 	}
