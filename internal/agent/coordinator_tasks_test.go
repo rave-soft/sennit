@@ -29,7 +29,9 @@ func (noopTaskManager) Get(context.Context, string) (tools.TaskInfo, error) {
 
 func (noopTaskManager) Cancel(context.Context, string, string) error { return nil }
 
-func (noopTaskManager) Send(context.Context, string, string) error { return nil }
+func (noopTaskManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
+	return tools.SendOutcome{}, nil
+}
 
 func (noopTaskManager) Output(context.Context, string, int) (tools.TaskOutput, error) {
 	return tools.TaskOutput{}, nil

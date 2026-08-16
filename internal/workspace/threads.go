@@ -93,12 +93,19 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 	return threadspawn.ThreadToProto(mgr, st), nil
 }
 
+// SendThread is the person's own path into a thread's session (the TUI's
+// thread view), so it drops Send's disposition: whoever typed the message
+// is looking at that session's transcript and can see for themselves
+// whether it started running or is waiting behind a turn. Only the agent-
+// facing thread_send tool, which has no such view, reports it — see
+// tools.SendOutcome.
 func (w *AppWorkspace) SendThread(ctx context.Context, id, message string) error {
 	mgr, ok := w.threadManager()
 	if !ok {
 		return ErrThreadsNotSupported
 	}
-	return mgr.Send(ctx, id, message)
+	_, err := mgr.Send(ctx, id, message)
+	return err
 }
 
 func (w *AppWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {

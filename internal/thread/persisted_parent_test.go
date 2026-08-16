@@ -89,7 +89,7 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
 
-	require.NoError(t, mgr2.Send(t.Context(), st.ID, "resume message"))
+	require.NoError(t, sendErr(mgr2.Send(t.Context(), st.ID, "resume message")))
 
 	ownCoord := spawner2.appFor(st.WorktreePath).AgentCoordinator.(*fakeCoordinator)
 	registered := ownCoord.registeredDelegationParents()
@@ -125,7 +125,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	mgr2 := NewManager(ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
 	tasks2 := NewTaskManager(store, NewTestParentAppSpawner(parentApp2), NewTestMessageService(parentApp2.Messages()), mgr2.lc, mgr2.ctx)
 
-	require.NoError(t, tasks2.Send(t.Context(), st.ID, "resume message"))
+	require.NoError(t, sendErr(tasks2.Send(t.Context(), st.ID, "resume message")))
 
 	coord := parentApp2.AgentCoordinator.(*fakeCoordinator)
 	registered := coord.registeredDelegationParents()
@@ -178,7 +178,7 @@ func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 	_, _, ok := mgr2.resolveDeliveryTarget(t.Context(), nil, fresh)
 	require.False(t, ok, "a thread with no recorded parent must not resolve a delivery target after restart")
 
-	require.NoError(t, mgr2.Send(t.Context(), st.ID, "resume message"))
+	require.NoError(t, sendErr(mgr2.Send(t.Context(), st.ID, "resume message")))
 	ownCoord := spawner2.appFor(st.WorktreePath).AgentCoordinator.(*fakeCoordinator)
 	require.Empty(t, ownCoord.registeredDelegationParents(),
 		"a parentless thread resumed after restart must register nothing")

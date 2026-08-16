@@ -122,6 +122,33 @@ const (
 	MergeManual MergePolicy = "manual"
 )
 
+// SendDisposition reports what actually happened to a message handed to
+// [Manager.Send] or [TaskManager.Send]. A send always succeeds in the
+// sense that the message is durably on its way, but "on its way" covers
+// two very different outcomes for the sender: the delegation's agent
+// either starts reading it right away, or it sits in the session's prompt
+// queue until whatever turn is currently in flight finishes — which, for
+// an agent deep in a long sub-agent call, can be many minutes.
+//
+// The distinction exists because a sender that cannot tell them apart
+// makes bad decisions: a steering message ("you have five minutes left,
+// wrap up") that lands in a queue behind a half-hour turn is not steering
+// anything, yet a bare "sent" told the sender it was. The send tools
+// render this back to the model verbatim — see tools.SendOutcome.
+type SendDisposition struct {
+	// Queued is true when the target session was mid-turn at dispatch, so
+	// the message becomes the next prompt rather than the current one.
+	Queued bool
+	// Ahead is how many prompts were already waiting in the session's
+	// queue when this one was added, i.e. how many turns run before it.
+	// Only meaningful when Queued is true.
+	Ahead int
+	// Resumed is true when the delegation's workspace was not live and had
+	// to be respawned to take the message. Such a send is never Queued:
+	// a freshly resumed workspace has no turn in flight.
+	Resumed bool
+}
+
 // Thread is a [Delegation] that additionally runs in its own git worktree
 // and branch, and is by default folded back into a base branch on
 // completion according to MergePolicy.

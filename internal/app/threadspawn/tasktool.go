@@ -58,8 +58,12 @@ func (a *agentToolTaskManager) Cancel(ctx context.Context, id, reason string) er
 	return a.t.Cancel(ctx, id, reason)
 }
 
-func (a *agentToolTaskManager) Send(ctx context.Context, id, message string) error {
-	return a.t.Send(ctx, id, message)
+func (a *agentToolTaskManager) Send(ctx context.Context, id, message string) (tools.SendOutcome, error) {
+	disp, err := a.t.Send(ctx, id, message)
+	if err != nil {
+		return tools.SendOutcome{}, err
+	}
+	return toToolSendOutcome(disp), nil
 }
 
 func (a *agentToolTaskManager) Output(ctx context.Context, id string, limit int) (tools.TaskOutput, error) {

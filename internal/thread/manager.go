@@ -582,25 +582,31 @@ func (m *Manager) Cancel(ctx context.Context, idOrName, reason string) error {
 // Send re-dispatches message into a thread's session, resuming it if its
 // workspace is not currently spawned (e.g. after an interrupted run — the
 // worktree is still on disk, so the workspace is simply respawned).
-func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
+//
+// The returned [SendDisposition] tells the caller whether the thread's
+// agent picks the message up now or only after the turn it is currently
+// running — see the type's own doc for why that difference matters enough
+// to report.
+func (m *Manager) Send(ctx context.Context, idOrName, message string) (SendDisposition, error) {
 	done, err := m.lc.beginOp()
 	if err != nil {
-		return err
+		return SendDisposition{}, err
 	}
 	defer done()
 	st, err := m.resolve(ctx, idOrName)
 	if err != nil {
-		return err
+		return SendDisposition{}, err
 	}
 	if st.Kind != KindThread {
-		return fmt.Errorf("thread: %q is not a thread", idOrName)
+		return SendDisposition{}, fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
 	// The "queue into a live runtime" / "respawn from spawnPath, then
 	// dispatch" logic itself has nothing thread-specific in it — see
 	// lifecycle.send's doc comment — so it lives there, shared with
 	// TaskManager.Send.
-	if err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message); err != nil {
-		return err
+	disp, err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message)
+	if err != nil {
+		return SendDisposition{}, err
 	}
 	// l.send does not hand the (possibly freshly respawned) handle back to
 	// its caller, so re-register from here instead, reading the
@@ -626,7 +632,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) error {
 			}
 		}
 	}
-	return nil
+	return disp, nil
 }
 
 // Merge runs (or retries) the merge flow for a thread. Manual-policy

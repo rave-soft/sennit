@@ -10,6 +10,11 @@ A task stopped with `task_cancel` is not reactivated this way: cancelling
 was a decision, not a pause. Sending to a cancelled task fails — start a
 new task instead.
 
+The result tells you whether the task's agent reads the message now or only
+after the turn it is already running finishes. When it says the message was
+queued, the task has not been informed yet — do not count on it having
+acted on the message.
+
 Parameters:
 - `id` (required): the task's ID (see `task_list`).
 - `message` (required): the instruction to send.

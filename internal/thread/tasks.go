@@ -383,21 +383,22 @@ func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
 // thread would be, since a task has no merge-flow-equivalent state that
 // would make reactivating it meaningless the way [Manager.Activate]
 // refuses a thread mid-merge.
-func (t *TaskManager) Send(ctx context.Context, id, message string) error {
+func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposition, error) {
 	done, err := t.lc.beginOp()
 	if err != nil {
-		return err
+		return SendDisposition{}, err
 	}
 	defer done()
 	st, err := t.Get(ctx, id)
 	if err != nil {
-		return err
+		return SendDisposition{}, err
 	}
 	if wasCancelled(st) {
-		return fmt.Errorf("thread: task %q was cancelled (%s) and cannot be resumed; create a new task instead", id, st.Error)
+		return SendDisposition{}, fmt.Errorf("thread: task %q was cancelled (%s) and cannot be resumed; create a new task instead", id, st.Error)
 	}
-	if err := t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message); err != nil {
-		return err
+	disp, err := t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message)
+	if err != nil {
+		return SendDisposition{}, err
 	}
 	// The dispatcher's DelegationParent registry lives per coordinator
 	// instance and is empty on a freshly-started process — see
@@ -423,7 +424,7 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) error {
 			}
 		}
 	}
-	return nil
+	return disp, nil
 }
 
 // wasCancelled reports whether st was explicitly stopped via

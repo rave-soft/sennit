@@ -70,8 +70,12 @@ func (a *agentToolManager) Get(ctx context.Context, idOrName string) (tools.Thre
 	return toToolInfo(st), nil
 }
 
-func (a *agentToolManager) Send(ctx context.Context, idOrName, message string) error {
-	return a.m.Send(ctx, idOrName, message)
+func (a *agentToolManager) Send(ctx context.Context, idOrName, message string) (tools.SendOutcome, error) {
+	disp, err := a.m.Send(ctx, idOrName, message)
+	if err != nil {
+		return tools.SendOutcome{}, err
+	}
+	return toToolSendOutcome(disp), nil
 }
 
 func (a *agentToolManager) Wait(ctx context.Context, ids []string, timeout time.Duration) error {
@@ -88,6 +92,18 @@ func (a *agentToolManager) Merge(ctx context.Context, idOrName string) (tools.Th
 
 func (a *agentToolManager) Remove(ctx context.Context, idOrName string, force, deleteBranch bool) error {
 	return a.m.Remove(ctx, idOrName, force, deleteBranch)
+}
+
+// toToolSendOutcome maps the domain's send disposition to the tools
+// package's identical spelling of it, the same one-to-one seam conversion
+// toToolInfo does for a thread — shared with the task adapter, since a
+// task's send reports the same two possibilities.
+func toToolSendOutcome(d thread.SendDisposition) tools.SendOutcome {
+	return tools.SendOutcome{
+		Queued:  d.Queued,
+		Ahead:   d.Ahead,
+		Resumed: d.Resumed,
+	}
 }
 
 func toToolInfo(st thread.Thread) tools.ThreadInfo {

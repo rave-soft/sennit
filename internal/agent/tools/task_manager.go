@@ -60,8 +60,10 @@ type TaskManager interface {
 	// error, for task_cancel.
 	Cancel(ctx context.Context, id, reason string) error
 	// Send dispatches message into id's session, reactivating it first if
-	// not live, for task_send.
-	Send(ctx context.Context, id, message string) error
+	// not live, for task_send. The [SendOutcome] reports whether the task's
+	// agent reads the message now or only after the turn it is already
+	// running.
+	Send(ctx context.Context, id, message string) (SendOutcome, error)
 	// Output returns a tail of id's child session transcript (at most
 	// limit messages; <= 0 means the implementation's own default), for
 	// task_output.

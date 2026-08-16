@@ -102,6 +102,11 @@ func (w *testAppWorkspace) SendEvent(msg any) {
 	w.app.SendEvent(msg)
 }
 
+// sendErr drops a Send's [SendDisposition], for the many tests that only
+// assert the message was accepted. Tests that care what the disposition
+// says read it directly instead.
+func sendErr(_ SendDisposition, err error) error { return err }
+
 // testCoordinatorAdapter wraps an agent.Coordinator into the domain's
 // narrow Coordinator port for in-package tests. It mirrors the production
 // adapter in threadspawn but lives here because the test files are in
@@ -146,6 +151,10 @@ func (a *testCoordinatorAdapter) BeginAccepted(sessionID string) any {
 
 func (a *testCoordinatorAdapter) Cancel(sessionID string) {
 	a.inner.Cancel(sessionID)
+}
+
+func (a *testCoordinatorAdapter) SessionQueue(sessionID string) (bool, int) {
+	return a.inner.IsSessionBusy(sessionID), a.inner.QueuedPrompts(sessionID)
 }
 
 func (a *testCoordinatorAdapter) RegisterDelegationParent(sessionID string, parent DelegationParent) {
@@ -439,6 +448,19 @@ type fakeCoordinator struct {
 	runErr            error
 	delivered         []deliveredCompletion
 	registeredParents []registeredParent
+	// busy/queued back IsSessionBusy/QueuedPrompts so a test can put the
+	// session in the state lifecycle.send reports as a queued delivery.
+	busy   bool
+	queued int
+}
+
+// setQueue makes the fake report sessions as mid-turn with queued prompts
+// waiting, the shape [lifecycle.send] turns into a queued SendDisposition.
+func (f *fakeCoordinator) setQueue(busy bool, queued int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.busy = busy
+	f.queued = queued
 }
 
 // registeredParent pairs a RegisterDelegationParent call's child session
@@ -577,8 +599,19 @@ func (f *fakeCoordinator) IsBusy() bool                   { return false }
 func (f *fakeCoordinator) Steer(context.Context, agent.SessionAgentCall) (agent.SteerOutcome, *fantasy.AgentResult, error) {
 	return 0, nil, f.runErr
 }
-func (f *fakeCoordinator) IsSessionBusy(string) bool                          { return false }
-func (f *fakeCoordinator) QueuedPrompts(string) int                           { return 0 }
+
+func (f *fakeCoordinator) IsSessionBusy(string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.busy
+}
+
+func (f *fakeCoordinator) QueuedPrompts(string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.queued
+}
+
 func (f *fakeCoordinator) QueuedPromptsList(string) []string                  { return nil }
 func (f *fakeCoordinator) ClearQueue(string)                                  {}
 func (f *fakeCoordinator) Summarize(context.Context, string) error            { return nil }

@@ -165,7 +165,7 @@ func TestManager_SendIntoIdleThread(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusIdle, st.Status)
 
-	require.NoError(t, mgr.Send(t.Context(), st.ID, "now do the thing"))
+	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "now do the thing")))
 
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
@@ -760,7 +760,7 @@ func TestManager_SendRedispatches(t *testing.T) {
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
 
-	require.NoError(t, mgr.Send(t.Context(), st.ID, "keep going"))
+	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "keep going")))
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
@@ -768,6 +768,55 @@ func TestManager_SendRedispatches(t *testing.T) {
 
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
+}
+
+// A message handed to a thread whose agent is mid-turn does not reach that
+// agent until the turn ends, and Send has to say so: the caller (the
+// thread_send tool, and through it a steering agent) decides what to do
+// next from this, and "sent" would tell it the opposite of the truth. See
+// SendDisposition.
+func TestManager_SendReportsQueuedBehindRunningTurn(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "busy", Goal: "do it", MergePolicy: MergeManual})
+	require.NoError(t, err)
+
+	// The goal run is still in flight, with two follow-ups already waiting.
+	coord := spawner.coordFor(st.WorktreePath)
+	coord.setQueue(true, 2)
+
+	disp, err := mgr.Send(t.Context(), st.ID, "wrap up, you have five minutes")
+	require.NoError(t, err)
+	require.True(t, disp.Queued)
+	require.Equal(t, 2, disp.Ahead)
+	require.False(t, disp.Resumed)
+
+	// An idle session takes the message as its own turn, and says so.
+	coord.setQueue(false, 0)
+	disp, err = mgr.Send(t.Context(), st.ID, "and now this")
+	require.NoError(t, err)
+	require.False(t, disp.Queued)
+	require.Zero(t, disp.Ahead)
+}
+
+// A thread whose workspace is no longer live is respawned by Send, and
+// that is never a queued delivery: the fresh workspace has no turn of its
+// own in flight for the message to wait behind.
+func TestManager_SendReportsResumeAsImmediate(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "resumed", Goal: "do it", MergePolicy: MergeManual})
+	require.NoError(t, err)
+	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.Nil(t, mgr.Handle(st.ID))
+
+	disp, err := mgr.Send(t.Context(), st.ID, "one more thing")
+	require.NoError(t, err)
+	require.True(t, disp.Resumed)
+	require.False(t, disp.Queued)
 }
 
 func TestManager_HandleAndWorkspaceID(t *testing.T) {
@@ -808,7 +857,7 @@ func TestManager_SendOwnershipFollowsLatestRun(t *testing.T) {
 	require.Nil(t, mgr.Handle(st.ID))
 
 	// Respawn via Send: the workspace must stay alive after Send returns.
-	require.NoError(t, mgr.Send(t.Context(), st.ID, "first"))
+	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "first")))
 	require.NotNil(t, mgr.Handle(st.ID))
 	require.Zero(t, spawner.releases(st.WorktreePath)-1) // only the goal run's release so far
 
@@ -819,7 +868,7 @@ func TestManager_SendOwnershipFollowsLatestRun(t *testing.T) {
 	coord.mu.Unlock()
 
 	// Queue a follow-up while the first run is in flight.
-	require.NoError(t, mgr.Send(t.Context(), st.ID, "second"))
+	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "second")))
 	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
 	coord.mu.Lock()
 	followUpRunID := coord.runs[1].runID
@@ -854,7 +903,7 @@ func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 12 {
-		wg.Go(func() { require.NoError(t, mgr.Send(t.Context(), st.ID, "again")) })
+		wg.Go(func() { require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "again"))) })
 	}
 	wg.Wait()
 	require.Equal(t, 2, spawner.spawns())
@@ -936,7 +985,7 @@ func TestManager_ConcurrentShutdownClosesMutations(t *testing.T) {
 	wg.Wait()
 	_, err := mgr.Create(t.Context(), CreateArgs{Name: "closed", Goal: "go"})
 	require.ErrorIs(t, err, ErrManagerClosed)
-	require.ErrorIs(t, mgr.Send(t.Context(), "missing", "go"), ErrManagerClosed)
+	require.ErrorIs(t, sendErr(mgr.Send(t.Context(), "missing", "go")), ErrManagerClosed)
 	_, mergeErr := mgr.Merge(t.Context(), "missing")
 	require.ErrorIs(t, mergeErr, ErrManagerClosed)
 	require.ErrorIs(t, mgr.Remove(t.Context(), "missing", true, false), ErrManagerClosed)
@@ -955,7 +1004,7 @@ func TestManager_ShutdownWaitsForCancelledSpawnRollback(t *testing.T) {
 	spawner.spawnEntered = make(chan struct{})
 	spawner.spawnRelease = make(chan struct{})
 	sendDone := make(chan error, 1)
-	go func() { sendDone <- mgr.Send(context.Background(), st.ID, "again") }()
+	go func() { sendDone <- sendErr(mgr.Send(context.Background(), st.ID, "again")) }()
 	<-spawner.spawnEntered
 	shutdownDone := make(chan error, 1)
 	go func() { shutdownDone <- mgr.Shutdown(context.Background()) }()
@@ -1036,7 +1085,7 @@ func TestManager_ShutdownBlocksAdmission(t *testing.T) {
 	// Operations during shutdown should fail immediately.
 	_, err := mgr.Create(t.Context(), CreateArgs{Name: "blocked", Goal: "x"})
 	require.ErrorIs(t, err, ErrManagerClosed)
-	err = mgr.Send(t.Context(), "missing", "x")
+	err = sendErr(mgr.Send(t.Context(), "missing", "x"))
 	require.ErrorIs(t, err, ErrManagerClosed)
 	_, err = mgr.Merge(t.Context(), "missing")
 	require.ErrorIs(t, err, ErrManagerClosed)

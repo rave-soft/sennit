@@ -85,16 +85,28 @@ The `task_*` tools disappear when `options.background_agents` is `false`.
 | `thread_create` | Create a thread: its own git worktree, branch, data directory and session |
 | `thread_list` | Every thread, with status, branch and summary |
 | `thread_status` | One thread's result, error, and merge conflicts |
-| `thread_send` | Queue a follow-up prompt for a thread |
+| `thread_send` | Queue a follow-up prompt for a thread, reporting whether it runs next or waits behind the turn in flight |
 | `thread_merge` | Merge a thread's branch into its base |
 | `thread_remove` | Cancel it, remove the worktree, delete the record |
 | `thread_wait` | Block until the given threads settle |
 
 > [!NOTE]
-> `thread_wait` is **not** in the default tool set. A thread's completion now
-> arrives on its own, so blocking is no longer necessary. The tool still exists
-> for "wait for several threads, then merge" and can be enabled by naming it in
-> an agent's `tools:` list.
+> `thread_send` is **not** in the default tool set. A thread that is mid-turn
+> does not read a follow-up until that turn ends — an agent inside a long
+> sub-agent call can be minutes away from it — so steering or time-boxing a
+> running thread, the tool's most tempting use, is the one thing it cannot do.
+> Enable it by naming it in an agent's `tools:` list when you do need it (for
+> resuming an `interrupted` thread, or driving conflict resolution inside a
+> thread's worktree). When enabled, its result says whether the message runs
+> next or is waiting behind the turn in flight. Sending to a thread from the
+> TUI's thread view is a separate path and is always available.
+
+> [!NOTE]
+> A single thread's completion arrives on its own, so waiting on one is rarely
+> needed. `thread_wait` is in the default set for the case that is not covered
+> that way: holding work until *several* threads have all settled. Without it,
+> an agent in that position falls back to sleeping in `bash`, which costs a
+> turn and tells it nothing.
 
 ## MCP
 

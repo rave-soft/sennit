@@ -132,15 +132,30 @@ func allToolNames() []string {
 		"thread_create",
 		"thread_list",
 		"thread_status",
-		"thread_send",
-		// thread_wait is deliberately absent from the default set: a
-		// thread's completion now arrives on its own (the completion
-		// inbox), so the blocking wait is no longer the model's only way
-		// to learn a thread finished. The tool itself still exists for
-		// the "wait for several threads before merging" case — see
-		// tools.NewThreadWaitTool — and remains fully usable by any
-		// agent config that explicitly lists it in AllowedTools; only the
-		// default membership here changes.
+		// thread_send is deliberately absent from the default set. A
+		// thread that is mid-turn does not read a follow-up until that
+		// turn ends, and an agent deep in a sub-agent call can be many
+		// minutes from that point — so the tool's most tempting use,
+		// steering or time-boxing a thread while it works, is the one it
+		// cannot actually do. It remains available to any agent config
+		// that names it in AllowedTools (and the person's own path into a
+		// thread's session, the TUI thread view, is unaffected — that is
+		// workspace.SendThread, not this tool). When it is enabled, its
+		// result says which of the two happened; see tools.SendOutcome.
+		//
+		// thread_wait was once left out of the default set on the grounds
+		// that a thread's completion arrives on its own (the completion
+		// inbox), making the blocking wait redundant. It is back because
+		// that reasoning only covers the single-thread case: an agent
+		// running several threads and holding work until they all land —
+		// the "wait before merging" case the tool was kept around for —
+		// has nothing to wait *with* if it is not in the default set, and
+		// what it reaches for instead is `bash sleep 300`, which burns a
+		// turn, learns nothing, and has to be repeated. Between a blocking
+		// wait that ends the moment the threads finish and a blind sleep
+		// that does not, the wait is strictly better for the model and for
+		// the person watching it.
+		"thread_wait",
 		"thread_merge",
 		"thread_remove",
 		"task_list",

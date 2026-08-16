@@ -24,6 +24,9 @@ type fakeTaskManager struct {
 	sendCalls   []struct{ id, message string }
 	outputs     map[string]TaskOutput
 	listErr     error
+	// sendOutcome is what Send reports back for an accepted message, so a
+	// test can pick which of the outcomes task_send has to render.
+	sendOutcome SendOutcome
 }
 
 func newFakeTaskManager() *fakeTaskManager {
@@ -68,12 +71,12 @@ func (f *fakeTaskManager) Cancel(_ context.Context, id, reason string) error {
 	return nil
 }
 
-func (f *fakeTaskManager) Send(_ context.Context, id, message string) error {
+func (f *fakeTaskManager) Send(_ context.Context, id, message string) (SendOutcome, error) {
 	if _, ok := f.tasks[id]; !ok {
-		return fmt.Errorf("thread: %q is not a task", id)
+		return SendOutcome{}, fmt.Errorf("thread: %q is not a task", id)
 	}
 	f.sendCalls = append(f.sendCalls, struct{ id, message string }{id, message})
-	return nil
+	return f.sendOutcome, nil
 }
 
 // Output returns exactly what the test configured in f.outputs[id],
@@ -207,6 +210,27 @@ func TestTaskSendTool_SendsMessage(t *testing.T) {
 	require.Len(t, manager.sendCalls, 1)
 	require.Equal(t, "t1", manager.sendCalls[0].id)
 	require.Equal(t, "keep going", manager.sendCalls[0].message)
+}
+
+// The tool's answer has to distinguish "the agent is reading this now"
+// from "this is waiting behind a turn already in flight" — a caller that
+// cannot tell them apart treats a message that steered nothing as
+// delivered. See SendOutcome.
+func TestTaskSendTool_ReportsQueuedDelivery(t *testing.T) {
+	manager := newFakeTaskManager()
+	manager.tasks["t1"] = TaskInfo{ID: "t1", Status: "running"}
+	manager.sendOutcome = SendOutcome{Queued: true, Ahead: 2}
+
+	resp := callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "t1", Message: "wrap up"})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "Queued")
+	require.Contains(t, resp.Content, "mid-turn")
+	require.Contains(t, resp.Content, "2 earlier message(s)")
+
+	manager.sendOutcome = SendOutcome{}
+	resp = callTaskTool(t, NewTaskSendTool(manager), TaskSendParams{ID: "t1", Message: "and this"})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "starts a turn on it now")
 }
 
 func TestTaskSendTool_MissingFields(t *testing.T) {

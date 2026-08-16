@@ -83,28 +83,47 @@ the DST boundary, keep the exported API unchanged" is.
    one actually landed — `thread_wait` only tells you they've settled, not
    into what state.
 
+Do not poll with `bash sleep` instead: it costs a turn, tells you nothing
+when it returns, and a thread that finishes one second in still leaves you
+sitting there. `thread_wait` returns the moment the threads settle.
+
+A running thread is not steerable. `thread_send` is not in the default tool
+set, and where it is enabled it does not interrupt anything: a thread that
+is mid-turn only reads the message as its *next* prompt, and a thread deep
+in a sub-agent call can be minutes from that point. A deadline ("you have
+five minutes") sent that way is read after the deadline has passed. So
+treat a launched thread as running to completion: put everything it needs
+in the goal, and if you need it to stop now, that is `thread_remove` with
+`force`, not a message.
+
 ## Handling settled statuses
 
 - **`merged`** — done; nothing to do but tell the user and, once you've
   confirmed you don't need the worktree anymore, `thread_remove` it.
 - **`conflict`** — the merge hit conflicting hunks, left unresolved in the
-  thread's worktree. `thread_send` an instruction telling the thread's agent
-  to resolve the conflicts (open the conflicted files, pick/combine the
-  changes, stage them) and report back, then call `thread_merge` again. Do
-  not try to resolve the conflict yourself from outside the thread's
-  worktree.
+  thread's worktree. Do not try to resolve them yourself from outside that
+  worktree. If you have `thread_send`, send the thread's agent an
+  instruction to resolve the conflicts (open the conflicted files,
+  pick/combine the changes, stage them) and report back, then call
+  `thread_merge` again. Without it, report the conflict and the conflicted
+  paths to the user and let them decide — resolving in the thread's
+  worktree is theirs to drive.
 - **`merge_blocked`** — the merge couldn't even be attempted cleanly (e.g.
   the base branch is checked out in your own worktree and it's dirty).
   `thread_status` gives the reason in its `error` field. This needs the
   user: either they clean/commit their own working tree, or you re-run
   `thread_merge` once it's safe.
 - **`failed`** — the thread's agent run errored out. `thread_status` gives
-  the error. Decide whether to `thread_send` a fix-up instruction to retry,
-  or `thread_remove` (with `force` if needed) and report the failure.
+  the error. Either `thread_send` a fix-up instruction to retry (if you have
+  that tool), or `thread_remove` (with `force` if needed) and report the
+  failure.
 - **`interrupted`** — the thread's process was torn down mid-run (e.g. Sennit
-  restarted) rather than the task failing. `thread_send` a message to resume
-  it — this respawns its agent session in the same worktree with the
-  message as new input.
+  restarted) rather than the task failing. Resuming it in place is a
+  `thread_send`: that respawns its agent session in the same worktree with
+  the message as new input. Without that tool, say so and let the user
+  resume it from the thread view — do not `thread_remove` an interrupted
+  thread to "restart" it, since that throws away work already in its
+  worktree.
 
 ## Manual merge policy
 
