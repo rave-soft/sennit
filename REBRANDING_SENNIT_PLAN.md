@@ -1,4 +1,4 @@
-# План ребрендинга Braid в Wythe
+# План ребрендинга Braid в Sennit
 
 ## Обратная совместимость не требуется
 
@@ -28,58 +28,75 @@ changelog и явно помеченные fixtures. Всё остальное �
 ## Цель
 
 Полностью перевести продукт, CLI, пользовательские интерфейсы, документацию и
-каналы поставки с бренда Braid на Wythe.
+каналы поставки с бренда Braid на Sennit.
 
 Имя Braid используется в путях, переменных окружения, hook API, именах
 инструментов, URI, базе данных, IPC, Go module path и пакетах дистрибуции —
 каждая из этих зон требует отдельного прохода, даже без слоя совместимости.
 
-## Почему Wythe
+## Почему Sennit
 
-Wythe — вертикальный слой каменной кладки. Стена собирается из нескольких
-wythes, связанных между собой тычковыми рядами: самостоятельные параллельные
-слои, работающие как одна конструкция. Это прямое продолжение метафоры Braid и
-существующего словаря thread/strand, но без ее главного дефекта.
+Sennit — плоская плетенка, свитая из отдельных прядей волокна; в морском деле
+из нее делают все, от оплетки до матов. Это прямое продолжение метафоры Braid и
+существующего словаря thread/strand: множество самостоятельных прядей,
+работающих как одно изделие.
 
 Имя выбрано по двум жестким критериям.
 
 **Отсутствие пересечений с CLI-инструментами.** Проверены Homebrew, официальные
-репозитории Arch, AUR, Debian contents по `bin/wythe`, crates.io, npm, PyPI,
-GitHub по точному имени и локальный PATH. Совпадений нет ни одного.
+репозитории Arch, AUR, Debian contents по `bin/sennit`, crates.io, npm, PyPI,
+GitHub по точному имени и локальный PATH. Совпадений нет ни одного, все реестры
+пакетов свободны.
 
 **Короткий уникальный префикс.** По корпусу из 27 045 имен команд (все
-исполняемые файлы в PATH плюс формулы и алиасы Homebrew) префикс `wyt`
-уникален: три символа и Tab дают завершение. Для сравнения, у `braid` и
-рассматривавшегося `chorda` минимальный уникальный префикс равен полному слову
-(`brai` конфликтует с `brainfuck`, `chord` — с формулой `chordii`).
+исполняемые файлы в PATH плюс формулы и алиасы Homebrew) префикс `senn`
+уникален: четыре символа и Tab дают завершение. На трех символах `sen` в меню
+попадают send, sendmail, sendme, senpai, sensible-* и sentencepiece. Для
+сравнения, у `braid` и рассматривавшегося `chorda` минимальный уникальный
+префикс равен полному слову: `brai` конфликтует с `brainfuck`, `chord` — с
+формулой `chordii`.
 
-Отвергнутые кандидаты и причины зафиксированы отдельно; ключевые: Hawser (AUR-
-пакет `hawser` и crate `hawser`, плюс историческое имя git-lfs), Ferrule (crate
-— CLI к базам данных), Truss (системный трассировщик в Solaris и FreeBSD),
-Sennit (несколько равноправных написаний), Chorda (префикс `ch` — 261 команда).
+Известные несовершенства, принятые сознательно:
 
-Написание бренда: `Wythe` в тексте, `wythe` для CLI и файлов, `WYTHE` для
-переменных окружения. Длина совпадает с `BRAID` — пять букв.
+- у слова есть равноправные написания sennit, sinnet и sennet, поэтому со слуха
+  имя восстанавливается неоднозначно;
+- существует бразильская софтверная компания Sennit с той же метафорой в
+  основе бренда, домен `sennit.io` занят;
+- на GitHub есть однозвездный `Alphabetsoup16/sennit` — MCP-агрегатор для
+  параллельного запуска инструментов, то есть тезка в соседней нише.
+
+Ни одно из этого не является пересечением с CLI и на решение не влияет.
+
+Отвергнутые кандидаты и причины: Hawser (AUR-пакет `hawser` и crate `hawser`,
+плюс историческое имя git-lfs), Ferrule (crate — CLI к базам данных), Truss
+(системный трассировщик в Solaris и FreeBSD), Xylem (`catkin/xylem` ставит
+одноименный CLI), Chorda (префикс `ch` — 261 команда, плюс формула `chordii`),
+Weft, Heddle, Sinew, Descant и Ropewalk (заняты продуктами в нише AI-агентов).
+Отдельно: Wythe проходит оба критерия и дает префикс из трех символов, но
+проиграл Sennit по решению о бренде, а не по проверкам.
+
+Написание бренда: `Sennit` в тексте, `sennit` для CLI и файлов, `SENNIT` для
+переменных окружения.
 
 ## Судьба существующих данных
 
 Автоматической миграции нет. Нужно выбрать одно поведение и задокументировать
 его:
 
-- [ ] Вариант A (рекомендуемый): Wythe стартует с чистым профилем в новых
+- [ ] Вариант A (рекомендуемый): Sennit стартует с чистым профилем в новых
   каталогах, старые каталоги Braid не читаются и не удаляются. В release notes
   и migration guide даются ручные команды переноса.
-- [ ] Вариант B: одноразовая явная команда `wythe migrate-from-braid`,
+- [ ] Вариант B: одноразовая явная команда `sennit migrate-from-braid`,
   запускаемая пользователем вручную, вне обычного старта.
 
-В обоих вариантах Wythe ничего не удаляет и не перезаписывает в старом
+В обоих вариантах Sennit ничего не удаляет и не перезаписывает в старом
 профиле — откат на Braid всегда возможен простым запуском старого бинарника.
 
 ## Решения, которые нужно принять до реализации
 
-- [x] Имя и написание бренда утверждены — см. «Почему Wythe».
+- [x] Имя и написание бренда утверждены — см. «Почему Sennit».
 - [ ] Определить новый GitHub repository и Go module path, предположительно
-  `github.com/rave-soft/wythe`.
+  `github.com/rave-soft/sennit`.
 - [ ] Определить основной домен, URL документации, schema URL, support и issue
   tracker.
 - [ ] Утвердить владельцев и имена пакетов для Homebrew, npm, AUR, Scoop, Nix,
@@ -88,7 +105,7 @@ Sennit (несколько равноправных написаний), Chorda 
   продукта.
 - [ ] Выбрать вариант A или B в разделе «Судьба существующих данных».
 - [ ] Решить судьбу старого репозитория: rename с redirect либо архивный
-  репозиторий с указателем на Wythe.
+  репозиторий с указателем на Sennit.
 
 ## Принципы
 
@@ -125,45 +142,45 @@ Sennit (несколько равноправных написаний), Chorda 
 
 ### CLI и публичные имена
 
-- [ ] Выпускать единственный бинарник `wythe`.
-- [ ] Переименовать публичные tools в `wythe_info` и `wythe_logs`.
-- [ ] Перевести skills URI на `wythe://skills/...`.
+- [ ] Выпускать единственный бинарник `sennit`.
+- [ ] Переименовать публичные tools в `sennit_info` и `sennit_logs`.
+- [ ] Перевести skills URI на `sennit://skills/...`.
 - [ ] Переименовать builtin skills `braid-config` и `braid-hooks` в
-  `wythe-config` и `wythe-hooks`.
+  `sennit-config` и `sennit-hooks`.
 
 ### Переменные окружения и hooks
 
-- [ ] Перевести все runtime, server, test и config variables на `WYTHE_*`.
-- [ ] В hook payload передавать `WYTHE_EVENT`, `WYTHE_TOOL_NAME`,
-  `WYTHE_SESSION_ID`, `WYTHE_CWD`, `WYTHE_PROJECT_DIR` и tool input variables.
-- [ ] Обновить marker variables до `WYTHE=1`, `AGENT=wythe`, `AI_AGENT=wythe`.
+- [ ] Перевести все runtime, server, test и config variables на `SENNIT_*`.
+- [ ] В hook payload передавать `SENNIT_EVENT`, `SENNIT_TOOL_NAME`,
+  `SENNIT_SESSION_ID`, `SENNIT_CWD`, `SENNIT_PROJECT_DIR` и tool input variables.
+- [ ] Обновить marker variables до `SENNIT=1`, `AGENT=sennit`, `AI_AGENT=sennit`.
 - [ ] Перенести специальную логику, где любое `BRAID_<NAME>` становится override
-  для `<NAME>`, на префикс `WYTHE_`.
+  для `<NAME>`, на префикс `SENNIT_`.
 - [ ] Явно указать в migration guide, что пользовательские hook-скрипты,
   завязанные на `BRAID_*`, сломаются и требуют правки.
 
 ### Config и context discovery
 
-- [ ] Сделать единственными именами `.wythe/`, `wytherc`, `.wytherc`,
-  `wythe.json`, `.wythe.json` и `.wytheignore`.
-- [ ] Перевести `.wythe/agents`, `.wythe/skills`, глобальные skills и
-  `~/.wythe/commands`.
-- [ ] Перевести context discovery на `WYTHE.md`, его casing и `.local` variants.
-- [ ] Обновить `$WYTHE_VERSION` в shell config.
+- [ ] Сделать единственными именами `.sennit/`, `sennitrc`, `.sennitrc`,
+  `sennit.json`, `.sennit.json` и `.sennitignore`.
+- [ ] Перевести `.sennit/agents`, `.sennit/skills`, глобальные skills и
+  `~/.sennit/commands`.
+- [ ] Перевести context discovery на `SENNIT.md`, его casing и `.local` variants.
+- [ ] Обновить `$SENNIT_VERSION` в shell config.
 - [ ] Убедиться, что старые имена нигде не остались в списках discovery — иначе
   получится молчаливый частичный dual-read.
 
 ## Этап 3. Хранилище и IPC
 
-- [ ] Перевести глобальный config/data/cache на каталоги `wythe` на Unix,
+- [ ] Перевести глобальный config/data/cache на каталоги `sennit` на Unix,
   Windows и при использовании XDG overrides.
 - [ ] Переименовать `braid.db`, логи, credentials/state и project registry.
 - [ ] Пересмотреть существующую legacy-миграцию `.braid/braid.db`: без
   требований совместимости этот код удаляется целиком.
 - [ ] Перевести lock-файлы, panic/server logs, Unix socket/Windows pipe и
-  внутренний host `api.braid.localhost` на Wythe.
-- [ ] Проверить, что Wythe не открывает и не блокирует старые пути, поэтому
-  параллельный запуск Braid и Wythe безопасен по построению.
+  внутренний host `api.braid.localhost` на Sennit.
+- [ ] Проверить, что Sennit не открывает и не блокирует старые пути, поэтому
+  параллельный запуск Braid и Sennit безопасен по построению.
 - [ ] Тесты: fresh install на каждой поддерживаемой ОС; upgrade-сценарии не
   нужны.
 
@@ -185,13 +202,13 @@ Sennit (несколько равноправных написаний), Chorda 
 
 ## Этап 5. Продуктовый интерфейс
 
-- [ ] Заменить бренд в system prompts и agent templates на Wythe.
-- [ ] Обновить terminal header, большой wordmark и small logo под `WYTHE`.
-  Длина совпадает с `BRAID` — пять букв, — поэтому ширина и раскладка
-  ASCII-логотипа сохраняются, меняются только глифы.
+- [ ] Заменить бренд в system prompts и agent templates на Sennit.
+- [ ] Обновить terminal header, большой wordmark и small logo под шесть букв
+  `SENNIT`. Текущий ASCII-логотип рассчитан на пять букв `BRAID`, поэтому
+  ширина и раскладка требуют пересчета.
 - [ ] Заменить notification icon и app name на всех платформах.
 - [ ] Обновить OAuth callback page, title, тексты успешной авторизации и assets.
-- [ ] Обновить attribution string `Generated with Braid` на Wythe с учетом
+- [ ] Обновить attribution string `Generated with Braid` на Sennit с учетом
   сохраненных пользовательских настроек.
 - [ ] Проверить onboarding, ошибки, doctor output, crash report URL и все
   команды, видимые пользователю.
@@ -208,16 +225,16 @@ Sennit (несколько равноправных написаний), Chorda 
 - [ ] Обновить sample config, schema references и editor integration.
 - [ ] Проверить ссылки, repository URLs, support contacts и issue templates.
 - [ ] Сохранить корректную историческую и лицензионную атрибуцию в `NOTICE` и
-  `LICENSE.md`; не выдавать upstream code/assets за новые материалы Wythe.
+  `LICENSE.md`; не выдавать upstream code/assets за новые материалы Sennit.
 
 ## Этап 7. Сборка, упаковка и выпуск
 
-- [ ] Перевести `.goreleaser.yml` на `project_name: wythe`, бинарник `wythe`,
-  архивы, checksums, completions и `wythe.1`.
+- [ ] Перевести `.goreleaser.yml` на `project_name: sennit`, бинарник `sennit`,
+  архивы, checksums, completions и `sennit.1`.
 - [ ] Обновить `Makefile`, `Taskfile.yaml`, `.gitignore`, `flake.nix` и dev scripts.
 - [ ] Создать пакеты Homebrew, npm, AUR, Scoop, Nix, Winget, deb/rpm/apk;
   проверить ownership и signing secrets.
-- [ ] Пометить старые package names deprecated с указателем на Wythe, где канал
+- [ ] Пометить старые package names deprecated с указателем на Sennit, где канал
   это поддерживает; redirect-совместимость установки не требуется.
 - [ ] Проверить repository URL, release notes URL, license URL и issue tracker
   во всех manifests.
@@ -231,7 +248,7 @@ Sennit (несколько равноправных написаний), Chorda 
 
 - [ ] Опубликовать анонс с причиной переименования, таблицей новых имен и явным
   предупреждением о breaking change без окна совместимости.
-- [ ] Архивировать или переименовать старый репозиторий с указателем на Wythe.
+- [ ] Архивировать или переименовать старый репозиторий с указателем на Sennit.
 - [ ] Отслеживать обращения по config discovery, hooks, packages, PATH и
   «пропавшей» истории; отвечать ссылкой на migration guide.
 
@@ -239,17 +256,17 @@ Sennit (несколько равноправных написаний), Chorda 
 
 | Контракт | Старое значение | Новое значение |
 | --- | --- | --- |
-| CLI | `braid` | `wythe` |
-| Env | `BRAID_*` | `WYTHE_*` |
-| Hooks | `BRAID_*`, `AGENT=braid` | `WYTHE_*`, `AGENT=wythe` |
-| Config dir | `.braid`, `~/.config/braid` | `.wythe`, `~/.config/wythe` |
-| Config files | `braidrc`, `braid.json` | `wytherc`, `wythe.json` |
-| Context | `BRAID.md` variants | `WYTHE.md` variants |
-| Ignore | `.braidignore` | `.wytheignore` |
-| Skills URI | `braid://skills/` | `wythe://skills/` |
-| Tools | `braid_info`, `braid_logs` | `wythe_info`, `wythe_logs` |
-| State/DB | Braid paths/names | Wythe paths/names |
-| Packages | Braid package names | Wythe package names |
+| CLI | `braid` | `sennit` |
+| Env | `BRAID_*` | `SENNIT_*` |
+| Hooks | `BRAID_*`, `AGENT=braid` | `SENNIT_*`, `AGENT=sennit` |
+| Config dir | `.braid`, `~/.config/braid` | `.sennit`, `~/.config/sennit` |
+| Config files | `braidrc`, `braid.json` | `sennitrc`, `sennit.json` |
+| Context | `BRAID.md` variants | `SENNIT.md` variants |
+| Ignore | `.braidignore` | `.sennitignore` |
+| Skills URI | `braid://skills/` | `sennit://skills/` |
+| Tools | `braid_info`, `braid_logs` | `sennit_info`, `sennit_logs` |
+| State/DB | Braid paths/names | Sennit paths/names |
+| Packages | Braid package names | Sennit package names |
 
 Колонки «переходное поведение» в этой таблице сознательно нет.
 
@@ -257,7 +274,7 @@ Sennit (несколько равноправных написаний), Chorda 
 
 - [ ] `gofumpt -w .` или `task fmt` не создает незапланированных изменений.
 - [ ] `go test ./...` проходит на чистом профиле.
-- [ ] `go build .` создает рабочий бинарник Wythe.
+- [ ] `go build .` создает рабочий бинарник Sennit.
 - [ ] `task lint:fix`/lint проходит без новых suppressions.
 - [ ] GoReleaser snapshot создает только ожидаемые артефакты и имена.
 - [ ] Тестовая матрица покрывает Linux, macOS и Windows, fresh install.
@@ -269,9 +286,9 @@ Sennit (несколько равноправных написаний), Chorda 
 
 ## Критерии готовности релиза
 
-1. Пользователь устанавливает Wythe с нуля и нигде в штатном UX не видит Braid.
+1. Пользователь устанавливает Sennit с нуля и нигде в штатном UX не видит Braid.
 2. Все официальные пакеты, документация, schema и release assets используют
-   согласованные идентификаторы Wythe.
+   согласованные идентификаторы Sennit.
 3. Migration guide явно перечисляет все сломанные контракты.
 4. Для каждого оставшегося упоминания Braid есть документированная причина.
 
@@ -292,7 +309,7 @@ Sennit (несколько равноправных написаний), Chorda 
 Многофазная схема с подготовительным релизом больше не нужна: без слоя
 совместимости ребрендинг умещается в один релиз.
 
-### Единственный релиз: первый Wythe
+### Единственный релиз: первый Sennit
 
 - Переключить бренд, CLI, repository/module, хранилище, UI, docs и package names
   одним изменением.
