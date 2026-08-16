@@ -293,6 +293,11 @@ type sessionState struct {
 
 	lastUserMessageTime int64
 
+	// modelUsed is the model the loaded session's own assistant messages
+	// were produced by — which is not the selected model for a sub-agent's
+	// session or one opened from history. See viewedModel.
+	modelUsed sessionModelRef
+
 	loadGen        uint64
 	loadExpectedID string
 

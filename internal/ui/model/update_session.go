@@ -71,6 +71,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		m.setState(uiChat, m.focus)
 		m.sess.current = msg.session
+		m.sess.modelUsed = msg.modelUsed
 		m.sidebar.offset = 0
 		m.sess.files = msg.files
 		// Session switch: the memoized busy state and queued prompts
@@ -226,6 +227,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			}
 			break
 		}
+		m.recordAssistantModel(msg.Payload)
 		switch msg.Type {
 		case pubsub.CreatedEvent:
 			cmds = append(cmds, m.appendSessionMessage(msg.Payload))

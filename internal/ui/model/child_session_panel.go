@@ -99,10 +99,15 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	width := area.Dx()
 	frame := m.sess.navStack[len(m.sess.navStack)-1]
 
-	// Row 1: model/effort override — "default model" when the delegation
-	// has none (agentic_fetch, or an agent tool inheriting the app's
-	// default), so the row is never blank.
+	// Row 1: which model this delegation ran on. Its own override when it
+	// has one; otherwise what its messages record, which is the answer for
+	// a delegation that inherited the app's model — including one read
+	// back from history, where the model of the day may be long gone from
+	// the picker. "default model" only when it has yet to answer anything.
 	line := childPanelModelSubtitle(frame.model, frame.effort)
+	if line == "" {
+		line = childPanelModelSubtitle(m.sess.modelUsed.String(), frame.effort)
+	}
 	if line == "" {
 		line = "default model"
 	}
@@ -199,7 +204,7 @@ func (m *UI) childPanelContextWindow(frame sessionNavFrame) int64 {
 		}
 		return 0
 	}
-	if sel := m.selectedModel(); sel != nil {
+	if sel := m.viewedModel(); sel != nil {
 		return sel.CatalogCfg.ContextWindow
 	}
 	return 0
