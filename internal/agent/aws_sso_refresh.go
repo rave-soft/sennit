@@ -40,8 +40,7 @@ func extractAWSSSOURL(line string) string {
 // signal that the failed request should be retried.
 //
 // The command runs here, in the coordinator, rather than in the UI dialog so
-// the refreshed credentials land where the model calls are made. This is
-// correct in both single-process and client/server deployments.
+// the refreshed credentials land where the model calls are made.
 func (c *coordinator) refreshAWSCredentials(ctx context.Context, providerCfg config.ProviderConfig) error {
 	if c.notify == nil {
 		return errNoInteractiveAuth

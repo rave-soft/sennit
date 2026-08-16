@@ -816,7 +816,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmds, done = m.updateShell(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case util.InfoMsg, util.ClearStatusMsg, pubsub.Event[proto.ServerNotice], workspace.UpdateAvailableMsg, workspace.ConnectionEvent, pubsub.Event[workspace.AgentNotification], cancelTimerExpiredMsg:
+	case util.InfoMsg, util.ClearStatusMsg, pubsub.Event[proto.ServerNotice], workspace.UpdateAvailableMsg, pubsub.Event[workspace.AgentNotification], cancelTimerExpiredMsg:
 		var done bool
 		if cmds, done = m.updateStatus(msg, cmds); done {
 			return m, tea.Batch(cmds...)
@@ -872,39 +872,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// should return all cmds anyway.
 	_ = m.editor.attachments.Update(msg)
 	return m, tea.Batch(cmds...)
-}
-
-// handleConnectionEvent reports the health of the client-server link and,
-// once it recovers, reloads the open session. A reload is always needed
-// after a degraded episode: events published while the stream was down are
-// gone, and if the workspace itself was re-created any run died with it.
-func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
-	info := util.InfoMsg{
-		Type: util.InfoTypeWarn,
-		Msg:  "Lost connection to the Braid server — reconnecting…",
-		TTL:  30 * time.Second,
-	}
-	switch msg.State {
-	case workspace.ConnectionDegraded:
-		slog.Warn("Server connection degraded", "error", msg.Err, "stuck", msg.Stuck)
-		if msg.Stuck {
-			info.Type = util.InfoTypeError
-			info.Msg = "Can't restore the connection to the Braid server. Restart Braid to recover."
-			info.TTL = time.Minute
-		}
-	case workspace.ConnectionRecovered:
-		info = util.InfoMsg{
-			Type: util.InfoTypeSuccess,
-			Msg:  "Reconnected to the Braid server.",
-			TTL:  DefaultStatusTTL,
-		}
-	}
-	m.status.SetInfoMsg(info)
-	cmds := []tea.Cmd{clearInfoMsgCmd(info.TTL)}
-	if msg.State == workspace.ConnectionRecovered && m.sess.session != nil {
-		cmds = append(cmds, m.requestSessionLoad(m.sess.session.ID))
-	}
-	return cmds
 }
 
 // childSessionRef identifies a sub-agent delegation (agent / agentic_fetch
@@ -1129,8 +1096,8 @@ type uiLayout struct {
 // isAgentBusy returns true if the agent coordinator exists and is currently
 // busy processing a request. It only reads the memoized state (it runs in
 // per-message paths like the textarea placeholder, where a workspace probe
-// would be an HTTP round-trip per keystroke in client/server mode); the
-// value is refreshed off-thread, see workspace_cache.go.
+// is treated as IO); the value is refreshed off-thread, see
+// workspace_cache.go.
 func (m *UI) isAgentBusy() bool {
 	if m.editor.bangCancel != nil {
 		return true

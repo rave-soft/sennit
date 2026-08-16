@@ -10,10 +10,9 @@ import (
 )
 
 // TestPermissionRequestParamsTypeAssertable guards the permission
-// dialog's type assertions across the client/server boundary. The TUI
-// asserts PermissionRequest.Params to tools.*PermissionsParams; when
-// the request round-trips over the SSE wire (server → client), the
-// decoded value must be the same Go type, otherwise the dialog
+// dialog's type assertions. The TUI asserts PermissionRequest.Params to
+// tools.*PermissionsParams; when the request round-trips through JSON,
+// the decoded value must be the same Go type, otherwise the dialog
 // renders empty content.
 func TestPermissionRequestParamsTypeAssertable(t *testing.T) {
 	t.Parallel()

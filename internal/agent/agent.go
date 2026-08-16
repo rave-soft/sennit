@@ -90,7 +90,7 @@ type SessionAgentCall struct {
 	OnComplete func(notify.RunComplete)
 	// Accepted, when non-nil, is the accept reservation taken by
 	// BeginAccepted before the call was dispatched onto a goroutine
-	// (the client/server fire-and-forget path). Run consumes it under
+	// (the fire-and-forget dispatch path). Run consumes it under
 	// dispatchMu[SessionID] once the accepted -> (cancel-on-entry |
 	// queued | active) transition has been chosen. When nil
 	// (in-process / local callers like AppWorkspace), behavior is

@@ -13,10 +13,11 @@ package model
 //     independent of the dashboard's.
 //   - Per-thread live activity (in-progress todo, message count), which
 //     requires AttachThread into the thread's own isolated workspace before
-//     GetSession can see its session — free in local/in-process mode but an
-//     HTTP round trip in client/server mode. Because of that cost this is
-//     fetched on its own, longer TTL and only for the small, bounded set of
-//     threads the dock actually renders (threadsDockVisibleCap).
+//     GetSession can see its session — cheap for a live thread, but a
+//     completed one must first be reactivated (respawning its worktree and
+//     process; see AttachThread). Because of that cost this is fetched on
+//     its own, longer TTL and only for the small, bounded set of threads
+//     the dock actually renders (threadsDockVisibleCap).
 //
 // Both halves follow the same TTL-cache idiom as threads_cache.go and
 // thread_indicator.go: a memoized value, checkedAt/inFlight/gen

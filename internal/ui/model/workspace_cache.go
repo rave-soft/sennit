@@ -2,9 +2,10 @@ package model
 
 // Memoized workspace state.
 //
-// In client/server mode every workspace probe (busy checks, permission mode,
-// queued prompts, agent readiness/model, LSP state) is a synchronous HTTP
-// round-trip, and the Update goroutine is the render loop — blocking it
+// Every workspace probe (busy checks, permission mode, queued prompts, agent
+// readiness/model, LSP state) goes through the workspace.Workspace boundary
+// and is treated as IO (see internal/ui/AGENTS.md: never do IO or expensive
+// work in Update). The Update goroutine is the render loop — blocking it
 // freezes typing. The UI therefore never probes the workspace synchronously
 // from Update or View. (The constructor is the one carve-out: New seeds the
 // yolo and ready/model caches synchronously so the first frame has values to
@@ -58,16 +59,15 @@ type workspaceCacheState struct {
 	// if the generation has moved on.
 	promptQueueGen uint64
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
-	// probes (synchronous HTTP round-trips in client/server mode). Reads
+	// probes (treated as IO — see the package doc comment above). Reads
 	// never probe; refreshes happen off-thread.
 	agentBusyCache    ttlCache[bool]
 	yoloCache         ttlCache[bool]
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
-	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
-	// client/server mode, and modelInfo renders them every frame). Seeded
-	// once at construction and refreshed by the same off-thread probe as
-	// agentBusyCache.
+	// selected model (AgentIsReady/AgentModel are treated as IO, and
+	// modelInfo renders them every frame). Seeded once at construction and
+	// refreshed by the same off-thread probe as agentBusyCache.
 	agentReady bool
 	agentModel workspace.AgentModel
 	// busyFetchGen is bumped by every busy/permission state transition;
@@ -177,9 +177,9 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 // updateAgentModelCmd sequences a coordinator model rebuild
 // (UpdateAgentModel) with the invalidation of the memoized ready/model
 // state. Callers wrap their pre-work in pre; the memoized model must only
-// be re-probed after the rebuild lands (a synchronous HTTP round-trip in
-// client/server mode), so the message drives the refresh instead of each
-// call site remembering to.
+// be re-probed after the rebuild lands (treated as IO — see the package doc
+// comment above), so the message drives the refresh instead of each call
+// site remembering to.
 func (m *UI) updateAgentModelCmd(pre tea.Cmd) tea.Cmd {
 	return tea.Sequence(pre, agentModelChangedCmd)
 }

@@ -30,7 +30,7 @@ func Translate(ev any) Event {
 	case pubsub.Event[permission.PermissionNotification]:
 		return PermissionResolved{}
 
-	// Proto types (client/server mode).
+	// Proto types (workspace/UI boundary events).
 	case pubsub.Event[proto.Message]:
 		return translateMessage(
 			e.Payload.Role == proto.Assistant,

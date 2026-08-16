@@ -22,9 +22,9 @@ import (
 )
 
 // countingWorkspace is a workspace.Workspace stub that counts every probe
-// that is a synchronous HTTP round-trip in client/server mode, split per
-// method so tests can pin exactly which probes ran. The embedded interface
-// panics on anything unimplemented.
+// treated as IO (see workspace_cache.go), split per method so tests can pin
+// exactly which probes ran. The embedded interface panics on anything
+// unimplemented.
 type countingWorkspace struct {
 	workspace.Workspace
 
@@ -218,12 +218,12 @@ func runCmds(m *UI, cmd tea.Cmd) {
 type plainMsg struct{}
 
 // TestUpdateDoesNotProbeWorkspacePerMessage pins the hot-path fix: Update
-// used to call AgentQueuedPrompts (a synchronous HTTP GET in client/server
-// mode) at the top of every message while the agent was busy, and the
-// placeholder path probed AgentIsReady/AgentIsBusy/PermissionSkipRequests —
-// every keystroke blocked the single Update goroutine on network round-
-// trips. Now Update performs no synchronous workspace call at all; refreshes
-// are dispatched as commands.
+// used to call AgentQueuedPrompts at the top of every message while the
+// agent was busy, and the placeholder path probed
+// AgentIsReady/AgentIsBusy/PermissionSkipRequests — every keystroke blocked
+// the single Update goroutine on a synchronous workspace call. Now Update
+// performs no synchronous workspace call at all; refreshes are dispatched
+// as commands.
 func TestUpdateDoesNotProbeWorkspacePerMessage(t *testing.T) {
 	pinTTLs(t)
 
@@ -653,7 +653,7 @@ func TestStalePromptQueuePreservesSessionScoping(t *testing.T) {
 // lspErrorCount render from memoized state only. They run on every frame
 // (landing view, sidebar, compact header), and the probes behind them
 // (AgentIsReady, AgentModel, LSPGetStates, LSPGetDiagnosticCounts) are
-// synchronous HTTP round-trips in client/server mode.
+// treated as IO — see workspace_cache.go.
 func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 	pinTTLs(t)
 
@@ -763,10 +763,10 @@ func TestMCPStateChangedRefreshesModel(t *testing.T) {
 
 // TestLSPEventRefreshIsOffThreadAndDeduped pins the LSP side of the
 // invariant: an LSP event must not fetch states synchronously in Update
-// (LSPGetStates + per-server LSPGetDiagnosticCounts are HTTP round-trips in
-// client/server mode, and diagnostics events arrive per edited file). It
-// schedules one off-thread fetch, dedups while one is in flight, and
-// re-dispatches a queued refresh when the in-flight fetch lands.
+// (LSPGetStates + per-server LSPGetDiagnosticCounts are treated as IO, and
+// diagnostics events arrive per edited file). It schedules one off-thread
+// fetch, dedups while one is in flight, and re-dispatches a queued refresh
+// when the in-flight fetch lands.
 func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 	pinTTLs(t)
 

@@ -78,23 +78,6 @@ var (
 	ErrTasksNotSupported = errors.New("workspace does not support tasks")
 )
 
-// ConnectionState describes the health of a workspace's event
-// subscription loop.
-type ConnectionState int
-
-const (
-	// ConnectionDegraded means the event stream is down (or the workspace
-	// was lost server-side) and the client is retrying or re-registering
-	// in the background.
-	ConnectionDegraded ConnectionState = iota
-	// ConnectionRecovered means the event stream was re-established,
-	// possibly against a re-created workspace.
-	ConnectionRecovered
-)
-
-// ConnectionEvent is delivered to the TUI as a tea.Msg on degraded and
-// recovered transitions of the client-server link. Local (in-process)
-// workspaces never emit it.
 type AgentNotificationType string
 
 const (
@@ -121,17 +104,6 @@ type UpdateAvailableMsg struct {
 	CurrentVersion string
 	LatestVersion  string
 	IsDevelopment  bool
-}
-
-type ConnectionEvent struct {
-	State ConnectionState
-	// Err is the most recent failure, set when State is
-	// ConnectionDegraded.
-	Err error
-	// Stuck marks a degraded connection that has resisted repeated
-	// recovery attempts. The loop keeps retrying regardless; the UI
-	// should escalate from a transient notice to a persistent error.
-	Stuck bool
 }
 
 // LSPClientInfo is the frontend-facing LSP client state.

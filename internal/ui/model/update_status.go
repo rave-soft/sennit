@@ -44,10 +44,9 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case pubsub.Event[proto.ServerNotice]:
-		// Server-originated notices (e.g. a client/server version
-		// mismatch) arrive as the transport-neutral proto.ServerNotice
-		// so backend code doesn't need to depend on internal/ui; convert
-		// to util.InfoMsg here at the boundary.
+		// Backend-originated notices arrive as the transport-neutral
+		// proto.ServerNotice so backend code doesn't need to depend on
+		// internal/ui; convert to util.InfoMsg here at the boundary.
 		info := util.InfoMsg{
 			Type: serverNoticeLevelToInfoType(msg.Payload.Level),
 			Msg:  msg.Payload.Message,
@@ -70,8 +69,6 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			TTL:  ttl,
 		})
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
-	case workspace.ConnectionEvent:
-		cmds = append(cmds, m.handleConnectionEvent(msg)...)
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
 	}

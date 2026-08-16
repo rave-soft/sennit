@@ -69,9 +69,8 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.editor.promptHistory.draft = ""
 
 	case pubsub.Event[workspace.LSPEvent]:
-		// Refresh the memoized LSP state off-thread: LSPGetStates is a
-		// synchronous HTTP round-trip in client/server mode and diagnostics
-		// events can arrive per edited file.
+		// Refresh the memoized LSP state off-thread: LSPGetStates is treated
+		// as IO and diagnostics events can arrive per edited file.
 		if cmd := m.requestLSPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

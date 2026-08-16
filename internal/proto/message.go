@@ -24,7 +24,7 @@ type Message struct {
 // belongs to [message]. Everything below is a type alias over the
 // canonical definitions there rather than a copy, so a
 // [proto.ContentPart] and a [message.ContentPart] are the same Go
-// value with no conversion needed at the client/server boundary. This
+// value with no conversion needed between the UI and the backend. This
 // mirrors the pattern already used for tool parameter types in
 // tools.go.
 //
@@ -77,10 +77,10 @@ const (
 )
 
 // MarshalParts and UnmarshalParts re-export [message.MarshalParts] and
-// [message.UnmarshalParts]. The client/server wire format for a
-// message's parts is byte-for-byte the same envelope SQLite storage
-// uses (type-tagged wrapper plus "_meta" version marker), so proto has
-// no format of its own to maintain here.
+// [message.UnmarshalParts]. proto's JSON encoding for a message's parts
+// is byte-for-byte the same envelope SQLite storage uses (type-tagged
+// wrapper plus "_meta" version marker), so proto has no format of its
+// own to maintain here.
 var (
 	MarshalParts   = message.MarshalParts
 	UnmarshalParts = message.UnmarshalParts

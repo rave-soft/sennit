@@ -4,10 +4,10 @@ package model
 //
 // Threads are parallel agent work streams the workspace runs in isolated
 // git worktrees (see internal/workspace/threads.go). Like the workspace
-// probes in workspace_cache.go, ListThreads is a synchronous round-trip in
-// client/server mode, so the dashboard (added in a later step) must never
-// call it from Update or View: it reads the memoized slice and this file
-// refreshes it off-thread, applying results back on the Update goroutine.
+// probes in workspace_cache.go, ListThreads is treated as IO, so the
+// dashboard (added in a later step) must never call it from Update or
+// View: it reads the memoized slice and this file refreshes it off-thread,
+// applying results back on the Update goroutine.
 //
 // Follows the same idiom as workspace_cache.go:
 //   - threadsCacheState holds the memoized value plus ttlCache bookkeeping,

@@ -55,7 +55,7 @@ func (h *header) refresh() {
 
 // drawHeader draws the header for the given session. lspErrorCount comes
 // from the UI's memoized LSP state: drawing runs on every frame and must not
-// probe the workspace (a synchronous HTTP round-trip in client/server mode).
+// probe the workspace (treated as IO — see workspace_cache.go).
 func (h *header) drawHeader(
 	scr uv.Screen,
 	area uv.Rectangle,

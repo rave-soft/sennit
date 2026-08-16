@@ -70,9 +70,9 @@ type AgentToolMessageItem struct {
 	// renderAgentStatusLine): a long delegation used to render as a bare
 	// spinner with no feedback for as long as it took the sub-agent to
 	// finish its first tool call — indistinguishable from a hang. Elapsed
-	// time is wall-clock local to this item, so it keeps advancing even
-	// in client/server mode if child-session events are ever delayed or
-	// dropped; the other fields degrade gracefully to "unknown" instead.
+	// time is wall-clock local to this item, so it keeps advancing even if
+	// child-session events are ever delayed or dropped; the other fields
+	// degrade gracefully to "unknown" instead.
 	startTime        time.Time
 	promptTokens     int64
 	completionTokens int64
@@ -908,8 +908,8 @@ func renderResultPreviewLine(sty *styles.Styles, width int, content string) stri
 // the only feedback during that stretch was the nested-tool tree — which
 // starts out empty and, once populated, only reflects the *last* observed
 // child-session pubsub event. If those events are delayed, coalesced, or
-// (in client/server mode) briefly interrupted, the render looks frozen even
-// though the sub-agent is making progress. renderAgentStatusLine is a
+// briefly interrupted, the render looks frozen even though the sub-agent
+// is making progress. renderAgentStatusLine is a
 // single line that's cheap to keep fresh every animation tick — most
 // importantly, the elapsed-time component advances on wall clock alone, so
 // it never stalls even if every other signal does.

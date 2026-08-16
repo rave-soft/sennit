@@ -114,7 +114,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 	}
 
 	// Gate on the memoized ready state: esc is a hot key and AgentIsReady
-	// is a synchronous HTTP round-trip in client/server mode.
+	// is treated as IO — see workspace_cache.go.
 	if !m.wsCache.agentReady {
 		return nil
 	}

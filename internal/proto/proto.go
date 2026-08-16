@@ -15,11 +15,10 @@ const (
 	ServerNoticeLevelError ServerNoticeLevel = "error"
 )
 
-// ServerNotice carries a human-readable notice from the server (e.g. a
-// client/server version mismatch) for display in the client's status
-// area. It is the transport-neutral payload backend code publishes
-// instead of reaching into internal/ui/util directly; the UI converts
-// it to its own util.InfoMsg on receipt.
+// ServerNotice carries a human-readable notice for display in the
+// client's status area. It is the transport-neutral payload backend
+// code publishes instead of reaching into internal/ui/util directly;
+// the UI converts it to its own util.InfoMsg on receipt.
 type ServerNotice struct {
 	Level   ServerNoticeLevel `json:"level"`
 	Message string            `json:"message"`
@@ -45,8 +44,8 @@ type QuestionChoice struct {
 // RunComplete is the authoritative end-of-run signal for a session,
 // emitted exactly once per top-level agent turn after all message
 // updates for the turn have flushed. Clients that need a reliable
-// completion contract (notably `braid run` in client/server mode)
-// should listen for this event filtered by RunID (preferred) — or
+// completion contract (notably `braid run`) should listen for this
+// event filtered by RunID (preferred) — or
 // by SessionID when no RunID was supplied — and use Text and
 // MessageID to reconcile any output they have already streamed from
 // earlier message events. Error is non-empty when the run terminated

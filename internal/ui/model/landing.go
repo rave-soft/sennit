@@ -12,8 +12,8 @@ import (
 // selectedModel returns the currently selected model as memoized by the
 // off-thread busy/agent probe (see workspace_cache.go), or nil when the
 // agent isn't ready. It must never probe the workspace: it is called on
-// every frame and AgentIsReady/AgentModel are synchronous HTTP round-trips
-// in client/server mode.
+// every frame, and workspace calls are treated as IO that must not run
+// synchronously in Update or View (see workspace_cache.go).
 func (m *UI) selectedModel() *workspace.AgentModel {
 	if m.wsCache.agentReady {
 		model := m.wsCache.agentModel

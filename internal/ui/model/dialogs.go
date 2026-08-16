@@ -315,9 +315,8 @@ func (m *UI) openDoctorDialog() {
 
 // openSessionsDialog opens the sessions dialog. If the dialog is already
 // open, it brings it to the front. Otherwise it dispatches an off-thread
-// ListSessions fetch (a synchronous HTTP round-trip in client/server mode)
-// and opens the dialog once sessionsLoadedMsg lands; see
-// applySessionsLoaded.
+// ListSessions fetch (treated as IO — see workspace_cache.go) and opens
+// the dialog once sessionsLoadedMsg lands; see applySessionsLoaded.
 func (m *UI) openSessionsDialog() tea.Cmd {
 	if m.dialog.ContainsDialog(dialog.SessionsID) {
 		// Bring to front

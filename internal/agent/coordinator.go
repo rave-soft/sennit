@@ -535,16 +535,15 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	// The readiness goroutines below perform one-time setup — building the
 	// system prompt and the (MCP-gated) tool list — whose results the
 	// coordinator needs for its whole lifetime, so they must survive the
-	// caller's context being canceled. Several entry points build an agent
-	// from a short-lived HTTP request context: the server's
-	// InitAgent/UpdateAgent handlers, and UpdateModels -> buildTools ->
-	// agentTool -> buildAgent for the sub-agent. Because mcp.WaitForInit
-	// blocks until MCP initialization finishes, a slow MCP server keeps one
-	// of these goroutines parked past the request; if it inherited the
-	// caller's cancellation, that request context going away (or, for the
-	// sub-agent rebuilt on every run, the *next* run's context replacing
-	// this one) would abort the work before emitting anything — the
-	// client/server session hangs with no visible response. c.lifecycleCtx
+	// caller's context being canceled. Some entry points build an agent
+	// from a short-lived caller context, notably UpdateModels ->
+	// buildTools -> agentTool -> buildAgent for the sub-agent. Because
+	// mcp.WaitForInit blocks until MCP initialization finishes, a slow MCP
+	// server keeps one of these goroutines parked past the call; if it
+	// inherited the caller's cancellation, that context going away (or, for
+	// the sub-agent rebuilt on every run, the *next* run's context replacing
+	// this one) would abort the work before emitting anything — the session
+	// hangs with no visible response. c.lifecycleCtx
 	// (see ensureLifecycle) is scoped to the coordinator itself instead: it
 	// only cancels when the coordinator is Close()d, so the work keeps
 	// running until it either finishes or the coordinator shuts down —

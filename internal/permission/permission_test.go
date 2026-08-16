@@ -344,9 +344,9 @@ func TestPermissionService_SequentialProperties(t *testing.T) {
 }
 
 // TestPermissionService_ResolveIdempotency covers the multi-subscriber
-// resolve guarantees added for client/server mode: exactly one
-// notification per resolution, racing callers see "already resolved",
-// and stray Grant/Deny calls for unknown IDs are safe no-ops.
+// resolve guarantees: exactly one notification per resolution, racing
+// callers see "already resolved", and stray Grant/Deny calls for unknown
+// IDs are safe no-ops.
 func TestPermissionService_ResolveIdempotency(t *testing.T) {
 	t.Parallel()
 

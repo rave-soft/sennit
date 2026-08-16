@@ -637,8 +637,8 @@ type partWrapper struct {
 // MarshalParts marshals content parts to JSON, wrapping each in a
 // type-tagged envelope plus a synthetic "_meta" version marker (see
 // [partsFormatVersion]). Exported so [github.com/rave-soft/braid/internal/proto]
-// can reuse it for the client/server wire format, which shares the
-// exact same shape as the SQLite storage format.
+// can reuse it for its own JSON encoding, which shares the exact same
+// shape as the SQLite storage format.
 func MarshalParts(parts []ContentPart) ([]byte, error) {
 	wrappedParts := make([]partWrapper, 0, len(parts)+1)
 	wrappedParts = append(wrappedParts, partWrapper{

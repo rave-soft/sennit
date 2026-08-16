@@ -93,7 +93,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		// errgroup. Any other early return means this minimal setup failed to
 		// build, which the NoError check surfaces distinctly.
 		require.NotErrorIs(t, err, context.Canceled,
-			"readyWg was poisoned by caller cancellation (client/server new-session hang regression)")
+			"readyWg was poisoned by caller cancellation (new-session hang regression)")
 		require.NoError(t, err, "unexpected buildAgent readiness error")
 	case <-time.After(250 * time.Millisecond):
 		// readyWg is still waiting on MCP init despite the canceled caller

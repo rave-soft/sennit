@@ -1,10 +1,9 @@
 package proto
 
-// The wire schema for per-tool permission parameters is owned by the
-// tool itself, not duplicated here. We alias the canonical types so
-// there is exactly one source of truth and so values survive a
-// round-trip across the client/server boundary as the same Go type
-// the UI asserts on.
+// The schema for per-tool permission parameters is owned by the tool
+// itself, not duplicated here. We alias the canonical types so there is
+// exactly one source of truth and so values survive a JSON round-trip
+// as the same Go type the UI asserts on.
 import "github.com/rave-soft/braid/internal/agent/tools"
 
 const BashToolName = "bash"

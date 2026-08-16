@@ -97,11 +97,9 @@ func TestResolveSession_ContinueByID_ChildSession(t *testing.T) {
 	require.Contains(t, err.Error(), "cannot continue a child session")
 }
 
-// TestResolveSession_ContinueByID_AgentToolSession is the coverage
-// the client/server path lacked before this refactor: `braid run
-// --session <agent-tool-session-id>` must be rejected the same way
-// local mode already rejects it, instead of quietly attaching to an
-// internal tool-call session.
+// TestResolveSession_ContinueByID_AgentToolSession covers that `braid run
+// --session <agent-tool-session-id>` must be rejected, instead of quietly
+// attaching to an internal tool-call session.
 func TestResolveSession_ContinueByID_AgentToolSession(t *testing.T) {
 	t.Parallel()
 	ws := &fakeSessionWorkspace{}
