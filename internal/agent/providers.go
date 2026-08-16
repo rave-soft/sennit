@@ -412,14 +412,26 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, proxyURL string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, providerID, proxyURL string) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
-	if httpClient, err := c.buildProviderHTTPClient(proxyURL); err != nil {
+	httpClient, err := c.buildProviderHTTPClient(proxyURL)
+	if err != nil {
 		return nil, err
-	} else if httpClient != nil {
+	}
+	if providerID == codex.ProviderID {
+		// Codex quotes the account's plan and remaining allowance on every
+		// response, so the sidebar's figures come from ordinary traffic
+		// rather than a separate poll — but only if something reads the
+		// headers, which is what this transport is for.
+		if httpClient == nil {
+			httpClient = &http.Client{}
+		}
+		httpClient.Transport = codex.NewUsageTransport(httpClient.Transport)
+	}
+	if httpClient != nil {
 		opts = append(opts, openai.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
@@ -631,7 +643,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.ProxyURL)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL)
 	case anthropic.Name:
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.ProxyURL)
 	case openrouter.Name:

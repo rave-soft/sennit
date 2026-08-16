@@ -42,6 +42,12 @@ the browser step is skipped. Which models the account may use is read from
 the Codex backend at sign-in and written to `providers.codex.models`; re-run
 `sennit login codex -f` to refresh that list after a plan change.
 
+Because the plan is flat-rate, the sidebar shows what it costs you instead
+of a running total: the tier and how much of the current allowance is gone,
+e.g. `Plus · 6% of weekly limit, resets in 3d`. The figures ride along on
+the model's own replies, so the line appears once the session has sent its
+first message and refreshes with every one after that.
+
 If OpenAI is only reachable through a proxy, give it one — the sign-in asks
 for it before anything goes out, and the model picker's Codex dialog opens
 on the same question:

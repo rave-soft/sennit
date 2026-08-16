@@ -9,6 +9,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/logo"
@@ -95,7 +96,42 @@ func (m *UI) modelInfo(width int) string {
 	if model != nil {
 		modelName = model.CatalogCfg.Name
 	}
-	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, modelContext, width)
+	return common.ModelInfo(m.com.Styles, modelName, providerName, reasoningInfo, m.planInfo(model), modelContext, width)
+}
+
+// planInfo describes the subscription the current model runs on and how
+// much of its allowance is gone — the two things a flat-rate provider hides
+// that a per-token cost line would otherwise show.
+//
+// Empty for everything but Codex, and empty there too until the account has
+// made a request: the figures are quoted on responses, so there is nothing
+// to report before the first one.
+func (m *UI) planInfo(model *mcp.AgentModel) string {
+	if model == nil || model.ModelCfg.Provider != codex.ProviderID {
+		return ""
+	}
+	usage, ok := codex.LatestUsage()
+	if !ok {
+		return ""
+	}
+	return common.FormatPlanUsage(usage.Plan, planWindows(usage))
+}
+
+// planWindows converts the account's rate-limit windows into the shape the
+// renderer takes, dropping any the plan does not have.
+func planWindows(usage codex.Usage) []common.PlanWindow {
+	var windows []common.PlanWindow
+	for _, w := range []codex.UsageWindow{usage.Primary, usage.Secondary} {
+		if !w.Known() {
+			continue
+		}
+		windows = append(windows, common.PlanWindow{
+			UsedPercent:   w.UsedPercent,
+			WindowMinutes: w.WindowMinutes,
+			ResetsAt:      w.ResetsAt,
+		})
+	}
+	return windows
 }
 
 func backgroundJobsInfo(t *styles.Styles, counts shell.BackgroundJobCounts, width int) string {

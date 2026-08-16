@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/color"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -29,6 +30,84 @@ func FormatReasoningEffort(effort string) string {
 	return cases.Title(language.English).String(effort)
 }
 
+// PlanWindow is one of a subscription's rate-limit windows: how much of it
+// is spent, how long it runs, and when it rolls over.
+type PlanWindow struct {
+	UsedPercent   int
+	WindowMinutes int
+	ResetsAt      time.Time
+}
+
+// FormatPlanUsage renders a one-line summary of a subscription and what is
+// left of it, e.g. "Plus · 6% of weekly limit, resets in 3d".
+//
+// A plan with several windows is summarised by the fullest one: that is the
+// one about to run out, and the sidebar has a line, not a table. Windows
+// are named by their length rather than by "primary"/"secondary", which
+// mean nothing to whoever is reading.
+func FormatPlanUsage(plan string, windows []PlanWindow) string {
+	var parts []string
+	if plan != "" {
+		parts = append(parts, cases.Title(language.English).String(plan))
+	}
+
+	var fullest PlanWindow
+	for _, w := range windows {
+		if w.WindowMinutes > 0 && w.UsedPercent >= fullest.UsedPercent {
+			fullest = w
+		}
+	}
+	if fullest.WindowMinutes > 0 {
+		limit := fmt.Sprintf("%d%% of %s limit", fullest.UsedPercent, planWindowName(fullest.WindowMinutes))
+		if reset := formatResetIn(fullest.ResetsAt); reset != "" {
+			limit += ", resets in " + reset
+		}
+		parts = append(parts, limit)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// planWindowName names a window by its length, in the words a plan is sold
+// in. Anything that is not one of the familiar periods is reported in
+// hours, which is still more use than a raw minute count.
+func planWindowName(minutes int) string {
+	switch {
+	case minutes%(60*24*7) == 0 && minutes/(60*24*7) == 1:
+		return "weekly"
+	case minutes%(60*24) == 0 && minutes/(60*24) == 1:
+		return "daily"
+	case minutes == 60:
+		return "hourly"
+	case minutes%(60*24) == 0:
+		return fmt.Sprintf("%dd", minutes/(60*24))
+	case minutes%60 == 0:
+		return fmt.Sprintf("%dh", minutes/60)
+	default:
+		return fmt.Sprintf("%dm", minutes)
+	}
+}
+
+// formatResetIn renders how long until a window rolls over, coarsely: the
+// exact minute matters far less than "today" versus "in three days", and a
+// long string crowds a narrow sidebar. A reset already in the past reports
+// nothing rather than a negative duration.
+func formatResetIn(at time.Time) string {
+	if at.IsZero() {
+		return ""
+	}
+	d := time.Until(at)
+	switch {
+	case d <= 0:
+		return ""
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", max(1, int(d.Minutes())))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
 // ModelContextInfo contains token usage and cost information for a model.
 type ModelContextInfo struct {
 	ContextUsed    int64
@@ -38,8 +117,9 @@ type ModelContextInfo struct {
 }
 
 // ModelInfo renders model information including name, provider, reasoning
-// settings, and optional context usage/cost.
-func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, context *ModelContextInfo, width int) string {
+// settings, an optional plan/allowance line, and optional context
+// usage/cost.
+func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo, planInfo string, context *ModelContextInfo, width int) string {
 	modelIcon := t.ModelInfo.Icon.Render(styles.ModelIcon)
 	modelName = t.ModelInfo.Name.Render(modelName)
 
@@ -70,6 +150,12 @@ func ModelInfo(t *styles.Styles, modelName, providerName, reasoningInfo string, 
 
 	if reasoningInfo != "" {
 		parts = append(parts, t.ModelInfo.Reasoning.Render(reasoningInfo))
+	}
+
+	// The plan line answers "what am I on, and how much is left" — the two
+	// things a subscription hides that a per-token bill would show.
+	if planInfo != "" {
+		parts = append(parts, t.ModelInfo.Reasoning.Render(planInfo))
 	}
 
 	if context != nil {
