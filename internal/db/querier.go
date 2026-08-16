@@ -44,10 +44,20 @@ type Querier interface {
 	// ListThreads instead.
 	GetThread(ctx context.Context, id string) (Thread, error)
 	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error)
+	ListAllAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAllAssistantMessagesSinceRow, error)
+	ListAllDelegationOutcomesSince(ctx context.Context, createdAt int64) ([]ListAllDelegationOutcomesSinceRow, error)
+	ListAllSessionsSince(ctx context.Context, createdAt int64) ([]ListAllSessionsSinceRow, error)
 	// Prompt-history source: only messages a human typed. Sub-agent child sessions
 	// and thread sessions carry machine-generated prompts as user-role messages.
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListAssistantMessagesSince(ctx context.Context, arg ListAssistantMessagesSinceParams) ([]ListAssistantMessagesSinceRow, error)
+	// Reports how each background delegation (a task or a thread) ended,
+	// joined to the session that ran it so the outcome can be attributed to
+	// an agent. Status is the delegation's own terminal state --
+	// completed/merged versus failed/cancelled -- which is as close to "did
+	// this work land" as the database gets: whether a reviewer approved the
+	// change is not something this process records.
+	ListDelegationOutcomesSince(ctx context.Context, arg ListDelegationOutcomesSinceParams) ([]ListDelegationOutcomesSinceRow, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error)
 	// The latest version of each path *within this session*. The maximum has
@@ -59,11 +69,18 @@ type Querier interface {
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson string) ([]Message, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
+	ListSessionTreeAssistantMessages(ctx context.Context, id string) ([]ListSessionTreeAssistantMessagesRow, error)
 	// A session and every descendant of it (agent-tool sub-sessions, title
 	// sessions, and their own children), which is the unit a delete has to
 	// operate on: parent_session_id carries no foreign key, so nothing
 	// cascades from a parent to its children on its own.
 	ListSessionTreeIDs(ctx context.Context, sessionID string) ([]string, error)
+	// The queries below extend the raw-rows-for-a-window shape above to the
+	// two scopes `sennit stat` never needed but the TUI's /stats screen does:
+	// one session's own tree, and every project at once. They deliberately
+	// return the same columns as their project-scoped counterparts so the
+	// Go-side aggregation (internal/stats) can treat all three identically.
+	ListSessionTreeSince(ctx context.Context, id string) ([]ListSessionTreeSinceRow, error)
 	ListSessions(ctx context.Context, projectPath string) ([]Session, error)
 	// Every session across every project, trimmed to the columns `sennit gc`
 	// needs to compute its retention set (age filter + parent/child
@@ -76,6 +93,14 @@ type Querier interface {
 	// model/agent grouping requires Go-side logic (proportional token
 	// attribution for multi-model sessions, see internal/cmd/stat.go).
 	ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error)
+	ListSessionsSinceWithAgent(ctx context.Context, arg ListSessionsSinceWithAgentParams) ([]ListSessionsSinceWithAgentRow, error)
+	// Counts skill loads by matching the `view` tool's result metadata. Both
+	// JSON layers are guarded with json_valid before being extracted: a
+	// message part whose parts blob or whose metadata field is not valid JSON
+	// (a tool that records a plain string there, say) would otherwise abort
+	// the whole query with "malformed JSON", losing every other skill load
+	// along with it. Substituting an empty object makes such a row contribute
+	// nothing instead of taking the report down.
 	ListSkillLoadsSince(ctx context.Context, arg ListSkillLoadsSinceParams) ([]ListSkillLoadsSinceRow, error)
 	// The sessions a named sub-agent has already had under one parent, oldest
 	// first: every prior turn of the same continuing conversation. agent_id is

@@ -1,12 +1,14 @@
 package dialog
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -26,6 +28,10 @@ func (w *doctorTestWorkspace) SupportsThreads() bool { return false }
 func (w *doctorTestWorkspace) Config() *config.Config { return w.cfg }
 
 func (w *doctorTestWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo { return w.states }
+
+func (w *doctorTestWorkspace) Stats(context.Context, stats.Request) (stats.Snapshot, error) {
+	return stats.Snapshot{}, nil
+}
 
 func newDoctorTestCommon(t *testing.T, cfg *config.Config, states map[string]workspace.MCPClientInfo) *common.Common {
 	t.Helper()

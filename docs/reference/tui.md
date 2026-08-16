@@ -18,6 +18,7 @@ Both are fed from the same list, so they never drift apart.
 | `models` | `ctrl+l` | switch model |
 | `providers` | | configure providers |
 | `doctor` | | check config problems, including live MCP health |
+| `stats` | | usage by model and subagent (aliases: *usage*, *tokens*, *cost*) |
 | `theme` | | switch colour theme |
 | `threads` | `ctrl+e` | the threads dashboard |
 | `compact` | | summarize the session |

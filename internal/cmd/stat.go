@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
-	"sort"
 	"text/tabwriter"
 	"time"
 
@@ -14,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	sennitdb "github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/event"
+	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/spf13/cobra"
 )
 
@@ -71,68 +70,17 @@ func statSince(since string) (int64, error) {
 	}
 }
 
-// statModelKey identifies a (model, provider) pair.
-type statModelKey struct {
-	model    string
-	provider string
-}
-
-// statModel is one row of the models breakdown.
-type statModel struct {
-	Model            string  `json:"model"`
-	Provider         string  `json:"provider"`
-	MessageCount     int64   `json:"message_count"`
-	TimeSeconds      int64   `json:"time_seconds"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	Cost             float64 `json:"cost"`
-	// Approximate is true when this row's tokens/cost were split
-	// proportionally across models within a mixed-model session, rather
-	// than attributed from a single-model session exactly.
-	Approximate bool `json:"approximate"`
-}
-
-// statAgent is one row of the subagent breakdown, grouped by session
-// title (see the command's Long help for why title is the best available
-// proxy for agent name).
-type statAgent struct {
-	Name             string  `json:"name"`
-	Runs             int64   `json:"runs"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	Cost             float64 `json:"cost"`
-	TimeSeconds      int64   `json:"time_seconds"`
-}
-
-// statProject is one row of the project breakdown (or the summary's
-// current-project total, or a per-project row under --all-projects).
-type statProject struct {
-	Path             string  `json:"path"`
-	Sessions         int64   `json:"sessions"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	Cost             float64 `json:"cost"`
-	TimeSeconds      int64   `json:"time_seconds"`
-}
-
-// statSkill is one row of the skill-usage breakdown.
-type statSkill struct {
-	Name         string `json:"name"`
-	LoadCount    int64  `json:"load_count"`
-	SessionCount int64  `json:"session_count"`
-	FirstUsedAt  string `json:"first_used_at,omitempty"`
-	LastUsedAt   string `json:"last_used_at,omitempty"`
-}
-
 // statOutput is the top-level shape for --json output. Only the sections
-// actually requested via --by are populated.
+// actually requested via --by are populated. The field types come from
+// internal/stats, so the JSON keys are that package's and stay identical
+// to what this command emitted when it owned them.
 type statOutput struct {
-	Since    string        `json:"since"`
-	Models   []statModel   `json:"models,omitempty"`
-	Agents   []statAgent   `json:"agents,omitempty"`
-	Projects []statProject `json:"projects,omitempty"`
-	Skills   []statSkill   `json:"skills,omitempty"`
-	Summary  *statProject  `json:"summary,omitempty"`
+	Since    string          `json:"since"`
+	Models   []stats.Model   `json:"models,omitempty"`
+	Agents   []stats.Agent   `json:"agents,omitempty"`
+	Projects []stats.Project `json:"projects,omitempty"`
+	Skills   []stats.Skill   `json:"skills,omitempty"`
+	Summary  *stats.Project  `json:"summary,omitempty"`
 }
 
 func runStat(cmd *cobra.Command, _ []string) error {
@@ -182,46 +130,46 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	defer sennitdb.Release(config.GlobalDBDir()) //nolint:errcheck // best-effort refcount release on exit
 	queries := sennitdb.New(conn)
 
-	// projectPath scopes the default (non --all-projects) view to the
-	// current project, now that every project shares one DB file.
-	projectPath := cwd
-
-	sessions, err := queries.ListSessionsSince(ctx, sennitdb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: projectPath})
+	// The aggregation itself lives in internal/stats, shared with the
+	// TUI's /stats screen, so the two can never disagree about the same
+	// numbers. This command's job is the flags, the scope they select,
+	// and the tables.
+	snap, err := stats.Gather(ctx, queries, stats.Request{
+		Scope: stats.ScopeProject,
+		// cwd, not cfg.WorkingDir(): sessions record project_path as an
+		// absolute path, which an empty-string config.Init() never
+		// matches. Same reasoning as doctor.go/models.go.
+		ProjectPath: cwd,
+		Since:       since,
+		WithSkills:  by == "" || by == "skills",
+	})
 	if err != nil {
-		return fmt.Errorf("failed to list sessions: %w", err)
-	}
-	messages, err := queries.ListAssistantMessagesSince(ctx, sennitdb.ListAssistantMessagesSinceParams{CreatedAt: since, ProjectPath: projectPath})
-	if err != nil {
-		return fmt.Errorf("failed to list assistant messages: %w", err)
+		return err
 	}
 
 	out := statOutput{Since: sinceFlag}
-
 	if by == "" || by == "models" {
-		out.Models = computeModelStats(sessions, messages)
+		out.Models = snap.Models
 	}
 	if by == "" || by == "agents" {
-		out.Agents = computeAgentStats(sessions)
+		out.Agents = snap.Agents
 	}
 	if by == "" || by == "projects" {
 		if by == "projects" && allProjects {
-			out.Projects, err = gatherAllProjectStats(ctx, queries, since)
+			global, err := stats.Gather(ctx, queries, stats.Request{Scope: stats.ScopeGlobal, Since: since})
 			if err != nil {
-				return fmt.Errorf("failed to gather stats from projects: %w", err)
+				return err
 			}
+			out.Projects = global.Projects
 		} else {
-			out.Projects = []statProject{currentProjectStat(sessions)}
+			out.Projects = []stats.Project{snap.Totals}
 		}
 	}
 	if by == "" || by == "skills" {
-		skillRows, err := queries.ListSkillLoadsSince(ctx, sennitdb.ListSkillLoadsSinceParams{CreatedAt: since, ProjectPath: projectPath})
-		if err != nil {
-			return fmt.Errorf("failed to list skill loads: %w", err)
-		}
-		out.Skills = computeSkillStats(skillRows)
+		out.Skills = snap.Skills
 	}
 	if by == "" {
-		summary := currentProjectStat(sessions)
+		summary := snap.Totals
 		out.Summary = &summary
 	}
 
@@ -233,271 +181,6 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	}
 	renderStatTables(w, by, out)
 	return nil
-}
-
-// computeModelStats groups assistant messages by (model, provider) for
-// exact message counts and time, then attributes each session's tokens
-// and cost to the model(s) its assistant messages used — exactly for
-// single-model sessions, proportionally (and marked Approximate) for
-// sessions that mixed models.
-func computeModelStats(sessions []sennitdb.ListSessionsSinceRow, messages []sennitdb.ListAssistantMessagesSinceRow) []statModel {
-	messagesBySession := make(map[string][]sennitdb.ListAssistantMessagesSinceRow)
-	timeByModel := make(map[statModelKey]int64)
-	countByModel := make(map[statModelKey]int64)
-	for _, m := range messages {
-		key := statModelKey{model: m.Model, provider: m.Provider}
-		timeByModel[key] += m.FinishedAt - m.CreatedAt
-		countByModel[key]++
-		messagesBySession[m.SessionID] = append(messagesBySession[m.SessionID], m)
-	}
-
-	type tokenTotals struct {
-		prompt     int64
-		completion int64
-		cost       float64
-	}
-	tokensByModel := make(map[statModelKey]tokenTotals)
-	approxByModel := make(map[statModelKey]bool)
-
-	for _, s := range sessions {
-		msgs := messagesBySession[s.ID]
-		if len(msgs) == 0 {
-			continue
-		}
-		countPerModel := make(map[statModelKey]int64)
-		for _, m := range msgs {
-			countPerModel[statModelKey{model: m.Model, provider: m.Provider}]++
-		}
-
-		if len(countPerModel) == 1 {
-			for key := range countPerModel {
-				t := tokensByModel[key]
-				t.prompt += s.PromptTokens
-				t.completion += s.CompletionTokens
-				t.cost += s.Cost
-				tokensByModel[key] = t
-			}
-			continue
-		}
-
-		var total int64
-		for _, c := range countPerModel {
-			total += c
-		}
-		for key, c := range countPerModel {
-			share := float64(c) / float64(total)
-			t := tokensByModel[key]
-			t.prompt += int64(math.Round(float64(s.PromptTokens) * share))
-			t.completion += int64(math.Round(float64(s.CompletionTokens) * share))
-			t.cost += s.Cost * share
-			tokensByModel[key] = t
-			approxByModel[key] = true
-		}
-	}
-
-	keys := make(map[statModelKey]bool)
-	for k := range countByModel {
-		keys[k] = true
-	}
-	for k := range tokensByModel {
-		keys[k] = true
-	}
-
-	result := make([]statModel, 0, len(keys))
-	for k := range keys {
-		t := tokensByModel[k]
-		result = append(result, statModel{
-			Model:            k.model,
-			Provider:         k.provider,
-			MessageCount:     countByModel[k],
-			TimeSeconds:      timeByModel[k],
-			PromptTokens:     t.prompt,
-			CompletionTokens: t.completion,
-			Cost:             t.cost,
-			Approximate:      approxByModel[k],
-		})
-	}
-	sort.Slice(result, func(i, j int) bool {
-		ti := result[i].PromptTokens + result[i].CompletionTokens
-		tj := result[j].PromptTokens + result[j].CompletionTokens
-		if ti != tj {
-			return ti > tj
-		}
-		return result[i].Model < result[j].Model
-	})
-	return result
-}
-
-// computeAgentStats groups subagent sessions (parent_session_id set) by
-// title. Unlike model attribution, this is exact: each subagent session
-// has its own prompt_tokens/completion_tokens/cost, and its wall-clock
-// duration is updated_at - created_at.
-func computeAgentStats(sessions []sennitdb.ListSessionsSinceRow) []statAgent {
-	byTitle := make(map[string]*statAgent)
-	var order []string
-	for _, s := range sessions {
-		if !s.ParentSessionID.Valid || s.ParentSessionID.String == "" {
-			continue
-		}
-		a, ok := byTitle[s.Title]
-		if !ok {
-			a = &statAgent{Name: s.Title}
-			byTitle[s.Title] = a
-			order = append(order, s.Title)
-		}
-		a.Runs++
-		a.PromptTokens += s.PromptTokens
-		a.CompletionTokens += s.CompletionTokens
-		a.Cost += s.Cost
-		a.TimeSeconds += s.UpdatedAt - s.CreatedAt
-	}
-
-	result := make([]statAgent, 0, len(order))
-	for _, title := range order {
-		result = append(result, *byTitle[title])
-	}
-	sort.Slice(result, func(i, j int) bool {
-		ti := result[i].PromptTokens + result[i].CompletionTokens
-		tj := result[j].PromptTokens + result[j].CompletionTokens
-		if ti != tj {
-			return ti > tj
-		}
-		return result[i].Name < result[j].Name
-	})
-	return result
-}
-
-// currentProjectStat aggregates top-level sessions (parent_session_id
-// empty) into a single totals row, matching the scope `sennit stats` uses
-// for its own totals.
-func currentProjectStat(sessions []sennitdb.ListSessionsSinceRow) statProject {
-	var p statProject
-	for _, s := range sessions {
-		if s.ParentSessionID.Valid && s.ParentSessionID.String != "" {
-			continue
-		}
-		p.Sessions++
-		p.PromptTokens += s.PromptTokens
-		p.CompletionTokens += s.CompletionTokens
-		p.Cost += s.Cost
-		p.TimeSeconds += s.UpdatedAt - s.CreatedAt
-	}
-	return p
-}
-
-// gatherAllProjectStats aggregates one row per project known to the shared
-// DB (like `sennit stats --all`), plus a trailing totals row. Now that every
-// project shares one DB file, this is a single GROUP BY query rather than a
-// walk over each project's own (no longer existing) database file.
-func gatherAllProjectStats(ctx context.Context, queries *sennitdb.Queries, since int64) ([]statProject, error) {
-	dbRows, err := queries.ProjectStatsSince(ctx, since)
-	if err != nil {
-		return nil, fmt.Errorf("failed to gather project stats: %w", err)
-	}
-
-	rows := make([]statProject, 0, len(dbRows))
-	var totals statProject
-	totals.Path = "TOTAL"
-
-	for _, r := range dbRows {
-		promptTokens, _ := statCoerceInt64(r.PromptTokens)
-		completionTokens, _ := statCoerceInt64(r.CompletionTokens)
-		timeSeconds, _ := statCoerceInt64(r.TimeSeconds)
-		cost, _ := statCoerceFloat64(r.Cost)
-
-		row := statProject{
-			Path:             r.ProjectPath,
-			Sessions:         r.Sessions,
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			Cost:             cost,
-			TimeSeconds:      timeSeconds,
-		}
-		rows = append(rows, row)
-
-		totals.Sessions += row.Sessions
-		totals.PromptTokens += row.PromptTokens
-		totals.CompletionTokens += row.CompletionTokens
-		totals.Cost += row.Cost
-		totals.TimeSeconds += row.TimeSeconds
-	}
-
-	// ProjectStatsSince already orders by (prompt_tokens +
-	// completion_tokens) DESC; sort again in Go to match the sibling
-	// gathering functions in this file and stay correct regardless of the
-	// SQL ORDER BY.
-	sort.Slice(rows, func(i, j int) bool {
-		ti := rows[i].PromptTokens + rows[i].CompletionTokens
-		tj := rows[j].PromptTokens + rows[j].CompletionTokens
-		return ti > tj
-	})
-
-	return append(rows, totals), nil
-}
-
-// computeSkillStats converts raw ListSkillLoadsSince rows (whose
-// aggregate columns come back as interface{} because sqlc can't infer a
-// static type across the json_each/json_extract join) into typed rows.
-func computeSkillStats(rows []sennitdb.ListSkillLoadsSinceRow) []statSkill {
-	result := make([]statSkill, 0, len(rows))
-	for _, r := range rows {
-		name, ok := r.SkillName.(string)
-		if !ok || name == "" {
-			continue
-		}
-		s := statSkill{
-			Name:         name,
-			LoadCount:    r.LoadCount,
-			SessionCount: r.SessionCount,
-		}
-		if v, ok := statCoerceInt64(r.FirstUsedAt); ok {
-			s.FirstUsedAt = time.Unix(v, 0).Format(time.RFC3339)
-		}
-		if v, ok := statCoerceInt64(r.LastUsedAt); ok {
-			s.LastUsedAt = time.Unix(v, 0).Format(time.RFC3339)
-		}
-		result = append(result, s)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].LoadCount != result[j].LoadCount {
-			return result[i].LoadCount > result[j].LoadCount
-		}
-		return result[i].Name < result[j].Name
-	})
-	return result
-}
-
-// statCoerceInt64 coerces a database/sql/driver scan result to int64. The
-// SQLite drivers used here (modernc.org/sqlite, ncruces/go-sqlite3) both
-// return int64 for INTEGER aggregates, but this stays defensive since the
-// column arrives as interface{}.
-func statCoerceInt64(v any) (int64, bool) {
-	switch n := v.(type) {
-	case int64:
-		return n, true
-	case int:
-		return int64(n), true
-	case float64:
-		return int64(n), true
-	default:
-		return 0, false
-	}
-}
-
-// statCoerceFloat64 coerces a database/sql/driver scan result to float64,
-// for aggregate columns (like ProjectStatsSince's SUM(cost)) that arrive as
-// interface{} because sqlc can't infer a static type through COALESCE.
-func statCoerceFloat64(v any) (float64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return n, true
-	case int64:
-		return float64(n), true
-	case int:
-		return float64(n), true
-	default:
-		return 0, false
-	}
 }
 
 // renderStatTables prints the requested sections as aligned terminal
@@ -532,7 +215,7 @@ func renderStatTables(w io.Writer, by string, out statOutput) {
 	}
 }
 
-func printModelsTable(w io.Writer, models []statModel) {
+func printModelsTable(w io.Writer, models []stats.Model) {
 	if len(models) == 0 {
 		fmt.Fprintln(w, "No model usage recorded in this period.")
 		return
@@ -556,7 +239,7 @@ func printModelsTable(w io.Writer, models []statModel) {
 	}
 }
 
-func printAgentsTable(w io.Writer, agents []statAgent) {
+func printAgentsTable(w io.Writer, agents []stats.Agent) {
 	if len(agents) == 0 {
 		fmt.Fprintln(w, "No subagent runs recorded in this period.")
 		return
@@ -571,7 +254,7 @@ func printAgentsTable(w io.Writer, agents []statAgent) {
 	_ = tw.Flush()
 }
 
-func printProjectsTable(w io.Writer, projects []statProject) {
+func printProjectsTable(w io.Writer, projects []stats.Project) {
 	if len(projects) == 0 {
 		fmt.Fprintln(w, "No sessions recorded in this period.")
 		return
@@ -590,7 +273,7 @@ func printProjectsTable(w io.Writer, projects []statProject) {
 	_ = tw.Flush()
 }
 
-func printSkillsTable(w io.Writer, skills []statSkill) {
+func printSkillsTable(w io.Writer, skills []stats.Skill) {
 	if len(skills) == 0 {
 		fmt.Fprintln(w, "No skill loads recorded in this period.")
 		return

@@ -33,6 +33,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/stats"
 )
 
 // UpdateAvailableMsg is sent when a new version is available.
@@ -80,6 +81,13 @@ type App struct {
 	BackgroundShells *shell.BackgroundShellManager
 
 	Skills *skills.Manager
+
+	// queries is the raw generated query set this App's services were
+	// built on, kept so read-only reporting that has no service of its
+	// own — the usage aggregation behind /stats and `sennit stat` — can
+	// run against the same connection instead of opening a second one.
+	// Everything that mutates state still goes through a service.
+	queries *db.Queries
 
 	// Threads is the thread manager owning this workspace's parallel
 	// agent work streams, wired in post-bootstrap by the caller (see
@@ -253,6 +261,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	app := &App{
 		sessions:         sessions,
 		messages:         messages,
+		queries:          q,
 		History:          files,
 		permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		Questions:        question.NewService(),
@@ -1047,4 +1056,19 @@ func (app *App) Shutdown() {
 	app.shutdownMu.Lock()
 	app.shutdownState = shutdownStateDone
 	app.shutdownMu.Unlock()
+}
+
+// Stats aggregates recorded usage for the requested scope. It is the only
+// read path that reaches the generated queries directly rather than a
+// service (see App.queries): the breakdown spans sessions, messages, and
+// delegations at once, and no single service owns that join.
+//
+// The heavy lifting lives in internal/stats, shared with `sennit stat`,
+// so the TUI screen and the command can never report different numbers
+// for the same data.
+func (app *App) Stats(ctx context.Context, req stats.Request) (stats.Snapshot, error) {
+	if app.queries == nil {
+		return stats.Snapshot{}, errors.New("app: stats unavailable: no database queries wired")
+	}
+	return stats.Gather(ctx, app.queries, req)
 }

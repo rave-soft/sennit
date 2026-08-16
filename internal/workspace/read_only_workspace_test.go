@@ -19,6 +19,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/stretchr/testify/require"
 )
 
@@ -466,8 +467,12 @@ func (s *stubWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, 
 }
 
 // MCP
-func (s *stubWorkspace) WaitForMCPInit(ctx context.Context) error             { return nil }
-func (s *stubWorkspace) MCPGetStates() map[string]MCPClientInfo               { return nil }
+func (s *stubWorkspace) WaitForMCPInit(ctx context.Context) error { return nil }
+func (s *stubWorkspace) MCPGetStates() map[string]MCPClientInfo   { return nil }
+
+func (s *stubWorkspace) Stats(context.Context, stats.Request) (stats.Snapshot, error) {
+	return stats.Snapshot{}, nil
+}
 func (s *stubWorkspace) MCPResources() []MCPResourceInfo                      { return nil }
 func (s *stubWorkspace) MCPRefreshPrompts(ctx context.Context, name string)   {}
 func (s *stubWorkspace) MCPRefreshResources(ctx context.Context, name string) {}

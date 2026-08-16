@@ -24,6 +24,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/anim"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/chat"
@@ -364,6 +365,10 @@ func (w *cmdDrivingWorkspace) ReadSkill(ctx context.Context, skillID string) ([]
 func (w *cmdDrivingWorkspace) WaitForMCPInit(ctx context.Context) error { return nil }
 func (w *cmdDrivingWorkspace) MCPGetStates() map[string]workspace.MCPClientInfo {
 	return nil
+}
+
+func (w *cmdDrivingWorkspace) Stats(context.Context, stats.Request) (stats.Snapshot, error) {
+	return stats.Snapshot{}, nil
 }
 
 func (w *cmdDrivingWorkspace) MCPResources() []workspace.MCPResourceInfo {

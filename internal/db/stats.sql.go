@@ -10,6 +10,176 @@ import (
 	"database/sql"
 )
 
+const listAllAssistantMessagesSince = `-- name: ListAllAssistantMessagesSince :many
+SELECT
+    messages.session_id,
+    COALESCE(messages.model, 'unknown') as model,
+    COALESCE(messages.provider, 'unknown') as provider,
+    messages.created_at,
+    COALESCE(messages.finished_at, messages.created_at) as finished_at
+FROM messages
+WHERE messages.role = 'assistant'
+  AND messages.created_at >= ?
+ORDER BY messages.created_at ASC
+`
+
+type ListAllAssistantMessagesSinceRow struct {
+	SessionID  string `json:"session_id"`
+	Model      string `json:"model"`
+	Provider   string `json:"provider"`
+	CreatedAt  int64  `json:"created_at"`
+	FinishedAt int64  `json:"finished_at"`
+}
+
+func (q *Queries) ListAllAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAllAssistantMessagesSinceRow, error) {
+	rows, err := q.query(ctx, q.listAllAssistantMessagesSinceStmt, listAllAssistantMessagesSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllAssistantMessagesSinceRow{}
+	for rows.Next() {
+		var i ListAllAssistantMessagesSinceRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.Model,
+			&i.Provider,
+			&i.CreatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllDelegationOutcomesSince = `-- name: ListAllDelegationOutcomesSince :many
+SELECT
+    threads.id,
+    threads.kind,
+    threads.status,
+    threads.session_id,
+    COALESCE(sessions.agent_id, '') as agent_id,
+    COALESCE(sessions.title, '') as title,
+    threads.created_at,
+    COALESCE(threads.completed_at, threads.updated_at) as completed_at
+FROM threads
+LEFT JOIN sessions ON sessions.id = threads.session_id
+WHERE threads.created_at >= ?
+ORDER BY threads.created_at ASC
+`
+
+type ListAllDelegationOutcomesSinceRow struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Status      string `json:"status"`
+	SessionID   string `json:"session_id"`
+	AgentID     string `json:"agent_id"`
+	Title       string `json:"title"`
+	CreatedAt   int64  `json:"created_at"`
+	CompletedAt int64  `json:"completed_at"`
+}
+
+func (q *Queries) ListAllDelegationOutcomesSince(ctx context.Context, createdAt int64) ([]ListAllDelegationOutcomesSinceRow, error) {
+	rows, err := q.query(ctx, q.listAllDelegationOutcomesSinceStmt, listAllDelegationOutcomesSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllDelegationOutcomesSinceRow{}
+	for rows.Next() {
+		var i ListAllDelegationOutcomesSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Status,
+			&i.SessionID,
+			&i.AgentID,
+			&i.Title,
+			&i.CreatedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllSessionsSince = `-- name: ListAllSessionsSince :many
+SELECT
+    id,
+    parent_session_id,
+    title,
+    agent_id,
+    prompt_tokens,
+    completion_tokens,
+    cost,
+    created_at,
+    updated_at
+FROM sessions
+WHERE created_at >= ?
+ORDER BY created_at ASC
+`
+
+type ListAllSessionsSinceRow struct {
+	ID               string         `json:"id"`
+	ParentSessionID  sql.NullString `json:"parent_session_id"`
+	Title            string         `json:"title"`
+	AgentID          string         `json:"agent_id"`
+	PromptTokens     int64          `json:"prompt_tokens"`
+	CompletionTokens int64          `json:"completion_tokens"`
+	Cost             float64        `json:"cost"`
+	CreatedAt        int64          `json:"created_at"`
+	UpdatedAt        int64          `json:"updated_at"`
+}
+
+func (q *Queries) ListAllSessionsSince(ctx context.Context, createdAt int64) ([]ListAllSessionsSinceRow, error) {
+	rows, err := q.query(ctx, q.listAllSessionsSinceStmt, listAllSessionsSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllSessionsSinceRow{}
+	for rows.Next() {
+		var i ListAllSessionsSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentSessionID,
+			&i.Title,
+			&i.AgentID,
+			&i.PromptTokens,
+			&i.CompletionTokens,
+			&i.Cost,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssistantMessagesSince = `-- name: ListAssistantMessagesSince :many
 SELECT
     messages.session_id,
@@ -53,6 +223,208 @@ func (q *Queries) ListAssistantMessagesSince(ctx context.Context, arg ListAssist
 			&i.Provider,
 			&i.CreatedAt,
 			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDelegationOutcomesSince = `-- name: ListDelegationOutcomesSince :many
+SELECT
+    threads.id,
+    threads.kind,
+    threads.status,
+    threads.session_id,
+    COALESCE(sessions.agent_id, '') as agent_id,
+    COALESCE(sessions.title, '') as title,
+    threads.created_at,
+    COALESCE(threads.completed_at, threads.updated_at) as completed_at
+FROM threads
+LEFT JOIN sessions ON sessions.id = threads.session_id
+WHERE threads.created_at >= ?
+  AND threads.project_path = ?
+ORDER BY threads.created_at ASC
+`
+
+type ListDelegationOutcomesSinceParams struct {
+	CreatedAt   int64  `json:"created_at"`
+	ProjectPath string `json:"project_path"`
+}
+
+type ListDelegationOutcomesSinceRow struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Status      string `json:"status"`
+	SessionID   string `json:"session_id"`
+	AgentID     string `json:"agent_id"`
+	Title       string `json:"title"`
+	CreatedAt   int64  `json:"created_at"`
+	CompletedAt int64  `json:"completed_at"`
+}
+
+// Reports how each background delegation (a task or a thread) ended,
+// joined to the session that ran it so the outcome can be attributed to
+// an agent. Status is the delegation's own terminal state --
+// completed/merged versus failed/cancelled -- which is as close to "did
+// this work land" as the database gets: whether a reviewer approved the
+// change is not something this process records.
+func (q *Queries) ListDelegationOutcomesSince(ctx context.Context, arg ListDelegationOutcomesSinceParams) ([]ListDelegationOutcomesSinceRow, error) {
+	rows, err := q.query(ctx, q.listDelegationOutcomesSinceStmt, listDelegationOutcomesSince, arg.CreatedAt, arg.ProjectPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDelegationOutcomesSinceRow{}
+	for rows.Next() {
+		var i ListDelegationOutcomesSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Status,
+			&i.SessionID,
+			&i.AgentID,
+			&i.Title,
+			&i.CreatedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionTreeAssistantMessages = `-- name: ListSessionTreeAssistantMessages :many
+WITH RECURSIVE tree(id) AS (
+    SELECT sessions.id FROM sessions WHERE sessions.id = ?
+    UNION
+    SELECT sessions.id
+    FROM sessions
+    JOIN tree ON sessions.parent_session_id = tree.id
+)
+SELECT
+    messages.session_id,
+    COALESCE(messages.model, 'unknown') as model,
+    COALESCE(messages.provider, 'unknown') as provider,
+    messages.created_at,
+    COALESCE(messages.finished_at, messages.created_at) as finished_at
+FROM messages
+JOIN tree ON tree.id = messages.session_id
+WHERE messages.role = 'assistant'
+ORDER BY messages.created_at ASC
+`
+
+type ListSessionTreeAssistantMessagesRow struct {
+	SessionID  string `json:"session_id"`
+	Model      string `json:"model"`
+	Provider   string `json:"provider"`
+	CreatedAt  int64  `json:"created_at"`
+	FinishedAt int64  `json:"finished_at"`
+}
+
+func (q *Queries) ListSessionTreeAssistantMessages(ctx context.Context, id string) ([]ListSessionTreeAssistantMessagesRow, error) {
+	rows, err := q.query(ctx, q.listSessionTreeAssistantMessagesStmt, listSessionTreeAssistantMessages, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSessionTreeAssistantMessagesRow{}
+	for rows.Next() {
+		var i ListSessionTreeAssistantMessagesRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.Model,
+			&i.Provider,
+			&i.CreatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionTreeSince = `-- name: ListSessionTreeSince :many
+
+WITH RECURSIVE tree(id) AS (
+    SELECT sessions.id FROM sessions WHERE sessions.id = ?
+    UNION
+    SELECT sessions.id
+    FROM sessions
+    JOIN tree ON sessions.parent_session_id = tree.id
+)
+SELECT
+    sessions.id,
+    sessions.parent_session_id,
+    sessions.title,
+    sessions.agent_id,
+    sessions.prompt_tokens,
+    sessions.completion_tokens,
+    sessions.cost,
+    sessions.created_at,
+    sessions.updated_at
+FROM sessions
+JOIN tree ON tree.id = sessions.id
+ORDER BY sessions.created_at ASC
+`
+
+type ListSessionTreeSinceRow struct {
+	ID               string         `json:"id"`
+	ParentSessionID  sql.NullString `json:"parent_session_id"`
+	Title            string         `json:"title"`
+	AgentID          string         `json:"agent_id"`
+	PromptTokens     int64          `json:"prompt_tokens"`
+	CompletionTokens int64          `json:"completion_tokens"`
+	Cost             float64        `json:"cost"`
+	CreatedAt        int64          `json:"created_at"`
+	UpdatedAt        int64          `json:"updated_at"`
+}
+
+// The queries below extend the raw-rows-for-a-window shape above to the
+// two scopes `sennit stat` never needed but the TUI's /stats screen does:
+// one session's own tree, and every project at once. They deliberately
+// return the same columns as their project-scoped counterparts so the
+// Go-side aggregation (internal/stats) can treat all three identically.
+func (q *Queries) ListSessionTreeSince(ctx context.Context, id string) ([]ListSessionTreeSinceRow, error) {
+	rows, err := q.query(ctx, q.listSessionTreeSinceStmt, listSessionTreeSince, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSessionTreeSinceRow{}
+	for rows.Next() {
+		var i ListSessionTreeSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentSessionID,
+			&i.Title,
+			&i.AgentID,
+			&i.PromptTokens,
+			&i.CompletionTokens,
+			&i.Cost,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -137,21 +509,100 @@ func (q *Queries) ListSessionsSince(ctx context.Context, arg ListSessionsSincePa
 	return items, nil
 }
 
-const listSkillLoadsSince = `-- name: ListSkillLoadsSince :many
+const listSessionsSinceWithAgent = `-- name: ListSessionsSinceWithAgent :many
 SELECT
-    json_extract(json_extract(value, '$.data.metadata'), '$.resource_name') as skill_name,
+    id,
+    parent_session_id,
+    title,
+    agent_id,
+    prompt_tokens,
+    completion_tokens,
+    cost,
+    created_at,
+    updated_at
+FROM sessions
+WHERE created_at >= ?
+  AND project_path = ?
+ORDER BY created_at ASC
+`
+
+type ListSessionsSinceWithAgentParams struct {
+	CreatedAt   int64  `json:"created_at"`
+	ProjectPath string `json:"project_path"`
+}
+
+type ListSessionsSinceWithAgentRow struct {
+	ID               string         `json:"id"`
+	ParentSessionID  sql.NullString `json:"parent_session_id"`
+	Title            string         `json:"title"`
+	AgentID          string         `json:"agent_id"`
+	PromptTokens     int64          `json:"prompt_tokens"`
+	CompletionTokens int64          `json:"completion_tokens"`
+	Cost             float64        `json:"cost"`
+	CreatedAt        int64          `json:"created_at"`
+	UpdatedAt        int64          `json:"updated_at"`
+}
+
+func (q *Queries) ListSessionsSinceWithAgent(ctx context.Context, arg ListSessionsSinceWithAgentParams) ([]ListSessionsSinceWithAgentRow, error) {
+	rows, err := q.query(ctx, q.listSessionsSinceWithAgentStmt, listSessionsSinceWithAgent, arg.CreatedAt, arg.ProjectPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSessionsSinceWithAgentRow{}
+	for rows.Next() {
+		var i ListSessionsSinceWithAgentRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentSessionID,
+			&i.Title,
+			&i.AgentID,
+			&i.PromptTokens,
+			&i.CompletionTokens,
+			&i.Cost,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSkillLoadsSince = `-- name: ListSkillLoadsSince :many
+WITH parts AS (
+    SELECT
+        messages.session_id AS session_id,
+        messages.created_at AS created_at,
+        CASE
+            WHEN json_valid(json_extract(value, '$.data.metadata'))
+            THEN json_extract(value, '$.data.metadata')
+            ELSE '{}'
+        END AS metadata
+    FROM messages
+    JOIN sessions ON sessions.id = messages.session_id,
+    json_each(CASE WHEN json_valid(messages.parts) THEN messages.parts ELSE '[]' END)
+    WHERE messages.role = 'tool'
+      AND messages.created_at >= ?
+      AND sessions.project_path = ?
+      AND json_extract(value, '$.type') = 'tool_result'
+)
+SELECT
+    json_extract(metadata, '$.resource_name') as skill_name,
     COUNT(*) as load_count,
-    COUNT(DISTINCT messages.session_id) as session_count,
-    MIN(messages.created_at) as first_used_at,
-    MAX(messages.created_at) as last_used_at
-FROM messages
-JOIN sessions ON sessions.id = messages.session_id, json_each(messages.parts)
-WHERE messages.role = 'tool'
-  AND messages.created_at >= ?
-  AND sessions.project_path = ?
-  AND json_extract(value, '$.type') = 'tool_result'
-  AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_type') = 'skill'
-  AND json_extract(json_extract(value, '$.data.metadata'), '$.resource_name') IS NOT NULL
+    COUNT(DISTINCT session_id) as session_count,
+    MIN(created_at) as first_used_at,
+    MAX(created_at) as last_used_at
+FROM parts
+WHERE json_extract(metadata, '$.resource_type') = 'skill'
+  AND json_extract(metadata, '$.resource_name') IS NOT NULL
 GROUP BY skill_name
 ORDER BY load_count DESC
 `
@@ -169,6 +620,13 @@ type ListSkillLoadsSinceRow struct {
 	LastUsedAt   interface{} `json:"last_used_at"`
 }
 
+// Counts skill loads by matching the `view` tool's result metadata. Both
+// JSON layers are guarded with json_valid before being extracted: a
+// message part whose parts blob or whose metadata field is not valid JSON
+// (a tool that records a plain string there, say) would otherwise abort
+// the whole query with "malformed JSON", losing every other skill load
+// along with it. Substituting an empty object makes such a row contribute
+// nothing instead of taking the report down.
 func (q *Queries) ListSkillLoadsSince(ctx context.Context, arg ListSkillLoadsSinceParams) ([]ListSkillLoadsSinceRow, error) {
 	rows, err := q.query(ctx, q.listSkillLoadsSinceStmt, listSkillLoadsSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	sennitdb "github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -239,15 +240,14 @@ func TestComputeModelStats_ExactAndApproximateAttribution(t *testing.T) {
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	sessions, err := q.ListSessionsSince(t.Context(), sennitdb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
+	snap, err := stats.Gather(t.Context(), q, stats.Request{
+		Scope: stats.ScopeProject, ProjectPath: testProjectPath, Since: since,
+	})
 	require.NoError(t, err)
-	messages, err := q.ListAssistantMessagesSince(t.Context(), sennitdb.ListAssistantMessagesSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
-	require.NoError(t, err)
-
-	models := computeModelStats(sessions, messages)
+	models := snap.Models
 	require.Len(t, models, 2, "expected exactly the two distinct (model, provider) pairs, old session excluded")
 
-	byModel := make(map[string]statModel)
+	byModel := make(map[string]stats.Model)
 	for _, m := range models {
 		byModel[m.Model] = m
 	}
@@ -285,13 +285,14 @@ func TestComputeAgentStats_GroupsByTitle(t *testing.T) {
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	sessions, err := q.ListSessionsSince(t.Context(), sennitdb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
+	snap, err := stats.Gather(t.Context(), q, stats.Request{
+		Scope: stats.ScopeProject, ProjectPath: testProjectPath, Since: since,
+	})
 	require.NoError(t, err)
-
-	agents := computeAgentStats(sessions)
+	agents := snap.Agents
 	require.Len(t, agents, 2)
 
-	byName := make(map[string]statAgent)
+	byName := make(map[string]stats.Agent)
 	for _, a := range agents {
 		byName[a.Name] = a
 	}
@@ -321,7 +322,11 @@ func TestComputeSkillStats_MatchesDoubleJSONExtract(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "the skill-loading tool_result message must be matched by the double json_extract query")
 
-	skills := computeSkillStats(rows)
+	snap, err := stats.Gather(t.Context(), q, stats.Request{
+		Scope: stats.ScopeProject, ProjectPath: testProjectPath, Since: since, WithSkills: true,
+	})
+	require.NoError(t, err)
+	skills := snap.Skills
 	require.Len(t, skills, 1)
 	require.Equal(t, "some-skill", skills[0].Name)
 	require.Equal(t, int64(1), skills[0].LoadCount)
@@ -439,11 +444,12 @@ func TestGatherAllProjectStats_GroupsByProjectWithoutLeaking(t *testing.T) {
 	since, err := statSince("7d")
 	require.NoError(t, err)
 
-	rows, err := gatherAllProjectStats(t.Context(), q, since)
+	global, err := stats.Gather(t.Context(), q, stats.Request{Scope: stats.ScopeGlobal, Since: since})
 	require.NoError(t, err)
+	rows := global.Projects
 	require.Len(t, rows, 3, "testProjectPath row, otherProjectPath row, and a trailing TOTAL row")
 
-	byPath := make(map[string]statProject)
+	byPath := make(map[string]stats.Project)
 	for _, r := range rows {
 		byPath[r.Path] = r
 	}

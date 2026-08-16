@@ -87,6 +87,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		m.openQuitDialog()
 	case dialog.DoctorID:
 		m.openDoctorDialog()
+	case dialog.StatsID:
+		if cmd := m.openStatsDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	default:
 		// Unknown dialog
 		break
@@ -301,6 +305,22 @@ func (m *UI) openNotificationsDialog() tea.Cmd {
 	notificationsDialog := dialog.NewNotifications(m.com)
 	m.dialog.OpenDialog(notificationsDialog)
 	return nil
+}
+
+// openStatsDialog opens the /stats usage screen and kicks off the first
+// tab's aggregation. The gather runs as a command rather than inline
+// because the global scope sweeps the whole message history, which is not
+// work the render loop should be holding.
+func (m *UI) openStatsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.StatsID) {
+		m.dialog.BringToFront(dialog.StatsID)
+		return nil
+	}
+
+	event.StatsViewed()
+	statsDialog := dialog.NewStats(m.com, m.sess.current.ID)
+	m.dialog.OpenDialog(statsDialog)
+	return statsDialog.LoadCmd()
 }
 
 // openDoctorDialog opens the /doctor config-problems dialog.

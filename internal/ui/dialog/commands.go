@@ -323,6 +323,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 		NewCommandItem(sty, "switch_model", "models", "ctrl+l", ActionOpenDialog{ModelsID}).WithAliases("switch model", "model").WithDescription("switch model"),
 		NewCommandItem(sty, "configure_providers", "providers", "", ActionOpenDialog{ProvidersID}).WithAliases("configure providers").WithDescription("configure providers"),
 		NewCommandItem(sty, "doctor", "doctor", "", ActionOpenDialog{DoctorID}).WithDescription("check config problems"),
+		NewCommandItem(sty, "stats", "stats", "", ActionOpenDialog{StatsID}).WithAliases("usage", "tokens", "cost").WithDescription("usage by model and subagent"),
 		NewCommandItem(sty, "select_theme", "theme", "", ActionOpenDialog{ThemeID}).WithAliases("switch theme", "colors", "palette").WithDescription("switch color theme"),
 	}
 

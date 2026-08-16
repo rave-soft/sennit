@@ -27,6 +27,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/stats"
 )
 
 // Reasons the coder agent may be unavailable, returned by
@@ -417,6 +418,7 @@ type EventSubscriber interface {
 type Workspace interface {
 	SessionStore
 	AgentController
+	UsageReporter
 	PermissionResolver
 	QuestionResponder
 	FileServices
@@ -428,6 +430,19 @@ type Workspace interface {
 	TaskController
 	BackgroundJobs
 	EventSubscriber
+}
+
+// UsageReporter reads back what has already been recorded — tokens,
+// cost, wall time, and how background delegations ended — for the
+// /stats screen. It is read-only by construction: there is no setter
+// anywhere in this interface, since usage is written as a side effect of
+// running agents, never by a caller asking about it.
+type UsageReporter interface {
+	// Stats aggregates recorded usage for req's scope. It returns an
+	// error only when the underlying queries fail; a scope with nothing
+	// in it yields an empty snapshot, not an error, so a fresh project
+	// renders as "nothing recorded yet" rather than as a failure.
+	Stats(ctx context.Context, req stats.Request) (stats.Snapshot, error)
 }
 
 // AgentRunEvent is one increment of a non-interactive agent turn

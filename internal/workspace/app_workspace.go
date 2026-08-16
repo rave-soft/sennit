@@ -29,6 +29,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/thread"
 )
 
@@ -568,6 +569,12 @@ func (w *AppWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, ski
 
 func (w *AppWorkspace) WaitForMCPInit(ctx context.Context) error {
 	return w.app.MCP.WaitForInit(ctx)
+}
+
+// Stats implements [UsageReporter] by forwarding to the App, which owns
+// the database connection the aggregation reads.
+func (w *AppWorkspace) Stats(ctx context.Context, req stats.Request) (stats.Snapshot, error) {
+	return w.app.Stats(ctx, req)
 }
 
 func (w *AppWorkspace) MCPGetStates() map[string]MCPClientInfo {

@@ -20,6 +20,7 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/stats"
 )
 
 // ErrReadOnlyOperation is returned by a read-only workspace when a
@@ -422,6 +423,12 @@ func (w *readOnlyWorkspace) ReadSkill(ctx context.Context, skillID string) ([]by
 
 func (w *readOnlyWorkspace) WaitForMCPInit(ctx context.Context) error {
 	return w.underlying.WaitForMCPInit(ctx)
+}
+
+// Stats is a read, so it passes straight through: a read-only workspace
+// refuses mutations, not questions about what has already happened.
+func (w *readOnlyWorkspace) Stats(ctx context.Context, req stats.Request) (stats.Snapshot, error) {
+	return w.underlying.Stats(ctx, req)
 }
 
 func (w *readOnlyWorkspace) MCPGetStates() map[string]MCPClientInfo {

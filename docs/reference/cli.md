@@ -109,6 +109,13 @@ Also available as `sennit stats`. Read the accuracy caveats in
 [Sessions and data storage](../concepts/sessions.md) before
 trusting a per-model number.
 
+The TUI's `/stats` shows the same aggregation (both run on
+`internal/stats`, so they cannot disagree), with tabs for three scopes:
+the current session and everything it delegated, the current project, and
+every project at once. It also reports how background delegations ended —
+"landed" meaning the task or thread reached a completed or merged state,
+which is what the database records; no review verdict is stored anywhere.
+
 ## `doctor` — check the config
 
 ```
