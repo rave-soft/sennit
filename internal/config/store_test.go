@@ -514,9 +514,17 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	err = store.ReloadFromDisk(ctx)
 	require.NoError(t, err)
 
-	// Verify the NEW config values are now in effect (regression check)
-	require.Equal(t, "anthropic", store.config.Model.Provider)
-	require.Equal(t, "claude-3", store.config.Model.Model)
+	// The new config values are in effect: the provider added on disk is
+	// now available to this instance.
+	_, ok := store.config.Providers.Get("anthropic")
+	require.True(t, ok, "a provider added on disk must show up after a reload")
+
+	// The selected model is the exception, and deliberately so: the global
+	// config file is shared with every other running instance, so adopting
+	// its model here would let a switch made in another project change this
+	// session's model mid-run (see pinPreferredModelLocked).
+	require.Equal(t, "openai", store.config.Model.Provider)
+	require.Equal(t, "gpt-4", store.config.Model.Model)
 }
 
 // TestSetConfigField_AutoReloads verifies that SetConfigField automatically

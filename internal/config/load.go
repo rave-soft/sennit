@@ -125,6 +125,20 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.writeMu.Lock()
 	defer store.writeMu.Unlock()
 
+	// Pin the model this instance started with, so a reload cannot swap it
+	// for one a sibling instance chose. Several instances share the global
+	// config file, and any of them writing to it (a model switch, an OAuth
+	// refresh, a provider being added) reloads it in all the others — which
+	// used to hand every running session whichever model was selected last,
+	// somewhere else. Worse, that model may name a provider this instance
+	// has no idea about, and the session breaks mid-run over a change made
+	// in another project.
+	//
+	// Pinning at startup rather than at first selection keeps the other
+	// half of the contract working: the file is read fresh here, so a new
+	// instance still starts on whatever default was chosen most recently.
+	store.pinPreferredModelLocked(resolved.Model)
+
 	// Persist any fallback correction.
 	if resolved.Fallback {
 		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {

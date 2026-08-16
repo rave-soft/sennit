@@ -64,10 +64,13 @@ func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 	require.Equal(t, "claude-3", large.Model)
 }
 
-// TestModelSelectionYieldsToDiskWhenUnchosen verifies the other half of the
-// rule: a model type this instance never selected still follows the config
-// file, so external edits and `sennit login` defaults keep working.
-func TestModelSelectionYieldsToDiskWhenUnchosen(t *testing.T) {
+// TestModelSelectionSurvivesPeerWriteWhenUnchosen covers the case that
+// actually bit: an instance running on the config's default model, never
+// having picked one of its own, must still keep it when a sibling changes
+// the default. Adopting it mid-session hands the session a model whose
+// provider this instance may not even know about — which is how a model
+// switch in one project broke a session running in another.
+func TestModelSelectionSurvivesPeerWriteWhenUnchosen(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "sennit.json")
 
@@ -85,6 +88,61 @@ func TestModelSelectionYieldsToDiskWhenUnchosen(t *testing.T) {
 	require.NoError(t, store.ReloadFromDisk(context.Background()))
 
 	large := store.Config().Model
-	require.Equal(t, "anthropic", large.Provider)
-	require.Equal(t, "claude-3", large.Model)
+	require.Equal(t, "openai", large.Provider, "a running session keeps the model it started on")
+	require.Equal(t, "gpt-4", large.Model)
+}
+
+// TestModelSelectionFollowsDiskOnNextStart is the other half of the rule:
+// pinning lasts for the life of an instance, not beyond it, so changing the
+// default in one client is picked up by the next client that starts.
+func TestModelSelectionFollowsDiskOnNextStart(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sennit.json")
+
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
+
+	first, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	require.Equal(t, "openai", first.Config().Model.Provider)
+
+	// A sibling instance switches the default and writes it out.
+	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("anthropic", "claude-3")), 0o600))
+
+	second, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	require.Equal(t, "anthropic", second.Config().Model.Provider, "a fresh start reads the file")
+	require.Equal(t, "claude-3", second.Config().Model.Model)
+
+	// And the instance that was already running is unaffected by it.
+	require.NoError(t, first.ReloadFromDisk(context.Background()))
+	require.Equal(t, "openai", first.Config().Model.Provider)
+}
+
+// TestModelSelectionStillFollowsOwnChoice: pinning must not stop this
+// instance from changing its own model, which is the common case.
+func TestModelSelectionStillFollowsOwnChoice(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sennit.json")
+
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, SelectedModel{
+		Provider: "anthropic",
+		Model:    "claude-3",
+	}))
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+
+	require.Equal(t, "anthropic", store.Config().Model.Provider)
+	require.Equal(t, "claude-3", store.Config().Model.Model)
 }

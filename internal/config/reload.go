@@ -99,11 +99,12 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// race a later read of the same field.
 	overrides := s.snapshotOverrides()
 
-	// Reapply a model choice made in this instance. The global config file
-	// is shared, so it may now name a model a sibling instance selected; a
-	// reload triggered by an unrelated write must not swap the user's model
-	// mid-session. An external edit to the config still takes effect when
-	// this instance never chose a model of its own.
+	// Reapply this instance's model. The global config file is shared, so
+	// it may now name a model a sibling instance selected; a reload — which
+	// any write by any instance triggers — must not swap the model out from
+	// under a running session. The pin is set at startup (see Load) and
+	// updated whenever this instance picks a model, so a new instance still
+	// starts on whatever the file says.
 	if overrides.Model != nil {
 		cfg.Model = *overrides.Model
 	}

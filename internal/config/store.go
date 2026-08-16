@@ -45,11 +45,12 @@ type RuntimeOverrides struct {
 	// pushes channel events when it also appears here. Entries may be written
 	// as "server:<name>" or as a bare "<name>".
 	EnabledChannels []string
-	// Model records the model choice made in this instance, whether
-	// persisted or not. It is reapplied after a config reload so that a
-	// selection made here always outranks whatever the shared config file
-	// happens to hold — see pinPreferredModelLocked. Nil means this instance
-	// never chose a model, so a reload should follow whatever is on disk.
+	// Model is the model this instance is running: pinned at startup from
+	// the config file and updated whenever this instance selects another,
+	// persisted or not. It is reapplied after a config reload so that the
+	// shared config file — which every sibling instance also writes to —
+	// cannot switch a running session's model. See pinPreferredModelLocked.
+	// Nil only before Load has resolved a model at all.
 	Model *SelectedModel
 }
 
@@ -493,12 +494,19 @@ func (s *ConfigStore) OverridePreferredModel(model SelectedModel) {
 	})
 }
 
-// pinPreferredModelLocked records a model choice made in this instance so
+// pinPreferredModelLocked records the model this instance is running so
 // that a later config reload cannot replace it with a choice made
 // somewhere else. Several Sennit instances share one global config file, so
 // a reload triggered by an unrelated write (a token refresh, say) would
 // otherwise import whichever model a sibling instance last selected and
-// switch models out from under the user mid-session.
+// switch models out from under the user mid-session — including to one
+// whose provider this instance does not have, which fails the session
+// outright.
+//
+// Load pins the startup model too, not just explicit selections, so an
+// instance quietly running on the config's default is protected as well.
+// The pin lives and dies with the process, so the next start still reads
+// the file.
 //
 // Caller must hold writeMu.
 func (s *ConfigStore) pinPreferredModelLocked(model SelectedModel) {
