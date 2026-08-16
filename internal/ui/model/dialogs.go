@@ -318,7 +318,14 @@ func (m *UI) openStatsDialog() tea.Cmd {
 	}
 
 	event.StatsViewed()
-	statsDialog := dialog.NewStats(m.com, m.sess.current.ID)
+	// No session yet is an ordinary state — the screen opens on the
+	// project tab and its Session tab says there is nothing to report.
+	// m.sess.current is a pointer that is nil until one is loaded.
+	var sessionID string
+	if m.sess.current != nil {
+		sessionID = m.sess.current.ID
+	}
+	statsDialog := dialog.NewStats(m.com, sessionID)
 	m.dialog.OpenDialog(statsDialog)
 	return statsDialog.LoadCmd()
 }
