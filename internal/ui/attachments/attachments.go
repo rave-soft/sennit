@@ -128,13 +128,17 @@ func NewRenderer(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle, 
 	}
 }
 
-// SetStyles updates the renderer styles in place.
-func (r *Renderer) SetStyles(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle, removeStyle lipgloss.Style) {
+// SetStyles updates the renderer styles in place. It takes the same set as
+// [NewRenderer], hover style included — leaving that one out left the
+// hovered remove button painted in the previous palette after a theme
+// switch.
+func (r *Renderer) SetStyles(normalStyle, deletingStyle, imageStyle, textStyle, skillStyle, removeStyle, hoverStyle lipgloss.Style) {
 	r.normalStyle = normalStyle
 	r.textStyle = textStyle
 	r.imageStyle = imageStyle
 	r.skillStyle = skillStyle
 	r.removeStyle = removeStyle
+	r.removeHoverStyle = hoverStyle
 	r.deletingStyle = deletingStyle
 }
 

@@ -401,6 +401,19 @@ func (l *List) invalidateAll() {
 	l.totalHeightValid = false
 }
 
+// InvalidateAll drops every cached render, both the list-level memo and
+// the per-item caches of items that keep one (see [BaseItem]). Use it when
+// something outside the item set changed the way every row draws — a theme
+// switch being the case it exists for.
+func (l *List) InvalidateAll() {
+	for _, item := range l.items {
+		if inv, ok := item.(interface{ Invalidate() }); ok {
+			inv.Invalidate()
+		}
+	}
+	l.invalidateAll()
+}
+
 // Invalidate drops the cache entry for the given item, forcing a
 // re-render on the next getItem call. No-op if the item is not in
 // the cache.

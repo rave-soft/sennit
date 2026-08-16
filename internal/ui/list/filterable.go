@@ -73,6 +73,19 @@ func (f *FilterableList) SetFilter(q string) {
 	f.ScrollToTop()
 }
 
+// InvalidateAll drops every cached render, including those of items the
+// current filter hides — the embedded list only knows about the visible
+// ones, and a hidden item with a stale cache would come back in the old
+// palette the moment the filter changed.
+func (f *FilterableList) InvalidateAll() {
+	for _, item := range f.items {
+		if inv, ok := item.(interface{ Invalidate() }); ok {
+			inv.Invalidate()
+		}
+	}
+	f.List.InvalidateAll()
+}
+
 // FilterableItemsSource is a type that implements [fuzzy.Source] for filtering
 // [FilterableItem]s.
 type FilterableItemsSource []FilterableItem

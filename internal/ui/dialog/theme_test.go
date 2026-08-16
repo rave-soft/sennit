@@ -117,3 +117,30 @@ func TestSystemCommandItems_ThemeOpensPicker(t *testing.T) {
 	require.Equal(t, "theme", theme.Title())
 	require.Equal(t, ActionOpenDialog{DialogID: ThemeID}, theme.Action())
 }
+
+// TestNewTheme_PreviewsOnMove pins the preview contract from the dialog's
+// side: moving the selection announces the highlighted palette so the UI
+// can paint itself in it, and typing a filter — which also moves the
+// selection — announces it alongside the input's own command.
+func TestNewTheme_PreviewsOnMove(t *testing.T) {
+	t.Parallel()
+
+	d, err := NewTheme(newThemeTestCommon(styles.DefaultThemeID))
+	require.NoError(t, err)
+
+	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
+	preview, ok := action.(ActionPreviewTheme)
+	require.True(t, ok, "moving down must preview a theme, got %T", action)
+	require.Equal(t, styles.Palettes()[1].ID, preview.ID)
+
+	batch, ok := d.HandleMsg(tea.KeyPressMsg{Code: 'i', Text: "i"}).(ActionBatch)
+	require.True(t, ok, "filtering must keep the input command and preview the new top row")
+	var previewed string
+	for _, a := range batch.Actions {
+		if p, ok := a.(ActionPreviewTheme); ok {
+			previewed = p.ID
+		}
+	}
+	require.NotEmpty(t, previewed)
+	require.Equal(t, d.selectedID(), previewed)
+}

@@ -154,11 +154,17 @@ func New(styles PopupStyles) *Completions {
 	}
 }
 
-// SetStyles updates the styles used when rendering completion items.
-// Existing items are not restyled; subsequent SetItems calls pick up the
-// new styles.
+// SetStyles updates the styles used when rendering completion items,
+// including the items currently held: a theme can be switched while the
+// popup is open, and items keep a copy of the styles they were built with.
 func (c *Completions) SetStyles(styles PopupStyles) {
 	c.styles = styles
+	for _, item := range c.allItems {
+		if s, ok := item.(*CompletionItem); ok {
+			s.SetStyles(styles.Normal, styles.Focused, styles.Match, styles.Muted)
+		}
+	}
+	c.list.InvalidateAll()
 }
 
 // IsOpen returns whether the completions popup is open.

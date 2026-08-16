@@ -653,6 +653,24 @@ type Styles struct {
 		Area               lipgloss.Style // Pills area container
 		HeaderHover        lipgloss.Style // Todos header row, hovered — signals it's clickable
 	}
+
+	// rev identifies the palette build this value came from. Live theme
+	// switching overwrites a shared *Styles in place, so pointer identity
+	// says nothing about which palette a cached artifact was derived
+	// from; rev does. Every [Theme] call stamps a fresh one, so caches
+	// keyed by it (markdown renderers, chroma styles) miss exactly when
+	// the palette changed and hit otherwise.
+	rev uint64
+}
+
+// Rev returns the palette-build revision of this Styles value. It changes
+// on every theme switch and is the correct cache key for anything derived
+// from a Styles (see the rev field).
+func (s *Styles) Rev() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.rev
 }
 
 // ChromaTheme converts the current markdown chroma styles to a chroma

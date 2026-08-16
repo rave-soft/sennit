@@ -190,6 +190,10 @@ type threadsDashboard struct {
 
 	width, height int
 	active        bool
+
+	// styleRev is the palette build the cached rows were rendered from;
+	// see Draw.
+	styleRev uint64
 }
 
 // newThreadsDashboard creates a new threads dashboard.
@@ -283,6 +287,15 @@ func (m *threadsDashboard) SetActive(active bool) tea.Cmd {
 func (m *threadsDashboard) Draw(scr uv.Screen, area uv.Rectangle) {
 	t := m.com.Styles
 	m.zones = m.zones[:0]
+
+	// Rows are frozen in the list memo once rendered, and the theme is
+	// switched from the chat screen, which has no handle on the dashboard.
+	// Noticing the palette build changed here is what keeps the table from
+	// coming back in the previous theme's colors.
+	if rev := t.Rev(); rev != m.styleRev {
+		m.styleRev = rev
+		m.list.InvalidateAll()
+	}
 
 	detailRows := m.detailHeight()
 	sections := []layout.Constraint{

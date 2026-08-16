@@ -169,6 +169,32 @@ func ClearItemCaches(items []MessageItem) {
 	}
 }
 
+// Restylable is implemented by message items that hold palette-derived
+// state Render cannot re-read: an [anim.Anim] pre-renders its gradient
+// frames from the colors it was built with, so a running spinner keeps the
+// old palette until the anim itself is rebuilt. Restyle rebuilds it and
+// returns the command that re-arms the tick chain, if the item was
+// animating (rebuilding resets the anim's generation, which drops the
+// in-flight ticks).
+type Restylable interface {
+	Restyle() tea.Cmd
+}
+
+// RestyleItems rebuilds the palette-derived state of every item that
+// implements [Restylable] and batches the commands that resume their
+// animations. Call it alongside [ClearItemCaches] after a theme switch.
+func RestyleItems(items []MessageItem) tea.Cmd {
+	var cmds []tea.Cmd
+	for _, item := range items {
+		if r, ok := item.(Restylable); ok {
+			if cmd := r.Restyle(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
 // cachedMessageItem caches rendered message content to avoid re-rendering.
 //
 // This should be used by any message that can store a cached version of its render. e.x user,assistant... and so on

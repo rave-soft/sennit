@@ -251,6 +251,19 @@ func (a *AgentToolMessageItem) HoverableAt(x, y, width int) bool {
 	return x >= MessageLeftPaddingTotal && y >= 0 && y < lipgloss.Height(a.Render(width))
 }
 
+// Restyle implements [Restylable]. Nested tools are not list entries of
+// their own — they render inline in this item — so nothing else would reach
+// their animations; this walks them alongside the delegation's own.
+func (a *AgentToolMessageItem) Restyle() tea.Cmd {
+	cmds := []tea.Cmd{a.baseToolMessageItem.Restyle()}
+	for _, nested := range a.nestedTools {
+		if r, ok := nested.(Restylable); ok {
+			cmds = append(cmds, r.Restyle())
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
 // Animate progresses the message animation if it should be spinning.
 //
 // Bumps the parent's F6 list-cache version on both the parent-tick and

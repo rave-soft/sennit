@@ -19,6 +19,34 @@ import (
 // ActionClose is a message to close the current dialog.
 type ActionClose struct{}
 
+// ActionBatch carries several actions produced by a single message, for the
+// cases where one keystroke means two things — moving through the theme
+// picker both previews a palette and feeds the filter input. The handler
+// applies them in order.
+type ActionBatch struct {
+	Actions []Action
+}
+
+// batchActions collapses actions into one: nil when nothing is left, the
+// action itself when only one is, and an [ActionBatch] otherwise. Callers
+// can pass nils freely.
+func batchActions(actions ...Action) Action {
+	kept := make([]Action, 0, len(actions))
+	for _, a := range actions {
+		if a != nil {
+			kept = append(kept, a)
+		}
+	}
+	switch len(kept) {
+	case 0:
+		return nil
+	case 1:
+		return kept[0]
+	default:
+		return ActionBatch{Actions: kept}
+	}
+}
+
 // ActionQuit is a message to quit the application.
 type ActionQuit = tea.QuitMsg
 
@@ -68,6 +96,13 @@ type (
 	// ActionSelectTheme is a message indicating a color palette has been
 	// selected in the theme dialog. ID is a styles palette ID.
 	ActionSelectTheme struct {
+		ID string
+	}
+	// ActionPreviewTheme is sent as the selection moves through the theme
+	// dialog: the palette is only highlighted, not chosen. The UI paints
+	// itself in it so the list is a preview rather than a guess, and puts
+	// the previous one back if the dialog closes without a choice.
+	ActionPreviewTheme struct {
 		ID string
 	}
 	ActionPermissionResponse struct {

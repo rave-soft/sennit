@@ -1,6 +1,10 @@
 package styles
 
-import "github.com/charmbracelet/x/exp/charmtone"
+import (
+	"sync/atomic"
+
+	"github.com/charmbracelet/x/exp/charmtone"
+)
 
 // Sennit's default brand colors, re-exported from the default palette for the
 // few places that need a brand color outside the Styles graph (the CLI's
@@ -172,5 +176,15 @@ func themeFromPalette(p Palette) Styles {
 	s.Tool.TodoCompletedIcon = s.Tool.TodoCompletedIcon.Foreground(p.Success)
 	s.Status.SuccessIndicator = s.Status.SuccessIndicator.Foreground(p.Success)
 
+	// Stamp the build so caches downstream can tell one palette's styles
+	// from another's even though live switching reuses the same *Styles.
+	s.rev = styleRev.Add(1)
+
 	return s
 }
+
+// styleRev hands out the monotonic revision stamped onto every Styles value
+// built by [Theme]. It starts at 1 so a zero rev always means "not built by
+// Theme" (a zero-value Styles in a test, say) and never collides with a
+// real build.
+var styleRev atomic.Uint64

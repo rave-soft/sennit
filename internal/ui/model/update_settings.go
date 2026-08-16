@@ -100,7 +100,9 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if msg.Err != nil {
 			// The palette was swapped optimistically; put it back so what
 			// is on screen matches what is on disk.
-			m.setTheme(msg.Previous)
+			if cmd := m.setTheme(msg.Previous); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			cmds = append(cmds, util.ReportError(msg.Err))
 			break
 		}

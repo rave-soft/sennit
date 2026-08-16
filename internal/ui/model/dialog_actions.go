@@ -21,6 +21,15 @@ import (
 // when their target isn't open, so callers never need to special-case the
 // no-dialog path.
 func (m *UI) applyDialogAction(action dialog.Action) tea.Cmd {
+	if batch, ok := action.(dialog.ActionBatch); ok {
+		cmds := make([]tea.Cmd, 0, len(batch.Actions))
+		for _, a := range batch.Actions {
+			if cmd := m.applyDialogAction(a); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+		return tea.Batch(cmds...)
+	}
 	if cmd, handled := m.applySettingsDialogAction(action); handled {
 		return cmd
 	}
@@ -120,6 +129,10 @@ func (m *UI) applySettingsDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.ActionPreviewTheme:
+		if cmd := m.previewTheme(msg.ID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectTheme:
@@ -349,6 +362,14 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 
 		if m.dialog.ContainsDialog(dialog.FilePickerID) {
 			defer fimage.ResetCache()
+		}
+
+		// Leaving the theme picker without choosing puts the palette that
+		// was live when it opened back on screen.
+		if front := m.dialog.DialogLast(); front != nil && front.ID() == dialog.ThemeID {
+			if cmd := m.cancelThemePreview(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 
 		m.dialog.CloseFrontDialog()

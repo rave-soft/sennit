@@ -3,6 +3,8 @@ package model
 import (
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
@@ -27,8 +29,9 @@ func TestSetTheme_SwapsSharedStyles(t *testing.T) {
 }
 
 // TestSetTheme_RestylesCopiedStyles covers the widgets that copy a style at
-// construction rather than reading Common.Styles at draw time — the help
-// model in the status bar is the one such case in the chat UI.
+// construction rather than reading Common.Styles at draw time; the status
+// bar's help model stands in for the set setTheme has to refresh (the
+// editor's textarea, completions and attachments are the others).
 func TestSetTheme_RestylesCopiedStyles(t *testing.T) {
 	t.Parallel()
 
@@ -55,4 +58,87 @@ func TestApplyTheme_RejectsUnknownID(t *testing.T) {
 
 	require.NotNil(t, cmd, "an unknown theme must report an error")
 	require.Equal(t, before, u.com.Styles.Background)
+}
+
+// TestSetTheme_RepaintsOpenCompletions covers the widgets the editor builds
+// once and keeps for the whole session. The completions popup copies its
+// styles into every item it holds, so without an explicit restyle it keeps
+// drawing the palette it was opened in — one of the "only part of the UI
+// changed color" symptoms.
+func TestSetTheme_RepaintsOpenCompletions(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.editor.completions = completions.New(completions.PopupStyles{
+		Normal:  u.com.Styles.Completions.Normal,
+		Focused: u.com.Styles.Completions.Focused,
+		Match:   u.com.Styles.Completions.Match,
+		Muted:   u.com.Styles.Completions.Muted,
+		Border:  u.com.Styles.Completions.Border,
+	})
+	u.editor.completions.SetItems([]completions.FileCompletionValue{{Path: "main.go"}}, nil)
+	before := u.editor.completions.Render()
+
+	u.setTheme(styles.PaletteGraphiteAmber.ID)
+
+	require.NotEqual(t, before, u.editor.completions.Render(),
+		"the open completions popup kept the previous palette")
+}
+
+// TestPreviewTheme_RestoredOnCancel is the contract behind previewing: the
+// UI really does switch palette as the selection moves (so the preview is
+// the actual thing, not an approximation of it), and walking away from the
+// dialog leaves both the screen and the config exactly as they were.
+func TestPreviewTheme_RestoredOnCancel(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIWithTheme(t, styles.PaletteSteelTeal.ID)
+	original := u.com.Styles.Background
+
+	u.previewTheme(styles.PaletteInkSage.ID)
+	require.Equal(t, styles.PaletteInkSage.Bg, u.com.Styles.Background,
+		"previewing must paint the UI in the highlighted palette")
+
+	// Browsing on before backing out: the restore point is where the
+	// dialog opened, not the previously highlighted row.
+	u.previewTheme(styles.PaletteGraphiteAmber.ID)
+	u.cancelThemePreview()
+
+	require.Equal(t, original, u.com.Styles.Background)
+	require.Equal(t, styles.PaletteSteelTeal.ID, u.liveThemeID())
+}
+
+// TestPreviewTheme_KeptOnSelect checks the other exit: confirming keeps the
+// previewed palette and persists it, rather than restoring the palette the
+// dialog opened in.
+func TestPreviewTheme_KeptOnSelect(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIWithTheme(t, styles.PaletteSteelTeal.ID)
+
+	u.previewTheme(styles.PaletteInkSage.ID)
+	cmd := u.applyTheme(styles.PaletteInkSage.ID)
+
+	require.NotNil(t, cmd, "confirming a previewed theme must persist it")
+	require.Equal(t, styles.PaletteInkSage.Bg, u.com.Styles.Background)
+	require.Empty(t, u.ops.themePreviewFrom, "the preview must be committed, not left open")
+
+	// A later cancel (e.g. the commands dialog closing behind the picker)
+	// must not undo the confirmed choice.
+	u.cancelThemePreview()
+	require.Equal(t, styles.PaletteInkSage.Bg, u.com.Styles.Background)
+}
+
+// newTestUIWithTheme builds a test UI whose workspace config names the
+// given palette, which is what the preview bookkeeping resolves "the
+// palette we started from" against.
+func newTestUIWithTheme(t *testing.T, id string) *UI {
+	t.Helper()
+
+	u := newTestUI()
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{
+		Options: &config.Options{TUI: &config.TUIOptions{Theme: id}},
+	}}
+	u.setTheme(id)
+	return u
 }

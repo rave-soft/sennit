@@ -231,19 +231,35 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		sty:                      sty,
 	}
 
-	a.anim = anim.New(anim.Settings{
+	a.anim = a.newAnim()
+	return a
+}
+
+// newAnim builds the working animation from the item's current styles.
+// Both construction and [AssistantMessageItem.Restyle] go through it so a
+// rebuilt animation cannot drift from the original settings.
+func (a *AssistantMessageItem) newAnim() *anim.Anim {
+	return anim.New(anim.Settings{
 		ID:          a.ID(),
 		Size:        15,
-		GradColorA:  sty.WorkingGradFromColor,
-		GradColorB:  sty.WorkingGradToColor,
-		LabelColor:  sty.WorkingLabelColor,
+		GradColorA:  a.sty.WorkingGradFromColor,
+		GradColorB:  a.sty.WorkingGradToColor,
+		LabelColor:  a.sty.WorkingLabelColor,
 		CycleColors: true,
 		Suffix: func() string {
 			return common.Elapsed()
 		},
-		SuffixColor: sty.WorkingTimerColor,
+		SuffixColor: a.sty.WorkingTimerColor,
 	})
-	return a
+}
+
+// Restyle implements [Restylable]: the working animation pre-renders its
+// gradient from the palette it was built with, so it is rebuilt (and
+// re-armed if it was running) rather than restyled in place.
+func (a *AssistantMessageItem) Restyle() tea.Cmd {
+	a.anim = a.newAnim()
+	a.Bump()
+	return a.StartAnimation()
 }
 
 // StartAnimation starts the assistant message animation if it should be spinning.

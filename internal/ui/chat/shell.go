@@ -84,15 +84,32 @@ func NewPendingShellItem(sty *styles.Styles, command string) *ShellItem {
 		sty:                      sty,
 		pending:                  true,
 	}
-	s.anim = anim.New(anim.Settings{
-		ID:         id,
+	s.anim = s.newAnim()
+	return s
+}
+
+// newAnim builds the "Running" animation from the item's current styles.
+// Construction and [ShellItem.Restyle] share it so a rebuilt animation
+// cannot drift from the original settings.
+func (s *ShellItem) newAnim() *anim.Anim {
+	return anim.New(anim.Settings{
+		ID:         s.id,
 		Label:      "Running",
-		LabelColor: sty.WorkingLabelColor,
-		GradColorA: sty.WorkingGradFromColor,
-		GradColorB: sty.WorkingGradToColor,
+		LabelColor: s.sty.WorkingLabelColor,
+		GradColorA: s.sty.WorkingGradFromColor,
+		GradColorB: s.sty.WorkingGradToColor,
 		NoScramble: true,
 	})
-	return s
+}
+
+// Restyle implements [Restylable]. See [AssistantMessageItem.Restyle].
+func (s *ShellItem) Restyle() tea.Cmd {
+	if !s.pending {
+		return nil
+	}
+	s.anim = s.newAnim()
+	s.Bump()
+	return s.StartAnimation()
 }
 
 // Complete transitions a pending ShellItem to a finished state with output.

@@ -3,6 +3,7 @@ package chat
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
@@ -195,16 +196,30 @@ func newBaseToolMessageItem(
 		status:                   status,
 		hasCappedWidth:           hasCappedWidth,
 	}
-	t.anim = anim.New(anim.Settings{
-		ID:          toolCall.ID,
-		Size:        15,
-		GradColorA:  sty.WorkingGradFromColor,
-		GradColorB:  sty.WorkingGradToColor,
-		LabelColor:  sty.WorkingLabelColor,
-		CycleColors: true,
-	})
+	t.anim = t.newAnim()
 
 	return t
+}
+
+// newAnim builds the pending-tool animation from the item's current styles.
+// Construction and [baseToolMessageItem.Restyle] share it so a rebuilt
+// animation cannot drift from the original settings.
+func (t *baseToolMessageItem) newAnim() *anim.Anim {
+	return anim.New(anim.Settings{
+		ID:          t.toolCall.ID,
+		Size:        15,
+		GradColorA:  t.sty.WorkingGradFromColor,
+		GradColorB:  t.sty.WorkingGradToColor,
+		LabelColor:  t.sty.WorkingLabelColor,
+		CycleColors: true,
+	})
+}
+
+// Restyle implements [Restylable]. See [AssistantMessageItem.Restyle].
+func (t *baseToolMessageItem) Restyle() tea.Cmd {
+	t.anim = t.newAnim()
+	t.Bump()
+	return t.StartAnimation()
 }
 
 func newRegisteredToolMessageItem(sty *styles.Styles, toolCall message.ToolCall, result *message.ToolResult, renderer ToolRenderer, canceled bool) ToolMessageItem {
