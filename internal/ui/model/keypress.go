@@ -300,6 +300,14 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case key.Matches(msg, m.keyMap.Editor.ScrollPageUp):
+		if cmd := m.scrollChatPage(-1); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case key.Matches(msg, m.keyMap.Editor.ScrollPageDown):
+		if cmd := m.scrollChatPage(1); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case key.Matches(msg, m.keyMap.Tab):
 		// Tab accepts the inline history prediction, if one is
 		// showing. It's otherwise a no-op here (deliberately: it
@@ -473,6 +481,23 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 		}
 	}
 	return cmds
+}
+
+// scrollChatPage scrolls the conversation by one screenful in the given
+// direction (-1 up, 1 down) and keeps the chat's selection inside the new
+// viewport. It's the editor-focused counterpart of the Chat.PageUp/PageDown
+// branches in handleMainKeyPress, so the page keys work while typing.
+func (m *UI) scrollChatPage(dir int) tea.Cmd {
+	if m.state != uiChat || !m.hasSession() {
+		return nil
+	}
+	cmd := m.chat.ScrollByAndAnimate(dir * m.chat.Height())
+	if dir < 0 {
+		m.chat.SelectFirstInView()
+	} else {
+		m.chat.SelectLastInView()
+	}
+	return cmd
 }
 
 // handleMainKeyPress handles key events while the chat list is focused:

@@ -25,6 +25,10 @@ type KeyMap struct {
 		// History navigation
 		HistoryPrev key.Binding
 		HistoryNext key.Binding
+
+		// Chat scrolling while the editor keeps focus.
+		ScrollPageUp   key.Binding
+		ScrollPageDown key.Binding
 	}
 
 	Chat struct {
@@ -174,6 +178,17 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 	)
 	km.Editor.HistoryNext = key.NewBinding(
 		key.WithKeys("down"),
+	)
+	// Page keys scroll the conversation without stealing focus from the
+	// editor; the chat's own "b"/"f"/space aliases stay out of these
+	// bindings, since those are ordinary characters while typing.
+	km.Editor.ScrollPageUp = key.NewBinding(
+		key.WithKeys("pgup"),
+		key.WithHelp("pgup", "page up"),
+	)
+	km.Editor.ScrollPageDown = key.NewBinding(
+		key.WithKeys("pgdown"),
+		key.WithHelp("pgdn", "page down"),
 	)
 
 	km.Chat.NewSession = key.NewBinding(
@@ -363,6 +378,8 @@ func (k *KeyMap) bindings() map[string]*key.Binding {
 		"editor.delete_all_attachments": &k.Editor.DeleteAllAttachments,
 		"editor.history_prev":           &k.Editor.HistoryPrev,
 		"editor.history_next":           &k.Editor.HistoryNext,
+		"editor.scroll_page_up":         &k.Editor.ScrollPageUp,
+		"editor.scroll_page_down":       &k.Editor.ScrollPageDown,
 		"chat.new_session":              &k.Chat.NewSession,
 		"chat.add_attachment":           &k.Chat.AddAttachment,
 		"chat.cancel":                   &k.Chat.Cancel,

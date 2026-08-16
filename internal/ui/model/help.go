@@ -156,6 +156,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.MentionFile,
 				k.Editor.Commands,
 				k.Editor.OpenEditor,
+				k.Editor.ScrollPageUp,
+				k.Editor.ScrollPageDown,
 			}
 			if m.currentModelSupportsImages() {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
