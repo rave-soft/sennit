@@ -1,15 +1,32 @@
 package dialog
 
 import (
+	"image"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
+	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
+
+// textEndColumn is the screen column just past needle in line, counted in
+// display cells rather than bytes — the dialog frame draws box characters
+// that are several bytes wide but one column each.
+func textEndColumn(line, needle string) int {
+	idx := strings.Index(line, needle)
+	if idx < 0 {
+		return -1
+	}
+	return lipgloss.Width(line[:idx]) + lipgloss.Width(needle)
+}
 
 func newCodexDialog(t *testing.T) *OAuth {
 	t.Helper()
@@ -104,4 +121,90 @@ func TestOAuthCodexProxyStepTypes(t *testing.T) {
 
 	require.Equal(t, "custom", dlg.proxyInput.Value())
 	require.Equal(t, OAuthStateProxy, dlg.State)
+}
+
+// TestOAuthCodexPrefillsProxyFromCodexCLI: the value the user already gave
+// the Codex CLI is offered back rather than asked for again.
+func TestOAuthCodexPrefillsProxyFromCodexCLI(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[network]\nproxy_url = \"http://127.0.0.1:8080\"\n"), 0o600))
+
+	dlg := newCodexDialog(t)
+	require.Equal(t, "http://127.0.0.1:8080", dlg.proxyInput.Value())
+}
+
+// TestOAuthCodexCursorSitsOnProxyField draws the step and checks the cursor
+// lands on the input's own line, right after what has been typed. The
+// offsets are the easy thing to get wrong — the shared InputCursor helper
+// assumes a layout where the field follows the title directly, and here it
+// does not — and the symptom is a cursor parked somewhere meaningless.
+func TestOAuthCodexCursorSitsOnProxyField(t *testing.T) {
+	t.Parallel()
+
+	dlg := newCodexDialog(t)
+	for _, r := range "zzproxyzz" {
+		dlg.HandleMsg(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+	}
+
+	area := image.Rect(0, 0, 100, 40)
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	cur := dlg.Draw(scr, area)
+	require.NotNil(t, cur, "the proxy step must show a cursor to type at")
+
+	lines := strings.Split(scr.String(), "\n")
+	require.Less(t, cur.Y, len(lines))
+
+	line := lines[cur.Y]
+	require.Contains(t, line, "zzproxyzz",
+		"cursor row %d must be the proxy field's line, got %q", cur.Y, line)
+
+	// The cursor belongs just past the typed text, not at the start of the
+	// line or off in the padding beyond it. Columns, not bytes: the frame's
+	// box-drawing characters are multi-byte.
+	require.Equal(t, textEndColumn(line, "zzproxyzz"), cur.X,
+		"cursor must sit right after the typed value on %q", line)
+}
+
+// TestOAuthCodexCursorDuringOnboarding: onboarding draws the step without
+// the dialog frame, and the cursor has to follow it there too.
+func TestOAuthCodexCursorDuringOnboarding(t *testing.T) {
+	t.Parallel()
+
+	s := styles.SennitDark()
+	com := &common.Common{Styles: &s}
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
+	dlg, _ := NewOAuthCodex(com, true, provider, nil)
+	for _, r := range "zzproxyzz" {
+		dlg.HandleMsg(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+	}
+
+	area := image.Rect(0, 0, 100, 40)
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	cur := dlg.Draw(scr, area)
+	require.NotNil(t, cur)
+
+	lines := strings.Split(scr.String(), "\n")
+	require.Less(t, cur.Y, len(lines))
+	line := lines[cur.Y]
+	require.Contains(t, line, "zzproxyzz",
+		"cursor row %d must be the proxy field's line, got %q", cur.Y, line)
+	require.Equal(t, textEndColumn(line, "zzproxyzz"), cur.X,
+		"cursor must sit right after the typed value on %q", line)
+}
+
+// TestOAuthCodexHidesCursorAfterProxyStep: once the step is done there is
+// nothing to type into, so a cursor left behind would point at nothing.
+func TestOAuthCodexHidesCursorAfterProxyStep(t *testing.T) {
+	t.Parallel()
+
+	dlg := newCodexDialog(t)
+	dlg.State = OAuthStateDisplay
+	dlg.verificationURL = "https://auth.openai.com/oauth/authorize"
+
+	area := image.Rect(0, 0, 100, 40)
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	require.Nil(t, dlg.Draw(scr, area))
 }

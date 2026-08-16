@@ -50,26 +50,25 @@ func (m *OAuthCodex) name() string {
 	return codex.ProviderName
 }
 
-// proxyURL prefills the step with whatever the provider is already
-// configured with, so re-authenticating does not mean retyping it.
+// proxyURL prefills the step, in order of how much it is known to be what
+// the user wants: what Sennit is already configured with, then what the
+// Codex CLI on this machine uses. Someone behind a proxy has told the CLI
+// about it already, and asking again for the same fact is a worse first
+// impression than offering it back for confirmation.
 func (m *OAuthCodex) proxyURL() string {
 	if m.proxy != "" {
 		return m.proxy
 	}
 	// Common carries no workspace in tests, and Config panics on one, so
-	// the absence of a config is a legitimate "nothing to prefill" here.
-	if m.com == nil || m.com.Workspace == nil {
-		return ""
+	// the absence of a config is a legitimate "nothing configured" here.
+	if m.com != nil && m.com.Workspace != nil {
+		if cfg := m.com.Config(); cfg != nil {
+			if pc, ok := cfg.Providers.Get(codex.ProviderID); ok && pc.ProxyURL != "" {
+				return pc.ProxyURL
+			}
+		}
 	}
-	cfg := m.com.Config()
-	if cfg == nil {
-		return ""
-	}
-	pc, ok := cfg.Providers.Get(codex.ProviderID)
-	if !ok {
-		return ""
-	}
-	return pc.ProxyURL
+	return codex.ProxyFromDisk()
 }
 
 // setProxyURL validates the entered value up front: a bad proxy would

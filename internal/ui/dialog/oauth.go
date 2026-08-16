@@ -12,6 +12,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth"
@@ -309,27 +310,24 @@ type oauthSaveErrMsg struct {
 // View renders the device flow dialog.
 func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.Resize(area)
-	// The proxy step is the only one with a field to type into, so it is
-	// also the only one that owns a cursor.
-	var cur *tea.Cursor
-	if m.State == OAuthStateProxy && m.proxyInput != nil {
-		cur = InputCursor(m.com.Styles, m.proxyInput.Cursor())
+
+	view := m.dialogContent()
+	if !m.isOnboarding {
+		view = m.Frame(view)
 	}
+
+	// The proxy step is the only one with a field to type into, so it is
+	// also the only one that owns a cursor. It is located in the rendered
+	// view, which is why the view is built before it.
+	var cur *tea.Cursor
+	if m.State == OAuthStateProxy {
+		cur = m.proxyCursor(view)
+	}
+
 	if m.isOnboarding {
-		view := m.dialogContent()
-		if cur != nil {
-			cur = adjustOnboardingInputCursor(m.com.Styles, cur)
-			DrawOnboardingCursor(scr, area, view, cur)
-		} else {
-			DrawOnboarding(scr, area, view)
-		}
+		DrawOnboardingCursor(scr, area, view, cur)
 	} else {
-		view := m.Frame(m.dialogContent())
-		if cur != nil {
-			DrawCenterCursor(scr, area, view, cur)
-		} else {
-			DrawCenter(scr, area, view)
-		}
+		DrawCenterCursor(scr, area, view, cur)
 	}
 	return cur
 }
@@ -499,6 +497,45 @@ func (m *OAuth) innerContent() string {
 	default:
 		return ""
 	}
+}
+
+// proxyCursor locates the proxy field inside the already-rendered view and
+// puts the terminal cursor on it.
+//
+// The position is found rather than derived. The shared InputCursor helper
+// encodes the API-key dialog's layout — a field directly under the title —
+// and here the field sits below a header and a prompt line, inside a frame
+// whose style getters under-report what it actually renders. Deriving the
+// offsets from those getters is what left the cursor parked away from the
+// field. Searching the rendered frame for the input's own prompt cannot
+// drift from what the user sees, whatever moves above it; when the anchor
+// is not found the cursor is dropped rather than guessed at.
+func (m *OAuth) proxyCursor(view string) *tea.Cursor {
+	if m.proxyInput == nil {
+		return nil
+	}
+	cur := m.proxyInput.Cursor()
+	if cur == nil {
+		return nil
+	}
+
+	// The input reports its cursor relative to its own render, which begins
+	// at the prompt — so the prompt is where the search begins too.
+	anchor := ansi.Strip(m.proxyInput.Prompt + m.proxyInput.Value())
+	if anchor == "" {
+		return nil
+	}
+	for y, line := range strings.Split(view, "\n") {
+		plain := ansi.Strip(line)
+		x := strings.Index(plain, anchor)
+		if x < 0 {
+			continue
+		}
+		cur.X += ansi.StringWidth(plain[:x])
+		cur.Y += y
+		return cur
+	}
+	return nil
 }
 
 // FullHelp returns the full help view.

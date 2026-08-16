@@ -28,12 +28,20 @@ func loginCodex(ws workspace.Workspace, force bool, proxyURL string) error {
 		return err
 	}
 	// An unspecified proxy keeps whatever the provider is already
-	// configured with, so re-running login does not silently drop it.
+	// configured with, so re-running login does not silently drop it, and
+	// otherwise borrows the Codex CLI's — someone behind a proxy has
+	// already told it about theirs.
 	if proxyURL == "" {
 		if cfg := ws.Config(); cfg != nil {
 			if pc, ok := cfg.Providers.Get(codex.ProviderID); ok {
 				proxyURL = pc.ProxyURL
 			}
+		}
+	}
+	if proxyURL == "" {
+		if fromCLI := codex.ProxyFromDisk(); fromCLI != "" {
+			proxyURL = fromCLI
+			fmt.Printf("Using the proxy configured for the Codex CLI: %s\n", proxyURL)
 		}
 	}
 

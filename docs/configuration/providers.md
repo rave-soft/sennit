@@ -51,7 +51,10 @@ sennit login codex --proxy socks5://127.0.0.1:1080
 ```
 
 It is optional: leave it empty to use `HTTP_PROXY`/`HTTPS_PROXY`, or pass
-`none` to force a direct connection despite them. The value is saved as
+`none` to force a direct connection despite them. If the Codex CLI on this
+machine already has one configured (`proxy_url` or `socks_url` in
+`~/.codex/config.toml`), it is offered as the default, so there is nothing
+to retype. The value is saved as
 `providers.codex.proxy_url`, so the token refreshes and the model requests
 all take the same route as the sign-in.
 

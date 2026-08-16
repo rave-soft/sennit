@@ -166,3 +166,67 @@ func TestFlowIgnoresUnrelatedPaths(t *testing.T) {
 	default:
 	}
 }
+
+// TestProxyFromDisk reads the proxy out of the Codex CLI's own config, so a
+// user who already told the CLI about their proxy is not asked again.
+func TestProxyFromDisk(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+
+	require.Empty(t, ProxyFromDisk(), "no config file means nothing to borrow")
+
+	write := func(body string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o600))
+	}
+
+	write(`
+# a comment mentioning proxy_url = "http://commented-out:1"
+model = "gpt-5.6-sol"
+
+[network]
+proxy_url = "http://127.0.0.1:8080"
+`)
+	require.Equal(t, "http://127.0.0.1:8080", ProxyFromDisk())
+
+	// The CLI accepts either table name, so both are read.
+	write("[network_proxy]\nproxy_url = 'http://other:3128'\n")
+	require.Equal(t, "http://other:3128", ProxyFromDisk())
+
+	// A SOCKS-only setup names the address under socks_url instead.
+	write("[network]\nenable_socks5 = true\nsocks_url = \"socks5://127.0.0.1:1080\"\n")
+	require.Equal(t, "socks5://127.0.0.1:1080", ProxyFromDisk())
+
+	// An explicit proxy_url wins over the socks fallback.
+	write("[network]\nsocks_url = \"socks5://127.0.0.1:1080\"\nproxy_url = \"http://127.0.0.1:8080\"\n")
+	require.Equal(t, "http://127.0.0.1:8080", ProxyFromDisk())
+}
+
+// TestProxyFromDiskIgnoresOtherTables: proxy_url under some unrelated
+// section belongs to that section, not to the network settings.
+func TestProxyFromDiskIgnoresOtherTables(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[mcp_servers.something]\nproxy_url = \"http://not-ours:1\"\n"), 0o600))
+
+	require.Empty(t, ProxyFromDisk())
+}
+
+// TestTokensFromDiskCarriesProxy: the proxy rides along with the login, so
+// importing credentials brings the setting the user already made.
+func TestTokensFromDiskCarriesProxy(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "auth.json"),
+		[]byte(`{"tokens":{"access_token":"at","refresh_token":"rt"}}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[network]\nproxy_url = \"http://127.0.0.1:8080\"\n"), 0o600))
+
+	tokens, ok := TokensFromDisk()
+	require.True(t, ok)
+	require.Equal(t, "http://127.0.0.1:8080", tokens.ProxyURL)
+}
