@@ -10,7 +10,7 @@ import (
 )
 
 // TestClose_SharedRegistryBrokerSurvivesOneOfTwoWorkspacesClosing is the
-// regression test for ARCHITECTURE_REVIEW.md section 3.1: before the
+// regression test for the shared-registry bug: before the
 // liveWorkspaces refcount, mcp.Close unconditionally called broker.Shutdown,
 // so a second workspace calling app.New (which arms the process-global MCP
 // registry and defers mcp.Close in its cleanup) would have its own MCP event
@@ -65,9 +65,9 @@ func TestClose_SharedRegistryBrokerSurvivesOneOfTwoWorkspacesClosing(t *testing.
 
 // TestRegistry_CloseIsolatedPerInstance is the stage-2 counterpart: two
 // independent *Registry instances (simulating two workspaces that have each
-// been given their own registry, per ARCHITECTURE_REVIEW.md 3.1's suggested
-// fix) must not affect each other's broker at all — closing one must never
-// touch the other's event stream, refcounted or not.
+// been given their own registry) must not affect each other's broker at
+// all — closing one must never touch the other's event stream,
+// refcounted or not.
 func TestRegistry_CloseIsolatedPerInstance(t *testing.T) {
 	regA := NewRegistry()
 	regB := NewRegistry()

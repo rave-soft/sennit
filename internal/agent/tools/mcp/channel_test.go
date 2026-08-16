@@ -612,8 +612,7 @@ func TestChannelConnDiscardsBufferOnClosedGate(t *testing.T) {
 }
 
 // TestSubscribeEventsDeliversChannelMessagesPerRegistry verifies two
-// things now that each workspace owns its own *Registry (ARCHITECTURE_REVIEW.md
-// 3.1, stage 3): SubscribeEvents no longer strips EventChannelMessage (there
+// things now that each workspace owns its own *Registry: SubscribeEvents no longer strips EventChannelMessage (there
 // is no longer a shared broker to leak across workspaces on), and two
 // independent registries stay isolated from each other regardless.
 func TestSubscribeEventsDeliversChannelMessagesPerRegistry(t *testing.T) {

@@ -38,7 +38,7 @@ type Message struct {
 // data/mime_type lose their omitempty. These are additive/cosmetic
 // wire changes only — no field present before was removed or
 // repurposed, and JSON consumers doing a normal unmarshal are
-// unaffected. See ARCHITECTURE_REVIEW.md §3.2 for the full writeup.
+// unaffected.
 type (
 	MessageRole      = message.MessageRole
 	Origin           = message.Origin

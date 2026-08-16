@@ -75,7 +75,7 @@ type App struct {
 	// state, auth handlers, and the event broker all live here rather
 	// than on mcp's process-wide defaultRegistry, so two App instances in
 	// one process (multi-client backend mode) don't clobber each other's
-	// MCP servers. See ARCHITECTURE_REVIEW.md section 3.1.
+	// MCP servers.
 	MCP              *mcp.Registry
 	BackgroundShells *shell.BackgroundShellManager
 

@@ -3,7 +3,8 @@
 // in-process single-flighting), signalling interactive re-authentication
 // completion, and importing a GitHub Copilot token found on disk.
 //
-// It was split out of config.ConfigStore per ARCHITECTURE_REVIEW.md §4 C5.
+// It was split out of config.ConfigStore, which had grown to own four
+// unrelated contexts at once.
 // The dependency runs one way: credentials imports config, not the other
 // way around. Manager reaches back into ConfigStore only through the
 // narrow Store interface below, so config never has to import

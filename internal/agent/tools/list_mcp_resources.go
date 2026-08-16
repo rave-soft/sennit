@@ -33,7 +33,7 @@ var listMCPResourcesDescription string
 // for permission-path resolution, plus whatever mcp.Registry's
 // ListResources/ReadResource require. Declaring it here rather than
 // accepting the concrete *config.ConfigStore keeps this package's
-// dependency on config narrow (ISP; see ARCHITECTURE_REVIEW.md section S4).
+// dependency on config narrow (ISP).
 type mcpResourceConfig interface {
 	mcp.ConfigProvider
 	WorkingDir() string

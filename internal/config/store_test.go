@@ -748,9 +748,9 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 	}
 }
 
-// TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload covers fix 2.1
-// (see ARCHITECTURE_REVIEW.md §3.4): writing an OAuth token for a provider
-// outside the embedded catalog must also persist its type/base_url/name,
+// TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload: writing an
+// OAuth token for a provider outside the embedded catalog must also
+// persist its type/base_url/name,
 // or a later reload (which rebuilds Config from disk via
 // configureProviders) drops the provider entirely for lacking a base_url.
 func TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload(t *testing.T) {

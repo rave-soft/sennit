@@ -21,14 +21,13 @@ import (
 // Historically this state lived in package-level variables, which meant a
 // single process could only ever run one MCP registry: a second workspace's
 // app.New silently stomped the first's sessions, and closing either
-// workspace shut down the broker for both (see ARCHITECTURE_REVIEW.md
-// section 3.1). Every app.App now constructs and owns its own *Registry
-// (app.App.MCP), so two workspaces in one process no longer share sessions,
-// states, auth handlers, or the event broker. The package-level functions
-// below still operate against a single [defaultRegistry] purely for source
-// compatibility with tests and any caller that constructs a Registry
-// directly rather than via app.New; production call sites all go through
-// app.App.MCP.
+// workspace shut down the broker for both. Every app.App now constructs
+// and owns its own *Registry (app.App.MCP), so two workspaces in one
+// process no longer share sessions, states, auth handlers, or the event
+// broker. The package-level functions below still operate against a
+// single [defaultRegistry] purely for source compatibility with tests and
+// any caller that constructs a Registry directly rather than via app.New;
+// production call sites all go through app.App.MCP.
 type attemptID struct {
 	gen uint64
 	seq uint64
@@ -37,8 +36,7 @@ type attemptID struct {
 // ConfigProvider is the slice of *config.ConfigStore this package needs: the
 // dictionary reads (Config, Resolver, Overrides) and the MCP OAuth token
 // mutation calls. Declaring it here rather than accepting the concrete
-// *config.ConfigStore keeps this package's dependency on config narrow (ISP;
-// see ARCHITECTURE_REVIEW.md section S4).
+// *config.ConfigStore keeps this package's dependency on config narrow (ISP).
 type ConfigProvider interface {
 	Config() *config.Config
 	Resolver() config.VariableResolver
@@ -361,8 +359,7 @@ const lifecycleCleanupTimeout = 2 * time.Second
 // shared; that filter is gone. What still isn't wired up is delivery:
 // downstream consumers (server/events.go's SSE bridge, the TUI's mcp.Event
 // switch) don't yet do anything with EventChannelMessage, so it currently
-// just passes through unconsumed rather than injecting into a session. See
-// ARCHITECTURE_REVIEW.md section 3.1.
+// just passes through unconsumed rather than injecting into a session.
 func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	return defaultRegistry.SubscribeEvents(ctx)
 }

@@ -638,8 +638,7 @@ func queueOrder(t *testing.T, svc Service) []string {
 }
 
 // TestPermissionService_QueuedDispatch covers the fix for the
-// requestMu-held-across-the-wait bug described in ARCHITECTURE_REVIEW.md
-// §3.5: Request must not block *posting* a second request behind a
+// requestMu-held-across-the-wait bug: Request must not block *posting* a second request behind a
 // first one still awaiting a user response, but the UI must still only
 // ever see one PermissionRequest event outstanding at a time.
 func TestPermissionService_QueuedDispatch(t *testing.T) {

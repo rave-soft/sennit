@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestProviders_PerConfigDisableDefaultProviders covers ARCHITECTURE_REVIEW.md
-// §3.1/§2.7: Providers used to memoize its result process-globally via
-// sync.Once, so the first *Config it ever saw fixed the answer for every
+// TestProviders_PerConfigDisableDefaultProviders: Providers used to
+// memoize its result process-globally via sync.Once, so the first *Config
+// it ever saw fixed the answer for every
 // other *Config passed in afterwards. In a multi-workspace process, the
 // first workspace loaded would silently decide DisableDefaultProviders for
 // every other workspace. Providers must be a pure function of its argument.

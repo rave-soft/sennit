@@ -34,8 +34,7 @@ type LSPClientInfo = lsp.ClientInfo
 // process (multi-client backend mode) shared one LSP status table: a
 // second workspace's LSP clients silently overwrote the first's, and
 // GetLSPStates() had no way to answer "which workspace's LSP clients?".
-// Embedded directly in App so each workspace owns its own (see
-// ARCHITECTURE_REVIEW.md section 3.1).
+// Embedded directly in App so each workspace owns its own.
 type lspEvents struct {
 	states *csync.Map[string, LSPClientInfo]
 	broker *pubsub.Broker[LSPEvent]

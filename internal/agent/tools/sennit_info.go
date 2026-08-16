@@ -27,8 +27,7 @@ type SennitInfoParams struct {
 // SennitInfoConfig is the slice of *config.ConfigStore this tool needs: the
 // dictionary read, the runtime overrides, the loaded config paths, and the
 // staleness snapshot. Declaring it here rather than accepting the concrete
-// *config.ConfigStore keeps this tool's dependency on config narrow (ISP;
-// see ARCHITECTURE_REVIEW.md section S4).
+// *config.ConfigStore keeps this tool's dependency on config narrow (ISP).
 type SennitInfoConfig interface {
 	Config() *config.Config
 	Overrides() *config.RuntimeOverrides

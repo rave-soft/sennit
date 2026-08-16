@@ -277,8 +277,7 @@ type CoordinatorOptions struct {
 	// MCP is the per-workspace MCP registry. Every consumer that used to
 	// reach for the mcp package's shared defaultRegistry now goes through
 	// this instance so two workspaces in one process don't share sessions,
-	// states, or auth handlers keyed by MCP server name. See
-	// ARCHITECTURE_REVIEW.md section 3.1.
+	// states, or auth handlers keyed by MCP server name.
 	MCP *mcp.Registry
 	// Threads is nil-safe: when nil, the thread_* tools are simply
 	// omitted from the top-level agent's tool list. It is normally wired

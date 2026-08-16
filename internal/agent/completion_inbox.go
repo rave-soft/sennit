@@ -213,8 +213,8 @@ func (d *dispatcher) wakeEligibleLocked(sessionID string) bool {
 // independently regardless of position. A mechanism that only some
 // providers implement correctly is worse than a uniformly plain one.
 //
-// A user-role message has no such trap: PROVIDER_ORDERING_SPIKE.md
-// already established, for steering, that fantasy accepts (and on
+// A user-role message has no such trap: the provider-ordering spike
+// established, for steering, that fantasy accepts (and on
 // Anthropic, merges) a user message appended after other turns - the
 // same path this rides now. The plan's constraint was that a completion
 // must not be *queued as a user prompt* or attributed to the user in
