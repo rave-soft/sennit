@@ -1,6 +1,6 @@
 ---
 name: threads
-description: Use ONLY when threads are explicitly called for — the user asks for one in chat (thread, epic, track, workstream, worktree, "тред", "эпик", "трек", "ворктри", "работай параллельно/изолированно"), another skill or project instructions prescribe them, or you hit a concrete isolation problem — merge/edit conflicts from concurrent work, or someone else's changes appearing in git. Do NOT reach for threads just because a request splits into parallelizable chunks. Also covers writing a thread's goal and handling settled statuses (conflict, merge_blocked, failed, interrupted).
+description: Use ONLY when threads are explicitly called for — the user asks for one in chat (thread, epic, track, workstream, worktree, or the same words in any other language, including asking to work on something in parallel or in isolation), another skill or project instructions prescribe them, or you hit a concrete isolation problem — merge/edit conflicts from concurrent work, or someone else's changes appearing in git. Do NOT reach for threads just because a request splits into parallelizable chunks. Also covers writing a thread's goal and handling settled statuses (conflict, merge_blocked, failed, interrupted).
 ---
 
 # Threads
@@ -15,10 +15,11 @@ general-purpose way to speed up multi-part requests.
 Threads are opt-in. Use them only when one of these holds:
 
 1. **The user asked for one explicitly.** Any of the aliases counts — a
-   *thread*, an *epic*, a *track*, a *workstream*, a *worktree*, "тред",
-   "эпик", "трек", "ворктри", "работай над этим параллельно/изолированно".
-   Whatever the label, they all map to the `thread_*` tools; there is no
-   separate epic/track/worktree feature.
+   *thread*, an *epic*, a *track*, a *workstream*, a *worktree*, the same
+   words in whatever language the user writes in, or a request to work on
+   something in parallel or in isolation. Whatever the label, they all map
+   to the `thread_*` tools; there is no separate epic/track/worktree
+   feature.
 2. **Another skill or project instructions prescribe them** for the current
    task.
 3. **You hit a real isolation problem**: concurrent work is stepping on
