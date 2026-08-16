@@ -38,14 +38,36 @@ theme:
 
 nav:
   - Home: index.md
-  - Config:
-      - Reference: config/README.md
-      - Future work: config/FUTURE.md
-  - Hooks:
-      - Reference: hooks/README.md
-      - Future work: hooks/FUTURE.md
-  - Delegation:
-      - Steering, tasks and threads: delegation/README.md
+  - Getting started: getting-started.md
+  - Configuration:
+      - configuration/index.md
+      - sennitrc reference: configuration/sennitrc.md
+      - Providers and models: configuration/providers.md
+      - Context files: configuration/context.md
+      - Permissions: configuration/permissions.md
+      - Environment and paths: configuration/environment.md
+      - Legacy JSON: configuration/json.md
+      - Future work: configuration/future.md
+  - Extending:
+      - extending/index.md
+      - Agents: extending/agents.md
+      - Skills: extending/skills.md
+      - Commands: extending/commands.md
+      - Hooks: extending/hooks.md
+      - Hooks, future work: extending/hooks-future.md
+      - MCP: extending/mcp.md
+      - LSP: extending/lsp.md
+  - Concepts:
+      - concepts/index.md
+      - Steering, tasks and threads: concepts/delegation.md
+      - Sessions and data storage: concepts/sessions.md
+  - Reference:
+      - reference/index.md
+      - Command line: reference/cli.md
+      - Terminal UI: reference/tui.md
+      - Built-in tools: reference/tools.md
+  - Troubleshooting: troubleshooting.md
+  - Contributing: contributing.md
 
 markdown_extensions:
   - admonition

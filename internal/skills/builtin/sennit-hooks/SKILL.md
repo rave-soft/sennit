@@ -11,7 +11,7 @@ during execution, giving deterministic control over tool behavior. They run
 sub-agent calls (task tool, agentic_fetch, etc.) are not intercepted, though
 the sub-agent tool call itself is.
 
-For the full reference, see `docs/hooks/README.md`. This skill covers what you
+For the full reference, see `docs/extending/hooks.md`. This skill covers what you
 need to author correct hooks.
 
 ## Supported Events

@@ -256,5 +256,5 @@ Reuses the universal rules:
 
 ## Cross-platform shell (Windows support)
 
-**Status:** implemented. See the [Execution model](README.md#execution-model)
+**Status:** implemented. See the [Execution model](hooks.md#execution-model)
 section in `README.md` for the current behavior and contract.

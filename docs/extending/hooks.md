@@ -529,7 +529,7 @@ tool call always proceeds.
 
 ### A real-world Example:
 
-For a more practical example, see [`rtk-rewrite.sh`](./examples/rtk-rewrite.sh),
+For a more practical example, see [`rtk-rewrite.sh`](hook-examples/rtk-rewrite.sh),
 which demonstrates how to rewrite tool input using
 [RTK](https://github.com/rtk-ai/rtk) to save tokens.
 

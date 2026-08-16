@@ -95,7 +95,7 @@ option skill-path ./skills
 
 Because it's a shell script, a shared team config is a `source`, secrets can
 come from your password manager, and machine-specific settings are just an
-`if`. The full command reference is in [docs/config](docs/config/README.md).
+`if`. The full command reference is in [docs/configuration](docs/configuration/sennitrc.md).
 
 `sennit.json` (and `.sennit.json`, in the same locations) still works but is
 deprecated: it follows [`schema.json`](schema.json) and receives no new
@@ -127,7 +127,7 @@ hook add PreToolUse --matcher "^bash$" \
   --command "./hooks/no-force-push.sh" --name no-force-push
 ```
 
-See [docs/hooks](docs/hooks/README.md) for the payload format, exit codes and
+See [docs/extending](docs/extending/hooks.md) for the payload format, exit codes and
 worked examples.
 
 ## Steering, tasks and threads
@@ -139,7 +139,7 @@ directory and reporting back automatically; a **thread** is fully isolated —
 its own git worktree, branch, app instance and merge policy — for work that
 would otherwise collide with what's already running. `sennit threads` manages
 the last of these from the CLI. See
-[docs/delegation](docs/delegation/README.md) for the trade-offs and limits.
+[docs/concepts](docs/concepts/delegation.md) for the trade-offs and limits.
 
 ## Command line
 

@@ -392,7 +392,7 @@ Usage:
 
 ### hook
 
-Manage hooks. See the [hooks docs](../hooks/README.md) for what they can do and how
+Manage hooks. See the [hooks docs](../extending/hooks.md) for what they can do and how
 they run.
 
 ```text

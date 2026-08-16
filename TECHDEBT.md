@@ -44,7 +44,7 @@
   видна лишь при чтении логов руками. Следующий шаг: снять эти два значения
   в счётчики (или хотя бы в `sennit stat`), опираясь на уже существующие
   точки логирования.
-- **Schema URL указывает на чужой домен.** В `docs/config/README.md` и в
+- **Schema URL указывает на чужой домен.** В `docs/configuration/sennitrc.md` и в
   `internal/skills/builtin/sennit-config/SKILL.md` пример JSON-конфига несёт
   `"$schema": "https://charm.land/sennit.json"` — домен Charm с именем файла
   Sennit, то есть несуществующий адрес. В самом `schema.json` `$id` уже
