@@ -186,6 +186,10 @@ The repo also ships a [Taskfile](Taskfile.yaml): `task build`, `task run`,
 regenerates `schema.json` and `task sqlc` the database layer, so both are
 rebuilt from source rather than edited by hand.
 
+The documentation site is built from `docs/` with MkDocs: `task docs` runs the
+same strict build CI does, and `task docs:serve` previews it locally with live
+reload. Both bootstrap their Python toolchain into `.venv-docs/` on first run.
+
 ## Origin and license
 
 Sennit is a fork of [Crush](https://github.com/charmbracelet/crush) by

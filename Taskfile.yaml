@@ -209,3 +209,31 @@ tasks:
     desc: Generate code using SQLC
     cmds:
       - sqlc generate
+
+  docs:deps:
+    desc: Install the documentation toolchain into .venv-docs
+    cmds:
+      - python3 -m venv .venv-docs
+      - ./.venv-docs/bin/pip install --quiet --requirement requirements-docs.txt
+    sources:
+      - requirements-docs.txt
+    generates:
+      - .venv-docs/bin/mkdocs
+
+  docs:
+    desc: Build the documentation site into site/
+    deps: [docs:deps]
+    cmds:
+      # --strict is what CI runs: broken links and stray nav entries fail the build.
+      - ./.venv-docs/bin/mkdocs build --strict {{.CLI_ARGS}}
+    sources:
+      - docs/**/*
+      - mkdocs.yml
+    generates:
+      - site/index.html
+
+  docs:serve:
+    desc: Serve the documentation site locally with live reload
+    deps: [docs:deps]
+    cmds:
+      - ./.venv-docs/bin/mkdocs serve {{.CLI_ARGS}}
