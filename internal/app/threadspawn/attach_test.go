@@ -19,7 +19,7 @@ import (
 
 func newAttachTestApp(t *testing.T, path string) *app.App {
 	t.Helper()
-	t.Setenv("BRAID_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv("SENNIT_GLOBAL_CONFIG", t.TempDir())
 	boot, err := app.Bootstrap(t.Context(), path, app.BootstrapOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() {

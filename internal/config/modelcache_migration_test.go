@@ -29,8 +29,7 @@ import (
 func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	hermeticGlobalDirs(t, globalDir, dataDir)
 
 	dataConfigPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
@@ -93,8 +92,7 @@ func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 func TestConfig_Load_SmallManualModelListIsNotMigrated(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	hermeticGlobalDirs(t, globalDir, dataDir)
 
 	dataConfigPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
@@ -146,8 +144,7 @@ func TestConfig_Load_SmallManualModelListIsNotMigrated(t *testing.T) {
 func TestConfig_Load_DiscoverModelsFalseNeverDiscovers(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	hermeticGlobalDirs(t, globalDir, dataDir)
 
 	discoverFalse := false
 	cfg := &Config{
@@ -182,8 +179,7 @@ func TestConfig_Load_DiscoverModelsFalseNeverDiscovers(t *testing.T) {
 func TestConfig_Load_MigrationLeavesKnownProviderModelsUntouched(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	hermeticGlobalDirs(t, globalDir, dataDir)
 
 	dataConfigPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))

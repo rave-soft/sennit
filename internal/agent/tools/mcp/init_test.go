@@ -1248,13 +1248,13 @@ func TestOwnedAuthHandlerSharedPublicationAndSessionClosesOnce(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	if os.Getenv("BRAID_STDIO_CHECK_HELPER") == "1" {
+	if os.Getenv("SENNIT_TEST_STDIO_CHECK_HELPER") == "1" {
 		got := strings.Join(os.Args[1:], " ")
 		fmt.Printf("args: %s", got)
-		if got != os.Getenv("BRAID_STDIO_CHECK_EXPECTED_ARGS") {
+		if got != os.Getenv("SENNIT_TEST_STDIO_CHECK_EXPECTED_ARGS") {
 			os.Exit(4)
 		}
-		if os.Getenv("BRAID_STDIO_CHECK_FAIL") == "1" {
+		if os.Getenv("SENNIT_TEST_STDIO_CHECK_FAIL") == "1" {
 			os.Exit(3)
 		}
 		os.Exit(0)
@@ -1268,9 +1268,9 @@ func TestStdioCheckArgv(t *testing.T) {
 		Path: os.Args[0],
 		Args: []string{os.Args[0], "--flag", "value"},
 		Env: append(os.Environ(),
-			"BRAID_STDIO_CHECK_HELPER=1",
-			"BRAID_STDIO_CHECK_EXPECTED_ARGS=--flag value",
-			"BRAID_STDIO_CHECK_FAIL=1"),
+			"SENNIT_TEST_STDIO_CHECK_HELPER=1",
+			"SENNIT_TEST_STDIO_CHECK_EXPECTED_ARGS=--flag value",
+			"SENNIT_TEST_STDIO_CHECK_FAIL=1"),
 	}
 	err := stdioCheck(old)
 	require.Error(t, err)
@@ -1282,8 +1282,8 @@ func TestStdioCheckNilArgs(t *testing.T) {
 	old := &exec.Cmd{
 		Path: os.Args[0],
 		Env: append(os.Environ(),
-			"BRAID_STDIO_CHECK_HELPER=1",
-			"BRAID_STDIO_CHECK_EXPECTED_ARGS="),
+			"SENNIT_TEST_STDIO_CHECK_HELPER=1",
+			"SENNIT_TEST_STDIO_CHECK_EXPECTED_ARGS="),
 	}
 	require.NoError(t, stdioCheck(old))
 }

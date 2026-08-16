@@ -13,10 +13,9 @@ import (
 // every selection.
 func BenchmarkUpdatePreferredModel(b *testing.B) {
 	dir := b.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
-	b.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	b.Setenv("BRAID_GLOBAL_DATA", dir)
+	hermeticGlobalDirs(b, dir, dir)
 
 	cfg := `{
 		"model": {"provider": "openai", "model": "gpt-4"},
@@ -70,10 +69,9 @@ func BenchmarkUpdatePreferredModel(b *testing.B) {
 // BenchmarkUpdatePreferredModel.
 func BenchmarkReloadFromDisk(b *testing.B) {
 	dir := b.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
-	b.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	b.Setenv("BRAID_GLOBAL_DATA", dir)
+	hermeticGlobalDirs(b, dir, dir)
 
 	cfg := `{
 		"model": {"provider": "openai", "model": "gpt-4"},
