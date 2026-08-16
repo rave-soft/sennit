@@ -16,11 +16,6 @@ import (
 // on config load, so it must fail fast rather than hold either up.
 const modelsTimeout = 10 * time.Second
 
-// defaultMaxTokensShare caps a single response at a fraction of the context
-// window. The Codex endpoint publishes no per-model output limit, and
-// sending none lets a long run spend the whole window on one reply.
-const defaultMaxTokensShare = 4
-
 // modelEntry is the subset of the Codex model list Sennit uses. The endpoint
 // returns a great deal more (prompt templates, tool modes, NUX copy) that
 // belongs to the Codex CLI's own UI, not to a model catalog.
@@ -139,10 +134,14 @@ func (e modelEntry) toCatwalk() (catwalk.Model, bool) {
 	}
 
 	return catwalk.Model{
-		ID:               e.Slug,
-		Name:             name,
-		ContextWindow:    contextWindow,
-		DefaultMaxTokens: contextWindow / defaultMaxTokensShare,
+		ID:            e.Slug,
+		Name:          name,
+		ContextWindow: contextWindow,
+		// No output cap: the endpoint publishes none and rejects the
+		// parameter outright ("Unsupported parameter:
+		// max_output_tokens"), so zero — "unknown" — is both honest and
+		// what keeps the field off the wire.
+		DefaultMaxTokens: 0,
 		// A ChatGPT subscription is a flat fee: per-token pricing would
 		// report a cost the user is not being charged.
 		CostPer1MIn:            0,

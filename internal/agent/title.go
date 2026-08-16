@@ -73,12 +73,17 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 	}()
 
 	newAgent := func(m fantasy.LanguageModel, p []byte, tok int64) fantasy.Agent {
-		return fantasy.NewAgent(
-			m,
-			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
-			fantasy.WithMaxOutputTokens(tok),
+		opts := []fantasy.AgentOption{
+			fantasy.WithSystemPrompt(string(p) + "\n /no_think"),
 			fantasy.WithUserAgent(userAgent),
-		)
+		}
+		// A zero cap means the provider will not take one (Codex rejects
+		// the field outright), so the option is left off rather than
+		// sending a limit of nothing.
+		if tok > 0 {
+			opts = append(opts, fantasy.WithMaxOutputTokens(tok))
+		}
+		return fantasy.NewAgent(m, opts...)
 	}
 
 	streamCall := fantasy.AgentStreamCall{
@@ -95,9 +100,16 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		},
 	}
 
+	// A title is one line, so a tiny cap is plenty; a reasoning model needs
+	// room to think first and gets its own. A provider that takes no cap at
+	// all gets none — the small default would be rejected like any other
+	// value.
 	tok := int64(40)
 	if model.CatalogCfg.CanReason {
-		tok = model.CatalogCfg.DefaultMaxTokens
+		tok = modelMaxOutputTokens(model)
+	}
+	if rejectsMaxOutputTokens(model) {
+		tok = 0
 	}
 	agent := newAgent(model.Model, titlePrompt, tok)
 	resp, err := agent.Stream(ctx, streamCall)

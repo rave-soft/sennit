@@ -64,10 +64,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	// Get model configuration
 	model := params.Agent.Model()
-	maxTokens := model.CatalogCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
-	}
+	maxTokens := modelMaxOutputTokens(model)
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {

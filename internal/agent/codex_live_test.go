@@ -59,6 +59,10 @@ func TestLiveCodexStream(t *testing.T) {
 	// Streaming only: the Codex endpoint answers a non-streaming request
 	// with "Stream must be set to true". That costs Sennit nothing, since
 	// every model call it makes goes through Stream.
+	//
+	// MaxOutputTokens stays unset on purpose — the endpoint answers 400
+	// "Unsupported parameter: max_output_tokens" for any value, which is
+	// why modelMaxOutputTokens reports zero for this provider.
 	stream, err := model.Stream(ctx, fantasy.Call{
 		Prompt: fantasy.Prompt{
 			fantasy.NewUserMessage("Read the file /etc/hostname using the read_file tool."),
@@ -97,4 +101,25 @@ func TestLiveCodexStream(t *testing.T) {
 	require.Contains(t, toolCall.ToolCallInput, "/etc/hostname")
 	require.Equal(t, fantasy.FinishReasonToolCalls, finishReason)
 	require.Positive(t, usage.InputTokens, "usage must come back so the session can account for it")
+
+	// And the constraint modelMaxOutputTokens exists for: any cap at all is
+	// a 400 here, so this must keep failing for the zero to stay justified.
+	outputCap := int64(256)
+	capped, err := model.Stream(ctx, fantasy.Call{
+		Prompt:          fantasy.Prompt{fantasy.NewUserMessage("say ok")},
+		MaxOutputTokens: &outputCap,
+		ProviderOptions: fantasy.ProviderOptions{openai.Name: opts},
+	})
+	capErr := err
+	if capErr == nil {
+		// The rejection arrives while the stream is consumed, not when it
+		// is opened, so it has to be read out.
+		for part := range capped {
+			if part.Error != nil {
+				capErr = part.Error
+			}
+		}
+	}
+	require.ErrorContains(t, capErr, "max_output_tokens",
+		"if the endpoint started accepting a cap, modelMaxOutputTokens can stop zeroing it")
 }

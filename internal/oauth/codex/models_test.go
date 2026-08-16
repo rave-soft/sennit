@@ -51,8 +51,8 @@ func TestParseModels(t *testing.T) {
 	require.Equal(t, "gpt-5.6-sol", sol.ID)
 	require.Equal(t, "GPT-5.6-Sol", sol.Name)
 	require.EqualValues(t, 272000, sol.ContextWindow)
-	require.Positive(t, sol.DefaultMaxTokens)
-	require.Less(t, sol.DefaultMaxTokens, sol.ContextWindow)
+	require.Zero(t, sol.DefaultMaxTokens,
+		"the endpoint rejects max_output_tokens, so no cap may be advertised")
 	require.True(t, sol.CanReason)
 	require.Equal(t, []string{"low", "high", "max"}, sol.ReasoningLevels)
 	require.Equal(t, "low", sol.DefaultReasoningEffort)

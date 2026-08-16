@@ -1177,10 +1177,7 @@ func (c *coordinator) runtimeFor(ctx context.Context) (*compiledRuntime, error) 
 			return nil, errModelProviderNotConfigured
 		}
 		options, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
-		maxTokens := model.CatalogCfg.DefaultMaxTokens
-		if model.ModelCfg.MaxTokens != 0 {
-			maxTokens = model.ModelCfg.MaxTokens
-		}
+		maxTokens := modelMaxOutputTokens(model)
 		return &compiledRuntime{
 			key: key, model: model, tools: builtTools, systemPrompt: systemPrompt,
 			providerCfg: providerCfg, providerOptions: options,

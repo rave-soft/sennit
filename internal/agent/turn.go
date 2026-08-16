@@ -464,14 +464,10 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
 }
 
-// maxOutputTokens is the largest reply this turn's model may produce: the
-// explicit per-model setting when there is one, otherwise the catalog
-// default. Zero means unknown.
+// maxOutputTokens is the largest reply this turn's model may produce. Zero
+// means unknown, which summarizeBuffer reads as "use the standard buffer".
 func (t *runTurn) maxOutputTokens() int64 {
-	if t.model.ModelCfg.MaxTokens > 0 {
-		return t.model.ModelCfg.MaxTokens
-	}
-	return t.model.CatalogCfg.DefaultMaxTokens
+	return modelMaxOutputTokens(t.model)
 }
 
 // stopOnContextWindow is the auto-summarize StopWhen condition: it stops
