@@ -126,6 +126,45 @@ type dispatcher struct {
 	// once at construction; not guarded by a lock since it never changes
 	// after that.
 	onQueueChanged func(sessionID string)
+
+	// userInput holds, per session, a channel closed when a prompt from
+	// the user is queued while a turn is already running. Tools that spend
+	// a turn waiting on something else (thread_wait) select on it so they
+	// can cut the wait short and let the user be answered — see
+	// tools.WaitForUserInput. The entry is dropped as it is closed, so the
+	// next request arms a fresh one.
+	userInput *csync.Map[string, chan struct{}]
+	// userInputMu guards the get-or-create and close-and-delete pair
+	// against each other; without it two goroutines can hand out different
+	// channels for the same session and one of them never closes.
+	userInputMu sync.Mutex
+}
+
+// userInputChan returns the channel that closes when the user next sends a
+// message to this session, creating it on first use.
+func (d *dispatcher) userInputChan(sessionID string) <-chan struct{} {
+	d.userInputMu.Lock()
+	defer d.userInputMu.Unlock()
+	if ch, ok := d.userInput.Get(sessionID); ok {
+		return ch
+	}
+	ch := make(chan struct{})
+	d.userInput.Set(sessionID, ch)
+	return ch
+}
+
+// signalUserInput reports that the user has queued a prompt for this
+// session, releasing anything waiting on it. Sessions nobody is waiting on
+// have no channel and cost nothing here.
+func (d *dispatcher) signalUserInput(sessionID string) {
+	d.userInputMu.Lock()
+	defer d.userInputMu.Unlock()
+	ch, ok := d.userInput.Get(sessionID)
+	if !ok {
+		return
+	}
+	d.userInput.Del(sessionID)
+	close(ch)
 }
 
 // DelegationParent describes where a running delegation should send an
@@ -157,6 +196,7 @@ func newDispatcher() *dispatcher {
 		cancelMark:        csync.NewMap[string, uint64](),
 		completionInbox:   csync.NewMap[string, []TaskCompletion](),
 		cancelledSessions: csync.NewMap[string, struct{}](),
+		userInput:         csync.NewMap[string, chan struct{}](),
 		delegationParents: csync.NewMap[string, DelegationParent](),
 	}
 }

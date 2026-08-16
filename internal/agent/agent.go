@@ -440,6 +440,11 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		// under sessMu, held by this caller, not by dispatch itself) - so
 		// this calls it explicitly, only now that the lock is released.
 		a.dispatch.notifyQueueChanged(call.SessionID)
+		// Release anything in the active turn that is only waiting (a
+		// thread_wait, say). The prompt stays queued either way; this
+		// just stops the turn from sitting idle on something else while
+		// the user has already moved on.
+		a.dispatch.signalUserInput(call.SessionID)
 		return SteerEnqueued, nil, nil
 	}
 
@@ -447,6 +452,11 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	// the lock so a Cancel that arrives between here and assistant creation
 	// is not lost.
 	runCtx := context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
+	// Tools that wait on something other than the user can use this to
+	// notice that the user has spoken and hand the turn back.
+	runCtx = tools.WithUserInput(runCtx, func() <-chan struct{} {
+		return a.dispatch.userInputChan(call.SessionID)
+	})
 	genCtx, cancel = context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
 	a.dispatch.activeRequests.Set(call.SessionID, ac)
