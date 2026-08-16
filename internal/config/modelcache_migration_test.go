@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/brand"
+
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/rave-soft/sennit/internal/config/migrate"
@@ -29,8 +31,8 @@ import (
 func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", globalDir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dataDir)
 
 	dataConfigPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
@@ -93,8 +95,8 @@ func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 func TestConfig_Load_SmallManualModelListIsNotMigrated(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", globalDir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dataDir)
 
 	dataConfigPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
@@ -146,8 +148,8 @@ func TestConfig_Load_SmallManualModelListIsNotMigrated(t *testing.T) {
 func TestConfig_Load_DiscoverModelsFalseNeverDiscovers(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", globalDir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dataDir)
 
 	discoverFalse := false
 	cfg := &Config{
@@ -182,8 +184,8 @@ func TestConfig_Load_DiscoverModelsFalseNeverDiscovers(t *testing.T) {
 func TestConfig_Load_MigrationLeavesKnownProviderModelsUntouched(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", globalDir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dataDir)
 
 	dataConfigPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))

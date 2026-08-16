@@ -71,7 +71,7 @@ type Styles struct {
 
 	// Header
 	Header struct {
-		Charm             lipgloss.Style // Style for "Charm™" label
+		Vendor            lipgloss.Style // Style for the vendor label
 		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
 		Percentage        lipgloss.Style // Style for context percentage
 		Keystroke         lipgloss.Style // Style for keystroke hints (e.g., "ctrl+d")
@@ -183,9 +183,9 @@ type Styles struct {
 		FieldColor         color.Color
 		TitleColorA        color.Color
 		TitleColorB        color.Color
-		CharmColor         color.Color
+		VendorColor        color.Color
 		VersionColor       color.Color
-		SmallCharm         lipgloss.Style // "Charm™" label in SmallRender
+		SmallVendor        lipgloss.Style // Vendor label in SmallRender
 		SmallDiagonals     lipgloss.Style // Diagonal line fill in SmallRender
 		GradCanvas         lipgloss.Style // Blank canvas for gradient painting
 		SmallGradFromColor color.Color    // Small "Braid" wordmark gradient start

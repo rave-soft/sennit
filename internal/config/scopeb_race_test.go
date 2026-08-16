@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 // TestScopeB_InPlaceMutationRace probes whether the store's in-place field
@@ -20,8 +22,8 @@ func TestScopeB_InPlaceMutationRace(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "braid.json")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_CONFIG", dir)
+	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dir)
 
 	cfg := `{
 		"model": {"provider": "openai", "model": "gpt-4"},

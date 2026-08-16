@@ -114,12 +114,6 @@ opened and then kept around as `sennit.db.imported`.
 go build -o sennit .
 ```
 
-## Upgrading from Braid
-
-Sennit is Braid, renamed. There is no compatibility layer — see
-[docs/MIGRATION.md](docs/MIGRATION.md) for the full old-to-new contract table
-and the manual steps to carry over an existing profile.
-
 ## Origin and license
 
 Sennit is a fork of [Crush](https://github.com/charmbracelet/crush) by

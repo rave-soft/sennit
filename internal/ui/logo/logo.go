@@ -24,7 +24,7 @@ type Opts struct {
 	FieldColor   color.Color // diagonal lines
 	TitleColorA  color.Color // left gradient ramp point
 	TitleColorB  color.Color // right gradient ramp point
-	CharmColor   color.Color // Charm™ text color
+	VendorColor  color.Color // Vendor text color
 	VersionColor color.Color // version text color
 	Width        int         // width of the rendered logo, used for truncation
 
@@ -40,7 +40,7 @@ type Opts struct {
 // The compact argument determines whether it renders compact for the sidebar
 // or wider for the main pane.
 func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
-	charm := " " + brand.Vendor
+	vendor := " " + brand.Vendor
 
 	fg := func(c color.Color, s string) string {
 		return lipgloss.NewStyle().Foreground(c).Render(s)
@@ -73,12 +73,12 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 	}
 	sennit = b.String()
 
-	// Charm and version.
+	// Vendor and version.
 	metaRowGap := 1
-	maxVersionWidth := sennitWidth - lipgloss.Width(charm) - metaRowGap
+	maxVersionWidth := sennitWidth - lipgloss.Width(vendor) - metaRowGap
 	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
-	gap := max(0, sennitWidth-lipgloss.Width(charm)-lipgloss.Width(version))
-	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
+	gap := max(0, sennitWidth-lipgloss.Width(vendor)-lipgloss.Width(version))
+	metaRow := fg(o.VendorColor, vendor) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
 
 	// Join the meta row and big Sennit title.
 	sennit = strings.TrimSpace(metaRow + "\n" + sennit)
@@ -129,8 +129,8 @@ func Render(base lipgloss.Style, version string, compact bool, o Opts) string {
 // smaller windows or sidebar usage.
 func SmallRender(t *styles.Styles, width int, o Opts) string {
 	name := brand.Name
-	charm := brand.Vendor
-	title := t.Logo.SmallCharm.Render(charm)
+	vendor := brand.Vendor
+	title := t.Logo.SmallVendor.Render(vendor)
 	title = fmt.Sprintf("%s %s", title, styles.ApplyBoldForegroundGrad(t.Logo.GradCanvas, name, t.Logo.SmallGradFromColor, t.Logo.SmallGradToColor))
 	remainingWidth := width - lipgloss.Width(title) - 1 // 1 for the space after the name
 	if remainingWidth > 0 {

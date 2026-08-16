@@ -30,7 +30,12 @@ import (
 func TestMain(m *testing.M) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	// Fail safe: a test in this package that forgets to point the global
+	// profile somewhere disposable would otherwise write into the
+	// developer's real one.
+	cleanup := testenv.IsolateGlobalProfile()
 	exitVal := m.Run()
+	cleanup()
 	os.Exit(exitVal)
 }
 

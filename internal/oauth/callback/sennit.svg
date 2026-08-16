@@ -1,0 +1,27 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 240 48"
+  fill="none"
+  role="img"
+  aria-label="Sennit"
+>
+  <!-- Plait mark, echoing the notification icon: three strands weaving
+       over and under. The strand passing underneath is broken at the
+       crossing rather than cased in a background colour, so the mark
+       reads on any background. -->
+  <g stroke="currentColor" stroke-width="5" stroke-linecap="round">
+    <path d="M6 30 C 14 12, 26 12, 34 30" />
+    <path d="M34 30 C 42 12, 54 12, 62 30" />
+    <path d="M6 18 C 12 30, 18 33, 24 34" />
+    <path d="M44 34 C 50 33, 56 30, 62 18" opacity="0.75" />
+    <path d="M28 35 C 32 36, 36 36, 40 35" opacity="0.75" />
+  </g>
+  <text
+    x="82"
+    y="34"
+    font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+    font-size="28"
+    letter-spacing="2"
+    fill="currentColor"
+  >sennit</text>
+</svg>

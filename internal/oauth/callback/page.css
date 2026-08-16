@@ -210,5 +210,5 @@ h1 {
   height: 1.5rem;
   width: auto;
   /* viewBox-only SVGs collapse to 0 width under height + width:auto. */
-  aspect-ratio: 153 / 47;
+  aspect-ratio: 240 / 48;
 }

@@ -31,40 +31,6 @@ func renderWord(spacing int, stretchIndex int, letterforms ...letterform) string
 	)
 }
 
-// LetterR renders the letter R in a stylized way. It takes an integer that
-// determines how many cells to stretch the letter. If the stretch is less than
-// 1, it defaults to no stretching.
-func LetterR(stretch bool) string {
-	// Here's what we're making:
-	//
-	// █▀▀▀▄
-	// █▀▀▀▄
-	// ▀   ▀
-
-	left := heredoc.Doc(`
-		█
-		█
-		▀`)
-	center := heredoc.Doc(`
-		▀
-		▀
-	`)
-	right := heredoc.Doc(`
-		▄
-		▄
-		▀`)
-	return joinLetterform(
-		left,
-		stretchLetterformPart(center, letterformProps{
-			stretch:    stretch,
-			width:      3,
-			minStretch: 7,
-			maxStretch: 12,
-		}),
-		right,
-	)
-}
-
 func joinLetterform(letters ...string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, letters...)
 }
@@ -95,75 +61,6 @@ func stretchLetterformPart(s string, p letterformProps) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
-// LetterB renders the letter B in a stylized way. It takes a bool that
-// determines whether to stretch the letter.
-func LetterB(stretch bool) string {
-	// Here's what we're making. The middle row is a solid crossbar (█
-	// instead of ▀), giving B an actual waist to anchor on instead of
-	// implying one through half-block shading — that's what sets it apart
-	// from R, which leaves that row open.
-	//
-	// █▀▀▄
-	// ███▄
-	// ▀▀▀▀
-
-	left := heredoc.Doc(`
-		█
-		█
-		▀`)
-	middle := heredoc.Doc(`
-		▀
-		█
-		▀`)
-	right := heredoc.Doc(`
-		▄
-		▄
-		▀`)
-	return joinLetterform(
-		left,
-		stretchLetterformPart(middle, letterformProps{
-			stretch:    stretch,
-			width:      2,
-			minStretch: 7,
-			maxStretch: 12,
-		}),
-		right,
-	)
-}
-
-// LetterA renders the letter A in a stylized way. The stretch argument is
-// accepted for symmetry with the other letterforms but ignored: A's
-// tent-like silhouette stops reading as a letter at any elongation (like
-// LetterI, which has nothing to stretch).
-func LetterA(_ bool) string {
-	// Here's what we're making:
-	//
-	// ▄▀▀▀▄
-	// █▀▀▀█
-	// ▀   ▀
-
-	left := heredoc.Doc(`
-		▄
-		█
-		▀`)
-	middle := heredoc.Doc(`
-		▀
-		▀
-	`)
-	right := heredoc.Doc(`
-		▄
-		█
-		▀`)
-	return joinLetterform(
-		left,
-		stretchLetterformPart(middle, letterformProps{
-			stretch: false,
-			width:   3,
-		}),
-		right,
-	)
-}
-
 // LetterI renders the letter I in a stylized way. The stretch argument is
 // accepted for symmetry with the other letterforms but ignored: a single
 // vertical stroke has nothing to stretch.
@@ -178,43 +75,6 @@ func LetterI(_ bool) string {
 		█
 		█
 		▀`)
-}
-
-// LetterD renders the letter D in a stylized way. It takes a bool that
-// determines whether to stretch the letter.
-func LetterD(stretch bool) string {
-	// Here's what we're making. The bottom row is pure ▀ (plus padding),
-	// same as every other letterform in this word — a closing curve made
-	// of █/▄ would sit below the shared baseline and make D look taller
-	// than its neighbors. Rounding comes only from the ▄ cap on top; the
-	// wall itself (▄, █, ▀) stays closed on every row.
-	//
-	// █▀▀▄
-	// █  █
-	// ▀▀▀▀
-
-	left := heredoc.Doc(`
-		█
-		█
-		▀`)
-	middle := heredoc.Doc(`
-		▀
-
-		▀`)
-	right := heredoc.Doc(`
-		▄
-		█
-		▀`)
-	return joinLetterform(
-		left,
-		stretchLetterformPart(middle, letterformProps{
-			stretch:    stretch,
-			width:      2,
-			minStretch: 7,
-			maxStretch: 12,
-		}),
-		right,
-	)
 }
 
 // LetterE renders the letter E in a stylized way. It takes a bool that
