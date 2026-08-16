@@ -553,9 +553,15 @@ Keybinding action names use the groups `editor.*`, `chat.*`, and
 `options.tui.keybindings` object whose values are arrays of keys.
 
 > [!IMPORTANT]
-> These skill paths load by default — you do NOT need `skill-path`
-> for them: `.agents/skills`, `.sennit/skills`, `.claude/skills`,
-> `.cursor/skills`.
+> Only Sennit's own skill directories load by default — you do NOT need
+> `skill-path` for them: `.sennit/skills` in the working directory (and at
+> the git worktree root, so monorepo-level skills are found) plus the global
+> `~/.config/sennit/skills`.
+>
+> Skills written for another tool (`.claude/skills`, `.opencode/skills`,
+> `.cursor/skills`, …) are **not** auto-discovered. Bring them in explicitly
+> with `sennit import claude --skills`, which copies and validates them into
+> `.sennit/skills`, or point at the directory yourself with `skill-path`.
 
 ## Composing configs
 

@@ -61,8 +61,8 @@ outright once you're done with it.
 
 ## Named agents remember
 
-A named agent — anything defined in `.claude/agents`, or any `agents` entry
-in the config other than `coder` and `task` — is a continuing counterpart,
+A named agent — anything defined as a markdown file in `.sennit/agents`,
+as opposed to the built-in `coder` and `task` — is a continuing counterpart,
 not a stranger on every call. Delegating to `developer` twice under the same
 session replays the first exchange into the second: you can send it review
 findings and it knows what it wrote.
