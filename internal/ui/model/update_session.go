@@ -72,6 +72,9 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.setState(uiChat, m.focus)
 		m.sess.current = msg.session
 		m.sess.modelUsed = msg.modelUsed
+		// The chat is about to be replaced wholesale; placeholders belong
+		// to the list that is going away.
+		m.clearQueuedPrompts()
 		m.sidebar.offset = 0
 		m.sess.files = msg.files
 		// Session switch: the memoized busy state and queued prompts

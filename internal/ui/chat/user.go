@@ -31,6 +31,12 @@ type UserMessageItem struct {
 	attachments *attachments.Renderer
 	message     *message.Message
 	sty         *styles.Styles
+	// queued marks a prompt the person has submitted but the agent has
+	// not taken yet: it is busy, so this is waiting in its queue. The
+	// text is theirs and reads exactly like a sent message, so the tag
+	// is the only thing separating "said" from "about to say" — see
+	// NewQueuedUserMessageItem.
+	queued bool
 }
 
 // NewUserMessageItem creates a new UserMessageItem.
@@ -45,6 +51,29 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachment
 		message:                  message,
 		sty:                      sty,
 	}
+}
+
+// NewQueuedUserMessageItem creates a placeholder for a prompt that has
+// been submitted while the agent was busy and is sitting in its queue
+// until the current turn reaches its next step.
+//
+// It exists because that wait is otherwise invisible: nothing is
+// persisted until the agent actually takes the prompt, so the chat used
+// to show no trace of a message that had been typed, sent, and accepted.
+// Waits of several minutes are ordinary when the turn is deep in a long
+// tool call, and a silent one reads as a lost message.
+//
+// id is the caller's own handle for removing this item once the real
+// message lands (see UI.deliverQueuedPrompt); it is not a message id and
+// never reaches the database.
+func NewQueuedUserMessageItem(sty *styles.Styles, id, text string) MessageItem {
+	item, _ := NewUserMessageItem(sty, &message.Message{
+		ID:    id,
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: text}},
+	}, nil).(*UserMessageItem)
+	item.queued = true
+	return item
 }
 
 // Finished implements list.Item. User messages are immutable once
@@ -74,6 +103,11 @@ func turnSeparator(sty *styles.Styles, width int) string {
 // than something the person actually typed.
 const originAgentTagLabel = "Agent"
 
+// queuedTagLabel marks a submitted prompt the agent has not taken yet.
+// It says what is true — the message is waiting, not answered — in the
+// same place the agent-authored tag sits.
+const queuedTagLabel = "Queued · waiting for the current step to finish"
+
 // withTurnSeparator prepends the turn separator rule (plus a blank line)
 // to a user message's rendered body. When the message originated from
 // another agent rather than the person, a muted tag line is inserted
@@ -81,7 +115,10 @@ const originAgentTagLabel = "Agent"
 // agent-authored at a glance.
 func (m *UserMessageItem) withTurnSeparator(content string, width int) string {
 	sep := turnSeparator(m.sty, width)
-	if m.message.Origin == message.OriginAgent {
+	switch {
+	case m.queued:
+		sep = sep + "\n" + m.sty.Messages.OriginAgentTag.Render(queuedTagLabel)
+	case m.message.Origin == message.OriginAgent:
 		sep = sep + "\n" + m.sty.Messages.OriginAgentTag.Render(originAgentTagLabel)
 	}
 	if content == "" {
@@ -95,7 +132,7 @@ func (m *UserMessageItem) withTurnSeparator(content string, width int) string {
 // tag, blank spacer) rather than the message body. Render uses this to
 // decide which lines get plain padding instead of the user border prefix.
 func (m *UserMessageItem) headerLineCount() int {
-	if m.message.Origin == message.OriginAgent {
+	if m.queued || m.message.Origin == message.OriginAgent {
 		return 3
 	}
 	return 2

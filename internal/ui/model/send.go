@@ -40,6 +40,12 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 			return nil
 		}
 		m.editor.pendingSendActive = true
+		// A busy session queues this prompt instead of running it, and
+		// nothing is persisted until the running turn takes it. Show it
+		// as waiting rather than letting it vanish until then.
+		if m.isAgentBusy() {
+			m.showQueuedPrompt(content)
+		}
 	}
 	return m.sendMessageNow(content, attachments...)
 }
@@ -130,6 +136,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		}
 
 		m.com.Workspace.AgentCancel(m.sess.current.ID)
+		// A cancel clears the agent's queue too, so nothing is left
+		// waiting for these placeholders to stand in for.
+		m.clearQueuedPrompts()
 		// Stop the spinning todo indicator and drop the memoized busy
 		// state the cancel just changed; the session panel reads
 		// m.panel.isSpinning fresh on every draw, and again once the
@@ -143,6 +152,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 	// count (event-driven) instead of a synchronous workspace probe.
 	if m.wsCache.promptQueue > 0 {
 		m.com.Workspace.AgentClearQueue(m.sess.current.ID)
+		m.clearQueuedPrompts()
 		m.wsCache.promptQueue = 0
 		m.wsCache.promptQueueItems = nil
 		m.wsCache.promptQueueCheckedAt = time.Now()

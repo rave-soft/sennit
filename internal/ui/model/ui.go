@@ -341,6 +341,10 @@ type UI struct {
 
 	sess sessionState
 
+	// queued holds the chat placeholders for prompts submitted into a
+	// busy session — see queuedPromptState.
+	queued queuedPromptState
+
 	ops settingsOps
 
 	lay layoutState
