@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"github.com/rave-soft/braid/internal/git"
-	"github.com/rave-soft/braid/internal/history"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/git"
+	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 

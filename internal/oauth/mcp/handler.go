@@ -18,8 +18,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/pkg/browser"
-	"github.com/rave-soft/braid/internal/oauth"
-	"github.com/rave-soft/braid/internal/oauth/callback"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth/callback"
 	"golang.org/x/oauth2"
 )
 
@@ -189,7 +190,7 @@ func NewHandler(
 		Client: newOAuthMetadataClient(http.DefaultTransport, serverURL),
 		DynamicClientRegistrationConfig: &auth.DynamicClientRegistrationConfig{
 			Metadata: &oauthex.ClientRegistrationMetadata{
-				ClientName:   "Braid",
+				ClientName:   brand.Name,
 				RedirectURIs: []string{redirectURL},
 				GrantTypes:   []string{"authorization_code", "refresh_token"},
 			},

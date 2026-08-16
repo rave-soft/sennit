@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/stretchr/testify/require"
 )
 

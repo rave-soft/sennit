@@ -2,8 +2,8 @@ package model
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // updateThreads handles the thread-tracking branches of UI.Update: the

@@ -7,7 +7,7 @@ import (
 	"html/template"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/permission"
 )
 
 const ThreadRemoveToolName = "thread_remove"

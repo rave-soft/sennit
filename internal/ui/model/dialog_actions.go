@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/ui/dialog"
-	fimage "github.com/rave-soft/braid/internal/ui/image"
-	"github.com/rave-soft/braid/internal/ui/util"
-	"github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
+	fimage "github.com/rave-soft/sennit/internal/ui/image"
+	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // applyDialogAction executes a [dialog.Action] regardless of where it came

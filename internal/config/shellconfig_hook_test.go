@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/rave-soft/braid/internal/hooks"
+	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/stretchr/testify/require"
 )
 

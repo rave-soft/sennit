@@ -412,8 +412,8 @@ func TestDiscoverBuiltin(t *testing.T) {
 			found = true
 			require.True(t, strings.HasPrefix(s.SkillFilePath, BuiltinPrefix))
 			require.True(t, strings.HasPrefix(s.Path, BuiltinPrefix))
-			require.Equal(t, "braid://skills/braid-config/SKILL.md", s.SkillFilePath)
-			require.Equal(t, "braid://skills/braid-config", s.Path)
+			require.Equal(t, "sennit://skills/braid-config/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "sennit://skills/braid-config", s.Path)
 			require.NotEmpty(t, s.Description)
 			require.NotEmpty(t, s.Instructions)
 			require.True(t, s.Builtin)
@@ -425,8 +425,8 @@ func TestDiscoverBuiltin(t *testing.T) {
 	for _, s := range discovered {
 		if s.Name == "jq" {
 			foundJQ = true
-			require.Equal(t, "braid://skills/jq/SKILL.md", s.SkillFilePath)
-			require.Equal(t, "braid://skills/jq", s.Path)
+			require.Equal(t, "sennit://skills/jq/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "sennit://skills/jq", s.Path)
 			require.NotEmpty(t, s.Description)
 			require.NotEmpty(t, s.Instructions)
 			require.True(t, s.Builtin)
@@ -438,8 +438,8 @@ func TestDiscoverBuiltin(t *testing.T) {
 	for _, s := range discovered {
 		if s.Name == "braid-hooks" {
 			foundHooks = true
-			require.Equal(t, "braid://skills/braid-hooks/SKILL.md", s.SkillFilePath)
-			require.Equal(t, "braid://skills/braid-hooks", s.Path)
+			require.Equal(t, "sennit://skills/braid-hooks/SKILL.md", s.SkillFilePath)
+			require.Equal(t, "sennit://skills/braid-hooks", s.Path)
 			require.NotEmpty(t, s.Description)
 			require.NotEmpty(t, s.Instructions)
 			require.True(t, s.Builtin)

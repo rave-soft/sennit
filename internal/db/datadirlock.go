@@ -11,8 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rave-soft/braid/internal/lock"
-	"github.com/rave-soft/braid/internal/version"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/lock"
+	"github.com/rave-soft/sennit/internal/version"
 )
 
 // ErrWorkspaceLocked is returned by AcquireWorkspaceLock when a
@@ -23,7 +24,7 @@ var ErrWorkspaceLocked = errors.New("workspace already in use by another braid p
 // workspaceLockFile is the name of the lock file inside a project's
 // .braid directory. It lives next to braid.db so users can `ls` and
 // find it.
-const workspaceLockFile = "braid.lock"
+const workspaceLockFile = brand.LockFile
 
 // dataDirOwnerInfo is the JSON payload written into the lock file by
 // the process that currently owns it. It is purely informational; the
@@ -161,7 +162,7 @@ func canonicalWorkspaceLockDir(dir string) (string, error) {
 }
 
 func skipWorkspaceLock() bool {
-	v, _ := strconv.ParseBool(os.Getenv("BRAID_SKIP_DATADIR_LOCK"))
+	v, _ := strconv.ParseBool(os.Getenv(brand.EnvPrefix + "SKIP_DATADIR_LOCK"))
 	return v
 }
 

@@ -6,7 +6,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 )
 
 // reinitAction describes how to reconcile one MCP server against the

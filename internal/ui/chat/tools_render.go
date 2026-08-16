@@ -6,10 +6,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/ui/anim"
-	"github.com/rave-soft/braid/internal/ui/presentation"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/ui/presentation"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // pendingTool renders a tool that is still in progress with an animation.

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/lsp"
+	"github.com/rave-soft/sennit/internal/lsp"
 )
 
 type CallHierarchyParams struct {

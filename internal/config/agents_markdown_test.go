@@ -27,7 +27,7 @@ func writeConfigFile(t *testing.T, root, name, content string) {
 
 func TestDiscoverBraidAgent(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", `---
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", `---
 name: reviewer
 description: Reviews Go code
 reasoning_effort: low
@@ -52,7 +52,7 @@ You review Go code.`)
 // app's main model), with a debug log fired.
 func TestDiscoverBraidAgentSlotWordsAreNotSpecial(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", `---
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", `---
 name: reviewer
 description: Reviews Go code
 model: small
@@ -72,7 +72,7 @@ You review Go code.`)
 // there by `braid import`).
 func TestDiscoverAgentResolvesForeignProviderModel(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer-dba.md", `---
+	writeAgent(t, root, ".sennit/agents", "reviewer-dba.md", `---
 name: reviewer-dba
 description: Reviews SQL
 model: fakeprovider/FAKE-MODEL
@@ -93,7 +93,7 @@ You review databases.`)
 	require.Equal(t, "fakeprovider/fake-model", agent.Model)
 }
 
-// Only .braid/agents is auto-discovered. Agent files written for other
+// Only .sennit/agents is auto-discovered. Agent files written for other
 // tools are not picked up on their own — they need `braid import` to bring
 // them in (see TECHDEBT.md and cmd/import.go).
 func TestDiscoverIgnoresForeignDirs(t *testing.T) {
@@ -109,29 +109,29 @@ func TestDiscoverPrefersBraidAgentsOverForeignDirs(t *testing.T) {
 	root := t.TempDir()
 	writeAgent(t, root, ".opencode/agent", "reviewer.md", "---\ndescription: from opencode\n---\nopencode body")
 	writeAgent(t, root, ".claude/agents", "reviewer.md", "---\nname: reviewer\ndescription: from claude\n---\nclaude body")
-	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\ndescription: from braid\n---\nbraid body")
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\ndescription: from braid\n---\nbraid body")
 
 	got := discoverMarkdownAgents(root, nil)
 	require.Equal(t, "from braid", got["reviewer"].Description)
 	require.Equal(t, "braid body", got["reviewer"].Prompt)
 }
 
-// mode: primary is still respected for files that live in .braid/agents
+// mode: primary is still respected for files that live in .sennit/agents
 // itself (e.g. an imported opencode file that kept the field).
 func TestDiscoverSkipsPrimaryMode(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "build.md", "---\nname: build\nmode: primary\ndescription: x\n---\nbody")
+	writeAgent(t, root, ".sennit/agents", "build.md", "---\nname: build\nmode: primary\ndescription: x\n---\nbody")
 
 	require.NotContains(t, discoverMarkdownAgents(root, nil), "build")
 }
 
 // Tool names are no longer translated during regular discovery — that only
-// happens in `braid import` now. A .braid/agents file naming Claude Code's
+// happens in `braid import` now. A .sennit/agents file naming Claude Code's
 // tools verbatim keeps those names as-is, which grants nothing useful, but
 // that's the user's file to fix (or re-run the importer).
 func TestDiscoverBraidAgentDoesNotTranslateToolNames(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", `---
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", `---
 name: reviewer
 description: Reviews code
 tools: Read, Grep, Glob, Bash
@@ -144,11 +144,11 @@ You review.`)
 
 func TestDiscoverSkipsDisabledAndBrokenFiles(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "off.md", "---\nname: off\ndisabled: true\n---\nbody")
-	writeAgent(t, root, ".braid/agents", "nofm.md", "no frontmatter here")
-	writeAgent(t, root, ".braid/agents", "unclosed.md", "---\nname: unclosed\ndescription: x\nbody")
-	writeAgent(t, root, ".braid/agents", "empty.md", "---\nname: empty\n---\n   \n")
-	writeAgent(t, root, ".braid/agents", "notes.txt", "---\nname: notes\n---\nbody")
+	writeAgent(t, root, ".sennit/agents", "off.md", "---\nname: off\ndisabled: true\n---\nbody")
+	writeAgent(t, root, ".sennit/agents", "nofm.md", "no frontmatter here")
+	writeAgent(t, root, ".sennit/agents", "unclosed.md", "---\nname: unclosed\ndescription: x\nbody")
+	writeAgent(t, root, ".sennit/agents", "empty.md", "---\nname: empty\n---\n   \n")
+	writeAgent(t, root, ".sennit/agents", "notes.txt", "---\nname: notes\n---\nbody")
 
 	// Asserting on specific ids rather than an empty map: discovery also
 	// scans the user's global agents directory, which the test cannot control.
@@ -163,7 +163,7 @@ func TestDiscoverIgnoresMissingDirs(t *testing.T) {
 	require.Empty(t, discoverMarkdownAgents("", nil), "an unknown working dir must not scan anything")
 }
 
-// Markdown files under .braid/agents are the only source of user-defined
+// Markdown files under .sennit/agents are the only source of user-defined
 // agents: a JSON "agents" entry of the same id must not win, or even be
 // read at all. This is the direct regression test for the incident that
 // prompted the JSON surface's removal — a braid agent once wrote a junk
@@ -171,11 +171,11 @@ func TestDiscoverIgnoresMissingDirs(t *testing.T) {
 // project markdown agent of the same name.
 func TestSetupAgentsIgnoresJSONAgentsBlock(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\ndescription: from file\n---\nfile body")
-	writeAgent(t, root, ".braid/agents", "dba.md", "---\nname: dba\ndescription: dba file\n---\ndba body")
-	writeConfigFile(t, root, "braid.json", `{"agents":{"reviewer":{"description":"from json","prompt":"json body"}}}`)
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\ndescription: from file\n---\nfile body")
+	writeAgent(t, root, ".sennit/agents", "dba.md", "---\nname: dba\ndescription: dba file\n---\ndba body")
+	writeConfigFile(t, root, "sennit.json", `{"agents":{"reviewer":{"description":"from json","prompt":"json body"}}}`)
 
-	cfg, _, err := loadFromConfigPaths(context.Background(), []string{filepath.Join(root, "braid.json")})
+	cfg, _, err := loadFromConfigPaths(context.Background(), []string{filepath.Join(root, "sennit.json")})
 	require.NoError(t, err)
 	require.True(t, cfg.jsonAgentsBlockDetected, "loadFromBytes must record a top-level agents key")
 
@@ -205,7 +205,7 @@ func TestSetupAgentsIgnoresJSONAgentsBlock(t *testing.T) {
 // populate c.Agents.
 func TestSetupAgentsDoesNotTrustPreexistingAgentsField(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\ndescription: from file\n---\nfile body")
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\ndescription: from file\n---\nfile body")
 
 	cfg := newAgentConfig(t, `{"agents":{"reviewer":{"description":"stale","prompt":"stale body"}}}`)
 	cfg.workingDir = root
@@ -216,8 +216,8 @@ func TestSetupAgentsDoesNotTrustPreexistingAgentsField(t *testing.T) {
 
 func TestStringListAcceptsBothForms(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "a.md", "---\nname: a\ntools: read, grep\n---\nbody")
-	writeAgent(t, root, ".braid/agents", "b.md", "---\nname: b\ntools: [read, grep]\n---\nbody")
+	writeAgent(t, root, ".sennit/agents", "a.md", "---\nname: a\ntools: read, grep\n---\nbody")
+	writeAgent(t, root, ".sennit/agents", "b.md", "---\nname: b\ntools: [read, grep]\n---\nbody")
 
 	got := discoverMarkdownAgents(root, nil)
 	require.Equal(t, []string{"read", "grep"}, got["a"].AllowedTools)

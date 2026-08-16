@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/sennit/internal/message"
 )
 
 // AttachmentFromPath reads the file at path, detects its MIME type, and

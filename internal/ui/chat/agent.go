@@ -11,13 +11,13 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/message"
-	tools "github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/ui/anim"
-	"github.com/rave-soft/braid/internal/ui/presentation"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/message"
+	tools "github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/ui/presentation"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // -----------------------------------------------------------------------------

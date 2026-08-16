@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/message"
-	tools "github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/ui/chat"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/message"
+	tools "github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 

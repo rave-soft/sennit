@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rave-soft/sennit/internal/brand"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,7 +20,7 @@ import (
 // auto-discovered — `braid import` copies and validates them into
 // .braid/agents instead of trusting a foreign directory implicitly.
 var agentDirs = []string{
-	filepath.Join(".braid", "agents"),
+	filepath.Join(brand.DataDir, "agents"),
 }
 
 // markdownAgent is the frontmatter of an agent file. Fields absent from a

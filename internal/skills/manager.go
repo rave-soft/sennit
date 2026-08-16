@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/home"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // Manager owns per-workspace skill discovery state: the latest discovery

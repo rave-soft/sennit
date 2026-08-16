@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/shell"
 )
 
 const (

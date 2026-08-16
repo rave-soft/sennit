@@ -1,8 +1,8 @@
 package common
 
 import (
-	"github.com/rave-soft/braid/internal/ui/diffview"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/diffview"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // DiffFormatter returns a diff formatter with the given styles that can be

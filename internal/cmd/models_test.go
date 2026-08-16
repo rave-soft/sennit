@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -33,15 +33,15 @@ func newRefreshTestCmd(t *testing.T) (*cobra.Command, *bytes.Buffer, *bytes.Buff
 	return testCmd, &stdout, &stderr
 }
 
-// setupHermeticConfigEnv points BRAID_GLOBAL_CONFIG/BRAID_GLOBAL_DATA at
+// setupHermeticConfigEnv points SENNIT_GLOBAL_CONFIG/SENNIT_GLOBAL_DATA at
 // fresh temp dirs and seeds the data-dir config file, mirroring the
 // pattern used in internal/config/load_test.go.
 func setupHermeticConfigEnv(t *testing.T, seed string) string {
 	t.Helper()
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 
 	dataConfigPath := config.GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))

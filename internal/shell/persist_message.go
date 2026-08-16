@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/sennit/internal/message"
 )
 
 // PersistOutput stores a bang-mode shell command result as a user message.

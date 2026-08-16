@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 // CacheIcon writes data to <os.UserCacheDir()>/braid/braid.png, skipping the
@@ -20,7 +22,7 @@ func CacheIcon(data []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve user cache dir: %w", err)
 	}
-	path := filepath.Join(dir, "braid", "braid.png")
+	path := filepath.Join(dir, brand.Slug, brand.IconFile)
 
 	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, data) {
 		return path, nil

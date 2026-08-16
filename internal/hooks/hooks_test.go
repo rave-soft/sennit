@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -188,20 +188,20 @@ func TestBuildEnv(t *testing.T) {
 		}
 	}
 
-	require.Equal(t, EventPreToolUse, envMap["BRAID_EVENT"])
-	require.Equal(t, "bash", envMap["BRAID_TOOL_NAME"])
-	require.Equal(t, "sess-1", envMap["BRAID_SESSION_ID"])
-	require.Equal(t, "/work", envMap["BRAID_CWD"])
-	require.Equal(t, "/project", envMap["BRAID_PROJECT_DIR"])
-	require.Equal(t, "ls", envMap["BRAID_TOOL_INPUT_COMMAND"])
-	require.Equal(t, "/tmp/f.txt", envMap["BRAID_TOOL_INPUT_FILE_PATH"])
+	require.Equal(t, EventPreToolUse, envMap["SENNIT_EVENT"])
+	require.Equal(t, "bash", envMap["SENNIT_TOOL_NAME"])
+	require.Equal(t, "sess-1", envMap["SENNIT_SESSION_ID"])
+	require.Equal(t, "/work", envMap["SENNIT_CWD"])
+	require.Equal(t, "/project", envMap["SENNIT_PROJECT_DIR"])
+	require.Equal(t, "ls", envMap["SENNIT_TOOL_INPUT_COMMAND"])
+	require.Equal(t, "/tmp/f.txt", envMap["SENNIT_TOOL_INPUT_FILE_PATH"])
 
 	// Shared Braid markers must be present so hook-authored scripts can
 	// detect they're running under Braid the same way bash-tool-invoked
 	// scripts can.
-	require.Equal(t, "1", envMap["BRAID"])
-	require.Equal(t, "braid", envMap["AGENT"])
-	require.Equal(t, "braid", envMap["AI_AGENT"])
+	require.Equal(t, "1", envMap["SENNIT"])
+	require.Equal(t, "sennit", envMap["AGENT"])
+	require.Equal(t, "sennit", envMap["AI_AGENT"])
 }
 
 func splitFirst(s, sep string) []string {
@@ -524,7 +524,7 @@ func TestRunnerParallelExecution(t *testing.T) {
 func TestRunnerEnvVarsPropagated(t *testing.T) {
 	t.Parallel()
 	hookCfg := config.HookConfig{
-		Command: `printf '{"decision":"allow","context":"%s"}' "$BRAID_TOOL_NAME"`,
+		Command: `printf '{"decision":"allow","context":"%s"}' "$SENNIT_TOOL_NAME"`,
 	}
 	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)

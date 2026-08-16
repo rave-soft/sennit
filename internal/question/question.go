@@ -14,7 +14,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // ErrCancelled is returned by Ask when the user cancels the question.

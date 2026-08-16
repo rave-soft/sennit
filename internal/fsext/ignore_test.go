@@ -17,8 +17,8 @@ func TestBraidIgnore(t *testing.T) {
 	require.NoError(t, os.WriteFile("test2.log", []byte("test"), 0o644))
 	require.NoError(t, os.WriteFile("test3.tmp", []byte("test"), 0o644))
 
-	// Create a .braidignore file that ignores .log files
-	require.NoError(t, os.WriteFile(".braidignore", []byte("*.log\n"), 0o644))
+	// Create a .sennitignore file that ignores .log files
+	require.NoError(t, os.WriteFile(".sennitignore", []byte("*.log\n"), 0o644))
 
 	dl := NewDirectoryLister(tempDir)
 	require.True(t, dl.shouldIgnore("test2.log", nil, false), ".log files should be ignored")
@@ -50,16 +50,16 @@ func TestShouldExcludeFile(t *testing.T) {
 		t.Fatalf("Failed to create .gitignore: %v", err)
 	}
 
-	// Create .braidignore file
-	braidignoreContent := "custom_ignored/\n"
-	if err := os.WriteFile(filepath.Join(tempDir, ".braidignore"), []byte(braidignoreContent), 0o644); err != nil {
-		t.Fatalf("Failed to create .braidignore: %v", err)
+	// Create .sennitignore file
+	sennitignoreContent := "custom_ignored/\n"
+	if err := os.WriteFile(filepath.Join(tempDir, ".sennitignore"), []byte(sennitignoreContent), 0o644); err != nil {
+		t.Fatalf("Failed to create .sennitignore: %v", err)
 	}
 
 	// Test that ignored directories are properly ignored
 	require.True(t, ShouldExcludeFile(tempDir, nodeModules), "Expected node_modules to be ignored by .gitignore")
 	require.True(t, ShouldExcludeFile(tempDir, target), "Expected target to be ignored by .gitignore")
-	require.True(t, ShouldExcludeFile(tempDir, customIgnored), "Expected custom_ignored to be ignored by .braidignore")
+	require.True(t, ShouldExcludeFile(tempDir, customIgnored), "Expected custom_ignored to be ignored by .sennitignore")
 
 	// Test that normal directories are not ignored
 	require.False(t, ShouldExcludeFile(tempDir, normalDir), "Expected src directory to not be ignored")
@@ -84,14 +84,14 @@ func TestShouldExcludeFileHierarchical(t *testing.T) {
 		}
 	}
 
-	// Create .braidignore in subdir that ignores normal_nested
-	subBraidignore := "normal_nested/\n"
-	if err := os.WriteFile(filepath.Join(subDir, ".braidignore"), []byte(subBraidignore), 0o644); err != nil {
-		t.Fatalf("Failed to create subdir .braidignore: %v", err)
+	// Create .sennitignore in subdir that ignores normal_nested
+	subSennitignore := "normal_nested/\n"
+	if err := os.WriteFile(filepath.Join(subDir, ".sennitignore"), []byte(subSennitignore), 0o644); err != nil {
+		t.Fatalf("Failed to create subdir .sennitignore: %v", err)
 	}
 
-	// Test hierarchical ignore behavior - this should work because the .braidignore is in the parent directory
-	require.True(t, ShouldExcludeFile(tempDir, nestedNormal), "Expected normal_nested to be ignored by subdir .braidignore")
+	// Test hierarchical ignore behavior - this should work because the .sennitignore is in the parent directory
+	require.True(t, ShouldExcludeFile(tempDir, nestedNormal), "Expected normal_nested to be ignored by subdir .sennitignore")
 	require.False(t, ShouldExcludeFile(tempDir, subDir), "Expected subdir itself to not be ignored")
 }
 

@@ -1,6 +1,6 @@
 package proto
 
-import "github.com/rave-soft/braid/internal/session"
+import "github.com/rave-soft/sennit/internal/session"
 
 // Todo is the session todo wire representation. It is an alias so the
 // wire boundary preserves every session status, including statuses

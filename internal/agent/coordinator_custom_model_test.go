@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/agent/prompt"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/agent/prompt"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +32,7 @@ func buildCustomModelCoordinator(t *testing.T) (*coordinator, *prompt.Prompt) {
     ]}},
   "model": {"provider": "mock", "model": "mock-model"}
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "braid.json"), []byte(braidJSON), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "sennit.json"), []byte(braidJSON), 0o644))
 
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)

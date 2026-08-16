@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"charm.land/glamour/v2"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // buildThinkingBlock generates a realistic long thinking block with

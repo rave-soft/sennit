@@ -8,11 +8,11 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/commands"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/list"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/commands"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/list"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // CommandsID is the identifier for the commands dialog.

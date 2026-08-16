@@ -7,14 +7,14 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/ui/attachments"
-	"github.com/rave-soft/braid/internal/ui/chat"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/attachments"
+	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -92,7 +92,7 @@ func TestViewWindowTitleIncludesSession(t *testing.T) {
 	u := newCursorTestUI(t)
 	u.sess.current.Title = "Fix Kitty title"
 
-	require.Equal(t, "braid /tmp — Fix Kitty title", u.View().WindowTitle)
+	require.Equal(t, "sennit /tmp — Fix Kitty title", u.View().WindowTitle)
 }
 
 // stubCursorDialog is a [dialog.Dialog] that always draws a fixed, easily

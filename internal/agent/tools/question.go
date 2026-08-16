@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/question"
+	"github.com/rave-soft/sennit/internal/question"
 )
 
 const QuestionToolName = "question"

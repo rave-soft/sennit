@@ -7,8 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 
-	"github.com/rave-soft/braid/internal/ui/attachments"
-	"github.com/rave-soft/braid/internal/ui/completions"
+	"github.com/rave-soft/sennit/internal/ui/attachments"
+	"github.com/rave-soft/sennit/internal/ui/completions"
 )
 
 // editorState holds the prompt editor's own state: the textarea, the

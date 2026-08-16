@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/projects"
+	"github.com/rave-soft/sennit/internal/projects"
 	"github.com/stretchr/testify/require"
 )
 

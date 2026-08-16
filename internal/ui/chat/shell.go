@@ -9,10 +9,10 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/ui/anim"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/list"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/list"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // shellSeq provides unique IDs for ShellItems even when the same

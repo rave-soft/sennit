@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/config/credentials"
-	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/credentials"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -82,10 +82,10 @@ func newTestConfigAccessor(t *testing.T) (accessor *testConfigAccessor, globalDa
 	globalDataDir := t.TempDir()
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalConfigDir)
-	t.Setenv("BRAID_GLOBAL_DATA", globalDataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalConfigDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDataDir)
 
-	configPath := filepath.Join(globalDataDir, "braid.json")
+	configPath := filepath.Join(globalDataDir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 
 	store, err := config.Load(workDir, dataDir, false)

@@ -5,9 +5,9 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/ui/presentation"
-	"github.com/rave-soft/braid/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/ui/presentation"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // Thread completion is surfaced as a toast (util.ReportInfo/ReportWarn),

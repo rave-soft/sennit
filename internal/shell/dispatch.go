@@ -14,7 +14,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/rave-soft/braid/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -175,14 +176,14 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	sb, err := parseShebang(probe)
 	if err != nil {
 		hc := interp.HandlerCtx(ctx)
-		fmt.Fprintf(hc.Stderr, "braid: %s: %s\n", scriptPath, err)
+		fmt.Fprintf(hc.Stderr, brand.Slug+": %s: %s\n", scriptPath, err)
 		return interp.ExitStatus(126)
 	}
 
 	interpreter, err := resolveInterpreter(sb.interpreter)
 	if err != nil {
 		hc := interp.HandlerCtx(ctx)
-		fmt.Fprintf(hc.Stderr, "braid: %s: %s\n", scriptPath, err)
+		fmt.Fprintf(hc.Stderr, brand.Slug+": %s: %s\n", scriptPath, err)
 		return interp.ExitStatus(127)
 	}
 

@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 // ImportLegacyProjectDB imports a pre-shared-database project's SQLite
@@ -19,7 +21,7 @@ import (
 // with a warning; all other import errors roll back the import (and the
 // import is retried on the next startup, since the file is not renamed).
 func ImportLegacyProjectDB(ctx context.Context, projectDir, projectPath string, dest *sql.DB) error {
-	legacyPath := filepath.Join(projectDir, "braid.db")
+	legacyPath := filepath.Join(projectDir, brand.DBFile)
 	if _, err := os.Stat(legacyPath); os.IsNotExist(err) {
 		// Never had a legacy DB, or already imported and renamed away.
 		return nil

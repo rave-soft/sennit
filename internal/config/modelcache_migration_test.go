@@ -10,9 +10,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
-	"github.com/rave-soft/braid/internal/config/migrate"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/testenv"
+	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )

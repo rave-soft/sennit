@@ -12,8 +12,8 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/pkg/browser"
-	"github.com/rave-soft/braid/internal/ui/common"
-	mcptools "github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	mcptools "github.com/rave-soft/sennit/internal/workspace"
 )
 
 // MCPAuthID is the identifier for the MCP authentication dialog.

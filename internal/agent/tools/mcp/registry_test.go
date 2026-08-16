@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 

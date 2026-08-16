@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rave-soft/braid/internal/fsext"
-	tools "github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/sennit/internal/fsext"
+	tools "github.com/rave-soft/sennit/internal/proto"
 )
 
 // formatToolForCopy formats the tool call for clipboard copying.

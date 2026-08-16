@@ -1,8 +1,8 @@
 package threadspawn
 
 import (
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/thread"
 )
 
 // ToProto converts st to its wire representation. workspaceID is the

@@ -14,10 +14,10 @@ import (
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
-	"github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/stringext"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/stringext"
 )
 
 // runTurn holds the mutable state a single streaming turn's

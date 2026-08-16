@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
 

@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/sennit/internal/message"
 )
 
 // Message represents a message in the proto layer.

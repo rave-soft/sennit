@@ -8,10 +8,10 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 

@@ -12,8 +12,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/testenv"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/testenv"
 )
 
 // TestNewSearchBackendDefaultsToDuckDuckGo verifies that an empty

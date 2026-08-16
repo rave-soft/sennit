@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/ui/notification"
+	"github.com/rave-soft/sennit/internal/ui/notification"
 	"github.com/stretchr/testify/require"
 )
 
@@ -157,7 +157,7 @@ func TestDetectOSC99Support_ValidResponse(t *testing.T) {
 	t.Parallel()
 
 	// Simulate a valid OSC 99 response with title support.
-	seq := "\x1b]99;i=braid-osc99-query:p=?;p=title\x07"
+	seq := "\x1b]99;i=sennit-osc99-query:p=?;p=title\x07"
 	require.True(t, notification.DetectOSC99Support(seq))
 }
 
@@ -165,7 +165,7 @@ func TestDetectOSC99Support_MultipleCapabilities(t *testing.T) {
 	t.Parallel()
 
 	// Response indicating support for title, body, and icon.
-	seq := "\x1b]99;i=braid-osc99-query:p=?;p=title,body,icon\x07"
+	seq := "\x1b]99;i=sennit-osc99-query:p=?;p=title,body,icon\x07"
 	require.True(t, notification.DetectOSC99Support(seq))
 }
 
@@ -173,7 +173,7 @@ func TestDetectOSC99Support_InvalidCommand(t *testing.T) {
 	t.Parallel()
 
 	// OSC 98 instead of 99.
-	seq := "\x1b]98;i=braid-osc99-query:p=?;p=title\x07"
+	seq := "\x1b]98;i=sennit-osc99-query:p=?;p=title\x07"
 	require.False(t, notification.DetectOSC99Support(seq))
 }
 
@@ -189,7 +189,7 @@ func TestDetectOSC99Support_NoQueryFlag(t *testing.T) {
 	t.Parallel()
 
 	// Missing p=? query flag.
-	seq := "\x1b]99;i=braid-osc99-query;p=title\x07"
+	seq := "\x1b]99;i=sennit-osc99-query;p=title\x07"
 	require.False(t, notification.DetectOSC99Support(seq))
 }
 
@@ -197,7 +197,7 @@ func TestDetectOSC99Support_NoTitleCapability(t *testing.T) {
 	t.Parallel()
 
 	// Response without title capability (only body).
-	seq := "\x1b]99;i=braid-osc99-query:p=?;p=body\x07"
+	seq := "\x1b]99;i=sennit-osc99-query:p=?;p=body\x07"
 	require.False(t, notification.DetectOSC99Support(seq))
 }
 
@@ -211,7 +211,7 @@ func TestDetectOSC99Support_MalformedSequence(t *testing.T) {
 	t.Parallel()
 
 	// Missing semicolon separator.
-	seq := "\x1b]99;i=braid-osc99-query:p=?p=title\x07"
+	seq := "\x1b]99;i=sennit-osc99-query:p=?p=title\x07"
 	require.False(t, notification.DetectOSC99Support(seq))
 }
 
@@ -220,7 +220,7 @@ func TestOSC99QuerySequence(t *testing.T) {
 
 	seq := notification.OSC99QuerySequence()
 	require.Contains(t, seq, "\x1b]99;")
-	require.Contains(t, seq, "i=braid-osc99-query")
+	require.Contains(t, seq, "i=sennit-osc99-query")
 	require.Contains(t, seq, "p=?")
 	require.Contains(t, seq, "\x07")
 }

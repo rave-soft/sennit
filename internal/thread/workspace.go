@@ -1,7 +1,7 @@
 package thread
 
 import (
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/permission"
 )
 
 // Workspace is the domain-facing slice of the App hosting a delegation's

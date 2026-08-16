@@ -6,9 +6,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/dialog"
-	"github.com/rave-soft/braid/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // updateMouse handles the mouse-driven branches of UI.Update: clicks,

@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/rave-soft/braid/internal/lsp"
-	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/lsp"
+	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 

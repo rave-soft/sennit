@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/stretchr/testify/require"
 )
 

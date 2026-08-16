@@ -4,12 +4,12 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/history"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/ui/dialog"
-	"github.com/rave-soft/braid/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // updateSession handles the session-lifecycle branches of UI.Update: session

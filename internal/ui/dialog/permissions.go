@@ -12,12 +12,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/fsext"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/stringext"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/stringext"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // PermissionsID is the identifier for the permissions dialog.

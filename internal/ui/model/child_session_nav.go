@@ -6,10 +6,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/chat"
 )
 
 // viewingChildSession reports whether the UI is currently navigated into a

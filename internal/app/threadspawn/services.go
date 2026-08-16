@@ -4,11 +4,11 @@ import (
 	"context"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/thread"
 )
 
 // NewAppWorkspaceAdapter presents a as a thread workspace. Adapters are

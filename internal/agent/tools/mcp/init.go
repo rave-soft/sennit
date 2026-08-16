@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/config"
-	mcpoauth "github.com/rave-soft/braid/internal/oauth/mcp"
+	"github.com/rave-soft/sennit/internal/config"
+	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
 )
 
 func (r *Registry) InitializeSingle(ctx context.Context, name string, cfg ConfigProvider) error {

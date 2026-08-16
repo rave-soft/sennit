@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/log"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/log"
 	"github.com/stretchr/testify/require"
 )
 

@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/config/migrate"
-	"github.com/rave-soft/braid/internal/lock"
+	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
 func TestMigrateBloatedModelCache_RereadsAfterLockAndIsIdempotent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "braid.json")
+	path := filepath.Join(t.TempDir(), "sennit.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(bloatedModelConfig(`"before": true`)), 0o600))
 
@@ -58,7 +58,7 @@ func TestMigrateBloatedModelCache_RereadsAfterLockAndIsIdempotent(t *testing.T) 
 }
 
 func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "braid.json")
+	path := filepath.Join(t.TempDir(), "sennit.json")
 	config := fmt.Sprintf(
 		`{"concurrent":{"preserved":true},"providers":{"failed":{"type":"openai","models":%s},"saved":{"type":"openai","models":%s}}}`,
 		bloatedModelsJSON("failed"),
@@ -104,8 +104,8 @@ func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing
 func TestMigrateDisableNotifications_RereadsBothFilesAndPreservesNotifications(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 	globalPath := GlobalConfig()
 	dataPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
@@ -155,8 +155,8 @@ func TestMigrateDisableNotifications_RereadsBothFilesAndPreservesNotifications(t
 func TestMigrateDisableNotifications_DestinationWriteFailureRetriesWithoutLosingLegacy(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 	globalPath := GlobalConfig()
 	dataPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
@@ -187,8 +187,8 @@ func TestMigrateDisableNotifications_DestinationWriteFailureRetriesWithoutLosing
 func TestMigrateDisableNotifications_CleanupFailureRetriesWithExistingNotifications(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 	globalPath := GlobalConfig()
 	dataPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))
@@ -227,8 +227,8 @@ func TestMigrateDisableNotifications_MigratesDataWithoutGlobalConfig(t *testing.
 		t.Run(name, func(t *testing.T) {
 			globalDir := t.TempDir()
 			dataDir := t.TempDir()
-			t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-			t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+			t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+			t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 			globalPath := GlobalConfig()
 			dataPath := GlobalConfigData()
 			require.NoError(t, os.MkdirAll(filepath.Dir(dataPath), 0o755))
@@ -263,8 +263,8 @@ func TestMigrateDisableNotifications_MigratesDataWithoutGlobalConfig(t *testing.
 func TestMigrateDisableNotifications_MalformedInputIsNotChanged(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 	globalPath := GlobalConfig()
 	dataPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(globalPath), 0o755))

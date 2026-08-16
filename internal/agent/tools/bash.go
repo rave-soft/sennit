@@ -15,10 +15,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/fsext"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/shell"
 )
 
 type BashParams struct {

@@ -9,14 +9,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rave-soft/braid/internal/ui/notification/genicon"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/ui/notification/genicon"
 )
 
 func main() {
 	// go:generate runs with the working directory set to the package
 	// containing the directive (internal/ui/notification), so this path is
 	// relative to there.
-	out := filepath.Join("assets", "braid.png")
+	out := filepath.Join("assets", brand.IconFile)
 	if err := os.WriteFile(out, genicon.Render(), 0o644); err != nil {
 		log.Fatalf("genicon: write %s: %v", out, err)
 	}

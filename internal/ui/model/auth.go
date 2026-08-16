@@ -2,8 +2,8 @@ package model
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
 )
 
 func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {

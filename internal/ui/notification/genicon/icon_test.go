@@ -5,8 +5,8 @@ import (
 	"image/png"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/ui/notification"
-	"github.com/rave-soft/braid/internal/ui/notification/genicon"
+	"github.com/rave-soft/sennit/internal/ui/notification"
+	"github.com/rave-soft/sennit/internal/ui/notification/genicon"
 	"github.com/stretchr/testify/require"
 )
 

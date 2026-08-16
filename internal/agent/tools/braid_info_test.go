@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/lsp"
-	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/lsp"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -629,8 +629,8 @@ func TestBraidInfo_Providers_CachedCustomProviderModels(t *testing.T) {
 
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 
 	dataConfigPath := config.GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))

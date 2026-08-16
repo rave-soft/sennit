@@ -5,10 +5,10 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/notify"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/agent"
+	"github.com/rave-soft/sennit/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // ErrDispatcherClosed is returned by [AgentDispatcher.Send] when the

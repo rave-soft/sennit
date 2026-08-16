@@ -10,8 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	xstrings "github.com/charmbracelet/x/exp/strings"
-	"github.com/rave-soft/braid/internal/ui/anim"
-	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // updateSystem handles the terminal/runtime and animation-tick branches of

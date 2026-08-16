@@ -14,8 +14,9 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/filepathext"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/permission"
 )
 
 type DownloadParams struct {
@@ -111,7 +112,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
 			}
 
-			req.Header.Set("User-Agent", "braid/1.0")
+			req.Header.Set("User-Agent", brand.Slug+"/1.0")
 
 			resp, err := client.Do(req)
 			if err != nil {

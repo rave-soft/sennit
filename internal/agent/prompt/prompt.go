@@ -12,11 +12,12 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/filepathext"
-	"github.com/rave-soft/braid/internal/home"
-	"github.com/rave-soft/braid/internal/shell"
-	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/skills"
 )
 
 // Prompt represents a template-based prompt generator.
@@ -40,6 +41,7 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	SkillsURIScheme    string
 }
 
 type ContextFile struct {
@@ -205,14 +207,15 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 
 	isGit := isGitRepo(store.WorkingDir())
 	data := PromptDat{
-		Provider:      provider,
-		Model:         model,
-		Config:        *cfg,
-		WorkingDir:    filepath.ToSlash(workingDir),
-		IsGitRepo:     isGit,
-		Platform:      platform,
-		Date:          p.now().Format("1/2/2006"),
-		AvailSkillXML: availSkillXML,
+		Provider:        provider,
+		Model:           model,
+		Config:          *cfg,
+		WorkingDir:      filepath.ToSlash(workingDir),
+		IsGitRepo:       isGit,
+		Platform:        platform,
+		Date:            p.now().Format("1/2/2006"),
+		AvailSkillXML:   availSkillXML,
+		SkillsURIScheme: brand.SkillsURIScheme,
 	}
 	if isGit {
 		data.GitStatus = getGitStatus(ctx, store.WorkingDir())

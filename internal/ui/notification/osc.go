@@ -7,11 +7,12 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/sennit/internal/brand"
 
 	tea "charm.land/bubbletea/v2"
 )
 
-const osc99QueryID = "braid-osc99-query"
+const osc99QueryID = brand.Slug + "-osc99-query"
 
 // DetectOSC99Support parses an OSC response sequence and returns true if it
 // indicates OSC 99 notification support. This function should be called from
@@ -108,10 +109,10 @@ func (b *OSCBackend) sendOSC99(n Notification) tea.Cmd {
 
 	var sb strings.Builder
 	b.notifySeq++
-	id := fmt.Sprintf("braid-%d", b.notifySeq)
+	id := fmt.Sprintf(brand.Slug+"-%d", b.notifySeq)
 
-	appName := "Braid"
-	notificationType := "braid-notification"
+	appName := brand.Name
+	notificationType := brand.Slug + "-notification"
 
 	sb.WriteString(ansi.DesktopNotification(n.Title, "i="+id, "d=0", "p=title", "a="+appName, "t="+notificationType))
 	if n.Message != "" {

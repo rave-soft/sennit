@@ -10,9 +10,9 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/event"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/event"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/zeebo/xxh3"
 )
 

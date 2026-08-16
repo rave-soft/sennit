@@ -2,7 +2,7 @@ package dialog
 
 import (
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // Base provides the width bookkeeping shared by dialogs that render as a

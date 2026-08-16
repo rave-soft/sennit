@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/session"
 )
 
 // ResolveSession resolves which session a non-interactive run should

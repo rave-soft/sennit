@@ -16,8 +16,8 @@ func TestNotificationTitle(t *testing.T) {
 		workingDir string
 		want       string
 	}{
-		{name: "empty", workingDir: "", want: "Braid"},
-		{name: "root", workingDir: "/", want: "Braid"},
+		{name: "empty", workingDir: "", want: "Sennit"},
+		{name: "root", workingDir: "/", want: "Sennit"},
 		{name: "project dir", workingDir: "/home/user/my-project", want: "Braid — my-project"},
 		{name: "trailing slash", workingDir: "/home/user/my-project/", want: "Braid — my-project"},
 	}

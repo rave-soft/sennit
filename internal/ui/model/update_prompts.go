@@ -2,10 +2,10 @@ package model
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/question"
-	"github.com/rave-soft/braid/internal/ui/notification"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/ui/notification"
 )
 
 // updatePrompts handles the permission and question prompt branches of

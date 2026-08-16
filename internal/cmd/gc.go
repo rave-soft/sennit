@@ -13,9 +13,10 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/rave-soft/braid/internal/config"
-	braiddb "github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
+	sennitdb "github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/spf13/cobra"
 )
 
@@ -134,17 +135,17 @@ func runGC(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	dbPath := filepath.Join(config.GlobalDBDir(), "braid.db")
+	dbPath := filepath.Join(config.GlobalDBDir(), brand.DBFile)
 	if info, err := os.Stat(dbPath); err == nil {
 		report.DBSizeBeforeBytes = info.Size()
 	}
 
-	conn, err := braiddb.Connect(ctx, config.GlobalDBDir())
+	conn, err := sennitdb.Connect(ctx, config.GlobalDBDir())
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer braiddb.Release(config.GlobalDBDir()) //nolint:errcheck // best-effort refcount release on exit
-	queries := braiddb.New(conn)
+	defer sennitdb.Release(config.GlobalDBDir()) //nolint:errcheck // best-effort refcount release on exit
+	queries := sennitdb.New(conn)
 
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
 	report.CutoffUnix = cutoff
@@ -212,7 +213,7 @@ type gcRowQuerier interface {
 // db's) current snapshot. Authoritative callers pass transaction-bound
 // queries plus the transaction; dry runs deliberately pass ordinary
 // database handles.
-func gcCollect(ctx context.Context, q *braiddb.Queries, db gcRowQuerier, cutoff int64, projectPath string) (gcSelection, error) {
+func gcCollect(ctx context.Context, q *sennitdb.Queries, db gcRowQuerier, cutoff int64, projectPath string) (gcSelection, error) {
 	sessionIDs, err := gcSelectSessions(ctx, q, cutoff, projectPath)
 	if err != nil {
 		return gcSelection{}, err
@@ -273,7 +274,7 @@ func gcCountDependents(ctx context.Context, db gcRowQuerier, sessionIDs []string
 // agent-tool/title sub-session parented to a selected session, regardless
 // of the sub-session's own age. The expansion runs to a fixed point so a
 // sub-session's own sub-sessions are swept up too.
-func gcSelectSessions(ctx context.Context, q *braiddb.Queries, cutoff int64, projectPath string) ([]string, error) {
+func gcSelectSessions(ctx context.Context, q *sennitdb.Queries, cutoff int64, projectPath string) ([]string, error) {
 	rows, err := q.ListSessionsForGC(ctx)
 	if err != nil {
 		return nil, err
@@ -324,7 +325,7 @@ func gcSelectSessions(ctx context.Context, q *braiddb.Queries, cutoff int64, pro
 // gcSelectThreads returns the IDs of finished threads (never
 // pending/running/merging) whose updated_at is strictly older than
 // cutoff, scoped to projectPath when non-empty.
-func gcSelectThreads(ctx context.Context, q *braiddb.Queries, cutoff int64, projectPath string) ([]string, error) {
+func gcSelectThreads(ctx context.Context, q *sennitdb.Queries, cutoff int64, projectPath string) ([]string, error) {
 	rows, err := q.ListThreadsForGC(ctx)
 	if err != nil {
 		return nil, err
@@ -354,16 +355,16 @@ func gcSelectThreads(ctx context.Context, q *braiddb.Queries, cutoff int64, proj
 // deletes mirror session.Service.Delete's pattern rather than leaning
 // solely on the schema's ON DELETE CASCADE, so gc keeps working even if a
 // future migration ever loosens those foreign keys.
-func gcDelete(ctx context.Context, conn *sql.DB, q *braiddb.Queries, cutoff int64, projectPath string) (gcSelection, error) {
+func gcDelete(ctx context.Context, conn *sql.DB, q *sennitdb.Queries, cutoff int64, projectPath string) (gcSelection, error) {
 	return gcDeleteWith(ctx, conn, q, cutoff, projectPath, gcDeleteSelected)
 }
 
-type gcDeleteFunc func(context.Context, *braiddb.Queries, gcSelection) error
+type gcDeleteFunc func(context.Context, *sennitdb.Queries, gcSelection) error
 
 // gcDeleteWith begins the immediate writer transaction before collecting the
 // authoritative selection. Its lock prevents another writer from changing
 // eligibility or adding descendants before the selected rows are committed.
-func gcDeleteWith(ctx context.Context, conn *sql.DB, q *braiddb.Queries, cutoff int64, projectPath string, deleteFunc gcDeleteFunc) (gcSelection, error) {
+func gcDeleteWith(ctx context.Context, conn *sql.DB, q *sennitdb.Queries, cutoff int64, projectPath string, deleteFunc gcDeleteFunc) (gcSelection, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return gcSelection{}, fmt.Errorf("beginning transaction: %w", err)
@@ -384,7 +385,7 @@ func gcDeleteWith(ctx context.Context, conn *sql.DB, q *braiddb.Queries, cutoff 
 	return selection, nil
 }
 
-func gcDeleteSelected(ctx context.Context, q *braiddb.Queries, selection gcSelection) error {
+func gcDeleteSelected(ctx context.Context, q *sennitdb.Queries, selection gcSelection) error {
 	for _, id := range selection.sessionIDs {
 		if err := q.DeleteSessionMessages(ctx, id); err != nil {
 			return fmt.Errorf("deleting messages for session %s: %w", id, err)

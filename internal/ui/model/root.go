@@ -22,13 +22,14 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/ui/anim"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/dialog"
-	"github.com/rave-soft/braid/internal/ui/util"
-	"github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/ui/anim"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // screenID identifies which child owns the terminal right now.
@@ -151,7 +152,7 @@ func (r *Root) dashboardView() tea.View {
 	v.AltScreen = true
 	v.BackgroundColor = r.com.Styles.Background
 	v.MouseMode = tea.MouseModeCellMotion
-	v.WindowTitle = "braid threads"
+	v.WindowTitle = brand.Slug + " threads"
 
 	canvas := uv.NewScreenBuffer(r.width, r.height)
 	r.dashboard.Draw(canvas, canvas.Bounds())

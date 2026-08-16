@@ -1,8 +1,8 @@
 package chat
 
 import (
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // toolItemFactory builds the concrete [ToolMessageItem] for a registered

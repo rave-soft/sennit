@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/sennit/internal/agent"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/stretchr/testify/require"
 )
 

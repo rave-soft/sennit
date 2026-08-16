@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/testenv"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 

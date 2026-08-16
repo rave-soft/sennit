@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 

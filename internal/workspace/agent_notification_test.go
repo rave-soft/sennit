@@ -3,8 +3,8 @@ package workspace
 import (
 	"testing"
 
-	"github.com/rave-soft/braid/internal/agent/notify"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 

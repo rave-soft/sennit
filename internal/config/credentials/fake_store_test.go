@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

@@ -12,16 +12,16 @@ import (
 
 // TestWatchForExternalChanges_DetectsEditOfExistingFile verifies that an
 // edit made to a config file outside of ConfigStore's own write path (e.g.
-// an agent's Edit/Write tool touching .braid/braid.json directly) is picked
+// an agent's Edit/Write tool touching .sennit/sennit.json directly) is picked
 // up by the poll loop, reloaded, and reported via OnExternalChange.
 func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 	dir := t.TempDir()
-	braidDir := filepath.Join(dir, ".braid")
+	braidDir := filepath.Join(dir, ".sennit")
 	require.NoError(t, os.MkdirAll(braidDir, 0o755))
-	configPath := filepath.Join(braidDir, "braid.json")
+	configPath := filepath.Join(braidDir, "sennit.json")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"mcp":{}}`), 0o600))
 
@@ -58,10 +58,10 @@ func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 // watcher-driven reload/notification.
 func TestWatchForExternalChanges_IgnoresOwnWrites(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
 	store, err := Load(dir, "", false)
@@ -91,37 +91,37 @@ func TestWatchForExternalChanges_IgnoresOwnWrites(t *testing.T) {
 
 // TestExternalChangeDetected_NewCandidateFile verifies the gap ConfigStaleness
 // alone can't cover: a config file that did not exist as a tracked
-// candidate at the last snapshot (a project's first .braid/braid.json,
+// candidate at the last snapshot (a project's first .sennit/sennit.json,
 // created mid-session) must still be detected once it appears.
 func TestExternalChangeDetected_NewCandidateFile(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)
 	require.False(t, store.externalChangeDetected())
 
-	braidDir := filepath.Join(dir, ".braid")
+	braidDir := filepath.Join(dir, ".sennit")
 	require.NoError(t, os.MkdirAll(braidDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(braidDir, "braid.json"), []byte(`{}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(braidDir, "sennit.json"), []byte(`{}`), 0o600))
 
 	require.True(t, store.externalChangeDetected(),
-		"a freshly-created .braid/braid.json should be detected even though it wasn't a tracked candidate before")
+		"a freshly-created .sennit/sennit.json should be detected even though it wasn't a tracked candidate before")
 }
 
 // TestWatchForExternalChanges_DetectsAgentFileChanges verifies that adding,
 // editing, and removing a markdown subagent file (e.g. an agent's Write tool
-// touching .braid/agents/dev.md, or a human editing it directly) is picked
+// touching .sennit/agents/dev.md, or a human editing it directly) is picked
 // up by the same poll loop that watches config files, and that cfg.Agents
 // reflects the change after each reload.
 func TestWatchForExternalChanges_DetectsAgentFileChanges(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key") // needed for cfg.IsConfigured(), which gates SetupAgents on reload.
 
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "braid.json"), []byte(`{}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{}`), 0o600))
 
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestWatchForExternalChanges_DetectsAgentFileChanges(t *testing.T) {
 	defer cancel()
 	go store.WatchForExternalChanges(ctx)
 
-	agentsDir := filepath.Join(dir, ".braid", "agents")
+	agentsDir := filepath.Join(dir, ".sennit", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
 	agentPath := filepath.Join(agentsDir, "dev.md")
 
@@ -176,14 +176,14 @@ func TestWatchForExternalChanges_DetectsAgentFileChanges(t *testing.T) {
 
 // TestWatchForExternalChanges_DetectsAgentDirCreatedLater verifies that an
 // agent directory that does not exist when the watcher starts (a project's
-// first .braid/agents) is still picked up once it is created mid-session.
+// first .sennit/agents) is still picked up once it is created mid-session.
 func TestWatchForExternalChanges_DetectsAgentDirCreatedLater(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 	t.Setenv("ANTHROPIC_API_KEY", "test-key") // needed for cfg.IsConfigured(), which gates SetupAgents on reload.
 
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "braid.json"), []byte(`{}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{}`), 0o600))
 
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)
@@ -200,7 +200,7 @@ func TestWatchForExternalChanges_DetectsAgentDirCreatedLater(t *testing.T) {
 	defer cancel()
 	go store.WatchForExternalChanges(ctx)
 
-	agentsDir := filepath.Join(dir, ".braid", "agents")
+	agentsDir := filepath.Join(dir, ".sennit", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
 	content := "---\nname: dev\ndescription: a dev agent\n---\nYou are a helpful dev agent.\n"
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "dev.md"), []byte(content), 0o600))

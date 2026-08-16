@@ -17,7 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/oauth2"
 )

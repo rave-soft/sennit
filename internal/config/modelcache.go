@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/sennit/internal/db"
 )
 
 // modelCacheDBPath returns the path to the global model-discovery cache,

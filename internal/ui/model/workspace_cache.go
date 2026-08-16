@@ -30,8 +30,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rave-soft/braid/internal/ui/util"
-	"github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // busyCacheTTL bounds how long the memoized busy/permission state may go

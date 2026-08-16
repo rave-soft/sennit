@@ -8,11 +8,11 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/hooks"
-	"github.com/rave-soft/braid/internal/stringext"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/presentation"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/hooks"
+	"github.com/rave-soft/sennit/internal/stringext"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/presentation"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // toolOutputPlainContent renders plain text, capped to responseContextHeight

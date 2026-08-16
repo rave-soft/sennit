@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // hookApprovalKey is the unexported context key used to mark a tool call as

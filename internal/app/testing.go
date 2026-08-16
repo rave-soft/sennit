@@ -4,16 +4,16 @@ import (
 	"context"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/notify"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/config/credentials"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/question"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/agent"
+	"github.com/rave-soft/sennit/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/credentials"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/shell"
 )
 
 // Test-only accessors for the services that used to be exported App fields

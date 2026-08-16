@@ -9,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/db"
-	gitpkg "github.com/rave-soft/braid/internal/git"
-	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/db"
+	gitpkg "github.com/rave-soft/sennit/internal/git"
+	"github.com/rave-soft/sennit/internal/skills"
 )
 
 // BootstrapOptions configures Bootstrap. Fields marked "backend" or

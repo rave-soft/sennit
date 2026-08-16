@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/config"
-	braiddb "github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/config"
+	sennitdb "github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
 // testProjectPath is the project_path statFixture seeds its "current
-// project" sessions under, for tests that query braiddb.Queries directly
+// project" sessions under, for tests that query sennitdb.Queries directly
 // rather than going through runStat (so no --cwd resolution is involved —
 // any fixed placeholder path works, it just has to match what's passed to
 // the Since queries in the same test).
@@ -62,13 +62,13 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 		dataDir = t.TempDir()
 	}
 	t.Cleanup(func() {
-		require.NoError(t, braiddb.Release(dataDir))
-		braiddb.ResetPool()
+		require.NoError(t, sennitdb.Release(dataDir))
+		sennitdb.ResetPool()
 	})
 
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 	ctx := t.Context()
 
 	now := time.Now()
@@ -89,13 +89,13 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 
 	// Session A: single model throughout (anthropic/claude), exact
 	// attribution expected.
-	sessA, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
+	sessA, err := q.CreateSession(ctx, sennitdb.CreateSessionParams{
 		ID: "sess-a", Title: "session A", ProjectPath: projectPath,
 		PromptTokens: 1000, CompletionTokens: 500, Cost: 1.5,
 	})
 	require.NoError(t, err)
 	setSessionTimes(sessA.ID, recent, recent+120)
-	msgA1, err := q.CreateMessage(ctx, braiddb.CreateMessageParams{
+	msgA1, err := q.CreateMessage(ctx, sennitdb.CreateMessageParams{
 		ID: "msg-a1", SessionID: sessA.ID, Role: "assistant", Parts: "[]",
 		Model:    sql.NullString{String: "claude-sonnet", Valid: true},
 		Provider: sql.NullString{String: "anthropic", Valid: true},
@@ -105,13 +105,13 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 
 	// Session B: a different single model (openai/gpt), exact
 	// attribution, distinct (model, provider) pair from session A.
-	sessB, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
+	sessB, err := q.CreateSession(ctx, sennitdb.CreateSessionParams{
 		ID: "sess-b", Title: "session B", ProjectPath: projectPath,
 		PromptTokens: 2000, CompletionTokens: 800, Cost: 2.0,
 	})
 	require.NoError(t, err)
 	setSessionTimes(sessB.ID, recent, recent+200)
-	msgB1, err := q.CreateMessage(ctx, braiddb.CreateMessageParams{
+	msgB1, err := q.CreateMessage(ctx, sennitdb.CreateMessageParams{
 		ID: "msg-b1", SessionID: sessB.ID, Role: "assistant", Parts: "[]",
 		Model:    sql.NullString{String: "gpt-5", Valid: true},
 		Provider: sql.NullString{String: "openai", Valid: true},
@@ -121,27 +121,27 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 
 	// Session C: mixed models (2x claude-sonnet, 1x gpt-5 assistant
 	// messages) -- exercises the proportional-split/approximate path.
-	sessC, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
+	sessC, err := q.CreateSession(ctx, sennitdb.CreateSessionParams{
 		ID: "sess-c", Title: "session C", ProjectPath: projectPath,
 		PromptTokens: 900, CompletionTokens: 300, Cost: 3.0,
 	})
 	require.NoError(t, err)
 	setSessionTimes(sessC.ID, recent, recent+300)
-	msgC1, err := q.CreateMessage(ctx, braiddb.CreateMessageParams{
+	msgC1, err := q.CreateMessage(ctx, sennitdb.CreateMessageParams{
 		ID: "msg-c1", SessionID: sessC.ID, Role: "assistant", Parts: "[]",
 		Model:    sql.NullString{String: "claude-sonnet", Valid: true},
 		Provider: sql.NullString{String: "anthropic", Valid: true},
 	})
 	require.NoError(t, err)
 	setMessageTimes(msgC1.ID, recent, recent+30)
-	msgC2, err := q.CreateMessage(ctx, braiddb.CreateMessageParams{
+	msgC2, err := q.CreateMessage(ctx, sennitdb.CreateMessageParams{
 		ID: "msg-c2", SessionID: sessC.ID, Role: "assistant", Parts: "[]",
 		Model:    sql.NullString{String: "claude-sonnet", Valid: true},
 		Provider: sql.NullString{String: "anthropic", Valid: true},
 	})
 	require.NoError(t, err)
 	setMessageTimes(msgC2.ID, recent, recent+30)
-	msgC3, err := q.CreateMessage(ctx, braiddb.CreateMessageParams{
+	msgC3, err := q.CreateMessage(ctx, sennitdb.CreateMessageParams{
 		ID: "msg-c3", SessionID: sessC.ID, Role: "assistant", Parts: "[]",
 		Model:    sql.NullString{String: "gpt-5", Valid: true},
 		Provider: sql.NullString{String: "openai", Valid: true},
@@ -151,7 +151,7 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 
 	// Subagent session delegated via the generic "task" tool: title is
 	// always "New Agent Session".
-	sessTask, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
+	sessTask, err := q.CreateSession(ctx, sennitdb.CreateSessionParams{
 		ID: "sess-task", ParentSessionID: sql.NullString{String: sessA.ID, Valid: true}, ProjectPath: projectPath,
 		Title: "New Agent Session", PromptTokens: 300, CompletionTokens: 100, Cost: 0.4,
 	})
@@ -160,7 +160,7 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 
 	// Subagent session delegated via a custom agent: title is the
 	// configured agent name.
-	sessCustom, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
+	sessCustom, err := q.CreateSession(ctx, sennitdb.CreateSessionParams{
 		ID: "sess-custom", ParentSessionID: sql.NullString{String: sessA.ID, Valid: true}, ProjectPath: projectPath,
 		Title: "reviewer", PromptTokens: 500, CompletionTokens: 200, Cost: 0.6,
 	})
@@ -179,7 +179,7 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 		message.ToolResult{ToolCallID: "tc-1", Name: "view", Content: "skill contents", Metadata: string(metaJSON)},
 	})
 	require.NoError(t, err)
-	msgSkill, err := q.CreateMessage(ctx, braiddb.CreateMessageParams{
+	msgSkill, err := q.CreateMessage(ctx, sennitdb.CreateMessageParams{
 		ID: "msg-skill", SessionID: sessA.ID, Role: "tool", Parts: string(partsJSON),
 	})
 	require.NoError(t, err)
@@ -187,13 +187,13 @@ func statFixture(t *testing.T, dir, projectPath string) string {
 
 	// A session entirely outside the --since window: must be excluded
 	// once filtering is applied.
-	sessOld, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
+	sessOld, err := q.CreateSession(ctx, sennitdb.CreateSessionParams{
 		ID: "sess-old", Title: "ancient session", ProjectPath: projectPath,
 		PromptTokens: 9999, CompletionTokens: 9999, Cost: 99,
 	})
 	require.NoError(t, err)
 	setSessionTimes(sessOld.ID, old, old+10)
-	msgOld, err := q.CreateMessage(ctx, braiddb.CreateMessageParams{
+	msgOld, err := q.CreateMessage(ctx, sennitdb.CreateMessageParams{
 		ID: "msg-old", SessionID: sessOld.ID, Role: "assistant", Parts: "[]",
 		Model:    sql.NullString{String: "claude-sonnet", Valid: true},
 		Provider: sql.NullString{String: "anthropic", Valid: true},
@@ -216,13 +216,13 @@ const otherProjectPath = "/other/project"
 // totals separate from the fixture's own.
 func seedOtherProjectSession(t *testing.T, dataDir string) {
 	t.Helper()
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 	ctx := t.Context()
 
 	recent := time.Now().Add(-1 * time.Hour).Unix()
-	sess, err := q.CreateSession(ctx, braiddb.CreateSessionParams{
+	sess, err := q.CreateSession(ctx, sennitdb.CreateSessionParams{
 		ID: "sess-other", Title: "other project session", ProjectPath: otherProjectPath,
 		PromptTokens: 400, CompletionTokens: 150, Cost: 0.75,
 	})
@@ -233,15 +233,15 @@ func seedOtherProjectSession(t *testing.T, dataDir string) {
 
 func TestComputeModelStats_ExactAndApproximateAttribution(t *testing.T) {
 	dataDir := statFixture(t, "", testProjectPath)
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	sessions, err := q.ListSessionsSince(t.Context(), braiddb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
+	sessions, err := q.ListSessionsSince(t.Context(), sennitdb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
 	require.NoError(t, err)
-	messages, err := q.ListAssistantMessagesSince(t.Context(), braiddb.ListAssistantMessagesSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
+	messages, err := q.ListAssistantMessagesSince(t.Context(), sennitdb.ListAssistantMessagesSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 
 	models := computeModelStats(sessions, messages)
@@ -279,13 +279,13 @@ func TestComputeModelStats_ExactAndApproximateAttribution(t *testing.T) {
 
 func TestComputeAgentStats_GroupsByTitle(t *testing.T) {
 	dataDir := statFixture(t, "", testProjectPath)
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	sessions, err := q.ListSessionsSince(t.Context(), braiddb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
+	sessions, err := q.ListSessionsSince(t.Context(), sennitdb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 
 	agents := computeAgentStats(sessions)
@@ -311,13 +311,13 @@ func TestComputeAgentStats_GroupsByTitle(t *testing.T) {
 
 func TestComputeSkillStats_MatchesDoubleJSONExtract(t *testing.T) {
 	dataDir := statFixture(t, "", testProjectPath)
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 
 	since, err := statSince("7d")
 	require.NoError(t, err)
-	rows, err := q.ListSkillLoadsSince(t.Context(), braiddb.ListSkillLoadsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
+	rows, err := q.ListSkillLoadsSince(t.Context(), sennitdb.ListSkillLoadsSinceParams{CreatedAt: since, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "the skill-loading tool_result message must be matched by the double json_extract query")
 
@@ -331,24 +331,24 @@ func TestComputeSkillStats_MatchesDoubleJSONExtract(t *testing.T) {
 
 func TestComputeSessionStats_SinceFiltersOutOldSessions(t *testing.T) {
 	dataDir := statFixture(t, "", testProjectPath)
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 
 	sinceAll, err := statSince("all")
 	require.NoError(t, err)
-	allSessions, err := q.ListSessionsSince(t.Context(), braiddb.ListSessionsSinceParams{CreatedAt: sinceAll, ProjectPath: testProjectPath})
+	allSessions, err := q.ListSessionsSince(t.Context(), sennitdb.ListSessionsSinceParams{CreatedAt: sinceAll, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 	require.Contains(t, titlesOf(allSessions), "ancient session")
 
 	since7d, err := statSince("7d")
 	require.NoError(t, err)
-	recentSessions, err := q.ListSessionsSince(t.Context(), braiddb.ListSessionsSinceParams{CreatedAt: since7d, ProjectPath: testProjectPath})
+	recentSessions, err := q.ListSessionsSince(t.Context(), sennitdb.ListSessionsSinceParams{CreatedAt: since7d, ProjectPath: testProjectPath})
 	require.NoError(t, err)
 	require.NotContains(t, titlesOf(recentSessions), "ancient session")
 }
 
-func titlesOf(sessions []braiddb.ListSessionsSinceRow) []string {
+func titlesOf(sessions []sennitdb.ListSessionsSinceRow) []string {
 	titles := make([]string, len(sessions))
 	for i, s := range sessions {
 		titles[i] = s.Title
@@ -432,9 +432,9 @@ func TestGatherAllProjectStats_GroupsByProjectWithoutLeaking(t *testing.T) {
 	dataDir := statFixture(t, "", testProjectPath)
 	seedOtherProjectSession(t, dataDir)
 
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 
 	since, err := statSince("7d")
 	require.NoError(t, err)

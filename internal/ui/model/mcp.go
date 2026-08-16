@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/styles"
-	mcp "github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/styles"
+	mcp "github.com/rave-soft/sennit/internal/workspace"
 )
 
 // mcpInfo renders the MCP status section showing active MCP clients and their

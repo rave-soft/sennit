@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 

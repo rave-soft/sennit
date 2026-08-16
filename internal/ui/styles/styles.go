@@ -14,7 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/ui/diffview"
+	"github.com/rave-soft/sennit/internal/ui/diffview"
 )
 
 const (

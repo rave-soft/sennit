@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"unicode/utf8"
 
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 )
 
 // defaultTavilyBaseURL is Tavily's public search endpoint, used when

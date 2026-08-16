@@ -8,8 +8,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/ui/completions"
-	"github.com/rave-soft/braid/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/completions"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
 )
 
 // isAuthTimeout reports whether an error indicates the OAuth flow was

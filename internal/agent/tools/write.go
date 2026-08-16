@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/diff"
-	"github.com/rave-soft/braid/internal/filepathext"
-	"github.com/rave-soft/braid/internal/filetracker"
-	"github.com/rave-soft/braid/internal/fsext"
-	"github.com/rave-soft/braid/internal/history"
+	"github.com/rave-soft/sennit/internal/diff"
+	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/filetracker"
+	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/history"
 
-	"github.com/rave-soft/braid/internal/lsp"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/lsp"
+	"github.com/rave-soft/sennit/internal/permission"
 )
 
 //go:embed write.md

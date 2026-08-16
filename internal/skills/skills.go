@@ -14,7 +14,7 @@ import (
 	"sync"
 
 	"github.com/charlievieth/fastwalk"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"gopkg.in/yaml.v3"
 )
 

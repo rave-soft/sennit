@@ -13,15 +13,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
 func TestMCPTokenMutationIsConditionalAndOwnerOrdered(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "braid.json")
+	path := filepath.Join(t.TempDir(), "sennit.json")
 	mcp := MCPConfig{Type: MCPHttp, URL: "https://example.test", OAuth: true, OAuthToken: &oauth.Token{AccessToken: "initial"}}
 	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true,"oauth_token":{"access_token":"initial"}}}}`), 0o600))
 	store := NewTestStore(&Config{MCP: MCPs{"server": mcp}})
@@ -62,7 +62,7 @@ func TestMCPTokenMutationIsConditionalAndOwnerOrdered(t *testing.T) {
 
 func TestMCPTokenMutationRejectsStaleStore(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "braid.json")
+	path := filepath.Join(t.TempDir(), "sennit.json")
 	initial := &oauth.Token{AccessToken: "initial"}
 	mcp := MCPConfig{Type: MCPHttp, URL: "https://example.test", OAuth: true, OAuthToken: initial}
 	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true,"oauth_token":{"access_token":"initial"}}}}`), 0o600))
@@ -101,31 +101,31 @@ func TestConfigStore_ConfigPath_GlobalAlwaysWorks(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{
-		globalDataPath: "/some/global/braid.json",
+		globalDataPath: "/some/global/sennit.json",
 	}
 
 	path, err := store.ConfigPath(ScopeGlobal)
 	require.NoError(t, err)
-	require.Equal(t, "/some/global/braid.json", path)
+	require.Equal(t, "/some/global/sennit.json", path)
 }
 
 func TestConfigStore_ConfigPath_WorkspaceReturnsPath(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{
-		workspacePath: "/some/workspace/.braid/braid.json",
+		workspacePath: "/some/workspace/.sennit/sennit.json",
 	}
 
 	path, err := store.ConfigPath(ScopeWorkspace)
 	require.NoError(t, err)
-	require.Equal(t, "/some/workspace/.braid/braid.json", path)
+	require.Equal(t, "/some/workspace/.sennit/sennit.json", path)
 }
 
 func TestConfigStore_ConfigPath_WorkspaceErrorsWhenEmpty(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{
-		globalDataPath: "/some/global/braid.json",
+		globalDataPath: "/some/global/sennit.json",
 		workspacePath:  "",
 	}
 
@@ -152,7 +152,7 @@ func TestConfigStore_SetConfigField_GlobalScopeAlwaysWorks(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	globalPath := filepath.Join(dir, "braid.json")
+	globalPath := filepath.Join(dir, "sennit.json")
 	store := &ConfigStore{
 		config:         &Config{},
 		globalDataPath: globalPath,
@@ -222,7 +222,7 @@ func TestConfigStore_RuntimeOverrides_MutableViaPointer(t *testing.T) {
 
 func TestGlobalWorkspaceDir(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	wsDir := GlobalWorkspaceDir()
 	globalData := GlobalConfigData()
@@ -243,7 +243,7 @@ func TestConfigStaleness_CleanImmediatelyAfterSnapshot(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Create a config file
 	content := []byte(`{"options": {"debug": true}}`)
@@ -265,7 +265,7 @@ func TestConfigStaleness_DetectsFileContentChange(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
@@ -290,7 +290,7 @@ func TestConfigStaleness_DetectsFileDeletion(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": true}`), 0o600))
@@ -314,7 +314,7 @@ func TestConfigStaleness_DetectsNewFile(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Don't create file initially
 	store := &ConfigStore{
@@ -369,7 +369,7 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
@@ -402,8 +402,8 @@ func TestReloadFromDisk_WorkspaceMergeErrorKeepsPublishedConfig(t *testing.T) {
 	workingDir := t.TempDir()
 	globalDir := t.TempDir()
 	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", globalDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
 
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
@@ -435,8 +435,8 @@ func TestReloadFromDisk_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *tes
 	workingDir := t.TempDir()
 	globalDir := t.TempDir()
 	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", globalDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
 
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
@@ -461,12 +461,12 @@ func TestReloadFromDisk_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *tes
 // so the new config values are used rather than stale pre-reload values.
 func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Isolate from the host's global config so only test-provided
 	// providers are visible.
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	// Create initial config with one model preference
 	initialConfig := `{
@@ -523,12 +523,12 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 // reloads config into memory after writing, so subsequent reads see the new value.
 func TestSetConfigField_AutoReloads(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Isolate from the host's real global config/data so this test only
 	// ever sees the config it writes itself.
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	// Create initial config file with debug = false
 	initialConfig := `{"options": {"debug": false}}`
@@ -561,12 +561,12 @@ func TestSetConfigField_AutoReloads(t *testing.T) {
 // reloads config into memory after writing.
 func TestRemoveConfigField_AutoReloads(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Isolate from the host's real global config/data so this test only
 	// ever sees the config it writes itself.
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	// Create initial config file with a custom option
 	initialConfig := `{"options": {"debug": true, "custom_field": "value"}}`
@@ -598,7 +598,7 @@ func TestSetConfigField_AutoReloadSkipsWhenNoWorkingDir(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Create a store without working directory (like some test setups)
 	store := &ConfigStore{
@@ -621,12 +621,12 @@ func TestSetConfigField_AutoReloadSkipsWhenNoWorkingDir(t *testing.T) {
 // during ReloadFromDisk to prevent re-entrant/nested reload calls.
 func TestAutoReloadDisabledDuringReload(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Isolate from the host's real global config/data so this test only
 	// ever sees the config it writes itself.
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	// Create initial config with a provider that will trigger config modification during reload
 	// (simulating the anthropic OAuth token removal case)
@@ -662,12 +662,12 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 // avoiding intermediate states where only some fields are persisted.
 func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Isolate from the host's real global config/data so this test only
 	// ever sees the config it writes itself.
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	// Create initial config file.
 	initialConfig := `{"options": {"debug": false}}`
@@ -700,7 +700,7 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(configPath), 0o755))
 	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 
@@ -755,12 +755,12 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 // configureProviders) drops the provider entirely for lacking a base_url.
 func TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Isolate from the host's real global config/data so only the
 	// test-provided provider and the embedded catalog are visible.
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	initialConfig := `{
 		"providers": {
@@ -817,10 +817,10 @@ func TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload(t *testing.T) {
 // updates (see isCatalogProvider).
 func TestSetProviderAPIKey_CatalogProviderOmitsBaseURL(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 
@@ -854,10 +854,10 @@ func TestSetProviderAPIKey_CatalogProviderOmitsBaseURL(t *testing.T) {
 // config file untouched.
 func TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	const initialConfig = `{"options": {"debug": false}}`
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
@@ -900,11 +900,11 @@ func TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu(t *testing.T) {
 	const serverDelay = 200 * time.Millisecond
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
 	// Isolate from the host's global config.
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	// Start with no providers so the initial Load is fast and has nothing
 	// to discover.
@@ -974,10 +974,10 @@ func TestLoad_AppleTerminalDefaultSurvivesReload(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "Apple_Terminal")
 
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	// Empty config: Load tolerates !cfg.IsConfigured() and returns early,
 	// which keeps this test focused on the Apple Terminal default rather
@@ -1012,10 +1012,10 @@ func TestLoad_AppleTerminalDefaultSurvivesReload(t *testing.T) {
 // setConfig the old snapshot would gain the new agent and this test fails.
 func TestReloadFromDisk_PublishedConfigNotMutated(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(`{
 		"model": {"provider": "openai", "model": "gpt-4"},
@@ -1038,7 +1038,7 @@ func TestReloadFromDisk_PublishedConfigNotMutated(t *testing.T) {
 
 	// Drop a new markdown agent on disk so reload discovers it.
 	agentID := "reviewer"
-	agentPath := filepath.Join(dir, ".braid", "agents", agentID+".md")
+	agentPath := filepath.Join(dir, ".sennit", "agents", agentID+".md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(agentPath), 0o755))
 	require.NoError(t, os.WriteFile(agentPath, []byte(`---
 name: reviewer
@@ -1073,8 +1073,8 @@ You review Go code.`), 0o644))
 // needs Agents["coder"] — without mutating any previously published Config.
 func TestOnboarding_FirstCredentialBuildsAgents(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	store, err := Load(dir, dir, false)
 	require.NoError(t, err)

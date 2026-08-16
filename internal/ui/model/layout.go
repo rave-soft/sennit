@@ -13,11 +13,12 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
-	"github.com/rave-soft/braid/internal/home"
-	"github.com/rave-soft/braid/internal/ui/dialog"
-	"github.com/rave-soft/braid/internal/ui/logo"
-	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/rave-soft/braid/internal/version"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/logo"
+	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/version"
 )
 
 // Compact mode breakpoints.
@@ -176,7 +177,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	// Debugging rendering (visually see when the tui rerenders)
-	if os.Getenv("BRAID_UI_DEBUG") == "true" {
+	if os.Getenv(brand.EnvPrefix+"UI_DEBUG") == "true" {
 		debugView := lipgloss.NewStyle().Background(lipgloss.ANSIColor(rand.Intn(256))).Width(4).Height(2)
 		debug := uv.NewStyledString(debugView.String())
 		debug.Draw(scr, image.Rectangle{
@@ -253,7 +254,7 @@ func (m *UI) View() tea.View {
 	}
 	v.MouseMode = tea.MouseModeAllMotion
 	v.ReportFocus = m.caps.ReportFocusEvents
-	v.WindowTitle = "braid " + home.Short(m.com.Workspace.WorkingDir())
+	v.WindowTitle = brand.Slug + " " + home.Short(m.com.Workspace.WorkingDir())
 	if m.hasSession() && m.sess.current.Title != "" {
 		v.WindowTitle += " — " + m.sess.current.Title
 	}

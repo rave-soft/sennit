@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/rave-soft/braid/internal/shell"
-	"github.com/rave-soft/braid/internal/version"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/version"
 )
 
 // loadTimeout bounds a single braidrc execution. Config loading runs on the
@@ -43,7 +44,7 @@ func LoadShellConfig(ctx context.Context, path string, src []byte) ([]byte, erro
 
 	// Expose the running Braid version so scripts can feature-detect, e.g.
 	// [[ "$BRAID_VERSION" == "devel" ]] or branch on the release.
-	env := append(os.Environ(), "BRAID_VERSION="+version.Version)
+	env := append(os.Environ(), brand.EnvPrefix+"VERSION="+version.Version)
 
 	err := shell.Run(runCtx, shell.RunOptions{
 		Command: string(src),

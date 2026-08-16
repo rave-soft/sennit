@@ -62,7 +62,7 @@ func TestDiscoverMarkdownAgents_FoldsLegacyToolName(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	dir := filepath.Join(root, ".braid", "agents")
+	dir := filepath.Join(root, ".sennit", "agents")
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "reviewer.md"),
 		[]byte("---\nname: reviewer\ntools: [view, grep]\n---\nYou review Go code."), 0o644))

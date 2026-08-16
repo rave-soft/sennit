@@ -16,9 +16,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/home"
-	"github.com/rave-soft/braid/internal/ui/common"
-	fimage "github.com/rave-soft/braid/internal/ui/image"
+	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	fimage "github.com/rave-soft/sennit/internal/ui/image"
 )
 
 const FilePickerID = "filepicker"

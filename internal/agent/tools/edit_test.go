@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/filetracker"
+	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/stretchr/testify/require"
 )
 

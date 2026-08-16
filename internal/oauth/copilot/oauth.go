@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth"
 )
 
 const (

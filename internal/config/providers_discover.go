@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/discover"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/discover"
 )
 
 // resolveCustomProviderModels does two things for every custom provider,

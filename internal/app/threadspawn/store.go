@@ -14,8 +14,8 @@ import (
 	"database/sql"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/thread"
 )
 
 type store struct {

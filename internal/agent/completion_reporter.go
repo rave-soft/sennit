@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/agent/notify"
 )
 
 // completionReporter gives "publish the terminal RunComplete for this

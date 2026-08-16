@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/x/exp/slice"
+	"github.com/rave-soft/sennit/internal/brand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -42,9 +43,9 @@ const (
 // A fresh slice is returned on every call so callers may append freely.
 func BraidEnvMarkers() []string {
 	return []string{
-		"BRAID=1",
-		"AGENT=braid",
-		"AI_AGENT=braid",
+		brand.EnvName + "=1",
+		"AGENT=" + brand.Slug,
+		"AI_AGENT=" + brand.Slug,
 	}
 }
 

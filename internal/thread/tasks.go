@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/permission"
 )
 
 // maxActiveTasksPerWorkspace and maxActiveTasksPerParentTurn bound

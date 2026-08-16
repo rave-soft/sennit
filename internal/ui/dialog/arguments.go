@@ -15,9 +15,9 @@ import (
 	"golang.org/x/text/language"
 
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/commands"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/commands"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // ArgumentsID is the identifier for the arguments dialog.

@@ -3,11 +3,11 @@ package workspace
 import (
 	"testing"
 
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/app/threadspawn"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/app/threadspawn"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +19,7 @@ import (
 // and context (see thread.NewTaskManager's doc comment).
 func newAttachedTaskTestApp(t *testing.T, repo string) *app.App {
 	t.Helper()
-	t.Setenv("BRAID_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv("SENNIT_GLOBAL_CONFIG", t.TempDir())
 	boot, err := app.Bootstrap(t.Context(), repo, app.BootstrapOptions{})
 	require.NoError(t, err)
 	t.Cleanup(func() {

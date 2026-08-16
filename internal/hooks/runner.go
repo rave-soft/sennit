@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/shell"
 )
 
 // abandonGrace is how long runOne waits after ctx cancellation for the

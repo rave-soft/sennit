@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

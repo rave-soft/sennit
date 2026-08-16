@@ -3,7 +3,7 @@ package common
 import (
 	"strings"
 
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // ScrollbarThumbBounds returns the thumb's start line and size (in track

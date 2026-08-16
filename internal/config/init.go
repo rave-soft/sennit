@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/rave-soft/braid/internal/fsext"
+	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 const (

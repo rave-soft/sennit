@@ -6,11 +6,11 @@ import (
 	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/braid/internal/app/threadspawn"
-	"github.com/rave-soft/braid/internal/log"
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/app/threadspawn"
+	"github.com/rave-soft/sennit/internal/log"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/thread"
 )
 
 // threadEventPubsubType maps a thread lifecycle event's semantic type

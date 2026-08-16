@@ -15,9 +15,9 @@ import (
 
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/fsext"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/sourcegraph/jsonrpc2"
 )
 

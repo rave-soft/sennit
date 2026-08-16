@@ -34,7 +34,7 @@ func TestRecoverPanicWritesToConfiguredLogDir(t *testing.T) {
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
-	require.Contains(t, entries[0].Name(), "braid-panic-test-")
+	require.Contains(t, entries[0].Name(), "sennit-panic-test-")
 
 	// Ensure the file did not end up in the process's cwd instead.
 	cwd, err := os.Getwd()
@@ -42,6 +42,6 @@ func TestRecoverPanicWritesToConfiguredLogDir(t *testing.T) {
 	cwdEntries, err := os.ReadDir(cwd)
 	require.NoError(t, err)
 	for _, e := range cwdEntries {
-		require.NotContains(t, e.Name(), "braid-panic-test-")
+		require.NotContains(t, e.Name(), "sennit-panic-test-")
 	}
 }

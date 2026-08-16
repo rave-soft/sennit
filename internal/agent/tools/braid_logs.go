@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
-const BraidLogsToolName = "braid_logs"
+const BraidLogsToolName = brand.ToolLogs
 
 //go:embed braid_logs.md.tpl
 var braidLogsDescriptionTmpl []byte

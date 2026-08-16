@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/sennit/internal/message"
 )
 
 const DefaultSessionName = "Untitled Session"

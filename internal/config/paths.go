@@ -12,8 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/fsext"
-	"github.com/rave-soft/braid/internal/home"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/fsext"
+	"github.com/rave-soft/sennit/internal/home"
 )
 
 // lookupConfigs searches config files starting at cwd and walking up
@@ -44,15 +45,16 @@ func lookupConfigs(cwd string) []string {
 	// not options.data_directory (which is configurable and resolved
 	// separately, see workspacePath in Load/reloadFromDisk); it is the
 	// project's canonical config subdirectory, checked at every directory in
-	// the upward walk just like the other names. defaultDataDirectory holds
-	// the same literal (".braid") so the two don't drift.
+	// the upward walk just like the other names. Both this name and
+	// defaultDataDirectory come from brand.DataDir, which is what keeps the
+	// two from drifting apart.
 	configNames := []string{
-		filepath.Join(defaultDataDirectory, appName+"rc"),
-		"." + appName + "rc",
-		appName + "rc",
-		filepath.Join(defaultDataDirectory, appName+".json"),
-		"." + appName + ".json",
-		appName + ".json",
+		filepath.Join(defaultDataDirectory, brand.ShellConfigFile),
+		brand.HiddenShellConfigFile,
+		brand.ShellConfigFile,
+		filepath.Join(defaultDataDirectory, brand.JSONConfigFile),
+		brand.HiddenJSONConfigFile,
+		brand.JSONConfigFile,
 	}
 
 	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
@@ -69,7 +71,7 @@ func lookupConfigs(cwd string) []string {
 
 // GlobalConfig returns the global configuration file path for the application.
 func GlobalConfig() string {
-	if braidGlobal := os.Getenv("BRAID_GLOBAL_CONFIG"); braidGlobal != "" {
+	if braidGlobal := os.Getenv(brand.EnvPrefix + "GLOBAL_CONFIG"); braidGlobal != "" {
 		return filepath.Join(braidGlobal, fmt.Sprintf("%s.json", appName))
 	}
 	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
@@ -87,7 +89,7 @@ func GlobalDBDir() string {
 // project, ~/.config/braid/logs/braid.log by default (alongside the
 // shared database — see GlobalDBDir).
 func GlobalLogFile() string {
-	return filepath.Join(GlobalDBDir(), "logs", "braid.log")
+	return filepath.Join(GlobalDBDir(), "logs", brand.LogFile)
 }
 
 // shellConfigSibling returns the braidrc path that sits alongside a given
@@ -112,7 +114,7 @@ func ProjectConfigs(cwd string) []string {
 // GlobalConfigData returns the path to the main data directory for the application.
 // this config is used when the app overrides configurations instead of updating the global config.
 func GlobalConfigData() string {
-	if braidData := os.Getenv("BRAID_GLOBAL_DATA"); braidData != "" {
+	if braidData := os.Getenv(brand.EnvPrefix + "GLOBAL_DATA"); braidData != "" {
 		return filepath.Join(braidData, fmt.Sprintf("%s.json", appName))
 	}
 	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
@@ -217,7 +219,7 @@ func projectBoundary(dir string) string {
 // which copies them into .braid/skills with validation instead of trusting a
 // foreign directory implicitly.
 func GlobalSkillsDirs() []string {
-	if braidSkills := os.Getenv("BRAID_SKILLS_DIR"); braidSkills != "" {
+	if braidSkills := os.Getenv(brand.EnvPrefix + "SKILLS_DIR"); braidSkills != "" {
 		return []string{braidSkills}
 	}
 
@@ -246,7 +248,7 @@ func GlobalSkillsDirs() []string {
 // in explicitly via `braid import`, not auto-discovered from their native
 // directories.
 var projectSkillSubdirs = []string{
-	".braid/skills",
+	brand.DataDir + "/skills",
 }
 
 // ProjectSkillsDir returns the default project directories for which Braid

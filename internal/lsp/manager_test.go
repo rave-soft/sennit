@@ -6,7 +6,7 @@ import (
 	"time"
 
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 

@@ -3,8 +3,8 @@ package chat
 import (
 	"encoding/json"
 
-	tools "github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	tools "github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // CallHierarchyToolRenderContext renders call hierarchy tool messages.

@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/discover"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/discover"
 )
 
 // ConfigureCustomProviderParams holds the user-supplied fields for a

@@ -11,7 +11,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
-	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // AWSSSOID is the identifier for the AWS SSO auth dialog.

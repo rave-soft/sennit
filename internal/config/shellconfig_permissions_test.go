@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,12 +31,12 @@ func loadBraidShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	t.Setenv("HOME", isolated)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
-	t.Setenv("BRAID_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "braid"))
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "braid"))
+	t.Setenv("SENNIT_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "braid"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "braid"))
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(workDir, "braidrc"), []byte(script), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "sennitrc"), []byte(script), 0o644))
 
 	return config.Load(workDir, dataDir, false)
 }

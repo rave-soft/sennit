@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/rave-soft/braid/internal/env"
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/shell"
 )
 
 // resolveTimeout bounds how long a single ResolveValue call may spend

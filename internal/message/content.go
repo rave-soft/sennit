@@ -14,7 +14,7 @@ import (
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/stringext"
+	"github.com/rave-soft/sennit/internal/stringext"
 )
 
 type MessageRole string
@@ -28,7 +28,7 @@ const (
 
 // MarshalText implements the [encoding.TextMarshaler] interface. It
 // lives here (rather than only in internal/proto, where it originated)
-// because [github.com/rave-soft/braid/internal/proto.MessageRole] is
+// because [github.com/rave-soft/sennit/internal/proto.MessageRole] is
 // now a type alias for MessageRole, and Go requires methods on an
 // aliased type to be defined in the package that declares the
 // underlying type.

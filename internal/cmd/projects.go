@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/x/term"
-	"github.com/rave-soft/braid/internal/projects"
+	"github.com/rave-soft/sennit/internal/projects"
 	"github.com/spf13/cobra"
 )
 

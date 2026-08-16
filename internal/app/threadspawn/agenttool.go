@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/thread"
 )
 
 // agentToolManager adapts a *thread.Manager to tools.ThreadManager, the

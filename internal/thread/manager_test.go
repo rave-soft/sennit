@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/agent/notify"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,9 +31,9 @@ func TestNewManager_WorktreeDirResolution(t *testing.T) {
 		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.worktreeDir)
 	})
 
-	t.Run("empty with no data directory falls back to the repo's own .braid", func(t *testing.T) {
+	t.Run("empty with no data directory falls back to the repo's own .sennit", func(t *testing.T) {
 		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot})
-		require.Equal(t, filepath.Join(repoRoot, ".braid", "threads"), mgr.worktreeDir)
+		require.Equal(t, filepath.Join(repoRoot, ".sennit", "threads"), mgr.worktreeDir)
 	})
 
 	// A relocated data directory takes the worktrees with it: they are

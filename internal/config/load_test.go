@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/config/migrate"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/oauth"
-	"github.com/rave-soft/braid/internal/testenv"
+	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -171,8 +171,8 @@ func TestLoad_WorkspaceMergePreservesAgentsMarker(t *testing.T) {
 	workingDir := t.TempDir()
 	globalDir := t.TempDir()
 	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", globalDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"agents":{},"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
 
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
@@ -188,8 +188,8 @@ func TestLoad_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *testing.T) {
 	workingDir := t.TempDir()
 	globalDir := t.TempDir()
 	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", globalDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
 
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
@@ -206,7 +206,7 @@ func TestLoad_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *testing.T) {
 
 // TestConfig_LoadFromBytes_DeprecatedStrandsAlias verifies that the old
 // "options.strands" key (from before the strands→threads rename) still
-// populates Options.Threads, so existing braid.json/braidrc files keep
+// populates Options.Threads, so existing sennit.json/sennitrc files keep
 // working without edits.
 func TestConfig_LoadFromBytes_DeprecatedStrandsAlias(t *testing.T) {
 	data := []byte(`{"options":{"strands":{"worktree_dir":"../thread-worktrees"}},"providers": {}}`)
@@ -223,7 +223,7 @@ func TestConfig_LoadFromBytes_DeprecatedStrandsAlias(t *testing.T) {
 // alias through the full file-loading path.
 func TestConfig_LoadFromConfigPaths_DeprecatedStrandsAlias(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "braid.json")
+	path := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(
 		path,
 		[]byte(`{"options":{"strands":{"worktree_dir":"../thread-worktrees"}},"providers": {}}`),
@@ -244,15 +244,15 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	// the developer's real config.
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 
-	t.Run("does not pick up braid.json above non-git project", func(t *testing.T) {
+	t.Run("does not pick up sennit.json above non-git project", func(t *testing.T) {
 		parent := t.TempDir()
 
-		// braid.json above the project must not be adopted.
+		// sennit.json above the project must not be adopted.
 		require.NoError(t, os.WriteFile(
-			filepath.Join(parent, "braid.json"),
+			filepath.Join(parent, "sennit.json"),
 			[]byte(`{}`),
 			0o644,
 		))
@@ -262,11 +262,11 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 
 		got := lookupConfigs(project)
 		for _, p := range got {
-			require.NotEqual(t, filepath.Join(parent, "braid.json"), p)
+			require.NotEqual(t, filepath.Join(parent, "sennit.json"), p)
 		}
 	})
 
-	t.Run("does not climb out of git worktree to find braid.json", func(t *testing.T) {
+	t.Run("does not climb out of git worktree to find sennit.json", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git not available")
 		}
@@ -274,7 +274,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		parent := t.TempDir()
 
 		require.NoError(t, os.WriteFile(
-			filepath.Join(parent, "braid.json"),
+			filepath.Join(parent, "sennit.json"),
 			[]byte(`{}`),
 			0o644,
 		))
@@ -286,20 +286,20 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.NoError(t, gitInit.Run())
 
 		got := lookupConfigs(worktree)
-		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, "braid.json"))
+		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, "sennit.json"))
 		require.NoError(t, err)
 		for _, p := range got {
 			pEval, err := filepath.EvalSymlinks(p)
 			if err != nil {
 				continue
 			}
-			require.NotEqual(t, strayEval, pEval, "must not adopt parent braid.json")
+			require.NotEqual(t, strayEval, pEval, "must not adopt parent sennit.json")
 		}
 	})
 
-	t.Run("picks up braid.json inside the project", func(t *testing.T) {
+	t.Run("picks up sennit.json inside the project", func(t *testing.T) {
 		project := t.TempDir()
-		local := filepath.Join(project, "braid.json")
+		local := filepath.Join(project, "sennit.json")
 		require.NoError(t, os.WriteFile(local, []byte(`{}`), 0o644))
 
 		got := lookupConfigs(project)
@@ -317,7 +317,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, foundLocal, "expected project braid.json to be in lookup result: %v", got)
+		require.True(t, foundLocal, "expected project sennit.json to be in lookup result: %v", got)
 	})
 
 	t.Run("global config is always included regardless of boundary", func(t *testing.T) {
@@ -330,45 +330,45 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.Contains(t, got, GlobalConfigData())
 	})
 
-	t.Run("global shell config (braidrc) is included", func(t *testing.T) {
+	t.Run("global shell config (sennitrc) is included", func(t *testing.T) {
 		project := t.TempDir()
 
 		got := lookupConfigs(project)
-		// A global braidrc is discovered only beside the user config. The data
-		// directory is machine-owned state and must never execute a braidrc.
+		// A global sennitrc is discovered only beside the user config. The data
+		// directory is machine-owned state and must never execute a sennitrc.
 		require.Contains(t, got, shellConfigSibling(GlobalConfig()))
 		require.NotContains(t, got, shellConfigSibling(GlobalConfigData()))
 	})
 
-	t.Run("project braidrc and .braidrc are discovered", func(t *testing.T) {
+	t.Run("project sennitrc and .sennitrc are discovered", func(t *testing.T) {
 		project := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(project, "braidrc"), []byte(""), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".braidrc"), []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, "sennitrc"), []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennitrc"), []byte(""), 0o644))
 
 		got := lookupConfigs(project)
-		require.Contains(t, got, filepath.Join(project, "braidrc"))
-		require.Contains(t, got, filepath.Join(project, ".braidrc"))
+		require.Contains(t, got, filepath.Join(project, "sennitrc"))
+		require.Contains(t, got, filepath.Join(project, ".sennitrc"))
 	})
 
-	t.Run(".braid/braid.json and .braid/braidrc are discovered", func(t *testing.T) {
+	t.Run(".sennit/sennit.json and .sennit/sennitrc are discovered", func(t *testing.T) {
 		project := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(project, ".braid"), 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braid.json"), []byte("{}"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braidrc"), []byte(""), 0o644))
+		require.NoError(t, os.MkdirAll(filepath.Join(project, ".sennit"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennit.json"), []byte("{}"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennitrc"), []byte(""), 0o644))
 
 		got := lookupConfigs(project)
-		require.Contains(t, got, filepath.Join(project, ".braid", "braid.json"))
-		require.Contains(t, got, filepath.Join(project, ".braid", "braidrc"))
+		require.Contains(t, got, filepath.Join(project, ".sennit", "sennit.json"))
+		require.Contains(t, got, filepath.Join(project, ".sennit", "sennitrc"))
 	})
 
-	t.Run(".braid/braid.json outranks root braid.json and .braid.json", func(t *testing.T) {
+	t.Run(".sennit/sennit.json outranks root sennit.json and .sennit.json", func(t *testing.T) {
 		project := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(project, "braid.json"),
+		require.NoError(t, os.WriteFile(filepath.Join(project, "sennit.json"),
 			[]byte(`{"options":{"data_directory":"from-root-json"}}`), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid.json"),
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit.json"),
 			[]byte(`{"options":{"data_directory":"from-dot-json"}}`), 0o644))
-		require.NoError(t, os.MkdirAll(filepath.Join(project, ".braid"), 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braid.json"),
+		require.NoError(t, os.MkdirAll(filepath.Join(project, ".sennit"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennit.json"),
 			[]byte(`{"options":{"data_directory":"from-braid-subdir"}}`), 0o644))
 
 		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project))
@@ -376,16 +376,16 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.Equal(t, "from-braid-subdir", cfg.Options.DataDirectory)
 	})
 
-	t.Run(".braid/braidrc outranks root braidrc, .braidrc, and .braid/braid.json", func(t *testing.T) {
+	t.Run(".sennit/sennitrc outranks root sennitrc, .sennitrc, and .sennit/sennit.json", func(t *testing.T) {
 		project := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(project, "braidrc"),
-			[]byte("option data-directory from-root-braidrc\n"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".braidrc"),
-			[]byte("option data-directory from-dot-braidrc\n"), 0o644))
-		require.NoError(t, os.MkdirAll(filepath.Join(project, ".braid"), 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braid.json"),
+		require.NoError(t, os.WriteFile(filepath.Join(project, "sennitrc"),
+			[]byte("option data-directory from-root-sennitrc\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennitrc"),
+			[]byte("option data-directory from-dot-sennitrc\n"), 0o644))
+		require.NoError(t, os.MkdirAll(filepath.Join(project, ".sennit"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennit.json"),
 			[]byte(`{"options":{"data_directory":"from-braid-subdir-json"}}`), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".braid", "braidrc"),
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennitrc"),
 			[]byte("option data-directory from-braid-subdir-rc\n"), 0o644))
 
 		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project))
@@ -402,7 +402,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.NotEmpty(t, got)
 		// The system-wide config must be first so it has the lowest
 		// priority when configs are merged.
-		require.Equal(t, "/etc/braid/braid.json", got[0])
+		require.Equal(t, "/etc/sennit/sennit.json", got[0])
 	})
 }
 
@@ -439,7 +439,7 @@ func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
 }
 
 // TestLoadFromConfigPaths_ConflictWarningNamesKeys verifies that when a JSON
-// config and a braidrc coexist in the same directory, the merge warning names
+// config and a sennitrc coexist in the same directory, the merge warning names
 // the overlapping top-level keys so incremental migrations can spot stale
 // duplicates.
 func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
@@ -455,8 +455,8 @@ func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 	t.Run("names overlapping keys", func(t *testing.T) {
 		buf := capture(t)
 		tmpDir := t.TempDir()
-		jsonPath := filepath.Join(tmpDir, "braid.json")
-		rcPath := filepath.Join(tmpDir, "braidrc")
+		jsonPath := filepath.Join(tmpDir, "sennit.json")
+		rcPath := filepath.Join(tmpDir, "sennitrc")
 		require.NoError(t, os.WriteFile(jsonPath, []byte(`{"options":{"debug":true},"providers":{}}`), 0o644))
 		require.NoError(t, os.WriteFile(rcPath, []byte("option debug true\n"), 0o644))
 
@@ -469,8 +469,8 @@ func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 	t.Run("no warning when nothing overlaps", func(t *testing.T) {
 		buf := capture(t)
 		tmpDir := t.TempDir()
-		jsonPath := filepath.Join(tmpDir, "braid.json")
-		rcPath := filepath.Join(tmpDir, "braidrc")
+		jsonPath := filepath.Join(tmpDir, "sennit.json")
+		rcPath := filepath.Join(tmpDir, "sennitrc")
 		require.NoError(t, os.WriteFile(jsonPath, []byte(`{"providers":{}}`), 0o644))
 		require.NoError(t, os.WriteFile(rcPath, []byte("option debug true\n"), 0o644))
 
@@ -499,7 +499,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NotNil(t, cfg.Providers)
 		require.NotNil(t, cfg.LSP)
 		require.NotNil(t, cfg.MCP)
-		require.Equal(t, filepath.Join(workingDir, ".braid"), cfg.Options.DataDirectory)
+		require.Equal(t, filepath.Join(workingDir, ".sennit"), cfg.Options.DataDirectory)
 		require.Equal(t, "AGENTS.md", cfg.Options.InitializeAs)
 		for _, path := range defaultContextPaths {
 			require.Contains(t, cfg.Options.ContextPaths, path)
@@ -572,10 +572,10 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.Equal(t, filepath.Join(workingDir, "state"), cfg.Options.DataDirectory)
 	})
 
-	t.Run("does not adopt .braid from a parent project", func(t *testing.T) {
+	t.Run("does not adopt .sennit from a parent project", func(t *testing.T) {
 		parent := t.TempDir()
 
-		// .braid in the parent: it should not be reused by the child
+		// .sennit in the parent: it should not be reused by the child
 		// because there is no git context joining them.
 		require.NoError(t, os.Mkdir(filepath.Join(parent, defaultDataDirectory), 0o755))
 
@@ -592,14 +592,14 @@ func TestConfig_setDefaults(t *testing.T) {
 		)
 	})
 
-	t.Run("does not climb out of git worktree to find .braid", func(t *testing.T) {
+	t.Run("does not climb out of git worktree to find .sennit", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git not available")
 		}
 
 		parent := t.TempDir()
 
-		// Stray .braid above the worktree root.
+		// Stray .sennit above the worktree root.
 		require.NoError(t, os.Mkdir(filepath.Join(parent, defaultDataDirectory), 0o755))
 
 		worktree := filepath.Join(parent, "worktree")
@@ -628,7 +628,7 @@ func TestConfig_setDefaults(t *testing.T) {
 
 		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, defaultDataDirectory))
 		require.NoError(t, err)
-		require.NotEqual(t, strayEval, gotEval, "must not adopt parent .braid")
+		require.NotEqual(t, strayEval, gotEval, "must not adopt parent .sennit")
 
 		subEval, err := filepath.EvalSymlinks(sub)
 		require.NoError(t, err)
@@ -1044,7 +1044,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "ls", "question", "todos", "read", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "sennit_info", "sennit_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "ls", "question", "todos", "read", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -1090,7 +1090,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "braid_info", "braid_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -1455,8 +1455,8 @@ func TestConfig_Load_DiscoveredModelsPersistAcrossReload(t *testing.T) {
 
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 
 	// Seed the data-dir config (what GlobalConfigData() resolves to) with
 	// a custom provider that has no models, so discovery auto-triggers.
@@ -1503,8 +1503,8 @@ func TestConfig_Load_DiscoveredModelsPersistAcrossReload(t *testing.T) {
 func TestConfig_Load_FailedDiscoveryLeavesDiskUntouched(t *testing.T) {
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 
 	dataConfigPath := GlobalConfigData()
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
@@ -1526,7 +1526,7 @@ func TestConfig_Load_FailedDiscoveryLeavesDiskUntouched(t *testing.T) {
 }
 
 // TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels verifies that a
-// project-level braid.json's explicit, non-empty models list merges with a
+// project-level sennit.json's explicit, non-empty models list merges with a
 // stale models list already persisted in the data-dir config, and that a
 // non-empty merged list is enough to skip discovery entirely (no HTTP
 // request is made). The stale data-dir models list is migrated out of the
@@ -1545,8 +1545,8 @@ func TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels(t *testing.T) {
 
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
-	t.Setenv("BRAID_GLOBAL_DATA", dataDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 
 	// Seed the data-dir config with a custom provider that already has a
 	// persisted (stale) models list and a base_url.
@@ -1555,12 +1555,12 @@ func TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels(t *testing.T) {
 	dataSeed := fmt.Sprintf(`{"providers": {"custom": {"api_key": "test-key", "base_url": %q, "models": [{"id": "stale-model", "name": "stale-model"}]}}}`, server.URL+"/v1")
 	require.NoError(t, os.WriteFile(dataConfigPath, []byte(dataSeed), 0o644))
 
-	// Seed a project-level braid.json with a different, explicit models
+	// Seed a project-level sennit.json with a different, explicit models
 	// list for the same provider ID. It intentionally omits base_url so we
 	// can confirm the merge still inherits it from the data-dir file.
 	workingDir := t.TempDir()
 	projectSeed := `{"providers": {"custom": {"models": [{"id": "project-model", "name": "project-model"}]}}}`
-	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "braid.json"), []byte(projectSeed), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "sennit.json"), []byte(projectSeed), 0o644))
 
 	store, err := Load(workingDir, "", false)
 	require.NoError(t, err)
@@ -2129,7 +2129,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 
 func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 	t.Run("sets option from environment variable", func(t *testing.T) {
-		t.Setenv("BRAID_DISABLE_DEFAULT_PROVIDERS", "true")
+		t.Setenv("SENNIT_DISABLE_DEFAULT_PROVIDERS", "true")
 
 		cfg := &Config{}
 		cfg.setDefaults("/tmp", "")
@@ -2152,7 +2152,7 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 func TestConfig_configureSelectedModels(t *testing.T) {
 	t.Run("reload mode should not persist fallback defaults", func(t *testing.T) {
 		dir := t.TempDir()
-		globalPath := filepath.Join(dir, "braid.json")
+		globalPath := filepath.Join(dir, "sennit.json")
 		require.NoError(t, os.WriteFile(globalPath, []byte(`{"model":{"provider":"ghost","model":"missing"}}`), 0o600))
 
 		knownProviders := []catwalk.Provider{
@@ -2306,7 +2306,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 	})
 	t.Run("resolve and persist fallback under writeMu does not deadlock", func(t *testing.T) {
 		dir := t.TempDir()
-		globalPath := filepath.Join(dir, "braid.json")
+		globalPath := filepath.Join(dir, "sennit.json")
 		require.NoError(t, os.WriteFile(globalPath, []byte(`{}`), 0o600))
 
 		knownProviders := []catwalk.Provider{
@@ -2656,14 +2656,14 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 }
 
 // TestGlobalLogFile verifies the log file lives alongside the shared
-// database (both under GlobalDBDir), under BRAID_GLOBAL_CONFIG so tests
-// stay hermetic and never touch the real ~/.config/braid.
+// database (both under GlobalDBDir), under SENNIT_GLOBAL_CONFIG so tests
+// stay hermetic and never touch the real ~/.config/sennit.
 func TestGlobalLogFile(t *testing.T) {
 	globalDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 
 	got := GlobalLogFile()
 
-	require.Equal(t, filepath.Join(GlobalDBDir(), "logs", "braid.log"), got)
-	require.Equal(t, filepath.Join(globalDir, "logs", "braid.log"), got)
+	require.Equal(t, filepath.Join(GlobalDBDir(), "logs", "sennit.log"), got)
+	require.Equal(t, filepath.Join(globalDir, "logs", "sennit.log"), got)
 }

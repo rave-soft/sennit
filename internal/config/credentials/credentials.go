@@ -28,10 +28,10 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/lock"
-	"github.com/rave-soft/braid/internal/oauth"
-	"github.com/rave-soft/braid/internal/oauth/copilot"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/lock"
+	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth/copilot"
 	"github.com/tidwall/gjson"
 	"golang.org/x/sync/singleflight"
 )

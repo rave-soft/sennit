@@ -6,8 +6,8 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/invopop/jsonschema"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/discover"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/spf13/cobra"
 )
 

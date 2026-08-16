@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/home"
+	"github.com/rave-soft/sennit/internal/home"
 	"github.com/stretchr/testify/require"
 )
 

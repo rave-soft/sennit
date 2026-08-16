@@ -6,7 +6,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/stretchr/testify/require"
 )
 

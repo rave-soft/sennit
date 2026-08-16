@@ -10,13 +10,13 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/agent"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
 

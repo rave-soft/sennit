@@ -4,8 +4,8 @@ import (
 	"context"
 	_ "embed"
 
-	"github.com/rave-soft/braid/internal/agent/prompt"
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/agent/prompt"
+	"github.com/rave-soft/sennit/internal/config"
 )
 
 //go:embed templates/coder.md.tpl

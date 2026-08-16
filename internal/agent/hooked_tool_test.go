@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/hooks"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/hooks"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 

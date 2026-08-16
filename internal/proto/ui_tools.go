@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rave-soft/braid/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 const (
@@ -24,8 +25,8 @@ const (
 	SymbolsToolName          = "lsp_symbols"
 	LSPRestartToolName       = "lsp_restart"
 	DiagnosticsToolName      = "lsp_diagnostics"
-	BraidInfoToolName        = "braid_info"
-	BraidLogsToolName        = "braid_logs"
+	BraidInfoToolName        = brand.ToolInfo
+	BraidLogsToolName        = brand.ToolLogs
 	ListMCPResourcesToolName = "list_mcp_resources"
 	ReadMCPResourceToolName  = "read_mcp_resource"
 	ThreadCreateToolName     = "thread_create"

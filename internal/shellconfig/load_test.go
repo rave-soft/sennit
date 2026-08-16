@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/shell"
-	"github.com/rave-soft/braid/internal/version"
+	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/version"
 	"github.com/stretchr/testify/require"
 )
 
@@ -364,11 +364,11 @@ fi`
 	require.Contains(t, providers, "anthropic")
 }
 
-// TestLoadShellConfig_BraidVersionEnv verifies that BRAID_VERSION is exposed
+// TestLoadShellConfig_BraidVersionEnv verifies that SENNIT_VERSION is exposed
 // to the script so it can feature-detect the running Braid version.
 func TestLoadShellConfig_BraidVersionEnv(t *testing.T) {
 	dir := t.TempDir()
-	script := `provider add openai --api-key "$BRAID_VERSION"`
+	script := `provider add openai --api-key "$SENNIT_VERSION"`
 	path := filepath.Join(dir, "braidrc")
 
 	jsonBytes, err := LoadShellConfig(t.Context(), path, []byte(script))

@@ -8,11 +8,11 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/pkg/browser"
-	"github.com/rave-soft/braid/internal/clipboard"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/oauth"
-	"github.com/rave-soft/braid/internal/oauth/copilot"
-	"github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/clipboard"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth/copilot"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

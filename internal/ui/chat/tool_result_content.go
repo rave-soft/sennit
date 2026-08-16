@@ -3,7 +3,7 @@ package chat
 import (
 	"strings"
 
-	"github.com/rave-soft/braid/internal/stringext"
+	"github.com/rave-soft/sennit/internal/stringext"
 )
 
 func humanizedToolName(name string) string {

@@ -13,7 +13,7 @@ import (
 // that scope would silently vanish on the next reload -- exactly the kind of
 // bug that made the refresh_singleflight_test.go fixtures non-hermetic:
 // they wrote to a tmp file that reload never looked at, so the
-// reload silently fell back to the real ~/.config/braid/braid.json.
+// reload silently fell back to the real ~/.config/sennit/sennit.json.
 //
 // The check runs for several independent working directories so it is not
 // an artifact of one particular temp-dir layout.
@@ -22,8 +22,8 @@ func TestConfigPathInvariant_MatchesReloadReadSet(t *testing.T) {
 		workingDir := t.TempDir()
 
 		envDir := t.TempDir()
-		t.Setenv("BRAID_GLOBAL_CONFIG", envDir)
-		t.Setenv("BRAID_GLOBAL_DATA", envDir)
+		t.Setenv("SENNIT_GLOBAL_CONFIG", envDir)
+		t.Setenv("SENNIT_GLOBAL_DATA", envDir)
 
 		store, err := Load(workingDir, "", false)
 		if err != nil {
@@ -33,7 +33,7 @@ func TestConfigPathInvariant_MatchesReloadReadSet(t *testing.T) {
 		// reloadFromDisk's read set: lookupConfigs(workingDir), plus the
 		// workspace config it reads directly via os.ReadFile (store.go, and
 		// mirrored in Load itself). Both compute the workspace path the same
-		// way: DataDirectory/braid.json.
+		// way: DataDirectory/sennit.json.
 		readSet := absSet(t, lookupConfigs(workingDir))
 		workspaceRead := filepath.Join(store.Config().Options.DataDirectory, appName+".json")
 		for p := range absSet(t, []string{workspaceRead}) {
@@ -58,29 +58,29 @@ func TestConfigPathInvariant_MatchesReloadReadSet(t *testing.T) {
 }
 
 // TestConfigPathInvariant_WorkspaceScopeReadableViaLookupConfigs guards the
-// project-scope write target added for .braid/braid.json: configPath
+// project-scope write target added for .sennit/sennit.json: configPath
 // (ScopeWorkspace) must land inside lookupConfigs' own result set, not just
 // the separately-read workspace file Load/reloadFromDisk layer on top. Before
-// .braid/braid.json and .braid/braidrc were added as literal candidates in
+// .sennit/sennit.json and .sennit/sennitrc were added as literal candidates in
 // lookupConfigs' configNames, this only held via the extra "plus workspace
 // path" union in TestConfigPathInvariant_MatchesReloadReadSet above; now
-// that .braid/braid.json is a first-class candidate, the default-DataDirectory
+// that .sennit/sennit.json is a first-class candidate, the default-DataDirectory
 // case should not need that union at all.
 func TestConfigPathInvariant_WorkspaceScopeReadableViaLookupConfigs(t *testing.T) {
 	workingDir := t.TempDir()
 
 	envDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", envDir)
-	t.Setenv("BRAID_GLOBAL_DATA", envDir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", envDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", envDir)
 
 	// lookupConfigs only lists candidates that exist on disk, so create the
 	// workspace file up front -- the invariant is about where reads and
 	// writes land once the file is there, not about a file that has never
 	// been written.
-	if err := os.MkdirAll(filepath.Join(workingDir, ".braid"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workingDir, ".sennit"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workingDir, ".braid", "braid.json"), []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workingDir, ".sennit", "sennit.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func TestConfigPathInvariant_WorkspaceScopeReadableViaLookupConfigs(t *testing.T
 	readSet := absSet(t, lookupConfigs(workingDir))
 	if _, ok := readSet[abs]; !ok {
 		t.Errorf("configPath(ScopeWorkspace) = %q is not among lookupConfigs(workingDir) candidates; "+
-			"expected .braid/braid.json to be a literal candidate there", abs)
+			"expected .sennit/sennit.json to be a literal candidate there", abs)
 	}
 }
 

@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/ui/notification"
+	"github.com/rave-soft/sennit/internal/ui/notification"
 	"github.com/stretchr/testify/require"
 )
 
 // TestCacheIcon_WritesAndReturnsPath verifies the icon lands under
-// <UserCacheDir>/braid/braid.png and the returned path is readable with
+// <UserCacheDir>/sennit/sennit.png and the returned path is readable with
 // matching content.
 func TestCacheIcon_WritesAndReturnsPath(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -18,8 +18,8 @@ func TestCacheIcon_WritesAndReturnsPath(t *testing.T) {
 	data := []byte("fake-png-bytes")
 	path, err := notification.CacheIcon(data)
 	require.NoError(t, err)
-	require.Equal(t, "braid.png", filepath.Base(path))
-	require.Equal(t, "braid", filepath.Base(filepath.Dir(path)))
+	require.Equal(t, "sennit.png", filepath.Base(path))
+	require.Equal(t, "sennit", filepath.Base(filepath.Dir(path)))
 
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)

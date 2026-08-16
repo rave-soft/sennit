@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/rave-soft/braid/internal/shell"
+	"github.com/rave-soft/sennit/internal/shell"
 )
 
 func init() {

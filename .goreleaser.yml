@@ -70,7 +70,7 @@ builds:
       - goos: windows
         goarch: arm
     ldflags:
-      - -s -w -X github.com/rave-soft/braid/internal/version.Version={{.Version}}
+      - -s -w -X github.com/rave-soft/sennit/internal/version.Version={{.Version}}
     flags:
       - -trimpath
 
@@ -116,7 +116,7 @@ aur_sources:
       export CGO_CXXFLAGS="${CXXFLAGS}"
       export CGO_LDFLAGS="${LDFLAGS}"
       export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
-      go build -ldflags="-w -s -buildid='' -linkmode=external -X github.com/rave-soft/braid/internal/version.Version=v${pkgver}" .
+      go build -ldflags="-w -s -buildid='' -linkmode=external -X github.com/rave-soft/sennit/internal/version.Version=v${pkgver}" .
       ./braid completion bash >./completions/braid.bash
       ./braid completion zsh >./completions/braid.zsh
       ./braid completion fish >./completions/braid.fish
@@ -211,8 +211,8 @@ scoops:
 
 npms:
   - name: "@charmland/braid"
-    repository: "git+https://github.com/rave-soft/braid.git"
-    bugs: https://github.com/rave-soft/braid/issues
+    repository: "git+https://github.com/rave-soft/sennit.git"
+    bugs: https://github.com/rave-soft/sennit/issues
     access: public
     disable: "{{ with .Prerelease }}true{{ end }}"
 
@@ -277,8 +277,8 @@ winget:
   - publisher: charmbracelet
     copyright: Charmbracelet, Inc
     publisher_url: https://charm.land
-    release_notes_url: "https://github.com/rave-soft/braid/releases/tag/{{.Tag}}"
-    license_url: https://github.com/rave-soft/braid/blob/main/LICENSE.md
+    release_notes_url: "https://github.com/rave-soft/sennit/releases/tag/{{.Tag}}"
+    license_url: https://github.com/rave-soft/sennit/blob/main/LICENSE.md
     skip_upload: "{{ with .Prerelease }}true{{ end }}"
     commit_author:
       name: "Charm"

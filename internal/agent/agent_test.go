@@ -14,10 +14,10 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,8 +34,8 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	_ = os.Setenv("BRAID_GLOBAL_CONFIG", filepath.Join(tmp, "cfg", "braid.json"))
-	_ = os.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmp, "data", "braid.json"))
+	_ = os.Setenv("SENNIT_GLOBAL_CONFIG", filepath.Join(tmp, "cfg", "sennit.json"))
+	_ = os.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(tmp, "data", "sennit.json"))
 	code := m.Run()
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)

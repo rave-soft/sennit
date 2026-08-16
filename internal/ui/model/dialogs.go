@@ -6,13 +6,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/event"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/question"
-	"github.com/rave-soft/braid/internal/ui/completions"
-	"github.com/rave-soft/braid/internal/ui/dialog"
-	"github.com/rave-soft/braid/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/event"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/ui/completions"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {

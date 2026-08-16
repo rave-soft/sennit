@@ -3,7 +3,7 @@ package dialog
 import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // QuitID is the identifier for the quit dialog.

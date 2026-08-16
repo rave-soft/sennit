@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/spf13/cobra"
 )
 

@@ -9,7 +9,7 @@ import (
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
-	"github.com/rave-soft/braid/internal/ui/diffview"
+	"github.com/rave-soft/sennit/internal/ui/diffview"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

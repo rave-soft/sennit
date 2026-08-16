@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
 
@@ -241,7 +241,7 @@ func TestCreateVersionConcurrent(t *testing.T) {
 	services := make([]Service, n)
 	services[0] = files
 	for i := 1; i < n; i++ {
-		conn, openErr := db.OpenDB(t.Context(), filepath.Join(dataDir, "braid.db"))
+		conn, openErr := db.OpenDB(t.Context(), filepath.Join(dataDir, "sennit.db"))
 		require.NoError(t, openErr)
 		t.Cleanup(func() { require.NoError(t, conn.Close()) })
 		services[i] = NewService(db.New(conn), conn)

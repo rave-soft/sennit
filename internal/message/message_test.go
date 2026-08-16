@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
 

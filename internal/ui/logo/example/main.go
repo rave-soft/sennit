@@ -8,8 +8,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/term"
-	"github.com/rave-soft/braid/internal/ui/logo"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/logo"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 func main() {

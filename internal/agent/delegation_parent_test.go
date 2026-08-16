@@ -8,7 +8,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/stretchr/testify/require"
 )
 

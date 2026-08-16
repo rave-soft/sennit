@@ -38,7 +38,7 @@ func TestConfigStore_KnownProvidersPerStore(t *testing.T) {
 	dirEnabled := t.TempDir()
 	dirDisabled := t.TempDir()
 
-	require.NoError(t, os.WriteFile(filepath.Join(dirEnabled, "braid.json"), []byte(`{}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dirEnabled, "sennit.json"), []byte(`{}`), 0o600))
 	// Load requires at least one custom provider when defaults are
 	// disabled, so this config supplies one purely to satisfy that
 	// bootstrap check; the test itself only cares about KnownProviders().
@@ -53,17 +53,17 @@ func TestConfigStore_KnownProvidersPerStore(t *testing.T) {
 			}
 		}
 	}`
-	require.NoError(t, os.WriteFile(filepath.Join(dirDisabled, "braid.json"), []byte(disabledConfig), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dirDisabled, "sennit.json"), []byte(disabledConfig), 0o600))
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dirEnabled)
-	t.Setenv("BRAID_GLOBAL_DATA", dirEnabled)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dirEnabled)
+	t.Setenv("SENNIT_GLOBAL_DATA", dirEnabled)
 
 	storeEnabled, err := Load(dirEnabled, dirEnabled, false)
 	require.NoError(t, err)
 	require.NotEmpty(t, storeEnabled.KnownProviders(), "embedded catalog should load for the first store")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dirDisabled)
-	t.Setenv("BRAID_GLOBAL_DATA", dirDisabled)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dirDisabled)
+	t.Setenv("SENNIT_GLOBAL_DATA", dirDisabled)
 
 	storeDisabled, err := Load(dirDisabled, dirDisabled, false)
 	require.NoError(t, err)

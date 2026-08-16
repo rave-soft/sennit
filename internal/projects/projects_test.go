@@ -14,7 +14,7 @@ func TestRegisterAndList(t *testing.T) {
 
 	// Override the projects file path for testing
 	t.Setenv("XDG_DATA_HOME", tmpDir)
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
 
 	// Test registering a project
 	err := Register("/home/user/project1", "/home/user/project1/.braid")
@@ -64,7 +64,7 @@ func TestRegisterAndList(t *testing.T) {
 func TestRegisterUpdatesExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
 
 	// Register a project
 	err := Register("/home/user/project1", "/home/user/project1/.braid")
@@ -101,7 +101,7 @@ func TestRegisterUpdatesExisting(t *testing.T) {
 func TestLoadEmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
 
 	// List before any projects exist
 	projects, err := List()
@@ -117,7 +117,7 @@ func TestLoadEmptyFile(t *testing.T) {
 func TestProjectsFilePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
 
 	expected := filepath.Join(tmpDir, "braid", "projects.json")
 	actual := projectsFilePath()
@@ -130,7 +130,7 @@ func TestProjectsFilePath(t *testing.T) {
 func TestRegisterWithParentDataDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
 
 	// Register a project where .braid is in a parent directory.
 	// e.g., working in /home/user/monorepo/packages/app but .braid is at /home/user/monorepo/.braid
@@ -160,7 +160,7 @@ func TestRegisterWithParentDataDir(t *testing.T) {
 func TestRegisterWithExternalDataDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
 
 	// Register a project where .braid is in a completely different location.
 	// e.g., project at /home/user/project but data stored at /var/data/braid/myproject
@@ -194,7 +194,7 @@ func TestRegisterWithExternalDataDir(t *testing.T) {
 func TestRegisterConcurrent(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", tmpDir)
-	t.Setenv("BRAID_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(tmpDir, "braid"))
 
 	const n = 30
 	var wg sync.WaitGroup

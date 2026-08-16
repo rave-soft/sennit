@@ -7,7 +7,7 @@ import (
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/discover"
+	"github.com/rave-soft/sennit/internal/discover"
 )
 
 // validateCustomProviders validates every provider outside the known

@@ -3,10 +3,10 @@ package thread
 import (
 	"context"
 
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/session"
 )
 
 // The helpers in this file are the test-only stand-ins for the threadspawn

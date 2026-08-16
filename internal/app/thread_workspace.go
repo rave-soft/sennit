@@ -1,10 +1,10 @@
 package app
 
 import (
-	"github.com/rave-soft/braid/internal/agent"
-	"github.com/rave-soft/braid/internal/message"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/agent"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/session"
 )
 
 // These accessors exist so an *App satisfies thread.Workspace — the

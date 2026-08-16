@@ -8,9 +8,9 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/rave-soft/braid/internal/agent/prompt"
-	"github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/agent/prompt"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/config"
 )
 
 // CustomAgentParams is the input schema for every user-defined agent tool.

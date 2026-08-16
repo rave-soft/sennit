@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/lock"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/lock"
 )
 
 const projectsFileName = "projects.json"

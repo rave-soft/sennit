@@ -18,17 +18,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/git"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/git"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // defaultDataDirName is the project-local data directory a workspace uses
 // when nothing else is configured; thread worktrees live in "threads"
-// inside it. Kept as a literal rather than imported from internal/config
-// to avoid a dependency edge for one string — the fallback only applies
-// when a caller supplies no DataDir at all.
-const defaultDataDirName = ".braid"
+// inside it. The fallback only applies when a caller supplies no DataDir
+// at all.
+const defaultDataDirName = brand.DataDir
 
 // nameRe restricts thread names to values safe to embed in a branch name
 // and a worktree directory: lowercase alphanumeric slugs, hyphen

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/config"
-	braiddb "github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/sennit/internal/config"
+	sennitdb "github.com/rave-soft/sennit/internal/db"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -68,13 +68,13 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 		dataDir = t.TempDir()
 	}
 	t.Cleanup(func() {
-		require.NoError(t, braiddb.Release(dataDir))
-		braiddb.ResetPool()
+		require.NoError(t, sennitdb.Release(dataDir))
+		sennitdb.ResetPool()
 	})
 
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 	ctx := t.Context()
 
 	// sessions/threads each carry an AFTER UPDATE trigger stamping
@@ -98,7 +98,7 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 	}
 
 	mustSession := func(id, title, projectPath string, parent string) {
-		params := braiddb.CreateSessionParams{ID: id, Title: title, ProjectPath: projectPath}
+		params := sennitdb.CreateSessionParams{ID: id, Title: title, ProjectPath: projectPath}
 		if parent != "" {
 			params.ParentSessionID = sql.NullString{String: parent, Valid: true}
 		}
@@ -138,20 +138,20 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 	// session row and so re-fires update_sessions_updated_at, stamping
 	// updated_at back to "now" -- backdating a session must be the last
 	// write that touches it.
-	_, err = q.CreateMessage(ctx, braiddb.CreateMessageParams{
+	_, err = q.CreateMessage(ctx, sennitdb.CreateMessageParams{
 		ID: "msg-old-parent-1", SessionID: ids.OldParent, Role: "user", Parts: "[]",
 	})
 	require.NoError(t, err)
-	_, err = q.CreateFile(ctx, braiddb.CreateFileParams{
+	_, err = q.CreateFile(ctx, sennitdb.CreateFileParams{
 		ID: "file-old-parent-1", SessionID: ids.OldParent, Path: "main.go", Content: "package main", Version: 0,
 	})
 	require.NoError(t, err)
-	require.NoError(t, q.RecordFileRead(ctx, braiddb.RecordFileReadParams{
+	require.NoError(t, q.RecordFileRead(ctx, sennitdb.RecordFileReadParams{
 		SessionID: ids.OldParent, Path: "main.go",
 	}))
 
 	mustThread := func(id, name, projectPath string) {
-		_, err := q.CreateThread(ctx, braiddb.CreateThreadParams{
+		_, err := q.CreateThread(ctx, sennitdb.CreateThreadParams{
 			ID: id, Name: name, ProjectPath: projectPath, Goal: "goal", BaseBranch: "main",
 			Branch: "thread/" + name, WorktreePath: "/tmp/" + name, Status: "pending", MergePolicy: "auto", Kind: "thread",
 		})
@@ -182,10 +182,10 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 
 func sessionExists(t *testing.T, dataDir, id string) bool {
 	t.Helper()
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	defer braiddb.Release(dataDir) //nolint:errcheck
-	q := braiddb.New(conn)
+	defer sennitdb.Release(dataDir) //nolint:errcheck
+	q := sennitdb.New(conn)
 	_, err = q.GetSessionByID(t.Context(), id)
 	if err == sql.ErrNoRows {
 		return false
@@ -196,10 +196,10 @@ func sessionExists(t *testing.T, dataDir, id string) bool {
 
 func threadExists(t *testing.T, dataDir, id string) bool {
 	t.Helper()
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	defer braiddb.Release(dataDir) //nolint:errcheck
-	q := braiddb.New(conn)
+	defer sennitdb.Release(dataDir) //nolint:errcheck
+	q := sennitdb.New(conn)
 	_, err = q.GetThread(t.Context(), id)
 	if err == sql.ErrNoRows {
 		return false
@@ -235,10 +235,10 @@ func TestGC_AllProjects_DeletesOldAndCascades(t *testing.T) {
 	require.True(t, sessionExists(t, dataDir, ids.YoungParent))
 
 	// Cascade: the old parent's message/file/read_files rows are gone too.
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	defer braiddb.Release(dataDir) //nolint:errcheck
-	q := braiddb.New(conn)
+	defer sennitdb.Release(dataDir) //nolint:errcheck
+	q := sennitdb.New(conn)
 	n, err := q.CountSessionMessages(t.Context(), ids.OldParent)
 	require.NoError(t, err)
 	require.Zero(t, n)
@@ -274,7 +274,7 @@ func TestGC_DryRun_ChangesNothing(t *testing.T) {
 	projectA, projectB := t.TempDir(), t.TempDir()
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
-	dbPath := filepath.Join(dataDir, "braid.db")
+	dbPath := filepath.Join(dataDir, "sennit.db")
 	before, err := os.Stat(dbPath)
 	require.NoError(t, err)
 
@@ -343,24 +343,24 @@ func TestGC_VacuumShrinksFile(t *testing.T) {
 
 	// Bulk up the DB with padding that gc will delete, so VACUUM has
 	// something measurable to reclaim.
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 	old := time.Unix(cutoff, 0).Add(-30 * 24 * time.Hour).Unix()
 	for i := range 200 {
 		id := "sess-pad-" + string(rune('a'+i%26)) + string(rune('0'+i/26))
-		_, err := q.CreateSession(t.Context(), braiddb.CreateSessionParams{ID: id, Title: "pad", ProjectPath: projectA})
+		_, err := q.CreateSession(t.Context(), sennitdb.CreateSessionParams{ID: id, Title: "pad", ProjectPath: projectA})
 		require.NoError(t, err)
 		_, err = conn.ExecContext(t.Context(), `UPDATE sessions SET updated_at = ? WHERE id = ?`, old, id)
 		require.NoError(t, err)
-		_, err = q.CreateFile(t.Context(), braiddb.CreateFileParams{
+		_, err = q.CreateFile(t.Context(), sennitdb.CreateFileParams{
 			ID: id + "-f", SessionID: id, Path: "p", Content: string(make([]byte, 8192)), Version: 0,
 		})
 		require.NoError(t, err)
 	}
-	require.NoError(t, braiddb.Release(dataDir))
+	require.NoError(t, sennitdb.Release(dataDir))
 
-	dbPath := filepath.Join(dataDir, "braid.db")
+	dbPath := filepath.Join(dataDir, "sennit.db")
 	before, err := os.Stat(dbPath)
 	require.NoError(t, err)
 
@@ -379,9 +379,9 @@ func TestGC_AuthoritativeSelectionKeepsNewlyActiveSession(t *testing.T) {
 	projectA, projectB := t.TempDir(), t.TempDir()
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 	preview, err := gcCollect(t.Context(), q, conn, cutoff, "")
 	require.NoError(t, err)
 	require.Contains(t, preview.sessionIDs, ids.OldParent)
@@ -404,14 +404,14 @@ func TestGC_AuthoritativeSelectionIncludesNewDescendant(t *testing.T) {
 	projectA, projectB := t.TempDir(), t.TempDir()
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 	preview, err := gcCollect(t.Context(), q, conn, cutoff, "")
 	require.NoError(t, err)
 	require.NotContains(t, preview.sessionIDs, "sess-new-child")
 
-	_, err = q.CreateSession(t.Context(), braiddb.CreateSessionParams{
+	_, err = q.CreateSession(t.Context(), sennitdb.CreateSessionParams{
 		ID:              "sess-new-child",
 		Title:           "new child",
 		ProjectPath:     projectA,
@@ -431,16 +431,16 @@ func TestGC_AuthoritativeSelectionKeepsActiveAndUnknownThreads(t *testing.T) {
 	projectA, projectB := t.TempDir(), t.TempDir()
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 	preview, err := gcCollect(t.Context(), q, conn, cutoff, "")
 	require.NoError(t, err)
 	require.Contains(t, preview.threadIDs, ids.ThreadOldDone)
 
 	_, err = conn.ExecContext(t.Context(), `UPDATE threads SET status = 'running' WHERE id = ?`, ids.ThreadOldDone)
 	require.NoError(t, err)
-	_, err = q.CreateThread(t.Context(), braiddb.CreateThreadParams{
+	_, err = q.CreateThread(t.Context(), sennitdb.CreateThreadParams{
 		ID: "thread-unknown", Name: "unknown", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
 		Branch: "thread/unknown", WorktreePath: "/tmp/unknown", Status: "future_status", MergePolicy: "auto", Kind: "thread",
 	})
@@ -462,11 +462,11 @@ func TestGC_DeleteRollbackRestoresAllRows(t *testing.T) {
 	projectA, projectB := t.TempDir(), t.TempDir()
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
-	conn, err := braiddb.Connect(t.Context(), dataDir)
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	q := braiddb.New(conn)
+	q := sennitdb.New(conn)
 	errInjected := errors.New("injected delete failure")
-	_, err = gcDeleteWith(t.Context(), conn, q, cutoff, "", func(ctx context.Context, q *braiddb.Queries, selection gcSelection) error {
+	_, err = gcDeleteWith(t.Context(), conn, q, cutoff, "", func(ctx context.Context, q *sennitdb.Queries, selection gcSelection) error {
 		require.NotEmpty(t, selection.sessionIDs)
 		require.NoError(t, q.DeleteSessionMessages(ctx, selection.sessionIDs[0]))
 		return errInjected

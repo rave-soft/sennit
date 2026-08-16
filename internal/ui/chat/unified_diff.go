@@ -3,7 +3,7 @@ package chat
 import (
 	"strings"
 
-	"github.com/rave-soft/braid/internal/diffdetect"
+	"github.com/rave-soft/sennit/internal/diffdetect"
 )
 
 type parsedDiffFile struct {

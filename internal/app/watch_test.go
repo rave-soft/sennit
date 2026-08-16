@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +18,7 @@ import (
 // up a config file edited outside the process at all. This exercises
 // Bootstrap+New directly, and checks that an MCP server added straight to
 // the workspace's
-// .braid/braid.json (as an agent's Write tool would do, bypassing
+// .sennit/sennit.json (as an agent's Write tool would do, bypassing
 // ConfigStore.SetConfigFields) shows up in cfg.MCP and a WorkspaceChanged
 // event is published, purely from app.New's own wiring.
 func TestStartExternalChangeWatchers_LocalModePicksUpMCPWithoutBackend(t *testing.T) {
@@ -41,7 +41,7 @@ func TestStartExternalChangeWatchers_LocalModePicksUpMCPWithoutBackend(t *testin
 	// thing an agent's Write/Edit tool would do -- instead of going
 	// through result.Config.SetConfigField. app.New must have started
 	// the watcher itself.
-	workspacePath := filepath.Join(dataDir, "braid.json")
+	workspacePath := filepath.Join(dataDir, "sennit.json")
 	require.NoError(t, os.WriteFile(workspacePath,
 		[]byte(`{"mcp":{"added-externally":{"command":"echo"}}}`), 0o600))
 

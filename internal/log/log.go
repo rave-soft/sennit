@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
-	"github.com/rave-soft/braid/internal/event"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/event"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -85,7 +86,7 @@ func panicLogPath(filename string) string {
 		return filename
 	}
 
-	dir := filepath.Join(cacheDir, "braid")
+	dir := filepath.Join(cacheDir, brand.Slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		slog.Error("Failed to create braid cache dir for panic log", "dir", dir, "error", err)
 		return filename
@@ -100,7 +101,7 @@ func RecoverPanic(name string, cleanup func()) {
 
 		// Create a timestamped panic log file
 		timestamp := time.Now().Format("20060102-150405")
-		filename := fmt.Sprintf("braid-panic-%s-%s.log", name, timestamp)
+		filename := fmt.Sprintf(brand.Slug+"-panic-%s-%s.log", name, timestamp)
 
 		file, err := os.Create(panicLogPath(filename))
 		if err == nil {

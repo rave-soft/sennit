@@ -7,7 +7,7 @@ import (
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 )
 
 // reasoningModel builds a Model whose catwalk config advertises the given

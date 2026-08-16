@@ -8,7 +8,7 @@ import (
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/sennit/internal/env"
 	"github.com/tidwall/sjson"
 )
 

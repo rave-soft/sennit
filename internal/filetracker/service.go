@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/sennit/internal/db"
 )
 
 // Service defines the interface for tracking file reads in sessions.

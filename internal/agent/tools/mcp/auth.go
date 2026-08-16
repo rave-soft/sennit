@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/oauth"
-	mcpoauth "github.com/rave-soft/braid/internal/oauth/mcp"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/oauth"
+	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
 	"golang.org/x/oauth2"
 )
 

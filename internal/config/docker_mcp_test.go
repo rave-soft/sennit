@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/sennit/internal/env"
 	"github.com/stretchr/testify/require"
 )
 

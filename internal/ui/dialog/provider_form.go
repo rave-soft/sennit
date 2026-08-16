@@ -12,8 +12,8 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/rave-soft/braid/internal/discover"
-	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/discover"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // ProviderFormID is the identifier for the custom provider form dialog.

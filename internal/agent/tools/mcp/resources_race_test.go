@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/stretchr/testify/require"
 )
 

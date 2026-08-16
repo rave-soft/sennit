@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/pressly/goose/v3"
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 var (
@@ -63,7 +64,7 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("data.dir is not set")
 	}
 
-	dbPath := filepath.Join(dataDir, "braid.db")
+	dbPath := filepath.Join(dataDir, brand.DBFile)
 
 	// Resolve to an absolute path so that different relative paths to
 	// the same file share a single connection.
@@ -123,7 +124,7 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 // data directory. When the count reaches zero the underlying connection
 // is closed and removed from the pool.
 func Release(dataDir string) error {
-	dbPath := filepath.Join(dataDir, "braid.db")
+	dbPath := filepath.Join(dataDir, brand.DBFile)
 	absPath, err := filepath.Abs(dbPath)
 	if err != nil {
 		absPath = dbPath

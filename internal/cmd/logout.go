@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

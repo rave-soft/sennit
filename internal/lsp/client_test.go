@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/testenv"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 

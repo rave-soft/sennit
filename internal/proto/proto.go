@@ -1,7 +1,7 @@
 package proto
 
 import (
-	"github.com/rave-soft/braid/internal/lsp"
+	"github.com/rave-soft/sennit/internal/lsp"
 )
 
 // ServerNoticeLevel mirrors the client's status-line severity taxonomy

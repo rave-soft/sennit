@@ -3,8 +3,8 @@ package threadspawn
 import (
 	"context"
 
-	"github.com/rave-soft/braid/internal/agent/tools"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/thread"
 )
 
 // agentToolTaskManager adapts a *thread.TaskManager to tools.TaskManager,

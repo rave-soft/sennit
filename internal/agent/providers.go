@@ -14,10 +14,10 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/discover"
-	"github.com/rave-soft/braid/internal/log"
-	"github.com/rave-soft/braid/internal/oauth/copilot"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/discover"
+	"github.com/rave-soft/sennit/internal/log"
+	"github.com/rave-soft/sennit/internal/oauth/copilot"
 
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/azure"

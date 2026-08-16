@@ -5,11 +5,13 @@ import (
 	"io/fs"
 	"log/slog"
 	"path/filepath"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 // BuiltinPrefix is the path prefix for builtin skill files. It is used by
 // the read tool to distinguish embedded files from disk files.
-const BuiltinPrefix = "braid://skills/"
+const BuiltinPrefix = brand.SkillsURIScheme + "skills/"
 
 //go:embed builtin/*
 var builtinFS embed.FS
@@ -54,9 +56,9 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 			return nil
 		}
 
-		// Set paths using the braid prefix. Strip the leading "builtin/"
+		// Set paths using the BuiltinPrefix. Strip the leading "builtin/"
 		// so the path is relative to the embedded root
-		// (e.g., "braid://skills/braid-config/SKILL.md").
+		// (e.g., "sennit://skills/braid-config/SKILL.md").
 		relPath, _ := filepath.Rel("builtin", path)
 		relPath = filepath.ToSlash(relPath)
 		skill.SkillFilePath = BuiltinPrefix + relPath

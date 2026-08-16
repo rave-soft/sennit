@@ -14,10 +14,11 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/qjebbs/go-jsons"
-	"github.com/rave-soft/braid/internal/config/migrate"
-	"github.com/rave-soft/braid/internal/env"
-	"github.com/rave-soft/braid/internal/home"
-	"github.com/rave-soft/braid/internal/shellconfig"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/shellconfig"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -187,12 +188,12 @@ func mustMarshalConfig(cfg *Config) []byte {
 func PushPopBraidEnv() func() {
 	var found []string
 	for _, ev := range os.Environ() {
-		if strings.HasPrefix(ev, "BRAID_") {
+		if strings.HasPrefix(ev, brand.EnvPrefix) {
 			pair := strings.SplitN(ev, "=", 2)
 			if len(pair) != 2 {
 				continue
 			}
-			found = append(found, strings.TrimPrefix(pair[0], "BRAID_"))
+			found = append(found, strings.TrimPrefix(pair[0], brand.EnvPrefix))
 		}
 	}
 	backups := make(map[string]string)
@@ -201,7 +202,7 @@ func PushPopBraidEnv() func() {
 	}
 
 	for _, ev := range found {
-		if err := os.Setenv(ev, os.Getenv("BRAID_"+ev)); err != nil {
+		if err := os.Setenv(ev, os.Getenv(brand.EnvPrefix+ev)); err != nil {
 			slog.Warn("Failed to set env var from BRAID_ override", "key", ev, "error", err)
 		}
 	}

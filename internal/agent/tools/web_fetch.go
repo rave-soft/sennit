@@ -11,7 +11,7 @@ import (
 
 	"charm.land/fantasy"
 
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/permission"
 )
 
 //go:embed web_fetch.md.tpl

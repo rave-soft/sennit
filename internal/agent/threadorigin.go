@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/rave-soft/braid/internal/message"
+	"github.com/rave-soft/sennit/internal/message"
 )
 
 // OriginAgent marks a prompt raised by an agent on the person's behalf

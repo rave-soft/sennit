@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
-	"github.com/rave-soft/braid/internal/filepathext"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
+	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/permission"
 )
 
 type ReadMCPResourceParams struct {

@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/lock"
+	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

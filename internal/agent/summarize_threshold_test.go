@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 
 	"charm.land/catwalk/pkg/catwalk"

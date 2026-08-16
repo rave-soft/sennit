@@ -60,7 +60,7 @@ You review code.`)
 	require.NotEmpty(t, entry.Warnings)
 	require.Contains(t, entry.Warnings[0], "claude-opus-4")
 
-	written, err := os.ReadFile(filepath.Join(root, ".braid", "agents", "reviewer.md"))
+	written, err := os.ReadFile(filepath.Join(root, ".sennit", "agents", "reviewer.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(written), "# original model: claude-opus-4 — not available")
 	require.NotContains(t, string(written), "\nmodel: ", "the dropped model must not also appear as a real frontmatter field")
@@ -90,7 +90,7 @@ You review code.`)
 	require.Equal(t, StatusImported, entry.Status)
 	require.Empty(t, entry.Warnings)
 
-	written, err := os.ReadFile(filepath.Join(root, ".braid", "agents", "reviewer.md"))
+	written, err := os.ReadFile(filepath.Join(root, ".sennit", "agents", "reviewer.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(written), "model: fakeprovider/fake-model")
 }
@@ -113,7 +113,7 @@ You review code.`)
 	entry := findEntry(t, report, "agent", "reviewer")
 	require.Equal(t, StatusImported, entry.Status)
 
-	written, err := os.ReadFile(filepath.Join(root, ".braid", "agents", "reviewer.md"))
+	written, err := os.ReadFile(filepath.Join(root, ".sennit", "agents", "reviewer.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(written), "tools:")
 	require.Contains(t, string(written), "view")
@@ -141,7 +141,7 @@ You review code.`)
 	require.Equal(t, StatusAdjusted, entry.Status)
 	require.Contains(t, entry.Warnings[0], "WebSearch")
 
-	written, err := os.ReadFile(filepath.Join(root, ".braid", "agents", "reviewer.md"))
+	written, err := os.ReadFile(filepath.Join(root, ".sennit", "agents", "reviewer.md"))
 	require.NoError(t, err)
 	require.NotContains(t, string(written), "WebSearch")
 }
@@ -174,7 +174,7 @@ You review databases.`)
 	}
 	require.True(t, found, "expected a permission warning, got %v", entry.Warnings)
 
-	written, err := os.ReadFile(filepath.Join(root, ".braid", "agents", "dba.md"))
+	written, err := os.ReadFile(filepath.Join(root, ".sennit", "agents", "dba.md"))
 	require.NoError(t, err)
 	require.NotContains(t, string(written), "permission:")
 	require.Contains(t, string(written), "# original permission block dropped")
@@ -198,7 +198,7 @@ You review databases.`)
 	entry := findEntry(t, report, "agent", "dba")
 	require.Equal(t, StatusAdjusted, entry.Status)
 
-	written, err := os.ReadFile(filepath.Join(root, ".braid", "agents", "dba.md"))
+	written, err := os.ReadFile(filepath.Join(root, ".sennit", "agents", "dba.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(written), "reasoning_effort: high")
 }
@@ -221,7 +221,7 @@ Fill the form.`)
 	entry := findEntry(t, report, "skill", "pdf-fill")
 	require.Equal(t, StatusImported, entry.Status)
 
-	written, err := os.ReadFile(filepath.Join(root, ".braid", "skills", "pdf-fill", "SKILL.md"))
+	written, err := os.ReadFile(filepath.Join(root, ".sennit", "skills", "pdf-fill", "SKILL.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(written), "Fill the form.")
 }
@@ -245,7 +245,7 @@ Fill the form.`)
 	require.Equal(t, StatusSkipped, entry.Status)
 	require.NotEmpty(t, entry.Reason)
 
-	_, err = os.Stat(filepath.Join(root, ".braid", "skills", "totally-different-name"))
+	_, err = os.Stat(filepath.Join(root, ".sennit", "skills", "totally-different-name"))
 	require.True(t, os.IsNotExist(err))
 }
 
@@ -271,9 +271,9 @@ Fill the form.`)
 	require.Equal(t, StatusImported, findEntry(t, report, "agent", "reviewer").Status)
 	require.Equal(t, StatusImported, findEntry(t, report, "skill", "pdf-fill").Status)
 
-	_, err = os.Stat(filepath.Join(root, ".braid", "agents", "reviewer.md"))
+	_, err = os.Stat(filepath.Join(root, ".sennit", "agents", "reviewer.md"))
 	require.True(t, os.IsNotExist(err), "dry-run must not write the agent file")
-	_, err = os.Stat(filepath.Join(root, ".braid", "skills", "pdf-fill"))
+	_, err = os.Stat(filepath.Join(root, ".sennit", "skills", "pdf-fill"))
 	require.True(t, os.IsNotExist(err), "dry-run must not write the skill directory")
 }
 
@@ -292,7 +292,7 @@ You review code.`)
 	_, err := RunImport(opts)
 	require.NoError(t, err)
 
-	dest := filepath.Join(root, ".braid", "agents", "reviewer.md")
+	dest := filepath.Join(root, ".sennit", "agents", "reviewer.md")
 	require.NoError(t, os.WriteFile(dest, []byte("hand-edited"), 0o644))
 
 	report, err := RunImport(opts)
@@ -320,7 +320,7 @@ You review code.`)
 	_, err := RunImport(opts)
 	require.NoError(t, err)
 
-	dest := filepath.Join(root, ".braid", "agents", "reviewer.md")
+	dest := filepath.Join(root, ".sennit", "agents", "reviewer.md")
 	require.NoError(t, os.WriteFile(dest, []byte("hand-edited"), 0o644))
 
 	opts.Force = true
@@ -348,7 +348,7 @@ func TestRunImport_MissingSourceDirIsNotAnError(t *testing.T) {
 }
 
 // opencode's disabled/primary agents are skipped, same as regular
-// discovery does for .braid/agents.
+// discovery does for .sennit/agents.
 func TestRunImport_OpenCodeAgent_SkipsPrimaryAndDisabled(t *testing.T) {
 	root := t.TempDir()
 	writeForeignAgent(t, root, ".opencode/agent", "build.md", "---\nmode: primary\ndescription: x\n---\nbody")

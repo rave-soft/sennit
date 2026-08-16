@@ -8,12 +8,12 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/shell"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/logo"
-	"github.com/rave-soft/braid/internal/ui/styles"
-	mcp "github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/logo"
+	"github.com/rave-soft/sennit/internal/ui/styles"
+	mcp "github.com/rave-soft/sennit/internal/workspace"
 )
 
 // sidebarState holds virtual-scroll state and cached rendered content for

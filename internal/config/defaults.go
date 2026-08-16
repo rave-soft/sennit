@@ -10,9 +10,10 @@ import (
 	"sync"
 
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/filepathext"
-	"github.com/rave-soft/braid/internal/fsext"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 // applyEnvironmentDefaults applies defaults that depend on the process
@@ -49,7 +50,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if len(c.Options.GlobalContextPaths) == 0 {
 		braidConfigDir := filepath.Dir(GlobalConfig())
 		c.Options.GlobalContextPaths = []string{
-			filepath.Join(braidConfigDir, "BRAID.md"),
+			filepath.Join(braidConfigDir, brand.ContextFile),
 			filepath.Join(filepath.Dir(braidConfigDir), "AGENTS.md"),
 		}
 	}
@@ -109,7 +110,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	// Project specific skills dirs.
 	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
 
-	if str, ok := os.LookupEnv("BRAID_DISABLE_DEFAULT_PROVIDERS"); ok {
+	if str, ok := os.LookupEnv(brand.EnvPrefix + "DISABLE_DEFAULT_PROVIDERS"); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
 	}
 

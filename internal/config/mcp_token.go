@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

@@ -14,7 +14,8 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
 )
 
 type RipgrepParams struct {
@@ -94,7 +95,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string, caseI
 	}
 
 	// Only add ignore files if they exist
-	for _, ignoreFile := range []string{".gitignore", ".braidignore"} {
+	for _, ignoreFile := range []string{".gitignore", brand.IgnoreFile} {
 		ignorePath := filepath.Join(path, ignoreFile)
 		if _, err := os.Stat(ignorePath); err == nil {
 			cmd.Args = append(cmd.Args, "--ignore-file", ignorePath)

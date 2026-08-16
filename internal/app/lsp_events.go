@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/lsp"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/lsp"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // LSPEventType represents the type of LSP event

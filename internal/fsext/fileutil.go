@@ -13,8 +13,9 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/home"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/home"
 )
 
 type FileInfo struct {
@@ -30,7 +31,7 @@ func SkipHidden(path string) bool {
 	}
 
 	commonIgnoredDirs := map[string]bool{
-		".braid":           true,
+		brand.DataDir:      true,
 		"node_modules":     true,
 		"vendor":           true,
 		"dist":             true,

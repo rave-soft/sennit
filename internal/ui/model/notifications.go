@@ -10,15 +10,16 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/question"
-	"github.com/rave-soft/braid/internal/ui/chat"
-	"github.com/rave-soft/braid/internal/ui/common"
-	"github.com/rave-soft/braid/internal/ui/dialog"
-	"github.com/rave-soft/braid/internal/ui/notification"
-	"github.com/rave-soft/braid/internal/ui/util"
-	"github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/question"
+	"github.com/rave-soft/sennit/internal/ui/chat"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/dialog"
+	"github.com/rave-soft/sennit/internal/ui/notification"
+	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 // sendNotification returns a command that sends a notification if allowed by policy.
@@ -42,7 +43,7 @@ const maxNotificationBodyLen = 120
 func notificationTitle(workingDir string) string {
 	name := filepath.Base(filepath.Clean(workingDir))
 	if name == "" || name == "." || name == string(filepath.Separator) {
-		return "Braid"
+		return brand.Name
 	}
 	return "Braid — " + name
 }

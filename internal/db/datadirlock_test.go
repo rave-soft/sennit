@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/lock"
+	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -77,7 +77,7 @@ func TestAcquireWorkspaceLock_SkipEnvBypassesAcquisition(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(release)
 
-	t.Setenv("BRAID_SKIP_DATADIR_LOCK", "1")
+	t.Setenv("SENNIT_SKIP_DATADIR_LOCK", "1")
 
 	l, err := AcquireWorkspaceLock(dir)
 	require.NoError(t, err, "skip-lock env should bypass contention")

@@ -6,11 +6,15 @@ import (
 
 	"charm.land/glamour/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
-	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/rave-soft/braid/internal/ui/xchroma"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/xchroma"
 )
 
-const formatterName = "braid"
+// formatterName is also used as the chroma style registry name in
+// chromastyle.go: both registries are keyed by the same brand slug, so one
+// constant covers both.
+const formatterName = brand.Slug
 
 func init() {
 	// NOTE: Glamour does not offer us an option to pass the formatter

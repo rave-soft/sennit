@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/rave-soft/braid/internal/proto"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/spf13/cobra"
 )
 

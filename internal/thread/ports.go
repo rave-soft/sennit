@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // This file declares the narrow, dependency-free ports the delegation

@@ -4,7 +4,7 @@ package proto
 // itself, not duplicated here. We alias the canonical types so there is
 // exactly one source of truth and so values survive a JSON round-trip
 // as the same Go type the UI asserts on.
-import "github.com/rave-soft/braid/internal/agent/tools"
+import "github.com/rave-soft/sennit/internal/agent/tools"
 
 const BashToolName = "bash"
 

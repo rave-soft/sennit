@@ -4,9 +4,9 @@
 //	@version		1.0
 //	@description	Braid is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.
 //	@contact.name	rave-soft
-//	@contact.url	https://github.com/rave-soft/braid
+//	@contact.url	https://github.com/rave-soft/sennit
 //	@license.name	MIT
-//	@license.url	https://github.com/rave-soft/braid/blob/main/LICENSE
+//	@license.url	https://github.com/rave-soft/sennit/blob/main/LICENSE
 //	@BasePath		/v1
 package main
 
@@ -17,12 +17,13 @@ import (
 	"os"
 
 	_ "github.com/joho/godotenv/autoload"
-	"github.com/rave-soft/braid/internal/cmd"
-	_ "github.com/rave-soft/braid/internal/dns"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/cmd"
+	_ "github.com/rave-soft/sennit/internal/dns"
 )
 
 func main() {
-	if os.Getenv("BRAID_PROFILE") != "" {
+	if os.Getenv(brand.EnvPrefix+"PROFILE") != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")
 			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil {

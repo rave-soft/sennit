@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	tools "github.com/rave-soft/braid/internal/proto"
+	tools "github.com/rave-soft/sennit/internal/proto"
 )
 
 // formatBashResultForCopy formats bash tool results for clipboard.

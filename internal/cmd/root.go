@@ -18,18 +18,19 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/app/threadspawn"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/event"
-	braidlog "github.com/rave-soft/braid/internal/log"
-	"github.com/rave-soft/braid/internal/projects"
-	"github.com/rave-soft/braid/internal/session"
-	"github.com/rave-soft/braid/internal/ui/common"
-	ui "github.com/rave-soft/braid/internal/ui/model"
-	"github.com/rave-soft/braid/internal/ui/styles"
-	"github.com/rave-soft/braid/internal/version"
-	"github.com/rave-soft/braid/internal/workspace"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/app/threadspawn"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/event"
+	braidlog "github.com/rave-soft/sennit/internal/log"
+	"github.com/rave-soft/sennit/internal/projects"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/common"
+	ui "github.com/rave-soft/sennit/internal/ui/model"
+	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/version"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -61,7 +62,7 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "braid",
+	Use:   brand.Slug,
 	Short: "A terminal-first AI assistant for software development",
 	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
@@ -128,7 +129,7 @@ braid --continue
 		if err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Braid crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/rave-soft/braid/issues/new?template=bug.yml") //nolint:staticcheck
+			return errors.New("Braid crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at " + brand.RepoURL + "/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		return nil
 	},

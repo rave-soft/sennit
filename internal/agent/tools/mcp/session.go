@@ -13,11 +13,12 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/oauth"
-	mcpoauth "github.com/rave-soft/braid/internal/oauth/mcp"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/version"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/oauth"
+	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/version"
 )
 
 // ClientSession wraps an mcp.ClientSession with a context cancel function so
@@ -181,9 +182,9 @@ func (r *Registry) createSession(ctx context.Context, cfg ConfigProvider, name s
 
 	client := mcp.NewClient(
 		&mcp.Implementation{
-			Name:    "braid",
+			Name:    brand.Slug,
 			Version: version.Version,
-			Title:   "Braid",
+			Title:   brand.Name,
 		},
 		&mcp.ClientOptions{
 			ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {

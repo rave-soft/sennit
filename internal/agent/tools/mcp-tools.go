@@ -6,8 +6,8 @@ import (
 	"slices"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
+	"github.com/rave-soft/sennit/internal/permission"
 )
 
 // whitelistDockerTools contains Docker MCP tools that don't require permission.

@@ -13,8 +13,9 @@ import (
 	"github.com/charlievieth/fastwalk"
 	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/home"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/home"
 )
 
 // fastIgnoreDirs is a set of directory names that are always ignored.
@@ -34,7 +35,7 @@ var fastIgnoreDirs = map[string]bool{
 	".Trash":          true,
 	".Spotlight-V100": true,
 	".fseventsd":      true,
-	".braid":          true,
+	brand.DataDir:     true,
 	"OrbStack":        true,
 	".local":          true,
 	".share":          true,
@@ -111,7 +112,7 @@ var gitGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 // braidGlobalIgnorePatterns returns patterns from the user's
 // ~/.config/braid/ignore file.
 var braidGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
-	name := filepath.Join(home.Config(), "braid", "ignore")
+	name := filepath.Join(home.Config(), brand.Slug, "ignore")
 	bts, err := os.ReadFile(name)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -176,7 +177,7 @@ func (dl *directoryLister) getDirPatterns(dir string) []gitignore.Pattern {
 			domain = pathToComponents(relPath)
 		}
 
-		for _, ignoreFile := range []string{".gitignore", ".braidignore"} {
+		for _, ignoreFile := range []string{".gitignore", brand.IgnoreFile} {
 			ignPath := filepath.Join(dir, ignoreFile)
 			if content, err := os.ReadFile(ignPath); err == nil {
 				lines := strings.Split(string(content), "\n")

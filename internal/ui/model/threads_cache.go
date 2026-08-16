@@ -29,9 +29,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/pubsub"
-	"github.com/rave-soft/braid/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
 // threadsCacheTTL bounds how long the memoized thread list may go without a

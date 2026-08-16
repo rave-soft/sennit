@@ -21,6 +21,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 // State values matching herdr's PaneAgentState enum.
@@ -279,12 +281,12 @@ func (c *Client) onSummarizing() {
 func (c *Client) newRequestLocked(method, idPrefix, state string) reportRequest {
 	c.seq++
 	return reportRequest{
-		ID:     fmt.Sprintf("braid:%s:%d", idPrefix, time.Now().UnixNano()),
+		ID:     fmt.Sprintf(brand.Slug+":%s:%d", idPrefix, time.Now().UnixNano()),
 		Method: method,
 		Params: reportParams{
 			PaneID:         c.paneID,
-			Source:         "braid",
-			Agent:          "braid",
+			Source:         brand.Slug,
+			Agent:          brand.Slug,
 			State:          state,
 			Seq:            c.seq,
 			AgentSessionID: c.sessionID,

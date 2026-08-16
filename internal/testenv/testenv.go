@@ -1,7 +1,7 @@
 // Package testenv provides deterministic environment values for internal tests.
 package testenv
 
-import "github.com/rave-soft/braid/internal/env"
+import "github.com/rave-soft/sennit/internal/env"
 
 type mapEnv map[string]string
 

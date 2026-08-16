@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 

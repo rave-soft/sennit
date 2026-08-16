@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/rave-soft/braid/internal/config"
-	braiddb "github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/event"
+	"github.com/rave-soft/sennit/internal/config"
+	sennitdb "github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/event"
 	"github.com/spf13/cobra"
 )
 
@@ -175,22 +175,22 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	}
 	event.StatsViewed()
 
-	conn, err := braiddb.Connect(ctx, config.GlobalDBDir())
+	conn, err := sennitdb.Connect(ctx, config.GlobalDBDir())
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer braiddb.Release(config.GlobalDBDir()) //nolint:errcheck // best-effort refcount release on exit
-	queries := braiddb.New(conn)
+	defer sennitdb.Release(config.GlobalDBDir()) //nolint:errcheck // best-effort refcount release on exit
+	queries := sennitdb.New(conn)
 
 	// projectPath scopes the default (non --all-projects) view to the
 	// current project, now that every project shares one DB file.
 	projectPath := cwd
 
-	sessions, err := queries.ListSessionsSince(ctx, braiddb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: projectPath})
+	sessions, err := queries.ListSessionsSince(ctx, sennitdb.ListSessionsSinceParams{CreatedAt: since, ProjectPath: projectPath})
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
-	messages, err := queries.ListAssistantMessagesSince(ctx, braiddb.ListAssistantMessagesSinceParams{CreatedAt: since, ProjectPath: projectPath})
+	messages, err := queries.ListAssistantMessagesSince(ctx, sennitdb.ListAssistantMessagesSinceParams{CreatedAt: since, ProjectPath: projectPath})
 	if err != nil {
 		return fmt.Errorf("failed to list assistant messages: %w", err)
 	}
@@ -214,7 +214,7 @@ func runStat(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if by == "" || by == "skills" {
-		skillRows, err := queries.ListSkillLoadsSince(ctx, braiddb.ListSkillLoadsSinceParams{CreatedAt: since, ProjectPath: projectPath})
+		skillRows, err := queries.ListSkillLoadsSince(ctx, sennitdb.ListSkillLoadsSinceParams{CreatedAt: since, ProjectPath: projectPath})
 		if err != nil {
 			return fmt.Errorf("failed to list skill loads: %w", err)
 		}
@@ -240,8 +240,8 @@ func runStat(cmd *cobra.Command, _ []string) error {
 // and cost to the model(s) its assistant messages used — exactly for
 // single-model sessions, proportionally (and marked Approximate) for
 // sessions that mixed models.
-func computeModelStats(sessions []braiddb.ListSessionsSinceRow, messages []braiddb.ListAssistantMessagesSinceRow) []statModel {
-	messagesBySession := make(map[string][]braiddb.ListAssistantMessagesSinceRow)
+func computeModelStats(sessions []sennitdb.ListSessionsSinceRow, messages []sennitdb.ListAssistantMessagesSinceRow) []statModel {
+	messagesBySession := make(map[string][]sennitdb.ListAssistantMessagesSinceRow)
 	timeByModel := make(map[statModelKey]int64)
 	countByModel := make(map[statModelKey]int64)
 	for _, m := range messages {
@@ -332,7 +332,7 @@ func computeModelStats(sessions []braiddb.ListSessionsSinceRow, messages []braid
 // title. Unlike model attribution, this is exact: each subagent session
 // has its own prompt_tokens/completion_tokens/cost, and its wall-clock
 // duration is updated_at - created_at.
-func computeAgentStats(sessions []braiddb.ListSessionsSinceRow) []statAgent {
+func computeAgentStats(sessions []sennitdb.ListSessionsSinceRow) []statAgent {
 	byTitle := make(map[string]*statAgent)
 	var order []string
 	for _, s := range sessions {
@@ -370,7 +370,7 @@ func computeAgentStats(sessions []braiddb.ListSessionsSinceRow) []statAgent {
 // currentProjectStat aggregates top-level sessions (parent_session_id
 // empty) into a single totals row, matching the scope `braid stats` uses
 // for its own totals.
-func currentProjectStat(sessions []braiddb.ListSessionsSinceRow) statProject {
+func currentProjectStat(sessions []sennitdb.ListSessionsSinceRow) statProject {
 	var p statProject
 	for _, s := range sessions {
 		if s.ParentSessionID.Valid && s.ParentSessionID.String != "" {
@@ -389,7 +389,7 @@ func currentProjectStat(sessions []braiddb.ListSessionsSinceRow) statProject {
 // DB (like `braid stats --all`), plus a trailing totals row. Now that every
 // project shares one DB file, this is a single GROUP BY query rather than a
 // walk over each project's own (no longer existing) database file.
-func gatherAllProjectStats(ctx context.Context, queries *braiddb.Queries, since int64) ([]statProject, error) {
+func gatherAllProjectStats(ctx context.Context, queries *sennitdb.Queries, since int64) ([]statProject, error) {
 	dbRows, err := queries.ProjectStatsSince(ctx, since)
 	if err != nil {
 		return nil, fmt.Errorf("failed to gather project stats: %w", err)
@@ -438,7 +438,7 @@ func gatherAllProjectStats(ctx context.Context, queries *braiddb.Queries, since 
 // computeSkillStats converts raw ListSkillLoadsSince rows (whose
 // aggregate columns come back as interface{} because sqlc can't infer a
 // static type across the json_each/json_extract join) into typed rows.
-func computeSkillStats(rows []braiddb.ListSkillLoadsSinceRow) []statSkill {
+func computeSkillStats(rows []sennitdb.ListSkillLoadsSinceRow) []statSkill {
 	result := make([]statSkill, 0, len(rows))
 	for _, r := range rows {
 		name, ok := r.SkillName.(string)

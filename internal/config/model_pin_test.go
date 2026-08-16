@@ -34,10 +34,10 @@ func twoProviderConfig(provider, model string) string {
 // for example) reloads the file we both write to.
 func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
@@ -69,10 +69,10 @@ func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 // file, so external edits and `braid login` defaults keep working.
 func TestModelSelectionYieldsToDiskWhenUnchosen(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "braid.json")
+	configPath := filepath.Join(dir, "sennit.json")
 
-	t.Setenv("BRAID_GLOBAL_CONFIG", dir)
-	t.Setenv("BRAID_GLOBAL_DATA", dir)
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 

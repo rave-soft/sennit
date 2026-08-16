@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/sennit/internal/csync"
 )
 
 // dispatcher owns the "accept/queue/cancel" dispatch protocol shared by

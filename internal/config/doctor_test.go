@@ -8,14 +8,14 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/csync"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/stretchr/testify/require"
 )
 
 // setupUserAgentsForTest runs the validate-and-rebuild step SetupAgents
 // performs on whatever is already in cfg.Agents, without SetupAgents' own
 // unconditional overwrite of cfg.Agents from markdown discovery. Since
-// SetupAgents now discovers agents from .braid/agents/*.md only (see
+// SetupAgents now discovers agents from .sennit/agents/*.md only (see
 // config.go), a Config built by hand in these tests (no workingDir, no
 // files on disk) has nothing to discover; this lets the doctor tests below
 // still exercise validUserAgents' model-resolution fallback and Problem
@@ -280,7 +280,7 @@ func TestDoctorJunkModelIDExplicitProviderSkipped(t *testing.T) {
 // list `braid doctor` and the TUI's /doctor dialog render.
 func TestDoctorReportsJSONAgentsBlock(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, "braid.json")
+	path := filepath.Join(root, "sennit.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{"agents":{"reviewer":{"prompt":"You review code."}}}`), 0o644))
 
 	cfg, _, err := loadFromConfigPaths(context.Background(), []string{path})

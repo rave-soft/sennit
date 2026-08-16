@@ -74,7 +74,7 @@ func TestImportLegacyProjectDB(t *testing.T) {
 
 	seedLegacyProjectDB(t, projectDir)
 
-	legacyPath := filepath.Join(projectDir, "braid.db")
+	legacyPath := filepath.Join(projectDir, "sennit.db")
 	require.FileExists(t, legacyPath)
 
 	dest, err := Connect(ctx, globalDir)
@@ -286,7 +286,7 @@ func TestImportLegacyProjectDB_NoLegacyFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// No legacy file should have been created as a side effect.
-	_, statErr := os.Stat(filepath.Join(projectDir, "braid.db"))
+	_, statErr := os.Stat(filepath.Join(projectDir, "sennit.db"))
 	require.True(t, os.IsNotExist(statErr))
 }
 

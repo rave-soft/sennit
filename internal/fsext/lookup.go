@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rave-soft/braid/internal/home"
+	"github.com/rave-soft/sennit/internal/home"
 )
 
 // Lookup searches for a target files or directories starting from dir

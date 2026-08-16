@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/env"
-	"github.com/rave-soft/braid/internal/lock"
-	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/lock"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )

@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/config"
 )
 
 var errRuntimeChanged = errors.New("agent runtime changed while it was being built")

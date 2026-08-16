@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/lsp"
+	"github.com/rave-soft/sennit/internal/lsp"
 )
 
 const LSPRestartToolName = "lsp_restart"

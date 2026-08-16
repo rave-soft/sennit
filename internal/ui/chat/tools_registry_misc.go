@@ -1,7 +1,7 @@
 package chat
 
 import (
-	tools "github.com/rave-soft/braid/internal/proto"
+	tools "github.com/rave-soft/sennit/internal/proto"
 )
 
 // registerMiscToolRenderers registers the renderers of the tools that do

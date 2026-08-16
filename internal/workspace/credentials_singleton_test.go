@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/config"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,9 +37,9 @@ import (
 func TestSharedCredentialsManager(t *testing.T) {
 	globalConfigDir := t.TempDir()
 	globalDataDir := t.TempDir()
-	t.Setenv("BRAID_GLOBAL_CONFIG", globalConfigDir)
-	t.Setenv("BRAID_GLOBAL_DATA", globalDataDir)
-	require.NoError(t, os.WriteFile(filepath.Join(globalDataDir, "braid.json"), []byte("{}"), 0o600))
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalConfigDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", globalDataDir)
+	require.NoError(t, os.WriteFile(filepath.Join(globalDataDir, "sennit.json"), []byte("{}"), 0o600))
 
 	store, err := config.Load(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)

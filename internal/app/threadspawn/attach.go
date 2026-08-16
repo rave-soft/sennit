@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"log/slog"
 
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/git"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/git"
+	"github.com/rave-soft/sennit/internal/thread"
 )
 
 // attachDeps keeps Attach's external dependencies explicit so failure and

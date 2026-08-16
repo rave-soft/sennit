@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rave-soft/braid/internal/agent/tools/mcp"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/home"
-	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/skills"
 )
 
 var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
@@ -125,11 +126,11 @@ func LoadMCPPrompts(reg *mcp.Registry) ([]MCPPrompt, error) {
 func buildCommandSources(cfg *config.Config) []commandSource {
 	return []commandSource{
 		{
-			path:   filepath.Join(home.Config(), "braid", "commands"),
+			path:   filepath.Join(home.Config(), brand.Slug, "commands"),
 			prefix: userCommandPrefix,
 		},
 		{
-			path:   filepath.Join(home.Dir(), ".braid", "commands"),
+			path:   filepath.Join(home.Dir(), brand.DataDir, "commands"),
 			prefix: userCommandPrefix,
 		},
 		{

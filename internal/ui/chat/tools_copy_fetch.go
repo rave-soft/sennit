@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	tools "github.com/rave-soft/braid/internal/proto"
+	tools "github.com/rave-soft/sennit/internal/proto"
 )
 
 // formatFetchResultForCopy formats fetch tool results for clipboard.

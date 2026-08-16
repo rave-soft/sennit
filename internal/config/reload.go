@@ -9,7 +9,7 @@ import (
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/braid/internal/env"
+	"github.com/rave-soft/sennit/internal/env"
 )
 
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory

@@ -3,8 +3,8 @@ package config
 import (
 	"testing"
 
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/oauth"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/stretchr/testify/require"
 )
 

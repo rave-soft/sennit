@@ -8,7 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/rave-soft/braid/internal/lsp"
+	"github.com/rave-soft/sennit/internal/lsp"
 )
 
 type SymbolsParams struct {

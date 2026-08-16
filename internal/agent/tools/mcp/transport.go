@@ -14,9 +14,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/home"
-	mcpoauth "github.com/rave-soft/braid/internal/oauth/mcp"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/home"
+	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
 )
 
 func (r *Registry) createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, *mcpoauth.Handler, error) {

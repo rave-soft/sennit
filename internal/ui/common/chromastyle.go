@@ -6,7 +6,7 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // Building a chroma style from a theme (chroma.MustNewStyle) parses every
@@ -35,7 +35,7 @@ func ChromaStyle(st *styles.Styles, bg color.Color) *chroma.Style {
 		chromaStyleByBg = nil
 	}
 	if chromaStyleBase == nil {
-		chromaStyleBase = chroma.MustNewStyle("braid", st.ChromaTheme())
+		chromaStyleBase = chroma.MustNewStyle(formatterName, st.ChromaTheme())
 	}
 	if bg == nil {
 		return chromaStyleBase

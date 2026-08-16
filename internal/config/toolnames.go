@@ -3,6 +3,8 @@ package config
 import (
 	"slices"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/brand"
 )
 
 // legacyToolNames maps names Braid used to expose onto the names its tools
@@ -98,8 +100,8 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
-		"braid_info",
-		"braid_logs",
+		brand.ToolInfo,
+		brand.ToolLogs,
 		"job_output",
 		"job_kill",
 		"download",

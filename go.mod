@@ -1,4 +1,4 @@
-module github.com/rave-soft/braid
+module github.com/rave-soft/sennit
 
 go 1.26.5
 

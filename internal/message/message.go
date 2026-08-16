@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
 // defaultUpdateDebounce is the default debounce window for [Service.Update].
@@ -636,7 +636,7 @@ type partWrapper struct {
 
 // MarshalParts marshals content parts to JSON, wrapping each in a
 // type-tagged envelope plus a synthetic "_meta" version marker (see
-// [partsFormatVersion]). Exported so [github.com/rave-soft/braid/internal/proto]
+// [partsFormatVersion]). Exported so [github.com/rave-soft/sennit/internal/proto]
 // can reuse it for its own JSON encoding, which shares the exact same
 // shape as the SQLite storage format.
 func MarshalParts(parts []ContentPart) ([]byte, error) {

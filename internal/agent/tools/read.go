@@ -16,11 +16,11 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/filepathext"
-	"github.com/rave-soft/braid/internal/filetracker"
-	"github.com/rave-soft/braid/internal/lsp"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/sennit/internal/filepathext"
+	"github.com/rave-soft/sennit/internal/filetracker"
+	"github.com/rave-soft/sennit/internal/lsp"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/skills"
 )
 
 //go:embed read.md.tpl

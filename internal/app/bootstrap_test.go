@@ -13,11 +13,11 @@ import (
 	"sync"
 	"testing"
 
-	gitpkg "github.com/rave-soft/braid/internal/git"
+	gitpkg "github.com/rave-soft/sennit/internal/git"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/db"
-	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 

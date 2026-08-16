@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/filetracker"
-	"github.com/rave-soft/braid/internal/permission"
-	"github.com/rave-soft/braid/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/filetracker"
+	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 
@@ -293,7 +293,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp := readBuiltinFile(ReadParams{
-			FilePath: "braid://skills/braid-config/SKILL.md",
+			FilePath: "sennit://skills/braid-config/SKILL.md",
 		}, nil)
 		require.NotEmpty(t, resp.Content)
 		require.Contains(t, resp.Content, "Braid Configuration")
@@ -303,7 +303,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp := readBuiltinFile(ReadParams{
-			FilePath: "braid://skills/nonexistent/SKILL.md",
+			FilePath: "sennit://skills/nonexistent/SKILL.md",
 		}, nil)
 		require.True(t, resp.IsError)
 	})
@@ -312,7 +312,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp := readBuiltinFile(ReadParams{
-			FilePath: "braid://skills/braid-config/SKILL.md",
+			FilePath: "sennit://skills/braid-config/SKILL.md",
 		}, nil)
 
 		var meta ReadResponseMetadata
@@ -326,7 +326,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		t.Parallel()
 
 		resp := readBuiltinFile(ReadParams{
-			FilePath: "braid://skills/braid-config/SKILL.md",
+			FilePath: "sennit://skills/braid-config/SKILL.md",
 			Offset:   5,
 		}, nil)
 		require.NotContains(t, resp.Content, "     1|")

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/config"
-	"github.com/rave-soft/braid/internal/permission"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,9 +23,9 @@ func TestNew_ConfigBypassSkipsPermissionsAtStartup(t *testing.T) {
 
 	// Written before Bootstrap so config.Init/Load picks it up as the
 	// workspace config file, the same path watch_test.go writes to for
-	// its external-change scenario (dataDir/braid.json, highest
+	// its external-change scenario (dataDir/sennit.json, highest
 	// priority, merged last in config.Load).
-	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "braid.json"),
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "sennit.json"),
 		[]byte(`{"permissions":{"bypass":true}}`), 0o600))
 
 	result, err := Bootstrap(context.Background(), cwd, BootstrapOptions{

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/sennit/internal/db"
 	"github.com/stretchr/testify/require"
 )
 

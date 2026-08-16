@@ -9,14 +9,15 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/invopop/jsonschema"
-	"github.com/rave-soft/braid/internal/csync"
-	"github.com/rave-soft/braid/internal/oauth"
-	"github.com/rave-soft/braid/internal/oauth/copilot"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth/copilot"
 )
 
 const (
-	appName              = "braid"
-	defaultDataDirectory = ".braid"
+	appName              = brand.Slug
+	defaultDataDirectory = brand.DataDir
 	defaultInitializeAs  = "AGENTS.md"
 )
 
@@ -27,12 +28,12 @@ const (
 // etc.) are not auto-loaded — add them explicitly via options.context_paths
 // (braidrc: `option context-path CLAUDE.md`) if you want Braid to read them.
 var defaultContextPaths = []string{
-	"braid.md",
-	"braid.local.md",
-	"Braid.md",
-	"Braid.local.md",
-	"BRAID.md",
-	"BRAID.local.md",
+	brand.Slug + ".md",
+	brand.Slug + ".local.md",
+	brand.Name + ".md",
+	brand.Name + ".local.md",
+	brand.ContextFile,
+	brand.ContextFileLocal,
 	"AGENTS.md",
 	"agents.md",
 	"Agents.md",

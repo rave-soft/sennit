@@ -3,9 +3,9 @@ package workspace
 import (
 	"context"
 
-	"github.com/rave-soft/braid/internal/app/threadspawn"
-	"github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/thread"
+	"github.com/rave-soft/sennit/internal/app/threadspawn"
+	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/thread"
 )
 
 // -- AppWorkspace: Tasks --

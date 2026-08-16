@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/braid/internal/session"
+	"github.com/rave-soft/sennit/internal/session"
 )
 
 //go:embed todos.md

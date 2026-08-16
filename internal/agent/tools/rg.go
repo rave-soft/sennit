@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/log"
+	"github.com/rave-soft/sennit/internal/log"
 )
 
 var getRg = sync.OnceValue(func() string {

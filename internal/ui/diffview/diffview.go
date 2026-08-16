@@ -11,8 +11,8 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/braid/internal/ansiext"
-	"github.com/rave-soft/braid/internal/ui/xchroma"
+	"github.com/rave-soft/sennit/internal/ansiext"
+	"github.com/rave-soft/sennit/internal/ui/xchroma"
 	"github.com/zeebo/xxh3"
 )
 

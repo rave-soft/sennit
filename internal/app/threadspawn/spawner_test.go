@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/rave-soft/braid/internal/app"
-	"github.com/rave-soft/braid/internal/db"
+	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/db"
 	"github.com/stretchr/testify/require"
 )
 

@@ -10,8 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rave-soft/braid/internal/home"
-	"github.com/rave-soft/braid/internal/skills"
+	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/home"
+	"github.com/rave-soft/sennit/internal/skills"
 	"gopkg.in/yaml.v3"
 )
 
@@ -142,7 +143,7 @@ func importDestDirs(workingDir string, global bool) (skillsDir, agentsDir string
 	if global {
 		return filepath.Join(home.Config(), appName, "skills"), filepath.Join(filepath.Dir(GlobalConfig()), "agents")
 	}
-	return filepath.Join(workingDir, ".braid", "skills"), filepath.Join(workingDir, ".braid", "agents")
+	return filepath.Join(workingDir, brand.DataDir, "skills"), filepath.Join(workingDir, brand.DataDir, "agents")
 }
 
 // importSkills copies every <srcDir>/<name>/SKILL.md directory that parses
@@ -451,7 +452,7 @@ var importKnownTools = map[string]bool{
 	"read": true, "write": true, "edit": true, "multiedit": true, "bash": true,
 	"grep": true, "ripgrep": true, "glob": true, "ls": true, "fetch": true, "web_fetch": true,
 	"web_search": true, "download": true, "todos": true, "agent": true,
-	"question": true, "braid_info": true, "braid_logs": true,
+	"question": true, brand.ToolInfo: true, brand.ToolLogs: true,
 	"job_output": true, "job_kill": true,
 	"thread_create": true, "thread_list": true, "thread_merge": true,
 	"thread_remove": true, "thread_send": true, "thread_status": true, "thread_wait": true,

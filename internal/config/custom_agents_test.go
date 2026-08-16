@@ -91,7 +91,7 @@ func TestSetupAgentsRejectsInvalidDefinitions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeAgent(t, root, ".braid/agents", tt.file, tt.content)
+			writeAgent(t, root, ".sennit/agents", tt.file, tt.content)
 
 			cfg := newAgentConfig(t, "")
 			cfg.workingDir = root
@@ -107,7 +107,7 @@ func TestSetupAgentsRejectsInvalidDefinitions(t *testing.T) {
 
 func TestSetupAgentsSkipsDisabledAgent(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\ndisabled: true\n---\nYou review code.")
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\ndisabled: true\n---\nYou review code.")
 
 	cfg := newAgentConfig(t, "")
 	cfg.workingDir = root
@@ -119,7 +119,7 @@ func TestSetupAgentsSkipsDisabledAgent(t *testing.T) {
 
 func TestSetupAgentsHonoursExplicitEmptyToolList(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "planner.md", "---\nname: planner\ntools: []\n---\nYou plan.")
+	writeAgent(t, root, ".sennit/agents", "planner.md", "---\nname: planner\ntools: []\n---\nYou plan.")
 
 	cfg := newAgentConfig(t, "")
 	cfg.workingDir = root
@@ -135,7 +135,7 @@ func TestSetupAgentsHonoursExplicitEmptyToolList(t *testing.T) {
 // appending duplicate tool names to the coder.
 func TestSetupAgentsIsIdempotent(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\n---\nYou review code.")
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\n---\nYou review code.")
 
 	cfg := newAgentConfig(t, "")
 	cfg.workingDir = root
@@ -162,9 +162,9 @@ func TestSetupAgentsIsIdempotent(t *testing.T) {
 
 func TestSetupAgentsMultipleRolesGetSortedTools(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\n---\nreview")
-	writeAgent(t, root, ".braid/agents", "dba.md", "---\nname: dba\n---\ndba")
-	writeAgent(t, root, ".braid/agents", "security.md", "---\nname: security\n---\nsec")
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\n---\nreview")
+	writeAgent(t, root, ".sennit/agents", "dba.md", "---\nname: dba\n---\ndba")
+	writeAgent(t, root, ".sennit/agents", "security.md", "---\nname: security\n---\nsec")
 
 	cfg := newAgentConfig(t, "")
 	cfg.workingDir = root
@@ -190,7 +190,7 @@ func TestValidAgentID(t *testing.T) {
 
 func TestSetupAgentsKeepsReasoningEffort(t *testing.T) {
 	root := t.TempDir()
-	writeAgent(t, root, ".braid/agents", "reviewer.md", "---\nname: reviewer\nreasoning_effort: low\n---\nYou review code.")
+	writeAgent(t, root, ".sennit/agents", "reviewer.md", "---\nname: reviewer\nreasoning_effort: low\n---\nYou review code.")
 
 	cfg := newAgentConfig(t, "")
 	cfg.workingDir = root

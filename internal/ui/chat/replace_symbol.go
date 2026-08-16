@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/rave-soft/braid/internal/diff"
-	"github.com/rave-soft/braid/internal/fsext"
-	tools "github.com/rave-soft/braid/internal/proto"
-	"github.com/rave-soft/braid/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/diff"
+	"github.com/rave-soft/sennit/internal/fsext"
+	tools "github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
 // ReplaceSymbolToolRenderContext renders replace symbol tool messages.
