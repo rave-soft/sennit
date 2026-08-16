@@ -35,6 +35,7 @@ type Flow struct {
 	verifier string
 	state    string
 	authURL  string
+	proxyURL string
 
 	// mu guards server, which Close clears while the serving goroutine and
 	// the callback handler are still live.
@@ -54,7 +55,15 @@ type callbackResult struct {
 // on the fixed callback port; if that port is busy — most often another
 // Codex or Sennit sign-in already running — the error says so rather than
 // silently binding a port the browser will never visit.
-func StartFlow() (*Flow, error) {
+//
+// proxyURL routes the code exchange, and may be empty for none. It does not
+// touch the listener, which is loopback, nor the browser, which uses
+// whatever proxy the browser itself is configured with.
+func StartFlow(proxyURL string) (*Flow, error) {
+	if err := ValidateProxy(proxyURL); err != nil {
+		return nil, err
+	}
+
 	verifier, err := randomURLSafe(64)
 	if err != nil {
 		return nil, err
@@ -80,6 +89,7 @@ func StartFlow() (*Flow, error) {
 	f := &Flow{
 		verifier: verifier,
 		state:    state,
+		proxyURL: proxyURL,
 		authURL:  authorizeURL + "?" + params.Encode(),
 		results:  make(chan callbackResult, 1),
 	}
@@ -134,7 +144,7 @@ func (f *Flow) Wait(ctx context.Context) (*oauth.Token, error) {
 		if res.err != nil {
 			return nil, res.err
 		}
-		return exchangeCode(ctx, res.code, f.verifier)
+		return exchangeCode(ctx, f.proxyURL, res.code, f.verifier)
 	}
 }
 
@@ -194,8 +204,8 @@ func (f *Flow) settle(res callbackResult) {
 }
 
 // exchangeCode trades the authorization code for a token pair.
-func exchangeCode(ctx context.Context, code, verifier string) (*oauth.Token, error) {
-	return postToken(ctx, url.Values{
+func exchangeCode(ctx context.Context, proxyURL, code, verifier string) (*oauth.Token, error) {
+	return postToken(ctx, proxyURL, url.Values{
 		"grant_type":    {"authorization_code"},
 		"client_id":     {clientID},
 		"code":          {code},
@@ -204,14 +214,15 @@ func exchangeCode(ctx context.Context, code, verifier string) (*oauth.Token, err
 	})
 }
 
-// RefreshToken exchanges a refresh token for a fresh access token. The
-// Codex authorization server rotates refresh tokens, so the returned token
-// carries the new one and callers must persist it.
-func RefreshToken(ctx context.Context, refreshToken string) (*oauth.Token, error) {
+// RefreshToken exchanges a refresh token for a fresh access token, through
+// proxyURL when one is given. The Codex authorization server rotates refresh
+// tokens, so the returned token carries the new one and callers must persist
+// it.
+func RefreshToken(ctx context.Context, proxyURL, refreshToken string) (*oauth.Token, error) {
 	if refreshToken == "" {
 		return nil, errors.New("no Codex refresh token available; sign in again")
 	}
-	token, err := postToken(ctx, url.Values{
+	token, err := postToken(ctx, proxyURL, url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {clientID},
 		"refresh_token": {refreshToken},
@@ -233,7 +244,7 @@ func RefreshToken(ctx context.Context, refreshToken string) (*oauth.Token, error
 // [oauth.Token]. Non-2xx replies come back as [oauth.TokenExchangeError] so
 // the refresh path can tell a revoked grant (re-authenticate) apart from a
 // transient failure (retry).
-func postToken(ctx context.Context, form url.Values) (*oauth.Token, error) {
+func postToken(ctx context.Context, proxyURL string, form url.Values) (*oauth.Token, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
@@ -241,7 +252,10 @@ func postToken(ctx context.Context, form url.Values) (*oauth.Token, error) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: httpTimeout}
+	client, err := httpClient(proxyURL, httpTimeout)
+	if err != nil {
+		return nil, err
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

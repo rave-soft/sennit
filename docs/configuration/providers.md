@@ -42,6 +42,19 @@ the browser step is skipped. Which models the account may use is read from
 the Codex backend at sign-in and written to `providers.codex.models`; re-run
 `sennit login codex -f` to refresh that list after a plan change.
 
+If OpenAI is only reachable through a proxy, give it one — the sign-in asks
+for it before anything goes out, and the model picker's Codex dialog opens
+on the same question:
+
+```sh
+sennit login codex --proxy socks5://127.0.0.1:1080
+```
+
+It is optional: leave it empty to use `HTTP_PROXY`/`HTTPS_PROXY`, or pass
+`none` to force a direct connection despite them. The value is saved as
+`providers.codex.proxy_url`, so the token refreshes and the model requests
+all take the same route as the sign-in.
+
 To ignore the built-in catalogue entirely and declare everything yourself:
 
 ```bash

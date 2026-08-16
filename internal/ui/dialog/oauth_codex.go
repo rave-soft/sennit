@@ -22,28 +22,64 @@ const codexAuthTimeout = 10 * time.Minute
 //
 // Codex is a redirect flow, not a device flow: there is no code to type, so
 // the dialog shows only the URL and waits for the browser to come back to
-// the loopback listener the flow owns.
+// the loopback listener the flow owns. It also opens on a proxy step, since
+// for many users the endpoint is only reachable through one.
 func NewOAuthCodex(
 	com *common.Common,
 	isOnboarding bool,
 	provider catwalk.Provider,
 	model *config.SelectedModel,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, isOnboarding, provider, model, &OAuthCodex{})
+	return newOAuth(com, isOnboarding, provider, model, &OAuthCodex{com: com})
 }
 
 type OAuthCodex struct {
+	com        *common.Common
+	proxy      string
 	flow       *codex.Flow
 	cancelFunc func()
 }
 
 var (
-	_ OAuthProvider  = (*OAuthCodex)(nil)
-	_ oauthPostSaver = (*OAuthCodex)(nil)
+	_ OAuthProvider        = (*OAuthCodex)(nil)
+	_ oauthPostSaver       = (*OAuthCodex)(nil)
+	_ oauthProxyConfigurer = (*OAuthCodex)(nil)
 )
 
 func (m *OAuthCodex) name() string {
 	return codex.ProviderName
+}
+
+// proxyURL prefills the step with whatever the provider is already
+// configured with, so re-authenticating does not mean retyping it.
+func (m *OAuthCodex) proxyURL() string {
+	if m.proxy != "" {
+		return m.proxy
+	}
+	// Common carries no workspace in tests, and Config panics on one, so
+	// the absence of a config is a legitimate "nothing to prefill" here.
+	if m.com == nil || m.com.Workspace == nil {
+		return ""
+	}
+	cfg := m.com.Config()
+	if cfg == nil {
+		return ""
+	}
+	pc, ok := cfg.Providers.Get(codex.ProviderID)
+	if !ok {
+		return ""
+	}
+	return pc.ProxyURL
+}
+
+// setProxyURL validates the entered value up front: a bad proxy would
+// otherwise surface as a confusing sign-in failure a few seconds later.
+func (m *OAuthCodex) setProxyURL(proxyURL string) error {
+	if err := codex.ValidateProxy(proxyURL); err != nil {
+		return err
+	}
+	m.proxy = proxyURL
+	return nil
 }
 
 // initiateAuth starts the flow, which binds the callback port before
@@ -56,14 +92,14 @@ func (m *OAuthCodex) initiateAuth() tea.Msg {
 	if disk, ok := codex.TokensFromDisk(); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if token, err := codex.RefreshToken(ctx, disk.RefreshToken); err == nil {
+		if token, err := codex.RefreshToken(ctx, m.proxy, disk.RefreshToken); err == nil {
 			return ActionCompleteOAuth{Token: token}
 		}
 		// A stale login on disk is not an error worth showing: the browser
 		// flow below is the fallback for exactly that.
 	}
 
-	flow, err := codex.StartFlow()
+	flow, err := codex.StartFlow(m.proxy)
 	if err != nil {
 		return ActionOAuthErrored{Error: err}
 	}
@@ -112,14 +148,26 @@ func (m *OAuthCodex) stopPolling() tea.Msg {
 	return nil
 }
 
-// afterSave stores the model list for the account that just signed in. The
-// catalog entry ships without models because which ones an account may use
-// depends on its plan.
+// afterSave stores the proxy the sign-in used and the model list for the
+// account that just signed in.
+//
+// The proxy is written first and unconditionally: model requests have to go
+// the same way the sign-in did, and clearing an emptied field matters as
+// much as saving a new one.
 func (m *OAuthCodex) afterSave(ws workspace.Workspace, token *oauth.Token) error {
+	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
+	if m.proxy == "" {
+		if err := ws.RemoveConfigField(config.ScopeGlobal, proxyKey); err != nil {
+			return err
+		}
+	} else if err := ws.SetConfigField(config.ScopeGlobal, proxyKey, m.proxy); err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	models, err := codex.FetchModels(ctx, token.AccessToken, codex.AccountID(token.AccessToken))
+	models, err := codex.FetchModels(ctx, m.proxy, token.AccessToken, codex.AccountID(token.AccessToken))
 	if err != nil {
 		return fmt.Errorf("signed in, but the Codex model list could not be fetched: %w", err)
 	}

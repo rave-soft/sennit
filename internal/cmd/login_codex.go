@@ -17,8 +17,25 @@ import (
 // An existing Codex CLI login is used when there is one: the refresh token it
 // left on disk is exchanged for Sennit's own pair, which spares the user a
 // second browser round trip. Otherwise the browser flow runs.
-func loginCodex(ws workspace.Workspace, force bool) error {
+//
+// proxyURL is optional, and routes both halves of the sign-in as well as the
+// model requests that follow: for a user who can only reach OpenAI through a
+// proxy, a token exchange that ignored it would fail on its own.
+func loginCodex(ws workspace.Workspace, force bool, proxyURL string) error {
 	loginCtx := getLoginContext()
+
+	if err := codex.ValidateProxy(proxyURL); err != nil {
+		return err
+	}
+	// An unspecified proxy keeps whatever the provider is already
+	// configured with, so re-running login does not silently drop it.
+	if proxyURL == "" {
+		if cfg := ws.Config(); cfg != nil {
+			if pc, ok := cfg.Providers.Get(codex.ProviderID); ok {
+				proxyURL = pc.ProxyURL
+			}
+		}
+	}
 
 	if !force {
 		if cfg := ws.Config(); cfg != nil {
@@ -30,12 +47,21 @@ func loginCodex(ws workspace.Workspace, force bool) error {
 		}
 	}
 
-	token, err := codexToken(loginCtx)
+	token, err := codexToken(loginCtx, proxyURL)
 	if err != nil {
 		return err
 	}
 
 	if err := ws.SetProviderAPIKey(config.ScopeGlobal, codex.ProviderID, token); err != nil {
+		return err
+	}
+	// Persisted so the model requests take the same route the sign-in did.
+	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
+	if proxyURL == "" {
+		if err := ws.RemoveConfigField(config.ScopeGlobal, proxyKey); err != nil {
+			return err
+		}
+	} else if err := ws.SetConfigField(config.ScopeGlobal, proxyKey, proxyURL); err != nil {
 		return err
 	}
 
@@ -44,7 +70,7 @@ func loginCodex(ws workspace.Workspace, force bool) error {
 	// to the sign-in itself: the credentials are already saved, and the list
 	// can be refreshed later.
 	accountID := codex.AccountID(token.AccessToken)
-	models, err := codex.FetchModels(loginCtx, token.AccessToken, accountID)
+	models, err := codex.FetchModels(loginCtx, proxyURL, token.AccessToken, accountID)
 	if err != nil {
 		fmt.Println()
 		fmt.Println("Signed in, but the model list could not be fetched:", err)
@@ -62,10 +88,10 @@ func loginCodex(ws workspace.Workspace, force bool) error {
 
 // codexToken obtains a token, preferring an existing Codex CLI login on disk
 // over the browser flow.
-func codexToken(ctx context.Context) (*oauth.Token, error) {
+func codexToken(ctx context.Context, proxyURL string) (*oauth.Token, error) {
 	if disk, ok := codex.TokensFromDisk(); ok {
 		fmt.Println("Found an existing Codex CLI login on disk. Using it to authenticate...")
-		token, err := codex.RefreshToken(ctx, disk.RefreshToken)
+		token, err := codex.RefreshToken(ctx, proxyURL, disk.RefreshToken)
 		if err == nil {
 			return token, nil
 		}
@@ -74,7 +100,7 @@ func codexToken(ctx context.Context) (*oauth.Token, error) {
 		fmt.Println("Could not reuse the Codex CLI login:", err)
 	}
 
-	flow, err := codex.StartFlow()
+	flow, err := codex.StartFlow(proxyURL)
 	if err != nil {
 		return nil, err
 	}

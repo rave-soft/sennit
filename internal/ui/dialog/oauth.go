@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
@@ -35,6 +36,11 @@ const (
 	OAuthStateSuccess
 	OAuthStateSaving
 	OAuthStateError
+	// OAuthStateProxy asks for a proxy before the flow starts. Only
+	// providers that opt in (see oauthProxyConfigurer) ever reach it —
+	// for a provider users can only reach through a proxy, a sign-in
+	// that started first would just fail.
+	OAuthStateProxy
 )
 
 // OAuthID is the identifier for the model selection dialog.
@@ -60,6 +66,10 @@ type OAuth struct {
 		Submit  key.Binding
 		Close   key.Binding
 	}
+
+	// proxyInput is the optional proxy step's field. It is nil for
+	// providers that do not opt into the step.
+	proxyInput *textinput.Model
 
 	deviceCode      string
 	userCode        string
@@ -112,6 +122,20 @@ func newOAuth(
 	)
 	m.keyMap.Close = CloseKey
 
+	// A provider that needs a proxy gets to ask for one before anything
+	// goes out on the network; everyone else starts authenticating now.
+	if configurer, ok := oAuthProvider.(oauthProxyConfigurer); ok {
+		input := textinput.New()
+		input.SetVirtualCursor(false)
+		input.Placeholder = "http://host:port (leave empty for none)"
+		input.SetStyles(t.TextInput)
+		input.SetValue(configurer.proxyURL())
+		input.Focus()
+		m.proxyInput = &input
+		m.State = OAuthStateProxy
+		return &m, nil
+	}
+
 	return &m, tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)
 }
 
@@ -134,6 +158,9 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		}
 
 	case tea.KeyPressMsg:
+		if m.State == OAuthStateProxy {
+			return m.handleProxyKey(msg)
+		}
 		switch {
 		case key.Matches(msg, m.keyMap.Copy):
 			cmd := m.copyCode()
@@ -168,6 +195,15 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 
 			default:
 				return ActionClose{}
+			}
+		}
+
+	case tea.PasteMsg:
+		if m.State == OAuthStateProxy && m.proxyInput != nil {
+			var cmd tea.Cmd
+			*m.proxyInput, cmd = m.proxyInput.Update(msg)
+			if cmd != nil {
+				return ActionCmd{cmd}
 			}
 		}
 
@@ -216,6 +252,49 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
+// handleProxyKey drives the proxy step: enter accepts the value and starts
+// the flow, escape dismisses the dialog, and anything else goes to the
+// field. An unusable value keeps the user on the step with the reason,
+// rather than failing later as an opaque sign-in error.
+func (m *OAuth) handleProxyKey(msg tea.KeyPressMsg) Action {
+	switch {
+	case key.Matches(msg, m.keyMap.Close):
+		return ActionClose{}
+
+	case key.Matches(msg, m.keyMap.Submit):
+		configurer, ok := m.oAuthProvider.(oauthProxyConfigurer)
+		if !ok {
+			return nil
+		}
+		proxy := strings.TrimSpace(m.proxyInput.Value())
+		if err := configurer.setProxyURL(proxy); err != nil {
+			return ActionCmd{util.ReportError(err)}
+		}
+		m.State = OAuthStateInitializing
+		return ActionCmd{tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)}
+
+	default:
+		var cmd tea.Cmd
+		*m.proxyInput, cmd = m.proxyInput.Update(msg)
+		if cmd != nil {
+			return ActionCmd{cmd}
+		}
+	}
+	return nil
+}
+
+// oauthProxyConfigurer is an optional half of [OAuthProvider], implemented
+// by providers whose sign-in may have to go through a proxy. The dialog
+// then opens on a proxy step instead of authenticating straight away.
+type oauthProxyConfigurer interface {
+	// proxyURL is the value to prefill, typically whatever the provider is
+	// already configured with.
+	proxyURL() string
+	// setProxyURL applies the value the user entered, rejecting one that
+	// cannot work. An empty value means no proxy.
+	setProxyURL(string) error
+}
+
 // oauthSaveDoneMsg is emitted by the background save command once the
 // credential has been persisted and models fetched. The model-selection
 // details are read from the dialog's own fields when the user confirms.
@@ -230,14 +309,29 @@ type oauthSaveErrMsg struct {
 // View renders the device flow dialog.
 func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.Resize(area)
+	// The proxy step is the only one with a field to type into, so it is
+	// also the only one that owns a cursor.
+	var cur *tea.Cursor
+	if m.State == OAuthStateProxy && m.proxyInput != nil {
+		cur = InputCursor(m.com.Styles, m.proxyInput.Cursor())
+	}
 	if m.isOnboarding {
 		view := m.dialogContent()
-		DrawOnboarding(scr, area, view)
+		if cur != nil {
+			cur = adjustOnboardingInputCursor(m.com.Styles, cur)
+			DrawOnboardingCursor(scr, area, view, cur)
+		} else {
+			DrawOnboarding(scr, area, view)
+		}
 	} else {
 		view := m.Frame(m.dialogContent())
-		DrawCenter(scr, area, view)
+		if cur != nil {
+			DrawCenterCursor(scr, area, view, cur)
+		} else {
+			DrawCenter(scr, area, view)
+		}
 	}
-	return nil
+	return cur
 }
 
 func (m *OAuth) dialogContent() string {
@@ -290,6 +384,30 @@ func (m *OAuth) innerContent() string {
 	innerWidth := m.InnerWidth()
 
 	switch m.State {
+	case OAuthStateProxy:
+		m.proxyInput.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1))
+		prompt := instructionStyle.
+			Width(innerWidth).
+			Padding(0, 1).
+			Render("Proxy for reaching " + m.oAuthProvider.name() + " (optional):")
+		field := t.Dialog.InputPrompt.Render(m.proxyInput.View())
+		note := statusTextStyle.
+			Width(innerWidth).
+			Padding(0, 1).
+			Render("Leave empty to use the environment's proxy settings, or\n" +
+				`type "none" to force a direct connection. It is saved with` + "\nthe provider, so model requests use it too.")
+
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			"",
+			prompt,
+			"",
+			field,
+			"",
+			note,
+			"",
+		)
+
 	case OAuthStateInitializing:
 		return lipgloss.NewStyle().
 			Width(innerWidth).
@@ -391,6 +509,15 @@ func (m *OAuth) FullHelp() [][]key.Binding {
 // ShortHelp returns the full help view.
 func (m *OAuth) ShortHelp() []key.Binding {
 	switch m.State {
+	case OAuthStateProxy:
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter", "ctrl+y"),
+				key.WithHelp("enter", "continue"),
+			),
+			m.keyMap.Close,
+		}
+
 	case OAuthStateError:
 		return []key.Binding{m.keyMap.Close}
 

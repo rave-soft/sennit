@@ -30,6 +30,9 @@ sennit login copilot
 # Authenticate with OpenAI Codex using a ChatGPT subscription
 sennit login codex
 
+# Authenticate with OpenAI Codex through a proxy
+sennit login codex --proxy socks5://127.0.0.1:1080
+
 # Force re-authentication even if already logged in
 sennit login -f copilot
   `,
@@ -58,7 +61,8 @@ sennit login -f copilot
 		case "copilot", "github", "github-copilot":
 			return loginCopilot(ws, force)
 		case "codex", "chatgpt", "openai-codex":
-			return loginCodex(ws, force)
+			proxyURL, _ := cmd.Flags().GetString("proxy")
+			return loginCodex(ws, force, proxyURL)
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}
@@ -67,6 +71,7 @@ sennit login -f copilot
 
 func init() {
 	loginCmd.Flags().BoolP("force", "f", false, "Force re-authentication even if already logged in")
+	loginCmd.Flags().String("proxy", "", `Proxy for reaching the platform, e.g. http://host:port or socks5://host:port ("none" forces a direct connection). Codex only; saved with the provider so model requests use it too`)
 }
 
 func loginCopilot(ws workspace.Workspace, force bool) error {

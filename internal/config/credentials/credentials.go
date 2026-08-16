@@ -338,10 +338,28 @@ func (m *Manager) exchange(ctx context.Context, providerID, refreshToken string)
 	case string(catwalk.InferenceProviderCopilot):
 		return copilot.RefreshToken(ctx, refreshToken)
 	case codex.ProviderID:
-		return codex.RefreshToken(ctx, refreshToken)
+		// Codex is reachable only through a proxy for some users, and a
+		// refresh that ignored the one the provider is configured with
+		// would fail while every model call kept working.
+		return codex.RefreshToken(ctx, m.providerProxy(providerID), refreshToken)
 	default:
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
+}
+
+// providerProxy returns the proxy configured for a provider, or "" when it
+// has none. A missing provider is not an error here: the refresh path can
+// run while the entry is mid-rewrite, and no proxy is the right default.
+func (m *Manager) providerProxy(providerID string) string {
+	cfg := m.store.Config()
+	if cfg == nil {
+		return ""
+	}
+	pc, ok := cfg.Providers.Get(providerID)
+	if !ok {
+		return ""
+	}
+	return pc.ProxyURL
 }
 
 // applyToken updates the in-memory provider config with the given token.

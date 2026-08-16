@@ -24,14 +24,15 @@ func TestLiveCodexStream(t *testing.T) {
 		t.Skip("set CODEX_LIVE=1 to run against the real Codex backend")
 	}
 	ctx := context.Background()
+	proxy := os.Getenv("CODEX_PROXY")
 
 	disk, ok := codex.TokensFromDisk()
 	require.True(t, ok, "no Codex CLI login on disk to test with")
-	token, err := codex.RefreshToken(ctx, disk.RefreshToken)
+	token, err := codex.RefreshToken(ctx, proxy, disk.RefreshToken)
 	require.NoError(t, err)
 	accountID := codex.AccountID(token.AccessToken)
 
-	models, err := codex.FetchModels(ctx, token.AccessToken, accountID)
+	models, err := codex.FetchModels(ctx, proxy, token.AccessToken, accountID)
 	require.NoError(t, err)
 	require.NotEmpty(t, models)
 

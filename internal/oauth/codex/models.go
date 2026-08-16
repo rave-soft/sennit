@@ -40,7 +40,7 @@ type modelEntry struct {
 // FetchModels asks the Codex backend which models the signed-in account can
 // use. The list is per-account (plans differ, and models come and go), which
 // is why it is fetched rather than shipped in the catalog.
-func FetchModels(ctx context.Context, accessToken, accountID string) ([]catwalk.Model, error) {
+func FetchModels(ctx context.Context, proxyURL, accessToken, accountID string) ([]catwalk.Model, error) {
 	ctx, cancel := context.WithTimeout(ctx, modelsTimeout)
 	defer cancel()
 
@@ -57,7 +57,11 @@ func FetchModels(ctx context.Context, accessToken, accountID string) ([]catwalk.
 		req.Header.Set(k, v)
 	}
 
-	resp, err := (&http.Client{}).Do(req)
+	client, err := httpClient(proxyURL, modelsTimeout)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

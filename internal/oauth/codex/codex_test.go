@@ -103,7 +103,7 @@ func TestTokensFromDiskNeedsRefreshToken(t *testing.T) {
 // server actually enforces: the fixed redirect URI, S256 PKCE, and a state
 // to bind the callback to this request.
 func TestStartFlowBuildsPKCEURL(t *testing.T) {
-	flow, err := StartFlow()
+	flow, err := StartFlow("")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = flow.Close() })
 
@@ -124,18 +124,18 @@ func TestStartFlowBuildsPKCEURL(t *testing.T) {
 // second concurrent sign-in has to fail loudly rather than bind elsewhere
 // and wait for a redirect that will never come.
 func TestStartFlowPortIsExclusive(t *testing.T) {
-	first, err := StartFlow()
+	first, err := StartFlow("")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = first.Close() })
 
-	_, err = StartFlow()
+	_, err = StartFlow("")
 	require.Error(t, err)
 }
 
 // TestFlowRejectsMismatchedState: a callback that does not carry this
 // flow's state belongs to some other authorization and must not settle it.
 func TestFlowRejectsMismatchedState(t *testing.T) {
-	flow, err := StartFlow()
+	flow, err := StartFlow("")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = flow.Close() })
 
@@ -152,7 +152,7 @@ func TestFlowRejectsMismatchedState(t *testing.T) {
 // same origin, and settling on one of those would abort the sign-in with an
 // empty code.
 func TestFlowIgnoresUnrelatedPaths(t *testing.T) {
-	flow, err := StartFlow()
+	flow, err := StartFlow("")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = flow.Close() })
 
