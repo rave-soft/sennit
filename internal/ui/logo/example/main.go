@@ -26,7 +26,6 @@ func main() {
 		VendorColor:  s.Logo.VendorColor,
 		VersionColor: s.Logo.VersionColor,
 		Width:        w,
-		Unstable:     true,
 	}
 
 	renderCompact := func() string {
