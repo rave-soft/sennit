@@ -1,6 +1,6 @@
 ---
 name: sennit-config
-description: Use when the user needs help configuring Sennit — writing sennitrc (the Bash config format) or sennit.json, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing Sennit behavior.
+description: Use when configuring Sennit or changing how it behaves — writing sennitrc (the Bash config format) or sennit.json; providers, models, MCP servers, LSPs, hooks, permissions, options; and whenever creating, editing, or debugging a subagent (.sennit/agents/<name>.md) or an Agent Skill (.sennit/skills/<name>/SKILL.md). Read this BEFORE writing an agent or SKILL.md file — both have a required frontmatter shape and a fixed location, and a file in the wrong place — or an "agents" block in sennit.json — is silently ignored. Also read it whenever you need to know which providers or model IDs actually exist for this user (never write a model from memory) — it tells you how to list them. Covers importing agents and skills from Claude Code or opencode too, and which settings are global-only.
 ---
 
 # Sennit Configuration
@@ -56,6 +56,33 @@ So when the user asks to add a provider, set an API key, or switch models,
 write it to `~/.config/sennit/sennitrc` (or the global `sennit.json`) — never
 to a project file, where it would silently do nothing. Everything else
 (permissions, MCP, LSP, hooks, options, env) is still per-project.
+
+## Which models are available
+
+**Never write a model ID from memory.** There is no fixed list — it depends on
+which providers this user configured, and router providers can carry thousands
+of entries where a plausible-looking ID is simply not one of them. Get the real
+list first, every time, before writing `model:` into an agent file, running
+`model <provider>/<id>`, or putting a model into any config:
+
+```jsonc
+// The tool call — one provider's model IDs, sorted (first 50, then a count):
+sennit_info {"models_for": "anthropic"}
+```
+
+```bash
+sennit models            # every configured provider and its model IDs
+sennit models sonnet     # filter by substring
+```
+
+Call `sennit_info` with no argument first if you don't know the provider IDs:
+it lists the configured providers with a model count each, then
+`{"models_for": "<provider-id>"}` gives the IDs themselves. `sennit models` in
+bash prints the same thing grouped by provider, marking unconfigured ones.
+
+The form is always `provider/model-id`, exactly as printed. An unresolvable
+value is not an error: it is dropped with a warning and the agent falls back to
+the main model, which is easy to miss. `sennit doctor` flags it after the fact.
 
 ## sennitrc at a glance
 
@@ -140,10 +167,8 @@ sennit models refresh my-local-llm # one provider
 ```
 
 > [!IMPORTANT] Never guess a model ID. Before writing `provider/model-id`
-> anywhere (agent frontmatter, `model add`, `sennit.json`), check it's real:
-> `sennit_info` with `{"models_for": "<provider-id>"}`, or `sennit models
-> <filter>` in bash. Router providers can carry thousands of models — a
-> plausible-looking ID is not the same as a listed one.
+> anywhere (agent frontmatter, `model add`, `sennit.json`), list the real ones
+> — see [Which models are available](#which-models-are-available).
 
 ### models
 
@@ -169,9 +194,9 @@ There is a single configured model — Sennit picks a smaller/cheaper model
 automatically for internal work like titles and summarization, and that
 choice is not user-configurable.
 
-Same rule as above: verify with `sennit_info {"models_for": "<provider>"}` or
-`sennit models` before running `model <provider>/<id>` — an unresolvable
-selection falls back silently to the default model.
+Same rule as above: list the real IDs before running `model <provider>/<id>`
+(see [Which models are available](#which-models-are-available)) — an
+unresolvable selection falls back silently to the default model.
 
 `model add` flags cover the common `catwalk.Model` fields. Two fields have no
 flag and are `sennit.json`-only: `reasoning_levels` (list of efforts the model
@@ -434,13 +459,13 @@ unchanged:
 Subagents are named roles the main agent can delegate to as a tool call.
 Markdown files under `.sennit/agents/*.md` are the only way to define one.
 
-> [!IMPORTANT] Before writing a `model:` field into an agent file, confirm
-> the ID exists — `sennit_info {"models_for": "<provider>"}` or `sennit
-> models <filter>`. Don't invent one from memory; an unresolvable `model:`
-> is dropped with a warning and the subagent silently falls back to the
-> main model, which is easy to miss. After writing/editing agent files, run
-> `sennit doctor` — it flags exactly this (an agent pinned to a model that
-> doesn't exist).
+> [!IMPORTANT] `model:` is optional — omit it and the subagent uses the main
+> model. If the user does want a specific one, list the real IDs first (see
+> [Which models are available](#which-models-are-available)); an
+> unresolvable `model:` is dropped with a warning and the subagent silently
+> falls back to the main model, which is easy to miss. After writing or
+> editing agent files, run `sennit doctor` — it flags exactly this (an agent
+> pinned to a model that doesn't exist).
 
 > [!WARNING] **NEVER** write agent definitions into `sennit.json` (or any
 > JSON config) — a JSON `agents` block is silently ignored (flagged by
@@ -522,10 +547,59 @@ TECHDEBT.md for why). `sennit import` is the supported way to bring files in:
 The command prints one row per skill/agent: name, `imported` / `adjusted` /
 `skipped`, and the reason or warnings behind that status.
 
-## User-invocable skills
+## Agent Skills
 
-Skills can be invoked as commands. Add `user-invocable: true` to the skill's
-YAML frontmatter:
+A skill is a directory containing a `SKILL.md` file: instructions the agent
+loads on demand, when the situation matches the skill's description.
+
+Discovered automatically, no `skill-path` needed:
+
+- `.sennit/skills/<name>/SKILL.md` — project skills. Also looked up at the git
+  worktree root, so monorepo-level skills are found from a subdirectory.
+- `~/.config/sennit/skills/<name>/SKILL.md` — global skills.
+- `option skill-path <dir>` adds further directories.
+
+Skills written for another tool (`.claude/skills`, `.opencode/skills`, ...) are
+**not** auto-discovered — bring them in with `sennit import claude --skills`.
+
+### Writing a SKILL.md
+
+```markdown
+---
+name: pdf-forms
+description: Use when the user needs to fill in or extract data from a PDF form — reading field names, writing values, flattening the result.
+---
+
+# PDF forms
+
+...the instructions themselves...
+```
+
+Rules checked at load time. A skill that breaks one is skipped, not
+half-loaded; `sennit doctor` reports it.
+
+- `name` — required, max 64 characters, alphanumerics separated by single
+  hyphens (no leading, trailing, or consecutive hyphens), and it **must match
+  the directory name** (`.sennit/skills/pdf-forms/` ↔ `name: pdf-forms`).
+- `description` — required, max 1024 characters. Together with the name it is
+  the *only* thing the agent sees when deciding whether to load the skill, so
+  write it as a trigger: "Use when ..." plus the concrete words, file types,
+  and situations that should fire it. A vague description means the skill is
+  never loaded.
+- Optional: `user-invocable`, `disable-model-invocation` (see below),
+  `license`, `compatibility` (max 500 chars), `metadata` (a string map).
+- Everything after the frontmatter is the instruction body.
+- Other files in the skill directory (scripts, references, templates) travel
+  with it. The agent is told where the `SKILL.md` lives, so reference them by
+  path relative to it.
+
+Skills, agent files, and config are picked up by a 2s background poll — no
+restart after adding or editing one.
+
+### User-invocable skills
+
+Skills can also be invoked as commands. Add `user-invocable: true` to the
+frontmatter:
 
 ```yaml
 ---
