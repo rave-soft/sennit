@@ -1,0 +1,74 @@
+site_name: Sennit
+site_description: A terminal-first AI coding agent with real multi-agent orchestration.
+site_url: https://rave-soft.github.io/sennit/
+repo_url: https://github.com/rave-soft/sennit
+repo_name: rave-soft/sennit
+edit_uri: edit/main/docs/
+copyright: FSL-1.1-MIT
+
+docs_dir: docs
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.action.edit
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Config:
+      - Reference: config/README.md
+      - Future work: config/FUTURE.md
+  - Hooks:
+      - Reference: hooks/README.md
+      - Future work: hooks/FUTURE.md
+  - Delegation:
+      - Steering, tasks and threads: delegation/README.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - github-callouts # renders GitHub-style "> [!NOTE]" blocks as admonitions
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn

@@ -1,0 +1,6 @@
+# Dependencies for the documentation site (mkdocs.yml, docs/).
+# Build locally with: pip install -r requirements-docs.txt && mkdocs serve
+mkdocs==1.6.1
+mkdocs-material==9.7.7
+markdown-callouts==0.4.0
+pymdown-extensions==11.0.1

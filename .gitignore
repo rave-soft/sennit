@@ -56,3 +56,6 @@ completions/sennit.*sh
 .task
 .claude/worktrees/
 internal/ui/logo/example/example
+
+# MkDocs build output
+/site/

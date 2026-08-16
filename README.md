@@ -2,6 +2,8 @@
 
 A terminal-first AI coding agent with real multi-agent orchestration.
 
+Documentation: **<https://rave-soft.github.io/sennit/>**
+
 Sennit runs specialised agents — a reviewer, a DBA, a security auditor, an
 implementer — as parallel delegations inside one process, each with its own
 prompt, tools, model slot and reasoning effort. Agents are plain markdown

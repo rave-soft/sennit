@@ -392,7 +392,7 @@ Usage:
 
 ### hook
 
-Manage hooks. See the [hooks docs](../hooks/) for what they can do and how
+Manage hooks. See the [hooks docs](../hooks/README.md) for what they can do and how
 they run.
 
 ```text
@@ -619,7 +619,7 @@ to Bash-based config.
 }
 ```
 
-For a full reference, See the [JSON schema](../../schema.json).
+For a full reference, See the [JSON schema](https://github.com/rave-soft/sennit/blob/main/schema.json).
 
 The `providers`, `model`, and `recent_models` keys are read only from a global
 `sennit.json`; in a project file they are ignored (see
