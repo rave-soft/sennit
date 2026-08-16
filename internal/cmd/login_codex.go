@@ -99,8 +99,18 @@ func loginCodex(ws workspace.Workspace, force bool, proxyURL string) error {
 func codexToken(ctx context.Context, proxyURL string) (*oauth.Token, error) {
 	if disk, ok := codex.TokensFromDisk(); ok {
 		fmt.Println("Found an existing Codex CLI login on disk. Using it to authenticate...")
+
+		// Prefer the access token it already holds. Refreshing would
+		// consume the CLI's single-use refresh token and log it out — a
+		// rude thing to do to another tool on the way past.
+		if token, ok := disk.Token(); ok {
+			return token, nil
+		}
+
 		token, err := codex.RefreshToken(ctx, proxyURL, disk.RefreshToken)
 		if err == nil {
+			fmt.Println("The Codex CLI's token was close to expiring, so it was refreshed;")
+			fmt.Println("the CLI may ask you to sign in again the next time you use it.")
 			return token, nil
 		}
 		// A stale or revoked token on disk is not a reason to fail: the

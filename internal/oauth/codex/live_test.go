@@ -31,8 +31,15 @@ func TestLiveAuthAndModels(t *testing.T) {
 	disk, ok := TokensFromDisk()
 	require.True(t, ok, "no Codex CLI login on disk to test with")
 
-	token, err := RefreshToken(ctx, proxy, disk.RefreshToken)
-	require.NoError(t, err, "refreshing the on-disk login must work")
+	// Prefer the token the CLI already holds. Refreshing here would spend
+	// its single-use refresh token and log it out — a test run should not
+	// cost the developer their Codex session.
+	token, ok := disk.Token()
+	if !ok {
+		var err error
+		token, err = RefreshToken(ctx, proxy, disk.RefreshToken)
+		require.NoError(t, err)
+	}
 	require.NotEmpty(t, token.AccessToken)
 	require.NotEmpty(t, token.RefreshToken, "a rotated-away refresh token would strand the next refresh")
 	require.Positive(t, token.ExpiresIn)

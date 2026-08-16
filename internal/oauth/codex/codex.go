@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 const (
@@ -99,21 +100,63 @@ func Headers(accountID string) map[string]string {
 // token is opaque or the claim is missing, which callers treat as "let the
 // backend decide" rather than as an error.
 func AccountID(token string) string {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
 	var claims struct {
 		Auth struct {
 			AccountID string `json:"chatgpt_account_id"`
 		} `json:"https://api.openai.com/auth"`
 	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
+	if !decodeClaims(token, &claims) {
 		return ""
 	}
 	return claims.Auth.AccountID
+}
+
+// ExpiresAt reports when an access token stops being accepted, or the zero
+// time when the token does not say.
+//
+// It matters because these tokens are long-lived — ten days — while the
+// refresh token that would replace one is single-use. Knowing the expiry is
+// what lets a caller use a token it already has instead of spending a
+// refresh it cannot spend twice.
+func ExpiresAt(token string) time.Time {
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if !decodeClaims(token, &claims) || claims.Exp <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(claims.Exp, 0)
+}
+
+// Usable reports whether an access token has enough life left to keep
+// using. A token nearing its expiry is treated as spent, so the refresh
+// happens ahead of time rather than in the middle of someone's turn.
+func Usable(token string) bool {
+	expiry := ExpiresAt(token)
+	if expiry.IsZero() {
+		return false
+	}
+	return time.Until(expiry) > accessTokenMargin
+}
+
+// accessTokenMargin is how much life an access token must have left to be
+// worth keeping. A day, against a ten-day lifetime: long enough that a
+// session started today cannot outlive its token, short enough that most
+// imports reuse the token already on disk instead of spending a refresh.
+const accessTokenMargin = 24 * time.Hour
+
+// decodeClaims unmarshals a JWT's payload into out, reporting whether it
+// could. Nothing here verifies the signature: these tokens were handed to
+// us by the authorization server or written by the Codex CLI, and the
+// backend is what actually validates them.
+func decodeClaims(token string, out any) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+	return json.Unmarshal(payload, out) == nil
 }

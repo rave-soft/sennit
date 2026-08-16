@@ -338,6 +338,15 @@ func (m *Manager) exchange(ctx context.Context, providerID, refreshToken string)
 	case string(catwalk.InferenceProviderCopilot):
 		return copilot.RefreshToken(ctx, refreshToken)
 	case codex.ProviderID:
+		// An imported login shares the Codex CLI's refresh token, and that
+		// token is single-use: spending it here logs the CLI out. The CLI
+		// refreshes on its own schedule, so adopt a newer token it has
+		// already produced for this account rather than taking its last
+		// one.
+		if token, ok := codex.TokenFromDiskFor(m.providerAccount(providerID)); ok {
+			slog.Debug("Adopted a Codex token from the CLI instead of spending the refresh token")
+			return token, nil
+		}
 		// Codex is reachable only through a proxy for some users, and a
 		// refresh that ignored the one the provider is configured with
 		// would fail while every model call kept working.
@@ -345,6 +354,20 @@ func (m *Manager) exchange(ctx context.Context, providerID, refreshToken string)
 	default:
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
+}
+
+// providerAccount is the account the provider's current credential belongs
+// to, or "" when there is none to read.
+func (m *Manager) providerAccount(providerID string) string {
+	cfg := m.store.Config()
+	if cfg == nil {
+		return ""
+	}
+	pc, ok := cfg.Providers.Get(providerID)
+	if !ok {
+		return ""
+	}
+	return codex.AccountID(pc.APIKey)
 }
 
 // providerProxy returns the proxy configured for a provider, or "" when it

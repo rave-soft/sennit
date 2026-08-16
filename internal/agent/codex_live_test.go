@@ -28,8 +28,15 @@ func TestLiveCodexStream(t *testing.T) {
 
 	disk, ok := codex.TokensFromDisk()
 	require.True(t, ok, "no Codex CLI login on disk to test with")
-	token, err := codex.RefreshToken(ctx, proxy, disk.RefreshToken)
-	require.NoError(t, err)
+	// Prefer the token the CLI already holds. Refreshing here would spend
+	// its single-use refresh token and log it out — a test run should not
+	// cost the developer their Codex session.
+	token, ok := disk.Token()
+	if !ok {
+		var err error
+		token, err = codex.RefreshToken(ctx, proxy, disk.RefreshToken)
+		require.NoError(t, err)
+	}
 	accountID := codex.AccountID(token.AccessToken)
 
 	models, err := codex.FetchModels(ctx, proxy, token.AccessToken, accountID)

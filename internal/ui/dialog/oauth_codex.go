@@ -89,6 +89,13 @@ func (m *OAuthCodex) setProxyURL(proxyURL string) error {
 // refresh token is exchanged for our own pair.
 func (m *OAuthCodex) initiateAuth() tea.Msg {
 	if disk, ok := codex.TokensFromDisk(); ok {
+		// Prefer the access token the CLI already holds: refreshing spends
+		// its single-use refresh token and logs it out, which is not
+		// something to do to another tool in passing.
+		if token, ok := disk.Token(); ok {
+			return ActionCompleteOAuth{Token: token}
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if token, err := codex.RefreshToken(ctx, m.proxy, disk.RefreshToken); err == nil {

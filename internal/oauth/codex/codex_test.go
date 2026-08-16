@@ -9,19 +9,26 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 // fakeJWT builds an unsigned token whose payload carries the given account
-// claim. Nothing here verifies signatures — the account ID is read out of a
-// token the authorization server already issued to us — so an unsigned one
-// exercises the same path.
-func fakeJWT(t *testing.T, accountID string) string {
+// claim and expiry. Nothing here verifies signatures — the claims are read
+// out of a token the authorization server already issued to us — so an
+// unsigned one exercises the same path.
+func fakeJWT(t *testing.T, accountID string, expiresIn ...time.Duration) string {
 	t.Helper()
-	payload, err := json.Marshal(map[string]any{
+	claims := map[string]any{
 		"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": accountID},
-	})
+	}
+	life := 10 * 24 * time.Hour
+	if len(expiresIn) > 0 {
+		life = expiresIn[0]
+	}
+	claims["exp"] = time.Now().Add(life).Unix()
+	payload, err := json.Marshal(claims)
 	require.NoError(t, err)
 	enc := base64.RawURLEncoding.EncodeToString
 	return enc([]byte(`{"alg":"none"}`)) + "." + enc(payload) + ".sig"
@@ -229,4 +236,79 @@ func TestTokensFromDiskCarriesProxy(t *testing.T) {
 	tokens, ok := TokensFromDisk()
 	require.True(t, ok)
 	require.Equal(t, "http://127.0.0.1:8080", tokens.ProxyURL)
+}
+
+// TestUsableTracksExpiry: a token nearing its expiry counts as spent, so
+// the refresh happens ahead of time instead of mid-turn.
+func TestUsableTracksExpiry(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, Usable(fakeJWT(t, "acct", 10*24*time.Hour)))
+	require.True(t, Usable(fakeJWT(t, "acct", 48*time.Hour)))
+	require.False(t, Usable(fakeJWT(t, "acct", 2*time.Hour)), "close to expiry counts as expired")
+	require.False(t, Usable(fakeJWT(t, "acct", -time.Hour)), "already expired")
+	require.False(t, Usable("opaque"), "a token that does not say is not assumed good")
+}
+
+// TestDiskTokenPrefersWhatTheCLIHolds is the point of the change: importing
+// a login must not spend the CLI's single-use refresh token when the access
+// token beside it is perfectly good.
+func TestDiskTokenPrefersWhatTheCLIHolds(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	writeAuth := func(access string) {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{
+			"tokens": map[string]any{"access_token": access, "refresh_token": "rt"},
+		})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(home, "auth.json"), body, 0o600))
+	}
+
+	writeAuth(fakeJWT(t, "acct-1", 10*24*time.Hour))
+	disk, ok := TokensFromDisk()
+	require.True(t, ok)
+
+	token, ok := disk.Token()
+	require.True(t, ok, "a token with days left must be used as-is")
+	require.Equal(t, disk.AccessToken, token.AccessToken)
+	require.Equal(t, "rt", token.RefreshToken, "the refresh token is kept for when it is really needed")
+	require.Positive(t, token.ExpiresIn)
+
+	// Near expiry, there is nothing to adopt and the caller must refresh.
+	writeAuth(fakeJWT(t, "acct-1", time.Hour))
+	disk, ok = TokensFromDisk()
+	require.True(t, ok)
+	_, ok = disk.Token()
+	require.False(t, ok)
+}
+
+// TestTokenFromDiskForChecksAccount: the CLI may have been signed in to
+// another account since the import, and adopting its token would move the
+// session onto that account's allowance without saying so.
+func TestTokenFromDiskForChecksAccount(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	body, err := json.Marshal(map[string]any{
+		"tokens": map[string]any{
+			"access_token":  fakeJWT(t, "acct-cli", 10*24*time.Hour),
+			"refresh_token": "rt",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "auth.json"), body, 0o600))
+
+	_, ok := TokenFromDiskFor("acct-ours")
+	require.False(t, ok, "another account's token must not be adopted")
+
+	token, ok := TokenFromDiskFor("acct-cli")
+	require.True(t, ok)
+	require.NotEmpty(t, token.AccessToken)
+
+	// With no account to check against, the token is taken at face value —
+	// there is nothing better to go on.
+	_, ok = TokenFromDiskFor("")
+	require.True(t, ok)
 }

@@ -38,7 +38,11 @@ sennit login codex       # sennit logout codex to revoke
 ```
 
 An existing Codex CLI login is picked up automatically when there is one, so
-the browser step is skipped. Which models the account may use is read from
+the browser step is skipped. Sennit reuses the access token that login
+already holds rather than refreshing it: OpenAI's refresh tokens are
+single-use, so spending one would log the Codex CLI out. It refreshes only
+when that token is within a day of expiring, and prefers a newer one the CLI
+has since produced over spending the refresh token itself. Which models the account may use is read from
 the Codex backend at sign-in and written to `providers.codex.models`; re-run
 `sennit login codex -f` to refresh that list after a plan change.
 
