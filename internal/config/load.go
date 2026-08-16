@@ -161,6 +161,10 @@ func applyWorkspaceConfig(cfg *Config, workingDir string, loadedPaths *[]string)
 	}
 
 	workspaceData = migrate.DropIncompatibleRecentModels(workspaceData, workspacePath)
+	// The workspace config is project-scoped: provider and model settings in
+	// it are ignored the same way they are in a project sennit.json/sennitrc.
+	workspaceData, globalOnly := dropGlobalOnlyKeys(workspaceData, workspacePath)
+
 	merged, err := loadFromBytes([][]byte{mustMarshalConfig(cfg), workspaceData})
 	if err != nil {
 		slog.Warn("Failed to merge workspace config", "path", workspacePath, "error", err)
@@ -169,6 +173,10 @@ func applyWorkspaceConfig(cfg *Config, workingDir string, loadedPaths *[]string)
 
 	dataDir := cfg.Options.DataDirectory
 	merged.jsonAgentsBlockDetected = merged.jsonAgentsBlockDetected || cfg.jsonAgentsBlockDetected
+	// Problems do not survive the JSON round trip above (they are not
+	// serialized), so carry the ones collected so far onto the merged config.
+	merged.Problems = append(slices.Clone(cfg.Problems), merged.Problems...)
+	recordGlobalOnlyProblems(merged, globalOnly)
 	*cfg = *merged
 	cfg.setDefaults(workingDir, dataDir)
 	*loadedPaths = append(*loadedPaths, workspacePath)
@@ -248,6 +256,11 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 	jsonDirKeys := make(map[string]map[string]bool)
 	shDirKeys := make(map[string]map[string]bool)
 
+	// Problems recorded for global-only keys (providers, model, ...) found in
+	// a project-scoped layer. Collected here and attached once the Config
+	// exists, since dropping happens before it is built.
+	var globalOnly []Problem
+
 	for _, path := range configPaths {
 		if path == "" {
 			continue
@@ -275,6 +288,11 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 				}
 				jsonBytes = migrate.MigrateDeprecatedKey(jsonBytes, "options.strands", "options.threads", path)
 				jsonBytes = migrate.DropIncompatibleRecentModels(jsonBytes, path)
+				if !isGlobalConfigPath(path) {
+					var dropped []Problem
+					jsonBytes, dropped = dropGlobalOnlyKeys(jsonBytes, path)
+					globalOnly = append(globalOnly, dropped...)
+				}
 				addTopLevelKeys(shDirKeys, dir, jsonBytes)
 				configs = append(configs, jsonBytes)
 				loaded = append(loaded, path)
@@ -285,6 +303,11 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 			}
 			data = migrate.MigrateDeprecatedKey(data, "options.strands", "options.threads", path)
 			data = migrate.DropIncompatibleRecentModels(data, path)
+			if !isGlobalConfigPath(path) {
+				var dropped []Problem
+				data, dropped = dropGlobalOnlyKeys(data, path)
+				globalOnly = append(globalOnly, dropped...)
+			}
 			addTopLevelKeys(jsonDirKeys, dir, data)
 			configs = append(configs, data)
 			loaded = append(loaded, path)
@@ -316,7 +339,18 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 	if err != nil {
 		return nil, nil, err
 	}
+	recordGlobalOnlyProblems(cfg, globalOnly)
 	return cfg, loaded, nil
+}
+
+// recordGlobalOnlyProblems attaches the problems collected while stripping
+// global-only keys from project layers, and logs each one so the ignore is
+// visible without opening the doctor.
+func recordGlobalOnlyProblems(cfg *Config, problems []Problem) {
+	for _, p := range problems {
+		slog.Warn("Ignoring global-only setting in a project config", "path", p.Subject, "detail", p.Message)
+		cfg.addProblem(p)
+	}
 }
 
 // addTopLevelKeys records the top-level JSON keys present in data into the

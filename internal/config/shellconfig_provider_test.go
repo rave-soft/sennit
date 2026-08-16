@@ -12,7 +12,7 @@ import (
 // builtins plus model selection via the single-model `model <provider/id>`
 // form (internal/shellconfig has no more large/small slots).
 func TestShellConfigProviderAddAndModel(t *testing.T) {
-	store := loadSennitSh(t, `provider add myllm \
+	store := loadSennitShGlobal(t, `provider add myllm \
   --type openai-compat \
   --base-url "http://localhost:1234/v1" \
   --api-key "sk-test" \
@@ -58,7 +58,7 @@ model myllm/foo-1 --think`)
 func TestShellConfigProviderRemove(t *testing.T) {
 	// Both providers get a model so they survive provider configuration
 	// (model-less providers are dropped); the only difference is the remove.
-	store := loadSennitSh(t, `provider add keepme --type openai-compat --base-url "http://localhost:1/v1" --api-key k
+	store := loadSennitShGlobal(t, `provider add keepme --type openai-compat --base-url "http://localhost:1/v1" --api-key k
 model add keepme/m1 --name M1
 provider add dropme --type openai-compat --base-url "http://localhost:2/v1" --api-key k
 model add dropme/m2 --name M2

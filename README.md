@@ -101,6 +101,11 @@ features. Everything found is merged, project settings override global ones,
 and in one directory `sennitrc` overrides the JSON — with a warning when both
 are present.
 
+Providers and the selected model are the exception: they are read only from the
+global config. A `provider`/`model` command or a `providers`/`model` block in a
+project config is ignored (and reported by `sennit doctor`), so cloning a repo
+can't repoint your session at someone else's endpoint.
+
 A custom provider with no `models` list has its model catalog auto-discovered
 from `/models` on first load, then cached in the data directory so later
 starts skip the network round trip. Run `sennit models refresh [provider-id]`

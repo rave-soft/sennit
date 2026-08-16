@@ -28,12 +28,7 @@ func lookupConfigs(cwd string) []string {
 	// config directory contributes a sennitrc; the data directory is writable
 	// machine state and must never be executed as Bash. Missing files are
 	// skipped when loaded.
-	configPaths := []string{
-		systemConfigPath,
-		GlobalConfig(),
-		shellConfigSibling(GlobalConfig()),
-		GlobalConfigData(),
-	}
+	configPaths := globalConfigPaths()
 
 	// Ordered high-to-low priority within a directory. LookupBounded returns
 	// matches in this order, and the later reverse + merge make the earliest

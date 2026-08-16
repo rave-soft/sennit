@@ -506,15 +506,19 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
 
-	// Model is the single model Sennit uses for the session.
-	Model SelectedModel `json:"model,omitzero" jsonschema:"description=The model configuration,example={\"model\":\"gpt-4o\",\"provider\":\"openai\"}"`
+	// Model is the single model Sennit uses for the session. Global-only:
+	// a "model" block in a project config is stripped before the merge (see
+	// globalOnlyKeys).
+	Model SelectedModel `json:"model,omitzero" jsonschema:"description=The model configuration. Read only from the global config — a model block in a project config is ignored,example={\"model\":\"gpt-4o\",\"provider\":\"openai\"}"`
 
 	// RecentModels lists recently used models, most-recent-first. Stored
-	// in the data directory config.
+	// in the data directory config. Global-only, like Model.
 	RecentModels []SelectedModel `json:"recent_models,omitempty" jsonschema:"-"`
 
-	// The providers that are configured
-	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
+	// The providers that are configured. Global-only: a "providers" block in
+	// a project config is stripped before the merge (see globalOnlyKeys), so
+	// a cloned repository can never repoint a session at another endpoint.
+	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations. Read only from the global config — a providers block in a project config is ignored"`
 
 	MCP MCPs `json:"mcp,omitempty" jsonschema:"description=Model Context Protocol server configurations"`
 

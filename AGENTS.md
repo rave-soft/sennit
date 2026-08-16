@@ -94,7 +94,10 @@ internal/
   `permissions`, `hook`, `options`) to define config. `sennit.json` is still
   supported but is deprecated in favor of `sennitrc` and may be removed in a
   future release. Shell config files are discovered alongside JSON configs
-  and deep-merged through the same pipeline. Builtins are registered via
+  and deep-merged through the same pipeline. Providers and the selected model
+  (`providers`, `model`, `recent_models`) are global-only: those keys are
+  stripped from every project-scoped layer before the merge — see
+  `internal/config/globalonly.go`. Builtins are registered via
   `shell.RegisterBuiltin` and gated by a `ConfigBuilder` on the context —
   they are no-ops during normal bash tool execution. See
   `internal/shellconfig/`.

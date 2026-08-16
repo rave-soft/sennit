@@ -57,14 +57,14 @@
         },
         "model": {
           "$ref": "#/$defs/SelectedModel",
-          "description": "The model configuration"
+          "description": "The model configuration. Read only from the global config — a model block in a project config is ignored"
         },
         "providers": {
           "additionalProperties": {
             "$ref": "#/$defs/ProviderConfig"
           },
           "type": "object",
-          "description": "AI provider configurations"
+          "description": "AI provider configurations. Read only from the global config — a providers block in a project config is ignored"
         },
         "mcp": {
           "$ref": "#/$defs/MCPs",

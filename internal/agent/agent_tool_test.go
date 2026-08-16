@@ -3,8 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"charm.land/fantasy"
@@ -73,7 +71,7 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
   "models": {"large": {"provider": "mock", "model": "mock-model"},
              "small": {"provider": "mock", "model": "mock-model"}}
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "sennit.json"), []byte(sennitJSON), 0o644))
+	writeGlobalConfig(t, sennitJSON)
 
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)

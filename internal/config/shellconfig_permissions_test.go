@@ -25,20 +25,44 @@ func loadSennitSh(t *testing.T, script string) *config.ConfigStore {
 // expected to fail at load time.
 func loadSennitShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	t.Helper()
-	// Isolate from the developer's real global config so only the script
-	// under test contributes. No t.Parallel(): these tests set env vars.
-	isolated := t.TempDir()
-	t.Setenv("HOME", isolated)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
-	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
-	t.Setenv("SENNIT_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "sennit"))
-	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "sennit"))
+	isolateSennitHome(t)
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "sennitrc"), []byte(script), 0o644))
 
 	return config.Load(workDir, dataDir, false)
+}
+
+// loadSennitShGlobal is loadSennitSh for scripts that configure providers or
+// select a model. Those settings are global-only — a `provider`/`model` block
+// coming from a project config is stripped before the merge — so the script
+// has to live in the global sennitrc to have any effect.
+func loadSennitShGlobal(t *testing.T, script string) *config.ConfigStore {
+	t.Helper()
+	globalDir := isolateSennitHome(t)
+
+	require.NoError(t, os.MkdirAll(globalDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "sennitrc"), []byte(script), 0o644))
+
+	store, err := config.Load(t.TempDir(), t.TempDir(), false)
+	require.NoError(t, err)
+	return store
+}
+
+// isolateSennitHome points every global config location at a fresh temporary
+// home so only the script under test contributes, and returns the global
+// config directory. No t.Parallel() in callers: this sets env vars.
+func isolateSennitHome(t *testing.T) string {
+	t.Helper()
+	isolated := t.TempDir()
+	globalDir := filepath.Join(isolated, ".config", "sennit")
+	t.Setenv("HOME", isolated)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "sennit"))
+	return globalDir
 }
 
 func TestShellConfigPermissionsAllow(t *testing.T) {

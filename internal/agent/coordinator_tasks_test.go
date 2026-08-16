@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/agent/tools"
@@ -64,7 +62,7 @@ func newTasksTestCoordinator(t *testing.T, taskManager tools.TaskManager) (*coor
   "models": {"large": {"provider": "mock", "model": "mock-model"},
              "small": {"provider": "mock", "model": "mock-model"}}
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "sennit.json"), []byte(sennitJSON), 0o644))
+	writeGlobalConfig(t, sennitJSON)
 
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)

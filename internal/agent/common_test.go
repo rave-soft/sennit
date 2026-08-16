@@ -45,6 +45,21 @@ type fakeEnv struct {
 	lspClients  *csync.Map[string, *lsp.Client]
 }
 
+// writeGlobalConfig points the global config location at a fresh directory
+// for this test and seeds it with cfgJSON.
+//
+// Provider and model settings are global-only: a providers/model block in a
+// project sennit.json is stripped before the merge (see config.globalOnlyKeys),
+// so a fixture that needs a mock provider has to seed the global layer. The
+// caller must not be a parallel test — this uses t.Setenv.
+func writeGlobalConfig(t *testing.T, cfgJSON string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(dir, "data"))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(cfgJSON), 0o644))
+}
+
 func testEnv(t *testing.T) fakeEnv {
 	t.Helper()
 	return testEnvAt(t, filepath.Join(os.TempDir(), "sennit-test-", t.Name()))

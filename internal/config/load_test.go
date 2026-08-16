@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1530,16 +1531,16 @@ func TestConfig_Load_FailedDiscoveryLeavesDiskUntouched(t *testing.T) {
 	require.False(t, gjson.GetBytes(after, "providers.custom.models").Exists())
 }
 
-// TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels verifies that a
-// project-level sennit.json's explicit, non-empty models list merges with a
-// stale models list already persisted in the data-dir config, and that a
-// non-empty merged list is enough to skip discovery entirely (no HTTP
-// request is made). The stale data-dir models list is migrated out of the
-// JSON file and into the model cache as a side effect of Load (see
-// migrateBloatedModelCache); this test only cares that no HTTP discovery
-// leaks in, not about that migration's own bookkeeping (covered by
-// TestConfig_Load_MigratesBloatedModelCache).
-func TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels(t *testing.T) {
+// TestConfig_Load_ProjectProvidersIgnored verifies that a project-level
+// sennit.json cannot contribute provider (or model) settings: providers are
+// global-only, so the project's models list for the same provider ID is
+// dropped before the merge and the data-dir config's entry survives
+// untouched. Discovery must still be short-circuited by that non-empty list,
+// so no HTTP request is made. The stale data-dir models list is migrated out
+// of the JSON file and into the model cache as a side effect of Load (see
+// migrateBloatedModelCache); this test does not cover that migration's own
+// bookkeeping (see TestConfig_Load_MigratesBloatedModelCache).
+func TestConfig_Load_ProjectProvidersIgnored(t *testing.T) {
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -1561,32 +1562,28 @@ func TestConfig_Load_ProjectModelsWinOverPersistedDataDirModels(t *testing.T) {
 	require.NoError(t, os.WriteFile(dataConfigPath, []byte(dataSeed), 0o644))
 
 	// Seed a project-level sennit.json with a different, explicit models
-	// list for the same provider ID. It intentionally omits base_url so we
-	// can confirm the merge still inherits it from the data-dir file.
+	// list for the same provider ID. It must be ignored in full.
 	workingDir := t.TempDir()
 	projectSeed := `{"providers": {"custom": {"models": [{"id": "project-model", "name": "project-model"}]}}}`
-	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "sennit.json"), []byte(projectSeed), 0o644))
+	projectPath := filepath.Join(workingDir, "sennit.json")
+	require.NoError(t, os.WriteFile(projectPath, []byte(projectSeed), 0o644))
 
 	store, err := Load(workingDir, "", false)
 	require.NoError(t, err)
 	pc, ok := store.config.Providers.Get("custom")
 	require.True(t, ok)
 
-	// jsons.Merge concatenates the array fields rather than letting the
-	// higher-priority project file fully replace it, so the merged models
-	// list carries both entries (data-dir's first, then the project's).
-	// What matters for this test is that the project's model is present
-	// and nothing from discovery leaked in.
-	require.Len(t, pc.Models, 2)
+	require.Len(t, pc.Models, 1)
 	require.Equal(t, "stale-model", pc.Models[0].ID)
-	require.Equal(t, "project-model", pc.Models[1].ID)
-
-	// base_url is not set in the project file, so it must be inherited
-	// from the data-dir config via field-by-field merge.
 	require.Equal(t, server.URL+"/v1", pc.BaseURL)
 
-	// A non-empty merged models list must short-circuit discovery.
-	require.Equal(t, int64(0), requests.Load(), "discovery must not run when merged models is already non-empty")
+	// A non-empty models list must short-circuit discovery.
+	require.Equal(t, int64(0), requests.Load(), "discovery must not run when models is already non-empty")
+
+	// The ignore is reported rather than silent.
+	require.True(t, slices.ContainsFunc(Doctor(store.Config()), func(p Problem) bool {
+		return p.Area == AreaProvider && p.Subject == projectPath
+	}), "the ignored project providers block must show up in the doctor")
 }
 
 func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {

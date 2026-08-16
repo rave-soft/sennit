@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -80,7 +78,7 @@ func newThreadsTestCoordinator(t *testing.T, threads tools.ThreadManager) (*coor
   "models": {"large": {"provider": "mock", "model": "mock-model"},
              "small": {"provider": "mock", "model": "mock-model"}}
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "sennit.json"), []byte(sennitJSON), 0o644))
+	writeGlobalConfig(t, sennitJSON)
 
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)

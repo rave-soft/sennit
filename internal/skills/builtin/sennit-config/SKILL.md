@@ -15,10 +15,10 @@ Sennit supports two config formats:
 
 Both are discovered together and deep-merged. Priority (highest to lowest):
 
-1. `.sennit/sennit.json` — the canonical, highest-priority project config.
-   This is also where `sennit config set` and agent-driven config writes land
-   (the workspace scope), so it always wins on conflicts, including over
-   `.sennitrc`/`sennitrc` in the same directory.
+1. `.sennit/sennit.json` — the canonical, highest-priority project config
+   (the workspace scope). It wins on conflicts, including over
+   `.sennitrc`/`sennitrc` in the same directory — except for providers and
+   models, which no project config can set at all (see below).
 2. `.sennit/sennitrc` / `.sennitrc` / `sennitrc` / `.sennit.json` / `sennit.json`
    (project-local, closer-to-cwd wins; Windows uses `.\.sennitrc` /
    `.\sennitrc`)
@@ -42,6 +42,20 @@ from those locations.
 
 If a directory has both `sennitrc` and `sennit.json`, they merge (`sennitrc` wins
 on conflicts) and Sennit logs a warning.
+
+### Providers and models are global-only
+
+The `providers`, `model`, and `recent_models` keys — and the `provider` /
+`model` sennitrc builtins that produce them — are read **only** from the global
+layers: `~/.config/sennit/sennitrc`, `~/.config/sennit/sennit.json`, the
+data-directory JSON, and `/etc/sennit/sennit.json`. In any project config
+(including `.sennit/sennit.json`) they are stripped before the merge and
+reported by `sennit doctor`.
+
+So when the user asks to add a provider, set an API key, or switch models,
+write it to `~/.config/sennit/sennitrc` (or the global `sennit.json`) — never
+to a project file, where it would silently do nothing. Everything else
+(permissions, MCP, LSP, hooks, options, env) is still per-project.
 
 ## sennitrc at a glance
 

@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/agent/prompt"
@@ -30,7 +28,7 @@ func agentModelCoordinator(t *testing.T) (*coordinator, *prompt.Prompt) {
     ]}},
   "model": {"provider": "mock", "model": "main-model"}
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(env.workingDir, "sennit.json"), []byte(sennitJSON), 0o644))
+	writeGlobalConfig(t, sennitJSON)
 
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)

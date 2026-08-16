@@ -97,7 +97,9 @@ precedence:
 Legacy JSON uses `.sennit.json` / `sennit.json` in the same directories as the
 above. Everything found is merged, with project settings overriding global ones
 and `sennitrc` overriding JSON in the same directory. If a folder has both, they
-merge and Sennit logs a warning.
+merge and Sennit logs a warning. The one exception is providers and models,
+which a project config cannot set at all — see
+[Providers and models are global-only](#providers-and-models-are-global-only).
 
 Data directories (`~/.local/share/sennit` on Unix-like systems and
 `%LOCALAPPDATA%\sennit` on Windows) contain machine-owned JSON state. Sennit does
@@ -107,6 +109,23 @@ not discover or execute a `sennitrc` from those locations.
 > Sennit also stores state data in `$XDG_DATA_HOME/sennit`
 > (`%LOCALAPPDATA%\sennit` on Windows). This is application state, and should
 > not be edited by hand.
+
+### Providers and models are global-only
+
+Providers and the selected model are a property of your machine, not of a
+checked-out repository, so Sennit reads them **only** from the global layers:
+`$XDG_CONFIG_HOME/sennit/sennitrc`, `$XDG_CONFIG_HOME/sennit/sennit.json`, the
+data-directory JSON, and `/etc/sennit/sennit.json`.
+
+A `provider` or `model` command in a project `sennitrc`, or a `providers` /
+`model` / `recent_models` block in a project `sennit.json` (including
+`.sennit/sennit.json`), is dropped before the merge and reported by
+`sennit doctor`. That way cloning a repository can never repoint your session at
+someone else's endpoint or swap the model out from under you.
+
+Everything else — permissions, MCP and LSP servers, hooks, options, env — still
+merges per project as described above. Sennit's own writes (the model picker,
+`sennit login`, adding a provider from the TUI) always go to the global config.
 
 ## Command Reference
 
@@ -127,7 +146,8 @@ Available Commands:
 
 ### provider
 
-Manage model providers.
+Manage model providers. Only effective in a global config — see
+[Providers and models are global-only](#providers-and-models-are-global-only).
 
 ```text
 Usage:
@@ -192,7 +212,9 @@ Usage:
 ### model
 
 Manage custom models and the selected model. Model references use the same
-`<provider>/<id>` form printed by `sennit models`.
+`<provider>/<id>` form printed by `sennit models`. Like `provider`, only
+effective in a global config — see
+[Providers and models are global-only](#providers-and-models-are-global-only).
 
 ```text
 Usage:
@@ -598,6 +620,10 @@ to Bash-based config.
 ```
 
 For a full reference, See the [JSON schema](../../schema.json).
+
+The `providers`, `model`, and `recent_models` keys are read only from a global
+`sennit.json`; in a project file they are ignored (see
+[Providers and models are global-only](#providers-and-models-are-global-only)).
 
 In JSON, only selected string fields (API keys, URLs, MCP/LSP commands and args,
 headers) are shell-expanded at load time. In `sennitrc` there's no such list —
