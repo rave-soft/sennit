@@ -9,6 +9,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/tidwall/sjson"
 )
 
@@ -246,6 +247,8 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 			continue
 		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
 			prepared.SetupGitHubCopilot()
+		case string(p.ID) == codex.ProviderID:
+			prepared.SetupCodex()
 		}
 
 		switch p.ID {

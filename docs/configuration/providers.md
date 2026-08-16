@@ -30,6 +30,18 @@ GitHub Copilot uses a device-code login rather than a key:
 sennit login copilot     # sennit logout copilot to revoke
 ```
 
+OpenAI Codex runs on a ChatGPT subscription, so it signs in through the
+browser rather than taking a key:
+
+```sh
+sennit login codex       # sennit logout codex to revoke
+```
+
+An existing Codex CLI login is picked up automatically when there is one, so
+the browser step is skipped. Which models the account may use is read from
+the Codex backend at sign-in and written to `providers.codex.models`; re-run
+`sennit login codex -f` to refresh that list after a plan change.
+
 To ignore the built-in catalogue entirely and declare everything yourself:
 
 ```bash

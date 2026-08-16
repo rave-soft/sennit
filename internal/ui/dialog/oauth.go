@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/util"
+	"github.com/rave-soft/sennit/internal/workspace"
 )
 
 type OAuthProvider interface {
@@ -302,22 +303,33 @@ func (m *OAuth) innerContent() string {
 		// Render each text segment with its own style. Wrapping the
 		// whole concatenation in a single style would lose the text
 		// color after enterKeyStyle's reset code.
+		//
+		// Not every provider issues a user code: a redirect flow carries
+		// everything it needs in the URL, so there is nothing to copy and
+		// nothing to show in a code box.
+		tail := " to copy the code below and open the browser."
+		if !m.hasUserCode() {
+			tail = " to open the browser and sign in."
+		}
 		instructionText := instructionStyle.Render("Press ") +
 			enterKeyStyle.Render("enter") +
-			instructionStyle.Render(" to copy the code below and open the browser.")
+			instructionStyle.Render(tail)
 		instructions := lipgloss.NewStyle().
 			Width(innerWidth).
 			Padding(0, 1).
 			Render(instructionText)
 
-		codeBox := lipgloss.NewStyle().
-			Width(innerWidth).
-			Height(7).
-			Align(lipgloss.Center, lipgloss.Center).
-			Background(t.Dialog.OAuth.UserCodeBg).
-			Render(
-				t.Dialog.OAuth.UserCode.Render(m.userCode),
-			)
+		codeBox := ""
+		if m.hasUserCode() {
+			codeBox = lipgloss.NewStyle().
+				Width(innerWidth).
+				Height(7).
+				Align(lipgloss.Center, lipgloss.Center).
+				Background(t.Dialog.OAuth.UserCodeBg).
+				Render(
+					t.Dialog.OAuth.UserCode.Render(m.userCode),
+				)
+		}
 
 		link := linkStyle.Hyperlink(m.verificationURL, "id=oauth-verify").Render(m.verificationURL)
 		url := statusTextStyle.
@@ -395,17 +407,27 @@ func (m *OAuth) ShortHelp() []key.Binding {
 		return nil
 
 	default:
-		return []key.Binding{
-			m.keyMap.Copy,
+		binds := []key.Binding{}
+		if m.hasUserCode() {
+			binds = append(binds, m.keyMap.Copy)
+		}
+		return append(binds,
 			m.keyMap.CopyURL,
 			m.keyMap.Submit,
 			m.keyMap.Close,
-		}
+		)
 	}
 }
 
+// hasUserCode reports whether this flow shows the user a code to type into
+// the browser (a device flow) rather than sending them to a URL that
+// already carries the authorization request (a redirect flow).
+func (m *OAuth) hasUserCode() bool {
+	return m.userCode != ""
+}
+
 func (m *OAuth) copyCode() tea.Cmd {
-	if m.State != OAuthStateDisplay {
+	if m.State != OAuthStateDisplay || !m.hasUserCode() {
 		return nil
 	}
 	return common.CopyToClipboard(m.userCode, "Code copied to clipboard")
@@ -421,6 +443,15 @@ func (m *OAuth) copyURL() tea.Cmd {
 func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if m.State != OAuthStateDisplay {
 		return nil
+	}
+	if !m.hasUserCode() {
+		// Nothing to copy: the URL is the whole authorization request.
+		return func() tea.Msg {
+			if err := browser.OpenURL(m.verificationURL); err != nil {
+				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
+			}
+			return nil
+		}
 	}
 	return common.CopyToClipboardWithCallback(
 		m.userCode,
@@ -445,12 +476,27 @@ func (m *OAuth) saveCredential() tea.Cmd {
 		provider = m.provider
 		token    = m.token
 	)
+	oAuthProvider := m.oAuthProvider
 	return func() tea.Msg {
 		if err := com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(provider.ID), token); err != nil {
 			return oauthSaveErrMsg{err: fmt.Errorf("failed to save API key: %w", err)}
 		}
+		// Some providers have more to store than the credential itself —
+		// Codex, whose model list is per-account and only readable once
+		// there is a token to read it with.
+		if saver, ok := oAuthProvider.(oauthPostSaver); ok {
+			if err := saver.afterSave(com.Workspace, token); err != nil {
+				return oauthSaveErrMsg{err: err}
+			}
+		}
 		return oauthSaveDoneMsg{}
 	}
+}
+
+// oauthPostSaver is the optional half of [OAuthProvider], implemented by
+// providers that need to write more than the token once it is saved.
+type oauthPostSaver interface {
+	afterSave(ws workspace.Workspace, token *oauth.Token) error
 }
 
 // confirmAndSelectModel is invoked when the user acknowledges the success

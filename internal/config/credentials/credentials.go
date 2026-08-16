@@ -32,6 +32,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
 	"github.com/tidwall/gjson"
 	"golang.org/x/sync/singleflight"
@@ -336,6 +337,8 @@ func (m *Manager) exchange(ctx context.Context, providerID, refreshToken string)
 	switch providerID {
 	case string(catwalk.InferenceProviderCopilot):
 		return copilot.RefreshToken(ctx, refreshToken)
+	case codex.ProviderID:
+		return codex.RefreshToken(ctx, refreshToken)
 	default:
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}

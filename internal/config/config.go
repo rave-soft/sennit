@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/oauth"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
 )
 
@@ -200,6 +201,23 @@ func (c *ProviderConfig) SetupGitHubCopilot() {
 		c.ExtraHeaders = make(map[string]string)
 	}
 	maps.Copy(c.ExtraHeaders, copilot.Headers())
+}
+
+// SetupCodex adds the headers the Codex backend requires to the provider.
+//
+// The account header is derived from the access token rather than stored:
+// the token is a JWT that names the account it was issued for, so a token
+// refresh or an account switch carries the right value automatically, and
+// nothing extra has to be kept in sync on disk.
+func (c *ProviderConfig) SetupCodex() {
+	if c.ExtraHeaders == nil {
+		c.ExtraHeaders = make(map[string]string)
+	}
+	accountID := codex.AccountID(c.APIKey)
+	if accountID == "" && c.OAuthToken != nil {
+		accountID = codex.AccountID(c.OAuthToken.AccessToken)
+	}
+	maps.Copy(c.ExtraHeaders, codex.Headers(accountID))
 }
 
 type MCPType string

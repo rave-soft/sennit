@@ -23,15 +23,21 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Sennit from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: copilot.`,
+Available platforms are: copilot, codex.`,
 	Example: `
 # Sign out from GitHub Copilot
 sennit logout copilot
+
+# Sign out from OpenAI Codex
+sennit logout codex
   `,
 	ValidArgs: []cobra.Completion{
 		"copilot",
 		"github",
 		"github-copilot",
+		"codex",
+		"chatgpt",
+		"openai-codex",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -67,6 +73,8 @@ sennit logout copilot
 			return logoutHyper(ws)
 		case "copilot", "github", "github-copilot":
 			return logoutCopilot(ws)
+		case "codex", "chatgpt", "openai-codex":
+			return logoutCodex(ws)
 		default:
 			return fmt.Errorf("unknown platform: %s", provider)
 		}
@@ -97,6 +105,22 @@ func logoutCopilot(ws workspace.Workspace) error {
 	return nil
 }
 
+// logoutCodex drops the Codex credentials. The discovered model list goes
+// with them: it is per-account, so leaving it behind would advertise models
+// the next account may not have.
+func logoutCodex(ws workspace.Workspace) error {
+	if err := cmp.Or(
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.api_key"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.oauth"),
+		ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.models"),
+	); err != nil {
+		return err
+	}
+
+	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of OpenAI Codex."))
+	return nil
+}
+
 func pickLoggedInProvider(ws workspace.Workspace) string {
 	cfg := ws.Config()
 	if cfg == nil {
@@ -114,6 +138,7 @@ func pickLoggedInProvider(ws workspace.Workspace) string {
 	oauthProviders := map[string]string{
 		"hyper":   "Hyper",
 		"copilot": "GitHub Copilot",
+		"codex":   "OpenAI Codex",
 	}
 
 	var loggedIn []loggedInProvider

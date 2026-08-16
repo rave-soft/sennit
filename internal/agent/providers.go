@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/log"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -129,8 +130,14 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
-		if openai.IsResponsesModel(model.CatalogCfg.ID) {
-			if openai.IsResponsesReasoningModel(model.CatalogCfg.ID) {
+		// Codex only speaks the Responses API, whatever a model is named:
+		// its catalog carries slugs like "codex-auto-review" that the
+		// name-based heuristic below does not recognize, and treating one
+		// of those as a Chat Completions model would build options for an
+		// API this provider never calls.
+		isCodex := providerCfg.ID == codex.ProviderID
+		if isCodex || openai.IsResponsesModel(model.CatalogCfg.ID) {
+			if (isCodex && model.CatalogCfg.CanReason) || openai.IsResponsesReasoningModel(model.CatalogCfg.ID) {
 				mergedOptions["reasoning_summary"] = "auto"
 				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
 			}

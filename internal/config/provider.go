@@ -12,6 +12,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 )
 
 // Providers returns the provider catalog for cfg.
@@ -40,7 +41,30 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	if cfg.Options.DisableDefaultProviders {
 		return nil, nil
 	}
-	return embedded.GetAll(), nil
+	return append(embedded.GetAll(), CodexProvider()), nil
+}
+
+// CodexProvider is the catalog entry for OpenAI Codex.
+//
+// Codex is not in the embedded catalog: it is not an API-key provider, it is
+// what a ChatGPT subscription unlocks, so it only exists once the user signs
+// in. Declaring it here rather than writing an endpoint and a type into the
+// user's config at sign-in time means a later Sennit can move the endpoint
+// or change the headers without every existing install being stuck on the
+// values it was set up with.
+//
+// The model list stays empty on purpose: which models an account may use is
+// per-plan and changes over time, so it is fetched from the backend at
+// sign-in and merged in from the user's config (see mergeCatalogProviders).
+func CodexProvider() catwalk.Provider {
+	return catwalk.Provider{
+		ID:          catwalk.InferenceProvider(codex.ProviderID),
+		Name:        codex.ProviderName,
+		APIEndpoint: codex.APIBaseURL,
+		// The Codex endpoint speaks the Responses API, which is exactly
+		// what the OpenAI provider type sends.
+		Type: catwalk.TypeOpenAI,
+	}
 }
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {

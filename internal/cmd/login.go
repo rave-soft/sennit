@@ -22,10 +22,13 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Sennit to a platform",
 	Long: `Login Sennit to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: copilot.`,
+Available platforms are: copilot, codex.`,
 	Example: `
 # Authenticate with GitHub Copilot
 sennit login copilot
+
+# Authenticate with OpenAI Codex using a ChatGPT subscription
+sennit login codex
 
 # Force re-authentication even if already logged in
 sennit login -f copilot
@@ -34,6 +37,9 @@ sennit login -f copilot
 		"copilot",
 		"github",
 		"github-copilot",
+		"codex",
+		"chatgpt",
+		"openai-codex",
 	},
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -51,6 +57,8 @@ sennit login -f copilot
 		switch provider {
 		case "copilot", "github", "github-copilot":
 			return loginCopilot(ws, force)
+		case "codex", "chatgpt", "openai-codex":
+			return loginCodex(ws, force)
 		default:
 			return fmt.Errorf("unknown platform: %s", args[0])
 		}

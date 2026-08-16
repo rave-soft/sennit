@@ -8,6 +8,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/event"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/ui/completions"
@@ -34,6 +35,8 @@ func (m *UI) openAuthenticationDialog(provider catwalk.Provider, model config.Se
 	switch provider.ID {
 	case catwalk.InferenceProviderCopilot:
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, &model)
+	case catwalk.InferenceProvider(codex.ProviderID):
+		dlg, cmd = dialog.NewOAuthCodex(m.com, isOnboarding, provider, &model)
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, &model)
 	}
@@ -280,6 +283,8 @@ func (m *UI) configureProvider(providerID string) tea.Cmd {
 	switch provider.ID {
 	case catwalk.InferenceProviderCopilot:
 		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, nil)
+	case catwalk.InferenceProvider(codex.ProviderID):
+		dlg, cmd = dialog.NewOAuthCodex(m.com, isOnboarding, provider, nil)
 	default:
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, nil)
 	}
