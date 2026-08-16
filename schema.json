@@ -9,7 +9,6 @@
           "type": "string",
           "enum": [
             "none",
-            "co-authored-by",
             "assisted-by"
           ],
           "description": "Style of attribution trailer to add to commits",

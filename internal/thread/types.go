@@ -18,7 +18,7 @@ const (
 	// drives themselves, or reactivated by [Manager.Activate] after an
 	// earlier run finished. It is neither active (nothing is running) nor
 	// terminal (the delegation is not finished), so destructive consumers
-	// such as braid gc leave it alone.
+	// such as sennit gc leave it alone.
 	StatusIdle        Status = "idle"
 	StatusCompleted   Status = "completed"
 	StatusFailed      Status = "failed"
@@ -60,7 +60,7 @@ func (s Status) Active() bool {
 // Terminal reports whether the delegation is known to be finished. This is
 // deliberately not !Active(): a status this build doesn't know (from a
 // newer version sharing the database) is neither active nor terminal, so
-// destructive consumers (braid gc) leave it alone. StatusIdle is likewise
+// destructive consumers (sennit gc) leave it alone. StatusIdle is likewise
 // neither, for the same reason: an idle delegation is work in progress
 // that simply has no run of its own in flight.
 func (s Status) Terminal() bool {

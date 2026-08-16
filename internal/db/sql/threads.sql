@@ -91,7 +91,7 @@ DELETE FROM threads
 WHERE id = ?;
 
 -- name: ListThreadsForGC :many
--- Every thread across every project, trimmed to the columns `braid gc`
+-- Every thread across every project, trimmed to the columns `sennit gc`
 -- needs to pick finished threads older than the retention cutoff.
 -- Unscoped by project_path; the caller filters by project in Go for
 -- --project. Scoped by kind = 'thread': gc is a thread-facing caller and

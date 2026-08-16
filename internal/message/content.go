@@ -51,7 +51,7 @@ func (r *MessageRole) UnmarshalText(data []byte) error {
 type Origin string
 
 const (
-	// OriginPerson is the default: the person using Braid typed this
+	// OriginPerson is the default: the person using Sennit typed this
 	// message themselves. Every existing row and every message
 	// created without an explicit origin is OriginPerson.
 	OriginPerson Origin = "person"

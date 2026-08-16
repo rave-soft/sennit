@@ -17,12 +17,12 @@ import (
 )
 
 // ErrWorkspaceLocked is returned by AcquireWorkspaceLock when a
-// project's workspace directory is already in use by another braid
+// project's workspace directory is already in use by another sennit
 // process.
-var ErrWorkspaceLocked = errors.New("workspace already in use by another braid process")
+var ErrWorkspaceLocked = errors.New("workspace already in use by another sennit process")
 
 // workspaceLockFile is the name of the lock file inside a project's
-// .braid directory. It lives next to braid.db so users can `ls` and
+// .sennit directory. It lives next to sennit.db so users can `ls` and
 // find it.
 const workspaceLockFile = brand.LockFile
 
@@ -37,7 +37,7 @@ type dataDirOwnerInfo struct {
 }
 
 // WorkspaceLock represents an acquired exclusive lock on a project's
-// workspace directory (its .braid directory). Calling Release on a nil
+// workspace directory (its .sennit directory). Calling Release on a nil
 // *WorkspaceLock is a no-op, so callers that skip locking can hold a
 // nil lock and release it unconditionally.
 type WorkspaceLock struct {
@@ -87,7 +87,7 @@ func (l *WorkspaceLock) Release() {
 }
 
 // AcquireWorkspaceLock takes an exclusive non-blocking lock on
-// {dir}/braid.lock, guarding against two braid processes racing the
+// {dir}/sennit.lock, guarding against two sennit processes racing the
 // same project's workspace. If the lock is already held by another
 // process, it returns ErrWorkspaceLocked wrapped with a diagnostic
 // that includes whatever owner info that process wrote. Concurrent
@@ -95,7 +95,7 @@ func (l *WorkspaceLock) Release() {
 // underlying OS lock via refcounting; see [workspaceLockEntry].
 //
 // Acquisition is skipped (returning a no-op lock) when
-// BRAID_SKIP_DATADIR_LOCK is set to a truthy value. This is intended
+// SENNIT_SKIP_DATADIR_LOCK is set to a truthy value. This is intended
 // as an escape hatch for hostile filesystems that do not implement
 // advisory locking; it should not be used in normal operation.
 func AcquireWorkspaceLock(dir string) (*WorkspaceLock, error) {

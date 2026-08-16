@@ -1,4 +1,4 @@
-// Package brand centralizes every brand-derived identifier Braid uses:
+// Package brand centralizes every brand-derived identifier Sennit uses:
 // display name, binary/directory/file name stem, environment variable
 // prefix, config file names, state file names, and tool names. It has no
 // imports so any package can depend on it without risking an import cycle.
@@ -14,7 +14,7 @@ const Name = "Sennit"
 // and file name stem, and the tool name prefix.
 const Slug = "sennit"
 
-// EnvName is the bare, unprefixed environment variable name Braid sets to
+// EnvName is the bare, unprefixed environment variable name Sennit sets to
 // mark its own shell sessions (e.g. SENNIT=1). It cannot be derived from
 // Slug at compile time (case differs), so it is its own root constant.
 const EnvName = "SENNIT"
@@ -37,13 +37,13 @@ const RepoURL = "https://github.com/" + Vendor + "/" + Slug
 const Wordmark = "SENNIT"
 
 // Config discovery: the project-local data directory and the config file
-// names users create by hand or that Braid writes to.
+// names users create by hand or that Sennit writes to.
 const (
-	// DataDir is the project-local data/config subdirectory Braid walks up
+	// DataDir is the project-local data/config subdirectory Sennit walks up
 	// to when discovering a project.
 	DataDir = "." + Slug
 
-	// ShellConfigFile is the bare sennitrc file name, Braid's primary Bash
+	// ShellConfigFile is the bare sennitrc file name, Sennit's primary Bash
 	// config format.
 	ShellConfigFile = Slug + "rc"
 
@@ -57,11 +57,11 @@ const (
 	// HiddenJSONConfigFile is the dotfile variant of JSONConfigFile.
 	HiddenJSONConfigFile = "." + JSONConfigFile
 
-	// IgnoreFile is the file users create to exclude paths from Braid,
+	// IgnoreFile is the file users create to exclude paths from Sennit,
 	// analogous to .gitignore.
 	IgnoreFile = "." + Slug + "ignore"
 
-	// ContextFile is the uppercase project context file Braid reads
+	// ContextFile is the uppercase project context file Sennit reads
 	// automatically. Casing and .local variants of this name are enumerated
 	// by the caller, not derived here.
 	ContextFile = "SENNIT.md"
@@ -70,7 +70,7 @@ const (
 	ContextFileLocal = "SENNIT.local.md"
 )
 
-// State file names: files Braid itself creates and manages under its data
+// State file names: files Sennit itself creates and manages under its data
 // directory.
 const (
 	// DBFile is the SQLite database file name.

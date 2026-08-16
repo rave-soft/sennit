@@ -1,4 +1,4 @@
-// Package agent is the core orchestration layer for Braid AI agents.
+// Package agent is the core orchestration layer for Sennit AI agents.
 //
 // It provides session-based AI agent functionality for managing
 // conversations, tool execution, and message handling. It coordinates
@@ -31,7 +31,7 @@ import (
 	"github.com/rave-soft/sennit/internal/version"
 )
 
-var userAgent = fmt.Sprintf("Charm-"+brand.Name+"/%s (https://charm.land/"+brand.Slug+")", version.Version)
+var userAgent = fmt.Sprintf(brand.Name+"/%s ("+brand.RepoURL+")", version.Version)
 
 type SessionAgentCall struct {
 	SessionID string
@@ -40,7 +40,7 @@ type SessionAgentCall struct {
 	// this turn. It is preserved when the call is enqueued behind a
 	// busy session so the queued turn's terminal event is still
 	// recognisable to the original caller. Callers that need a
-	// reliable completion contract (e.g. `braid run` against a
+	// reliable completion contract (e.g. `sennit run` against a
 	// session that may be busy) MUST set it; SessionID alone is
 	// ambiguous when concurrent turns share the same session.
 	RunID  string
@@ -81,7 +81,7 @@ type SessionAgentCall struct {
 	// callback instead of emitting it on the RunComplete broker. The
 	// coordinator uses this hook to coalesce the unauthorized →
 	// re-auth → retry chain into a single user-visible terminal
-	// event, so non-interactive clients (e.g. `braid run`) don't
+	// event, so non-interactive clients (e.g. `sennit run`) don't
 	// exit on a stale failed-attempt RunComplete before the
 	// successful retry. It is intentionally stripped when queueing
 	// a busy-session call (see Run): the originating
@@ -309,7 +309,7 @@ func NewSessionAgent(
 // ctx is used only for the bounded-blocking must-deliver publish; the
 // terminal payload is supplied by the caller. This is the single emit path
 // shared by the streaming defer and the cancel-on-entry early return so a
-// caller waiting on RunComplete (e.g. `braid run` with a RunID) always
+// caller waiting on RunComplete (e.g. `sennit run` with a RunID) always
 // observes exactly one terminal event regardless of which Run branch ends
 // the turn.
 func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgentCall, complete notify.RunComplete) {
@@ -383,7 +383,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		// This path returns before the streaming defer that publishes
 		// RunComplete is installed, so emit the terminal event explicitly.
 		// Without it, a caller waiting on RunComplete for this RunID (e.g.
-		// `braid run`, which ignores message events and blocks on
+		// `sennit run`, which ignores message events and blocks on
 		// RunComplete) would hang on an immediately-canceled accepted run.
 		call.Accepted.Close()
 		sessMu.Unlock()

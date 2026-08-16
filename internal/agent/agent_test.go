@@ -57,12 +57,12 @@ func fixtureResourceURL(env fakeEnv, path string) string {
 
 func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
 	t.Helper()
-	mode := os.Getenv("BRAID_TEST_VCR_MODE")
+	mode := os.Getenv("SENNIT_TEST_VCR_MODE")
 	cfg, err := resolveTestVCRConfig(
 		mode,
-		os.Getenv("BRAID_TEST_CASSETTE_ROOT"),
-		os.Getenv("BRAID_TEST_OPENAI_BASE_URL"),
-		os.Getenv("BRAID_TEST_OPENAI_MODEL"),
+		os.Getenv("SENNIT_TEST_CASSETTE_ROOT"),
+		os.Getenv("SENNIT_TEST_OPENAI_BASE_URL"),
+		os.Getenv("SENNIT_TEST_OPENAI_MODEL"),
 	)
 	require.NoError(t, err)
 

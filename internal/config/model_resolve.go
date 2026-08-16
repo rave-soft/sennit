@@ -44,7 +44,7 @@ func FindModelMatches(providers map[string]ProviderConfig, modelStr string) ([]M
 
 	if providerFilter != "" {
 		if _, ok := providers[providerFilter]; !ok {
-			return nil, fmt.Errorf("provider %q not found in configuration. Use 'braid models' to list available models", providerFilter)
+			return nil, fmt.Errorf("provider %q not found in configuration. Use 'sennit models' to list available models", providerFilter)
 		}
 	}
 
@@ -216,7 +216,7 @@ func resolveSelectedModel(cfg *Config, knownProviders []catwalk.Provider) (resol
 					"configured main model %s/%s not found — falling back to %s/%s",
 					modelSelected.Provider, modelSelected.Model, def.Provider, def.Model,
 				),
-				Hint: "run 'braid models' to see available provider/model pairs",
+				Hint: "run 'sennit models' to see available provider/model pairs",
 			})
 			selected = def
 			result.Fallback = true

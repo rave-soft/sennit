@@ -88,7 +88,7 @@ func panicLogPath(filename string) string {
 
 	dir := filepath.Join(cacheDir, brand.Slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		slog.Error("Failed to create braid cache dir for panic log", "dir", dir, "error", err)
+		slog.Error("Failed to create sennit cache dir for panic log", "dir", dir, "error", err)
 		return filename
 	}
 

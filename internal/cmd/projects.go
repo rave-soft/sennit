@@ -14,13 +14,13 @@ import (
 var projectsCmd = &cobra.Command{
 	Use:   "projects",
 	Short: "List project directories",
-	Long:  "List directories where Braid project data is known to exist",
+	Long:  "List directories where Sennit project data is known to exist",
 	Example: `
 # List all projects in a table
-braid projects
+sennit projects
 
 # Output projects data as JSON
-braid projects --json
+sennit projects --json
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		jsonOutput, _ := cmd.Flags().GetBool("json")

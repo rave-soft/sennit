@@ -1,5 +1,5 @@
 // Package herdr provides native integration with the herdr terminal
-// multiplexer. When Braid runs inside a herdr-managed pane it reports
+// multiplexer. When Sennit runs inside a herdr-managed pane it reports
 // agent state (idle, working, blocked) and session identity over
 // herdr's Unix socket API so herdr can display accurate status without
 // screen scraping.
@@ -79,7 +79,7 @@ type sender interface {
 	close()
 }
 
-// Client reports Braid agent state to a running herdr instance.
+// Client reports Sennit agent state to a running herdr instance.
 type Client struct {
 	socketPath string
 	paneID     string
@@ -102,7 +102,7 @@ var (
 )
 
 // Init returns the process-wide herdr Client, creating it on first
-// call from environment variables. Returns nil when Braid is not
+// call from environment variables. Returns nil when Sennit is not
 // running inside a herdr pane. Safe to call from any goroutine.
 func Init() *Client {
 	initOnce.Do(func() {
@@ -151,8 +151,8 @@ func newFromEnv() *Client {
 //
 // herdr remembers the highest seq it has seen per source for the
 // lifetime of a pane and silently drops any report with a seq that
-// is not strictly greater. Because braid seeds seq from the wall
-// clock at startup (see newFromEnv), a restarted braid in the same
+// is not strictly greater. Because sennit seeds seq from the wall
+// clock at startup (see newFromEnv), a restarted sennit in the same
 // pane always reports above the previous run's high-water mark, so
 // the first report is accepted instead of being rejected as stale.
 func (c *Client) registerInitial() {

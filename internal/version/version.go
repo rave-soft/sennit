@@ -18,7 +18,7 @@ var (
 	BuildID = ""
 )
 
-// A user may install braid using `go install github.com/rave-soft/sennit@latest`.
+// A user may install sennit using `go install github.com/rave-soft/sennit@latest`.
 // without -ldflags, in which case the version above is unset. As a workaround
 // we use the embedded build version that *is* set when using `go install` (and
 // is only set for `go install` and not for `go build`).

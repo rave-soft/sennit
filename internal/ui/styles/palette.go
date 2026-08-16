@@ -73,7 +73,7 @@ type Palette struct {
 	Attention   color.Color
 }
 
-// PaletteSteelTeal is Braid's default scheme: cool steel neutrals with a
+// PaletteSteelTeal is Sennit's default scheme: cool steel neutrals with a
 // single muted teal accent. The most engineering-room of the four and the
 // one the rest are calibrated against.
 var PaletteSteelTeal = Palette{
@@ -299,7 +299,7 @@ func Palettes() []Palette {
 
 // PaletteByID returns the palette with the given ID. An unknown or empty ID
 // resolves to the default, so a hand-edited config with a stale theme name
-// degrades to Braid's own scheme instead of failing to start.
+// degrades to Sennit's own scheme instead of failing to start.
 func PaletteByID(id string) Palette {
 	for _, p := range palettes {
 		if p.ID == id {

@@ -21,11 +21,11 @@ that can't reason, providers dropped for a missing api key, a main model
 that fell back to a default, and disabled_tools/allowed_tools typos.
 
 This only inspects the config as loaded; it does not make network calls to
-verify a provider's api key or endpoint actually works (use 'braid models
+verify a provider's api key or endpoint actually works (use 'sennit models
 refresh' or the TUI's "Test Connection" for that). MCP server connection
 health is likewise only checked from a running session, since this command
 never starts MCP servers itself; see the TUI's /doctor command or the
-braid_info tool for that.
+sennit_info tool for that.
 
 Exit code is 1 if any problem is severity "error", 0 otherwise (including
 when only warnings were found).`,

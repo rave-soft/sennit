@@ -1,5 +1,5 @@
 // Package event used to report usage analytics to Charm's PostHog instance at
-// data.charm.land. That reporting is removed: Braid sends nothing anywhere.
+// data.charm.land. That reporting is removed: Sennit sends nothing anywhere.
 //
 // The call sites are kept as no-ops rather than deleted so that adding a
 // self-hosted sink later is a change in one file instead of a hunt through

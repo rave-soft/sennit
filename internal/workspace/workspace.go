@@ -56,7 +56,7 @@ var (
 	// ErrServerUnreachable means the client could not reach the server
 	// to determine the agent's status (server down, or the workspace was
 	// torn down out from under the client).
-	ErrServerUnreachable = errors.New("lost connection to the braid server")
+	ErrServerUnreachable = errors.New("lost connection to the sennit server")
 	// ErrWorkspaceGone means the server is reachable but no longer knows
 	// this client's workspace: it was torn down, or the server was
 	// replaced underneath the client. The subscription loop re-registers
@@ -252,13 +252,13 @@ type ConfigAccessor interface {
 
 	UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error
 	// OverridePreferredModel applies a preferred-model override for the
-	// current process, for callers (namely `braid run -m/--model`) that
+	// current process, for callers (namely `sennit run -m/--model`) that
 	// must not surprise the user with a config-file write from a
 	// single invocation. In local mode this is purely in-memory (see
 	// config.ConfigStore.OverridePreferredModel). Client/server mode has
 	// no equivalent ephemeral primitive on the server, so it falls back
 	// to a persisted UpdatePreferredModel at ScopeWorkspace — matching
-	// braid run -m's pre-existing behavior in that mode.
+	// sennit run -m's pre-existing behavior in that mode.
 	OverridePreferredModel(model config.SelectedModel) error
 	SetCompactMode(scope config.Scope, enabled bool) error
 	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
@@ -439,7 +439,7 @@ type Workspace interface {
 // Err=nil when the turn itself reports a clean cancellation (e.g. the
 // server-side run was cancelled); a caller-driven ctx cancellation
 // still surfaces ctx.Err(), matching the pre-refactor behavior of
-// `braid run`'s select-on-ctx.Done() branch.
+// `sennit run`'s select-on-ctx.Done() branch.
 type AgentRunEvent struct {
 	TextDelta string
 	Done      bool

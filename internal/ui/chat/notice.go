@@ -12,7 +12,7 @@ import (
 )
 
 // NoticeItem renders a system-role message: a one-line, muted record of
-// something Braid did on its own — a thread merging and being cleared
+// something Sennit did on its own — a thread merging and being cleared
 // away, say. It is not part of the conversation. The model never sees a
 // system-role message (they are dropped when the prompt is built), and it
 // is not styled like anything either party said; it reads as a margin

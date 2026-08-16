@@ -103,7 +103,7 @@ func NewReadTool(
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			// Handle builtin skill files (braid: prefix).
+			// Handle builtin skill files (sennit: prefix).
 			if strings.HasPrefix(params.FilePath, skills.BuiltinPrefix) {
 				return readBuiltinFile(params, skillTracker), nil
 			}

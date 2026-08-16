@@ -25,7 +25,7 @@ import (
 //
 // Examples:
 //
-//	option data-directory .braid
+//	option data-directory .sennit
 //	option context-path .cursorrules
 //	option reset skill-path
 //	option metrics false
@@ -80,9 +80,9 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 			return usage(stderr, "option: attribution-trailer-style requires a value")
 		}
 		switch val {
-		case "none", "co-authored-by", "assisted-by":
+		case "none", "assisted-by":
 		default:
-			return usage(stderr, fmt.Sprintf("option: attribution-trailer-style expects none, co-authored-by, or assisted-by, got %q", val))
+			return usage(stderr, fmt.Sprintf("option: attribution-trailer-style expects none or assisted-by, got %q", val))
 		}
 		attribution := childMap(o, "attribution")
 		if _, ok := attribution["generated_with"]; !ok {

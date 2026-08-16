@@ -48,7 +48,7 @@ type Agent struct {
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
 
-// SetupAgents discovers user-defined agents from .braid/agents/*.md, merges
+// SetupAgents discovers user-defined agents from .sennit/agents/*.md, merges
 // them with the two built-ins, and writes the combined set back to c.Agents.
 //
 // Every user-defined agent becomes a tool the coder can call to delegate work,
@@ -84,15 +84,15 @@ func (c *Config) setupAgents(inherited map[string]Agent) {
 			Severity: SeverityWarn,
 			Area:     AreaAgent,
 			Subject:  "agents",
-			Message:  "agents in braid.json are ignored — define agents as .braid/agents/*.md files",
-			Hint:     "move each entry to .braid/agents/<name>.md (frontmatter: name, description, model, tools; body is the prompt)",
+			Message:  "agents in sennit.json are ignored — define agents as .sennit/agents/*.md files",
+			Hint:     "move each entry to .sennit/agents/<name>.md (frontmatter: name, description, model, tools; body is the prompt)",
 		})
 	}
 
 	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
 	providers := c.providersOrEmpty()
 
-	// Markdown files under .braid/agents are the only source of user-defined
+	// Markdown files under .sennit/agents are the only source of user-defined
 	// agents. A JSON "agents" block is never read (see loadFromBytes in
 	// load.go); if one was present, jsonAgentsBlockDetected records it and
 	// the Problem above surfaces it instead of using it.
@@ -219,7 +219,7 @@ func (c *Config) validUserAgents() (valid map[string]Agent, invalid map[string]s
 						Area:     AreaAgent,
 						Subject:  id,
 						Message:  fmt.Sprintf("agent %s: model %s not found — falls back to the main model", id, agent.Model),
-						Hint:     "run 'braid models' to see available provider/model pairs",
+						Hint:     "run 'sennit models' to see available provider/model pairs",
 					})
 					agent.Model = ""
 				}

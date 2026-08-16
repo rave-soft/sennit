@@ -14,7 +14,7 @@ import (
 // session. Otherwise it creates a new session titled title.
 //
 // This is shared across Workspace implementations (via cmd/run.go) so
-// `braid run` behaves identically regardless of which one is in use; it
+// `sennit run` behaves identically regardless of which one is in use; it
 // is a free function rather than an interface method because it only
 // needs the operations Workspace already exposes.
 func ResolveSession(ctx context.Context, ws Workspace, continueSessionID string, useLast bool, title string) (session.Session, error) {

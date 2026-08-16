@@ -49,12 +49,12 @@ type Querier interface {
 	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context, projectPath string) ([]Session, error)
-	// Every session across every project, trimmed to the columns `braid gc`
+	// Every session across every project, trimmed to the columns `sennit gc`
 	// needs to compute its retention set (age filter + parent/child
 	// expansion) without pulling message/file bodies into memory. Unscoped by
 	// project_path; the caller filters by project in Go for --project.
 	ListSessionsForGC(ctx context.Context) ([]ListSessionsForGCRow, error)
-	// The queries below back `braid stat`, a terminal-table
+	// The queries below back `sennit stat`, a terminal-table
 	// breakdown by model/agent/project/skill. They intentionally return raw
 	// rows for a time window rather than pre-aggregating, since the
 	// model/agent grouping requires Go-side logic (proportional token
@@ -80,7 +80,7 @@ type Querier interface {
 	// displayed as active forever. Not for thread-facing callers; see
 	// ListThreads.
 	ListThreadsAll(ctx context.Context, projectPath string) ([]Thread, error)
-	// Every thread across every project, trimmed to the columns `braid gc`
+	// Every thread across every project, trimmed to the columns `sennit gc`
 	// needs to pick finished threads older than the retention cutoff.
 	// Unscoped by project_path; the caller filters by project in Go for
 	// --project. Scoped by kind = 'thread': gc is a thread-facing caller and

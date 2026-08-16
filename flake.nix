@@ -1,5 +1,5 @@
 {
-  description = "Braid development environment";
+  description = "Sennit development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

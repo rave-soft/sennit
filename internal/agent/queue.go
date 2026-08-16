@@ -38,7 +38,7 @@ func (a *sessionAgent) requeueDrained(sessionID string, remainder []SessionAgent
 // every dropped queued call that carries a RunID. A queued prompt removed
 // from the queue without ever running — covered by a pending cancel, or
 // cleared by Cancel/ClearQueue — would otherwise leave a caller blocked on
-// that RunID: `braid run` ignores live message events and exits only on a
+// that RunID: `sennit run` ignores live message events and exits only on a
 // RunComplete whose RunID matches. Calls without a RunID had no such waiter
 // and are dropped silently as before. A detached, bounded context keeps the
 // must-deliver publish alive even when the run context that triggered the

@@ -58,9 +58,9 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case workspace.UpdateAvailableMsg:
-		text := fmt.Sprintf("Braid update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
+		text := fmt.Sprintf("Sennit update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
-			text = fmt.Sprintf("This is a development version of Braid. The latest version is v%s.", msg.LatestVersion)
+			text = fmt.Sprintf("This is a development version of Sennit. The latest version is v%s.", msg.LatestVersion)
 		}
 		ttl := 10 * time.Second
 		m.status.SetInfoMsg(util.InfoMsg{

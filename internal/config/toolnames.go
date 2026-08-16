@@ -7,9 +7,9 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 )
 
-// legacyToolNames maps names Braid used to expose onto the names its tools
+// legacyToolNames maps names Sennit used to expose onto the names its tools
 // carry today. Tool names reach us from places we do not control and cannot
-// migrate: a braid.json checked into a repo, a .braid/agents/*.md file, a
+// migrate: a sennit.json checked into a repo, a .sennit/agents/*.md file, a
 // `permissions allow ...` line in a shell config. Folding the old name onto
 // the current one wherever such a list is read keeps those files working
 // across a rename instead of silently ignoring an entry — an ignored

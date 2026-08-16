@@ -15,7 +15,7 @@ import (
 // before discovery runs:
 //
 //  1. Marks ModelsSource — ModelsSourceConfig for a provider that already
-//     has a non-empty, hand-written Models list, so later code (`braid
+//     has a non-empty, hand-written Models list, so later code (`sennit
 //     models refresh`'s explicit-config guard, in internal/cmd/models.go)
 //     can tell "the user wrote these" apart from "these came from
 //     discovery" without re-deriving it. This must run before the cache
@@ -25,7 +25,7 @@ import (
 //     global model-discovery cache (see saveCachedModels), marking it
 //     ModelsSourceCache. This lets a restart skip
 //     discoverCustomProviderModels' HTTP round trip for an empty models
-//     list — the cache, not providers.<id>.models in braid.json, is where
+//     list — the cache, not providers.<id>.models in sennit.json, is where
 //     auto-discovered models live now. A provider with discover_models:
 //     true explicitly still refreshes over HTTP regardless
 //     (discoverCustomProviderModels's wantsDiscovery branch doesn't check

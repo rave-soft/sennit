@@ -21,7 +21,7 @@ type ConfigureCustomProviderParams struct {
 
 // ConfigureCustomProvider persists a custom provider's configuration and
 // runs model discovery against it, reusing the same discover.DiscoverModels
-// / discover.GetEnricher core that `braid models refresh` uses (see
+// / discover.GetEnricher core that `sennit models refresh` uses (see
 // internal/cmd/models.go's refreshCmd) so the two entry points share
 // identical discovery behavior without duplicating it.
 //
@@ -43,7 +43,7 @@ type ConfigureCustomProviderParams struct {
 // already in place. Fields still land on disk even when discovery fails or
 // returns nothing — callers should treat a zero-model result as "not yet
 // usable" rather than deleted, since the user may fix the URL and retry via
-// `braid models refresh <id>` or this same flow again.
+// `sennit models refresh <id>` or this same flow again.
 func ConfigureCustomProvider(ctx context.Context, ws ConfigAccessor, scope config.Scope, params ConfigureCustomProviderParams) ([]catwalk.Model, error) {
 	if params.ID == "" || params.BaseURL == "" {
 		return nil, fmt.Errorf("provider ID and base URL are required")

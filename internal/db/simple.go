@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// OpenDB opens a SQLite database at dbPath with braid's standard pragmas
+// OpenDB opens a SQLite database at dbPath with sennit's standard pragmas
 // (WAL, busy_timeout, etc.) but without goose migrations or connection
 // pooling/refcounting. Intended for small auxiliary stores (e.g. the
 // global model-discovery cache) that manage their own schema via

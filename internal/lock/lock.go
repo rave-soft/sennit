@@ -14,7 +14,7 @@
 // create a window where two processes lock different inodes at the
 // same path.
 //
-// This is the canonical file-locking helper for Braid. Callers should
+// This is the canonical file-locking helper for Sennit. Callers should
 // prefer it over rolling their own platform-specific code.
 package lock
 

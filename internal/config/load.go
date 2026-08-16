@@ -137,7 +137,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 
 	// Capture initial staleness snapshot. Track every discovered config path,
 	// not just the ones that loaded, so a config file created after startup
-	// (e.g. a braidrc added mid-session) is detected as a change.
+	// (e.g. a sennitrc added mid-session) is detected as a change.
 	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
 	store.captureAgentFileSnapshot()
 
@@ -203,7 +203,7 @@ func PushPopBraidEnv() func() {
 
 	for _, ev := range found {
 		if err := os.Setenv(ev, os.Getenv(brand.EnvPrefix+ev)); err != nil {
-			slog.Warn("Failed to set env var from BRAID_ override", "key", ev, "error", err)
+			slog.Warn("Failed to set env var from SENNIT_ override", "key", ev, "error", err)
 		}
 	}
 
@@ -242,7 +242,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 	var configs [][]byte
 	var loaded []string
 
-	// Track directories that have both braid.json and braidrc to warn
+	// Track directories that have both sennit.json and sennitrc to warn
 	// about potential confusion, along with the top-level keys each
 	// defines so we can report conflicts.
 	jsonDirKeys := make(map[string]map[string]bool)
@@ -291,7 +291,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 		}
 	}
 
-	// Warn if both a JSON config and a braidrc exist in the same directory
+	// Warn if both a JSON config and a sennitrc exist in the same directory
 	// and define overlapping top-level keys. Disjoint coexistence is
 	// intentional and not worth warning about.
 	for dir, jKeys := range jsonDirKeys {
@@ -307,7 +307,7 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 		}
 		if len(conflicts) > 0 {
 			slices.Sort(conflicts)
-			slog.Warn("Found both a JSON config and a braidrc in the same directory; merging with braidrc taking precedence",
+			slog.Warn("Found both a JSON config and a sennitrc in the same directory; merging with sennitrc taking precedence",
 				"dir", dir, "conflicting_keys", strings.Join(conflicts, ", "))
 		}
 	}
@@ -348,7 +348,7 @@ func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Pr
 // rather than letting it decode into Config.Agents: unlike a normal
 // deprecated-key rename (see migrate.MigrateDeprecatedKey), a JSON agents block has
 // no in-place replacement to migrate to — subagents are defined exclusively
-// as .braid/agents/*.md files now, so the block is simply discarded, with
+// as .sennit/agents/*.md files now, so the block is simply discarded, with
 // jsonAgentsBlockDetected left behind for SetupAgents to turn into a doctor
 // Problem instead of silently ignoring it forever.
 func loadFromBytes(configs [][]byte) (*Config, error) {

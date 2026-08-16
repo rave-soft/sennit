@@ -16,8 +16,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ImportSource identifies which foreign tool's files `braid import` reads.
-// Auto-discovery only ever looks at .braid/skills and .braid/agents (see
+// ImportSource identifies which foreign tool's files `sennit import` reads.
+// Auto-discovery only ever looks at .sennit/skills and .sennit/agents (see
 // load.go, agents_markdown.go); this is the only supported path for bringing
 // in a Claude Code or opencode role or skill, and it goes through validation
 // and an explicit report rather than trusting a foreign directory.
@@ -28,7 +28,7 @@ const (
 	ImportSourceOpenCode ImportSource = "opencode"
 )
 
-// ImportOptions configures a braid import run.
+// ImportOptions configures a sennit import run.
 type ImportOptions struct {
 	Source     ImportSource
 	WorkingDir string
@@ -49,7 +49,7 @@ const (
 	StatusImported ImportStatus = "imported"
 	// StatusAdjusted means the item was written, but with warnings — a
 	// field was dropped, mapped to the nearest equivalent, or left as a
-	// frontmatter comment because Braid has no matching field.
+	// frontmatter comment because Sennit has no matching field.
 	StatusAdjusted ImportStatus = "adjusted"
 	// StatusSkipped means nothing was written; Reason explains why.
 	StatusSkipped ImportStatus = "skipped"
@@ -65,14 +65,14 @@ type ImportEntry struct {
 	Dest     string   // destination path, populated even under --dry-run
 }
 
-// ImportReport is the result of a braid import run.
+// ImportReport is the result of a sennit import run.
 type ImportReport struct {
 	Source  ImportSource
 	Entries []ImportEntry
 }
 
 // RunImport copies skills and/or agents from a foreign tool's directories
-// into Braid's own (.braid/skills, .braid/agents, or their global
+// into Sennit's own (.sennit/skills, .sennit/agents, or their global
 // equivalents under --global), validating and translating as it goes. It
 // never touches source files. Nothing is written when opts.DryRun is set;
 // callers get the same report either way.
@@ -115,7 +115,7 @@ func RunImport(opts ImportOptions) (ImportReport, error) {
 }
 
 // importSourceDirs returns the directories a foreign tool keeps skills and
-// agents in. The project forms mirror the directories Braid itself used to
+// agents in. The project forms mirror the directories Sennit itself used to
 // auto-discover before this change (see git history of agentDirs and
 // projectSkillSubdirs); the global forms are this package's best-effort
 // mapping of each tool's documented global config location, since neither
@@ -137,7 +137,7 @@ func importSourceDirs(source ImportSource, workingDir string, global bool) (skil
 	}
 }
 
-// importDestDirs returns Braid's own skill/agent directories — the only
+// importDestDirs returns Sennit's own skill/agent directories — the only
 // ones discovery reads, project or global depending on opts.Global.
 func importDestDirs(workingDir string, global bool) (skillsDir, agentsDir string) {
 	if global {
@@ -147,7 +147,7 @@ func importDestDirs(workingDir string, global bool) (skillsDir, agentsDir string
 }
 
 // importSkills copies every <srcDir>/<name>/SKILL.md directory that parses
-// and validates as a Braid-compatible skill into dstDir. A missing srcDir is
+// and validates as a Sennit-compatible skill into dstDir. A missing srcDir is
 // not an error — it just means there is nothing of that kind to import.
 func importSkills(srcDir, dstDir string, opts ImportOptions) ([]ImportEntry, error) {
 	entries, err := os.ReadDir(srcDir)
@@ -174,13 +174,13 @@ func importSkills(srcDir, dstDir string, opts ImportOptions) ([]ImportEntry, err
 			})
 			continue
 		}
-		// Braid enforces the same Agent Skills spec these tools' skills
+		// Sennit enforces the same Agent Skills spec these tools' skills
 		// already follow, so this mostly catches name/directory mismatches
 		// and oversized descriptions rather than anything tool-specific.
 		if err := skill.Validate(); err != nil {
 			out = append(out, ImportEntry{
 				Kind: "skill", Name: e.Name(), Status: StatusSkipped,
-				Reason: fmt.Sprintf("not braid-compatible: %v", err),
+				Reason: fmt.Sprintf("not sennit-compatible: %v", err),
 			})
 			continue
 		}
@@ -254,9 +254,9 @@ type importAgentMeta struct {
 	Permission      yaml.Node  `yaml:"permission"`
 }
 
-// outAgentFrontmatter is the frontmatter Braid actually writes. A dedicated
+// outAgentFrontmatter is the frontmatter Sennit actually writes. A dedicated
 // (rather than reused) type keeps yaml.Marshal from ever emitting a field
-// Braid's own agent files don't understand.
+// Sennit's own agent files don't understand.
 type outAgentFrontmatter struct {
 	Name            string   `yaml:"name"`
 	Description     string   `yaml:"description,omitempty"`
@@ -265,7 +265,7 @@ type outAgentFrontmatter struct {
 	Tools           []string `yaml:"tools,omitempty"`
 }
 
-// importAgents converts every *.md file in srcDir into a Braid agent file
+// importAgents converts every *.md file in srcDir into a Sennit agent file
 // under dstDir. A missing srcDir is not an error — nothing to import.
 func importAgents(srcDir, dstDir string, opts ImportOptions) ([]ImportEntry, error) {
 	entries, err := os.ReadDir(srcDir)
@@ -362,19 +362,19 @@ func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (Import
 		mapped, dropped := translateAgentTools([]string(meta.Tools))
 		fm.Tools = mapped
 		for _, d := range dropped {
-			warnings = append(warnings, fmt.Sprintf("tool %q has no Braid equivalent; dropped", d))
+			warnings = append(warnings, fmt.Sprintf("tool %q has no Sennit equivalent; dropped", d))
 		}
 	}
 
-	// Braid agents have no temperature/top_p field (see config.Agent); the
+	// Sennit agents have no temperature/top_p field (see config.Agent); the
 	// value is preserved as a comment rather than silently lost.
 	if meta.Temperature != nil {
-		warnings = append(warnings, "temperature is not supported by braid agents")
-		comments = append(comments, fmt.Sprintf("# original temperature: %v (not supported by braid agents)", *meta.Temperature))
+		warnings = append(warnings, "temperature is not supported by sennit agents")
+		comments = append(comments, fmt.Sprintf("# original temperature: %v (not supported by sennit agents)", *meta.Temperature))
 	}
 	if meta.TopP != nil {
-		warnings = append(warnings, "top_p is not supported by braid agents")
-		comments = append(comments, fmt.Sprintf("# original top_p: %v (not supported by braid agents)", *meta.TopP))
+		warnings = append(warnings, "top_p is not supported by sennit agents")
+		comments = append(comments, fmt.Sprintf("# original top_p: %v (not supported by sennit agents)", *meta.TopP))
 	}
 
 	// See TECHDEBT.md, "Limitations of imported agent definitions":
@@ -427,7 +427,7 @@ func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (Import
 	return entry, nil
 }
 
-// normalizeReasoningEffort maps a foreign effort value onto Braid's
+// normalizeReasoningEffort maps a foreign effort value onto Sennit's
 // low/medium/high scale. ok is false when the value can't be mapped at all
 // (the caller drops it); adjusted is true when the mapping isn't an exact
 // match (the caller still uses it, but warns).
@@ -444,7 +444,7 @@ func normalizeReasoningEffort(v string) (mapped string, adjusted bool, ok bool) 
 	}
 }
 
-// importKnownTools are Braid's own tool names, accepted as pass-through
+// importKnownTools are Sennit's own tool names, accepted as pass-through
 // during import. Kept as a literal set rather than importing
 // internal/agent/tools for its name constants: that package already imports
 // internal/config, and config importing it back would cycle.
@@ -464,9 +464,9 @@ var importKnownTools = map[string]bool{
 	"list_mcp_resources": true, "read_mcp_resource": true,
 }
 
-// translateAgentTools maps foreign tool names onto Braid's, the same way
-// normalizeToolNames does for .braid/agents files — except here a name that
-// resolves to neither a known Claude Code name nor a known Braid name is
+// translateAgentTools maps foreign tool names onto Sennit's, the same way
+// normalizeToolNames does for .sennit/agents files — except here a name that
+// resolves to neither a known Claude Code name nor a known Sennit name is
 // reported back as dropped, rather than kept as-is: an imported file that
 // silently granted the wrong tools would be worse than one that grants
 // fewer, correctly.
@@ -484,7 +484,7 @@ func translateAgentTools(names []string) (mapped []string, dropped []string) {
 		case importKnownTools[lower]:
 			name = lower
 		case legacyToolNames[lower] != "":
-			// One of Braid's own older names — fold it forward rather
+			// One of Sennit's own older names — fold it forward rather
 			// than dropping it. See [CanonicalToolName].
 			name = legacyToolNames[lower]
 		default:

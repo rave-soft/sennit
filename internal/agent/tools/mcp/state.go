@@ -225,7 +225,7 @@ func (r *Registry) updateStateLocked(name string, state State, err error, client
 		// close it so the child process and its stdio pipes are released — the
 		// bare map delete this used to do leaked both. Clearing the tool
 		// registry keeps the agent from advertising tools it can no longer
-		// call: without it, braid_info / the `/mcp` menu and the tool list
+		// call: without it, sennit_info / the `/mcp` menu and the tool list
 		// handed to the LLM diverge, so a server still reads "connected, N
 		// tools" while every call fails with "tool not found".
 		if old, ok := r.sessions.Take(name); ok {

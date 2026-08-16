@@ -4,7 +4,7 @@ import _ "embed"
 
 //go:generate go run ./genicon/cmd
 
-// Icon is the PNG data for the Braid notification icon: a dark rounded
+// Icon is the PNG data for the Sennit notification icon: a dark rounded
 // square with three crossing diagonal strands in the brand's
 // primary/secondary/accent colors, evoking a braid/plait. It's generated
 // deterministically by genicon (see genicon/icon.go and the go:generate

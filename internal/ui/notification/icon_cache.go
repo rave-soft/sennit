@@ -9,7 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 )
 
-// CacheIcon writes data to <os.UserCacheDir()>/braid/braid.png, skipping the
+// CacheIcon writes data to <os.UserCacheDir()>/sennit/sennit.png, skipping the
 // write if a file already there has identical content, and returns the
 // resulting path. Backends that need a filesystem path rather than raw
 // bytes (native OS notifications via beeep) call this once and reuse the

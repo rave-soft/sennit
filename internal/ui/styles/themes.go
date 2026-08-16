@@ -2,9 +2,9 @@ package styles
 
 import "github.com/charmbracelet/x/exp/charmtone"
 
-// Braid's default brand colors, re-exported from the default palette for the
+// Sennit's default brand colors, re-exported from the default palette for the
 // few places that need a brand color outside the Styles graph (the CLI's
-// version mark and `braid dirs`, the generated notification icon's reference
+// version mark and `sennit dirs`, the generated notification icon's reference
 // values). Those surfaces render before or outside the TUI, so they always
 // speak the default scheme rather than the selected theme; everything drawn
 // inside the TUI goes through Styles and follows the theme. See
@@ -40,7 +40,7 @@ var (
 	BrandAttention   = PaletteSteelTeal.Attention
 )
 
-// SennitDark returns Braid's default dark theme.
+// SennitDark returns Sennit's default dark theme.
 func SennitDark() Styles {
 	return Theme(DefaultThemeID)
 }

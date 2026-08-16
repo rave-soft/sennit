@@ -53,13 +53,13 @@ tasks:
       - internal/agent/**/*.md.tpl
       - internal/agent/hyper/provider.json
     generates:
-      - braid{{exeExt}}
+      - sennit{{exeExt}}
 
   run:
     desc: Run build
     cmds:
       - task: build
-      - "./braid{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
+      - "./sennit{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
 
   run:catwalk:
     desc: Run build with local Catwalk
@@ -67,17 +67,17 @@ tasks:
       CATWALK_URL: http://localhost:8080
     cmds:
       - task: build
-      - ./braid{{exeExt}} {{.CLI_ARGS}}
+      - ./sennit{{exeExt}} {{.CLI_ARGS}}
 
   run:onboarding:
     desc: Run build with custom config to test onboarding
     env:
-      BRAID_GLOBAL_DATA: tmp/onboarding/data
-      BRAID_GLOBAL_CONFIG: tmp/onboarding/config
+      SENNIT_GLOBAL_DATA: tmp/onboarding/data
+      SENNIT_GLOBAL_CONFIG: tmp/onboarding/config
     cmds:
       - task: build
       - rm -rf tmp/onboarding
-      - ./braid{{exeExt}} {{.CLI_ARGS}}
+      - ./sennit{{exeExt}} {{.CLI_ARGS}}
 
   test:
     desc: Run fast tests
@@ -88,10 +88,10 @@ tasks:
     desc: Run the full test suite with the race detector
     cmds:
       - |
-        test_binary="$(mktemp "${TMPDIR:-/tmp}/braid-test.XXXXXX")"
+        test_binary="$(mktemp "${TMPDIR:-/tmp}/sennit-test.XXXXXX")"
         trap 'rm -f "$test_binary"' EXIT
         go build -o "$test_binary" .
-        BRAID_TEST_BINARY="$test_binary" go test -race -failfast ./... {{.CLI_ARGS}}
+        SENNIT_TEST_BINARY="$test_binary" go test -race -failfast ./... {{.CLI_ARGS}}
 
   test:record:
     desc: Run tests and record all VCR cassettes again
@@ -118,7 +118,7 @@ tasks:
   dev:
     desc: Run with profiling enabled
     env:
-      BRAID_PROFILE: true
+      SENNIT_PROFILE: true
     cmds:
       - go run .
 

@@ -1,4 +1,4 @@
-// Package migrate owns Braid's one-time, idempotent config-file migrations.
+// Package migrate owns Sennit's one-time, idempotent config-file migrations.
 //
 // It transforms raw config bytes and rewrites on-disk config files while they
 // are protected by cross-process file locks. It is deliberately a leaf
@@ -39,14 +39,14 @@ const lockDeadline = 5 * time.Second
 // were bloat and handed to a refresh that then replaced it with junk.
 // Erring on the side of leaving a small list alone is cheap: it just means
 // the data-dir file keeps a few extra lines, not that a real router
-// provider's thousands of models stay in braid.json.
+// provider's thousands of models stay in sennit.json.
 const ModelCacheMigrationThreshold = 50
 
 // DropIncompatibleRecentModels drops a pre-refactor "recent_models" value
 // (an object keyed by "large"/"small") that no longer unmarshals into the
 // current flat-array shape. Old configs are not migrated — the field is
 // simply dropped and rebuilt from scratch — but a stale shape must not turn
-// into a hard json.Unmarshal failure that stops braid from starting.
+// into a hard json.Unmarshal failure that stops sennit from starting.
 func DropIncompatibleRecentModels(data []byte, path string) []byte {
 	v := gjson.GetBytes(data, "recent_models")
 	if !v.Exists() || v.IsArray() {
@@ -94,7 +94,7 @@ func MigrateDeprecatedKey(data []byte, oldKey, newKey, path string) []byte {
 // auto-discovered models still sitting in the data-dir config file (from
 // before the model-discovery cache existed) into the cache, and strips them
 // out of the JSON. It operates on the raw bytes of globalDataPath directly,
-// never on the in-memory cfg and never on ~/.config/braid.json: only the
+// never on the in-memory cfg and never on ~/.config/sennit.json: only the
 // data-dir file (machine-owned, writable state) is a candidate, only for
 // provider IDs outside the known catalog (a catalog provider's models field
 // is a legitimate user override, not a discovery dump), and only for arrays

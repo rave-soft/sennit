@@ -88,7 +88,7 @@ func saveLocked(list *ProjectList) error {
 // Register adds or updates a project in the list. The read-modify-write
 // cycle is protected by an in-process mutex (mu) against concurrent
 // goroutines in this process, and by a cross-process flock on
-// projects.json.lock against concurrent Braid processes — otherwise two
+// projects.json.lock against concurrent Sennit processes — otherwise two
 // processes registering at the same time can race and one update is lost.
 func Register(workingDir, dataDir string) error {
 	mu.Lock()

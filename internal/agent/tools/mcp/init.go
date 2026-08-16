@@ -1,5 +1,5 @@
 // Package mcp provides functionality for managing Model Context Protocol (MCP)
-// clients within the Braid application.
+// clients within the Sennit application.
 package mcp
 
 import (

@@ -36,7 +36,7 @@ import (
 
 func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
-	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom braid data directory")
+	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom sennit data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
@@ -67,28 +67,28 @@ var rootCmd = &cobra.Command{
 	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
 # Run in interactive mode
-braid
+sennit
 
 # Run non-interactively
-braid run "Guess my 5 favorite Pokémon"
+sennit run "Guess my 5 favorite Pokémon"
 
 # Run a non-interactively with pipes and redirection
-cat README.md | braid run "make this more glamorous" > GLAMOROUS_README.md
+cat README.md | sennit run "make this more glamorous" > GLAMOROUS_README.md
 
 # Run with debug logging in a specific directory
-braid --debug --cwd /path/to/project
+sennit --debug --cwd /path/to/project
 
 # Run in yolo mode (auto-accept all permissions; use with care)
-braid --yolo
+sennit --yolo
 
 # Run with custom data directory
-braid --data-dir /path/to/custom/.braid
+sennit --data-dir /path/to/custom/.sennit
 
 # Continue a previous session
-braid --session {session-id}
+sennit --session {session-id}
 
 # Continue the most recent session
-braid --continue
+sennit --continue
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sessionID, _ := cmd.Flags().GetString("session")
@@ -129,7 +129,7 @@ braid --continue
 		if err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Braid crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at " + brand.RepoURL + "/issues/new?template=bug.yml") //nolint:staticcheck
+			return errors.New("Sennit crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at " + brand.RepoURL + "/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		return nil
 	},

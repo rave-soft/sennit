@@ -28,7 +28,7 @@ var statCmd = &cobra.Command{
 	Short:   "Show usage statistics as terminal tables",
 	Long: `Show usage statistics as terminal tables, broken down by model,
 subagent, project, and skill, in tokens and time. Also available as
-"braid stats" for backwards compatibility.
+"sennit stats" for backwards compatibility.
 
 Caveats baked into this data:
 
@@ -56,7 +56,7 @@ func init() {
 }
 
 // statSince resolves the --since flag to a unix timestamp lower bound.
-// "all" resolves to 0 (the unix epoch), which predates any real Braid
+// "all" resolves to 0 (the unix epoch), which predates any real Sennit
 // data and so is effectively unfiltered.
 func statSince(since string) (int64, error) {
 	switch since {
@@ -368,7 +368,7 @@ func computeAgentStats(sessions []sennitdb.ListSessionsSinceRow) []statAgent {
 }
 
 // currentProjectStat aggregates top-level sessions (parent_session_id
-// empty) into a single totals row, matching the scope `braid stats` uses
+// empty) into a single totals row, matching the scope `sennit stats` uses
 // for its own totals.
 func currentProjectStat(sessions []sennitdb.ListSessionsSinceRow) statProject {
 	var p statProject
@@ -386,7 +386,7 @@ func currentProjectStat(sessions []sennitdb.ListSessionsSinceRow) statProject {
 }
 
 // gatherAllProjectStats aggregates one row per project known to the shared
-// DB (like `braid stats --all`), plus a trailing totals row. Now that every
+// DB (like `sennit stats --all`), plus a trailing totals row. Now that every
 // project shares one DB file, this is a single GROUP BY query rather than a
 // walk over each project's own (no longer existing) database file.
 func gatherAllProjectStats(ctx context.Context, queries *sennitdb.Queries, since int64) ([]statProject, error) {

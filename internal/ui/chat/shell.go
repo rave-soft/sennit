@@ -244,7 +244,7 @@ func (s *ShellItem) RawRender(width int) string {
 	}
 
 	// Remap raw ANSI 16-color codes onto legible Charmtone colors so
-	// dark terminal defaults don't render illegibly on Braid's
+	// dark terminal defaults don't render illegibly on Sennit's
 	// background.
 	// Strip trailing whitespace and bare ANSI resets before remapping.
 	// Programs like `task` emit "\x1b[0m\n" after their last line of

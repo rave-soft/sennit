@@ -60,7 +60,7 @@ func (t *Tracker) IsLoaded(name string) bool {
 // skills that are no longer active. It deliberately does not clear
 // loaded state wholesale: a skill that stays active across the rescan
 // must stay "loaded" if it was read earlier this session, or the
-// braid_info tool would misreport it as never having been read.
+// sennit_info tool would misreport it as never having been read.
 func (t *Tracker) UpdateActiveSkills(activeSkills []*Skill) {
 	if t == nil {
 		return

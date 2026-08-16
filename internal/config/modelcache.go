@@ -17,7 +17,7 @@ import (
 
 // modelCacheDBPath returns the path to the global model-discovery cache,
 // which lives next to the global data-dir config rather than inside any
-// per-project .braid/braid.db (that one is per-project user data, uses
+// per-project .sennit/sennit.db (that one is per-project user data, uses
 // goose migrations, and is a different concern entirely).
 func modelCacheDBPath(globalDataPath string) string {
 	return filepath.Join(filepath.Dir(globalDataPath), "models.db")
@@ -25,9 +25,9 @@ func modelCacheDBPath(globalDataPath string) string {
 
 // withModelCache opens the model-discovery cache, ensures its schema
 // exists, runs fn, and closes the connection. Cache reads/writes are rare
-// (once per custom provider per config load, plus `braid models refresh`),
+// (once per custom provider per config load, plus `sennit models refresh`),
 // so open-do-close per call is fine; there is no long-lived pool here, only
-// braid.db (internal/db.Connect) needs one.
+// sennit.db (internal/db.Connect) needs one.
 func withModelCache(dbPath string, fn func(*sql.DB) error) error {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return err
@@ -183,7 +183,7 @@ func saveCachedModelsWithError(globalDataPath, providerID string, models []catwa
 // SaveCachedProviderModels writes freshly discovered models for providerID
 // into the global model-discovery cache. Unlike saveCachedModels (used from
 // the best-effort background load path), this returns an error so callers
-// like `braid models refresh` can report a failure to the user.
+// like `sennit models refresh` can report a failure to the user.
 func (s *ConfigStore) SaveCachedProviderModels(providerID string, models []catwalk.Model) error {
 	if s.globalDataPath == "" {
 		return errors.New("no global data path configured for this store")

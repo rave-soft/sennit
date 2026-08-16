@@ -1,8 +1,8 @@
-// Package main is the entry point for the Braid CLI.
+// Package main is the entry point for the Sennit CLI.
 //
-//	@title			Braid API
+//	@title			Sennit API
 //	@version		1.0
-//	@description	Braid is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.
+//	@description	Sennit is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.
 //	@contact.name	rave-soft
 //	@contact.url	https://github.com/rave-soft/sennit
 //	@license.name	MIT

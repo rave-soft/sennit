@@ -192,7 +192,7 @@ func TestSetupAgentsIgnoresJSONAgentsBlock(t *testing.T) {
 	var warned bool
 	for _, p := range cfg.Problems {
 		if p.Area == AreaAgent && p.Severity == SeverityWarn &&
-			strings.Contains(p.Message, "agents in braid.json are ignored — define agents as .braid/agents/*.md files") {
+			strings.Contains(p.Message, "agents in sennit.json are ignored — define agents as .sennit/agents/*.md files") {
 			warned = true
 		}
 	}

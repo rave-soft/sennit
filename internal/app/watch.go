@@ -13,7 +13,7 @@ import (
 // or skill catalog was reloaded because an external edit was detected by
 // the watchers started in New (config.ConfigStore.WatchForExternalChanges
 // / skills.WatchForChanges) — for example an agent's Edit/Write tool
-// adding an MCP server to .braid/braid.json directly, bypassing
+// adding an MCP server to .sennit/sennit.json directly, bypassing
 // SetConfigFields.
 //
 // It carries no payload; subscribers that cache a derived snapshot should

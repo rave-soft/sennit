@@ -23,10 +23,10 @@ var modelsCmd = &cobra.Command{
 	Short: "List all available models from known providers",
 	Long:  `List all available models from known providers. Shows provider name and model IDs. Unconfigured providers are marked with (not configured).`,
 	Example: `# List all available models
-braid models
+sennit models
 
 # Search models
-braid models gpt5`,
+sennit models gpt5`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := ResolveCwd(cmd)
@@ -168,10 +168,10 @@ With no arguments, every custom provider (a provider with a base_url that
 isn't part of the built-in catwalk catalog) is refreshed. With a
 provider-id argument, only that provider is refreshed.`,
 	Example: `# Refresh every custom provider
-braid models refresh
+sennit models refresh
 
 # Refresh a single provider
-braid models refresh my-local-llm`,
+sennit models refresh my-local-llm`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := ResolveCwd(cmd)
@@ -301,7 +301,7 @@ braid models refresh my-local-llm`,
 			}
 
 			// Discovered models live in the global model-discovery cache,
-			// not providers.<id>.models in braid.json — see
+			// not providers.<id>.models in sennit.json — see
 			// validateCustomProviders in internal/config/load.go.
 			if err := cfg.SaveCachedProviderModels(id, models); err != nil {
 				hadFailure = true

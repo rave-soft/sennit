@@ -239,7 +239,7 @@ func NewToolMessageItem(
 	case strings.HasPrefix(toolCall.Name, "mcp_"):
 		item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
 	case isCustomAgentTool(cfg, toolCall.Name):
-		// User-defined agents (.braid/agents, config.Agents) are
+		// User-defined agents (.sennit/agents, config.Agents) are
 		// delegations of the same shape as the built-in "agent" tool —
 		// CustomAgentParams mirrors AgentParams, just a "prompt" field —
 		// so they get the identical renderer: running status line,

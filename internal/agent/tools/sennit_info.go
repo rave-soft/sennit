@@ -522,7 +522,7 @@ func writeAttribution(b *strings.Builder, cfg SennitInfoConfig) {
 	b.WriteString("[attribution]\n")
 	trailerStyle := c.Options.Attribution.TrailerStyle
 	if trailerStyle == "" {
-		trailerStyle = config.TrailerStyleCoAuthoredBy
+		trailerStyle = config.TrailerStyleAssistedBy
 	}
 	fmt.Fprintf(b, "trailer_style = %s\n", trailerStyle)
 	fmt.Fprintf(b, "generated_with = %v\n", c.Options.Attribution.GeneratedWith)

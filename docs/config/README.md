@@ -482,8 +482,9 @@ String Keys:
   initialize-as string             context filename created by sennit init
   notifications string             notification style: auto, native, osc, bell,
                                    or disabled
-  attribution-trailer-style string attribution trailer: none, co-authored-by,
-                                   or assisted-by
+  attribution-trailer-style string attribution trailer: none or assisted-by
+                                   (old configs with co_authored_by: true now
+                                   map to assisted-by)
 
 List Keys:
   context-path string             append a project context path

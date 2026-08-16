@@ -110,13 +110,13 @@ var gitGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 })
 
 // braidGlobalIgnorePatterns returns patterns from the user's
-// ~/.config/braid/ignore file.
+// ~/.config/sennit/ignore file.
 var braidGlobalIgnorePatterns = sync.OnceValue(func() []gitignore.Pattern {
 	name := filepath.Join(home.Config(), brand.Slug, "ignore")
 	bts, err := os.ReadFile(name)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			slog.Debug("Failed to read braid global ignore file", "path", name, "error", err)
+			slog.Debug("Failed to read sennit global ignore file", "path", name, "error", err)
 		}
 		return nil
 	}
@@ -139,7 +139,7 @@ func parsePatterns(lines []string, domain []string) []gitignore.Pattern {
 }
 
 type directoryLister struct {
-	// dirPatterns caches parsed patterns from .gitignore/.braidignore for each directory.
+	// dirPatterns caches parsed patterns from .gitignore/.sennitignore for each directory.
 	// This avoids re-reading files when building combined matchers.
 	dirPatterns *csync.Map[string, []gitignore.Pattern]
 	// combinedMatchers caches a combined matcher for each directory that includes
@@ -166,7 +166,7 @@ func pathToComponents(path string) []string {
 }
 
 // getDirPatterns returns the parsed patterns for a specific directory's
-// .gitignore and .braidignore files. Results are cached.
+// .gitignore and .sennitignore files. Results are cached.
 func (dl *directoryLister) getDirPatterns(dir string) []gitignore.Pattern {
 	return dl.dirPatterns.GetOrSet(dir, func() []gitignore.Pattern {
 		var allPatterns []gitignore.Pattern
@@ -198,7 +198,7 @@ func (dl *directoryLister) getCombinedMatcher(dir string) gitignore.Matcher {
 		// Add common patterns first (lowest priority).
 		allPatterns = append(allPatterns, commonIgnorePatterns()...)
 
-		// Add global ignore patterns (git core.excludesFile + braid global ignore).
+		// Add global ignore patterns (git core.excludesFile + sennit global ignore).
 		allPatterns = append(allPatterns, gitGlobalIgnorePatterns()...)
 		allPatterns = append(allPatterns, braidGlobalIgnorePatterns()...)
 

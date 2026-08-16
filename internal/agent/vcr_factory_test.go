@@ -42,21 +42,21 @@ func resolveTestVCRConfig(mode, cassetteRoot, baseURL, model string) (testVCRCon
 		return cfg, nil
 	case vcrModeFixture:
 		if cassetteRoot == "" {
-			return testVCRConfig{}, fmt.Errorf("fixture mode requires an absolute BRAID_TEST_CASSETTE_ROOT")
+			return testVCRConfig{}, fmt.Errorf("fixture mode requires an absolute SENNIT_TEST_CASSETTE_ROOT")
 		}
 		if !filepath.IsAbs(cassetteRoot) {
-			return testVCRConfig{}, fmt.Errorf("fixture mode requires absolute BRAID_TEST_CASSETTE_ROOT, got %q", cassetteRoot)
+			return testVCRConfig{}, fmt.Errorf("fixture mode requires absolute SENNIT_TEST_CASSETTE_ROOT, got %q", cassetteRoot)
 		}
 		cfg.Mode = recorder.ModeRecordOnly
 		return cfg, nil
 	case vcrModeRecord:
 		if baseURL == "" || model == "" {
-			return testVCRConfig{}, fmt.Errorf("record mode requires BRAID_TEST_OPENAI_BASE_URL and BRAID_TEST_OPENAI_MODEL")
+			return testVCRConfig{}, fmt.Errorf("record mode requires SENNIT_TEST_OPENAI_BASE_URL and SENNIT_TEST_OPENAI_MODEL")
 		}
 		cfg.Mode, cfg.BaseURL, cfg.Model = recorder.ModeRecordOnly, baseURL, model
 		return cfg, nil
 	default:
-		return testVCRConfig{}, fmt.Errorf("invalid BRAID_TEST_VCR_MODE %q (want %q, %q, or unset)", mode, vcrModeRecord, vcrModeFixture)
+		return testVCRConfig{}, fmt.Errorf("invalid SENNIT_TEST_VCR_MODE %q (want %q, %q, or unset)", mode, vcrModeRecord, vcrModeFixture)
 	}
 }
 
@@ -146,7 +146,7 @@ func TestTestVCRConfig(t *testing.T) {
 	_, err = resolveTestVCRConfig("bad", "", "", "")
 	require.Error(t, err)
 	_, err = resolveTestVCRConfig(vcrModeFixture, "relative/testdata", "", "")
-	require.ErrorContains(t, err, "absolute BRAID_TEST_CASSETTE_ROOT")
+	require.ErrorContains(t, err, "absolute SENNIT_TEST_CASSETTE_ROOT")
 	root, err := filepath.Abs(t.TempDir())
 	require.NoError(t, err)
 	cfg, err = resolveTestVCRConfig(vcrModeFixture, root, "", "")

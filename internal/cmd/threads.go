@@ -15,7 +15,7 @@ import (
 // parallel agent work streams `ctrl+e` drives from the TUI. It exists so a
 // thread running unattended (e.g. kicked off from a script, or left
 // running while the TUI is closed) can still be inspected and acted on.
-// Bare "braid threads" lists, mirroring how "braid session" defaults to no
+// Bare "sennit threads" lists, mirroring how "sennit session" defaults to no
 // subcommand meaning nothing (session requires "list") — threads instead
 // defaults straight to listing since that's the overwhelmingly common
 // case: a user checking "what's still running".

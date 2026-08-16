@@ -19,16 +19,16 @@ import (
 var loginCmd = &cobra.Command{
 	Aliases: []string{"auth"},
 	Use:     "login [platform]",
-	Short:   "Login Braid to a platform",
-	Long: `Login Braid to a specified platform.
+	Short:   "Login Sennit to a platform",
+	Long: `Login Sennit to a specified platform.
 The platform should be provided as an argument.
 Available platforms are: copilot.`,
 	Example: `
 # Authenticate with GitHub Copilot
-braid login copilot
+sennit login copilot
 
 # Force re-authentication even if already logged in
-braid login -f copilot
+sennit login -f copilot
   `,
 	ValidArgs: []cobra.Completion{
 		"copilot",

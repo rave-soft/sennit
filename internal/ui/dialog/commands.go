@@ -446,7 +446,7 @@ func systemCommandItems(com *common.Common, sessionID string, hasSession, hasTod
 
 	commands = append(
 		commands,
-		NewCommandItem(sty, "quit", "exit", "ctrl+c", tea.QuitMsg{}).WithAliases("quit").WithDescription("quit braid"),
+		NewCommandItem(sty, "quit", "exit", "ctrl+c", tea.QuitMsg{}).WithAliases("quit").WithDescription("quit sennit"),
 	)
 
 	return commands

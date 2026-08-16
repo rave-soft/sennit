@@ -240,7 +240,7 @@ func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string
 		}
 	}
 
-	// Create walker with gitignore and braidignore support
+	// Create walker with gitignore and sennitignore support
 	walker := fsext.NewFastGlobWalker(rootPath)
 
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {

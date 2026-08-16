@@ -180,9 +180,9 @@ func TestTavilyBackendRequiresAPIKey(t *testing.T) {
 // TestNewSearchBackendExpandsAPIKey verifies options.web_search.api_key
 // runs through shell expansion, the same as provider api_key.
 func TestNewSearchBackendExpandsAPIKey(t *testing.T) {
-	t.Setenv("BRAID_TEST_TAVILY_KEY", "expanded-key")
+	t.Setenv("SENNIT_TEST_TAVILY_KEY", "expanded-key")
 	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{
-		"BRAID_TEST_TAVILY_KEY": "expanded-key",
+		"SENNIT_TEST_TAVILY_KEY": "expanded-key",
 	}))
 
 	var gotAuth string
@@ -195,7 +195,7 @@ func TestNewSearchBackendExpandsAPIKey(t *testing.T) {
 
 	backend, err := NewSearchBackend(config.WebSearchOptions{
 		Provider: "tavily",
-		APIKey:   "$BRAID_TEST_TAVILY_KEY",
+		APIKey:   "$SENNIT_TEST_TAVILY_KEY",
 		BaseURL:  srv.URL,
 	}, resolver, nil)
 	require.NoError(t, err)

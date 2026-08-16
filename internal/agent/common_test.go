@@ -200,7 +200,7 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
 	// independently of user config on `$HOME/.config/braid/braid.json`.
 	cfg.Config().Options.Attribution = &config.Attribution{
-		TrailerStyle:  "co-authored-by",
+		TrailerStyle:  "assisted-by",
 		GeneratedWith: true,
 	}
 

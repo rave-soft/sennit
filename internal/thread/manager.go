@@ -1,6 +1,6 @@
 // Package thread implements threads: parallel agent work streams, each
 // running in its own git worktree and branch with a fully isolated
-// workspace (own .braid data directory, database, and agent
+// workspace (own .sennit data directory, database, and agent
 // coordinator), and by default auto-merged back into its base branch on
 // completion.
 package thread
@@ -63,12 +63,12 @@ type ManagerOptions struct {
 	// directory; an absolute value is used as-is.
 	WorktreeDir string
 	// DataDir is the workspace's project-local data directory
-	// (<repo>/.braid by default), which is where thread worktrees live
+	// (<repo>/.sennit by default), which is where thread worktrees live
 	// unless WorktreeDir says otherwise. That directory carries a
 	// "*" .gitignore of its own (see app.ensureDotBraidDir), which is
 	// what lets worktrees sit inside the repository without the repo
 	// seeing a second copy of itself as untracked files. Empty falls
-	// back to RepoRoot/.braid.
+	// back to RepoRoot/.sennit.
 	DataDir string
 	// Context is the base context background thread goroutines (agent
 	// runs, RunComplete watchers) are bound to. Defaults to

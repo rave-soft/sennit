@@ -12,9 +12,9 @@ import (
 )
 
 // ImportLegacyProjectDB imports a pre-shared-database project's SQLite
-// file (<projectDir>/braid.db, from before every project moved to one
+// file (<projectDir>/sennit.db, from before every project moved to one
 // shared database) into dest, stamping every row with projectPath, then
-// renames the source file to braid.db.imported so it is never imported
+// renames the source file to sennit.db.imported so it is never imported
 // again. It is a no-op if the legacy file doesn't exist or was already
 // imported (i.e. already renamed). Rows with primary key or unique
 // conflicts, and child rows orphaned by a missing session, are skipped

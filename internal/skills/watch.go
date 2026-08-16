@@ -12,7 +12,7 @@ import (
 // for SKILL.md files changed outside this process. Mirrors
 // internal/config's externalChangePollInterval: skill edits are rare and
 // not latency-sensitive, so a cheap poll beats fsnotify's trouble with
-// directories that don't exist yet (a project's first .braid/skills) and
+// directories that don't exist yet (a project's first .sennit/skills) and
 // editors' atomic rename-replace saves. A var, not a const, so tests can
 // shorten it.
 var ChangePollInterval = 2 * time.Second

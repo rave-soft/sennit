@@ -100,7 +100,7 @@ type ListSessionsSinceRow struct {
 	UpdatedAt        int64          `json:"updated_at"`
 }
 
-// The queries below back `braid stat`, a terminal-table
+// The queries below back `sennit stat`, a terminal-table
 // breakdown by model/agent/project/skill. They intentionally return raw
 // rows for a time window rather than pre-aggregating, since the
 // model/agent grouping requires Go-side logic (proportional token

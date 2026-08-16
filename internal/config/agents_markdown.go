@@ -15,16 +15,16 @@ import (
 // agentDirs are scanned for `*.md` agent definitions, lowest priority first,
 // so a later directory overrides an agent of the same name from an earlier one.
 //
-// Only Braid's own directory is scanned. Agent files written for other tools
+// Only Sennit's own directory is scanned. Agent files written for other tools
 // (Claude Code's .claude/agents, opencode's .opencode/agent) are not
-// auto-discovered — `braid import` copies and validates them into
-// .braid/agents instead of trusting a foreign directory implicitly.
+// auto-discovered — `sennit import` copies and validates them into
+// .sennit/agents instead of trusting a foreign directory implicitly.
 var agentDirs = []string{
 	filepath.Join(brand.DataDir, "agents"),
 }
 
 // markdownAgent is the frontmatter of an agent file. Fields absent from a
-// foreign tool's format simply stay zero and fall back to Braid's defaults.
+// foreign tool's format simply stay zero and fall back to Sennit's defaults.
 type markdownAgent struct {
 	Name        string `yaml:"name"`
 	Description string `yaml:"description"`
@@ -81,10 +81,10 @@ func (s *stringList) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// ClaudeToolNames maps Claude Code's tool names onto Braid's. It is exported
-// for `braid import` (see import.go), which is now the only place that
+// ClaudeToolNames maps Claude Code's tool names onto Sennit's. It is exported
+// for `sennit import` (see import.go), which is now the only place that
 // translates foreign tool names — regular discovery only reads
-// .braid/agents, whose files are expected to already name Braid's own tools.
+// .sennit/agents, whose files are expected to already name Sennit's own tools.
 var ClaudeToolNames = map[string]string{
 	"read":      "read",
 	"write":     "write",
@@ -208,10 +208,10 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 }
 
 // normalizeToolNames trims and drops duplicate tool names, folding names
-// Braid has since renamed onto their current ones. Unlike the importer
-// (see import.go), it does not translate foreign tool names: .braid/agents
-// is Braid's own directory, so its files are expected to already name
-// Braid's tools directly — only Braid's own older names are accepted.
+// Sennit has since renamed onto their current ones. Unlike the importer
+// (see import.go), it does not translate foreign tool names: .sennit/agents
+// is Sennit's own directory, so its files are expected to already name
+// Sennit's tools directly — only Sennit's own older names are accepted.
 func normalizeToolNames(names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, name := range names {

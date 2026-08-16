@@ -81,7 +81,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		c.MCP = make(map[string]MCPConfig)
 	}
 	// Drop orphaned OAuth token entries left behind when a user removes
-	// an MCP from braid.json. See MCPConfig.isOrphanedToken.
+	// an MCP from sennit.json. See MCPConfig.isOrphanedToken.
 	for name, m := range c.MCP {
 		if m.isOrphanedToken() {
 			delete(c.MCP, name)
@@ -123,7 +123,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		// Migrate deprecated co_authored_by or apply default
 		if c.Options.Attribution.CoAuthoredBy != nil {
 			if *c.Options.Attribution.CoAuthoredBy {
-				c.Options.Attribution.TrailerStyle = TrailerStyleCoAuthoredBy
+				c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
 			} else {
 				c.Options.Attribution.TrailerStyle = TrailerStyleNone
 			}

@@ -87,8 +87,8 @@ type ConfigStore struct {
 	config             *Config
 	workingDir         string
 	resolver           VariableResolver
-	globalDataPath     string   // ~/.local/share/braid/braid.json
-	workspacePath      string   // .braid/braid.json
+	globalDataPath     string   // ~/.local/share/sennit/sennit.json
+	workspacePath      string   // .sennit/sennit.json
 	loadedPaths        []string // config files that were successfully loaded
 	knownProviders     []catwalk.Provider
 	overrides          RuntimeOverrides
@@ -99,7 +99,7 @@ type ConfigStore struct {
 	// (CaptureStalenessSnapshot, RefreshStalenessSnapshot) already run
 	// under writeMu via updateLocked/reloadFromDisk, but ConfigStaleness
 	// is a read-only diagnostic called from other goroutines without
-	// writeMu (the braid_info tool, and WatchForExternalChanges' poll
+	// writeMu (the sennit_info tool, and WatchForExternalChanges' poll
 	// loop in watch.go) — a separate mutex, rather than reusing writeMu,
 	// keeps that read cheap and avoids adding staleness bookkeeping to
 	// writeMu's contention.
@@ -495,7 +495,7 @@ func (s *ConfigStore) OverridePreferredModel(model SelectedModel) {
 
 // pinPreferredModelLocked records a model choice made in this instance so
 // that a later config reload cannot replace it with a choice made
-// somewhere else. Several Braid instances share one global config file, so
+// somewhere else. Several Sennit instances share one global config file, so
 // a reload triggered by an unrelated write (a token refresh, say) would
 // otherwise import whichever model a sibling instance last selected and
 // switch models out from under the user mid-session.

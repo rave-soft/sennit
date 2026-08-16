@@ -205,7 +205,7 @@ type ListSessionsForGCRow struct {
 	UpdatedAt       int64          `json:"updated_at"`
 }
 
-// Every session across every project, trimmed to the columns `braid gc`
+// Every session across every project, trimmed to the columns `sennit gc`
 // needs to compute its retention set (age filter + parent/child
 // expansion) without pulling message/file bodies into memory. Unscoped by
 // project_path; the caller filters by project in Go for --project.

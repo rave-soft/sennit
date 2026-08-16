@@ -222,8 +222,8 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 
 // DoctorProblems collects every config.Problem for this workspace: the
 // static findings from config.Doctor plus any MCP server currently stuck
-// in an error/needs-auth state. This mirrors braid_info's [problems]
-// section (domain/agent/tools/braid_info.go's writeProblems) — the same
+// in an error/needs-auth state. This mirrors sennit_info's [problems]
+// section (domain/agent/tools/sennit_info.go's writeProblems) — the same
 // merge, on the UI side of the workspace.Workspace boundary since
 // internal/config cannot import the MCP client package.
 func DoctorProblems(com *common.Common) []config.Problem {

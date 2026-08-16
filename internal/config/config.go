@@ -21,12 +21,12 @@ const (
 	defaultInitializeAs  = "AGENTS.md"
 )
 
-// defaultContextPaths lists the project files Braid loads as context
-// automatically, without any opt-in. Braid only reads its own conventions
-// here (braid.md/AGENTS.md and casing/local variants); files belonging to
+// defaultContextPaths lists the project files Sennit loads as context
+// automatically, without any opt-in. Sennit only reads its own conventions
+// here (sennit.md/AGENTS.md and casing/local variants); files belonging to
 // other tools (CLAUDE.md, .cursorrules, .github/copilot-instructions.md,
 // etc.) are not auto-loaded — add them explicitly via options.context_paths
-// (braidrc: `option context-path CLAUDE.md`) if you want Braid to read them.
+// (sennitrc: `option context-path CLAUDE.md`) if you want Sennit to read them.
 var defaultContextPaths = []string{
 	brand.Slug + ".md",
 	brand.Slug + ".local.md",
@@ -128,7 +128,7 @@ type ProviderConfig struct {
 	FlatRate bool `json:"flat_rate,omitempty" jsonschema:"description=Flat-rate mode for this provider"`
 
 	// AutoDiscoverModels controls model discovery via /v1/models endpoint.
-	// When Models is empty and this is nil or true, Braid auto-discovers
+	// When Models is empty and this is nil or true, Sennit auto-discovers
 	// models. When true and Models is non-empty, discovered models are
 	// merged in (user-specified models take precedence). When false,
 	// only explicitly listed models are used.
@@ -141,7 +141,7 @@ type ProviderConfig struct {
 	// user's own config, or the global model-discovery cache (see
 	// internal/config/modelcache.go). It is in-memory bookkeeping only,
 	// never serialized — set by resolveCustomProviderModels/
-	// validateCustomProviders in load.go, and read by `braid models
+	// validateCustomProviders in load.go, and read by `sennit models
 	// refresh` (internal/cmd/models.go) to refuse silently overwriting a
 	// manually curated list with (possibly junk) discovery output.
 	ModelsSource ModelsSource `json:"-"`
@@ -151,8 +151,8 @@ type ProviderConfig struct {
 type ModelsSource string
 
 const (
-	// ModelsSourceConfig means Models was written by hand in braidrc/
-	// braid.json — refresh must never overwrite it silently.
+	// ModelsSourceConfig means Models was written by hand in sennitrc/
+	// sennit.json — refresh must never overwrite it silently.
 	ModelsSourceConfig ModelsSource = "config"
 	// ModelsSourceCache means Models came from discovery, either just now
 	// or from a previous load via the global model-discovery cache.
@@ -250,7 +250,7 @@ type MCPConfig struct {
 	// OAuthCallbackPort pins the localhost port used for the OAuth
 	// redirect listener. Set this when the OAuth provider requires an
 	// exact-match callback URL (e.g. GitHub OAuth Apps). When omitted,
-	// Braid picks the first free port from its default range.
+	// Sennit picks the first free port from its default range.
 	OAuthCallbackPort int `json:"oauth_callback_port,omitempty" jsonschema:"description=Fixed localhost port for the OAuth callback, required by providers that enforce exact-match redirect URIs"`
 
 	// OAuthToken is the persisted OAuth token for this server. It is
@@ -282,7 +282,7 @@ type TUIOptions struct {
 	// Theme names the color palette the TUI renders in, as chosen by the
 	// "/theme" command. The palettes themselves live in internal/ui/styles;
 	// config deliberately does not know their IDs, so an unknown or stale
-	// value here falls back to Braid's default scheme rather than failing
+	// value here falls back to Sennit's default scheme rather than failing
 	// to load (see styles.PaletteByID).
 	Theme string `json:"theme,omitempty" jsonschema:"description=Color palette for the TUI\\, chosen with the /theme command. An unknown value falls back to the default theme,enum=steel-teal,enum=graphite-amber,enum=ink-sage,enum=mono-steel,default=steel-teal"`
 
@@ -322,15 +322,14 @@ type Permissions struct {
 type TrailerStyle string
 
 const (
-	TrailerStyleNone         TrailerStyle = "none"
-	TrailerStyleCoAuthoredBy TrailerStyle = "co-authored-by"
-	TrailerStyleAssistedBy   TrailerStyle = "assisted-by"
+	TrailerStyleNone       TrailerStyle = "none"
+	TrailerStyleAssistedBy TrailerStyle = "assisted-by"
 )
 
 type Attribution struct {
-	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=assisted-by"`
+	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=assisted-by,default=assisted-by"`
 	CoAuthoredBy  *bool        `json:"co_authored_by,omitempty" jsonschema:"description=Deprecated: use trailer_style instead"`
-	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Braid line to commit messages and issues and PRs,default=true"`
+	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Sennit line to commit messages and issues and PRs,default=true"`
 }
 
 // JSONSchemaExtend marks the co_authored_by field as deprecated in the schema.
@@ -343,27 +342,27 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI. Braid auto-loads only its own conventions (AGENTS.md/BRAID.md and casing/local variants); list other tools' files here explicitly (e.g. CLAUDE.md) to have Braid read them too,example=BRAID.md,example=CLAUDE.md"`
-	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/braid/BRAID.md,default=~/.config/AGENTS.md"`
-	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/braid/skills,example=./skills"`
+	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI. Sennit auto-loads only its own conventions (AGENTS.md/SENNIT.md and casing/local variants); list other tools' files here explicitly (e.g. CLAUDE.md) to have Sennit read them too,example=SENNIT.md,example=CLAUDE.md"`
+	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/sennit/SENNIT.md,default=~/.config/AGENTS.md"`
+	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/sennit/skills,example=./skills"`
 	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	// DataDirectory is a project-local directory (".braid" by default) for
+	// DataDirectory is a project-local directory (".sennit" by default) for
 	// workspace-scoped state that is NOT part of the shared global database:
 	// the single-instance lock file, workspace config overrides, and (until
-	// imported) a pre-shared-database project's legacy braid.db. Session and
+	// imported) a pre-shared-database project's legacy sennit.db. Session and
 	// message history now live in the single global database (see
 	// config.GlobalDBDir()), not here. Relative paths are resolved against
 	// the working directory; absolute paths are used verbatim. After
 	// defaulting the stored value is always absolute.
-	DataDirectory           string            `json:"data_directory,omitempty" jsonschema:"description=Project-local directory for workspace-scoped state (lock file\\, config overrides\\, legacy pre-migration database) — not the shared session/message database. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.braid,example=.braid"`
+	DataDirectory           string            `json:"data_directory,omitempty" jsonschema:"description=Project-local directory for workspace-scoped state (lock file\\, config overrides\\, legacy pre-migration database) — not the shared session/message database. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.sennit,example=.sennit"`
 	DisabledTools           []string          `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=web_search"`
 	DisableDefaultProviders bool              `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
 	Attribution             *Attribution      `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics          bool              `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs            string            `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=BRAID.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	InitializeAs            string            `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=SENNIT.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	AutoLSP                 *bool             `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                *bool             `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications           string            `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
@@ -387,10 +386,10 @@ type Options struct {
 	// Threads (the git-worktree feature) are a separate, older feature and
 	// are not affected by this switch.
 	BackgroundAgents *bool `json:"background_agents,omitempty" jsonschema:"description=Allow the agent tool's background mode and the task_* tools\\, letting the model delegate work to background tasks in this workspace. Turning this off only blocks new dispatch — a task already running keeps running to completion. Does not affect threads.,default=true"`
-	// HistoryRetentionDays is read by `braid gc`, not enforced automatically:
+	// HistoryRetentionDays is read by `sennit gc`, not enforced automatically:
 	// nothing purges history on its own. A pointer distinguishes "unset"
 	// (defaults to 90) from an explicit 0, which means keep history forever.
-	HistoryRetentionDays *int `json:"history_retention_days,omitempty" jsonschema:"description=Age in days after which \"braid gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"braid gc\" (e.g. from cron) to apply it.,default=90,example=30,example=180"`
+	HistoryRetentionDays *int `json:"history_retention_days,omitempty" jsonschema:"description=Age in days after which \"sennit gc\" deletes sessions (and their messages/files) and finished threads. 0 keeps history forever. Not enforced automatically — run \"sennit gc\" (e.g. from cron) to apply it.,default=90,example=30,example=180"`
 }
 
 // ThreadsOptions configures the threads feature (parallel agent work
@@ -401,10 +400,10 @@ type ThreadsOptions struct {
 	// path is resolved against the parent of the repository root, not
 	// against the working directory. Absolute paths are used as-is.
 	// Defaults to "threads" inside the workspace data directory
-	// (<repo>/.braid/threads), which is ignored by the repository's own
+	// (<repo>/.sennit/threads), which is ignored by the repository's own
 	// git, so a worktree there is not seen as a second copy of the
 	// project.
-	WorktreeDir string `json:"worktree_dir,omitempty" jsonschema:"description=Parent directory for thread worktrees (<worktree_dir>/<thread-name>). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to \"threads\" inside the workspace data directory (.braid/threads).,example=/var/tmp/braid-threads,example=../thread-worktrees"`
+	WorktreeDir string `json:"worktree_dir,omitempty" jsonschema:"description=Parent directory for thread worktrees (<worktree_dir>/<thread-name>). A relative path resolves against the parent of the repository root; an absolute path is used as-is. Defaults to \"threads\" inside the workspace data directory (.sennit/threads).,example=/var/tmp/sennit-threads,example=../thread-worktrees"`
 }
 
 // WebSearchOptions configures the backend used by the web_search tool.
@@ -503,11 +502,11 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 	return time.Duration(h.Timeout) * time.Second
 }
 
-// Config holds the configuration for braid.
+// Config holds the configuration for sennit.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
 
-	// Model is the single model Braid uses for the session.
+	// Model is the single model Sennit uses for the session.
 	Model SelectedModel `json:"model,omitzero" jsonschema:"description=The model configuration,example={\"model\":\"gpt-4o\",\"provider\":\"openai\"}"`
 
 	// RecentModels lists recently used models, most-recent-first. Stored
@@ -533,7 +532,7 @@ type Config struct {
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
 	// Agents holds both the built-in agents and any the user defines.
-	// SetupAgents populates this from .braid/agents/*.md files (via
+	// SetupAgents populates this from .sennit/agents/*.md files (via
 	// discoverMarkdownAgents) plus the two built-ins; nothing decodes user
 	// agents into this field from JSON anymore (see loadFromBytes in
 	// load.go), so it is hidden from the generated config schema.
@@ -555,7 +554,7 @@ type Config struct {
 	// jsonAgentsBlockDetected records whether any loaded JSON config layer
 	// contained a top-level "agents" key. loadFromBytes (load.go) strips the
 	// block before unmarshaling instead of decoding it into Agents — a JSON
-	// "agents" entry is no longer read at all, only .braid/agents/*.md files
+	// "agents" entry is no longer read at all, only .sennit/agents/*.md files
 	// are. SetupAgents turns this into a doctor Problem so the silent ignore
 	// is visible instead of quietly no-op'ing forever.
 	jsonAgentsBlockDetected bool
@@ -678,7 +677,7 @@ func (c *Config) GetProviderForModel() *ProviderConfig {
 }
 
 // SelectedCatalogModel returns the catalog entry for c.Model, the one model
-// Braid is configured to use.
+// Sennit is configured to use.
 func (c *Config) SelectedCatalogModel() *catwalk.Model {
 	return c.GetModel(c.Model.Provider, c.Model.Model)
 }

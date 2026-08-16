@@ -36,12 +36,12 @@ func TestCoordinatorWebSearchBackend(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		t.Setenv("BRAID_TEST_WS_KEY", "resolved-key")
+		t.Setenv("SENNIT_TEST_WS_KEY", "resolved-key")
 
 		c := newProxyTestCoordinator(t, false)
 		c.cfg.Config().Options.WebSearch = &config.WebSearchOptions{
 			Provider: "tavily",
-			APIKey:   "$BRAID_TEST_WS_KEY",
+			APIKey:   "$SENNIT_TEST_WS_KEY",
 			BaseURL:  srv.URL,
 		}
 

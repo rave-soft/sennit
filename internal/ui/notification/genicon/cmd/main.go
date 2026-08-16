@@ -1,4 +1,4 @@
-// Command genicon regenerates Braid's embedded notification icon. Run via
+// Command genicon regenerates Sennit's embedded notification icon. Run via
 // `go generate ./internal/ui/notification/...`; see the go:generate
 // directive in internal/ui/notification/icon.go. Writes deterministic
 // output, so a clean regeneration should never produce a diff.

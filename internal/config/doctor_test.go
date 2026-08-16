@@ -274,10 +274,10 @@ func TestDoctorJunkModelIDExplicitProviderSkipped(t *testing.T) {
 }
 
 // TestDoctorReportsJSONAgentsBlock is the end-to-end version of
-// TestSetupAgentsIgnoresJSONAgentsBlock: it loads a real braid.json with an
+// TestSetupAgentsIgnoresJSONAgentsBlock: it loads a real sennit.json with an
 // "agents" block off disk through loadFromConfigPaths (not a hand-built
 // Config) and asserts the ignored block surfaces through Doctor, the same
-// list `braid doctor` and the TUI's /doctor dialog render.
+// list `sennit doctor` and the TUI's /doctor dialog render.
 func TestDoctorReportsJSONAgentsBlock(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "sennit.json")
@@ -294,7 +294,7 @@ func TestDoctorReportsJSONAgentsBlock(t *testing.T) {
 	for _, p := range problems {
 		if p.Area == AreaAgent && p.Severity == SeverityWarn && p.Subject == "agents" {
 			found = true
-			require.Contains(t, p.Message, "agents in braid.json are ignored — define agents as .braid/agents/*.md files")
+			require.Contains(t, p.Message, "agents in sennit.json are ignored — define agents as .sennit/agents/*.md files")
 		}
 	}
 	require.True(t, found, "expected a Problem for the ignored JSON agents block")

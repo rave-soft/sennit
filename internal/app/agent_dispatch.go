@@ -119,7 +119,7 @@ func (d *AgentDispatcher) Send(sessionID, runID, prompt string, attachments []me
 // On a non-cancel error it surfaces the failure to observers via a
 // notify.TypeAgentError notification (lossy, best-effort). That alone
 // is not a reliable terminal signal: the agent-event fan-in uses lossy
-// subscribers, so a `braid run` caller blocking on its RunID could
+// subscribers, so a `sennit run` caller blocking on its RunID could
 // hang if the event is dropped. To guarantee termination, when runID
 // is non-empty and the coordinator did not already publish the run's
 // authoritative terminal RunComplete (e.g. the error was returned

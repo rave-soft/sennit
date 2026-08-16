@@ -1,4 +1,4 @@
-Get Braid's current runtime state: active model, provider, LSP/MCP status, skills, hooks, permissions, and disabled tools. No parameters needed for the full dump; pass `models_for` to list one provider's available model IDs instead.
+Get Sennit's current runtime state: active model, provider, LSP/MCP status, skills, hooks, permissions, and disabled tools. No parameters needed for the full dump; pass `models_for` to list one provider's available model IDs instead.
 
 <usage>
 - Shows active model and provider, LSP/MCP server status, skills,
@@ -10,7 +10,7 @@ Get Braid's current runtime state: active model, provider, LSP/MCP status, skill
   (one per line, capped at 50 with "...and N more" for large router
   catalogs) instead of the full dump — use this to verify a model ID
   actually exists before writing `provider/model-id` into an agent file,
-  `model add`, or `braid.json`
+  `model add`, or `sennit.json`
 </usage>
 
 <tips>

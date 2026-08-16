@@ -57,19 +57,16 @@ When user asks to create a git commit:
 2. Stage relevant untracked files. Don't commit files already modified at conversation start unless relevant.
 3. Analyze staged changes in <commit_analysis> tags: list changed/added files, nature of change (feature/fix/refactor/test/docs), purpose, project impact, check for sensitive info. Don't use tools beyond git context.
 4. Draft the message per <commit_messages> and check it against the <git_message_quality> litmus test.
-5. Create the commit{{ if or (eq .Attribution.TrailerStyle "assisted-by") (eq .Attribution.TrailerStyle "co-authored-by")}} with attribution{{ end }} using HEREDOC:
+5. Create the commit{{ if eq .Attribution.TrailerStyle "assisted-by" }} with attribution{{ end }} using HEREDOC:
    git commit -m "$(cat <<'EOF'
 Commit message here.
 
 {{ if .Attribution.GeneratedWith }}
-💘 Generated with Braid
+💘 Generated with Sennit
 {{ end}}
 {{if eq .Attribution.TrailerStyle "assisted-by" }}
 
-Assisted-by: Braid:{{ .ModelID }}
-{{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
-
-Co-Authored-By: Braid <braid@charm.land>
+Assisted-by: Sennit:{{ .ModelID }}
 {{ end }}
 EOF
 )"
@@ -96,7 +93,7 @@ When user asks you to create or update a PR:
 <summary>
 
 {{ if .Attribution.GeneratedWith -}}
-💘 Generated with Braid
+💘 Generated with Sennit
 {{- end }}
 
 EOF

@@ -1,11 +1,11 @@
 ---
 name: sennit-hooks
-description: Use when the user wants to add, write, debug, or configure a Braid hook — gating or blocking tool calls, approving or rewriting tool input before execution, injecting context into tool results, or troubleshooting hook behavior in braid.json.
+description: Use when the user wants to add, write, debug, or configure a Sennit hook — gating or blocking tool calls, approving or rewriting tool input before execution, injecting context into tool results, or troubleshooting hook behavior in sennit.json.
 ---
 
-# Braid Hooks
+# Sennit Hooks
 
-Hooks are user-defined commands in `braid.json` that fire at specific points
+Hooks are user-defined commands in `sennit.json` that fire at specific points
 during execution, giving deterministic control over tool behavior. They run
 **before** permission checks and **only on the top-level agent's** tool calls —
 sub-agent calls (task tool, agentic_fetch, etc.) are not intercepted, though
@@ -51,13 +51,13 @@ the input/output contract is identical regardless of language.
 
 | Variable                     | Description                              |
 | ---------------------------- | ---------------------------------------- |
-| `BRAID_EVENT`                | Event name (e.g. `PreToolUse`)           |
-| `BRAID_TOOL_NAME`            | Tool being called (e.g. `bash`)          |
-| `BRAID_SESSION_ID`           | Current session ID                       |
-| `BRAID_CWD`                  | Working directory                        |
-| `BRAID_PROJECT_DIR`          | Project root directory                   |
-| `BRAID_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command      |
-| `BRAID_TOOL_INPUT_FILE_PATH` | For file tools: the target file path     |
+| `SENNIT_EVENT`                | Event name (e.g. `PreToolUse`)           |
+| `SENNIT_TOOL_NAME`            | Tool being called (e.g. `bash`)          |
+| `SENNIT_SESSION_ID`           | Current session ID                       |
+| `SENNIT_CWD`                  | Working directory                        |
+| `SENNIT_PROJECT_DIR`          | Project root directory                   |
+| `SENNIT_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command      |
+| `SENNIT_TOOL_INPUT_FILE_PATH` | For file tools: the target file path     |
 
 **JSON on stdin:**
 
@@ -129,7 +129,7 @@ Composed in **config order**:
 #!/usr/bin/env bash
 set -euo pipefail
 
-if echo "$BRAID_TOOL_INPUT_COMMAND" | grep -qE 'rm\s+-(rf|fr)\s+/'; then
+if echo "$SENNIT_TOOL_INPUT_COMMAND" | grep -qE 'rm\s+-(rf|fr)\s+/'; then
   echo "Refusing to run rm -rf against root" >&2
   exit 2
 fi
@@ -153,7 +153,7 @@ Emit only `context` — omit `decision` so the normal permission flow still runs
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$BRAID_TOOL_INPUT_FILE_PATH" == *.go ]]; then
+if [[ "$SENNIT_TOOL_INPUT_FILE_PATH" == *.go ]]; then
   echo '{"context": "Remember: run gofumpt after editing Go files."}'
 else
   echo '{}'
@@ -187,7 +187,7 @@ preserved.
 
 1. Add `#!/usr/bin/env bash` and `set -euo pipefail` (for shell scripts).
 2. `chmod +x` the script.
-3. Add the entry under `hooks.PreToolUse` in `braid.json` with the right matcher.
+3. Add the entry under `hooks.PreToolUse` in `sennit.json` with the right matcher.
 4. Decide intent: inject context (omit `decision`), auto-approve (`"allow"`),
    block (`exit 2`), or halt (`exit 49`).
 5. If rewriting input, remember `updated_input` is a shallow merge — only
@@ -196,14 +196,14 @@ preserved.
 ## Debugging
 
 - Timeouts kill the hook silently and the tool call proceeds. Bump `timeout` if needed.
-- Non-zero exit codes other than 2/49 are logged but don't block — check Braid logs.
+- Non-zero exit codes other than 2/49 are logged but don't block — check Sennit logs.
 - Use `echo "debug info" >&2` for logging without corrupting stdout JSON.
 - `matcher` is a regex against the tool name. Use `^bash$` (not `bash`) if you
   don't also want to match `mcp_something_bash`.
 
 ## Claude Code Compatibility
 
-Braid also accepts Claude Code's `hookSpecificOutput` envelope. One intentional
-divergence: Braid treats `updated_input` as shallow-merge, Claude Code replaces.
+Sennit also accepts Claude Code's `hookSpecificOutput` envelope. One intentional
+divergence: Sennit treats `updated_input` as shallow-merge, Claude Code replaces.
 Existing Claude Code hooks work without modification for the matcher/decision
 parts; revisit any that relied on `updatedInput` fully replacing tool input.

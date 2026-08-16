@@ -27,7 +27,7 @@ import (
 // been declared with `provider add` first). "remove" removes it. Given a
 // <provider>/<id>, the bare form sets the selected model; given no argument
 // it prints the current selection as <provider>/<id>. The old `model large`
-// and `model small` slot syntax is rejected: Braid now selects a single
+// and `model small` slot syntax is rejected: Sennit now selects a single
 // model, not a large/small pair.
 func handleModel(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	b := configBuilderFromCtx(ctx)

@@ -1,4 +1,4 @@
-// Package shellconfig implements the Bash-powered config format for Braid.
+// Package shellconfig implements the Bash-powered config format for Sennit.
 //
 // It provides shell builtins (provider, model, mcp, lsp, permissions, hook,
 // option) that populate config by mutating a ConfigBuilder
@@ -7,7 +7,7 @@
 // they are no-ops during normal bash tool execution.
 //
 // This package sits between shell and config: it imports shell (for
-// RegisterBuiltin and Run), and config imports shellconfig to run braidrc
+// RegisterBuiltin and Run), and config imports shellconfig to run sennitrc
 // files.
 package shellconfig
 

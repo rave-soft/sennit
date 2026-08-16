@@ -138,7 +138,7 @@ func ensureParentDir(filePath string) error {
 
 // writeFileWithHistory writes newContent to filePath and updates file
 // history: it records a history entry if none exists yet, snapshots any
-// content that changed on disk outside of Braid, and stores the new
+// content that changed on disk outside of Sennit, and stores the new
 // version. Used by write/edit/multiedit whenever a tool commits file
 // content, whether creating the file (oldContent == "") or overwriting it.
 func writeFileWithHistory(ctx context.Context, files history.Service, sessionID, filePath, oldContent, newContent string) error {

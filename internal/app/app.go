@@ -171,7 +171,7 @@ type App struct {
 	// runCompletions is the authoritative per-run completion signal,
 	// emitted once per top-level agent turn after all message
 	// updates have been flushed. Bridged into app.events so
-	// subscribers (notably `braid run`) can drive their exit on a
+	// subscribers (notably `sennit run`) can drive their exit on a
 	// deterministic, payload-bearing event instead of guessing from
 	// message finish parts.
 	runCompletions *pubsub.Broker[notify.RunComplete]
@@ -286,7 +286,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	}
 
 	// Check for updates in the background.
-	// Upstream started a background update check against GitHub here. Braid
+	// Upstream started a background update check against GitHub here. Sennit
 	// makes no outbound calls of its own.
 
 	// Arm initialization synchronously before launching it so WaitForInit
@@ -680,7 +680,7 @@ func ForwardEvents[T any](app *App, name string, subscribe func(context.Context)
 // app.events broker using PublishMustDeliver instead of Publish. Use
 // this for terminal events that subscribers cannot tolerate losing —
 // notably RunComplete, which is the authoritative end-of-run signal
-// for `braid run`. A lossy fan-in here can drop the only terminal
+// for `sennit run`. A lossy fan-in here can drop the only terminal
 // event and hang non-interactive clients waiting on it.
 func setupSubscriberMustDeliver[T any](
 	ctx context.Context,

@@ -50,14 +50,14 @@ linters:
     paths:
       # Git worktrees created inside the repo: Claude Code puts them in
       # .claude/worktrees/, and a thread's own worktree lives in
-      # .braid/threads/ (see thread.ManagerOptions.WorktreeDir). Go's own
+      # .sennit/threads/ (see thread.ManagerOptions.WorktreeDir). Go's own
       # tooling skips dot-directories, so `go build ./...` never sees
       # them, but golangci-lint does: it would lint a second copy of
       # every package — on another branch, often deliberately
       # mid-refactor — report issues against paths that vanish when the
       # worktree is removed, and poison its cache with them.
       - '\.claude/'
-      - '\.braid/'
+      - '\.sennit/'
     rules:
       - text: '(slog|log)\.\w+'
         linters:
@@ -83,4 +83,4 @@ formatters:
     generated: lax
     paths:
       - '\.claude/'
-      - '\.braid/'
+      - '\.sennit/'

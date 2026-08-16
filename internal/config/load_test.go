@@ -462,7 +462,7 @@ func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 
 		_, _, err := loadFromConfigPaths(context.Background(), []string{jsonPath, rcPath})
 		require.NoError(t, err)
-		require.Contains(t, buf.String(), "braidrc taking precedence")
+		require.Contains(t, buf.String(), "sennitrc taking precedence")
 		require.Contains(t, buf.String(), `"conflicting_keys":"options"`)
 	})
 
@@ -476,7 +476,7 @@ func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 
 		_, _, err := loadFromConfigPaths(context.Background(), []string{jsonPath, rcPath})
 		require.NoError(t, err)
-		require.NotContains(t, buf.String(), "braidrc taking precedence",
+		require.NotContains(t, buf.String(), "sennitrc taking precedence",
 			"disjoint coexistence should not warn")
 	})
 }

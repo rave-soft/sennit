@@ -35,8 +35,8 @@ interrupted — never pending/running/merging) older than the same window,
 then VACUUM the database and checkpoint its WAL file.
 
 The retention window defaults to options.history_retention_days (90 days
-if unset); 0 means "keep forever" and turns "braid gc" into a no-op. A
-session's age is judged by its updated_at, exactly like "braid stat"'s
+if unset); 0 means "keep forever" and turns "sennit gc" into a no-op. A
+session's age is judged by its updated_at, exactly like "sennit stat"'s
 --since window; a session updated exactly at the cutoff is kept, since the
 comparison is strict (updated_at < cutoff).
 
@@ -44,19 +44,19 @@ Deleting a session also deletes any agent-tool/title sub-sessions parented
 to it, regardless of the child's own age. Sub-sessions old enough on their
 own are deleted independently of their parent.
 
-By default "braid gc" operates on the entire shared database, across every
+By default "sennit gc" operates on the entire shared database, across every
 project — the database is shared, so that is almost always what you want
 when reclaiming disk space. Pass --project to scope the run to sessions and
 threads under the current working directory only.`,
 	Example: `
 # See what a gc run would delete, without deleting anything
-braid gc --dry-run
+sennit gc --dry-run
 
 # Purge history older than 30 days instead of the configured default
-braid gc --days 30
+sennit gc --days 30
 
 # Only touch the current project's history
-braid gc --project
+sennit gc --project
   `,
 	RunE: runGC,
 }
@@ -68,7 +68,7 @@ func init() {
 	gcCmd.Flags().Bool("json", false, "Output machine-readable JSON instead of text")
 }
 
-// gcReport summarizes one `braid gc` run, for both the human-readable and
+// gcReport summarizes one `sennit gc` run, for both the human-readable and
 // --json output paths.
 type gcReport struct {
 	DryRun            bool   `json:"dry_run"`
@@ -125,7 +125,7 @@ func runGC(cmd *cobra.Command, _ []string) error {
 
 	out := cmd.OutOrStdout()
 
-	// retentionDays <= 0 means "keep forever" -- braid gc has nothing to
+	// retentionDays <= 0 means "keep forever" -- sennit gc has nothing to
 	// do and, since nothing changes, nothing to VACUUM either.
 	if retentionDays <= 0 {
 		if jsonOut {
@@ -268,7 +268,7 @@ func gcCountDependents(ctx context.Context, db gcRowQuerier, sessionIDs []string
 	return messages, files, readFiles, nil
 }
 
-// gcSelectSessions returns the IDs of every session `braid gc` should
+// gcSelectSessions returns the IDs of every session `sennit gc` should
 // delete: every session whose updated_at is strictly older than cutoff
 // (scoped to projectPath when non-empty), expanded to include any
 // agent-tool/title sub-session parented to a selected session, regardless

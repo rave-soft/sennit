@@ -231,7 +231,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			}
 		}
 	case message.System:
-		// A notice Braid wrote about its own doing (a thread merged and
+		// A notice Sennit wrote about its own doing (a thread merged and
 		// cleared away, say). Nothing to animate and nothing to link up —
 		// it is one static line.
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Config())

@@ -16,7 +16,7 @@ func TestAttributionMigration(t *testing.T) {
 		expectedGenerate bool
 	}{
 		{
-			name: "old setting co_authored_by=true migrates to co-authored-by",
+			name: "old setting co_authored_by=true migrates to assisted-by",
 			configJSON: `{
 				"options": {
 					"attribution": {
@@ -25,7 +25,7 @@ func TestAttributionMigration(t *testing.T) {
 					}
 				}
 			}`,
-			expectedTrailer:  TrailerStyleCoAuthoredBy,
+			expectedTrailer:  TrailerStyleAssistedBy,
 			expectedGenerate: false,
 		},
 		{

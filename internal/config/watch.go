@@ -13,13 +13,13 @@ import (
 // tracked config files for changes made outside this process. Config edits
 // are rare and not latency-sensitive, so a cheap poll beats the complexity
 // of watching directories that may not exist yet (a project's first
-// .braid/, say) or of teasing apart editors' atomic rename-replace saves
+// .sennit/, say) or of teasing apart editors' atomic rename-replace saves
 // from a real fsnotify watch.
 const externalChangePollInterval = 2 * time.Second
 
 // OnExternalChange registers fn to run after WatchForExternalChanges
 // reloads config because of a change made outside this process — for
-// example an agent's Edit/Write tool touching .braid/braid.json directly,
+// example an agent's Edit/Write tool touching .sennit/sennit.json directly,
 // instead of going through SetConfigFields. Only one callback is kept; a
 // later call replaces the previous one. fn runs synchronously on the
 // watcher goroutine, so it should not block; callers that need to touch
@@ -83,7 +83,7 @@ func (s *ConfigStore) WatchForExternalChanges(ctx context.Context) {
 // ConfigStaleness alone is not quite enough: it only tracks paths that
 // were already candidates as of the last snapshot, so a config file
 // created for the first time after that snapshot (a project's first
-// .braid/braid.json, written by an agent's Write tool mid-session) is
+// .sennit/sennit.json, written by an agent's Write tool mid-session) is
 // invisible to it. Re-running the candidate walk catches that case too;
 // it is cheap (stat calls only, no file reads).
 func (s *ConfigStore) externalChangeDetected() bool {
@@ -127,7 +127,7 @@ func (s *ConfigStore) resolveAgentDirs() []string {
 // scanAgentFiles snapshots every *.md file under the agent directories —
 // path, size, and mtime, at the same granularity fileSnapshot already uses
 // for config files. A missing directory is skipped rather than treated as
-// an error: a project's first .braid/agents is typically created mid-
+// an error: a project's first .sennit/agents is typically created mid-
 // session, and a global agents directory may never exist at all.
 func (s *ConfigStore) scanAgentFiles() map[string]fileSnapshot {
 	snapshot := make(map[string]fileSnapshot)

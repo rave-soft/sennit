@@ -296,7 +296,7 @@ func TestReadBuiltinFile(t *testing.T) {
 			FilePath: "sennit://skills/sennit-config/SKILL.md",
 		}, nil)
 		require.NotEmpty(t, resp.Content)
-		require.Contains(t, resp.Content, "Braid Configuration")
+		require.Contains(t, resp.Content, "Sennit Configuration")
 	})
 
 	t.Run("not found", func(t *testing.T) {

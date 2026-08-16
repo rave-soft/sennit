@@ -20,12 +20,12 @@ import (
 // lookupConfigs searches config files starting at cwd and walking up
 // through the current project. The upward walk stops at the git
 // working tree root when one can be detected, otherwise at cwd itself,
-// so an unrelated braid.json placed above the project is never picked
+// so an unrelated sennit.json placed above the project is never picked
 // up. Global user-level config locations are always included
 // regardless of the boundary.
 func lookupConfigs(cwd string) []string {
 	// Prepend global user config and machine-owned data JSON. Only the user
-	// config directory contributes a braidrc; the data directory is writable
+	// config directory contributes a sennitrc; the data directory is writable
 	// machine state and must never be executed as Bash. Missing files are
 	// skipped when loaded.
 	configPaths := []string{
@@ -37,11 +37,11 @@ func lookupConfigs(cwd string) []string {
 
 	// Ordered high-to-low priority within a directory. LookupBounded returns
 	// matches in this order, and the later reverse + merge make the earliest
-	// listed name win on conflict. So: the .braid/ subdirectory variants beat
-	// their root-level counterparts, .braidrc beats braidrc, both beat the
-	// JSON configs, and .braid.json beats braid.json.
+	// listed name win on conflict. So: the .sennit/ subdirectory variants beat
+	// their root-level counterparts, .sennitrc beats sennitrc, both beat the
+	// JSON configs, and .sennit.json beats sennit.json.
 	//
-	// The .braid/ variants are looked up as literal names — ".braid" here is
+	// The .sennit/ variants are looked up as literal names — ".sennit" here is
 	// not options.data_directory (which is configurable and resolved
 	// separately, see workspacePath in Load/reloadFromDisk); it is the
 	// project's canonical config subdirectory, checked at every directory in
@@ -78,29 +78,29 @@ func GlobalConfig() string {
 }
 
 // GlobalDBDir returns the directory holding the single SQLite database
-// shared by every project, ~/.config/braid by default (or
-// BRAID_GLOBAL_CONFIG's directory when set). Every workspace connects to
-// the same braid.db; rows are scoped by project_path.
+// shared by every project, ~/.config/sennit by default (or
+// SENNIT_GLOBAL_CONFIG's directory when set). Every workspace connects to
+// the same sennit.db; rows are scoped by project_path.
 func GlobalDBDir() string {
 	return filepath.Dir(GlobalConfig())
 }
 
 // GlobalLogFile returns the path to the single log file shared by every
-// project, ~/.config/braid/logs/braid.log by default (alongside the
+// project, ~/.config/sennit/logs/sennit.log by default (alongside the
 // shared database — see GlobalDBDir).
 func GlobalLogFile() string {
 	return filepath.Join(GlobalDBDir(), "logs", brand.LogFile)
 }
 
-// shellConfigSibling returns the braidrc path that sits alongside a given
-// braid.json path (same directory). Used so global config locations pick up a
+// shellConfigSibling returns the sennitrc path that sits alongside a given
+// sennit.json path (same directory). Used so global config locations pick up a
 // shell config, not just JSON.
 func shellConfigSibling(jsonPath string) string {
 	return filepath.Join(filepath.Dir(jsonPath), appName+"rc")
 }
 
-// isShellConfig reports whether a config path is a shell config (braidrc or
-// the hidden .braidrc), as opposed to a JSON config.
+// isShellConfig reports whether a config path is a shell config (sennitrc or
+// the hidden .sennitrc), as opposed to a JSON config.
 func isShellConfig(path string) bool {
 	base := filepath.Base(path)
 	return base == appName+"rc" || base == "."+appName+"rc"
@@ -122,8 +122,8 @@ func GlobalConfigData() string {
 	}
 
 	// return the path to the main data directory
-	// for windows, it should be in `%LOCALAPPDATA%/braid/`
-	// for linux and macOS, it should be in `$HOME/.local/share/braid/`
+	// for windows, it should be in `%LOCALAPPDATA%/sennit/`
+	// for linux and macOS, it should be in `$HOME/.local/share/sennit/`
 	if runtime.GOOS == "windows" {
 		localAppData := cmp.Or(
 			os.Getenv("LOCALAPPDATA"),
@@ -197,7 +197,7 @@ func computeWorktreeRoot(dir string) string {
 // projectBoundary returns the directory at which an upward configuration
 // search rooted at dir should stop. It is the git working tree root when
 // one can be detected, otherwise dir itself. Returning dir as a
-// fallback keeps Braid from silently adopting state files placed above
+// fallback keeps Sennit from silently adopting state files placed above
 // the current project.
 func projectBoundary(dir string) string {
 	if root := worktreeRoot(dir); root != "" {
@@ -214,9 +214,9 @@ func projectBoundary(dir string) string {
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
 //
-// Only Braid's own catalog is scanned here. Skills authored for other tools
-// (Claude Code, opencode, ...) are not auto-discovered — see `braid import`,
-// which copies them into .braid/skills with validation instead of trusting a
+// Only Sennit's own catalog is scanned here. Skills authored for other tools
+// (Claude Code, opencode, ...) are not auto-discovered — see `sennit import`,
+// which copies them into .sennit/skills with validation instead of trusting a
 // foreign directory implicitly.
 func GlobalSkillsDirs() []string {
 	if braidSkills := os.Getenv(brand.EnvPrefix + "SKILLS_DIR"); braidSkills != "" {
@@ -227,7 +227,7 @@ func GlobalSkillsDirs() []string {
 		filepath.Join(home.Config(), appName, "skills"),
 	}
 
-	// On Windows, also load from app data on top of `$HOME/.config/braid`.
+	// On Windows, also load from app data on top of `$HOME/.config/sennit`.
 	// This is here mostly for backwards compatibility.
 	if runtime.GOOS == "windows" {
 		appData := cmp.Or(
@@ -244,14 +244,14 @@ func GlobalSkillsDirs() []string {
 // project-level skills are discovered. Shared across working-dir and
 // git-root lookups to prevent drift when a new convention is added.
 //
-// Only .braid/skills is scanned: skills written for other tools are brought
-// in explicitly via `braid import`, not auto-discovered from their native
+// Only .sennit/skills is scanned: skills written for other tools are brought
+// in explicitly via `sennit import`, not auto-discovered from their native
 // directories.
 var projectSkillSubdirs = []string{
 	brand.DataDir + "/skills",
 }
 
-// ProjectSkillsDir returns the default project directories for which Braid
+// ProjectSkillsDir returns the default project directories for which Sennit
 // will look for skills. In addition to the working directory, it also
 // checks the git working tree root so that monorepo-level skills are
 // discovered when the user is inside a subdirectory.

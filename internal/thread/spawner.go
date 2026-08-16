@@ -3,7 +3,7 @@ package thread
 import "context"
 
 // Handle is a running workspace hosting one delegation's app: for a
-// thread, its own isolated instance (its own .braid data directory,
+// thread, its own isolated instance (its own .sennit data directory,
 // database, and agent coordinator) rooted at the thread's git worktree;
 // for a task, the parent workspace's own instance.
 type Handle interface {

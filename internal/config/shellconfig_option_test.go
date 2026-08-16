@@ -79,11 +79,11 @@ option attribution-generated-with false`)
 }
 
 func TestShellConfigOptionAttributionTrailerStylePreservesGeneratedWithDefault(t *testing.T) {
-	store := loadBraidSh(t, `option attribution-trailer-style co-authored-by`)
+	store := loadBraidSh(t, `option attribution-trailer-style assisted-by`)
 
 	attribution := store.Config().Options.Attribution
 	require.NotNil(t, attribution)
-	require.Equal(t, "co-authored-by", string(attribution.TrailerStyle))
+	require.Equal(t, "assisted-by", string(attribution.TrailerStyle))
 	require.True(t, attribution.GeneratedWith)
 }
 
@@ -97,7 +97,7 @@ func TestShellConfigOptionAttributionGeneratedWithCaseInsensitive(t *testing.T) 
 func TestShellConfigOptionAttributionRejectsInvalidStyle(t *testing.T) {
 	_, err := loadBraidShErr(t, `option attribution-trailer-style bogus`)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "expects none, co-authored-by, or assisted-by")
+	require.Contains(t, err.Error(), "expects none or assisted-by")
 }
 
 func TestShellConfigOptionListAppends(t *testing.T) {

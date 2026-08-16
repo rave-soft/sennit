@@ -30,28 +30,28 @@ var runCmd = &cobra.Command{
 The prompt can be provided as arguments or piped from stdin.`,
 	Example: `
 # Run a simple prompt
-braid run "Guess my 5 favorite Pokémon"
+sennit run "Guess my 5 favorite Pokémon"
 
 # Pipe input from stdin
-curl https://charm.land | braid run "Summarize this website"
+curl https://example.com | sennit run "Summarize this website"
 
 # Read from a file
-braid run "What is this code doing?" <<< prrr.go
+sennit run "What is this code doing?" <<< prrr.go
 
 # Redirect output to a file
-braid run "Generate a hot README for this project" > MY_HOT_README.md
+sennit run "Generate a hot README for this project" > MY_HOT_README.md
 
 # Run in quiet mode (hide the spinner)
-braid run --quiet "Generate a README for this project"
+sennit run --quiet "Generate a README for this project"
 
 # Run in verbose mode (show logs)
-braid run --verbose "Generate a README for this project"
+sennit run --verbose "Generate a README for this project"
 
 # Continue a previous session
-braid run --session {session-id} "Follow up on your last response"
+sennit run --session {session-id} "Follow up on your last response"
 
 # Continue the most recent session
-braid run --continue "Follow up on your last response"
+sennit run --continue "Follow up on your last response"
 
   `,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -97,7 +97,7 @@ braid run --continue "Follow up on your last response"
 		event.AppInitialized()
 
 		if !ws.Config().IsConfigured() {
-			return fmt.Errorf("no providers configured - please run 'braid' to set up a provider interactively")
+			return fmt.Errorf("no providers configured - please run 'sennit' to set up a provider interactively")
 		}
 
 		if verbose {
@@ -274,7 +274,7 @@ func overrideModel(ctx context.Context, ws workspace.Workspace, model string) er
 }
 
 // resolveSessionByID resolves a session ID that may be a full UUID or a hash
-// prefix returned by braid session list.
+// prefix returned by sennit session list.
 func resolveSessionByID(ctx context.Context, ws workspace.Workspace, id string) (session.Session, error) {
 	if sess, err := ws.GetSession(ctx, id); err == nil {
 		return sess, nil

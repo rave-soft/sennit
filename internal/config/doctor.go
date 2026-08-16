@@ -29,8 +29,8 @@ const (
 )
 
 // Problem describes one thing that is wrong, or worth flagging, in the
-// loaded configuration. `braid doctor`, the TUI's /doctor dialog, and the
-// braid_info tool all render the same list, so an agent asked "why is my
+// loaded configuration. `sennit doctor`, the TUI's /doctor dialog, and the
+// sennit_info tool all render the same list, so an agent asked "why is my
 // sub-agent on the wrong model?" can answer the question from its own
 // tool output instead of a log file the user never sees.
 type Problem struct {
@@ -57,9 +57,9 @@ func (c *Config) addProblem(p Problem) {
 // does not support).
 //
 // It never makes network calls: whether a provider's api key or endpoint
-// actually works is `braid models --refresh` / the TUI's "Test Connection",
+// actually works is `sennit models --refresh` / the TUI's "Test Connection",
 // not this. MCP server health is likewise not checked here — the caller
-// (braid_info, the doctor CLI/dialog) merges in MCP registry state
+// (sennit_info, the doctor CLI/dialog) merges in MCP registry state
 // separately, since internal/config cannot import the MCP client package
 // without an import cycle.
 func Doctor(cfg *Config) []Problem {
@@ -101,7 +101,7 @@ func doctorJunkModelIDs(cfg *Config) []Problem {
 					Area:     AreaProvider,
 					Subject:  id,
 					Message:  fmt.Sprintf("provider %s has a model ID that looks like a file path (%q), not a model name", id, m.ID),
-					Hint:     "likely a llama.cpp /v1/models response echoing --model; define models explicitly or run `braid models refresh`",
+					Hint:     "likely a llama.cpp /v1/models response echoing --model; define models explicitly or run `sennit models refresh`",
 				})
 				break
 			}
@@ -165,7 +165,7 @@ func doctorToolNames(cfg *Config) []Problem {
 	for id := range cfg.Agents {
 		known[id] = true
 	}
-	// Names Braid has since renamed are known too: they are folded onto
+	// Names Sennit has since renamed are known too: they are folded onto
 	// the current name when the config is read (see [CanonicalToolName]),
 	// so warning about one would be warning about a name that works.
 	for legacy := range legacyToolNames {
@@ -211,7 +211,7 @@ func doctorToolNames(cfg *Config) []Problem {
 // doctorPermissionsBypass flags a persistently enabled permissions.bypass,
 // since it silently disables every permission prompt for the life of the
 // process — the same effect as always running with --yolo, but easy to
-// forget about once it is checked into braid.json.
+// forget about once it is checked into sennit.json.
 func doctorPermissionsBypass(cfg *Config) []Problem {
 	if cfg.Permissions == nil || !cfg.Permissions.Bypass {
 		return nil
@@ -221,6 +221,6 @@ func doctorPermissionsBypass(cfg *Config) []Problem {
 		Area:     AreaPermission,
 		Subject:  "permissions.bypass",
 		Message:  "permissions bypass is enabled — the agent never asks for permission before running a tool",
-		Hint:     "disable permissions.bypass in braid.json (or `permissions bypass off` in braidrc) to restore prompts",
+		Hint:     "disable permissions.bypass in sennit.json (or `permissions bypass off` in sennitrc) to restore prompts",
 	}}
 }

@@ -18,8 +18,8 @@ func TestNotificationTitle(t *testing.T) {
 	}{
 		{name: "empty", workingDir: "", want: "Sennit"},
 		{name: "root", workingDir: "/", want: "Sennit"},
-		{name: "project dir", workingDir: "/home/user/my-project", want: "Braid — my-project"},
-		{name: "trailing slash", workingDir: "/home/user/my-project/", want: "Braid — my-project"},
+		{name: "project dir", workingDir: "/home/user/my-project", want: "Sennit — my-project"},
+		{name: "trailing slash", workingDir: "/home/user/my-project/", want: "Sennit — my-project"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

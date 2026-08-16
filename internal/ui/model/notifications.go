@@ -37,15 +37,15 @@ func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 const maxNotificationBodyLen = 120
 
 // notificationTitle returns the desktop notification title. Appending the
-// project directory name lets a user running Braid in several workspaces
+// project directory name lets a user running Sennit in several workspaces
 // at once tell which one a notification came from; falls back to plain
-// "Braid" when the working directory is unknown or root.
+// "Sennit" when the working directory is unknown or root.
 func notificationTitle(workingDir string) string {
 	name := filepath.Base(filepath.Clean(workingDir))
 	if name == "" || name == "." || name == string(filepath.Separator) {
 		return brand.Name
 	}
-	return "Braid — " + name
+	return "Sennit — " + name
 }
 
 // notificationBodyTaskFinished formats the body for an agent-turn-completed

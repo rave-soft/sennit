@@ -51,7 +51,7 @@ func TestDoctorProblems_StaticConfigCheck(t *testing.T) {
 			{
 				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
 				Message: "agent reviewer: model nope/nope not found — falls back to the main model",
-				Hint:    "run 'braid models' to see available provider/model pairs",
+				Hint:    "run 'sennit models' to see available provider/model pairs",
 			},
 		},
 	}
@@ -106,7 +106,7 @@ func TestNewDoctor_ListsProblems(t *testing.T) {
 			{
 				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
 				Message: "agent reviewer: model nope/nope not found — falls back to the main model",
-				Hint:    "run 'braid models' to see available provider/model pairs",
+				Hint:    "run 'sennit models' to see available provider/model pairs",
 			},
 		},
 	}
@@ -137,7 +137,7 @@ func TestDoctor_EnterOpensDetail(t *testing.T) {
 			{
 				Severity: config.SeverityWarn, Area: config.AreaAgent, Subject: "reviewer",
 				Message: "agent reviewer: model x/y not found — falls back to the main model",
-				Hint:    "run 'braid models' to see available provider/model pairs",
+				Hint:    "run 'sennit models' to see available provider/model pairs",
 			},
 		},
 	}
@@ -152,7 +152,7 @@ func TestDoctor_EnterOpensDetail(t *testing.T) {
 	// The detail screen must show the full text, not the list's truncated
 	// row.
 	require.Contains(t, d.detail.Message, "falls back to the main model")
-	require.Contains(t, d.detail.Hint, "braid models")
+	require.Contains(t, d.detail.Hint, "sennit models")
 }
 
 // TestDoctor_EscFromList_Closes preserves the pre-existing behavior: esc on

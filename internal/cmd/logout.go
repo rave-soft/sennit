@@ -19,14 +19,14 @@ var (
 var logoutCmd = &cobra.Command{
 	Aliases: []string{"signout"},
 	Use:     "logout [platform]",
-	Short:   "Logout Braid from a platform",
-	Long: `Logout Braid from a specified platform, removing stored credentials.
+	Short:   "Logout Sennit from a platform",
+	Long: `Logout Sennit from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
 Available platforms are: copilot.`,
 	Example: `
 # Sign out from GitHub Copilot
-braid logout copilot
+sennit logout copilot
   `,
 	ValidArgs: []cobra.Completion{
 		"copilot",

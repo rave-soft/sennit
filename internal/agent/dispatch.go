@@ -336,7 +336,7 @@ func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func())
 // Calls covered by a pending cancel are dropped; the dropped ones that
 // carry a RunID are returned in canceledWithRunID so the caller can
 // publish their terminal cancelled RunComplete (a caller waiting on that
-// RunID, e.g. `braid run`, would otherwise hang). Uncanceled calls without
+// RunID, e.g. `sennit run`, would otherwise hang). Uncanceled calls without
 // a RunID are returned in fold to be folded into the active turn,
 // preserving the existing follow-up behavior. Uncanceled calls that carry
 // a RunID are left in the queue so each runs as its own turn via the

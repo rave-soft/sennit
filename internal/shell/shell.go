@@ -36,7 +36,7 @@ const (
 )
 
 // SennitEnvMarkers returns a fresh slice of the environment variables that
-// Braid unconditionally sets on every shell it spawns — both the interactive
+// Sennit unconditionally sets on every shell it spawns — both the interactive
 // bash tool's [Shell] and the hook runner's [Run] calls. Tools that want to
 // detect "am I being invoked by an AI agent?" can check any of these.
 // Keeping them in one place guarantees the two shell surfaces cannot drift.
@@ -96,11 +96,11 @@ func NewShell(opts *Options) *Shell {
 	}
 
 	// Strip herdr pane-ownership vars so subprocesses (including test
-	// binaries and nested braid instances) can't attach to or release
+	// binaries and nested sennit instances) can't attach to or release
 	// the parent pane's agent authority.
 	env = withoutHerdrEnv(env)
 
-	// Allow tools to detect execution by Braid.
+	// Allow tools to detect execution by Sennit.
 	env = append(env, SennitEnvMarkers()...)
 
 	logger := opts.Logger

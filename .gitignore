@@ -45,13 +45,13 @@ Thumbs.db
 # Nix/direnv
 .direnv/
 
-**/.braid/**
+**/.sennit/**
 
-/braid
+/sennit
 /tmp/
 
 manpages/
-completions/braid.*sh
+completions/sennit.*sh
 .prettierignore
 .task
 .claude/worktrees/

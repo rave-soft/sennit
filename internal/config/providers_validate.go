@@ -70,7 +70,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 				providerConfig.Models = result.models
 				providerConfig.ModelsSource = ModelsSourceCache
 				slog.Info("Discovered models for provider", "provider", id, "count", len(result.models))
-				// Persist to the model cache (not braid.json) so the next
+				// Persist to the model cache (not sennit.json) so the next
 				// load finds a non-empty models list via
 				// resolveCustomProviderModels and skips this HTTP round
 				// trip entirely. A failed discovery (the branch above)

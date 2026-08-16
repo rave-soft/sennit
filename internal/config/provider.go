@@ -34,7 +34,7 @@ import (
 func Providers(cfg *Config) ([]catwalk.Provider, error) {
 	// The provider catalog ships with the binary. Upstream refreshed it
 	// from Charm's catwalk service at startup; that call is removed, so
-	// Braid never reaches the network to decide what models exist.
+	// Sennit never reaches the network to decide what models exist.
 	// Anything the embedded list does not know about is declared in the
 	// user's own config.
 	if cfg.Options.DisableDefaultProviders {

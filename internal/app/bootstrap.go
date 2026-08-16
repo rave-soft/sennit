@@ -49,7 +49,7 @@ type BootstrapOptions struct {
 	// last-writer-wins cross-talk between them.
 	GlobalSkillsMirror bool
 
-	// PostDataDir, if set, runs after the .braid data directory has
+	// PostDataDir, if set, runs after the .sennit data directory has
 	// been created and before the DB connection is opened. Local mode
 	// uses this to register the project with the projects package.
 	PostDataDir func(cfg *config.ConfigStore) error
@@ -77,7 +77,7 @@ type BootstrapResult struct {
 
 // Bootstrap runs the workspace bootstrap sequence shared by every place
 // that starts an in-process app.App: initialize config, ensure the
-// workspace's .braid data directory exists, acquire its workspace lock,
+// workspace's .sennit data directory exists, acquire its workspace lock,
 // connect its database,
 // discover its skills, then construct the App. Callers differ only in
 // the details captured by BootstrapOptions; see its field comments.
@@ -213,7 +213,7 @@ func workspaceLockDir(ctx context.Context, workspaceDir, dataDir string) (string
 	return "", fmt.Errorf("failed to resolve repository workspace lock: %w", err)
 }
 
-// ensureDotBraidDir creates the workspace's .braid data directory and,
+// ensureDotBraidDir creates the workspace's .sennit data directory and,
 // the first time, a .gitignore inside it that excludes the whole thing
 // from the workspace's own git repo.
 func ensureDotBraidDir(dir string) error {

@@ -53,7 +53,7 @@ func (c *Common) Context() context.Context {
 
 // DefaultCommon returns the default common UI configurations, styled with
 // the theme the workspace's config selects (see the "/theme" command). An
-// unset or unknown theme resolves to Braid's default palette.
+// unset or unknown theme resolves to Sennit's default palette.
 func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
 	s := styles.Theme(ThemeID(ws))
 	return &Common{

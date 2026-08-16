@@ -1,51 +1,51 @@
 ---
 name: sennit-config
-description: Use when the user needs help configuring Braid — writing braidrc (the Bash config format) or braid.json, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing Braid behavior.
+description: Use when the user needs help configuring Sennit — writing sennitrc (the Bash config format) or sennit.json, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing Sennit behavior.
 ---
 
-# Braid Configuration
+# Sennit Configuration
 
-Braid supports two config formats:
+Sennit supports two config formats:
 
-- **`braidrc`** — a Bash script that builds config by calling Braid builtins.
+- **`sennitrc`** — a Bash script that builds config by calling Sennit builtins.
   **Preferred.** Because it is real Bash you get includes, secrets,
   conditionals, and variables for free.
-- **`braid.json`** — static JSON. Fully supported; see
+- **`sennit.json`** — static JSON. Fully supported; see
   [Legacy JSON format](#legacy-json-format).
 
 Both are discovered together and deep-merged. Priority (highest to lowest):
 
-1. `.braid/braid.json` — the canonical, highest-priority project config.
-   This is also where `braid config set` and agent-driven config writes land
+1. `.sennit/sennit.json` — the canonical, highest-priority project config.
+   This is also where `sennit config set` and agent-driven config writes land
    (the workspace scope), so it always wins on conflicts, including over
-   `.braidrc`/`braidrc` in the same directory.
-2. `.braid/braidrc` / `.braidrc` / `braidrc` / `.braid.json` / `braid.json`
-   (project-local, closer-to-cwd wins; Windows uses `.\.braidrc` /
-   `.\braidrc`)
-3. `$XDG_CONFIG_HOME/braid/braidrc` or `~/.config/braid/braidrc`
-   (`%XDG_CONFIG_HOME%\braid\braidrc` or
-   `%USERPROFILE%\.config\braid\braidrc` on Windows)
+   `.sennitrc`/`sennitrc` in the same directory.
+2. `.sennit/sennitrc` / `.sennitrc` / `sennitrc` / `.sennit.json` / `sennit.json`
+   (project-local, closer-to-cwd wins; Windows uses `.\.sennitrc` /
+   `.\sennitrc`)
+3. `$XDG_CONFIG_HOME/sennit/sennitrc` or `~/.config/sennit/sennitrc`
+   (`%XDG_CONFIG_HOME%\sennit\sennitrc` or
+   `%USERPROFILE%\.config\sennit\sennitrc` on Windows)
 
-`.braid/braid.json` and `.braid/braidrc` are checked at every directory in the
-upward walk, same as the root-level names; `.braid/braid.json` is the highest
-priority among the JSON variants, and `.braid/braidrc` the highest among the
-`braidrc` variants.
+`.sennit/sennit.json` and `.sennit/sennitrc` are checked at every directory in the
+upward walk, same as the root-level names; `.sennit/sennit.json` is the highest
+priority among the JSON variants, and `.sennit/sennitrc` the highest among the
+`sennitrc` variants.
 
 Config, skills, and agent definitions are picked up automatically (a 2s
-background poll) — no restart needed after editing `braid.json`/`braidrc`,
+background poll) — no restart needed after editing `sennit.json`/`sennitrc`,
 adding or removing a `SKILL.md`, or adding/editing an agent markdown file,
 whether the edit comes from you, the agent's own file tools, or a human.
 
-Data directories (`~/.local/share/braid` and `%LOCALAPPDATA%\braid`) contain
-machine-owned JSON state only; Braid does not discover or execute a `braidrc`
+Data directories (`~/.local/share/sennit` and `%LOCALAPPDATA%\sennit`) contain
+machine-owned JSON state only; Sennit does not discover or execute a `sennitrc`
 from those locations.
 
-If a directory has both `braidrc` and `braid.json`, they merge (`braidrc` wins
-on conflicts) and Braid logs a warning.
+If a directory has both `sennitrc` and `sennit.json`, they merge (`sennitrc` wins
+on conflicts) and Sennit logs a warning.
 
-## braidrc at a glance
+## sennitrc at a glance
 
-A `braidrc` is a plain Bash script executed at load time with the same embedded
+A `sennitrc` is a plain Bash script executed at load time with the same embedded
 shell the `bash` tool uses. It builds config by calling builtins (`provider`,
 `model`, `mcp`, `lsp`, `hook`, `permissions`, `option`). Statements run top to
 bottom; later statements win, and `remove`/`reset` operate on anything defined
@@ -54,7 +54,7 @@ earlier or pulled in via `source`.
 ```bash
 #!/usr/bin/env bash
 # Includes and secrets are just Bash.
-source ~/.config/braid/shared.sh
+source ~/.config/sennit/shared.sh
 
 provider add anthropic --api-key "$ANTHROPIC_API_KEY"
 
@@ -67,11 +67,11 @@ permissions allow read ls grep edit
 Values are ordinary Bash — quote and expand normally (`"$VAR"`, `$(cmd)`,
 `${VAR:?required}`). A failing `$(command)` aborts the load.
 
-`BRAID_VERSION` is exported into the script so you can feature-detect the
-running Braid (it is the literal `devel` for local builds):
+`SENNIT_VERSION` is exported into the script so you can feature-detect the
+running Sennit (it is the literal `devel` for local builds):
 
 ```bash
-[[ "$BRAID_VERSION" != devel ]] && lsp add gopls --command gopls
+[[ "$SENNIT_VERSION" != devel ]] && lsp add gopls --command gopls
 ```
 
 ## Commands
@@ -102,14 +102,14 @@ provider add deepseek \
 `proxy_url` (routes this provider's requests through an http/https/socks5
 proxy, or forces a direct connection with the sentinel `"none"` even when
 `HTTP_PROXY`/`HTTPS_PROXY` are set) has **no `provider add` flag**. Set it in
-`braid.json` only:
+`sennit.json` only:
 
 ```json
 { "providers": { "deepseek": { "proxy_url": "socks5://localhost:1080" } } }
 ```
 
-`proxy_url` goes through shell expansion in `braid.json` (see [Shell
-expansion](#shell-expansion-in-braidjson)), so `"$CORP_PROXY"` works too.
+`proxy_url` goes through shell expansion in `sennit.json` (see [Shell
+expansion](#shell-expansion-in-sennitjson)), so `"$CORP_PROXY"` works too.
 
 ### Model discovery
 
@@ -117,17 +117,17 @@ A custom provider (one with a `base_url` outside the built-in catwalk
 catalog) auto-discovers its models from `/v1/models` on load when `models` is
 empty, or always when `discover_models: true` — the discovered list is merged
 onto the provider and persisted into the data-directory config
-(`~/.local/share/braid/braid.json`) so later loads skip the HTTP round trip.
+(`~/.local/share/sennit/sennit.json`) so later loads skip the HTTP round trip.
 Force a full re-discovery (overwriting the persisted list) with:
 
 ```bash
-braid models refresh              # every custom provider
-braid models refresh my-local-llm # one provider
+sennit models refresh              # every custom provider
+sennit models refresh my-local-llm # one provider
 ```
 
 > [!IMPORTANT] Never guess a model ID. Before writing `provider/model-id`
-> anywhere (agent frontmatter, `model add`, `braid.json`), check it's real:
-> `braid_info` with `{"models_for": "<provider-id>"}`, or `braid models
+> anywhere (agent frontmatter, `model add`, `sennit.json`), check it's real:
+> `sennit_info` with `{"models_for": "<provider-id>"}`, or `sennit models
 > <filter>` in bash. Router providers can carry thousands of models — a
 > plausible-looking ID is not the same as a listed one.
 
@@ -139,7 +139,7 @@ model remove <provider>/<id>       # alias: rm
 model [<provider>/<id>] [flags]    # set the model; no arg prints the current one
 ```
 
-- `<provider>/<id>` is the same form `braid models` prints. A missing slash is
+- `<provider>/<id>` is the same form `sennit models` prints. A missing slash is
   an error. `model add` requires the provider to already exist.
 - `model add` flags: `--name`, `--context-window N`, `--default-max-tokens N`,
   `--can-reason BOOL`, `--supports-images BOOL`, `--price-input F`,
@@ -151,16 +151,16 @@ model [<provider>/<id>] [flags]    # set the model; no arg prints the current on
 - `model` with no argument prints the current selection as `provider/id`,
   usable in `$(model)`.
 
-There is a single configured model — Braid picks a smaller/cheaper model
+There is a single configured model — Sennit picks a smaller/cheaper model
 automatically for internal work like titles and summarization, and that
 choice is not user-configurable.
 
-Same rule as above: verify with `braid_info {"models_for": "<provider>"}` or
-`braid models` before running `model <provider>/<id>` — an unresolvable
+Same rule as above: verify with `sennit_info {"models_for": "<provider>"}` or
+`sennit models` before running `model <provider>/<id>` — an unresolvable
 selection falls back silently to the default model.
 
 `model add` flags cover the common `catwalk.Model` fields. Two fields have no
-flag and are `braid.json`-only: `reasoning_levels` (list of efforts the model
+flag and are `sennit.json`-only: `reasoning_levels` (list of efforts the model
 advertises) and `id`/`name` beyond the required minimum. A hand-written model
 entry needs at least:
 
@@ -223,7 +223,7 @@ intend to remove it later. See [Hooks runtime](#hooks-runtime) for how hooks
 execute (stdin payload, env vars, decisions).
 
 ```bash
-hook add PreToolUse --matcher "^bash$" --command ".braid/hooks/no-haskell.sh" --name no-haskell
+hook add PreToolUse --matcher "^bash$" --command ".sennit/hooks/no-haskell.sh" --name no-haskell
 ```
 
 ### permissions
@@ -240,7 +240,7 @@ tool is hidden from the agent, not merely prompted for.
 `bypass on` writes `permissions.bypass = true`, which auto-approves every
 permission request from process start — the persisted equivalent of always
 running with `--yolo`. It is dangerous: the agent runs every tool, including
-destructive ones, without asking. `braid doctor` flags it as a warning. The
+destructive ones, without asking. `sennit doctor` flags it as a warning. The
 session-only `ctrl+y` toggle / `/yolo` command still work independently on
 top of this and are not written to config.
 
@@ -257,11 +257,12 @@ option reset <list-key>    # clear a list option back to empty
   `auto-summarize`, `default-providers`. Example: `option metrics false`
   disables metrics.
 - **String keys**: `data-directory`, `initialize-as`, `notifications`.
-- **Integer keys**: `history-retention-days` (age, in days, after which `braid
+- **Integer keys**: `history-retention-days` (age, in days, after which `sennit
   gc` deletes old sessions/threads; default 90, 0 keeps history forever — see
   [Maintenance](#maintenance)).
-- **Attribution keys**: `attribution-trailer-style` (`none`, `co-authored-by`,
-  `assisted-by`) and `attribution-generated-with` (boolean).
+- **Attribution keys**: `attribution-trailer-style` (`none`, `assisted-by`) and
+  `attribution-generated-with` (boolean). Old configs with `co_authored_by:
+  true` now migrate to `assisted-by`.
 - **UI settings**: `option ui compact BOOL`, `option ui diff unified|split`,
   `option ui transparent BOOL`, `option ui scrollbar default|always|never`,
   `option ui completions-max-depth N`, `option ui completions-max-items N`,
@@ -276,7 +277,7 @@ option reset <list-key>    # clear a list option back to empty
 ```bash
 option progress false
 option skill-path ./skills
-option disable-skill braid-config
+option disable-skill sennit-config
 option attribution-trailer-style assisted-by
 option attribution-generated-with true
 option ui compact true
@@ -284,14 +285,14 @@ option ui diff unified
 option ui keybinding commands super+p
 ```
 
-> [!IMPORTANT] `.braid/skills` is loaded by default and does NOT need
+> [!IMPORTANT] `.sennit/skills` is loaded by default and does NOT need
 > `skill-path`. Skills written for other tools (`.claude/skills`,
 > `.opencode/skills`, ...) are **not** auto-discovered — bring them in with
-> `braid import claude --skills` / `braid import opencode --skills`, which
-> copies and validates them into `.braid/skills` instead.
+> `sennit import claude --skills` / `sennit import opencode --skills`, which
+> copies and validates them into `.sennit/skills` instead.
 
-> [!IMPORTANT] Braid only auto-loads its own context conventions
-> (`AGENTS.md`/`BRAID.md` and casing/`.local` variants). Other tools' files
+> [!IMPORTANT] Sennit only auto-loads its own context conventions
+> (`AGENTS.md`/`SENNIT.md` and casing/`.local` variants). Other tools' files
 > (`CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`, `GEMINI.md`,
 > ...) are **not** read unless you opt in explicitly:
 >
@@ -303,7 +304,7 @@ option ui keybinding commands super+p
 ### options.web_search
 
 The `web_search` tool's backend is configurable via `options.web_search` in
-`braid.json` (no braidrc builtin yet — edit the JSON directly). Omitting the
+`sennit.json` (no sennitrc builtin yet — edit the JSON directly). Omitting the
 section, or setting `provider` to `"duckduckgo"`, keeps the default: a keyless
 scraper of DuckDuckGo Lite.
 
@@ -367,13 +368,13 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
 
 | Variable                     | Description                                       |
 | ---------------------------- | ------------------------------------------------- |
-| `BRAID_EVENT`                | Event name (e.g. `PreToolUse`)                    |
-| `BRAID_TOOL_NAME`            | Name of the tool being called                     |
-| `BRAID_SESSION_ID`           | Current session ID                                |
-| `BRAID_CWD`                  | Current working directory                         |
-| `BRAID_PROJECT_DIR`          | Project root directory                            |
-| `BRAID_TOOL_INPUT_COMMAND`   | Value of `command` from tool input (if present)   |
-| `BRAID_TOOL_INPUT_FILE_PATH` | Value of `file_path` from tool input (if present) |
+| `SENNIT_EVENT`                | Event name (e.g. `PreToolUse`)                    |
+| `SENNIT_TOOL_NAME`            | Name of the tool being called                     |
+| `SENNIT_SESSION_ID`           | Current session ID                                |
+| `SENNIT_CWD`                  | Current working directory                         |
+| `SENNIT_PROJECT_DIR`          | Project root directory                            |
+| `SENNIT_TOOL_INPUT_COMMAND`   | Value of `command` from tool input (if present)   |
+| `SENNIT_TOOL_INPUT_FILE_PATH` | Value of `file_path` from tool input (if present) |
 
 ### Hook output
 
@@ -401,7 +402,7 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
 
 ### Claude Code compatibility
 
-Braid also accepts the Claude Code hook output format, so existing hooks work
+Sennit also accepts the Claude Code hook output format, so existing hooks work
 unchanged:
 
 ```json
@@ -417,27 +418,27 @@ unchanged:
 ## Subagents
 
 Subagents are named roles the main agent can delegate to as a tool call.
-Markdown files under `.braid/agents/*.md` are the only way to define one.
+Markdown files under `.sennit/agents/*.md` are the only way to define one.
 
 > [!IMPORTANT] Before writing a `model:` field into an agent file, confirm
-> the ID exists — `braid_info {"models_for": "<provider>"}` or `braid
+> the ID exists — `sennit_info {"models_for": "<provider>"}` or `sennit
 > models <filter>`. Don't invent one from memory; an unresolvable `model:`
 > is dropped with a warning and the subagent silently falls back to the
 > main model, which is easy to miss. After writing/editing agent files, run
-> `braid doctor` — it flags exactly this (an agent pinned to a model that
+> `sennit doctor` — it flags exactly this (an agent pinned to a model that
 > doesn't exist).
 
-> [!WARNING] **NEVER** write agent definitions into `braid.json` (or any
+> [!WARNING] **NEVER** write agent definitions into `sennit.json` (or any
 > JSON config) — a JSON `agents` block is silently ignored (flagged by
-> `braid doctor`). Create or edit `.braid/agents/<name>.md` instead.
+> `sennit doctor`). Create or edit `.sennit/agents/<name>.md` instead.
 
 ### Markdown files
 
-Drop a file in `.braid/agents/*.md` (also read: an `agents/` directory next
+Drop a file in `.sennit/agents/*.md` (also read: an `agents/` directory next
 to the global config, lower priority). Files written for another tool
 (`.claude/agents/`, `.opencode/agent/`) are **not** auto-discovered — run
-`braid import claude --agents` or `braid import opencode --agents` to copy
-and validate them into `.braid/agents` first.
+`sennit import claude --agents` or `sennit import opencode --agents` to copy
+and validate them into `.sennit/agents` first.
 
 ```markdown
 ---
@@ -456,9 +457,9 @@ You are a Go code reviewer. Report real defects, not style opinions.
 - `model` is optional and, when set, must resolve to a `provider/model-id`
   among configured providers; an unresolvable value is dropped with a
   warning and the agent falls back to the app's main model.
-- `.braid/agents` files are expected to already name Braid's own tools
+- `.sennit/agents` files are expected to already name Sennit's own tools
   (`read`, `grep`, `bash`, ...) — regular discovery does not translate
-  Claude Code names anymore. `braid import` does that translation once, at
+  Claude Code names anymore. `sennit import` does that translation once, at
   import time, and reports any tool name it couldn't map.
 - opencode's `permission:` blocks are **not enforced**, imported or not —
   restrict an agent via `tools` or the config's `permissions` section
@@ -467,20 +468,20 @@ You are a Go code reviewer. Report real defects, not style opinions.
 ## Importing from Claude Code or opencode
 
 ```sh
-braid import claude|opencode [--skills] [--agents] [--dry-run] [--global] [--force]
+sennit import claude|opencode [--skills] [--agents] [--dry-run] [--global] [--force]
 ```
 
-Braid does not auto-discover another tool's config directories (see
+Sennit does not auto-discover another tool's config directories (see
 [Limitations of imported agent definitions](../../../../TECHDEBT.md) in
-TECHDEBT.md for why). `braid import` is the supported way to bring files in:
+TECHDEBT.md for why). `sennit import` is the supported way to bring files in:
 
 - `--skills` copies `<tool>/skills/<name>/SKILL.md` (and any other files in
-  that skill's directory) into `.braid/skills/<name>/`, after parsing and
-  validating it against the same Agent Skills spec Braid's own skills follow.
+  that skill's directory) into `.sennit/skills/<name>/`, after parsing and
+  validating it against the same Agent Skills spec Sennit's own skills follow.
   A skill that fails validation (bad name, oversized description, ...) is
   skipped with a reason, not partially imported.
 - `--agents` copies `<tool>/agents/*.md` (or opencode's `.opencode/agent/`)
-  into `.braid/agents/*.md`, translating:
+  into `.sennit/agents/*.md`, translating:
   - `model` — resolved against your configured providers the same way a
     hand-written `model:` is; an unresolvable value is dropped with a
     warning and left as a `# original model: ... — not available` comment in
@@ -490,15 +491,15 @@ TECHDEBT.md for why). `braid import` is the supported way to bring files in:
     (`high`) with a warning, and anything unrecognized is dropped with a
     warning.
   - `tools` — Claude Code names (`Read`, `Grep`, `Bash`, ...) are translated
-    to Braid's; a name that maps to neither a known Claude Code name nor a
-    Braid tool is dropped and reported, not kept as-is.
-  - `temperature`/`top_p` — Braid agents have no such field; the original
+    to Sennit's; a name that maps to neither a known Claude Code name nor a
+    Sennit tool is dropped and reported, not kept as-is.
+  - `temperature`/`top_p` — Sennit agents have no such field; the original
     value is kept as a frontmatter comment and reported as a warning.
   - opencode's `permission:` block — dropped with a warning; it was never
     enforced even when opencode's directory was auto-discovered. Restrict an
     imported agent via its `tools` list instead.
 - `--global` reads/writes the user-level directories (`~/.claude/...`,
-  `~/.config/opencode/...` → the global `.braid` directories) instead of the
+  `~/.config/opencode/...` → the global `.sennit` directories) instead of the
   project ones.
 - `--dry-run` prints the report without writing anything.
 - Without `--force`, a destination file that already exists is left alone
@@ -527,18 +528,18 @@ user-invocable: true
 
 ## Maintenance
 
-The shared database (`~/.config/braid/braid.db`) is not pruned
-automatically — `braid gc` is a CLI command a human (or a cron job) runs, not
+The shared database (`~/.config/sennit/sennit.db`) is not pruned
+automatically — `sennit gc` is a CLI command a human (or a cron job) runs, not
 something the agent does for itself, and there is no `/gc` slash command.
 
 ```sh
-braid gc [--days N] [--dry-run] [--project] [--json]
+sennit gc [--days N] [--dry-run] [--project] [--json]
 ```
 
 - Deletes sessions (and their messages/files/read-file records) whose last
   activity (`updated_at`) is older than `options.history_retention_days`
   (default 90; set via `option history-retention-days N`). `0` disables
-  retention entirely and turns `braid gc` into a no-op.
+  retention entirely and turns `sennit gc` into a no-op.
 - Deleting a session also deletes any agent-tool/title sub-session parented
   to it, regardless of the sub-session's own age; old sub-sessions under a
   kept parent are deleted independently, on their own age.
@@ -546,32 +547,32 @@ braid gc [--days N] [--dry-run] [--project] [--json]
   `merge_blocked`, `failed`, `interrupted`) past the same window —
   `pending`/`running`/`merging` threads are never touched, regardless of age.
 - Runs `VACUUM` and a WAL checkpoint afterward to actually shrink
-  `braid.db` on disk.
+  `sennit.db` on disk.
 - Defaults to the entire shared database (every project); pass `--project`
   to scope to the current working directory's project only.
 - `--days N` overrides `options.history_retention_days` for one run;
   `--dry-run` reports counts and current database size without deleting
   anything.
-- Rotated log files (`~/.config/braid/logs/*.log.gz`) are unrelated: they
+- Rotated log files (`~/.config/sennit/logs/*.log.gz`) are unrelated: they
   are pruned by lumberjack's own `MaxAge` (30 days) independently of
-  `braid gc`.
+  `sennit gc`.
 
 ## Environment variables
 
-- `BRAID_VERSION` — exported into `braidrc` at load; the running version (or
+- `SENNIT_VERSION` — exported into `sennitrc` at load; the running version (or
   `devel` for local builds).
-- `BRAID_GLOBAL_CONFIG` — override global config location.
-- `BRAID_GLOBAL_DATA` — override data directory location.
-- `BRAID_SKILLS_DIR` — override default skills directory.
+- `SENNIT_GLOBAL_CONFIG` — override global config location.
+- `SENNIT_GLOBAL_DATA` — override data directory location.
+- `SENNIT_SKILLS_DIR` — override default skills directory.
 
 ## Legacy JSON format
 
-`braid.json` is the original static format. It still works and merges with
-`braidrc`. Basic structure:
+`sennit.json` is the original static format. It still works and merges with
+`sennitrc`. Basic structure:
 
 ```json
 {
-  "$schema": "https://charm.land/braid.json",
+  "$schema": "https://charm.land/sennit.json",
   "model": {},
   "providers": {},
   "mcp": {},
@@ -584,9 +585,9 @@ braid gc [--days N] [--dry-run] [--project] [--json]
 
 The `$schema` property enables IDE autocomplete but is optional.
 
-### braidrc ↔ braid.json mapping
+### sennitrc ↔ sennit.json mapping
 
-| braidrc                             | braid.json                                             |
+| sennitrc                             | sennit.json                                             |
 | ------------------------------------ | ------------------------------------------------------ |
 | `provider add openai --api-key "$K"` | `providers.openai = {"api_key": "$K"}`                 |
 | `model add openai/gpt-x --name X`    | append to `providers.openai.models[]`                  |
@@ -599,16 +600,16 @@ The `$schema` property enables IDE autocomplete but is optional.
 | `permissions bypass on`              | `permissions.bypass = true`                            |
 | `option skill-path ./skills`         | `options.skills_paths = ["./skills"]`                  |
 | `option history-retention-days 30`   | `options.history_retention_days = 30`                  |
-| *(no braidrc equivalent)*            | `providers.<id>.proxy_url = "http://host:8080"`        |
+| *(no sennitrc equivalent)*            | `providers.<id>.proxy_url = "http://host:8080"`        |
 | `option metrics false`               | `options.disable_metrics = true`                       |
 | `option attribution-trailer-style none` | `options.attribution.trailer_style = "none"`        |
 | `option attribution-generated-with false` | `options.attribution.generated_with = false`       |
-| *(no braidrc equivalent)*            | `options.web_search = {"provider":"tavily","api_key":"$K"}` |
+| *(no sennitrc equivalent)*            | `options.web_search = {"provider":"tavily","api_key":"$K"}` |
 
-### Shell expansion in braid.json
+### Shell expansion in sennit.json
 
 In JSON, only selected string fields are run through the embedded shell at load
-time (in `braidrc`, everything is native Bash so this table does not apply):
+time (in `sennitrc`, everything is native Bash so this table does not apply):
 
 | Surface                                                         | Expansion                          |
 | --------------------------------------------------------------- | ---------------------------------- |
@@ -626,7 +627,7 @@ the request.
 
 ### Security note
 
-Both formats are trusted code. `braidrc` runs entirely, and any `$(...)` in
-`braid.json` runs at load time, with the invoking user's shell privileges,
-before the UI appears. Don't launch Braid in a directory whose config you
+Both formats are trusted code. `sennitrc` runs entirely, and any `$(...)` in
+`sennit.json` runs at load time, with the invoking user's shell privileges,
+before the UI appears. Don't launch Sennit in a directory whose config you
 haven't reviewed.

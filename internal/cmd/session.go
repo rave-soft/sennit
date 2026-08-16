@@ -34,7 +34,7 @@ var sessionCmd = &cobra.Command{
 	Use:     "session",
 	Aliases: []string{"sessions", "s"},
 	Short:   "Manage sessions",
-	Long:    "Manage Braid sessions. Agents can use --json for machine-readable output.",
+	Long:    "Manage Sennit sessions. Agents can use --json for machine-readable output.",
 }
 
 var (

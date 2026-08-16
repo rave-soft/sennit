@@ -6,9 +6,9 @@ import "fmt"
 type Scope int
 
 const (
-	// ScopeGlobal targets the global data config (~/.local/share/braid/braid.json).
+	// ScopeGlobal targets the global data config (~/.local/share/sennit/sennit.json).
 	ScopeGlobal Scope = iota
-	// ScopeWorkspace targets the workspace config (.braid/braid.json).
+	// ScopeWorkspace targets the workspace config (.sennit/sennit.json).
 	ScopeWorkspace
 )
 
