@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/skills"
 )
 
 // Severity classifies how urgently a Problem needs attention.
@@ -223,4 +225,49 @@ func doctorPermissionsBypass(cfg *Config) []Problem {
 		Message:  "permissions bypass is enabled — the agent never asks for permission before running a tool",
 		Hint:     "disable permissions.bypass in sennit.json (or `permissions bypass off` in sennitrc) to restore prompts",
 	}}
+}
+
+// SkillProblems reports every SKILL.md that failed to parse or validate
+// during discovery, so a broken skill shows up wherever the other config
+// problems do (`sennit doctor`, the TUI dialog, sennit_info) instead of
+// only as a WARN line in the log.
+//
+// It matters more than a config typo usually does: a skill that fails to
+// parse is not loaded at all, yet nothing else changes. Agents told to
+// follow it simply proceed without it, doing whatever they would have done
+// with no skill present, and the work looks like it followed the process
+// right up until someone reads the output closely. The most common cause is
+// an unquoted colon in the frontmatter's description, which YAML reads as a
+// nested mapping.
+//
+// States are passed in rather than discovered here because discovery is
+// per-workspace and already done by the time anything asks for problems;
+// this only translates its outcome. A nil or empty snapshot yields no
+// problems.
+func SkillProblems(states []*skills.SkillState) []Problem {
+	var problems []Problem
+	for _, st := range states {
+		if st == nil || st.State != skills.StateError {
+			continue
+		}
+		subject := st.Name
+		if subject == "" {
+			// A skill that failed to parse has no name yet — its own
+			// frontmatter is what did not load — so fall back to the
+			// directory, which is what the person sees on disk.
+			subject = filepath.Base(filepath.Dir(st.Path))
+		}
+		msg := fmt.Sprintf("skill %s failed to load", subject)
+		if st.Err != nil {
+			msg += ": " + st.Err.Error()
+		}
+		problems = append(problems, Problem{
+			Severity: SeverityError,
+			Area:     AreaSkill,
+			Subject:  subject,
+			Message:  msg,
+			Hint:     "fix " + st.Path + " — a description containing \": \" must be quoted, and name/description are both required",
+		})
+	}
+	return problems
 }

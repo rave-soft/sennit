@@ -163,6 +163,16 @@ type coordinator struct {
 	allSkills    []*skills.Skill // Pre-filter: all discovered after dedup.
 	activeSkills []*skills.Skill // Post-filter: active skills only.
 	skillTracker *skills.Tracker
+	// skillsMgr is the workspace's own skills manager, kept only to read
+	// the discovery state snapshot (which SKILL.md files failed to parse
+	// or validate) for sennit_info's [problems] section. It is read live
+	// rather than snapshotted alongside the slices above because the
+	// manager already owns the hot-reload path — its States() is current
+	// by construction — and because it needs no lock of ours: the manager
+	// guards its own snapshot. Nil for the legacy callers that construct a
+	// coordinator without a manager (see NewCoordinator), in which case
+	// there is simply no discovery state to report.
+	skillsMgr *skills.Manager
 
 	readyWg errgroup.Group
 
@@ -329,6 +339,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		allSkills:    allSkills,
 		activeSkills: activeSkills,
 		skillTracker: skillTracker,
+		skillsMgr:    opts.Skills,
 		interactive:  opts.Interactive,
 		mcp:          opts.MCP,
 		threads:      opts.Threads,
@@ -693,7 +704,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	allTools = append(
 		allTools,
 		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, c.background),
-		tools.NewSennitInfoTool(c.cfg, c.mcp, c.lspManager, allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot),
+		tools.NewSennitInfoTool(c.cfg, c.mcp, c.lspManager, allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot, c.skillStates()),
 		tools.NewSennitLogsTool(logFile),
 		tools.NewJobOutputTool(c.background),
 		tools.NewJobKillTool(c.background),
@@ -1052,6 +1063,18 @@ func (c *coordinator) RefreshSkills(allSkills, activeSkills []*skills.Skill) {
 	c.skillsMu.Unlock()
 	tracker.UpdateActiveSkills(activeSkills)
 	c.invalidateRuntime()
+}
+
+// skillStates returns the workspace's current skill discovery states, or
+// nil when no skills manager was wired in. Used for sennit_info's
+// [problems] section, so an agent can see that a SKILL.md it was told to
+// follow never loaded — see config.SkillProblems for why that particular
+// failure is worth surfacing to the agent and not only to the log.
+func (c *coordinator) skillStates() []*skills.SkillState {
+	if c.skillsMgr == nil {
+		return nil
+	}
+	return c.skillsMgr.States()
 }
 
 // skillsSnapshot returns the coordinator's current skill discovery
