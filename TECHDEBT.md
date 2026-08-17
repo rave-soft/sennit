@@ -1,95 +1,130 @@
-# Технический долг
+# Technical debt
 
-Что осталось незакрытым после форка Crush, ребрендинга и удаления внешних
-сервисов. Каждый пункт — с причиной и понятным следующим шагом, чтобы к нему
-можно было вернуться без повторного расследования.
+What is still open after the Crush fork, the rebrand, and the removal of the
+external services. Every entry carries its reason and a concrete next step, so
+it can be picked up again without repeating the investigation.
 
-Закрытые пункты здесь не копятся: когда долг выплачен, запись удаляется, а
-история остаётся в git.
+Closed entries do not accumulate here: once a debt is paid the entry is
+deleted, and the history stays in git.
 
-## Открытый долг
+## Open debt
 
-- **Gemini и два подряд идущих user-контента.** Steering доставляется
-  отдельным `user` message после всех tool results
-  (`internal/agent/completion_inbox.go`, `prepareStep` в
-  `internal/agent/turn.go`). Anthropic сливает такую пару сам, для
-  OpenAI-совместимых это проверено живым запросом (200, модель выполнила
-  именно steering), в OpenAI Responses раздельность — норма протокола. У
-  Gemini адаптер `fantasy` кладёт результаты инструментов в
-  `genai.Content{Role: user}` и следом создаёт **второй** такой же
-  `Content{Role: user}`; слияния однорольных Content нет ни в адаптере, ни у
-  нас, а Gemini в ряде случаев отвечает 400 на неперемежающиеся роли.
-  Примет ли он эту конкретную форму — вопрос эмпирический, ключа для
-  проверки нет. Следующий шаг: прогнать один реальный запрос
-  `user → assistant(tool_calls) → tool → user(steering)` против Gemini,
-  когда появится ключ; если 400 — слить подряд идущие user-контенты,
-  предпочтительно в адаптере, иначе нормализацией перед вызовом. До тех пор
-  mid-turn steering на Gemini — непроверенный путь.
+- **Gemini and two consecutive user contents.** Steering is delivered as its
+  own `user` message after all tool results
+  (`internal/agent/completion_inbox.go`, `prepareStep` in
+  `internal/agent/turn.go`). Anthropic merges such a pair itself; for
+  OpenAI-compatible providers this was verified with a live request (200, and
+  the model acted on the steering specifically); in OpenAI Responses keeping
+  them separate is what the protocol expects. On Gemini the `fantasy` adapter
+  puts tool results into a `genai.Content{Role: user}` and then creates a
+  **second** `Content{Role: user}` right after it; nothing merges
+  same-role contents, not in the adapter and not here, and Gemini answers 400
+  to non-alternating roles in some cases. Whether it accepts this particular
+  shape is an empirical question, and there is no key to ask it with. Next
+  step: run one real `user → assistant(tool_calls) → tool → user(steering)`
+  request against Gemini once a key is available; if it 400s, merge
+  consecutive user contents, preferably in the adapter, otherwise by
+  normalizing before the call. Until then, mid-turn steering on Gemini is an
+  untested path.
 
-## Решения, отложенные до подтверждения
+## Decisions deferred pending confirmation
 
 ### GitHub Copilot
 
-Не удалён. Это провайдер модели, как OpenAI или Anthropic, а не сервис Charm:
-удаление лишает бэкенда, а не отвязывает от чужой инфраструктуры. Если решение
-— выносить и его, удалять нужно `internal/oauth/copilot`, команды `login` и
-`logout`, диалог `internal/ui/dialog/oauth_copilot.go` и ветку обмена токена в
-`internal/config/store.go`.
+Not removed, and keeping it is a deliberate decision (2026-08) rather than an
+omission. It is a model provider, like OpenAI or Anthropic, not a Charm
+service: removing it takes a backend away from the user, it does not detach
+the fork from someone else's infrastructure.
 
-## Ограничения перенесённых определений агентов
+What ships with it is worth knowing, because "just another provider" does not
+describe the situation fully. The client authenticates with someone else's
+OAuth application and presents itself as someone else's product:
 
-Не долг, а контракт `sennit import` — описан здесь, потому что на этот раздел
-ссылается код (`internal/config/import.go`, скилл `sennit-config`).
+- `clientID = "Iv1.b507a08c87ecfe98"` (`internal/oauth/copilot/oauth.go`) —
+  the Copilot/VS Code client ID, not one registered to rave-soft.
+- `userAgent = "GitHubCopilotChat/0.32.4"`, `editorVersion = "vscode/1.105.1"`
+  (`internal/oauth/copilot/http.go`) — to GitHub's API, Sennit presents itself
+  as the Copilot Chat extension for VS Code.
 
-Решение пользователя (2026-08): Sennit больше не сканирует чужие каталоги
-конфигов сам. Discovery — `internal/config/agents_markdown.go` (`agentDirs`)
-и `internal/config/load.go` (`GlobalSkillsDirs`, `projectSkillSubdirs`) —
-читает только `.sennit/agents` и `.sennit/skills` (плюс их глобальные
-эквиваленты и `options.skills_paths`). Раньше туда же попадали
+All of this is inherited from upstream rather than introduced here. An
+inconsistency lives next to it: `SignupURL` in
+`internal/oauth/copilot/urls.go` carries `editor=sennit`, so signup is branded
+as Sennit while the traffic claims to be VS Code.
+
+Three possible next steps, none of them started:
+
+1. Do nothing — the status quo this entry records.
+2. Remove Copilot entirely. The surface is larger than it looks: it is
+   mentioned in 36 files, 24 of them non-test. The `internal/oauth/copilot`
+   package (419 lines) and the `internal/ui/dialog/oauth_copilot.go` dialog
+   (77 lines) go entirely; then the branches in `internal/cmd/login.go` and
+   `logout.go`, the refresh path in
+   `internal/config/credentials/credentials.go`, `SetupGitHubCopilot` and the
+   token exchange in `internal/config/{config,store,providers_merge,reload}.go`,
+   the dialog wiring in `internal/ui/model/`, the "model not enabled in
+   Copilot" diagnostic in `internal/agent/turn.go`, and the plumbing in
+   `internal/workspace/`. After that `catwalk.InferenceProviderCopilot` is no
+   longer used anywhere.
+3. Keep it, but stop impersonating VS Code: register a GitHub OAuth App of our
+   own and send an honest `User-Agent`. Three constants to edit, but it needs
+   an application registered, and whether GitHub grants such a client access
+   to the Copilot API is an empirical question — theirs is a restricted list.
+
+## Limitations of imported agent definitions
+
+Not debt but the contract of `sennit import` — documented here because the
+code points at this section (`internal/config/import.go`, the `sennit-config`
+skill).
+
+User's decision (2026-08): Sennit no longer scans another tool's config
+directories on its own. Discovery — `internal/config/agents_markdown.go`
+(`agentDirs`) and `internal/config/load.go` (`GlobalSkillsDirs`,
+`projectSkillSubdirs`) — reads only `.sennit/agents` and `.sennit/skills`
+(plus their global equivalents and `options.skills_paths`). It used to take in
 `.claude/agents`, `.opencode/agent`, `.agents/skills`, `.claude/skills`,
-`.cursor/skills`, `.opencode/skills` — то есть Sennit молча доверял
-содержимому каталогов, которые пишет другой инструмент, без валидации и без
-уведомления пользователя о том, что не смогло примениться.
+`.cursor/skills`, and `.opencode/skills` as well — meaning Sennit silently
+trusted the contents of directories another tool writes, without validating
+them and without telling the user what failed to apply.
 
-Перенос теперь идёт только через явный импорт — `sennit import claude|opencode
-[--skills] [--agents] [--dry-run] [--global] [--force]`
-(`internal/config/import.go`, `internal/cmd/import.go`). Импорт копирует в
-`.sennit/skills`/`.sennit/agents`, а не читает чужой каталог на лету, и на
-каждый файл печатает отчёт (`imported`/`adjusted`/`skipped` + причина/
-предупреждения) — те же ограничения ниже применяются, но теперь они видны
-пользователю в момент импорта, а не выясняются постфактум по логам.
+Bringing files over now goes through an explicit import only — `sennit import
+claude|opencode [--skills] [--agents] [--dry-run] [--global] [--force]`
+(`internal/config/import.go`, `internal/cmd/import.go`). The import copies
+into `.sennit/skills`/`.sennit/agents` rather than reading a foreign directory
+on the fly, and prints a report for every file (`imported`/`adjusted`/
+`skipped` plus the reason or warnings) — the same limitations below still
+apply, but the user now sees them at import time instead of discovering them
+afterwards in the logs.
 
-- Блоки `permission:` из файлов opencode **не применяются** ни при обычной
-  загрузке, ни после импорта. Роль, запертая там в read-only, в Sennit
-  получит всё, что перечислено в её `tools`. Импорт репортит это как
-  предупреждение («permission block is not supported; restrict tools via the
-  tools list instead») и оставляет комментарий в frontmatter, но само поле
-  не пишет. Ограничивать нужно списком `tools` или секцией `permissions`
-  конфига.
-- Поле `model` из чужих файлов понимает ссылки вида `provider/model-id`,
-  если такая модель есть среди настроенных провайдеров — резолвится через
-  `config.ResolveModelString`. Слотов `large`/`small` для `Agent.Model`
-  больше не существует: эти слова не имеют особого смысла даже в
-  собственных агент-файлах Sennit и обрабатываются как любая другая
-  нерезолвящаяся строка. Значения, которые ни на что не резолвятся
-  (например, `opus` — имя модели из другого инструмента, которого нет в
-  конфиге, или буквально `large`/`small`) при импорте не отбрасываются
-  молча: поле `model` опускается (агент наследует основную модель), но
-  исходное значение остаётся в frontmatter комментарием
-  (`# original model: ... — not available`), и импорт репортит это как
-  предупреждение вместо `slog.Debug`.
-- `reasoning_effort`/opencode-шный `effort`: значения `low`/`medium`/`high`
-  переносятся как есть; близкие, но нестандартные (`max`, `minimal`, ...)
-  маппятся на ближайший валидный уровень с предупреждением; нераспознанные —
-  отбрасываются с предупреждением и остаются комментарием в frontmatter.
-- opencode-шные `temperature`/`top_p`: у `config.Agent` нет таких полей.
-  Импорт не роняет файл и не выдумывает поле — значение остаётся
-  комментарием в frontmatter, импорт репортит предупреждение.
-- Имена инструментов, которым нет соответствия (например, `WebSearch`),
-  при импорте не отбрасываются молча — репортятся как предупреждение с
-  именем инструмента. При обычной загрузке `.sennit/agents` трансляция имён
-  Claude Code (`Read`→`read` и т.д., `ClaudeToolNames` в
-  `agents_markdown.go`) больше не применяется вообще: файлы в собственном
-  каталоге Sennit должны уже называть инструменты по-своему. Транслятор не
-  удалён — он используется только импортом.
-- Делегирование одноуровневое: роль не может вызвать другую роль.
+- `permission:` blocks from opencode files are **not applied**, neither on a
+  normal load nor after an import. A role locked to read-only there gets
+  everything listed in its `tools` under Sennit. The import reports this as a
+  warning ("permission block is not supported; restrict tools via the tools
+  list instead") and leaves a comment in the frontmatter, but does not write
+  the field itself. Restrict via the `tools` list or the config's
+  `permissions` section instead.
+- The `model` field from foreign files understands `provider/model-id`
+  references when such a model exists among the configured providers — it
+  resolves through `config.ResolveModelString`. There are no `large`/`small`
+  slots for `Agent.Model` any more: those words carry no special meaning even
+  in Sennit's own agent files and are treated like any other unresolvable
+  string. Values that resolve to nothing (`opus`, say — a model name from
+  another tool that is not in the config — or literally `large`/`small`) are
+  not dropped silently on import: the `model` field is omitted (the agent
+  inherits the main model), the original value stays in the frontmatter as a
+  comment (`# original model: ... — not available`), and the import reports it
+  as a warning rather than an `slog.Debug`.
+- `reasoning_effort` / opencode's `effort`: `low`/`medium`/`high` carry over
+  as they are; close but non-standard values (`max`, `minimal`, ...) map onto
+  the nearest valid level with a warning; unrecognized ones are dropped with a
+  warning and left as a frontmatter comment.
+- opencode's `temperature`/`top_p`: `config.Agent` has no such fields. The
+  import neither rejects the file nor invents a field — the value stays as a
+  frontmatter comment and the import reports a warning.
+- Tool names with no counterpart (`WebSearch`, for instance) are not dropped
+  silently on import — they are reported as a warning naming the tool. On a
+  normal load of `.sennit/agents`, the Claude Code name translation
+  (`Read`→`read` and so on, `ClaudeToolNames` in `agents_markdown.go`) no
+  longer applies at all: files in Sennit's own directory are expected to name
+  tools Sennit's way already. The translator was not deleted — it is used by
+  the import only.
+- Delegation is single-level: a role cannot call another role.
