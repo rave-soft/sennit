@@ -23,13 +23,13 @@ func TestLdflagsVersionSurvivesBuildInfo(t *testing.T) {
 	}
 
 	binary := filepath.Join(t.TempDir(), "sennit")
-	build := exec.Command("go", "build",
+	build := exec.CommandContext(t.Context(), "go", "build",
 		"-ldflags", "-X github.com/rave-soft/sennit/internal/version.Version=v9.9.9",
 		"-o", binary, "github.com/rave-soft/sennit")
 	out, err := build.CombinedOutput()
 	require.NoError(t, err, string(out))
 
-	reported, err := exec.Command(binary, "--version").Output()
+	reported, err := exec.CommandContext(t.Context(), binary, "--version").Output()
 	require.NoError(t, err)
 	require.Contains(t, string(reported), "v9.9.9")
 	require.NotContains(t, string(reported), "v0.0.0-",

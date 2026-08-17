@@ -147,7 +147,7 @@ func TestFlowRejectsMismatchedState(t *testing.T) {
 	t.Cleanup(func() { _ = flow.Close() })
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, callbackPath+"?code=abc&state=not-the-state", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, callbackPath+"?code=abc&state=not-the-state", nil)
 	flow.handleCallback(rec, req)
 
 	res := <-flow.results
@@ -164,7 +164,7 @@ func TestFlowIgnoresUnrelatedPaths(t *testing.T) {
 	t.Cleanup(func() { _ = flow.Close() })
 
 	rec := httptest.NewRecorder()
-	flow.handleCallback(rec, httptest.NewRequest(http.MethodGet, "/favicon.ico", nil))
+	flow.handleCallback(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/favicon.ico", nil))
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	select {

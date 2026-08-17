@@ -84,7 +84,9 @@ func TestUsageTransportRecords(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	client := &http.Client{Transport: NewUsageTransport(nil)}
-	resp, err := client.Get(srv.URL)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 
@@ -106,7 +108,9 @@ func TestUsageTransportKeepsLastKnown(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	client := &http.Client{Transport: NewUsageTransport(nil)}
-	resp, err := client.Get(srv.URL)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 

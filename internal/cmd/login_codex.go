@@ -122,7 +122,7 @@ func codexToken(ctx context.Context, proxyURL string) (*oauth.Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer flow.Close() //nolint:errcheck // best-effort listener shutdown
+	defer flow.Close() // best-effort listener shutdown
 
 	fmt.Println()
 	fmt.Println("Press enter to open this URL and sign in with your ChatGPT account:")

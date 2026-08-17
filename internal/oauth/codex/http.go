@@ -26,10 +26,10 @@ const ProxyDirect = "none"
 // correctly configured.
 func httpClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
 	client := &http.Client{Timeout: timeout}
-	switch {
-	case proxyURL == "":
+	switch proxyURL {
+	case "":
 		return client, nil
-	case proxyURL == ProxyDirect:
+	case ProxyDirect:
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
 		client.Transport = transport

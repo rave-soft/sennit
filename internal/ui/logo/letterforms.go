@@ -32,14 +32,11 @@ func joinLetterform(letters ...string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, letters...)
 }
 
-// repeatLetterformPart repeats a letterform part horizontally a fixed number
-// of times. Every letterform has a fixed width: nothing here is stretched.
-func repeatLetterformPart(s string, width int) string {
-	parts := make([]string, width)
-	for i := range parts {
-		parts[i] = s
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+// doubleLetterformPart repeats a letterform part horizontally, twice. Every
+// letterform has a fixed width: nothing here is stretched, and every caller
+// wants the same doubling, so the count is not a parameter.
+func doubleLetterformPart(s string) string {
+	return lipgloss.JoinHorizontal(lipgloss.Top, s, s)
 }
 
 // LetterI renders the letter I in a stylized way.
@@ -76,7 +73,7 @@ func LetterE() string {
 		▀`)
 	return joinLetterform(
 		left,
-		repeatLetterformPart(middle, 2),
+		doubleLetterformPart(middle),
 	)
 }
 
@@ -113,7 +110,7 @@ func LetterN() string {
 		▀`)
 	return joinLetterform(
 		left,
-		repeatLetterformPart(middle, 2),
+		doubleLetterformPart(middle),
 		right,
 	)
 }
@@ -146,7 +143,7 @@ func LetterS() string {
 		▀`)
 	return joinLetterform(
 		left,
-		repeatLetterformPart(middle, 2),
+		doubleLetterformPart(middle),
 		right,
 	)
 }
@@ -167,6 +164,6 @@ func LetterT() string {
 		█
 		█
 		▀`)
-	barPart := repeatLetterformPart(bar, 2)
+	barPart := doubleLetterformPart(bar)
 	return joinLetterform(barPart, stem, barPart)
 }

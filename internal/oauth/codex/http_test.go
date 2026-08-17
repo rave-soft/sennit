@@ -51,7 +51,9 @@ func TestHTTPClientRoutesThroughProxy(t *testing.T) {
 
 	// An http:// target is forwarded through the proxy as a plain request,
 	// so the test server sees it without having to speak CONNECT.
-	resp, err := client.Get("http://codex.invalid/models")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://codex.invalid/models", nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	require.Equal(t, []string{"codex.invalid"}, proxied)
