@@ -107,8 +107,8 @@ func TestComputeAgents_PrefersAgentIDOverTitle(t *testing.T) {
 
 	sessions := []stats.Session{
 		{ID: "root", Title: "root session"},
-		{ID: "a1", ParentID: "root", AgentID: "reviewer", Title: "Ревью итерации 1", PromptTokens: 100, CompletionTokens: 10, Cost: 0.5, CreatedAt: 10, UpdatedAt: 40},
-		{ID: "a2", ParentID: "root", AgentID: "reviewer", Title: "Ревью итерации 2", PromptTokens: 200, CompletionTokens: 20, Cost: 0.5, CreatedAt: 40, UpdatedAt: 60},
+		{ID: "a1", ParentID: "root", AgentID: "reviewer", Title: "Review iteration 1", PromptTokens: 100, CompletionTokens: 10, Cost: 0.5, CreatedAt: 10, UpdatedAt: 40},
+		{ID: "a2", ParentID: "root", AgentID: "reviewer", Title: "Review iteration 2", PromptTokens: 200, CompletionTokens: 20, Cost: 0.5, CreatedAt: 40, UpdatedAt: 60},
 		{ID: "a3", ParentID: "root", Title: "New Agent Session", PromptTokens: 50, CompletionTokens: 5, CreatedAt: 10, UpdatedAt: 20},
 	}
 
