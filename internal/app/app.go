@@ -655,8 +655,16 @@ func setupSubscriber[T any](
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	broker *pubsub.Broker[any],
 ) {
+	// Subscribed here rather than inside the goroutine below. A broker
+	// only delivers to subscribers already registered when a value is
+	// published, so subscribing asynchronously leaves a window in which
+	// everything the source emits is lost outright -- and the window
+	// closes only when the runtime happens to schedule this goroutine.
+	// With more than one P that is usually immediate, which is why it
+	// took a single-P run to make it visible; the window is real either
+	// way, and it sits at startup, exactly where the first events are.
+	subCh := subscriber(ctx)
 	wg.Go(func() {
-		subCh := subscriber(ctx)
 		for {
 			select {
 			case event, ok := <-subCh:
@@ -704,8 +712,11 @@ func setupSubscriberMustDeliver[T any](
 	subscriber func(context.Context) <-chan pubsub.Event[T],
 	broker *pubsub.Broker[any],
 ) {
+	// Subscribed before the goroutine starts, for the reason
+	// setupSubscriber gives -- and it matters more here: this variant
+	// exists for events subscribers cannot tolerate losing.
+	subCh := subscriber(ctx)
 	wg.Go(func() {
-		subCh := subscriber(ctx)
 		for {
 			select {
 			case event, ok := <-subCh:

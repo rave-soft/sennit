@@ -14,13 +14,22 @@ import (
 // assistant message with a null finished_at, joined to its project), so a
 // fake would be testing the fake.
 type interruptedEnv struct {
-	projectPath string
-	sessions    session.Service
-	messages    message.Service
+	sessions session.Service
+	messages message.Service
 }
 
-func newInterruptedEnv(t *testing.T, projectPath string) interruptedEnv {
+// interruptedTestProject is the project every session in these tests
+// belongs to. The sweep is scoped by project, so the tests need a second
+// name to pass in as "somebody else's" - see
+// TestFinalizeInterruptedTurns_IgnoresOtherProjects.
+const (
+	interruptedTestProject = "/proj"
+	otherTestProject       = "/other-proj"
+)
+
+func newInterruptedEnv(t *testing.T) interruptedEnv {
 	t.Helper()
+	projectPath := interruptedTestProject
 	dataDir := t.TempDir()
 	t.Cleanup(func() {
 		require.NoError(t, db.Release(dataDir))
@@ -30,17 +39,17 @@ func newInterruptedEnv(t *testing.T, projectPath string) interruptedEnv {
 	require.NoError(t, err)
 	q := db.New(conn)
 	return interruptedEnv{
-		projectPath: projectPath,
-		sessions:    session.NewService(q, conn, projectPath),
-		messages:    message.NewService(q),
+		sessions: session.NewService(q, conn, projectPath),
+		messages: message.NewService(q),
 	}
 }
 
 // assistantWithToolCall creates a session holding an assistant message
 // with one unfinished tool call and no result — the shape a killed
 // process leaves behind.
-func (e interruptedEnv) assistantWithToolCall(t *testing.T, callID string) (session.Session, message.Message) {
+func (e interruptedEnv) assistantWithToolCall(t *testing.T) (session.Session, message.Message) {
 	t.Helper()
+	const callID = "call-1"
 	sess, err := e.sessions.Create(t.Context(), "s")
 	require.NoError(t, err)
 	msg, err := e.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
@@ -71,10 +80,10 @@ func (e interruptedEnv) reload(t *testing.T, sessionID, messageID string) messag
 // error result and its turn gets a Finish, which is what stops the UI
 // reading it as still running (chat.ToolRenderOpts.IsPending).
 func TestFinalizeInterruptedTurns_AnswersDanglingToolCall(t *testing.T) {
-	env := newInterruptedEnv(t, "/proj")
-	sess, msg := env.assistantWithToolCall(t, "call-1")
+	env := newInterruptedEnv(t)
+	sess, msg := env.assistantWithToolCall(t)
 
-	require.NoError(t, finalizeInterruptedTurns(t.Context(), "/proj", env.messages))
+	require.NoError(t, finalizeInterruptedTurns(t.Context(), interruptedTestProject, env.messages))
 
 	got := env.reload(t, sess.ID, msg.ID)
 	require.NotNil(t, got.FinishPart(), "the turn must be closed out")
@@ -96,13 +105,13 @@ func TestFinalizeInterruptedTurns_AnswersDanglingToolCall(t *testing.T) {
 // A turn that ended normally is not this sweep's business, and rewriting
 // it would corrupt real history.
 func TestFinalizeInterruptedTurns_LeavesFinishedTurnsAlone(t *testing.T) {
-	env := newInterruptedEnv(t, "/proj")
-	sess, msg := env.assistantWithToolCall(t, "call-1")
+	env := newInterruptedEnv(t)
+	sess, msg := env.assistantWithToolCall(t)
 	msg.AddFinish(message.FinishReasonEndTurn, "", "")
 	require.NoError(t, env.messages.Update(t.Context(), msg))
 	require.NoError(t, env.messages.FlushAll(t.Context()))
 
-	require.NoError(t, finalizeInterruptedTurns(t.Context(), "/proj", env.messages))
+	require.NoError(t, finalizeInterruptedTurns(t.Context(), interruptedTestProject, env.messages))
 
 	got := env.reload(t, sess.ID, msg.ID)
 	require.Equal(t, message.FinishReasonEndTurn, got.FinishReason(),
@@ -118,7 +127,7 @@ func TestFinalizeInterruptedTurns_LeavesFinishedTurnsAlone(t *testing.T) {
 // Parallel tool calls can be killed with one answered and one not. Only
 // the missing one is written; the recorded result must survive untouched.
 func TestFinalizeInterruptedTurns_OnlyAnswersTheMissingCall(t *testing.T) {
-	env := newInterruptedEnv(t, "/proj")
+	env := newInterruptedEnv(t)
 	sess, err := env.sessions.Create(t.Context(), "s")
 	require.NoError(t, err)
 	_, err = env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{
@@ -137,7 +146,7 @@ func TestFinalizeInterruptedTurns_OnlyAnswersTheMissingCall(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, finalizeInterruptedTurns(t.Context(), "/proj", env.messages))
+	require.NoError(t, finalizeInterruptedTurns(t.Context(), interruptedTestProject, env.messages))
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
@@ -158,10 +167,10 @@ func TestFinalizeInterruptedTurns_OnlyAnswersTheMissingCall(t *testing.T) {
 // Another project's interrupted turn is another bootstrap's job — sweeping
 // it here would repair sessions belonging to a sennit that may be running.
 func TestFinalizeInterruptedTurns_IgnoresOtherProjects(t *testing.T) {
-	env := newInterruptedEnv(t, "/proj")
-	sess, msg := env.assistantWithToolCall(t, "call-1")
+	env := newInterruptedEnv(t)
+	sess, msg := env.assistantWithToolCall(t)
 
-	require.NoError(t, finalizeInterruptedTurns(t.Context(), "/other-proj", env.messages))
+	require.NoError(t, finalizeInterruptedTurns(t.Context(), otherTestProject, env.messages))
 
 	got := env.reload(t, sess.ID, msg.ID)
 	require.Nil(t, got.FinishPart(), "another project's turn must be left for its own bootstrap")
@@ -170,12 +179,12 @@ func TestFinalizeInterruptedTurns_IgnoresOtherProjects(t *testing.T) {
 // Running twice must be a no-op the second time: the Finish written by the
 // first pass is what takes the message out of the candidate query.
 func TestFinalizeInterruptedTurns_IsIdempotent(t *testing.T) {
-	env := newInterruptedEnv(t, "/proj")
-	sess, _ := env.assistantWithToolCall(t, "call-1")
+	env := newInterruptedEnv(t)
+	sess, _ := env.assistantWithToolCall(t)
 
-	require.NoError(t, finalizeInterruptedTurns(t.Context(), "/proj", env.messages))
+	require.NoError(t, finalizeInterruptedTurns(t.Context(), interruptedTestProject, env.messages))
 	require.NoError(t, env.messages.FlushAll(t.Context()))
-	require.NoError(t, finalizeInterruptedTurns(t.Context(), "/proj", env.messages))
+	require.NoError(t, finalizeInterruptedTurns(t.Context(), interruptedTestProject, env.messages))
 	require.NoError(t, env.messages.FlushAll(t.Context()))
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
