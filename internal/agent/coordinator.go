@@ -45,7 +45,7 @@ var (
 )
 
 type Coordinator interface {
-	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
+	// Not used yet; for when there are multiple agents.
 	// SetMainAgent(string)
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
