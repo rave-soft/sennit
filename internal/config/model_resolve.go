@@ -134,7 +134,7 @@ func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (model
 		}
 		defaultModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
 		if defaultModel == nil {
-			slog.Warn("Default model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
+			slog.Warn("Default model not found for provider", "model", p.DefaultLargeModelID, "provider", p.ID)
 			if len(providerConfig.Models) == 0 {
 				return model, fmt.Errorf("default model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
 			}
