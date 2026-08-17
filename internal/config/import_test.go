@@ -372,3 +372,139 @@ func TestRunImport_RequiresSkillsOrAgents(t *testing.T) {
 	_, err := RunImport(ImportOptions{Source: ImportSourceClaude, WorkingDir: t.TempDir()})
 	require.Error(t, err)
 }
+
+// opencode reads both spellings of each directory — <dir>/skill and
+// <dir>/skills for skills, <dir>/agent and <dir>/agents for agents —
+// verified against a real installation (v1.18.18) by dropping probes in
+// each and asking `opencode agent list` what it found. Importing only
+// one spelling would silently miss whichever half of its users picked
+// the other.
+func TestRunImport_OpenCode_ReadsBothDirectorySpellings(t *testing.T) {
+	root := t.TempDir()
+	writeForeignSkill(t, root, ".opencode/skills", "plural-skill", `---
+name: plural-skill
+description: Lives in the plural directory.
+---
+body`)
+	writeForeignSkill(t, root, ".opencode/skill", "singular-skill", `---
+name: singular-skill
+description: Lives in the singular directory.
+---
+body`)
+	writeForeignAgent(t, root, ".opencode/agent", "singular-agent.md", `---
+name: singular-agent
+description: Lives in the singular directory.
+mode: subagent
+---
+body`)
+	writeForeignAgent(t, root, ".opencode/agents", "plural-agent.md", `---
+name: plural-agent
+description: Lives in the plural directory.
+mode: subagent
+---
+body`)
+
+	report, err := RunImport(ImportOptions{
+		Source: ImportSourceOpenCode, WorkingDir: root, Skills: true, Agents: true,
+	})
+	require.NoError(t, err)
+
+	for _, name := range []string{"plural-skill", "singular-skill"} {
+		require.Equal(t, StatusImported, findEntry(t, report, "skill", name).Status)
+		require.FileExists(t, filepath.Join(root, ".sennit", "skills", name, "SKILL.md"))
+	}
+	for _, name := range []string{"singular-agent", "plural-agent"} {
+		require.Equal(t, StatusImported, findEntry(t, report, "agent", name).Status)
+		require.FileExists(t, filepath.Join(root, ".sennit", "agents", name+".md"))
+	}
+}
+
+// The same name in both spellings is one skill, not two. It is claimed
+// by the first directory searched and reported as a skip against the
+// other, so the user can see the duplicate rather than wonder which copy
+// landed.
+func TestRunImport_OpenCode_DuplicateAcrossSpellingsImportedOnce(t *testing.T) {
+	root := t.TempDir()
+	writeForeignSkill(t, root, ".opencode/skills", "shared", `---
+name: shared
+description: The copy in the plural directory.
+---
+plural body`)
+	writeForeignSkill(t, root, ".opencode/skill", "shared", `---
+name: shared
+description: The copy in the singular directory.
+---
+singular body`)
+
+	report, err := RunImport(ImportOptions{
+		Source: ImportSourceOpenCode, WorkingDir: root, Skills: true,
+	})
+	require.NoError(t, err)
+
+	var imported, skipped int
+	for _, e := range report.Entries {
+		switch e.Status {
+		case StatusImported:
+			imported++
+		case StatusSkipped:
+			skipped++
+			require.Contains(t, e.Reason, "already imported from")
+		}
+	}
+	require.Equal(t, 1, imported, "one skill, however many directories hold it")
+	require.Equal(t, 1, skipped, "the duplicate is reported, not silently dropped")
+
+	written, err := os.ReadFile(filepath.Join(root, ".sennit", "skills", "shared", "SKILL.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(written), "plural body", "the canonical directory wins")
+}
+
+// A "nothing to import" result has to name where it looked. The two
+// causes — an empty setup and a wrong path — call for opposite next
+// moves, and the report is the only place a user can tell them apart.
+func TestRunImport_ReportsEveryDirectorySearched(t *testing.T) {
+	root := t.TempDir()
+
+	report, err := RunImport(ImportOptions{
+		Source: ImportSourceOpenCode, WorkingDir: root, Skills: true, Agents: true,
+	})
+	require.NoError(t, err)
+	require.Empty(t, report.Entries)
+	require.Equal(t, []string{
+		filepath.Join(root, ".opencode", "skills"),
+		filepath.Join(root, ".opencode", "skill"),
+		filepath.Join(root, ".opencode", "agent"),
+		filepath.Join(root, ".opencode", "agents"),
+	}, report.Searched, "every directory looked in, existing or not")
+}
+
+// Only the kinds actually asked for are searched, so the list never
+// implies a lookup that did not happen.
+func TestRunImport_SearchedCoversOnlyRequestedKinds(t *testing.T) {
+	root := t.TempDir()
+
+	report, err := RunImport(ImportOptions{
+		Source: ImportSourceClaude, WorkingDir: root, Agents: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{filepath.Join(root, ".claude", "agents")}, report.Searched)
+}
+
+// opencode's global root is $XDG_CONFIG_HOME/opencode, falling back to
+// ~/.config/opencode — the same resolution home.Config performs, checked
+// against a real installation by pointing XDG_CONFIG_HOME at a fixture
+// and confirming opencode loaded the agents and skills from it.
+func TestImportSourceDirs_OpenCodeGlobalFollowsXDGConfigHome(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	skillsDirs, agentsDirs := importSourceDirs(ImportSourceOpenCode, "/irrelevant", true)
+	require.Equal(t, []string{
+		filepath.Join(xdg, "opencode", "skills"),
+		filepath.Join(xdg, "opencode", "skill"),
+	}, skillsDirs)
+	require.Equal(t, []string{
+		filepath.Join(xdg, "opencode", "agent"),
+		filepath.Join(xdg, "opencode", "agents"),
+	}, agentsDirs)
+}

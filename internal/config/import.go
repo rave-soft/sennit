@@ -69,6 +69,12 @@ type ImportEntry struct {
 type ImportReport struct {
 	Source  ImportSource
 	Entries []ImportEntry
+	// Searched lists every source directory that was looked in, for the
+	// kinds this run asked for, whether or not it existed. It is what
+	// lets "nothing to import" be distinguished from "looked in the
+	// wrong place" without the user having to guess which directories
+	// this build believes in.
+	Searched []string
 }
 
 // RunImport copies skills and/or agents from a foreign tool's directories
@@ -84,24 +90,36 @@ func RunImport(opts ImportOptions) (ImportReport, error) {
 		return ImportReport{}, errors.New("nothing to import: pass --skills and/or --agents")
 	}
 
-	srcSkillsDir, srcAgentsDir := importSourceDirs(opts.Source, opts.WorkingDir, opts.Global)
+	srcSkillsDirs, srcAgentsDirs := importSourceDirs(opts.Source, opts.WorkingDir, opts.Global)
 	dstSkillsDir, dstAgentsDir := importDestDirs(opts.WorkingDir, opts.Global)
 
 	report := ImportReport{Source: opts.Source}
 
+	// seen tracks which source directory each name was taken from, so a
+	// tool that reads two spellings of the same directory does not import
+	// the same skill twice. Directories are visited most-canonical first,
+	// so the first one to claim a name keeps it.
 	if opts.Skills {
-		entries, err := importSkills(srcSkillsDir, dstSkillsDir, opts)
-		if err != nil {
-			return report, err
+		seen := map[string]string{}
+		for _, srcDir := range srcSkillsDirs {
+			report.Searched = append(report.Searched, srcDir)
+			entries, err := importSkills(srcDir, dstSkillsDir, opts, seen)
+			if err != nil {
+				return report, err
+			}
+			report.Entries = append(report.Entries, entries...)
 		}
-		report.Entries = append(report.Entries, entries...)
 	}
 	if opts.Agents {
-		entries, err := importAgents(srcAgentsDir, dstAgentsDir, opts)
-		if err != nil {
-			return report, err
+		seen := map[string]string{}
+		for _, srcDir := range srcAgentsDirs {
+			report.Searched = append(report.Searched, srcDir)
+			entries, err := importAgents(srcDir, dstAgentsDir, opts, seen)
+			if err != nil {
+				return report, err
+			}
+			report.Entries = append(report.Entries, entries...)
 		}
-		report.Entries = append(report.Entries, entries...)
 	}
 
 	sort.SliceStable(report.Entries, func(i, j int) bool {
@@ -115,25 +133,45 @@ func RunImport(opts ImportOptions) (ImportReport, error) {
 }
 
 // importSourceDirs returns the directories a foreign tool keeps skills and
-// agents in. The project forms mirror the directories Sennit itself used to
-// auto-discover before this change (see git history of agentDirs and
-// projectSkillSubdirs); the global forms are this package's best-effort
-// mapping of each tool's documented global config location, since neither
-// tool is a dependency here to confirm it against.
-func importSourceDirs(source ImportSource, workingDir string, global bool) (skillsDir, agentsDir string) {
+// agents in, most-canonical first. More than one per kind is not
+// hedging: opencode genuinely reads both spellings, so importing only one
+// would quietly miss half its users.
+//
+// The Claude Code forms mirror the directories Sennit itself used to
+// auto-discover before imports became explicit (see git history of
+// agentDirs and projectSkillSubdirs).
+//
+// The opencode forms are verified against a real installation (v1.18.18)
+// rather than inferred: it registers <dir>/skill and <dir>/skills as
+// skill sources and reads both <dir>/agent and <dir>/agents for agents,
+// for every directory in its config chain — project-local .opencode and
+// the global one alike. Its global root is $XDG_CONFIG_HOME/opencode
+// falling back to ~/.config/opencode, which is exactly what home.Config
+// resolves.
+func importSourceDirs(source ImportSource, workingDir string, global bool) (skillsDirs, agentsDirs []string) {
+	join := func(root string, names ...string) []string {
+		out := make([]string, 0, len(names))
+		for _, name := range names {
+			out = append(out, filepath.Join(root, name))
+		}
+		return out
+	}
+
 	switch source {
 	case ImportSourceClaude:
+		root := filepath.Join(workingDir, ".claude")
 		if global {
-			return filepath.Join(home.Dir(), ".claude", "skills"), filepath.Join(home.Dir(), ".claude", "agents")
+			root = filepath.Join(home.Dir(), ".claude")
 		}
-		return filepath.Join(workingDir, ".claude", "skills"), filepath.Join(workingDir, ".claude", "agents")
+		return join(root, "skills"), join(root, "agents")
 	case ImportSourceOpenCode:
+		root := filepath.Join(workingDir, ".opencode")
 		if global {
-			return filepath.Join(home.Config(), "opencode", "skills"), filepath.Join(home.Config(), "opencode", "agent")
+			root = filepath.Join(home.Config(), "opencode")
 		}
-		return filepath.Join(workingDir, ".opencode", "skills"), filepath.Join(workingDir, ".opencode", "agent")
+		return join(root, "skills", "skill"), join(root, "agent", "agents")
 	default:
-		return "", ""
+		return nil, nil
 	}
 }
 
@@ -149,7 +187,14 @@ func importDestDirs(workingDir string, global bool) (skillsDir, agentsDir string
 // importSkills copies every <srcDir>/<name>/SKILL.md directory that parses
 // and validates as a Sennit-compatible skill into dstDir. A missing srcDir is
 // not an error — it just means there is nothing of that kind to import.
-func importSkills(srcDir, dstDir string, opts ImportOptions) ([]ImportEntry, error) {
+//
+// seen carries names already taken by an earlier source directory (see
+// RunImport) and is extended with the ones this call claims. Matching on
+// the directory name rather than the parsed skill name is deliberate: the
+// spec ties the two together, and a name has to be claimed before the
+// file is parsed for a --dry-run to report the same outcome as a real
+// run.
+func importSkills(srcDir, dstDir string, opts ImportOptions, seen map[string]string) ([]ImportEntry, error) {
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -163,6 +208,14 @@ func importSkills(srcDir, dstDir string, opts ImportOptions) ([]ImportEntry, err
 		if !e.IsDir() {
 			continue
 		}
+		if from, dup := seen[e.Name()]; dup {
+			out = append(out, ImportEntry{
+				Kind: "skill", Name: e.Name(), Status: StatusSkipped,
+				Reason: fmt.Sprintf("already imported from %s", from),
+			})
+			continue
+		}
+		seen[e.Name()] = srcDir
 		skillDir := filepath.Join(srcDir, e.Name())
 		skillFile := filepath.Join(skillDir, skills.SkillFileName)
 
@@ -267,7 +320,7 @@ type outAgentFrontmatter struct {
 
 // importAgents converts every *.md file in srcDir into a Sennit agent file
 // under dstDir. A missing srcDir is not an error — nothing to import.
-func importAgents(srcDir, dstDir string, opts ImportOptions) ([]ImportEntry, error) {
+func importAgents(srcDir, dstDir string, opts ImportOptions, seen map[string]string) ([]ImportEntry, error) {
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -281,6 +334,17 @@ func importAgents(srcDir, dstDir string, opts ImportOptions) ([]ImportEntry, err
 		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".md") {
 			continue
 		}
+		// Filename, not the frontmatter id: the id is only known after
+		// conversion, and by then a duplicate would already have been
+		// written. See importSkills for the same reasoning.
+		if from, dup := seen[e.Name()]; dup {
+			out = append(out, ImportEntry{
+				Kind: "agent", Name: e.Name(), Status: StatusSkipped,
+				Reason: fmt.Sprintf("already imported from %s", from),
+			})
+			continue
+		}
+		seen[e.Name()] = srcDir
 		entry, err := convertAgentFile(filepath.Join(srcDir, e.Name()), e.Name(), dstDir, opts)
 		if err != nil {
 			out = append(out, ImportEntry{Kind: "agent", Name: e.Name(), Status: StatusSkipped, Reason: err.Error()})

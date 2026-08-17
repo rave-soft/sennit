@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/home"
 	"github.com/spf13/cobra"
 )
 
@@ -30,7 +31,12 @@ directory implicitly.
 
 Neither --skills nor --agents is on by default; pass at least one. Files
 that already exist at the destination are left alone unless --force is
-given. --dry-run reports what would happen without writing anything.`,
+given. --dry-run reports what would happen without writing anything.
+
+Both spellings of opencode's directories are read, since opencode reads
+both itself: skill/ and skills/, agent/ and agents/. A name found in more
+than one is imported once and reported as skipped against the rest. When
+nothing is found, the directories that were searched are listed.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var source config.ImportSource
@@ -82,7 +88,14 @@ given. --dry-run reports what would happen without writing anything.`,
 // status, and the reason/warnings behind it.
 func printImportReport(cmd *cobra.Command, report config.ImportReport, dryRun bool) {
 	if len(report.Entries) == 0 {
-		cmd.Printf("Nothing to import from %s.\n", report.Source)
+		// Name the directories. "Nothing to import" on its own reads as
+		// a fact about the user's setup when it may be a fact about
+		// where this build looked — and the two call for opposite next
+		// moves.
+		cmd.Printf("Nothing to import from %s. Looked in:\n", report.Source)
+		for _, dir := range report.Searched {
+			cmd.Printf("  %s\n", home.Short(dir))
+		}
 		return
 	}
 

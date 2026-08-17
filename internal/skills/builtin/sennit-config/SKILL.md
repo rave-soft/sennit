@@ -519,8 +519,8 @@ TECHDEBT.md for why). `sennit import` is the supported way to bring files in:
   validating it against the same Agent Skills spec Sennit's own skills follow.
   A skill that fails validation (bad name, oversized description, ...) is
   skipped with a reason, not partially imported.
-- `--agents` copies `<tool>/agents/*.md` (or opencode's `.opencode/agent/`)
-  into `.sennit/agents/*.md`, translating:
+- `--agents` copies `<tool>/agents/*.md` into `.sennit/agents/*.md`,
+  translating:
   - `model` — resolved against your configured providers the same way a
     hand-written `model:` is; an unresolvable value is dropped with a
     warning and left as a `# original model: ... — not available` comment in
@@ -538,14 +538,22 @@ TECHDEBT.md for why). `sennit import` is the supported way to bring files in:
     enforced even when opencode's directory was auto-discovered. Restrict an
     imported agent via its `tools` list instead.
 - `--global` reads/writes the user-level directories (`~/.claude/...`,
-  `~/.config/opencode/...` → the global `.sennit` directories) instead of the
-  project ones.
+  `$XDG_CONFIG_HOME/opencode/...` or `~/.config/opencode/...` → the global
+  `.sennit` directories) instead of the project ones.
 - `--dry-run` prints the report without writing anything.
 - Without `--force`, a destination file that already exists is left alone
   and reported as skipped — re-running an import is safe.
 
+Both spellings of opencode's directories are read, because opencode itself
+reads both: `skill/` and `skills/` for skills, `agent/` and `agents/` for
+agents, project-local and global alike. A name present in both is imported
+once, from the first directory searched, and reported as skipped against the
+other.
+
 The command prints one row per skill/agent: name, `imported` / `adjusted` /
-`skipped`, and the reason or warnings behind that status.
+`skipped`, and the reason or warnings behind that status. When there is
+nothing to import it lists every directory it looked in, so "nothing here"
+can be told apart from "looked in the wrong place".
 
 ## Agent Skills
 
