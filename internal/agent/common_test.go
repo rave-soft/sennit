@@ -212,7 +212,7 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 		return nil, err
 	}
 
-	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
+	// Set a fixed config to ensure cassettes match
 	// independently of user config on `$HOME/.config/sennit/sennit.json`.
 	cfg.Config().Options.Attribution = &config.Attribution{
 		TrailerStyle:  "assisted-by",
