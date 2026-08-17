@@ -62,11 +62,12 @@ func TestThreadDockStatusWordIdleIsExplicit(t *testing.T) {
 	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusFailed), word, "must not fall through to an unhandled-status default indistinguishable from idle")
 }
 
-// TestDispatchThreadsDockRefreshMergesTasks proves the dock's refresh
-// merges task rows in from ListTasks (mirroring TestDispatchThreadsRefresh
-// MergesTasks in threads_cache_test.go), so a running task shows up in the
-// dock's live-work list with its own identity.
-func TestDispatchThreadsDockRefreshMergesTasks(t *testing.T) {
+// The dock lists threads only, mirroring
+// TestDispatchThreadsRefreshExcludesTasks. A task is the `agent` tool's own
+// delegation, already visible inline in the chat that started it, and a
+// finished one was never removed from the shared table — so a running task
+// no longer takes a slot in the dock's list.
+func TestDispatchThreadsDockRefreshExcludesTasks(t *testing.T) {
 	t.Parallel()
 
 	ws := &threadsDockTestWorkspace{
@@ -85,7 +86,7 @@ func TestDispatchThreadsDockRefreshMergesTasks(t *testing.T) {
 	require.True(t, ok)
 
 	active := activeDockThreads(loaded.threads)
-	require.ElementsMatch(t, []string{"thr-1", "task-1"}, dockThreadIDs(active))
+	require.Equal(t, []string{"thr-1"}, dockThreadIDs(active))
 }
 
 // TestVisibleDockThreadsReturnsEveryThread pins the removal of the old

@@ -322,9 +322,16 @@ func gcSelectSessions(ctx context.Context, q *sennitdb.Queries, cutoff int64, pr
 	return ids, nil
 }
 
-// gcSelectThreads returns the IDs of finished threads (never
+// gcSelectThreads returns the IDs of finished delegations (never
 // pending/running/merging) whose updated_at is strictly older than
 // cutoff, scoped to projectPath when non-empty.
+//
+// Both kinds sharing the table are eligible. gc is the only thing that
+// reclaims rows here: a thread is otherwise removed only by merging, and
+// a task by nothing at all, so tasks accumulated for the life of the
+// database until this stopped excluding them. The terminal-status and
+// cutoff rules are the same for both — a task's completed/cancelled/
+// interrupted are terminal statuses like any other.
 func gcSelectThreads(ctx context.Context, q *sennitdb.Queries, cutoff int64, projectPath string) ([]string, error) {
 	rows, err := q.ListThreadsForGC(ctx)
 	if err != nil {

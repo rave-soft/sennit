@@ -76,24 +76,15 @@ func (c *threadsCacheState) dispatchThreadsRefresh(com *common.Common) tea.Cmd {
 	}
 	ws := com.Workspace
 	return func() tea.Msg {
+		// Threads only. Tasks share the Kind-discriminated table and this
+		// list used to merge them in as "live work", but a task is the
+		// `agent` tool's own delegation: it already renders inline in the
+		// chat that started it, it is never merged, and nothing ever
+		// removed a finished one — so they only accumulated here, burying
+		// the threads this screen is about.
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
 			slog.Error("Failed to list threads", "error", err)
-		}
-		// Tasks share the same Kind-discriminated table (see
-		// internal/workspace/tasks.go), so the dashboard's live-work list
-		// merges both round trips rather than only ever seeing threads.
-		// err below stays whatever ListThreads reported: a ListTasks
-		// failure is logged and simply leaves task rows out of this
-		// refresh rather than discarding an otherwise-successful thread
-		// list too (applyThreadsLoaded only caches on err == nil).
-		if ws.SupportsTasks() {
-			tasks, taskErr := ws.ListTasks(context.Background())
-			if taskErr != nil {
-				slog.Error("Failed to list tasks", "error", taskErr)
-			} else {
-				threads = append(threads, tasks...)
-			}
 		}
 		return threadsLoadedMsg{gen: gen, threads: threads, err: err}
 	}

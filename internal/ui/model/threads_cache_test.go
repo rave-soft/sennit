@@ -264,7 +264,11 @@ func TestApplyThreadsLoadedErrorPreservesCachedValue(t *testing.T) {
 	require.False(t, c.cache.inFlight)
 }
 
-func TestDispatchThreadsRefreshMergesTasks(t *testing.T) {
+// The threads list is threads only. A task is the `agent` tool's own
+// delegation: it renders inline in the chat that started it, it is never
+// merged, and nothing removed a finished one from the shared table — so
+// merging them here only buried the threads this screen is about.
+func TestDispatchThreadsRefreshExcludesTasks(t *testing.T) {
 	t.Parallel()
 
 	ws := &threadsTestWorkspace{
@@ -281,14 +285,13 @@ func TestDispatchThreadsRefreshMergesTasks(t *testing.T) {
 	msg := cmd()
 	loaded, ok := msg.(threadsLoadedMsg)
 	require.True(t, ok)
-	require.Equal(t, 1, ws.taskCalls)
-	require.ElementsMatch(t, []proto.Thread{
+	require.Zero(t, ws.taskCalls, "the threads list must not pay for a task round trip it does not use")
+	require.Equal(t, []proto.Thread{
 		{ID: "thr-1", Name: "a-thread", Kind: "thread"},
-		{ID: "task-1", Name: "a-task", Kind: "task"},
 	}, loaded.threads)
 }
 
-func TestDispatchThreadsRefreshSkipsTasksWhenUnsupported(t *testing.T) {
+func TestDispatchThreadsRefreshIgnoresTaskSupport(t *testing.T) {
 	t.Parallel()
 
 	ws := &threadsTestWorkspace{
@@ -302,7 +305,7 @@ func TestDispatchThreadsRefreshSkipsTasksWhenUnsupported(t *testing.T) {
 	msg := c.dispatchThreadsRefresh(com)()
 	loaded, ok := msg.(threadsLoadedMsg)
 	require.True(t, ok)
-	require.Equal(t, 0, ws.taskCalls, "ListTasks must not be called when the workspace doesn't support tasks")
+	require.Zero(t, ws.taskCalls, "ListTasks is not part of this fetch at all")
 	require.Equal(t, []proto.Thread{{ID: "thr-1"}}, loaded.threads)
 }
 

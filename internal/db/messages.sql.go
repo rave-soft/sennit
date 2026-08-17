@@ -325,7 +325,7 @@ JOIN sessions s ON s.id = m.session_id
 WHERE s.project_path = ?
   AND m.role = 'assistant'
   AND m.finished_at IS NULL
-ORDER BY m.created_at ASC, m.id
+ORDER BY m.created_at ASC, m.id ASC
 `
 
 type ListUnfinishedAssistantMessagesRow struct {
@@ -342,7 +342,7 @@ type ListUnfinishedAssistantMessagesRow struct {
 
 // Assistant messages in a project that carry no Finish part, which is
 // what finished_at records (see message.service.write). Every path that
-// ends a turn — normal completion, error, cancel — writes one, and every
+// ends a turn -- normal completion, error, cancel -- writes one, and every
 // such path runs inside the process that owns the turn. So a row left
 // here belongs to a turn that was killed, and is the starting point for
 // closing it out on the next start.

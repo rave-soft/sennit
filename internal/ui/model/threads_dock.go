@@ -132,21 +132,13 @@ func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cm
 	}
 	ws := com.Workspace
 	return func() tea.Msg {
+		// Threads only, for the reason threads_cache.go gives: a task is
+		// the `agent` tool's own delegation, already visible inline in the
+		// chat that started it, and one that finished was never removed
+		// from this table by anything.
 		threads, err := ws.ListThreads(context.Background())
 		if err != nil {
 			slog.Error("Failed to list threads for dock", "error", err)
-		}
-		// Merge in task rows the same way threads_cache.go does: a
-		// ListTasks failure is logged and just leaves task rows out of
-		// this refresh, it never discards an otherwise-successful thread
-		// list (applyThreadsDockLoaded only caches on err == nil).
-		if ws.SupportsTasks() {
-			tasks, taskErr := ws.ListTasks(context.Background())
-			if taskErr != nil {
-				slog.Error("Failed to list tasks for dock", "error", taskErr)
-			} else {
-				threads = append(threads, tasks...)
-			}
 		}
 		return threadsDockLoadedMsg{gen: gen, threads: threads, err: err}
 	}

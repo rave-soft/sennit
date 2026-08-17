@@ -297,7 +297,6 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 const listThreadsForGC = `-- name: ListThreadsForGC :many
 SELECT id, project_path, status, updated_at
 FROM threads
-WHERE kind = 'thread'
 `
 
 type ListThreadsForGCRow struct {
@@ -307,11 +306,18 @@ type ListThreadsForGCRow struct {
 	UpdatedAt   int64  `json:"updated_at"`
 }
 
-// Every thread across every project, trimmed to the columns `sennit gc`
-// needs to pick finished threads older than the retention cutoff.
+// Every delegation across every project, trimmed to the columns `sennit
+// gc` needs to pick finished ones older than the retention cutoff.
 // Unscoped by project_path; the caller filters by project in Go for
-// --project. Scoped by kind = 'thread': gc is a thread-facing caller and
-// must not see other delegation kinds sharing this table.
+// --project.
+//
+// Deliberately unscoped by kind, unlike the display queries above. gc is
+// not a thread-facing caller -- it is the only thing that reclaims rows
+// here, and a task has nothing else that would: it is never merged (so
+// discardMerged cannot reach it) and the task API has no removal of its
+// own. Scoping this to threads meant finished tasks accumulated for the
+// life of the database. A task carries no worktree, so reclaiming one is
+// the row and its retention alone, with nothing left orphaned on disk.
 func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error) {
 	rows, err := q.query(ctx, q.listThreadsForGCStmt, listThreadsForGC)
 	if err != nil {

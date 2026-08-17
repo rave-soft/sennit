@@ -481,3 +481,55 @@ func TestGC_DeleteRollbackRestoresAllRows(t *testing.T) {
 	require.EqualValues(t, 1, n)
 	require.True(t, threadExists(t, dataDir, ids.ThreadOldDone))
 }
+
+// gc is the only thing that reclaims rows from the delegations table. A
+// thread is otherwise removed only by merging, and a task by nothing at
+// all: it is never merged and the task API has no removal of its own. So
+// scoping this collection to threads meant every finished task stayed for
+// the life of the database.
+func TestGC_CollectsFinishedTasksToo(t *testing.T) {
+	dataDir := t.TempDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := sennitdb.New(conn)
+
+	// A task old enough to collect, and one that only just finished.
+	// Tasks carry no worktree: they share their parent's app rather than
+	// getting an isolated one, which is why reclaiming one is the row
+	// alone with nothing left orphaned on disk.
+	for _, tc := range []struct {
+		id        string
+		status    string
+		updatedAt int64
+	}{
+		{"task-old-done", "completed", cutoff - 1},
+		{"task-recent-done", "completed", cutoff + 1},
+		{"task-old-running", "running", cutoff - 1},
+	} {
+		_, err = q.CreateThread(t.Context(), sennitdb.CreateThreadParams{
+			ID: tc.id, Name: tc.id, ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
+			Branch: "", WorktreePath: "", Status: tc.status, MergePolicy: "auto", Kind: "task",
+		})
+		require.NoError(t, err)
+		_, err = conn.ExecContext(t.Context(), `UPDATE threads SET updated_at = ? WHERE id = ?`, tc.updatedAt, tc.id)
+		require.NoError(t, err)
+	}
+
+	selection, err := gcDelete(t.Context(), conn, q, cutoff, "")
+	require.NoError(t, err)
+
+	require.Contains(t, selection.threadIDs, "task-old-done",
+		"a finished task past the cutoff is exactly what nothing else would ever reclaim")
+	require.NotContains(t, selection.threadIDs, "task-recent-done",
+		"retention applies to tasks the same way it applies to threads")
+	require.NotContains(t, selection.threadIDs, "task-old-running",
+		"an unfinished task is not collectable however old it is")
+
+	require.False(t, threadExists(t, dataDir, "task-old-done"))
+	require.True(t, threadExists(t, dataDir, "task-recent-done"))
+	require.True(t, threadExists(t, dataDir, "task-old-running"))
+}
