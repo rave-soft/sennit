@@ -215,6 +215,116 @@ func TestWorktreeRemove(t *testing.T) {
 	require.NoDirExists(t, wtPath)
 }
 
+// readOnlyCacheDir plants the shape a build cache leaves inside a worktree:
+// a directory git may not write to, holding a file it must unlink to remove
+// the worktree. Go's module cache does exactly this to every package
+// directory it writes.
+func readOnlyCacheDir(t *testing.T, wtPath string) {
+	t.Helper()
+
+	cache := filepath.Join(wtPath, ".cache", "go-mod", "example.com", "pkg@v1.0.0")
+	require.NoError(t, os.MkdirAll(cache, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cache, "pkg.go"), []byte("package pkg\n"), 0o444))
+	require.NoError(t, os.Chmod(cache, 0o555))
+	// Restore write permission unconditionally, so a failing test leaves
+	// nothing t.TempDir's own cleanup would then choke on.
+	t.Cleanup(func() { _ = os.Chmod(cache, 0o755) })
+}
+
+// A forced remove has to survive read-only directories. It gets a single
+// attempt: git deregisters the worktree before it deletes the files, so a
+// failure here is not something a retry can repair — see WorktreeRemove.
+func TestWorktreeRemoveForcedThroughReadOnlyDir(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
+	readOnlyCacheDir(t, wtPath)
+
+	require.NoError(t, WorktreeRemove(ctx, repo, wtPath, true))
+	require.NoDirExists(t, wtPath)
+
+	// The worktree is gone from git's view too, not merely off disk.
+	list, err := run(ctx, repo, "worktree", "list", "--porcelain")
+	require.NoError(t, err)
+	require.NotContains(t, list, wtPath)
+}
+
+// An unforced remove keeps refusing a dirty worktree. The permission fix
+// belongs to force alone, and must not become a way to discard work.
+func TestWorktreeRemoveUnforcedStillRefusesDirtyWorktree(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
+	require.NoError(t, os.WriteFile(filepath.Join(wtPath, "README.md"), []byte("edited\n"), 0o644))
+
+	require.Error(t, WorktreeRemove(ctx, repo, wtPath, false))
+	require.DirExists(t, wtPath)
+}
+
+// A worktree an older build left deregistered on disk is cleaned up rather
+// than leaked: no git command can reach it, so nothing else ever will.
+func TestWorktreeRemoveCleansUpDeregisteredWorktree(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
+
+	// Reproduce the corpse exactly: the administrative directory gone,
+	// the working files and their dangling .git pointer still there.
+	adminDir, err := run(ctx, wtPath, "rev-parse", "--path-format=absolute", "--git-dir")
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(adminDir))
+	readOnlyCacheDir(t, wtPath)
+	require.Error(t, func() error {
+		_, err := run(ctx, repo, "worktree", "remove", "--force", wtPath)
+		return err
+	}(), "precondition: git itself can no longer remove this")
+
+	require.NoError(t, WorktreeRemove(ctx, repo, wtPath, true))
+	require.NoDirExists(t, wtPath)
+}
+
+// The cleanup path is narrow on purpose: it deletes a directory outright,
+// so anything that is not this repo's own abandoned worktree is left alone
+// and git's error is reported instead.
+func TestWorktreeRemoveLeavesForeignDirectoriesAlone(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	t.Run("plain directory", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "not-a-worktree")
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("mine\n"), 0o644))
+
+		require.Error(t, WorktreeRemove(ctx, repo, dir, true))
+		require.FileExists(t, filepath.Join(dir, "keep.txt"))
+	})
+
+	t.Run("independent repository", func(t *testing.T) {
+		other := initRepo(t)
+
+		require.Error(t, WorktreeRemove(ctx, repo, other, true))
+		require.DirExists(t, filepath.Join(other, ".git"))
+	})
+
+	t.Run("worktree of another repository", func(t *testing.T) {
+		other := initRepo(t)
+		wtPath := filepath.Join(t.TempDir(), "other-wt")
+		require.NoError(t, WorktreeAdd(ctx, other, wtPath, "feature", "main"))
+		adminDir, err := run(ctx, wtPath, "rev-parse", "--path-format=absolute", "--git-dir")
+		require.NoError(t, err)
+		require.NoError(t, os.RemoveAll(adminDir))
+
+		require.Error(t, WorktreeRemove(ctx, repo, wtPath, true))
+		require.DirExists(t, wtPath)
+	})
+}
+
 func TestCommitAll(t *testing.T) {
 	repo := initRepo(t)
 	ctx := context.Background()
