@@ -78,7 +78,19 @@ source:
 
 changelog:
   sort: asc
-  use: github
+  # git, not github: `use: github` asks the API to compare the previous
+  # tag with this one, and that request 404s for this repository — twice,
+  # identically, on v0.1.1. It had never actually run before: v0.1.0 was
+  # the first tag, so goreleaser had nothing to compare against and fell
+  # back to the git log, which is why the notes it published carry the
+  # "<sha>: <subject> (<author>)" shape this setting produces.
+  #
+  # Reading the local history is also what the rest of the release path
+  # already assumes: release.yml clones with fetch-depth: 0 precisely so
+  # the range since the previous tag is present, and says so. Keeping the
+  # changelog off the network means one less thing that can fail after an
+  # eight-minute build has already succeeded.
+  use: git
   filters:
     exclude:
       - "^(build|ci): "
