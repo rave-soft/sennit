@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
@@ -13,6 +14,21 @@ import (
 func newTestUIForPermissions() *UI {
 	u := newTestUI()
 	u.dialog = dialog.NewOverlay()
+	return u
+}
+
+// newTestUIForOpeningPermissions is newTestUIForPermissions plus the
+// config openPermissionsDialog reads for its diff mode. The tests that
+// build the dialog by hand do not need it; the ones that go through
+// openPermissionsDialog do.
+func newTestUIForOpeningPermissions(t *testing.T) *UI {
+	t.Helper()
+	u := newTestUIForPermissions()
+	// Only the workspace is swapped in: the rest of the Common (styles in
+	// particular) is what dialog.NewPermissions renders through.
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{
+		Options: &config.Options{TUI: &config.TUIOptions{}},
+	}}
 	return u
 }
 
@@ -93,4 +109,78 @@ func TestHandlePermissionNotification_DifferentToolCallIDDoesNotClose(t *testing
 
 	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID),
 		"notification for unrelated tool call must not close the dialog")
+}
+
+// A thread's permission request reaches the drilled-in UI twice — once
+// through the thread's own event pump, once through the relay into the
+// parent's stream. The duplicate must not disturb the dialog already
+// standing for it.
+//
+// Reopening on the duplicate is what made the prompt unanswerable: it
+// bumps the generation an in-flight answer is matched against, so the
+// answer is dropped, and the fresh dialog then stands for a request the
+// service has already decided and will refuse to decide again.
+func TestOpenPermissionsDialog_DuplicateRequestIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIForOpeningPermissions(t)
+	perm := permission.PermissionRequest{
+		ID:         "perm-dup",
+		ToolCallID: "tool-call-dup",
+		ToolName:   "bash",
+	}
+
+	require.Nil(t, u.openPermissionsDialog(perm))
+	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
+	gen := u.ops.permissionGeneration
+
+	// The user answers: the response path claims the current generation.
+	u.ops.permissionLoading = true
+
+	// The second copy of the same request arrives now.
+	require.Nil(t, u.openPermissionsDialog(perm))
+
+	require.Equal(t, gen, u.ops.permissionGeneration,
+		"a duplicate must not bump the generation an in-flight answer is matched against")
+	require.True(t, u.ops.permissionLoading,
+		"a duplicate must not clear the in-flight answer's loading state")
+	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
+}
+
+// A genuinely different request still replaces whatever is open: the
+// dedup is keyed on the request id, not on "a permissions dialog exists".
+func TestOpenPermissionsDialog_DifferentRequestReopens(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIForOpeningPermissions(t)
+	first := permission.PermissionRequest{ID: "perm-1", ToolCallID: "tc-1", ToolName: "bash"}
+	second := permission.PermissionRequest{ID: "perm-2", ToolCallID: "tc-2", ToolName: "edit"}
+
+	require.Nil(t, u.openPermissionsDialog(first))
+	gen := u.ops.permissionGeneration
+
+	require.Nil(t, u.openPermissionsDialog(second))
+	require.Greater(t, u.ops.permissionGeneration, gen,
+		"a new request must claim a new generation")
+	require.Equal(t, "perm-2", u.ops.permissionID)
+	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
+}
+
+// Once the dialog is gone, the same id may legitimately open a new one:
+// the guard must key on a dialog actually being open, not on the id alone.
+func TestOpenPermissionsDialog_SameIDReopensAfterClose(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIForOpeningPermissions(t)
+	perm := permission.PermissionRequest{ID: "perm-1", ToolCallID: "tc-1", ToolName: "bash"}
+
+	require.Nil(t, u.openPermissionsDialog(perm))
+	gen := u.ops.permissionGeneration
+
+	u.dialog.CloseDialog(dialog.PermissionsID)
+	require.False(t, u.dialog.ContainsDialog(dialog.PermissionsID))
+
+	require.Nil(t, u.openPermissionsDialog(perm))
+	require.Greater(t, u.ops.permissionGeneration, gen)
+	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
 }

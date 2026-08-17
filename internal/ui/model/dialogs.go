@@ -405,6 +405,27 @@ func (m *UI) openFilesDialog() tea.Cmd {
 //
 //nolint:unparam // always nil today, but matches the tea.Cmd signature shared by the other open*Dialog methods
 func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
+	// One request can reach this UI twice. While drilled into a thread,
+	// its permission traffic arrives both through the thread's own event
+	// pump (Root.handleThreadAttached's SubscribeWith) and through the
+	// relay into the parent's stream (thread lifecycle.forwardPermissions),
+	// and the router hands both to the thread's embedded UI.
+	//
+	// Reopening for the second copy is not a cosmetic double-render: it
+	// bumps the generation that an answer already in flight is matched
+	// against, so that answer is dropped on arrival, and it leaves a fresh
+	// dialog standing for a request that has already been decided.
+	// Granting an already-decided request is refused, so that dialog can
+	// never be dismissed — and on the thread screen the refusal is not
+	// even visible, since errors there have nowhere to render yet (see
+	// Root.Update's util.InfoMsg case). The result is a permission prompt
+	// the user cannot answer or escape.
+	//
+	// Keyed on the request id, so a genuinely new request still replaces
+	// whatever is open.
+	if m.ops.permissionID == perm.ID && m.dialog.Dialog(dialog.PermissionsID) != nil {
+		return nil
+	}
 	m.ops.permissionGeneration++
 	m.ops.permissionLoading = false
 	m.ops.permissionID = perm.ID
