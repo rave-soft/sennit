@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -15,6 +16,11 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/zeebo/xxh3"
 )
+
+// ErrNotFound is returned by [Service.Get] when no session has the
+// requested id — a session deleted or never created, rather than a
+// failure to reach the store.
+var ErrNotFound = errors.New("session: no such session")
 
 type TodoStatus string
 
@@ -86,6 +92,8 @@ type Service interface {
 	// session being started now). Returns nothing when agentID is
 	// empty rather than matching every anonymous child session.
 	ListSubAgentSessions(ctx context.Context, parentSessionID, agentID, excludeSessionID string) ([]Session, error)
+	// Get returns the session with the given id, or an error wrapping
+	// [ErrNotFound] when no session has that id.
 	Get(ctx context.Context, id string) (Session, error)
 	GetLast(ctx context.Context) (Session, error)
 	List(ctx context.Context) ([]Session, error)
@@ -236,6 +244,12 @@ func (s *service) Delete(ctx context.Context, id string) error {
 func (s *service) Get(ctx context.Context, id string) (Session, error) {
 	dbSession, err := s.q.GetSessionByID(ctx, id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// The bare driver error ("sql: no rows in result set")
+			// says nothing about what was being looked up, and it
+			// reaches the user verbatim as a status-line error.
+			return Session{}, fmt.Errorf("%w: %q", ErrNotFound, id)
+		}
 		return Session{}, err
 	}
 	session := s.fromDBItem(dbSession)

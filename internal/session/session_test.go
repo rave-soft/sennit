@@ -1,6 +1,7 @@
 package session
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/db"
@@ -171,4 +172,23 @@ func TestDeleteRemovesDescendantSessions(t *testing.T) {
 	survivor, err := sessions.Get(t.Context(), bystander.ID)
 	require.NoError(t, err)
 	require.Equal(t, bystander.ID, survivor.ID)
+}
+
+func TestGetReportsMissingSessionAsErrNotFound(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	_, err = sessions.Get(t.Context(), "does-not-exist")
+	require.ErrorIs(t, err, ErrNotFound)
+	require.NotErrorIs(t, err, sql.ErrNoRows,
+		"the bare driver error reaches the user verbatim in the status line")
+	require.Contains(t, err.Error(), "does-not-exist", "the id being looked up must survive into the message")
 }
