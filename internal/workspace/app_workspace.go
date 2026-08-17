@@ -220,15 +220,42 @@ func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) bool {
 	return w.app.AgentCoordinator.IsSessionBusy(sessionID)
 }
 
+// AgentModel reports the model the next turn will run on, which is the
+// one the config selects.
+//
+// It deliberately does not ask the coordinator, whose Model() returns a
+// copy held on the current agent and written only by UpdateModels. A run
+// never reads that copy: coordinator.run resolves its own runtime from the
+// config on every dispatch (the runtime cache is keyed on the config
+// version, so a model change rebuilds it). The two therefore diverge
+// whenever an UpdateModels does not land — and when they diverged, the
+// display sat on the previous model while every answer came back from the
+// new one, with no way for the user to tell which was true.
+//
+// The coordinator remains the fallback for a config that selects nothing,
+// which is the state before onboarding picks a model.
 func (w *AppWorkspace) AgentModel() AgentModel {
 	if w.app.AgentCoordinator == nil {
 		return AgentModel{}
 	}
-	m := w.app.AgentCoordinator.Model()
-	return AgentModel{
-		CatalogCfg: m.CatalogCfg,
-		ModelCfg:   m.ModelCfg,
+	cfg := w.store.Config()
+	if cfg == nil || cfg.Model.Model == "" {
+		m := w.app.AgentCoordinator.Model()
+		return AgentModel{CatalogCfg: m.CatalogCfg, ModelCfg: m.ModelCfg}
 	}
+	selected := cfg.Model
+	// A model the catalog cannot resolve is still named by its id rather
+	// than left blank: "which model is this" is the question the sidebar
+	// exists to answer, and the id answers it better than an empty line.
+	catalog := catwalk.Model{ID: selected.Model, Name: selected.Model}
+	// A config with no providers can resolve nothing, and GetModel reads
+	// the map without checking.
+	if cfg.Providers != nil {
+		if known := cfg.GetModel(selected.Provider, selected.Model); known != nil {
+			catalog = *known
+		}
+	}
+	return AgentModel{CatalogCfg: catalog, ModelCfg: selected}
 }
 
 func (w *AppWorkspace) AgentIsReady() bool {
