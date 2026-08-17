@@ -217,10 +217,11 @@ func TestManager_ActivateFinishedThread(t *testing.T) {
 	require.Equal(t, StatusIdle, again.Status)
 }
 
-// Threads in the merge flow are refused: their branch is being folded
-// into the base branch, and reopening the worktree underneath that is a
-// different feature with its own conflict semantics.
-func TestManager_ActivateRefusesMergeFlow(t *testing.T) {
+// A merge in flight, and a merge already landed, are the two states
+// there is nothing to reactivate into: the first holds the thread's opMu
+// for its whole duration, and the second has already been folded into
+// its base and is on its way to being discarded, worktree included.
+func TestManager_ActivateRefusesMergeInFlightAndMerged(t *testing.T) {
 	repo := initRepo(t)
 	store := newTestStoreDB(t)
 	mgr := NewManager(ManagerOptions{
@@ -230,7 +231,7 @@ func TestManager_ActivateRefusesMergeFlow(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 	})
 
-	for _, status := range []Status{StatusMerging, StatusMerged, StatusConflict, StatusMergeBlocked} {
+	for _, status := range []Status{StatusMerging, StatusMerged} {
 		t.Run(string(status), func(t *testing.T) {
 			st, err := store.Create(t.Context(), CreateParams{
 				Name: "merge-" + string(status), Goal: "x", BaseBranch: "main",
@@ -247,6 +248,53 @@ func TestManager_ActivateRefusesMergeFlow(t *testing.T) {
 			got, err := store.Get(t.Context(), st.ID)
 			require.NoError(t, err)
 			require.Equal(t, status, got.Status, "a refused activation must not change status")
+		})
+	}
+}
+
+// A thread whose merge stopped on a conflict (or was blocked outright) is
+// exactly the one a person needs to open and work in: the half-finished
+// merge is still in its worktree, and resolving it by hand and merging
+// again is the recovery path mergeAttempt documents for itself. Refusing
+// it left that path reachable through Send but not through the TUI, which
+// attaches and so fell back to a read-only workspace.
+//
+// The status survives the activation. It describes the state of the merge
+// in the worktree, which attaching does not change — resetting it to idle
+// would drop the thread out of the dashboard's failed filter merely
+// because somebody looked at it.
+func TestManager_ActivateRestingMergeFlowKeepsStatus(t *testing.T) {
+	repo := initRepo(t)
+	store := newTestStoreDB(t)
+	mgr := NewManager(ManagerOptions{
+		Store:       store,
+		Spawner:     newFakeSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+
+	for _, status := range []Status{StatusConflict, StatusMergeBlocked} {
+		t.Run(string(status), func(t *testing.T) {
+			st, err := store.Create(t.Context(), CreateParams{
+				Name: "rest-" + string(status), Goal: "x", BaseBranch: "main",
+				Branch: "thread/rest-" + string(status), WorktreePath: t.TempDir(),
+			})
+			require.NoError(t, err)
+			_, err = store.SetStatus(t.Context(), st.ID, SetStatusParams{
+				Status: status, Error: "merge conflicts: a.go", ResultSummary: "did the work",
+			})
+			require.NoError(t, err)
+
+			activated, err := mgr.Activate(t.Context(), st.ID)
+			require.NoError(t, err)
+			require.NotNil(t, mgr.Handle(st.ID), "the workspace must be live so the person can work in it")
+			require.Equal(t, status, activated.Status, "attaching to a thread must not change what it is")
+			require.Equal(t, "merge conflicts: a.go", activated.Error, "the reason the merge stopped must survive")
+			require.Equal(t, "did the work", activated.ResultSummary, "the earlier run's result must survive")
+
+			got, err := store.Get(t.Context(), st.ID)
+			require.NoError(t, err)
+			require.Equal(t, status, got.Status)
 		})
 	}
 }
@@ -306,11 +354,16 @@ func TestManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 }
 
 // TestManager_CancelRefusesMergeFlow proves the decision this step made
-// explicit: cancelling a thread already in the merge flow is refused, the
-// same way Activate refuses to reactivate one (TestManager_
-// ActivateRefusesMergeFlow) — by the time a thread has reached one of
-// these statuses there is either nothing left running to stop, or a merge
-// actively folding a branch back that is not a step to interrupt partway.
+// explicit: cancelling a thread already in the merge flow is refused for
+// all four statuses — by the time a thread has reached one of them there
+// is either nothing left running to stop, or a merge actively folding a
+// branch back that is not a step to interrupt partway.
+//
+// Cancel stays wider than Activate here, which reactivates the two
+// resting statuses (TestManager_ActivateRestingMergeFlowKeepsStatus). The
+// two answer different questions: Activate asks "may a person work in
+// this worktree", and for a stopped merge the answer is yes; Cancel asks
+// "is there a run in flight to stop", and for all four the answer is no.
 func TestManager_CancelRefusesMergeFlow(t *testing.T) {
 	repo := initRepo(t)
 	store := newTestStoreDB(t)

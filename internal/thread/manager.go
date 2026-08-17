@@ -461,10 +461,29 @@ func (m *Manager) deliverMergeOutcome(ctx context.Context, threadID string) {
 // read-only.
 //
 // Activating a thread that is already live is a no-op that returns its
-// current state. Threads in the merge flow (merging, merged, conflict,
-// merge_blocked) are rejected: their branch is being folded into the base
-// branch, and reopening the worktree for hand edits underneath that is a
-// different feature with its own conflict semantics.
+// current state.
+//
+// Only [StatusMerging] and [StatusMerged] are rejected, and for two
+// different reasons: merging is an operation in flight (mergeAttempt
+// holds the thread's opMu for its whole duration), and a merged thread
+// has already been folded into its base and is on its way to being
+// discarded, worktree included.
+//
+// The two resting merge-flow states are not rejected. A thread at
+// [StatusConflict] or [StatusMergeBlocked] is exactly the one a person
+// needs to open and work in: its worktree is still on disk with the
+// half-finished merge in it, and resolving that by hand and calling
+// [Manager.Merge] again is the recovery path mergeAttempt documents for
+// itself. Refusing here left that path reachable through Send but not
+// through the TUI, which attaches (see workspace.AppWorkspace.AttachThread)
+// and so fell back to a read-only workspace.
+//
+// Those two statuses are also preserved rather than reset to idle, unlike
+// every other status this reactivates from. The status is a fact about the
+// state of the worktree's merge, which attaching does not change: resetting
+// it would drop the thread out of the dashboard's failed filter merely
+// because somebody looked at it. It moves to idle on its own once a turn
+// actually runs in the thread — see lifecycle.restIdleAfterPersonTurn.
 func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error) {
 	done, err := m.lc.beginOp()
 	if err != nil {
@@ -494,7 +513,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	}
 
 	switch st.Status {
-	case StatusMerging, StatusMerged, StatusConflict, StatusMergeBlocked:
+	case StatusMerging, StatusMerged:
 		return Thread{}, fmt.Errorf("thread: %q is in the merge flow (%s) and cannot be reactivated", idOrName, st.Status)
 	}
 	if _, err := os.Stat(st.WorktreePath); err != nil {
@@ -513,7 +532,16 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	// Preserve the earlier run's outcome: SetStatus rewrites all four
 	// columns, so the summary/error/timestamp have to be carried across
 	// explicitly or reactivating would erase the record of what ran.
-	st, err = m.lc.setStatus(ctx, st.ID, StatusIdle, st.Error, st.ResultSummary, st.CompletedAt)
+	//
+	// A resting merge-flow status is carried across as well, for the reason
+	// in the doc comment: the unresolved merge in the worktree is still
+	// there after attaching, so the row must keep saying so.
+	activated := StatusIdle
+	switch st.Status {
+	case StatusConflict, StatusMergeBlocked:
+		activated = st.Status
+	}
+	st, err = m.lc.setStatus(ctx, st.ID, activated, st.Error, st.ResultSummary, st.CompletedAt)
 	if err != nil {
 		_ = m.spawner.Release(ctx, handle.ID())
 		return Thread{}, err
@@ -551,7 +579,11 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 // parent's).
 //
 // Refuses a thread already in the merge flow (merging, merged, conflict,
-// merge_blocked) the same way Activate refuses to reactivate one:
+// merge_blocked). This is wider than what [Manager.Activate] refuses, and
+// deliberately so: the two answer different questions. Activate asks
+// whether a person may work in the worktree, and for a merge that stopped
+// on a conflict the answer is yes; this asks whether there is a run in
+// flight to stop, and for all four statuses the answer is no.
 // mergeAttempt holds the thread's opMu for its entire duration (see
 // onAutoMerge's doc comment), so by the time this call's own status read
 // can matter the merge has either not started (an active run is exactly
