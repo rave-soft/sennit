@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -137,6 +138,34 @@ type SessionAgentCall struct {
 	// refuse to start further background work once it reaches the hard
 	// cascade limit.
 	Depth int
+	// Steering marks a follow-up the person typed at a session that may
+	// already be mid-turn, asking for it to reach that turn rather than
+	// wait for it: when run's dispatch decision finds the session busy,
+	// this call's RunID is dropped as it is enqueued, so
+	// drainQueueForStep folds it into the active turn's next step instead
+	// of sequencing a separate turn behind it (see [SteerOutcome]).
+	//
+	// The RunID is kept — and the call runs as its own turn under it —
+	// when the session turns out to be idle, which is why a steering
+	// caller supplies one at all: it cannot know which of the two will
+	// happen, and only the idle branch produces a turn whose terminal
+	// RunComplete anyone can correlate. OnDispatch reports which branch
+	// was taken, under the same lock that took it.
+	Steering bool
+	// OnDispatch, when non-nil, is called exactly once with the dispatch
+	// decision this call reached, from inside the per-session dispatch
+	// mutex that made it and before the turn (if any) starts streaming.
+	//
+	// It exists for callers whose own bookkeeping has to branch on the
+	// decision at the moment it is made rather than when the turn ends:
+	// internal/thread hands workspace ownership to a new run only if one
+	// actually started, and observing that after the fact would race the
+	// in-flight turn's completion. Callers that only care about the
+	// result should use Steer, which reports the same outcome on return.
+	//
+	// The hook must not block and must not take the dispatch mutex: it
+	// runs under it.
+	OnDispatch func(SteerOutcome)
 	// Continuation marks an auto-woken continuation turn (see
 	// startContinuation): its Prompt is a placeholder, not real content
 	// (see continuationPromptPlaceholder), so run() skips
@@ -163,7 +192,9 @@ const (
 	SteerRan SteerOutcome = iota
 	// SteerEnqueued means the call was queued behind an active turn: a
 	// call without a RunID will fold into that turn's next step, one
-	// with a RunID runs recursively once the queue drains. result is
+	// with a RunID runs recursively once the queue drains (a
+	// SessionAgentCall.Steering call has its RunID dropped on the way
+	// into the queue, so it always takes the folding side). result is
 	// always nil.
 	SteerEnqueued
 	// SteerCanceled means the call was canceled on entry: a cancel
@@ -372,6 +403,21 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		call.acceptSeq = call.Accepted.seq
 	}
 
+	// dispatched reports the branch taken to call.OnDispatch, at most once
+	// and from under the per-session dispatch mutex that took it - see
+	// SessionAgentCall.OnDispatch for why the timing is the point. Only
+	// the paths below that actually reach a decision call it; a call
+	// rejected before any decision (ValidateCall above) leaves the hook
+	// unfired, so a caller waiting on it learns from the returned error
+	// instead that nothing was dispatched.
+	var dispatchOnce sync.Once
+	dispatched := func(outcome SteerOutcome) {
+		if call.OnDispatch == nil {
+			return
+		}
+		dispatchOnce.Do(func() { call.OnDispatch(outcome) })
+	}
+
 	// genCtx/cancel are the run context and its cancel func, created under
 	// the per-session dispatch mutex below so a concurrent Cancel can observe
 	// the activeRequests entry before the assistant message exists.
@@ -406,6 +452,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		// `sennit run`, which ignores message events and blocks on
 		// RunComplete) would hang on an immediately-canceled accepted run.
 		call.Accepted.Close()
+		dispatched(SteerCanceled)
 		sessMu.Unlock()
 		reporter := newCompletionReporter(a, call)
 		complete := notify.RunComplete{
@@ -437,6 +484,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 			if call.Accepted != nil {
 				call.Accepted.Close()
 			}
+			dispatched(SteerEnqueued)
 			sessMu.Unlock()
 			return SteerEnqueued, nil, nil
 		}
@@ -451,10 +499,22 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		// left to consume the buffered terminal event. The queued turn falls
 		// back to the default broker publish, which is what existing
 		// subscribers expect.
+		// A steering follow-up asked to reach the turn already in flight
+		// rather than queue behind it, and the fold is keyed on the
+		// absence of a RunID (see drainQueueForStep), so drop it here -
+		// the one point where "the session is busy" is known atomically.
+		// Nothing is left waiting on that RunID: the hook below tells the
+		// caller its call was enqueued, precisely so it can settle its own
+		// bookkeeping without a terminal event of its own. See
+		// SessionAgentCall.Steering.
+		if call.Steering {
+			call.RunID = ""
+		}
 		a.enqueueCall(call)
 		if call.Accepted != nil {
 			call.Accepted.Close()
 		}
+		dispatched(SteerEnqueued)
 		sessMu.Unlock()
 		// enqueueCall itself must not call notifyQueueChanged (it runs
 		// under sessMu, held by this caller, not by dispatch itself) - so
@@ -488,6 +548,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}
+	dispatched(SteerRan)
 	sessMu.Unlock()
 
 	defer cancel()

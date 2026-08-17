@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -399,6 +400,91 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 	}
 }
 
+// steer dispatches the person's own message into a live delegation's
+// session as a steering follow-up: if a turn is already in flight the
+// message folds into that turn's next step instead of waiting for it to
+// end, and if the session is idle it starts its own run under runID,
+// exactly as an agent's send always does.
+//
+// Only the person gets this. A delegation's turn can sit inside a
+// sub-agent call for many minutes, and a course correction that is read
+// only after those minutes has corrected nothing — but the same
+// interruption from another agent is not a correction, it is one agent
+// derailing another's work, which is why [SenderAgent] keeps queueing.
+//
+// The two outcomes need different bookkeeping, and which one happened
+// cannot be probed for afterwards without racing the very turn it is
+// about: a folded message extends the run already in flight, so that
+// run's own completion stays the entity's terminal event and rt.runID
+// must not move, while a message that started a run must take ownership
+// before the displaced run's completion is processed. So the decision is
+// taken inside the coordinator's own dispatch mutex and reported back
+// through the steering hook, and this waits for it while still holding
+// opMu — which is what keeps handleRunComplete (which takes opMu too)
+// from acting on the older run's completion in between.
+func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeState, id, sessionID, msg, runID string, disp SendDisposition) (SendDisposition, error) {
+	var (
+		decided = make(chan bool, 1)
+		failed  = make(chan error, 1)
+		folded  atomic.Bool
+	)
+	steerCtx := WithSteering(WithRunID(bgCtx, runID), func(f bool) {
+		folded.Store(f)
+		select {
+		case decided <- f:
+		default:
+		}
+	})
+	l.goWorker(func() {
+		err := rt.handle.Workspace().Coordinator().Run(steerCtx, sessionID, msg)
+		select {
+		case failed <- err:
+		default:
+		}
+		if err == nil {
+			return
+		}
+		slog.Error("Steered agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
+		// Same fallback as the queued dispatch above, and for the same
+		// reason — but only for a message that actually became a run of
+		// its own. A folded message never owned runID (the coordinator
+		// drops it when it folds), so synthesizing a completion for it
+		// would either match nothing or, worse, tear down a workspace
+		// whose turn is still running.
+		if !folded.Load() {
+			l.handleRunComplete(bgCtx, id, RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
+		}
+	})
+
+	select {
+	case f := <-decided:
+		if f {
+			// Folded into the turn in flight: that turn's completion is
+			// still the one this entity ends on, so leave rt.runID alone.
+			return SendDisposition{Steered: true}, nil
+		}
+		// It became the active turn, so it owns the workspace from here.
+		// Still under opMu, so the run it displaced (if any) has not been
+		// reacted to yet, and once it is its RunID will no longer match.
+		c.mu.Lock()
+		rt.runID = runID
+		c.mu.Unlock()
+		return SendDisposition{}, nil
+	case err := <-failed:
+		// The dispatch failed before reaching a decision (a coordinator
+		// that never admitted the call). Nothing was queued and no run
+		// started, so there is nothing to own and nothing to report but
+		// the error.
+		if err != nil {
+			return SendDisposition{}, err
+		}
+		// Returned cleanly without ever reporting a decision. Not a state
+		// any coordinator in this system produces; report what was read
+		// before the dispatch rather than inventing an outcome.
+		return disp, nil
+	}
+}
+
 // forwardInto pumps one of a delegation workspace's event sources onto the
 // parent App's fan-in, republishing each event unchanged so a subscriber
 // cannot tell it apart from one the parent raised itself - which is the
@@ -462,13 +548,18 @@ func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Conte
 // Callers must hold no locks: send acquires id's own opMu for its
 // duration, the same admission ordering [Manager.Send] always used.
 //
-// The returned [SendDisposition] describes which of the two branches the
+// from decides both how the message is persisted and whether it may fold
+// into a turn already running — see [Sender], and the steering branch
+// below for what folding costs and buys.
+//
+// The returned [SendDisposition] describes which of the branches the
 // message took and, when it was queued behind a turn already in flight,
-// how many prompts were waiting ahead of it. It is reporting only — no
-// dispatch decision is made from it — and it is read from the coordinator
-// before the dispatch, so it describes the queue the message is joining
-// rather than the one it has already joined.
-func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string) (SendDisposition, error) {
+// how many prompts were waiting ahead of it. Only Steered is decided by
+// the coordinator itself; the rest is reporting only — no dispatch
+// decision is made from it — and the queue depth is read before the
+// dispatch, so it describes the queue the message is joining rather than
+// the one it has already joined.
+func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string, from Sender) (SendDisposition, error) {
 	// Tag bgCtx so coordinator.run persists this dispatch's user message
 	// with Origin agent.OriginAgent instead of the default
 	// message.OriginPerson — a thread_send/task_send follow-up was not
@@ -476,7 +567,14 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 	// ordinary message.User turn like any other. Both branches below
 	// (queue into the live runtime, and respawn-then-dispatch) read
 	// bgCtx, so tagging it once here covers both.
-	bgCtx = WithAgentDispatch(bgCtx)
+	//
+	// A [SenderPerson] send is exactly the case the tag does not describe:
+	// the person typed it themselves, into the TUI's view of this
+	// session, so it is persisted as their own words like any prompt they
+	// type into their own session.
+	if from == SenderAgent {
+		bgCtx = WithAgentDispatch(bgCtx)
+	}
 	// Same reasoning for the delegation tag: both branches below dispatch
 	// a run, and a prompt raised by either has to be attributable.
 	bgCtx = l.withDelegation(bgCtx, id)
@@ -494,15 +592,16 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 
 	if rt != nil {
 		// The workspace is live: either a run is in flight, or the entity
-		// is idle (created without a goal, or reactivated). Both take the
-		// same path — dispatch the message as its own RunID-bearing turn
-		// (the dispatcher gives every RunID-bearing queued prompt its own
-		// turn and terminal RunComplete) and hand workspace ownership to
-		// it: rt.runID is advanced under c.mu, so any in-flight run's
-		// completion no longer matches in handleRunComplete and cannot
-		// release the workspace out from under the queued turn. For an
-		// idle entity rt.runID was empty, so there is no earlier run to
-		// displace.
+		// is idle (created without a goal, or reactivated). An agent's
+		// send takes the same path for both — dispatch the message as its
+		// own RunID-bearing turn (the dispatcher gives every RunID-bearing
+		// queued prompt its own turn and terminal RunComplete) and hand
+		// workspace ownership to it: rt.runID is advanced under c.mu, so
+		// any in-flight run's completion no longer matches in
+		// handleRunComplete and cannot release the workspace out from
+		// under the queued turn. For an idle entity rt.runID was empty, so
+		// there is no earlier run to displace. The person's own send does
+		// not: see steer.
 		//
 		// Which of those two it is, is exactly what the sender needs told
 		// back: read it now, before the dispatch below adds this message
@@ -517,6 +616,9 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 			return SendDisposition{}, err
 		}
 		runID := uuid.NewString()
+		if from == SenderPerson {
+			return l.steer(bgCtx, c, rt, id, sessionID, msg, runID, disp)
+		}
 		c.mu.Lock()
 		rt.runID = runID
 		c.mu.Unlock()

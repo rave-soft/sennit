@@ -138,10 +138,14 @@ func allToolNames() []string {
 		// minutes from that point — so the tool's most tempting use,
 		// steering or time-boxing a thread while it works, is the one it
 		// cannot actually do. It remains available to any agent config
-		// that names it in AllowedTools (and the person's own path into a
-		// thread's session, the TUI thread view, is unaffected — that is
-		// workspace.SendThread, not this tool). When it is enabled, its
-		// result says which of the two happened; see tools.SendOutcome.
+		// that names it in AllowedTools. The person's own path into a
+		// thread's session is unaffected by any of this and is the one
+		// path that *can* steer: workspace.SendThread goes through
+		// thread.Manager.SendFromPerson, which folds into the turn in
+		// flight rather than queueing behind it — a person correcting
+		// their own delegation is not an agent derailing another's work.
+		// When this tool is enabled, its result says which of the two
+		// happened; see tools.SendOutcome.
 		//
 		// thread_wait was once left out of the default set on the grounds
 		// that a thread's completion arrives on its own (the completion

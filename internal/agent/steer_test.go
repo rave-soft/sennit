@@ -336,3 +336,144 @@ func TestSteer_LandingAsTurnFinishesRunsExactlyOnce(t *testing.T) {
 	require.Equal(t, 2, assistants,
 		"two independent turns must each produce exactly one assistant message - never a missing or duplicate turn")
 }
+
+// A steering call carries a RunID it can only use if it turns out to run
+// as its own turn — the caller cannot know which will happen (see
+// SessionAgentCall.Steering). When the session is busy, that RunID must be
+// dropped as the call is enqueued, or drainQueueForStep would sequence it
+// as a separate turn behind the one it was meant to reach. OnDispatch is
+// what tells the caller which branch it got, in time to settle its own
+// per-run bookkeeping.
+func TestSteer_SteeringCallDropsRunIDWhenFolded(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	toolEntered := make(chan struct{})
+	toolGate := make(chan struct{})
+	hold := fantasy.NewAgentTool("hold", "hold", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		close(toolEntered)
+		<-toolGate
+		return fantasy.NewTextResponse("ok"), nil
+	})
+
+	model := &toolStepModel{text: "done", toolID: "tool-1"}
+	sa := NewSessionAgent(SessionAgentOptions{
+		Model:       Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		Tools:       []fantasy.AgentTool{hold},
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	mainDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, RunID: "run-main", Prompt: "main"})
+		mainDone <- runErr
+	}()
+	select {
+	case <-toolEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("main run never entered the tool call")
+	}
+	require.True(t, sa.IsSessionBusy(sess.ID))
+
+	reported := make(chan SteerOutcome, 4)
+	outcome, res, err := sa.Steer(t.Context(), SessionAgentCall{
+		SessionID:  sess.ID,
+		RunID:      "run-steer",
+		Prompt:     "steer",
+		Steering:   true,
+		OnDispatch: func(o SteerOutcome) { reported <- o },
+	})
+	require.NoError(t, err)
+	require.Equal(t, SteerEnqueued, outcome)
+	require.Nil(t, res)
+	require.Equal(t, SteerEnqueued, <-reported, "OnDispatch must report the branch actually taken")
+	require.Len(t, reported, 0, "OnDispatch fires exactly once")
+
+	close(toolGate)
+	require.NoError(t, <-mainDone)
+
+	require.Equal(t, int32(2), model.steps.Load(), "the steering call folded into the active turn, adding no turn of its own")
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	var userTexts []string
+	for _, m := range msgs {
+		if m.Role == message.User {
+			userTexts = append(userTexts, m.Content().String())
+		}
+	}
+	require.Equal(t, []string{"main", "steer"}, userTexts)
+
+	// The dropped RunID must not surface as a terminal event of its own:
+	// nothing is waiting on it, and a completion under it would be a run
+	// that never existed. Only the turn it folded into reports.
+	deadline := time.After(500 * time.Millisecond)
+	seen := map[string]bool{}
+	for {
+		select {
+		case ev := <-ch:
+			seen[ev.Payload.RunID] = true
+			continue
+		case <-deadline:
+		}
+		break
+	}
+	require.True(t, seen["run-main"], "the turn the message folded into still reports")
+	require.False(t, seen["run-steer"], "a folded steering call has no run of its own to report")
+}
+
+// The same steering call against an idle session has nothing to fold
+// into, so it keeps its RunID and runs as its own turn — the case its
+// caller supplied a RunID for, and the one where a terminal event under
+// that RunID is exactly what has to happen.
+func TestSteer_SteeringCallKeepsRunIDWhenIdle(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	broker := pubsub.NewBroker[notify.RunComplete]()
+	t.Cleanup(broker.Shutdown)
+
+	sa := NewSessionAgent(SessionAgentOptions{
+		Model:       Model{Model: &finishStreamModel{text: "done"}, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Sessions:    env.sessions,
+		Messages:    env.messages,
+		RunComplete: broker,
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	subCtx, subCancel := context.WithCancel(t.Context())
+	defer subCancel()
+	ch := broker.Subscribe(subCtx)
+
+	reported := make(chan SteerOutcome, 4)
+	outcome, res, err := sa.Steer(t.Context(), SessionAgentCall{
+		SessionID:  sess.ID,
+		RunID:      "run-steer",
+		Prompt:     "steer",
+		Steering:   true,
+		OnDispatch: func(o SteerOutcome) { reported <- o },
+	})
+	require.NoError(t, err)
+	require.Equal(t, SteerRan, outcome)
+	require.NotNil(t, res)
+	require.Equal(t, SteerRan, <-reported)
+
+	select {
+	case ev := <-ch:
+		require.Equal(t, "run-steer", ev.Payload.RunID,
+			"an idle steering call keeps its RunID and reports under it")
+	case <-time.After(5 * time.Second):
+		t.Fatal("no RunComplete published for the steering turn")
+	}
+}

@@ -587,7 +587,25 @@ func (m *Manager) Cancel(ctx context.Context, idOrName, reason string) error {
 // agent picks the message up now or only after the turn it is currently
 // running — see the type's own doc for why that difference matters enough
 // to report.
+//
+// This is the agent-facing entry (thread_send); [Manager.SendFromPerson]
+// is the person's own.
 func (m *Manager) Send(ctx context.Context, idOrName, message string) (SendDisposition, error) {
+	return m.send(ctx, idOrName, message, SenderAgent)
+}
+
+// SendFromPerson is [Manager.Send] for a message the person typed
+// themselves, in the TUI's view of the thread's session. It differs in the
+// only two ways authorship can matter: the message is persisted as their
+// own words rather than as an agent dispatch, and it folds into the
+// thread's turn in flight instead of queueing behind it — see
+// [lifecycle.steer] for why the person gets that and another agent does
+// not.
+func (m *Manager) SendFromPerson(ctx context.Context, idOrName, message string) (SendDisposition, error) {
+	return m.send(ctx, idOrName, message, SenderPerson)
+}
+
+func (m *Manager) send(ctx context.Context, idOrName, message string, from Sender) (SendDisposition, error) {
 	done, err := m.lc.beginOp()
 	if err != nil {
 		return SendDisposition{}, err
@@ -604,7 +622,7 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) (SendDispo
 	// dispatch" logic itself has nothing thread-specific in it — see
 	// lifecycle.send's doc comment — so it lives there, shared with
 	// TaskManager.Send.
-	disp, err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message)
+	disp, err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message, from)
 	if err != nil {
 		return SendDisposition{}, err
 	}

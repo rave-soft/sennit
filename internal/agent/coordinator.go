@@ -445,6 +445,18 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// same correlator.
 	runID := RunIDFromContext(ctx)
 	promptOrigin := PromptOriginFromContext(ctx)
+	// A steering dispatch (agent.WithSteering) asks for this prompt to
+	// reach a turn already in flight rather than queue behind it. The
+	// decision hook is wrapped in a Once because the auth-retry chain
+	// below may call run twice: the retry's dispatch decision is not a
+	// second event to report - the first attempt already reached one, and
+	// an auth failure happens while streaming, long past it.
+	onDispatch, steering := SteeringFromContext(ctx)
+	if onDispatch != nil {
+		var once sync.Once
+		hook := onDispatch
+		onDispatch = func(outcome SteerOutcome) { once.Do(func() { hook(outcome) }) }
+	}
 	run := func() (*fantasy.AgentResult, error) {
 		return c.currentAgent.Run(ctx, SessionAgentCall{
 			Runtime:          runtime,
@@ -453,6 +465,8 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			RunID:            runID,
 			Prompt:           prompt,
 			PromptOrigin:     promptOrigin,
+			Steering:         steering,
+			OnDispatch:       onDispatch,
 			Attachments:      attachments,
 			MaxOutputTokens:  runtime.maxOutputTokens,
 			ProviderOptions:  runtime.providerOptions,

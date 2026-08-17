@@ -94,17 +94,20 @@ func (w *AppWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadR
 }
 
 // SendThread is the person's own path into a thread's session (the TUI's
-// thread view), so it drops Send's disposition: whoever typed the message
-// is looking at that session's transcript and can see for themselves
-// whether it started running or is waiting behind a turn. Only the agent-
-// facing thread_send tool, which has no such view, reports it — see
-// tools.SendOutcome.
+// thread view), so it goes through SendFromPerson: the message is theirs,
+// and it reaches the turn the thread is already running rather than
+// waiting behind it (see thread.SenderPerson).
+//
+// It drops the disposition: whoever typed the message is looking at that
+// session's transcript and can see for themselves what became of it. Only
+// the agent-facing thread_send tool, which has no such view, reports it —
+// see tools.SendOutcome.
 func (w *AppWorkspace) SendThread(ctx context.Context, id, message string) error {
 	mgr, ok := w.threadManager()
 	if !ok {
 		return ErrThreadsNotSupported
 	}
-	_, err := mgr.Send(ctx, id, message)
+	_, err := mgr.SendFromPerson(ctx, id, message)
 	return err
 }
 

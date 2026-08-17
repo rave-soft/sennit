@@ -18,10 +18,11 @@ import (
 // The mapping is behavior-preserving: Run/RunAccepted forward the prompt
 // with no attachments (the delegation lifecycle never dispatches an
 // attached prompt) and discard the agent result the domain never reads;
-// the per-run RunID and the agent-dispatch origin tag the domain set on its
-// own context keys (see thread.WithRunID / thread.WithAgentDispatch) are
-// re-applied to the agent's own keys here, so the coordinator's run-id
-// echo and prompt-origin persistence are byte-identical to before the port
+// the per-run RunID, the agent-dispatch origin tag and the steering tag the
+// domain set on its own context keys (see thread.WithRunID /
+// thread.WithAgentDispatch / thread.WithSteering) are re-applied to the
+// agent's own keys here, so the coordinator's run-id echo, prompt-origin
+// persistence and dispatch decision are byte-identical to before the port
 // was introduced.
 type coordinatorAdapter struct {
 	inner agent.Coordinator
@@ -49,6 +50,21 @@ func (a *coordinatorAdapter) translateCtx(ctx context.Context) context.Context {
 	}
 	if thread.AgentDispatchFromContext(ctx) {
 		ctx = agent.WithAgentDispatch(ctx)
+	}
+	if onFolded, ok := thread.SteeringFromContext(ctx); ok {
+		// The domain's hook speaks in "did it fold", the agent's in
+		// SteerOutcome; SteerEnqueued is the folding branch for a steering
+		// call, since the agent drops such a call's RunID as it enqueues
+		// (see agent.SessionAgentCall.Steering). SteerCanceled is
+		// unreachable from this path — it needs an Accepted handle, which
+		// the lifecycle's steering dispatch does not take — and reads as
+		// "no run of ours started", the same as folding, for the one
+		// decision the domain makes from this.
+		ctx = agent.WithSteering(ctx, func(outcome agent.SteerOutcome) {
+			if onFolded != nil {
+				onFolded(outcome != agent.SteerRan)
+			}
+		})
 	}
 	return ctx
 }

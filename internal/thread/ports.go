@@ -64,6 +64,35 @@ func AgentDispatchFromContext(ctx context.Context) bool {
 	return v
 }
 
+// steeringContextKey carries a steering dispatch's decision hook. It
+// mirrors agent.WithSteering but is owned here; the composition seam
+// copies it onto the agent's own steering key.
+type steeringContextKey struct{}
+
+// WithSteering returns ctx tagged so the prompt dispatched through it
+// folds into the target session's turn in flight, if there is one,
+// instead of queueing behind it. It is the thread-domain spelling of
+// agent.WithSteering.
+//
+// onFolded is called once with the decision the coordinator reached: true
+// when the prompt folded into a turn already running, false when the
+// session was idle and the prompt became its own run under the ctx's
+// RunID. The distinction is not cosmetic here — only the second case
+// produces a run whose completion the lifecycle can own, which is why
+// [lifecycle.send] installs a runtime's RunID only after seeing it. The
+// hook runs under the coordinator's dispatch mutex and must not block.
+func WithSteering(ctx context.Context, onFolded func(folded bool)) context.Context {
+	return context.WithValue(ctx, steeringContextKey{}, onFolded)
+}
+
+// SteeringFromContext returns the hook set by [WithSteering] and whether
+// ctx was tagged at all. Exported so the composition seam can re-apply the
+// tag to the agent's own steering context key.
+func SteeringFromContext(ctx context.Context) (func(folded bool), bool) {
+	v, ok := ctx.Value(steeringContextKey{}).(func(folded bool))
+	return v, ok
+}
+
 // RunComplete is the domain's view of an agent run's terminal event — the
 // thread-domain spelling of agent/notify.RunComplete. The composition seam
 // maps a workspace's real RunComplete broker onto [RunCompletionBroker]

@@ -147,7 +147,33 @@ type SendDisposition struct {
 	// to be respawned to take the message. Such a send is never Queued:
 	// a freshly resumed workspace has no turn in flight.
 	Resumed bool
+	// Steered is true when the message reached the turn already in flight
+	// instead of waiting for it — the person's own sends only (see
+	// [SenderPerson]), and only when there was a turn to reach. It is the
+	// one outcome where "mid-turn" is not the same as "not read yet", so
+	// it is reported apart from Queued rather than folded into it.
+	Steered bool
 }
+
+// Sender says who wrote the message handed to [Manager.Send] /
+// [Manager.SendFromPerson] / [TaskManager.Send]. It decides two things
+// that only differ by authorship: the origin the message is persisted
+// under, and whether it may fold into a turn already in flight.
+type Sender int
+
+const (
+	// SenderAgent is a thread_send/task_send follow-up: an agent writing
+	// to another agent. It is persisted as agent-origin, and it never
+	// folds — a delegation's turn is not something another agent gets to
+	// interrupt (see internal/config.toolnames on why thread_send is not
+	// even in the default tool set).
+	SenderAgent Sender = iota
+	// SenderPerson is the person's own words, typed into the delegation's
+	// session in the TUI. It is persisted as person-origin, and it folds
+	// into the turn in flight when there is one, because "wait, do this
+	// instead" that arrives after the work is done has steered nothing.
+	SenderPerson
+)
 
 // Thread is a [Delegation] that additionally runs in its own git worktree
 // and branch, and is by default folded back into a base branch on

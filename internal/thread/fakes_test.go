@@ -131,6 +131,13 @@ func testTranslateCtx(ctx context.Context) context.Context {
 	if AgentDispatchFromContext(ctx) {
 		ctx = agent.WithAgentDispatch(ctx)
 	}
+	if onFolded, ok := SteeringFromContext(ctx); ok {
+		ctx = agent.WithSteering(ctx, func(outcome agent.SteerOutcome) {
+			if onFolded != nil {
+				onFolded(outcome != agent.SteerRan)
+			}
+		})
+	}
 	return ctx
 }
 
@@ -527,17 +534,38 @@ type fakeRun struct {
 	origin     message.Origin
 }
 
+// Run records the dispatch and, for a steering call, reproduces the real
+// dispatch decision sessionAgent.run would have taken under its
+// per-session mutex: a busy session folds the call into the turn in flight
+// (dropping its RunID on the way into the queue, exactly as the real one
+// does), an idle session runs it as its own turn under that RunID. The
+// hook fires after the fake's own lock is released, matching production's
+// "the hook must not take a lock this call already holds".
 func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+	onDispatch, steering := agent.SteeringFromContext(ctx)
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	runID := agent.RunIDFromContext(ctx)
+	folded := steering && f.busy
+	if folded {
+		runID = ""
+	}
 	f.runs = append(f.runs, fakeRun{
 		sessionID:  sessionID,
 		prompt:     prompt,
-		runID:      agent.RunIDFromContext(ctx),
+		runID:      runID,
 		delegation: permission.DelegationFromContext(ctx),
 		origin:     agent.PromptOriginFromContext(ctx),
 	})
-	return nil, f.runErr
+	err := f.runErr
+	f.mu.Unlock()
+	if steering && onDispatch != nil {
+		if folded {
+			onDispatch(agent.SteerEnqueued)
+		} else {
+			onDispatch(agent.SteerRan)
+		}
+	}
+	return nil, err
 }
 
 func (f *fakeCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
