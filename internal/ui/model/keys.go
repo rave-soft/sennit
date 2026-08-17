@@ -151,7 +151,7 @@ func keyMapForPlatform(goos string, overrides map[string][]string) KeyMap {
 	)
 	km.Editor.PasteImage = key.NewBinding(
 		key.WithKeys("ctrl+v", "super+v"),
-		key.WithHelp("ctrl+v", "paste image from clipboard"),
+		key.WithHelp("ctrl+v", "paste images and text from clipboard"),
 	)
 	km.Editor.MentionFile = key.NewBinding(
 		key.WithKeys("@"),

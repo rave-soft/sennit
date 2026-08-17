@@ -552,6 +552,18 @@ func (m *Message) AddBinary(mimeType string, data []byte) {
 	m.Parts = append(m.Parts, BinaryContent{MIMEType: mimeType, Data: data})
 }
 
+// attachmentTag picks the element a text attachment is wrapped in. A path
+// says "this exists on disk, go read it if you need more"; a bare name like
+// paste_3.txt is something the user pasted, which lives nowhere and sends
+// the agent chasing a file that was never there. Whatever the tag, the
+// content is inlined right below it, so nothing has to be read either way.
+func attachmentTag(filePath string) string {
+	if filePath == "" || strings.ContainsRune(filePath, '/') || strings.ContainsRune(filePath, '\\') {
+		return "file"
+	}
+	return "pasted_text"
+}
+
 func PromptWithTextAttachments(prompt string, attachments []Attachment) string {
 	var sb strings.Builder
 	sb.WriteString(prompt)
@@ -561,17 +573,21 @@ func PromptWithTextAttachments(prompt string, attachments []Attachment) string {
 			continue
 		}
 		if !addedAttachments {
-			sb.WriteString("\n<system_info>The files below have been attached by the user, consider them in your response</system_info>\n")
+			sb.WriteString("\n<system_info>The items below have been attached by the user — files from disk, and pasted text that exists only here. Consider them in your response.</system_info>\n")
 			addedAttachments = true
 		}
-		if content.FilePath != "" {
-			fmt.Fprintf(&sb, "<file path='%s'>\n", content.FilePath)
-		} else {
+		tag := attachmentTag(content.FilePath)
+		switch {
+		case content.FilePath == "":
 			sb.WriteString("<file>\n")
+		case tag == "file":
+			fmt.Fprintf(&sb, "<file path='%s'>\n", content.FilePath)
+		default:
+			fmt.Fprintf(&sb, "<%s name='%s'>\n", tag, content.FilePath)
 		}
 		sb.WriteString("\n")
 		sb.Write(content.Content)
-		sb.WriteString("\n</file>\n")
+		fmt.Fprintf(&sb, "\n</%s>\n", tag)
 	}
 	return sb.String()
 }

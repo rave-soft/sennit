@@ -15,6 +15,10 @@ func writeText(text string) {
 func read(f Format) ([]byte, error) {
 	var format clipboard.Format
 	switch f {
+	case FormatHTML:
+		// golang.design/x/clipboard only speaks text and image, so the
+		// markup flavor comes from a platform helper.
+		return readHTML()
 	case FormatText:
 		format = clipboard.FmtText
 	case FormatImage:

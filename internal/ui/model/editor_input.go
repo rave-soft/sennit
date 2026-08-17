@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/bubbles/v2/textarea"
@@ -22,6 +23,7 @@ import (
 	"github.com/rave-soft/sennit/internal/clipboard"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/richpaste"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/completions"
 	"github.com/rave-soft/sennit/internal/ui/util"
@@ -95,14 +97,14 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		}()
 
 		if err != nil {
-			return util.ReportError(err)
+			return util.NewErrorMsg(err)
 		}
 		content, err := os.ReadFile(tmpPath)
 		if err != nil {
-			return util.ReportError(err)
+			return util.NewErrorMsg(err)
 		}
 		if len(content) == 0 {
-			return util.ReportWarn("Message is empty")
+			return util.NewWarnMsg("Message is empty")
 		}
 		return openEditorMsg{
 			Text: strings.TrimSpace(string(content)),
@@ -321,7 +323,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		return func() tea.Msg {
 			content := []byte(msg.Content)
 			if int64(len(content)) > common.MaxAttachmentSize {
-				return util.ReportWarn("Paste is too big (>5mb)")
+				// A tea.Cmd here would be delivered as a message and
+				// dropped: this command's return value is the message.
+				return util.NewWarnMsg("Paste is too big (>5mb)")
 			}
 			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
 			return common.AttachmentFromBytes(name, name, content)
@@ -390,28 +394,46 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 	return func() tea.Msg {
 		fileInfo, err := os.Stat(path)
 		if err != nil {
-			return util.ReportError(err)
+			return util.NewErrorMsg(err)
 		}
 		if fileInfo.IsDir() {
-			return util.ReportWarn("Cannot attach a directory")
+			return util.NewWarnMsg("Cannot attach a directory")
 		}
 		if fileInfo.Size() > common.MaxAttachmentSize {
-			return util.ReportWarn("File is too big (>5mb)")
+			return util.NewWarnMsg("File is too big (>5mb)")
 		}
 
 		attachment, err := common.AttachmentFromPath(path)
 		if err != nil {
-			return util.ReportError(err)
+			return util.NewErrorMsg(err)
 		}
 
 		return attachment
 	}
 }
 
+// richPasteTimeout bounds the whole rich-paste round trip, downloads
+// included, so that a slow host cannot wedge the paste keybinding.
+const richPasteTimeout = 15 * time.Second
+
+// richPasteMsg carries a clipboard payload that mixed markup with images:
+// the images become attachments, the text goes through the normal paste
+// path.
+type richPasteMsg struct {
+	text        string
+	attachments []message.Attachment
+	skipped     int
+}
+
 // pasteImageFromClipboard reads image data from the system clipboard and
-// creates an attachment. If no image data is found, it falls back to
-// interpreting clipboard text as a file path.
+// creates an attachment. A rich payload — markup carrying several images,
+// as a browser selection does — is handled first. Failing that, a lone
+// clipboard image, then clipboard text read as a file path.
 func (m *UI) pasteImageFromClipboard() tea.Msg {
+	if msg := m.pasteRichFromClipboard(); msg != nil {
+		return msg
+	}
+
 	imageData, err := clipboard.Read(clipboard.FormatImage)
 	if int64(len(imageData)) > common.MaxAttachmentSize {
 		return util.InfoMsg{
@@ -437,7 +459,9 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 	path := strings.TrimSpace(string(textData))
 	path = strings.ReplaceAll(path, "\\ ", " ")
 	if _, statErr := os.Stat(path); statErr != nil {
-		return nil // Clipboard does not contain an image or valid file path
+		// Text that is not a path is what a browser selection looks like
+		// once its markup has been dropped for want of a helper.
+		return pasteHelperNotice()
 	}
 
 	lowerPath := strings.ToLower(path)
@@ -482,7 +506,99 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 	}
 }
 
-var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
+// pasteRichFromClipboard reads the markup flavor of the clipboard and turns
+// the images it references into attachments, pairing them with the plain
+// text of the same selection. It returns nil when the clipboard holds no
+// rich payload, leaving the plain image and file-path paths to run.
+func (m *UI) pasteRichFromClipboard() tea.Msg {
+	markup, err := clipboard.Read(clipboard.FormatHTML)
+	if err != nil || len(markup) == 0 {
+		return nil
+	}
+	srcs := richpaste.ImageSources(markup)
+	if len(srcs) == 0 {
+		return nil
+	}
+
+	var text string
+	if data, textErr := clipboard.Read(clipboard.FormatText); textErr == nil {
+		text = strings.TrimRight(string(data), "\n")
+	}
+
+	// A single image with no text alongside it is the plain image-paste
+	// case; the bitmap already on the clipboard beats re-fetching it.
+	if len(srcs) == 1 && strings.TrimSpace(text) == "" {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), richPasteTimeout)
+	defer cancel()
+	images, skipped := richpaste.Resolve(ctx, srcs, richpaste.Options{
+		MaxBytes: common.MaxAttachmentSize,
+	})
+	if len(images) == 0 {
+		return nil
+	}
+
+	idx := m.pasteIdx()
+	attachments := make([]message.Attachment, 0, len(images))
+	for i, img := range images {
+		name := fmt.Sprintf("paste_%d%s", idx+i, extensionFor(img.MimeType))
+		attachments = append(attachments, message.Attachment{
+			FilePath: name,
+			FileName: name,
+			MimeType: img.MimeType,
+			Content:  img.Content,
+		})
+	}
+
+	return richPasteMsg{text: text, attachments: attachments, skipped: skipped}
+}
+
+// handleRichPaste attaches the images of a rich paste and hands the text to
+// the regular paste path, so thresholds and bang mode behave as they do for
+// any other paste.
+func (m *UI) handleRichPaste(msg richPasteMsg) tea.Cmd {
+	for _, attachment := range msg.attachments {
+		m.editor.attachments.Update(attachment)
+	}
+
+	var cmds []tea.Cmd
+	if strings.TrimSpace(msg.text) != "" {
+		if cmd := m.handlePasteMsg(tea.PasteMsg{Content: msg.text}); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if msg.skipped > 0 {
+		cmds = append(cmds, util.ReportWarn(fmt.Sprintf(
+			"Skipped %d image(s) that could not be read", msg.skipped,
+		)))
+	}
+	return tea.Batch(cmds...)
+}
+
+// pasteHelperNotice explains an inert Ctrl+V when the cause is a missing
+// clipboard helper rather than an empty clipboard: without one, a browser
+// selection reaches Sennit as bare text and its images are simply gone.
+func pasteHelperNotice() tea.Msg {
+	missing := clipboard.MissingHTMLHelpers()
+	if len(missing) == 0 {
+		return nil
+	}
+	return util.NewWarnMsg(fmt.Sprintf(
+		"Install %s to paste images from a browser or document",
+		strings.Join(missing, " or "),
+	))
+}
+
+func extensionFor(mimeType string) string {
+	if mimeType == "image/jpeg" {
+		return ".jpg"
+	}
+	return ".png"
+}
+
+var pasteRE = regexp.MustCompile(`paste_(\d+)\.(?:txt|png|jpg)`)
 
 func (m *UI) pasteIdx() int {
 	result := 0

@@ -11,3 +11,5 @@ func writeText(string) {}
 func read(Format) ([]byte, error) {
 	return nil, ErrUnsupported
 }
+
+func missingHTMLHelpers() []string { return nil }

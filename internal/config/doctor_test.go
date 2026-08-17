@@ -332,3 +332,29 @@ func TestDoctorMainModelFallback(t *testing.T) {
 	require.Equal(t, SeverityError, problems[0].Severity)
 	require.Contains(t, problems[0].Message, "does-not-exist")
 }
+
+// TestEnvironmentProblemsFlagsMissingClipboardHelper covers the check that
+// keeps a rich paste from silently degrading to a text-only one.
+func TestEnvironmentProblemsFlagsMissingClipboardHelper(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	problems := EnvironmentProblems()
+
+	require.Len(t, problems, 1)
+	require.Equal(t, AreaEnvironment, problems[0].Area)
+	require.Equal(t, SeverityWarn, problems[0].Severity)
+	require.Equal(t, "clipboard", problems[0].Subject)
+	require.NotEmpty(t, problems[0].Hint)
+}
+
+// TestDoctorExcludesEnvironmentProblems pins the split: Doctor answers
+// "is this config right?" from the config alone, so it stays reproducible
+// on a machine that happens to lack a clipboard helper.
+func TestDoctorExcludesEnvironmentProblems(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	cfg := doctorTestConfig(t)
+	cfg.SetupAgents()
+
+	require.Empty(t, Doctor(cfg))
+}

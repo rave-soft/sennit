@@ -13,6 +13,10 @@ const (
 	FormatText Format = iota
 	// FormatImage is binary image data (PNG).
 	FormatImage
+	// FormatHTML is the text/html clipboard flavor, which browsers and
+	// document editors set alongside plain text when the selection carries
+	// markup — including the <img> tags of any images it contained.
+	FormatHTML
 )
 
 var (
@@ -41,4 +45,13 @@ func WriteText(text string) {
 // without clipboard support.
 func Read(f Format) ([]byte, error) {
 	return read(f)
+}
+
+// MissingHTMLHelpers names the programs that would let Sennit read
+// FormatHTML, when none of them is installed — the one thing that silently
+// turns a rich clipboard paste back into a plain one. It returns nil when a
+// helper is present, and on platforms with no clipboard support at all,
+// where a missing helper is not the interesting part.
+func MissingHTMLHelpers() []string {
+	return missingHTMLHelpers()
 }

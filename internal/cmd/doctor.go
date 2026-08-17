@@ -44,6 +44,7 @@ when only warnings were found).`,
 		}
 
 		problems := config.Doctor(cfg.Config())
+		problems = append(problems, config.EnvironmentProblems()...)
 
 		if doctorJSON {
 			bts, err := json.MarshalIndent(problems, "", "  ")

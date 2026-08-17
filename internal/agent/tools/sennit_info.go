@@ -177,6 +177,7 @@ func writeConfigStaleness(b *strings.Builder, cfg SennitInfoConfig) {
 // output instead of a log file it never sees.
 func writeProblems(b *strings.Builder, cfg SennitInfoConfig, mcpStates map[string]mcp.ClientInfo, skillStates []*skills.SkillState) {
 	problems := config.Doctor(cfg.Config())
+	problems = append(problems, config.EnvironmentProblems()...)
 	problems = append(problems, config.SkillProblems(skillStates)...)
 	for name, info := range mcpStates {
 		if info.State != mcp.StateError && info.State != mcp.StateNeedsAuth {

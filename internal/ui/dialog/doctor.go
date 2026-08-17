@@ -230,6 +230,7 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 // cannot import the MCP client package.
 func DoctorProblems(com *common.Common) []config.Problem {
 	problems := config.Doctor(com.Config())
+	problems = append(problems, config.EnvironmentProblems()...)
 	problems = append(problems, config.SkillProblems(skills.GetLatestStates())...)
 	for name, info := range com.Workspace.MCPGetStates() {
 		if info.State != mcptools.MCPStateError && info.State != mcptools.MCPStateNeedsAuth {

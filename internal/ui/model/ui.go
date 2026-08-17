@@ -829,6 +829,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handlePasteMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case richPasteMsg:
+		if cmd := m.handleRichPaste(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case openEditorMsg, shellStreamMsg, shellResultMsg:
 		var done bool
 		if cmds, done = m.updateShell(msg, cmds); done {

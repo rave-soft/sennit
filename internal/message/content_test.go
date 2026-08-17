@@ -189,3 +189,45 @@ func TestToAIMessage_SystemRoleIsNotSentToTheModel(t *testing.T) {
 	}
 	require.Empty(t, m.ToAIMessage(), "a system-role message must not reach the provider")
 }
+
+// TestPromptWithTextAttachmentsLabelsPastesAsPastes covers the agent going
+// off to read paste_3.txt: a pasted buffer has no path, and saying it does
+// sends the read tool after a file that never existed.
+func TestPromptWithTextAttachmentsLabelsPastesAsPastes(t *testing.T) {
+	t.Parallel()
+
+	prompt := PromptWithTextAttachments("look", []Attachment{
+		{FilePath: "paste_3.txt", FileName: "paste_3.txt", MimeType: "text/plain", Content: []byte("pasted body")},
+	})
+
+	require.Contains(t, prompt, "<pasted_text name='paste_3.txt'>")
+	require.Contains(t, prompt, "</pasted_text>")
+	require.Contains(t, prompt, "pasted body")
+	require.NotContains(t, prompt, "path=", "a paste has no path to advertise")
+}
+
+// TestPromptWithTextAttachmentsKeepsPathsForRealFiles is the other half:
+// a file attached from disk still tells the agent where it lives.
+func TestPromptWithTextAttachmentsKeepsPathsForRealFiles(t *testing.T) {
+	t.Parallel()
+
+	prompt := PromptWithTextAttachments("look", []Attachment{
+		{FilePath: "/home/u/notes.md", FileName: "notes.md", MimeType: "text/markdown", Content: []byte("body")},
+	})
+
+	require.Contains(t, prompt, "<file path='/home/u/notes.md'>")
+	require.Contains(t, prompt, "</file>")
+}
+
+// TestPromptWithTextAttachmentsWithoutAPathStillWraps guards the third
+// case: no path at all, which must not produce mismatched tags.
+func TestPromptWithTextAttachmentsWithoutAPathStillWraps(t *testing.T) {
+	t.Parallel()
+
+	prompt := PromptWithTextAttachments("look", []Attachment{
+		{FileName: "x", MimeType: "text/plain", Content: []byte("body")},
+	})
+
+	require.Contains(t, prompt, "<file>")
+	require.Contains(t, prompt, "</file>")
+}

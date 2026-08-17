@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/clipboard"
 	"github.com/rave-soft/sennit/internal/skills"
 )
 
@@ -22,12 +23,13 @@ const (
 type Area string
 
 const (
-	AreaAgent      Area = "agent"
-	AreaProvider   Area = "provider"
-	AreaModel      Area = "model"
-	AreaSkill      Area = "skill"
-	AreaMCP        Area = "mcp"
-	AreaPermission Area = "permission"
+	AreaAgent       Area = "agent"
+	AreaProvider    Area = "provider"
+	AreaModel       Area = "model"
+	AreaSkill       Area = "skill"
+	AreaMCP         Area = "mcp"
+	AreaPermission  Area = "permission"
+	AreaEnvironment Area = "environment"
 )
 
 // Problem describes one thing that is wrong, or worth flagging, in the
@@ -224,6 +226,28 @@ func doctorPermissionsBypass(cfg *Config) []Problem {
 		Subject:  "permissions.bypass",
 		Message:  "permissions bypass is enabled — the agent never asks for permission before running a tool",
 		Hint:     "disable permissions.bypass in sennit.json (or `permissions bypass off` in sennitrc) to restore prompts",
+	}}
+}
+
+// EnvironmentProblems reports what is missing from the machine rather than
+// from the config: right now, the clipboard helper that lets a paste carry
+// the images of a rich selection instead of only its text.
+//
+// It is deliberately not part of [Doctor], which answers "is this config
+// right?" from the config alone and stays reproducible anywhere. Callers
+// merge this in the same way they merge MCP state and SkillProblems.
+func EnvironmentProblems() []Problem {
+	missing := clipboard.MissingHTMLHelpers()
+	if len(missing) == 0 {
+		return nil
+	}
+	return []Problem{{
+		Severity: SeverityWarn,
+		Area:     AreaEnvironment,
+		Subject:  "clipboard",
+		Message: "no clipboard helper installed — pasting a mixed selection " +
+			"(text plus images) keeps only the text",
+		Hint: "install " + strings.Join(missing, " or ") + " to paste images from a browser or document",
 	}}
 }
 
