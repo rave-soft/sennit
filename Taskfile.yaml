@@ -168,6 +168,11 @@ tasks:
 
   release:
     desc: Create and push a new tag following semver
+    # svu derives the next version from the previous tag. With no tags at
+    # all it proposes v1.0.0, so the first release is tagged by hand
+    # (`git tag -as v0.1.0 -m v0.1.0 && git push origin v0.1.0`) and this
+    # task takes over from there. Pushing the tag is what triggers
+    # .github/workflows/release.yml; nothing else publishes.
     vars:
       NEXT:
         sh: svu next --always || go run github.com/caarlos0/svu/v3@latest next --always

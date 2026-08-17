@@ -1,0 +1,33 @@
+name: Snapshot
+
+# A full goreleaser run without publishing anything. It exists so that a
+# release-time failure (a broken build for one of the target platforms, a
+# hook that no longer runs) shows up on main rather than on the tag, which
+# is why `task release` refuses to tag a commit this has not passed.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snapshot-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish

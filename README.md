@@ -4,6 +4,27 @@ A terminal-first AI coding agent with real multi-agent orchestration.
 
 Documentation: **<https://rave-soft.github.io/sennit/>**
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rave-soft/sennit/main/scripts/install.sh | sh
+```
+
+Installs the latest release into `~/.local/bin`, checksum-verified. Or build
+it yourself — it is one Go binary with no runtime dependencies:
+
+```sh
+go install github.com/rave-soft/sennit@latest
+```
+
+Archives for Linux, macOS and Windows are attached to each
+[release](https://github.com/rave-soft/sennit/releases). macOS builds are not
+signed, so a manually downloaded binary needs
+`xattr -d com.apple.quarantine ./sennit` before its first run; the install
+script handles that itself. See
+[Getting started](https://rave-soft.github.io/sennit/getting-started/) for the
+rest.
+
 Sennit runs specialised agents — a reviewer, a DBA, a security auditor, an
 implementer — as parallel delegations inside one process, each with its own
 prompt, tools, model slot and reasoning effort. Agents are plain markdown

@@ -2,6 +2,25 @@
 
 ## Install
 
+### Install script
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rave-soft/sennit/main/scripts/install.sh | sh
+```
+
+It picks the archive for your OS and architecture from the latest GitHub
+release, verifies it against the release's `checksums.txt`, and installs into
+`~/.local/bin`. `SENNIT_VERSION` pins a version, `SENNIT_BIN_DIR` changes the
+destination. Linux and macOS only; on Windows, download the `.zip` from the
+[releases page](https://github.com/rave-soft/sennit/releases).
+
+> [!WARNING]
+> macOS binaries are **not** signed or notarized. Gatekeeper quarantines a
+> downloaded archive, so a manually downloaded `sennit` fails its first run
+> with "cannot be opened because the developer cannot be verified". Clear it
+> with `xattr -d com.apple.quarantine /path/to/sennit` — the install script
+> above already does this for you.
+
 ### From source
 
 Sennit is a single Go binary with no runtime dependencies. Go 1.26 or newer is
@@ -23,25 +42,16 @@ Move the resulting binary somewhere on your `PATH`.
 
 ### From a release
 
-> [!NOTE]
-> The release pipeline is configured but no tagged release has been published
-> yet. Until one is, build from source. The channels below are what
-> [`.goreleaser.yml`](https://github.com/rave-soft/sennit/blob/main/.goreleaser.yml)
-> publishes on a tag.
+Every tag publishes archives for Linux, macOS and Windows (amd64 and arm64)
+on the [releases page](https://github.com/rave-soft/sennit/releases), with a
+`checksums.txt` beside them. Each archive carries the binary, shell
+completions (bash, zsh, fish) and the `sennit(1)` man page.
 
-| Platform | Channel |
-|:--|:--|
-| macOS / Linux | Homebrew — `brew install rave-soft/tap/sennit` |
-| Windows | Scoop — bucket `rave-soft/scoop-bucket`; or winget |
-| Arch Linux | AUR — `sennit-bin` |
-| Debian / RPM / Alpine | `.deb`, `.rpm`, `.apk` packages |
-| Nix | NUR — `rave-soft/nur` |
-| Node | `npm install -g @rave-soft/sennit` |
-| Anything | Archives attached to the GitHub release |
+There are no package-manager channels yet — no Homebrew tap, Scoop bucket,
+AUR package, deb/rpm repository or npm package. Use the install script, an
+archive, or a source build.
 
-Packaged builds also install shell completions (bash, zsh, fish) and a
-`sennit(1)` man page. From a source build you can generate completions
-yourself:
+From a source build you can generate completions yourself:
 
 ```sh
 sennit completion zsh > "${fpath[1]}/_sennit"
