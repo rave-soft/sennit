@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent"
 	"github.com/rave-soft/sennit/internal/agent/notify"
@@ -269,6 +271,60 @@ func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) err
 
 func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.app.UpdateAgentModel(ctx)
+}
+
+// ApplySessionModel implements AgentController. See the interface for the
+// contract; the checks below are in the order that makes each subsequent
+// one meaningful.
+func (w *AppWorkspace) ApplySessionModel(ctx context.Context, sessionID string) (bool, error) {
+	if w.app.AgentCoordinator == nil {
+		return false, ErrAgentNotInitialized
+	}
+	sess, err := w.app.Sessions().Get(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if sess.Model.IsZero() {
+		return false, nil
+	}
+	pinned := config.SelectedModel{Provider: sess.Model.Provider, Model: sess.Model.Model}
+
+	cfg := w.store.Config()
+	current := cfg.Model
+	if current.Provider == pinned.Provider && current.Model == pinned.Model {
+		return false, nil
+	}
+
+	// The pin outlives the configuration that made it valid: a provider
+	// can be removed, or the session can have been recorded on a different
+	// machine entirely. Verify before switching, because switching onto a
+	// model this instance cannot build fails every turn in the session
+	// rather than the one selection — which is exactly the failure the
+	// fallback to the instance's own model exists to avoid.
+	providerCfg, ok := cfg.Providers.Get(pinned.Provider)
+	if !ok {
+		slog.Debug("Session pins a model whose provider is not configured here; keeping the current model",
+			"session_id", sessionID, "provider", pinned.Provider, "model", pinned.Model)
+		return false, nil
+	}
+	if !slices.ContainsFunc(providerCfg.Models, func(m catwalk.Model) bool { return m.ID == pinned.Model }) {
+		slog.Debug("Session pins a model its provider no longer offers; keeping the current model",
+			"session_id", sessionID, "provider", pinned.Provider, "model", pinned.Model)
+		return false, nil
+	}
+
+	// Carry the current selection's per-model preferences across rather
+	// than resetting them: the pin records which model the session ran on,
+	// not how the user had it tuned.
+	pinned.Think = current.Think
+	pinned.MaxTokens = current.MaxTokens
+	pinned.ReasoningEffort = current.ReasoningEffort
+
+	w.store.OverridePreferredModel(pinned)
+	if err := w.app.UpdateAgentModel(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (w *AppWorkspace) InitCoderAgent(ctx context.Context) error {

@@ -64,6 +64,10 @@ type cmdDrivingWorkspace struct {
 	agentCancelCalls      int
 	agentSummarizeCalls   int
 	agentUpdateModelCalls int
+
+	applySessionModelCalls    int
+	applySessionModelSwitched bool
+	applySessionModelErr      error
 	agentRunShellCalls    int
 
 	permGrantCalls          int
@@ -165,6 +169,14 @@ func (w *cmdDrivingWorkspace) AgentSummarize(ctx context.Context, s string) erro
 func (w *cmdDrivingWorkspace) UpdateAgentModel(ctx context.Context) error {
 	w.agentUpdateModelCalls++
 	return nil
+}
+
+// applySessionModelResult is what ApplySessionModel reports back: false is
+// the common case (the session pins no model, or is already on it), so it
+// is the default a test does not have to opt out of.
+func (w *cmdDrivingWorkspace) ApplySessionModel(context.Context, string) (bool, error) {
+	w.applySessionModelCalls++
+	return w.applySessionModelSwitched, w.applySessionModelErr
 }
 
 func (w *cmdDrivingWorkspace) AgentRun(

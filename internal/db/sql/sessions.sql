@@ -87,6 +87,19 @@ SET
     title = ?
 WHERE id = ?;
 
+-- name: SetSessionModel :exec
+-- Pin the model a session runs on, so restoring it later restores the
+-- model it was working with rather than the instance's current selection.
+-- Empty strings clear the pin, returning the session to that fallback.
+--
+-- Deliberately not RETURNING the row: this is written on every turn, from
+-- the dispatch path, and its result is never read back.
+UPDATE sessions
+SET
+    model_provider = ?,
+    model_id = ?
+WHERE id = ?;
+
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE id = ?;

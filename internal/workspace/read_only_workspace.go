@@ -247,6 +247,15 @@ func (w *readOnlyWorkspace) UpdateAgentModel(ctx context.Context) error {
 	return w.readOnlyError("UpdateAgentModel")
 }
 
+// ApplySessionModel is a no-op here rather than an error. This wrapper is
+// how a caller inspects a thread it cannot run (see
+// AppWorkspace.AttachThread), and the instance it would switch is the
+// parent's, not the thread's: looking at a thread must not change the
+// model the user's own session runs on.
+func (w *readOnlyWorkspace) ApplySessionModel(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (w *readOnlyWorkspace) InitCoderAgent(ctx context.Context) error {
 	return w.readOnlyError("InitCoderAgent")
 }

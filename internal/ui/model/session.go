@@ -61,7 +61,12 @@ type loadSessionMsg struct {
 	items               []chat.MessageItem
 	lastUserMessageTime int64
 	modelUsed           sessionModelRef
-	err                 error
+	// modelSwitched reports that loading this session moved the instance
+	// onto the model the session is pinned to, so the memoized model state
+	// has to be re-probed. False whenever the session was already on it, or
+	// pins none — see workspace.AgentController.ApplySessionModel.
+	modelSwitched bool
+	err           error
 }
 
 type requestSessionLoad struct {
@@ -130,6 +135,18 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 	if err != nil {
 		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
 	}
+	// Put the session back on the model it was working with before any of
+	// it is rendered, so the model shown and the model the next turn runs
+	// on are the same one.
+	//
+	// A failure here is not a failure to open the session: it opens on the
+	// current model, which is what it did before sessions carried a model
+	// at all. Refusing to show a session because its model could not be
+	// restored would be strictly worse than showing it.
+	modelSwitched, err := r.workspace.ApplySessionModel(r.ctx, sessionID)
+	if err != nil {
+		slog.Debug("Failed to restore the session's model", "session_id", sessionID, "error", err)
+	}
 	sessionFiles, err := loadModifiedFiles(r.ctx, r.workspace, sessionID)
 	if err != nil {
 		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
@@ -156,6 +173,7 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 		items:               items,
 		lastUserMessageTime: lastUserMessageTime,
 		modelUsed:           lastAssistantModel(msgs),
+		modelSwitched:       modelSwitched,
 	}
 }
 

@@ -381,6 +381,7 @@ func (s *stubWorkspace) AgentQueuedPromptsList(sessionID string) []string       
 func (s *stubWorkspace) AgentClearQueue(sessionID string)                           {}
 func (s *stubWorkspace) AgentSummarize(ctx context.Context, sessionID string) error { return nil }
 func (s *stubWorkspace) UpdateAgentModel(ctx context.Context) error                 { return nil }
+func (s *stubWorkspace) ApplySessionModel(context.Context, string) (bool, error)    { return false, nil }
 func (s *stubWorkspace) InitCoderAgent(ctx context.Context) error                   { return nil }
 func (s *stubWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error     { return nil }
 func (s *stubWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {

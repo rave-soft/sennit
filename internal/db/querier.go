@@ -150,6 +150,13 @@ type Querier interface {
 	// percentile aggregate to lean on anyway.
 	RecordLatencyEvent(ctx context.Context, arg RecordLatencyEventParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	// Pin the model a session runs on, so restoring it later restores the
+	// model it was working with rather than the instance's current selection.
+	// Empty strings clear the pin, returning the session to that fallback.
+	//
+	// Deliberately not RETURNING the row: this is written on every turn, from
+	// the dispatch path, and its result is never read back.
+	SetSessionModel(ctx context.Context, arg SetSessionModelParams) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error

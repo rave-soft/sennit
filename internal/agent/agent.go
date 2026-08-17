@@ -551,6 +551,20 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	dispatched(SteerRan)
 	sessMu.Unlock()
 
+	// Record the model this turn is about to run on, so restoring the
+	// session later restores the model it was working with rather than
+	// whatever the instance has selected then. Stamped here, from the one
+	// point where a turn genuinely becomes this session's active run, so
+	// what is recorded is what the session did rather than what anyone
+	// intended — a queued prompt that drains into a turn of its own needs
+	// no stamp of its own, since it runs on the same model that put it
+	// here.
+	//
+	// Best-effort on purpose: a session whose model failed to persist runs
+	// exactly as it did before this was recorded at all, and failing a
+	// turn over its bookkeeping would be the worse trade.
+	a.recordSessionModel(ctx, call.SessionID)
+
 	defer cancel()
 	// Conditional cleanup: only remove our entry if it hasn't been replaced
 	// by a newer run. Without this guard, the deferred Del fires after a
@@ -917,6 +931,33 @@ func withPriorMessages(prior, own []message.Message) []message.Message {
 
 func (a *sessionAgent) SetModel(model Model) {
 	a.model.Set(model)
+}
+
+// recordSessionModel pins sessionID to the model this agent is currently
+// running, so a later restore of that session can put the model back. See
+// session.Session.Model.
+//
+// Failures are logged and swallowed: this is bookkeeping alongside a turn
+// that is already starting, and a session that keeps no model behaves the
+// way every session behaved before the column existed — it falls back to
+// the instance's own selection.
+func (a *sessionAgent) recordSessionModel(ctx context.Context, sessionID string) {
+	if a.sessions == nil {
+		return
+	}
+	cfg := a.model.Get().ModelCfg
+	if cfg.Provider == "" || cfg.Model == "" {
+		// Nothing worth recording, and writing the zero ref here would
+		// clear a pin the session legitimately has.
+		return
+	}
+	if err := a.sessions.SetModel(ctx, sessionID, session.ModelRef{
+		Provider: cfg.Provider,
+		Model:    cfg.Model,
+	}); err != nil {
+		slog.Error("Failed to record the model a session ran on",
+			"component", "agent", "session_id", sessionID, "error", err)
+	}
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {

@@ -184,6 +184,25 @@ type AgentController interface {
 	AgentClearQueue(sessionID string)
 	AgentSummarize(ctx context.Context, sessionID string) error
 	UpdateAgentModel(ctx context.Context) error
+	// ApplySessionModel switches this instance onto the model sessionID is
+	// pinned to (see session.Session.Model), so opening an older session
+	// resumes it on the model it was working with instead of whatever is
+	// selected now. It reports whether it actually switched.
+	//
+	// The switch is in-memory only: it never writes the user's config
+	// file. Opening a session is not the same act as choosing a default,
+	// and several instances share that file — see
+	// config.ConfigStore.OverridePreferredModel.
+	//
+	// Not switching is an ordinary outcome, reported as (false, nil): the
+	// session may have no pinned model (it never ran, or predates the
+	// pin), may already be on it, or may name a model this instance
+	// cannot reach — a provider since removed, or one that was never
+	// configured here. The last case is the reason this cannot simply
+	// trust the stored value: the pin outlives the configuration that
+	// made it valid, and a session must still open on a machine that has
+	// since dropped the provider.
+	ApplySessionModel(ctx context.Context, sessionID string) (bool, error)
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
 	// AgentRunStream sends prompt as a new turn on the already-resolved

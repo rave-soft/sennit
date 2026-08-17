@@ -192,3 +192,51 @@ func TestGetReportsMissingSessionAsErrNotFound(t *testing.T) {
 		"the bare driver error reaches the user verbatim in the status line")
 	require.Contains(t, err.Error(), "does-not-exist", "the id being looked up must survive into the message")
 }
+
+// A session's pinned model has to survive the round trip through the
+// store, and Save must not quietly drop it: Save writes a whole Session
+// back, and the model is not among the columns UpdateSession sets, so a
+// fetch-modify-save cycle is exactly where a pin would go missing.
+func TestSetModelSurvivesFetchModifySave(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	created, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+	require.True(t, created.Model.IsZero(), "a fresh session pins no model")
+
+	pinned := ModelRef{Provider: "anthropic", Model: "claude-opus-5"}
+	require.NoError(t, sessions.SetModel(t.Context(), created.ID, pinned))
+
+	fetched, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, pinned, fetched.Model)
+
+	fetched.Title = "renamed by an unrelated edit"
+	saved, err := sessions.Save(t.Context(), fetched)
+	require.NoError(t, err)
+	require.Equal(t, pinned, saved.Model, "an unrelated save must not drop the pin")
+
+	again, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, pinned, again.Model)
+
+	// Re-pinning replaces rather than accumulates, and the zero ref clears.
+	moved := ModelRef{Provider: "openai", Model: "gpt-5"}
+	require.NoError(t, sessions.SetModel(t.Context(), created.ID, moved))
+	again, err = sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, moved, again.Model)
+
+	require.NoError(t, sessions.SetModel(t.Context(), created.ID, ModelRef{}))
+	again, err = sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.True(t, again.Model.IsZero(), "the zero ref clears the pin")
+}

@@ -60,6 +60,8 @@ type Session struct {
 	Todos            sql.NullString `json:"todos"`
 	ProjectPath      string         `json:"project_path"`
 	AgentID          string         `json:"agent_id"`
+	ModelProvider    string         `json:"model_provider"`
+	ModelID          string         `json:"model_id"`
 }
 
 type Thread struct {

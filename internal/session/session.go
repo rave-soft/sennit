@@ -53,9 +53,36 @@ func HasIncompleteTodos(todos []Todo) bool {
 	return false
 }
 
+// ModelRef names a model the way a model has to be named to be found
+// again: by provider as well as id, since a model id is only unique
+// within its provider. It mirrors config.SelectedModel, spelled here so
+// internal/session does not depend on internal/config.
+//
+// The zero value means "not pinned", which is a real and common state —
+// see [Session.Model].
+type ModelRef struct {
+	Provider string
+	Model    string
+}
+
+// IsZero reports whether the ref names no model at all.
+func (m ModelRef) IsZero() bool { return m.Provider == "" && m.Model == "" }
+
 type Session struct {
 	ID              string
 	ParentSessionID string
+	// Model is the model this session runs on, pinned so that restoring
+	// the session restores the model it was working with rather than
+	// whatever the instance happens to have selected now. It is stamped
+	// from the turn that actually ran (see the agent's dispatch path), so
+	// it records what the session did rather than what someone intended.
+	//
+	// Zero means not pinned, and is normal: a session that has never run
+	// has no model to restore, and one restored from before this was
+	// recorded may have none either. Callers fall back to the instance's
+	// own selection in that case, which is what every session did before
+	// this field existed.
+	Model ModelRef
 	// AgentID names the configured agent whose delegation this session
 	// is, and is empty for every session that is not one: top-level
 	// sessions, title sessions, thread and task sessions, and the
@@ -101,6 +128,15 @@ type Service interface {
 	Save(ctx context.Context, session Session) (Session, error)
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	Rename(ctx context.Context, id string, title string) error
+	// SetModel pins the model sessionID runs on. A zero ModelRef clears
+	// the pin, returning the session to the instance's own selection.
+	//
+	// It is called from the dispatch path on every turn, so it is a bare
+	// write: no row is read back and no event is published. Nothing
+	// renders a session's pinned model, and republishing the session on
+	// every turn would wake every subscriber for a field none of them
+	// display.
+	SetModel(ctx context.Context, sessionID string, model ModelRef) error
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
@@ -328,6 +364,14 @@ func (s *service) Rename(ctx context.Context, id string, title string) error {
 	return nil
 }
 
+func (s *service) SetModel(ctx context.Context, sessionID string, model ModelRef) error {
+	return s.q.SetSessionModel(ctx, db.SetSessionModelParams{
+		ID:            sessionID,
+		ModelProvider: model.Provider,
+		ModelID:       model.Model,
+	})
+}
+
 func (s *service) ValidateSessionIDsInTree(ctx context.Context, rootSessionID string, sessionIDs []string) ([]string, error) {
 	if len(sessionIDs) == 0 {
 		return nil, nil
@@ -398,6 +442,7 @@ func (s *service) fromDBItem(item db.Session) Session {
 		ID:               item.ID,
 		ParentSessionID:  item.ParentSessionID.String,
 		AgentID:          item.AgentID,
+		Model:            ModelRef{Provider: item.ModelProvider, Model: item.ModelID},
 		Title:            item.Title,
 		MessageCount:     item.MessageCount,
 		PromptTokens:     item.PromptTokens,

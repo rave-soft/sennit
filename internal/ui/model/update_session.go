@@ -83,6 +83,12 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// session instead of a stale one.
 		m.invalidateBusyCaches()
 		m.invalidatePromptQueue()
+		if msg.modelSwitched {
+			// Loading the session moved the instance onto the model it is
+			// pinned to. The rebuild has already landed by the time this
+			// message exists, so the memoized model only needs re-probing.
+			cmds = append(cmds, agentModelChangedCmd)
+		}
 		m.wsCache.promptQueue = 0
 		m.wsCache.promptQueueItems = nil
 		m.wsCache.promptQueueCheckedAt = time.Time{}
