@@ -135,7 +135,7 @@ func TestCoordinatorAdapter_TranslateCtxCarriesDispatchTag(t *testing.T) {
 	adapter := NewCoordinatorAdapter(coord)
 
 	ctx := thread.WithAgentDispatch(thread.WithRunID(context.Background(), "run-123"))
-	require.NoError(t, adapter.Run(ctx, "sess", "do it"))
+	require.NoError(t, adapter.Run(ctx, "sess", "do it", nil))
 
 	require.Equal(t, message.OriginAgent, seenOrigin.Load().(message.Origin),
 		"the agent-dispatch origin tag must be re-applied on the agent's own key")

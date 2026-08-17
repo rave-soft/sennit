@@ -591,7 +591,7 @@ func (m *Manager) Cancel(ctx context.Context, idOrName, reason string) error {
 // This is the agent-facing entry (thread_send); [Manager.SendFromPerson]
 // is the person's own.
 func (m *Manager) Send(ctx context.Context, idOrName, message string) (SendDisposition, error) {
-	return m.send(ctx, idOrName, message, SenderAgent)
+	return m.send(ctx, idOrName, message, SenderAgent, nil)
 }
 
 // SendFromPerson is [Manager.Send] for a message the person typed
@@ -602,10 +602,29 @@ func (m *Manager) Send(ctx context.Context, idOrName, message string) (SendDispo
 // [lifecycle.steer] for why the person gets that and another agent does
 // not.
 func (m *Manager) SendFromPerson(ctx context.Context, idOrName, message string) (SendDisposition, error) {
-	return m.send(ctx, idOrName, message, SenderPerson)
+	return m.send(ctx, idOrName, message, SenderPerson, nil)
 }
 
-func (m *Manager) send(ctx context.Context, idOrName, message string, from Sender) (SendDisposition, error) {
+// RunFromPerson dispatches a turn the person is driving by hand in the
+// thread's own session — the TUI drilled into a thread and typed. It is
+// [Manager.SendFromPerson] plus attachments, and it exists as its own
+// entry point because of what it is for: the drilled-in view used to talk
+// to the thread's coordinator directly, which meant the manager never
+// learned a turn had started. The thread stayed idle while it worked, its
+// completion was dropped (an untracked run has no RunID to match), and a
+// thread revived by hand could therefore never settle, merge, or report
+// again.
+//
+// Routing that typing through here instead makes the manager the one
+// owner of every turn in a thread's session. What it does not do is treat
+// such a turn as the thread's work being finished: it rests at idle with
+// its workspace live, and merging stays the person's own call — see
+// lifecycle.handleRunComplete's person branch.
+func (m *Manager) RunFromPerson(ctx context.Context, idOrName, message string, attachments []Attachment) (SendDisposition, error) {
+	return m.send(ctx, idOrName, message, SenderPerson, attachments)
+}
+
+func (m *Manager) send(ctx context.Context, idOrName, message string, from Sender, attachments []Attachment) (SendDisposition, error) {
 	done, err := m.lc.beginOp()
 	if err != nil {
 		return SendDisposition{}, err
@@ -622,7 +641,7 @@ func (m *Manager) send(ctx context.Context, idOrName, message string, from Sende
 	// dispatch" logic itself has nothing thread-specific in it — see
 	// lifecycle.send's doc comment — so it lives there, shared with
 	// TaskManager.Send.
-	disp, err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message, from)
+	disp, err := m.lc.send(ctx, m.ctx, st.ID, m.spawner, st.WorktreePath, st.SessionID, message, from, attachments)
 	if err != nil {
 		return SendDisposition{}, err
 	}

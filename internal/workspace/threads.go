@@ -185,7 +185,18 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 			return nil, nil, fmt.Errorf("thread: workspace handle does not wrap an *app.App")
 		}
 		ws := NewAppWorkspace(aw.App, aw.App.Store())
-		return ws, func() {}, nil
+		// Wrapped so a turn the person starts in the thread's own session
+		// goes through the Manager rather than past it — see
+		// attachedThreadWorkspace. Reading the row for its session id is
+		// what makes that possible; a thread we cannot resolve is handed
+		// back unwrapped rather than not at all, since viewing it still
+		// works and refusing the attach over bookkeeping would be worse.
+		st, err := mgr.Get(ctx, id)
+		if err != nil {
+			slog.Debug("Attached thread could not be resolved; its turns will not be tracked", "thread", id, "error", err)
+			return ws, func() {}, nil
+		}
+		return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
 	}
 	// Thread is not currently spawned (completed, interrupted, failed).
 	// Verify the thread actually exists before returning a workspace —
@@ -201,7 +212,12 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 	if _, err := mgr.Activate(ctx, id); err == nil {
 		if h := mgr.Handle(id); h != nil {
 			if a, ok := h.Workspace().(*threadspawn.AppWorkspaceAdapter); ok && a.App != nil {
-				return NewAppWorkspace(a.App, a.App.Store()), func() {}, nil
+				// Same wrapping as the live branch — and this is the branch
+				// that most needs it: a thread revived here is idle by
+				// definition, and everything that happens in it next is the
+				// person's own doing.
+				ws := NewAppWorkspace(a.App, a.App.Store())
+				return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
 			}
 		}
 	} else {

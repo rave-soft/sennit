@@ -4,7 +4,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
 
@@ -123,4 +126,78 @@ func TestManager_SendFromAgentStillQueuesBehindRunningTurn(t *testing.T) {
 	require.Equal(t, queued.runID, runtimeRunID(t, mgr, st.ID),
 		"the queued turn takes the workspace so the displaced run's completion cannot release it")
 	require.NotEqual(t, goalRunID, queued.runID)
+}
+
+// A thread revived by hand and then worked in must show what it is
+// actually doing. The drilled-in TUI used to talk to the thread's
+// coordinator directly, so the manager never learned a turn had started:
+// the thread sat at idle while its agent worked, and its completion was
+// dropped on arrival. RunFromPerson is that path routed back through the
+// manager.
+func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "revived", Goal: "do it", MergePolicy: MergeAuto})
+	require.NoError(t, err)
+	worktree := st.WorktreePath
+
+	// Let the goal run fail, then revive the thread the way attaching to
+	// it does.
+	publishFailure(t, spawner.appFor(worktree), st.SessionID, "stream error: overloaded")
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
+	st, err = mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusFailed, st.Status)
+
+	st, err = mgr.Activate(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusIdle, st.Status)
+	require.Equal(t, "stream error: overloaded", st.Error, "activation preserves what went wrong")
+
+	// Reviving respawns the workspace, so the coordinator to watch is the
+	// new one — its run counter starts empty.
+	coord := spawner.coordFor(worktree)
+	coord.setQueue(false, 0)
+	_, err = mgr.RunFromPerson(t.Context(), st.ID, "carry on by hand", nil)
+	require.NoError(t, err)
+
+	// While the person's turn runs, the thread says so — the whole point.
+	st, err = mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusRunning, st.Status)
+	require.Empty(t, st.Error, "a turn is in flight; the old failure is no longer the current state")
+
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	coord.mu.Lock()
+	personRun := coord.runs[0]
+	coord.mu.Unlock()
+	require.NotEmpty(t, personRun.runID, "the manager owns this turn, so it must be able to match its completion")
+
+	// The turn ends: back to idle, workspace still live, nothing merged
+	// and nothing reported — the person is still sitting in it.
+	publishSuccess(t, spawner.appFor(worktree), st.SessionID)
+	require.Eventually(t, func() bool {
+		got, err := mgr.Get(t.Context(), st.ID)
+		return err == nil && got.Status == StatusIdle
+	}, time.Second, time.Millisecond)
+
+	require.NotNil(t, mgr.Handle(st.ID), "the workspace stays live: the person is working in it")
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Empty(t, got.Error, "the turn succeeded, so the stale failure is finally gone")
+	require.Equal(t, MergeAuto, got.MergePolicy)
+	require.DirExists(t, worktree, "an auto-policy thread is not merged and discarded because the person stopped typing")
+}
+
+// publishFailure simulates a thread's agent run ending in an error, the
+// state a thread revived by hand is usually found in.
+func publishFailure(t *testing.T, a *app.App, sessionID, errText string) {
+	t.Helper()
+	coord := a.AgentCoordinator.(*fakeCoordinator)
+	require.Eventually(t, func() bool { return coord.runCount() > 0 }, time.Second, time.Millisecond)
+	coord.mu.Lock()
+	runID := coord.runs[len(coord.runs)-1].runID
+	coord.mu.Unlock()
+	a.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: errText})
 }

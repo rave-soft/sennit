@@ -141,8 +141,17 @@ func testTranslateCtx(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (a *testCoordinatorAdapter) Run(ctx context.Context, sessionID, prompt string) error {
-	_, err := a.inner.Run(testTranslateCtx(ctx), sessionID, prompt)
+func (a *testCoordinatorAdapter) Run(ctx context.Context, sessionID, prompt string, attachments []Attachment) error {
+	msgAttachments := make([]message.Attachment, 0, len(attachments))
+	for _, at := range attachments {
+		msgAttachments = append(msgAttachments, message.Attachment{
+			FilePath: at.FilePath,
+			FileName: at.FileName,
+			MimeType: at.MimeType,
+			Content:  at.Content,
+		})
+	}
+	_, err := a.inner.Run(testTranslateCtx(ctx), sessionID, prompt, msgAttachments...)
 	return err
 }
 

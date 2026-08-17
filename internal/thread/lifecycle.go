@@ -26,6 +26,11 @@ type runtimeState struct {
 	spawner     Spawner
 	watchCancel context.CancelFunc
 	runID       string
+	// person marks runID as a turn the person is driving by hand, rather
+	// than one this package dispatched on a delegation's behalf. The two
+	// end very differently — see handleRunComplete — so the flag is set
+	// and cleared together with runID, under the same mutex.
+	person bool
 }
 
 // threadControl is permanent while an entity is known to the lifecycle. opMu
@@ -422,7 +427,7 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 // through the steering hook, and this waits for it while still holding
 // opMu — which is what keeps handleRunComplete (which takes opMu too)
 // from acting on the older run's completion in between.
-func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeState, id, sessionID, msg, runID string, disp SendDisposition) (SendDisposition, error) {
+func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeState, id, sessionID, msg, runID string, attachments []Attachment, disp SendDisposition) (SendDisposition, error) {
 	var (
 		decided = make(chan bool, 1)
 		failed  = make(chan error, 1)
@@ -436,7 +441,7 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 		}
 	})
 	l.goWorker(func() {
-		err := rt.handle.Workspace().Coordinator().Run(steerCtx, sessionID, msg)
+		err := rt.handle.Workspace().Coordinator().Run(steerCtx, sessionID, msg, attachments)
 		select {
 		case failed <- err:
 		default:
@@ -466,8 +471,12 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 		// It became the active turn, so it owns the workspace from here.
 		// Still under opMu, so the run it displaced (if any) has not been
 		// reacted to yet, and once it is its RunID will no longer match.
+		// Marked as the person's: it ends by resting the delegation at
+		// idle with its workspace intact, not by settling and merging it
+		// — see handleRunComplete.
 		c.mu.Lock()
 		rt.runID = runID
+		rt.person = true
 		c.mu.Unlock()
 		return SendDisposition{}, nil
 	case err := <-failed:
@@ -559,7 +568,7 @@ func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Conte
 // decision is made from it — and the queue depth is read before the
 // dispatch, so it describes the queue the message is joining rather than
 // the one it has already joined.
-func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string, from Sender) (SendDisposition, error) {
+func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner, spawnPath, sessionID, msg string, from Sender, attachments []Attachment) (SendDisposition, error) {
 	// Tag bgCtx so coordinator.run persists this dispatch's user message
 	// with Origin agent.OriginAgent instead of the default
 	// message.OriginPerson — a thread_send/task_send follow-up was not
@@ -617,13 +626,13 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		}
 		runID := uuid.NewString()
 		if from == SenderPerson {
-			return l.steer(bgCtx, c, rt, id, sessionID, msg, runID, disp)
+			return l.steer(bgCtx, c, rt, id, sessionID, msg, runID, attachments, disp)
 		}
 		c.mu.Lock()
 		rt.runID = runID
 		c.mu.Unlock()
 		l.goWorker(func() {
-			if err := rt.handle.Workspace().Coordinator().Run(WithRunID(bgCtx, runID), sessionID, msg); err != nil {
+			if err := rt.handle.Workspace().Coordinator().Run(WithRunID(bgCtx, runID), sessionID, msg, nil); err != nil {
 				slog.Error("Queued agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 				// Mirror startRun's fallback for pre-execution failures so
 				// the workspace is not stranded on a run that never
@@ -745,6 +754,21 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 		c.mu.Unlock()
 		return
 	}
+	if rt.person {
+		// A turn the person drove by hand ends where it started: the
+		// delegation goes back to idle with its workspace still live,
+		// because the person is sitting in it and will very likely type
+		// again. None of the terminal machinery applies — releasing the
+		// workspace would pull it out from under them, and merging (for
+		// an auto-policy thread) would fold and discard the worktree they
+		// are still working in. A thread revived by hand is merged when
+		// they say so, not when they stop typing.
+		rt.runID = ""
+		rt.person = false
+		c.mu.Unlock()
+		l.restIdleAfterPersonTurn(ctx, id, rc)
+		return
+	}
 	c.runtime = nil
 	depth := c.depth
 	c.mu.Unlock()
@@ -790,6 +814,31 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 
 	slog.Info("Delegation reached terminal status", "id", id, "kind", finalSt.Kind, "status", finalSt.Status)
 	l.deliverCompletion(ctx, rt.handle, finalSt, depth)
+}
+
+// restIdleAfterPersonTurn records the end of a hand-driven turn: back to
+// [StatusIdle], carrying whatever that turn itself produced as the
+// delegation's Error (empty when it succeeded, which is what finally
+// clears a stale failure the person has just worked past — the state the
+// row describes is now the one they are looking at).
+//
+// ResultSummary and CompletedAt are preserved rather than rewritten: they
+// describe the delegation's own goal run, and a person's turn is not a new
+// answer to that goal. Nothing is delivered to the parent either — the
+// parent asked for the goal's outcome and has long since been told it.
+func (l *lifecycle) restIdleAfterPersonTurn(ctx context.Context, id string, rc RunComplete) {
+	st, err := l.store.Get(ctx, id)
+	if err != nil {
+		return
+	}
+	// A completion for a session this entity no longer owns says nothing
+	// about it — the same guard the dispatched path applies.
+	if rc.SessionID != st.SessionID {
+		return
+	}
+	if _, err := l.setStatus(ctx, id, StatusIdle, rc.Error, st.ResultSummary, st.CompletedAt); err != nil {
+		slog.Error("Failed to record the end of a hand-driven turn", "component", "thread", "thread", id, "error", err)
+	}
 }
 
 // deliverCompletion pushes st (a delegation that just reached a terminal

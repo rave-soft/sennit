@@ -153,6 +153,22 @@ type TaskCompletion struct {
 	TerminalAt     time.Time
 }
 
+// Attachment is the domain's view of a file the person attached to a
+// prompt — the thread-domain spelling of message.Attachment, mapped
+// field-for-field at the composition seam like every other type in this
+// file.
+//
+// It exists because one dispatch path does carry attachments: the person
+// typing into a thread's own session (see Manager.RunFromPerson). Every
+// other path this package drives — a goal, a thread_send follow-up — is
+// text an agent wrote, and passes none.
+type Attachment struct {
+	FilePath string
+	FileName string
+	MimeType string
+	Content  []byte
+}
+
 // Coordinator is the slice of a workspace's agent coordinator the
 // delegation lifecycle drives: dispatching a run (Run/RunAccepted, with the
 // accept handle reserved by BeginAccepted), cancelling a session,
@@ -160,17 +176,17 @@ type TaskCompletion struct {
 // completion into a parent session. Declared here, on the consumer side, so
 // internal/thread stays free of internal/agent.
 //
-// Run/RunAccepted take no attachments: the delegation lifecycle never
-// dispatches an attached prompt, so the port omits them rather than naming
-// the agent's attachment type. accept is an opaque accept handle
-// ([BeginAccepted]'s result) carried opaquely so the port never names the
-// agent's AcceptedRun type.
+// RunAccepted takes no attachments: only the person attaches files, and
+// the person's dispatch is never an accepted one. accept is an opaque
+// accept handle ([BeginAccepted]'s result) carried opaquely so the port
+// never names the agent's AcceptedRun type.
 type Coordinator interface {
 	// Run dispatches prompt into sessionID as a fire-and-forget run whose
 	// completion is delivered through the workspace's RunCompletionBroker.
 	// err is non-nil only for a pre-execution failure (the caller then
-	// synthesizes the terminal event itself).
-	Run(ctx context.Context, sessionID, prompt string) error
+	// synthesizes the terminal event itself). attachments is nil for every
+	// dispatch this package makes on an agent's behalf; see [Attachment].
+	Run(ctx context.Context, sessionID, prompt string, attachments []Attachment) error
 	// RunAccepted runs a call already reserved by BeginAccepted, for the
 	// same fire-and-forget semantics. accept is the [BeginAccepted] result.
 	RunAccepted(ctx context.Context, accept any, sessionID, prompt string) error

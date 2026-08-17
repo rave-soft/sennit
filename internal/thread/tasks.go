@@ -396,7 +396,7 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 	if wasCancelled(st) {
 		return SendDisposition{}, fmt.Errorf("thread: task %q was cancelled (%s) and cannot be resumed; create a new task instead", id, st.Error)
 	}
-	disp, err := t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message, SenderAgent)
+	disp, err := t.lc.send(ctx, t.ctx, st.ID, t.spawner, "", st.SessionID, message, SenderAgent, nil)
 	if err != nil {
 		return SendDisposition{}, err
 	}

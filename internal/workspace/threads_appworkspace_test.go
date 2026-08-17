@@ -292,7 +292,12 @@ func TestAppWorkspace_AttachThread(t *testing.T) {
 	require.NotNil(t, attached)
 	require.NotNil(t, detach)
 
-	attachedAW, ok := attached.(*AppWorkspace)
+	// The attached workspace wraps the thread's own AppWorkspace so the
+	// person's turns route through the Manager (see
+	// attachedThreadWorkspace); unwrap it to reach the App underneath.
+	wrapped, ok := attached.(*attachedThreadWorkspace)
+	require.True(t, ok)
+	attachedAW, ok := wrapped.Workspace.(*AppWorkspace)
 	require.True(t, ok)
 	fh, ok := handle.(*fakeThreadHandle)
 	require.True(t, ok)
@@ -365,7 +370,10 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 
 	// The thread was reactivated: a writable workspace bound to the
 	// thread's own respawned app, not the read-only view.
-	require.IsType(t, &AppWorkspace{}, attached, "attaching to a finished thread should reactivate it")
+	// A writable workspace over the thread's own respawned app, not the
+	// read-only view — wrapped so the turns the person starts in it are
+	// dispatched through the Manager (see attachedThreadWorkspace).
+	require.IsType(t, &attachedThreadWorkspace{}, attached, "attaching to a finished thread should reactivate it")
 	require.NotNil(t, mgr.Handle(created.ID), "reactivation should install a runtime")
 
 	// It now rests at idle, and the finished run's summary survives.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/agent"
 	"github.com/rave-soft/sennit/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/thread"
 )
@@ -16,8 +17,8 @@ import (
 // Coordinator port and this seam maps between the two spellings.
 //
 // The mapping is behavior-preserving: Run/RunAccepted forward the prompt
-// with no attachments (the delegation lifecycle never dispatches an
-// attached prompt) and discard the agent result the domain never reads;
+// (with the attachments only the person's own dispatch carries — see
+// thread.Attachment) and discard the agent result the domain never reads;
 // the per-run RunID, the agent-dispatch origin tag and the steering tag the
 // domain set on its own context keys (see thread.WithRunID /
 // thread.WithAgentDispatch / thread.WithSteering) are re-applied to the
@@ -72,9 +73,28 @@ func (a *coordinatorAdapter) translateCtx(ctx context.Context) context.Context {
 // runCoordinator is intentionally absent: Run and RunAccepted below each
 // translate the context and forward directly, discarding the agent result
 // the domain never reads and surfacing only the error.
-func (a *coordinatorAdapter) Run(ctx context.Context, sessionID, prompt string) error {
-	_, err := a.inner.Run(a.translateCtx(ctx), sessionID, prompt)
+func (a *coordinatorAdapter) Run(ctx context.Context, sessionID, prompt string, attachments []thread.Attachment) error {
+	_, err := a.inner.Run(a.translateCtx(ctx), sessionID, prompt, toMessageAttachments(attachments)...)
 	return err
+}
+
+// toMessageAttachments maps the domain's attachment DTO back to the
+// agent's own type, field for field. Only the person's dispatch carries
+// any (see thread.Attachment); every other path passes nil and gets nil.
+func toMessageAttachments(in []thread.Attachment) []message.Attachment {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]message.Attachment, 0, len(in))
+	for _, a := range in {
+		out = append(out, message.Attachment{
+			FilePath: a.FilePath,
+			FileName: a.FileName,
+			MimeType: a.MimeType,
+			Content:  a.Content,
+		})
+	}
+	return out
 }
 
 func (a *coordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string) error {
