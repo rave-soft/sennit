@@ -33,6 +33,13 @@ type Manager struct {
 	resolvedPaths []string
 	workingDir    string
 
+	// inherited are skills handed down by a parent workspace rather than
+	// found on this workspace's own paths. Stored so a re-discovery
+	// (WatchForChanges) can put them back instead of dropping them: they
+	// are not on any path this workspace scans, so nothing else would
+	// rediscover them.
+	inherited []*Skill
+
 	broker       *pubsub.Broker[Event]
 	globalMirror bool
 }
@@ -64,6 +71,15 @@ func WithResolvedPaths(paths []string) ManagerOption {
 func WithWorkingDir(dir string) ManagerOption {
 	return func(m *Manager) {
 		m.workingDir = dir
+	}
+}
+
+// WithInheritedSkills stores the skills a parent workspace handed to this
+// one, so a later re-discovery can include them again. See
+// DiscoveryConfig.InheritedSkills for why they exist.
+func WithInheritedSkills(inherited []*Skill) ManagerOption {
+	return func(m *Manager) {
+		m.inherited = inherited
 	}
 }
 
@@ -111,6 +127,24 @@ func (m *Manager) ResolvedPaths() []string {
 // construction time.
 func (m *Manager) WorkingDir() string {
 	return m.workingDir
+}
+
+// InheritedSkills returns the skills handed down by a parent workspace.
+// The watcher passes these back into DiscoverFromConfig so a re-discovery
+// keeps them.
+func (m *Manager) InheritedSkills() []*Skill {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.inherited
+}
+
+// ReplaceInherited swaps in a new set of parent-supplied skills. Called
+// when the parent workspace re-discovers its own skills and pushes the
+// result down, so a thread sees an edited SKILL.md without a restart.
+func (m *Manager) ReplaceInherited(inherited []*Skill) {
+	m.mu.Lock()
+	m.inherited = inherited
+	m.mu.Unlock()
 }
 
 // States returns a clone of the latest discovery state snapshot.
@@ -176,6 +210,31 @@ func (m *Manager) Shutdown() {
 	}
 }
 
+// Inheritable returns the skills worth handing to a child workspace:
+// everything except the builtins, which the child discovers from the same
+// embedded FS and so would only duplicate.
+//
+// Each is copied rather than shared, and its location is rewritten to an
+// InheritedPrefix address. A skill is loaded by reading the location the
+// catalog advertises, and the original is an absolute path into the
+// parent's checkout — somewhere a thread must not reach. The rewritten
+// address is served from the skill's own Source instead, so the child
+// needs nothing from the parent's filesystem. Copying also keeps the
+// rewrite off the parent's own catalog, which still points at real files.
+func Inheritable(all []*Skill) []*Skill {
+	out := make([]*Skill, 0, len(all))
+	for _, s := range all {
+		if s == nil || s.Builtin {
+			continue
+		}
+		clone := *s
+		clone.Path = InheritedPrefix + s.Name
+		clone.SkillFilePath = InheritedPrefix + s.Name + "/" + SkillFileName
+		out = append(out, &clone)
+	}
+	return out
+}
+
 // DiscoverFromConfig walks the embedded builtin FS and every path in
 // cfg.Options.SkillsPaths (after home / env expansion), then dedups and
 // filters by cfg.Options.DisabledSkills. It returns the three slices the
@@ -187,6 +246,23 @@ func (m *Manager) Shutdown() {
 func DiscoverFromConfig(cfg DiscoveryConfig) (allSkills, activeSkills []*Skill, states []*SkillState) {
 	builtin, builtinStates := DiscoverBuiltinWithStates()
 	discovered := append([]*Skill(nil), builtin...)
+
+	// Inherited skills sit between builtins and this workspace's own: a
+	// parent's skill overrides a builtin of the same name, and the
+	// workspace's own definition overrides both (Deduplicate keeps the
+	// last occurrence).
+	inheritedStates := make([]*SkillState, 0, len(cfg.InheritedSkills))
+	for _, s := range cfg.InheritedSkills {
+		if s == nil {
+			continue
+		}
+		discovered = append(discovered, s)
+		inheritedStates = append(inheritedStates, &SkillState{
+			Name:  s.Name,
+			Path:  s.SkillFilePath,
+			State: StateNormal,
+		})
+	}
 
 	var userStates []*SkillState
 	userPaths := cfg.ResolvePaths()
@@ -200,6 +276,7 @@ func DiscoverFromConfig(cfg DiscoveryConfig) (allSkills, activeSkills []*Skill, 
 	activeSkills = Filter(allSkills, cfg.DisabledSkills)
 
 	allStates := append([]*SkillState(nil), builtinStates...)
+	allStates = append(allStates, inheritedStates...)
 	allStates = append(allStates, userStates...)
 	allStates = DeduplicateStates(allStates)
 	slices.SortStableFunc(allStates, func(a, b *SkillState) int {
@@ -215,6 +292,16 @@ type DiscoveryConfig struct {
 	SkillsPaths    []string
 	DisabledSkills []string
 	WorkingDir     string
+	// InheritedSkills are skills a parent workspace already discovered
+	// and handed down, for a child that cannot find them itself. A
+	// thread runs in a git worktree, and a worktree has no
+	// .sennit/skills of its own — the directory is not tracked, so it
+	// does not come across with the checkout. Scanning the main
+	// checkout instead would give a thread a filesystem reach outside
+	// the worktree that isolates it, so the parent passes the parsed
+	// skills down rather than the child reading back up. This
+	// workspace's own DisabledSkills still apply to them.
+	InheritedSkills []*Skill
 	// Resolver expands $VAR-style references in paths. May be nil.
 	Resolver func(string) (string, error)
 }

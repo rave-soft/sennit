@@ -76,15 +76,19 @@ func skillSnapshotsDiffer(prev, current map[string]skillFileSnapshot) bool {
 //
 // interval overrides ChangePollInterval when positive; tests use this to
 // avoid a real multi-second wait.
-func WatchForChanges(ctx context.Context, cfg DiscoveryConfig, mgr *Manager, interval time.Duration, onChange func()) {
-	if mgr == nil {
+// cfg is a function, not a value, because the config is not static: the
+// inherited-skill set a child workspace carries can be replaced by its
+// parent between polls, and each pass must discover against the current
+// one.
+func WatchForChanges(ctx context.Context, cfg func() DiscoveryConfig, mgr *Manager, interval time.Duration, onChange func()) {
+	if mgr == nil || cfg == nil {
 		return
 	}
 	if interval <= 0 {
 		interval = ChangePollInterval
 	}
 
-	last := scanSkillFiles(cfg.ResolvePaths())
+	last := scanSkillFiles(cfg().ResolvePaths())
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -94,13 +98,14 @@ func WatchForChanges(ctx context.Context, cfg DiscoveryConfig, mgr *Manager, int
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			current := scanSkillFiles(cfg.ResolvePaths())
+			discoveryCfg := cfg()
+			current := scanSkillFiles(discoveryCfg.ResolvePaths())
 			if !skillSnapshotsDiffer(last, current) {
 				continue
 			}
 			last = current
 
-			allSkills, activeSkills, states := DiscoverFromConfig(cfg)
+			allSkills, activeSkills, states := DiscoverFromConfig(discoveryCfg)
 			mgr.ReplaceDiscovery(allSkills, activeSkills, states)
 			if onChange != nil {
 				onChange()

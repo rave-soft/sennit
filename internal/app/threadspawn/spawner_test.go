@@ -3,9 +3,11 @@ package threadspawn
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +36,7 @@ func TestLocalSpawnerInheritsParentYOLO(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Cleanup(func() { db.ResetPool() })
 
-	spawner := NewLocalSpawner(nil, func() bool { return true })
+	spawner := NewLocalSpawner(nil, nil, func() bool { return true })
 	handle, err := spawner.Spawn(context.Background(), t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
@@ -48,7 +50,7 @@ func TestLocalSpawnerInheritsParentYOLO(t *testing.T) {
 
 func TestLocalSpawnerConfinesWritesToWorktree(t *testing.T) {
 	repo := initRepo(t)
-	spawner := NewLocalSpawner(nil, nil)
+	spawner := NewLocalSpawner(nil, nil, nil)
 
 	handle, err := spawner.Spawn(t.Context(), repo)
 	require.NoError(t, err)
@@ -57,4 +59,83 @@ func TestLocalSpawnerConfinesWritesToWorktree(t *testing.T) {
 	local, ok := handle.(*localHandle)
 	require.True(t, ok)
 	require.Equal(t, repo, local.app.Permissions().ConfinedDir())
+}
+
+// A thread runs in a git worktree, which has no .sennit/skills of its own,
+// and must not go looking for one in the main checkout. The parent hands
+// its skills down at spawn instead.
+func TestLocalSpawnerInheritsParentSkills(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Cleanup(func() { db.ResetPool() })
+
+	parentSkill := &skills.Skill{
+		Name:         "parent-skill",
+		Description:  "Handed down to every thread.",
+		Instructions: "Parent instructions.",
+	}
+	spawner := NewLocalSpawner(nil, func() []*skills.Skill { return []*skills.Skill{parentSkill} }, nil)
+
+	handle, err := spawner.Spawn(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
+
+	lh, ok := handle.(*localHandle)
+	require.True(t, ok)
+
+	var got *skills.Skill
+	for _, s := range lh.app.Skills.ActiveSkills() {
+		if s.Name == "parent-skill" {
+			got = s
+		}
+	}
+	require.NotNil(t, got, "a spawned thread must receive the parent workspace's skills")
+	require.Equal(t, "Parent instructions.", got.Instructions)
+
+	require.Len(t, spawner.Apps(), 1, "a live thread must be reachable for skill updates")
+}
+
+// The point of inheriting skills would be lost if the copy froze at spawn:
+// editing a SKILL.md while threads are running must reach the threads that
+// are already working, not only the next one to start.
+func TestForwardSkillsToThreadsPushesUpdateToLiveThread(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Cleanup(func() { db.ResetPool() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	parent := app.NewForTest(ctx)
+	t.Cleanup(parent.ShutdownForTest)
+	parent.Skills = skills.NewManager(nil, nil, nil)
+
+	spawner := NewLocalSpawner(nil, nil, nil)
+	handle, err := spawner.Spawn(ctx, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
+	lh, ok := handle.(*localHandle)
+	require.True(t, ok)
+
+	go forwardSkillsToThreads(ctx, parent, spawner)
+
+	edited := &skills.Skill{
+		Name:         "parent-skill",
+		Description:  "Edited while the thread was running.",
+		Instructions: "Edited instructions.",
+	}
+	// Stand in for the parent's watcher noticing the edited file.
+	require.Eventually(t, func() bool {
+		parent.Skills.ReplaceDiscovery([]*skills.Skill{edited}, []*skills.Skill{edited}, nil)
+		for _, s := range lh.app.Skills.ActiveSkills() {
+			if s.Name == "parent-skill" && s.Instructions == "Edited instructions." {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 20*time.Millisecond, "the edit never reached the running thread")
 }

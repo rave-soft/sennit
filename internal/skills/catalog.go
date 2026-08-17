@@ -96,6 +96,12 @@ func ReadContent(active []*Skill, skillPaths []string, workingDir string, skillI
 		return content, result, nil
 	}
 
+	if strings.HasPrefix(skill.SkillFilePath, InheritedPrefix) {
+		// Inherited from a parent workspace: there is no file here to
+		// open, the text came with the skill.
+		return []byte(skill.Source), result, nil
+	}
+
 	content, err := os.ReadFile(skill.SkillFilePath)
 	if err != nil {
 		return nil, SkillReadResult{}, fmt.Errorf("read skill %q: %w", skillID, err)

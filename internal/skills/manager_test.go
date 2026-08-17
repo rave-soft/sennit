@@ -247,3 +247,162 @@ func TestDiscoverFromConfig_Resolver(t *testing.T) {
 	}
 	require.True(t, found, "DiscoverFromConfig must expand $VAR via Resolver")
 }
+
+// A thread's worktree carries no .sennit/skills of its own, so the parent
+// hands its skills down. They must arrive as fully usable skills — with
+// Instructions, since that is what the agent's prompt renders — and be
+// visible in the state snapshot the skills UI reads.
+func TestDiscoverFromConfig_InheritedSkills(t *testing.T) {
+	t.Parallel()
+
+	inherited := &Skill{
+		Name:          "parent-skill",
+		Description:   "Handed down by the parent workspace.",
+		Instructions:  "Do the parent's thing.",
+		SkillFilePath: "/parent/.sennit/skills/parent-skill/" + SkillFileName,
+	}
+
+	allSkills, activeSkills, states := DiscoverFromConfig(DiscoveryConfig{
+		SkillsPaths:     []string{t.TempDir()},
+		InheritedSkills: []*Skill{inherited},
+	})
+
+	require.NotNil(t, findSkill(allSkills, "parent-skill"))
+	got := findSkill(activeSkills, "parent-skill")
+	require.NotNil(t, got, "an inherited skill must be active by default")
+	require.Equal(t, "Do the parent's thing.", got.Instructions)
+
+	var state *SkillState
+	for _, s := range states {
+		if s.Name == "parent-skill" {
+			state = s
+		}
+	}
+	require.NotNil(t, state, "an inherited skill must appear in the state snapshot")
+	require.Equal(t, StateNormal, state.State)
+}
+
+// The workspace's own SKILL.md wins over one of the same name handed down,
+// mirroring how a child workspace's agents override inherited agents.
+func TestDiscoverFromConfig_OwnSkillOverridesInherited(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	skillDir := filepath.Join(tmp, "shared-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: shared-skill\ndescription: The workspace's own.\n---\nLocal instructions.\n"),
+		0o644,
+	))
+
+	_, activeSkills, _ := DiscoverFromConfig(DiscoveryConfig{
+		SkillsPaths: []string{tmp},
+		InheritedSkills: []*Skill{{
+			Name:         "shared-skill",
+			Description:  "The parent's.",
+			Instructions: "Inherited instructions.",
+		}},
+	})
+
+	got := findSkill(activeSkills, "shared-skill")
+	require.NotNil(t, got)
+	require.Equal(t, "Local instructions.", got.Instructions)
+}
+
+// DisabledSkills is the child workspace's own setting and must apply to
+// what it inherited, or a thread could not turn a parent skill off.
+func TestDiscoverFromConfig_InheritedSkillCanBeDisabled(t *testing.T) {
+	t.Parallel()
+
+	_, activeSkills, _ := DiscoverFromConfig(DiscoveryConfig{
+		SkillsPaths:     []string{t.TempDir()},
+		DisabledSkills:  []string{"parent-skill"},
+		InheritedSkills: []*Skill{{Name: "parent-skill", Description: "Handed down."}},
+	})
+
+	require.Nil(t, findSkill(activeSkills, "parent-skill"))
+}
+
+// Builtins are discovered by every workspace from the same embedded FS, so
+// handing them down would only duplicate them.
+func TestInheritableDropsBuiltins(t *testing.T) {
+	t.Parallel()
+
+	got := Inheritable([]*Skill{
+		{Name: "builtin-one", Builtin: true},
+		{Name: "project-one"},
+		nil,
+	})
+
+	require.Len(t, got, 1)
+	require.Equal(t, "project-one", got[0].Name)
+}
+
+func findSkill(list []*Skill, name string) *Skill {
+	for _, s := range list {
+		if s.Name == name {
+			return s
+		}
+	}
+	return nil
+}
+
+// A skill is loaded by reading the location the catalog advertises. For an
+// inherited skill that location must not be the parent's file — a thread
+// may not read outside its worktree — so it is rewritten to an
+// InheritedPrefix address the read tool serves from the skill's Source.
+func TestInheritableRewritesLocationAndCarriesSource(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	skillDir := filepath.Join(tmp, "parent-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	source := "---\nname: parent-skill\ndescription: The parent's skill.\n---\nParent instructions.\n"
+	skillPath := filepath.Join(skillDir, SkillFileName)
+	require.NoError(t, os.WriteFile(skillPath, []byte(source), 0o644))
+
+	parsed, err := Parse(skillPath)
+	require.NoError(t, err)
+	require.Equal(t, source, parsed.Source, "Parse must keep the text so it can travel")
+
+	inherited := Inheritable([]*Skill{parsed})
+	require.Len(t, inherited, 1)
+	got := inherited[0]
+
+	require.Equal(t, InheritedPrefix+"parent-skill/"+SkillFileName, got.SkillFilePath)
+	require.NotContains(t, got.SkillFilePath, tmp, "the parent's path must not travel to the child")
+	require.Equal(t, skillPath, parsed.SkillFilePath, "the parent's own catalog must keep the real path")
+
+	// The rewritten address resolves back to the original text.
+	src, ok := NewTracker(inherited).InheritedSource(got.SkillFilePath)
+	require.True(t, ok)
+	require.Equal(t, source, src)
+
+	// And that text is a valid SKILL.md, which is what the read tool
+	// parses to report the resource it just loaded.
+	reparsed, err := ParseContent([]byte(src))
+	require.NoError(t, err)
+	require.Equal(t, "parent-skill", reparsed.Name)
+	require.Equal(t, "Parent instructions.", reparsed.Instructions)
+}
+
+// The skills viewer opens a skill by the same location, so it must not go
+// to disk for an inherited one either.
+func TestReadContentServesInheritedFromMemory(t *testing.T) {
+	t.Parallel()
+
+	source := "---\nname: parent-skill\ndescription: The parent's skill.\n---\nParent instructions.\n"
+	inherited := &Skill{
+		Name:          "parent-skill",
+		Description:   "The parent's skill.",
+		Instructions:  "Parent instructions.",
+		Source:        source,
+		SkillFilePath: InheritedPrefix + "parent-skill/" + SkillFileName,
+	}
+
+	content, result, err := ReadContent([]*Skill{inherited}, nil, "", inherited.SkillFilePath)
+	require.NoError(t, err)
+	require.Equal(t, source, string(content))
+	require.Equal(t, "parent-skill", result.Name)
+}

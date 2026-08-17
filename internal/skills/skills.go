@@ -46,6 +46,12 @@ type Skill struct {
 	Path                   string            `yaml:"-" json:"path"`
 	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
 	Builtin                bool              `yaml:"-" json:"builtin"`
+	// Source is the SKILL.md text this skill was parsed from. It is what
+	// lets a skill be handed to another workspace and still be loadable
+	// there: a thread reads its skills by their location, and an
+	// inherited skill's file is not one the thread may open (see
+	// DiscoveryConfig.InheritedSkills), so the text travels with it.
+	Source string `yaml:"-" json:"-"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -170,6 +176,7 @@ func ParseContent(content []byte) (*Skill, error) {
 	}
 
 	skill.Instructions = strings.TrimSpace(body)
+	skill.Source = string(content)
 
 	return &skill, nil
 }

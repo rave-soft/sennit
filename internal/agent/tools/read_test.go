@@ -14,6 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
 )
 
@@ -371,3 +372,38 @@ func (m *mockReadPermissionService) ActiveRequest() (permission.PermissionReques
 
 func (*mockReadPermissionService) ConfineToWorkingDir() {}
 func (*mockReadPermissionService) ConfinedDir() string  { return "" }
+
+// A thread loads a skill it inherited by reading the location the catalog
+// gave it. That location is not a file, so the read must be served from
+// the skill's own text without a permission prompt — nobody is watching a
+// thread to answer one.
+func TestReadInheritedSkill(t *testing.T) {
+	t.Parallel()
+
+	source := "---\nname: parent-skill\ndescription: Handed down.\n---\nParent instructions.\n"
+	location := skills.InheritedPrefix + "parent-skill/" + skills.SkillFileName
+	inherited := &skills.Skill{
+		Name:          "parent-skill",
+		Description:   "Handed down.",
+		Instructions:  "Parent instructions.",
+		Source:        source,
+		SkillFilePath: location,
+	}
+	tracker := skills.NewTracker([]*skills.Skill{inherited})
+
+	permissions := &mockReadPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
+	tool := NewReadTool(nil, permissions, mockFileTracker{}, tracker, t.TempDir())
+
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	resp := runReadTool(t, tool, ctx, ReadParams{FilePath: location})
+
+	require.Contains(t, resp.Content, "Parent instructions.")
+	require.True(t, tracker.IsLoaded("parent-skill"), "reading a skill must mark it loaded")
+
+	// An address with no skill behind it fails cleanly rather than
+	// falling through to the filesystem.
+	missing := runReadTool(t, tool, ctx, ReadParams{
+		FilePath: skills.InheritedPrefix + "nope/" + skills.SkillFileName,
+	})
+	require.Contains(t, missing.Content, "Inherited skill not found")
+}

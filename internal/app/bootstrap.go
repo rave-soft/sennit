@@ -31,6 +31,12 @@ type BootstrapOptions struct {
 	// The child workspace's own definitions take precedence.
 	InheritedAgents map[string]config.Agent
 
+	// InheritedSkills supplies skills from a parent workspace, for a
+	// child that cannot discover them itself — see
+	// skills.DiscoveryConfig.InheritedSkills. The child workspace's own
+	// definitions take precedence, and its DisabledSkills still apply.
+	InheritedSkills []*skills.Skill
+
 	// ConfineWrites keeps this workspace's file writes inside its own
 	// working directory (see permission.Service.ConfinedDir). Set for a
 	// thread, whose isolation in a git worktree is the whole point of it
@@ -146,10 +152,12 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 
 	// Discover skills once per workspace, before New.
 	discoveryCfg := SkillsDiscoveryConfig(cfg)
+	discoveryCfg.InheritedSkills = opts.InheritedSkills
 	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
 	skillOpts := []skills.ManagerOption{
 		skills.WithResolvedPaths(discoveryCfg.ResolvePaths()),
 		skills.WithWorkingDir(discoveryCfg.WorkingDir),
+		skills.WithInheritedSkills(opts.InheritedSkills),
 	}
 	if opts.GlobalSkillsMirror {
 		skillOpts = append([]skills.ManagerOption{skills.WithGlobalMirror()}, skillOpts...)

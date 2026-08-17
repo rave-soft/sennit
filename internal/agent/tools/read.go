@@ -108,6 +108,18 @@ func NewReadTool(
 				return readBuiltinFile(params, skillTracker), nil
 			}
 
+			// Handle a skill inherited from a parent workspace. Its file
+			// lives in the parent's checkout, which a thread must not
+			// read, so the text travelled with the skill instead.
+			if strings.HasPrefix(params.FilePath, skills.InheritedPrefix) {
+				source, ok := skillTracker.InheritedSource(params.FilePath)
+				if !ok {
+					return fantasy.NewTextErrorResponse(
+						fmt.Sprintf("Inherited skill not found: %s", params.FilePath)), nil
+				}
+				return readSkillSource(params, []byte(source), skillTracker), nil
+			}
+
 			// Handle relative paths
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
@@ -448,6 +460,14 @@ func readBuiltinFile(params ReadParams, skillTracker *skills.Tracker) fantasy.To
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Builtin file not found: %s", params.FilePath))
 	}
 
+	return readSkillSource(params, data, skillTracker)
+}
+
+// readSkillSource renders a skill whose text this process holds rather
+// than reads: a builtin from the embedded FS, or one inherited from a
+// parent workspace. Both are addressed by a scheme prefix instead of a
+// filesystem path, so neither can go through the normal read path.
+func readSkillSource(params ReadParams, data []byte, skillTracker *skills.Tracker) fantasy.ToolResponse {
 	content := string(data)
 	if !utf8.ValidString(content) {
 		return fantasy.NewTextErrorResponse("File content is not valid UTF-8")

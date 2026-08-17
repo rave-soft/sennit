@@ -31,7 +31,7 @@ func TestWatchForChanges_DetectsAddEditRemove(t *testing.T) {
 	notified := make(chan struct{}, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go WatchForChanges(ctx, cfg, mgr, testPollInterval, func() {
+	go WatchForChanges(ctx, func() DiscoveryConfig { return cfg }, mgr, testPollInterval, func() {
 		select {
 		case notified <- struct{}{}:
 		default:
@@ -95,7 +95,7 @@ func TestWatchForChanges_DetectsRootCreatedLater(t *testing.T) {
 	notified := make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go WatchForChanges(ctx, cfg, mgr, testPollInterval, func() {
+	go WatchForChanges(ctx, func() DiscoveryConfig { return cfg }, mgr, testPollInterval, func() {
 		select {
 		case notified <- struct{}{}:
 		default:
@@ -128,4 +128,51 @@ func requireSkillNamed(t *testing.T, mgr *Manager, name, description string) {
 		}
 	}
 	t.Fatalf("skill %q not found in ActiveSkills: %+v", name, mgr.ActiveSkills())
+}
+
+// A workspace that inherited skills from a parent keeps them when its own
+// discovery re-runs. The inherited set is on no path this workspace scans,
+// so a re-discovery that ignored it would silently drop a thread's skills
+// the first time any local SKILL.md changed.
+func TestWatchForChanges_KeepsInheritedSkills(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	inherited := &Skill{
+		Name:         "parent-skill",
+		Description:  "handed down",
+		Instructions: "Parent instructions.",
+	}
+	mgr := NewManager(nil, nil, nil, WithInheritedSkills([]*Skill{inherited}))
+
+	notified := make(chan struct{}, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go WatchForChanges(ctx, func() DiscoveryConfig {
+		return DiscoveryConfig{SkillsPaths: []string{root}, InheritedSkills: mgr.InheritedSkills()}
+	}, mgr, testPollInterval, func() {
+		select {
+		case notified <- struct{}{}:
+		default:
+		}
+	})
+
+	time.Sleep(5 * testPollInterval)
+
+	skillDir := filepath.Join(root, "local-skill")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, SkillFileName),
+		[]byte("---\nname: local-skill\ndescription: the workspace's own\n---\nBody.\n"),
+		0o600,
+	))
+
+	select {
+	case <-notified:
+	case <-time.After(5 * time.Second):
+		t.Fatal("onChange was not invoked after a local SKILL.md was added")
+	}
+
+	requireSkillNamed(t, mgr, "local-skill", "the workspace's own")
+	requireSkillNamed(t, mgr, "parent-skill", "handed down")
 }

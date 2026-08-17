@@ -13,6 +13,13 @@ import (
 // the read tool to distinguish embedded files from disk files.
 const BuiltinPrefix = brand.SkillsURIScheme + "skills/"
 
+// InheritedPrefix is the path prefix for a skill a parent workspace handed
+// to a child. Like BuiltinPrefix it marks a location the read tool serves
+// from memory rather than from disk — here from the skill's own Source,
+// because the file it came from belongs to the parent's checkout and a
+// thread must not read outside its worktree.
+const InheritedPrefix = brand.SkillsURIScheme + "inherited/"
+
 //go:embed builtin/*
 var builtinFS embed.FS
 

@@ -49,15 +49,31 @@ func (app *App) startExternalChangeWatchers(ctx context.Context) {
 
 	if app.Skills != nil {
 		watcherWG.Go(func() {
-			skills.WatchForChanges(watchCtx, SkillsDiscoveryConfig(app.config), app.Skills, 0, func() {
+			// The discovery config is rebuilt on every pass so a
+			// re-discovery keeps the parent's skills: they are on no path
+			// this workspace scans, so leaving them out would drop them
+			// the first time a local SKILL.md changed.
+			skillsCfg := func() skills.DiscoveryConfig {
+				cfg := SkillsDiscoveryConfig(app.config)
+				cfg.InheritedSkills = app.Skills.InheritedSkills()
+				return cfg
+			}
+			skills.WatchForChanges(watchCtx, skillsCfg, app.Skills, 0, func() {
 				// Unlike config, skill discovery is not re-run by anything
 				// else, so the watcher's onChange must also refresh the
 				// coordinator's cached skill snapshot — ReplaceDiscovery
 				// alone only updates app.Skills, which buildTools does not
 				// read from directly.
+				active := app.Skills.ActiveSkills()
 				if app.AgentCoordinator != nil {
-					app.AgentCoordinator.RefreshSkills(app.Skills.AllSkills(), app.Skills.ActiveSkills())
+					app.AgentCoordinator.RefreshSkills(app.Skills.AllSkills(), active)
 				}
+				// Logged because a hot reload is otherwise invisible: a
+				// successful load is a Debug line, so nothing at the
+				// default level tells you whether an edited SKILL.md was
+				// picked up or quietly ignored.
+				slog.Info("Reloaded skills after an external change",
+					"component", "skills", "active", len(active))
 				app.publishWorkspaceChanged()
 			})
 		})

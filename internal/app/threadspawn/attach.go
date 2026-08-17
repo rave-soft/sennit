@@ -9,6 +9,8 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/git"
+	"github.com/rave-soft/sennit/internal/log"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
 )
 
@@ -140,4 +142,62 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	a.SetTaskManager(tasks)
 	a.SetTasks(AsAgentToolTaskManager(tasks))
 	deps.forwardEvents(a, mgr)
+	if local, ok := spawner.(*LocalSpawner); ok {
+		go forwardSkillsToThreads(ctx, a, local)
+	}
+}
+
+// forwardSkillsToThreads pushes the parent workspace's skills into every
+// live thread whenever the parent re-discovers them.
+//
+// A thread cannot see the edit itself: its skills were inherited at spawn
+// (see skills.DiscoveryConfig.InheritedSkills) and the file that changed
+// lives outside the worktree, where the thread's own watcher neither looks
+// nor should. Without this, an edited SKILL.md only reached threads
+// started after the edit, and a thread running at the time kept the
+// version it was born with until it finished.
+func forwardSkillsToThreads(ctx context.Context, parent *app.App, spawner *LocalSpawner) {
+	defer log.RecoverPanic("threadspawn.forwardSkillsToThreads", func() {})
+	if parent.Skills == nil {
+		return
+	}
+	events := parent.Skills.SubscribeEvents(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+			inherited := skills.Inheritable(parent.Skills.AllSkills())
+			threadApps := spawner.Apps()
+			for _, threadApp := range threadApps {
+				if threadApp.Skills == nil {
+					continue
+				}
+				// Replace the stored set first: the thread's own watcher
+				// discovers against it, so a later local change must not
+				// resurrect the pre-edit copy.
+				threadApp.Skills.ReplaceInherited(inherited)
+				all, active, states := skills.DiscoverFromConfig(threadSkillsConfig(threadApp, inherited))
+				threadApp.Skills.ReplaceDiscovery(all, active, states)
+				if threadApp.AgentCoordinator != nil {
+					threadApp.AgentCoordinator.RefreshSkills(all, active)
+				}
+			}
+			if len(threadApps) > 0 {
+				slog.Info("Pushed skill update to threads",
+					"component", "skills", "threads", len(threadApps), "skills", len(inherited))
+			}
+		}
+	}
+}
+
+// threadSkillsConfig rebuilds a thread workspace's discovery config with a
+// fresh inherited set.
+func threadSkillsConfig(threadApp *app.App, inherited []*skills.Skill) skills.DiscoveryConfig {
+	cfg := app.SkillsDiscoveryConfig(threadApp.Store())
+	cfg.InheritedSkills = inherited
+	return cfg
 }

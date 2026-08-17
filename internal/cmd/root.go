@@ -26,6 +26,7 @@ import (
 	sennitlog "github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/projects"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	ui "github.com/rave-soft/sennit/internal/ui/model"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -260,6 +261,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 
 	threadspawn.Attach(ctx, boot.App, cwd, threadspawn.NewLocalSpawner(
 		func() map[string]config.Agent { return boot.App.Config().UserAgents() },
+		func() []*skills.Skill { return skills.Inheritable(boot.App.Skills.AllSkills()) },
 		boot.App.PermissionsSkipFunc(),
 	))
 

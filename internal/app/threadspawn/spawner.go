@@ -7,6 +7,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
 )
 
@@ -28,16 +29,36 @@ func (h *localHandle) Workspace() thread.Workspace { return h.workspace }
 type LocalSpawner struct {
 	apps         *csync.Map[string, *app.App]
 	parentAgents func() map[string]config.Agent
+	parentSkills func() []*skills.Skill
 	parentYOLO   func() bool
 }
 
-// NewLocalSpawner returns a ready-to-use LocalSpawner.
-func NewLocalSpawner(parentAgents func() map[string]config.Agent, parentYOLO func() bool) *LocalSpawner {
+// NewLocalSpawner returns a ready-to-use LocalSpawner. parentSkills, when
+// non-nil, supplies the parent workspace's skills to every thread it
+// spawns; see skills.DiscoveryConfig.InheritedSkills for why a thread
+// cannot find them on its own.
+func NewLocalSpawner(
+	parentAgents func() map[string]config.Agent,
+	parentSkills func() []*skills.Skill,
+	parentYOLO func() bool,
+) *LocalSpawner {
 	return &LocalSpawner{
 		apps:         csync.NewMap[string, *app.App](),
 		parentAgents: parentAgents,
+		parentSkills: parentSkills,
 		parentYOLO:   parentYOLO,
 	}
+}
+
+// Apps returns the apps of every thread this spawner currently holds, for
+// callers that must reach live threads after they started — the parent's
+// skill watcher pushes a re-discovered skill set into each.
+func (s *LocalSpawner) Apps() []*app.App {
+	out := make([]*app.App, 0, s.apps.Len())
+	for _, a := range s.apps.Seq2() {
+		out = append(out, a)
+	}
+	return out
 }
 
 // Spawn implements thread.Spawner.
@@ -45,6 +66,10 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, e
 	var inheritedAgents map[string]config.Agent
 	if s.parentAgents != nil {
 		inheritedAgents = s.parentAgents()
+	}
+	var inheritedSkills []*skills.Skill
+	if s.parentSkills != nil {
+		inheritedSkills = s.parentSkills()
 	}
 	var yolo bool
 	if s.parentYOLO != nil {
@@ -54,6 +79,7 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, e
 		WorkspaceLock:      true,
 		GlobalSkillsMirror: false,
 		InheritedAgents:    inheritedAgents,
+		InheritedSkills:    inheritedSkills,
 		YOLO:               yolo,
 		ConfineWrites:      true,
 	})

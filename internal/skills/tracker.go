@@ -2,6 +2,7 @@ package skills
 
 import (
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -16,19 +17,52 @@ type Tracker struct {
 	mu          sync.RWMutex
 	loaded      map[string]bool
 	activeNames map[string]bool // Set of active skill names (post-dedup, post-filter)
+	// inheritedSource maps an InheritedPrefix location to the SKILL.md
+	// text behind it. Inherited skills have no file this workspace may
+	// open, so the read tool serves them from here — the tracker already
+	// follows the active set, which is exactly the set that needs it.
+	inheritedSource map[string]string
 }
 
 // NewTracker creates a new skill tracker with the given active skill names.
 // Only skills in activeSkills can be marked as loaded.
 func NewTracker(activeSkills []*Skill) *Tracker {
-	activeNames := make(map[string]bool, len(activeSkills))
-	for _, s := range activeSkills {
-		activeNames[s.Name] = true
-	}
 	return &Tracker{
-		loaded:      make(map[string]bool),
-		activeNames: activeNames,
+		loaded:          make(map[string]bool),
+		activeNames:     activeNameSet(activeSkills),
+		inheritedSource: inheritedSourceMap(activeSkills),
 	}
+}
+
+func activeNameSet(activeSkills []*Skill) map[string]bool {
+	names := make(map[string]bool, len(activeSkills))
+	for _, s := range activeSkills {
+		names[s.Name] = true
+	}
+	return names
+}
+
+func inheritedSourceMap(activeSkills []*Skill) map[string]string {
+	sources := make(map[string]string)
+	for _, s := range activeSkills {
+		if s == nil || !strings.HasPrefix(s.SkillFilePath, InheritedPrefix) {
+			continue
+		}
+		sources[s.SkillFilePath] = s.Source
+	}
+	return sources
+}
+
+// InheritedSource returns the SKILL.md text behind an InheritedPrefix
+// location. Safe to call on a nil Tracker.
+func (t *Tracker) InheritedSource(location string) (string, bool) {
+	if t == nil {
+		return "", false
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	src, ok := t.inheritedSource[location]
+	return src, ok
 }
 
 // MarkLoaded marks a skill as having been loaded.
@@ -65,14 +99,13 @@ func (t *Tracker) UpdateActiveSkills(activeSkills []*Skill) {
 	if t == nil {
 		return
 	}
-	activeNames := make(map[string]bool, len(activeSkills))
-	for _, s := range activeSkills {
-		activeNames[s.Name] = true
-	}
+	activeNames := activeNameSet(activeSkills)
+	inheritedSource := inheritedSourceMap(activeSkills)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.activeNames = activeNames
+	t.inheritedSource = inheritedSource
 	for name := range t.loaded {
 		if !activeNames[name] {
 			delete(t.loaded, name)
