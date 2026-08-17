@@ -289,6 +289,58 @@ func TestWorktreeRemoveCleansUpDeregisteredWorktree(t *testing.T) {
 	require.NoDirExists(t, wtPath)
 }
 
+// Removing a worktree someone already deleted by hand succeeds and leaves
+// git's registration pruned. A caller that cannot get past this has no way
+// left to finish the cleanup, and its own record of the worktree leaks.
+func TestWorktreeRemoveAlreadyGone(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
+	require.NoError(t, os.RemoveAll(wtPath))
+
+	for _, force := range []bool{false, true} {
+		require.NoError(t, WorktreeRemove(ctx, repo, wtPath, force))
+	}
+
+	list, err := run(ctx, repo, "worktree", "list", "--porcelain")
+	require.NoError(t, err)
+	require.NotContains(t, list, wtPath)
+}
+
+// The invariant that keeps a worktree from leaking: while its files are
+// still on disk, its registration stays. A container that wrote into a
+// worktree owns directories this process cannot chmod, so the removal can
+// fail for reasons no retry here can fix — and the retry has to remain
+// possible for whenever it can. Deleting the files before git touches its
+// metadata is what buys that; letting git go first would deregister the
+// worktree and strand it.
+func TestWorktreeRemoveForcedKeepsRegistrationWhenFilesSurvive(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	parent := t.TempDir()
+	wtPath := filepath.Join(parent, "wt")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
+	// Stand in for the directories this process may not chmod: the walk
+	// inside WorktreeRemove only reaches into the worktree, so a parent it
+	// may not write to fails the final unlink of the worktree itself.
+	require.NoError(t, os.Chmod(parent, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	require.Error(t, WorktreeRemove(ctx, repo, wtPath, true))
+
+	list, err := run(ctx, repo, "worktree", "list", "--porcelain")
+	require.NoError(t, err)
+	require.Contains(t, list, wtPath, "the worktree must still be git's to remove")
+
+	// And once whatever held the files lets go, the retry goes through.
+	require.NoError(t, os.Chmod(parent, 0o755))
+	require.NoError(t, WorktreeRemove(ctx, repo, wtPath, true))
+	require.NoDirExists(t, wtPath)
+}
+
 // The cleanup path is narrow on purpose: it deletes a directory outright,
 // so anything that is not this repo's own abandoned worktree is left alone
 // and git's error is reported instead.
@@ -323,6 +375,27 @@ func TestWorktreeRemoveLeavesForeignDirectoriesAlone(t *testing.T) {
 		require.Error(t, WorktreeRemove(ctx, repo, wtPath, true))
 		require.DirExists(t, wtPath)
 	})
+}
+
+func TestDeleteBranch(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	wtPath := filepath.Join(t.TempDir(), "wt")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
+	require.NoError(t, WorktreeRemove(ctx, repo, wtPath, true))
+
+	require.NoError(t, DeleteBranch(ctx, repo, "feature", true))
+	exists, err := BranchExists(ctx, repo, "feature")
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	// A branch already gone is the outcome the caller asked for.
+	require.NoError(t, DeleteBranch(ctx, repo, "feature", true))
+	require.NoError(t, DeleteBranch(ctx, repo, "never-existed", false))
+
+	// Real refusals still surface: git will not delete a checked-out branch.
+	require.Error(t, DeleteBranch(ctx, repo, "main", true))
 }
 
 func TestCommitAll(t *testing.T) {

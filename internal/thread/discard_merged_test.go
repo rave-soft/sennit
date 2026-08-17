@@ -237,9 +237,14 @@ func TestDiscardMerged_KeepsTheRowWhenTheWorktreeCannotGo(t *testing.T) {
 	_, err = mgr.lc.setStatus(t.Context(), st.ID, StatusMerged, "", "", time.Now().Unix())
 	require.NoError(t, err)
 
-	// Take the worktree out from under the manager, so its own removal
-	// call fails on a path git no longer recognizes.
-	runGit(t, repo, "worktree", "remove", "--force", st.WorktreePath)
+	// Stand in for the real thing: a thread that ran a container leaves
+	// behind directories this process does not own and cannot chmod, so the
+	// removal fails with the files still there. A parent directory that
+	// cannot be written to fails the same unlink from outside the worktree,
+	// where the removal's own chmod pass does not reach.
+	parent := filepath.Dir(st.WorktreePath)
+	require.NoError(t, os.Chmod(parent, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 
 	mgr.discardMerged(t.Context(), st.ID)
 
@@ -248,6 +253,32 @@ func TestDiscardMerged_KeepsTheRowWhenTheWorktreeCannotGo(t *testing.T) {
 	require.Equal(t, StatusMerged, got.Status)
 	require.Contains(t, runGit(t, repo, "branch", "--list", st.Branch), st.Branch,
 		"and the branch must not be deleted behind a failed removal either")
+	require.DirExists(t, st.WorktreePath)
+}
+
+// TestDiscardMerged_FinishesACleanupDoneByHand: the other half of the rule
+// above. A worktree and branch someone already removed themselves leave a
+// row whose only remaining job is to go away, and every git step of the
+// discard has nothing left to do. Failing any of them here is what used to
+// strand these rows: nothing could remove them afterwards, because the
+// removal insisted on deleting a worktree that was no longer there.
+func TestDiscardMerged_FinishesACleanupDoneByHand(t *testing.T) {
+	repo := initRepo(t)
+	mgr, _ := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "by-hand", Goal: "do it", MergePolicy: MergeManual})
+	require.NoError(t, err)
+
+	_, err = mgr.lc.setStatus(t.Context(), st.ID, StatusMerged, "", "", time.Now().Unix())
+	require.NoError(t, err)
+
+	runGit(t, repo, "worktree", "remove", "--force", st.WorktreePath)
+	runGit(t, repo, "branch", "-D", st.Branch)
+
+	mgr.discardMerged(t.Context(), st.ID)
+
+	_, err = mgr.Get(t.Context(), st.ID)
+	require.Error(t, err, "the row must be gone")
 }
 
 // TestThreadWorktreeLivesInsideTheDataDirectory pins where a thread's

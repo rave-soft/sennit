@@ -820,33 +820,45 @@ func (m *Manager) discardMerged(ctx context.Context, threadID string) {
 		slog.Error("Failed to remove merged worktree", "component", "thread", "thread", threadID, "error", err)
 		return
 	}
-	// Verify the branch really is contained in the base before deleting
-	// it, and only then force. "git branch -d" is not that check: it asks
-	// whether the branch is merged into HEAD, so it refuses a properly
-	// merged branch whenever the repo has something else checked out —
-	// which for a thread's base branch is the normal case, not the
-	// exception. Ask about the two branches that matter, then act on the
-	// answer.
-	branchKept := true
-	merged, err := git.IsAncestor(ctx, m.repoRoot, st.Branch, st.BaseBranch)
-	switch {
-	case err != nil:
-		slog.Error("Failed to verify merged branch before delete", "component", "thread", "thread", threadID, "branch", st.Branch, "error", err)
-	case !merged:
-		slog.Error("Refusing to delete a branch not contained in its base", "component", "thread", "thread", threadID, "branch", st.Branch, "base", st.BaseBranch)
-	default:
-		if err := git.DeleteBranch(ctx, m.repoRoot, st.Branch, true); err != nil {
-			slog.Error("Failed to delete merged branch", "component", "thread", "thread", threadID, "branch", st.Branch, "error", err)
-		} else {
-			branchKept = false
-		}
-	}
+	branchKept := m.keepMergedBranch(ctx, st)
 	if err := m.store.Delete(ctx, st.ID); err != nil {
 		slog.Error("Failed to delete merged thread record", "component", "thread", "thread", threadID, "error", err)
 		return
 	}
 	m.lc.publish(EventRemoved, st)
 	m.recordDiscardNotice(ctx, st, branchKept)
+}
+
+// keepMergedBranch deletes the branch of a merged thread that is being
+// discarded, and reports whether the branch is still there afterwards — the
+// one detail the note to the user turns on.
+//
+// It verifies the branch really is contained in the base before deleting
+// it, and only then forces. "git branch -d" is not that check: it asks
+// whether the branch is merged into HEAD, so it refuses a properly merged
+// branch whenever the repo has something else checked out — which for a
+// thread's base branch is the normal case, not the exception. Ask about the
+// two branches that actually matter, then act on the answer.
+func (m *Manager) keepMergedBranch(ctx context.Context, st Thread) bool {
+	if exists, err := git.BranchExists(ctx, m.repoRoot, st.Branch); err == nil && !exists {
+		// Already deleted, by hand or by an earlier run. That is the state
+		// this wants, so there is nothing to verify and nothing to report.
+		return false
+	}
+	merged, err := git.IsAncestor(ctx, m.repoRoot, st.Branch, st.BaseBranch)
+	switch {
+	case err != nil:
+		slog.Error("Failed to verify merged branch before delete", "component", "thread", "thread", st.ID, "branch", st.Branch, "error", err)
+	case !merged:
+		slog.Error("Refusing to delete a branch not contained in its base", "component", "thread", "thread", st.ID, "branch", st.Branch, "base", st.BaseBranch)
+	default:
+		if err := git.DeleteBranch(ctx, m.repoRoot, st.Branch, true); err != nil {
+			slog.Error("Failed to delete merged branch", "component", "thread", "thread", st.ID, "branch", st.Branch, "error", err)
+		} else {
+			return false
+		}
+	}
+	return true
 }
 
 // recordDiscardNotice writes the merged-and-removed note into the parent

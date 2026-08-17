@@ -749,6 +749,26 @@ func TestManager_RemoveForce(t *testing.T) {
 	require.Empty(t, exists)
 }
 
+// A record whose worktree and branch someone already removed by hand is
+// exactly the one a user is trying to get rid of, and the only way to get
+// rid of it is Remove. It used to fail on the missing worktree and leave the
+// record listed forever.
+func TestManager_RemoveClearsARecordCleanedUpByHand(t *testing.T) {
+	repo := initRepo(t)
+	mgr, _ := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "lambda", Goal: "do it", MergePolicy: MergeManual})
+	require.NoError(t, err)
+
+	runGit(t, repo, "worktree", "remove", "--force", st.WorktreePath)
+	runGit(t, repo, "branch", "-D", st.Branch)
+
+	require.NoError(t, mgr.Remove(t.Context(), st.ID, true, true))
+
+	_, err = mgr.Get(t.Context(), st.ID)
+	require.Error(t, err)
+}
+
 func TestManager_SendRedispatches(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
