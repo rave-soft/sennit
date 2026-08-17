@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/thread"
 )
@@ -35,6 +36,32 @@ type attachedThreadWorkspace struct {
 	// session within it, this redirect applies to.
 	threadID  string
 	sessionID string
+}
+
+// SubscribeWith forwards to the wrapped workspace's own subscription.
+//
+// It has to be spelled out. The embedded field is the Workspace
+// *interface*, and SubscribeWith is not part of it — it is a concrete
+// method on AppWorkspace — so nothing is promoted and this wrapper does
+// not satisfy the subscriber interface the TUI type-asserts for when
+// attaching (see the router's handleThreadAttached). That assertion
+// failing is silent: the attach succeeds and the thread's screen simply
+// never receives an event again. Its chat stopped growing as its agent
+// worked, and only leaving and re-entering showed what had happened,
+// because that re-reads the messages instead of being told about them.
+//
+// The type assertion is kept rather than widened to the Workspace
+// interface for the reason SubscribeWith is not on it: this is a second,
+// independently stoppable subscription that only a workspace backed by a
+// real App can offer.
+func (w *attachedThreadWorkspace) SubscribeWith(send func(tea.Msg)) func() {
+	sub, ok := w.Workspace.(interface {
+		SubscribeWith(func(tea.Msg)) func()
+	})
+	if !ok {
+		return func() {}
+	}
+	return sub.SubscribeWith(send)
 }
 
 // AgentRun routes a turn in the thread's own session through the Manager,
