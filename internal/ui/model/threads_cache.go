@@ -123,6 +123,23 @@ func (c *threadsCacheState) invalidateThreads() {
 // refresh, then invalidates the TTL so a background refresh eventually
 // reconciles with the authoritative list.
 func (c *threadsCacheState) applyThreadEvent(evt pubsub.Event[proto.Thread]) {
+	// Threads only, matching the list this cache is refreshed from. Tasks
+	// share the delegations table and the lifecycle that publishes these
+	// events, so without this a task's own create/status event wrote a row
+	// straight into the cache — around the kind-scoped query, and staying
+	// until a full refresh replaced the slice. Filtering the fetch alone
+	// was not enough.
+	//
+	// An empty kind reads as a thread: it is an additive field (see
+	// proto.Thread.Kind), and a payload that predates it describes a
+	// thread. A removal is not filtered — dropping a row this cache does
+	// not hold is already a no-op, and refusing to drop one it somehow
+	// does hold would strand it.
+	if evt.Type != pubsub.DeletedEvent &&
+		evt.Payload.Kind != "" &&
+		proto.ThreadKind(evt.Payload.Kind) != proto.ThreadKindThread {
+		return
+	}
 	switch evt.Type {
 	case pubsub.DeletedEvent:
 		for i := range c.cache.value {

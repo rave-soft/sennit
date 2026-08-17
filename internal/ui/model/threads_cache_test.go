@@ -343,3 +343,61 @@ func TestDispatchThreadsRefreshPropagatesError(t *testing.T) {
 	require.True(t, ok)
 	require.Nil(t, loaded.threads, "best-effort: zero value returned alongside the logged error")
 }
+
+// A task's lifecycle event must not write a row into the threads cache.
+//
+// Tasks share the delegations table and the lifecycle that publishes these
+// events, so filtering the fetch was not enough: a task's own create or
+// status event went straight into the cache, around the kind-scoped query,
+// and stayed there until a full refresh replaced the slice.
+func TestApplyThreadEventIgnoresTasks(t *testing.T) {
+	t.Parallel()
+
+	c := &threadsCacheState{}
+	c.cache.set([]proto.Thread{{ID: "thr-1", Kind: "thread"}})
+
+	c.applyThreadEvent(pubsub.Event[proto.Thread]{
+		Type:    pubsub.CreatedEvent,
+		Payload: proto.Thread{ID: "task-1", Kind: "task", Status: "running"},
+	})
+
+	require.Equal(t, []proto.Thread{{ID: "thr-1", Kind: "thread"}}, c.cache.value,
+		"a task must not appear in a list scoped to threads")
+}
+
+// A thread's own event still writes through, which is what makes the list
+// update before the next refresh lands.
+func TestApplyThreadEventUpsertsThreads(t *testing.T) {
+	t.Parallel()
+
+	c := &threadsCacheState{}
+	c.cache.set([]proto.Thread{{ID: "thr-1", Kind: "thread", Status: "running"}})
+
+	c.applyThreadEvent(pubsub.Event[proto.Thread]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: proto.Thread{ID: "thr-1", Kind: "thread", Status: "completed"},
+	})
+	c.applyThreadEvent(pubsub.Event[proto.Thread]{
+		Type:    pubsub.CreatedEvent,
+		Payload: proto.Thread{ID: "thr-2", Kind: "thread"},
+	})
+
+	require.Equal(t, []proto.Thread{
+		{ID: "thr-1", Kind: "thread", Status: "completed"},
+		{ID: "thr-2", Kind: "thread"},
+	}, c.cache.value)
+}
+
+// A payload from before Kind existed describes a thread: the field is
+// additive, so an empty value must not be read as "not a thread".
+func TestApplyThreadEventTreatsEmptyKindAsThread(t *testing.T) {
+	t.Parallel()
+
+	c := &threadsCacheState{}
+	c.applyThreadEvent(pubsub.Event[proto.Thread]{
+		Type:    pubsub.CreatedEvent,
+		Payload: proto.Thread{ID: "thr-1"},
+	})
+
+	require.Equal(t, []proto.Thread{{ID: "thr-1"}}, c.cache.value)
+}
