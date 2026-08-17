@@ -97,6 +97,34 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 	// pool connections to interleave writes/checkpoints (especially
 	// under concurrent sub-agents) has caused WAL/header desync
 	// resulting in SQLITE_NOTADB (26) on the next open.
+	//
+	// One database is now shared by every project a process serves, so
+	// this one connection serializes all of them rather than one. What
+	// that costs is measured, not assumed — see the benchmarks in
+	// connect_bench_test.go, which produced the following on a 32-thread
+	// desktop with every writer going flat out (no think time at all,
+	// roughly 13k writes/sec through the connection):
+	//
+	//	projects   write p50   write p95   read p50   read p95
+	//	       1       0.06ms      0.10ms     0.015ms    0.02ms
+	//	       4       0.24ms      0.69ms     0.23ms     0.85ms
+	//	      16       0.88ms      3.70ms     0.87ms     3.72ms
+	//
+	// Two things to read off it. Per-write cost stays flat (65us at one
+	// project, 77us at sixteen): the queue serializes cleanly, it does
+	// not collapse, and total throughput is the same however many
+	// projects are sharing it. And the latency that does grow grows
+	// linearly with the number of writers, with no cliff — it is
+	// queueing, nothing more.
+	//
+	// Reads are the side that pays: WAL would let a reader run
+	// alongside a writer, and one pool connection will not. That is the
+	// real cost of this line. It only bites at a duty cycle no real
+	// workload reaches, though: a session or message write per model
+	// turn is single-digit writes per second per project, so sixteen
+	// busy projects keep this connection occupied on the order of 1% of
+	// the time and a read finds it free. Re-measure if that ever stops
+	// being true.
 	conn.SetMaxOpenConns(1)
 
 	if err = conn.PingContext(ctx); err != nil {
