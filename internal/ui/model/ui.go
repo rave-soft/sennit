@@ -618,8 +618,21 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
 	if ui.embedded {
-		// A thread's embedded chat always lands directly in uiLanding —
-		// onboarding/initialize are one-time, top-level-session concerns.
+		// A thread's embedded chat never onboards or initializes — those
+		// are one-time, top-level-session concerns.
+		//
+		// It opens straight into the chat frame when it already knows
+		// which session it is for, rather than painting the landing screen
+		// for the moment the load takes. The router switches to this UI
+		// as soon as the attach returns (see Root.handleThreadAttached),
+		// which is well before the session's messages are read, so landing
+		// first meant clicking a thread flashed a full logo-and-status
+		// screen on the way in. Empty is the right frame to wait in: it is
+		// the one the content lands in, and every part of it tolerates
+		// having no session yet.
+		if initialSessionID != "" {
+			desiredState = uiChat
+		}
 	} else if !com.Config().IsConfigured() {
 		desiredState = uiOnboarding
 	} else if n, _ := com.Workspace.ProjectNeedsInitialization(); n {
