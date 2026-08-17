@@ -660,7 +660,7 @@ sennit gc [--days N] [--dry-run] [--project] [--json]
 
 ```json
 {
-  "$schema": "https://charm.land/sennit.json",
+  "$schema": "https://rave-soft.github.io/sennit/schema.json",
   "model": {},
   "providers": {},
   "mcp": {},

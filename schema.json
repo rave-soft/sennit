@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/rave-soft/sennit/internal/config/config",
+  "$id": "https://rave-soft.github.io/sennit/schema.json",
   "$ref": "#/$defs/Config",
   "$defs": {
     "Attribution": {

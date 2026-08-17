@@ -610,7 +610,7 @@ to Bash-based config.
 
 ```jsonc
 {
-  "$schema": "https://charm.land/sennit.json",
+  "$schema": "https://rave-soft.github.io/sennit/schema.json",
   "providers": {
     "anthropic": { "api_key": "$ANTHROPIC_API_KEY" },
   },

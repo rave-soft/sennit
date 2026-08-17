@@ -5,12 +5,19 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      # docs/schema.json is a symlink to the generated schema.json at the
+      # repo root, and that published copy is what a sennit.json's
+      # "$schema" points an editor at. Without this path a regenerated
+      # schema would sit in the repo while the site kept serving the old
+      # one.
+      - "schema.json"
       - "mkdocs.yml"
       - "requirements-docs.txt"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "docs/**"
+      - "schema.json"
       - "mkdocs.yml"
       - "requirements-docs.txt"
       - ".github/workflows/docs.yml"
