@@ -68,7 +68,7 @@ type cmdDrivingWorkspace struct {
 	applySessionModelCalls    int
 	applySessionModelSwitched bool
 	applySessionModelErr      error
-	agentRunShellCalls    int
+	agentRunShellCalls        int
 
 	permGrantCalls          int
 	permGrantPersistentCall permission.PermissionRequest

@@ -179,6 +179,16 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		appInstance.Permissions().ConfineToWorkingDir()
 	}
 
+	// Close out whatever a previous process was killed in the middle of,
+	// now — before anything of this project's is dispatched, which is what
+	// lets "unfinished" be read as "abandoned". Failure is logged inside
+	// and not fatal: a session that opens with a stale spinner beats one
+	// that does not open. See finalizeInterruptedTurns.
+	if err := finalizeInterruptedTurns(ctx, cfg.WorkingDir(), appInstance.Messages()); err != nil {
+		slog.Error("Failed to close out interrupted turns from a previous run",
+			"component", "app", "project_path", cfg.WorkingDir(), "error", err)
+	}
+
 	// Keep the workspace lock through all repo-dependent teardown. In
 	// particular, it must outlive background shells and LSP clients.
 	if err := appInstance.AddFinalCleanup(func(context.Context) error {

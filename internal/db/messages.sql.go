@@ -317,6 +317,71 @@ func (q *Queries) ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson s
 	return items, nil
 }
 
+const listUnfinishedAssistantMessages = `-- name: ListUnfinishedAssistantMessages :many
+SELECT m.id, m.session_id, m.role, m.parts, m.model, m.provider,
+       m.created_at, m.updated_at, m.finished_at
+FROM messages m
+JOIN sessions s ON s.id = m.session_id
+WHERE s.project_path = ?
+  AND m.role = 'assistant'
+  AND m.finished_at IS NULL
+ORDER BY m.created_at ASC, m.id
+`
+
+type ListUnfinishedAssistantMessagesRow struct {
+	ID         string         `json:"id"`
+	SessionID  string         `json:"session_id"`
+	Role       string         `json:"role"`
+	Parts      string         `json:"parts"`
+	Model      sql.NullString `json:"model"`
+	Provider   sql.NullString `json:"provider"`
+	CreatedAt  int64          `json:"created_at"`
+	UpdatedAt  int64          `json:"updated_at"`
+	FinishedAt sql.NullInt64  `json:"finished_at"`
+}
+
+// Assistant messages in a project that carry no Finish part, which is
+// what finished_at records (see message.service.write). Every path that
+// ends a turn — normal completion, error, cancel — writes one, and every
+// such path runs inside the process that owns the turn. So a row left
+// here belongs to a turn that was killed, and is the starting point for
+// closing it out on the next start.
+//
+// Ordered oldest first so a repair walks a session's history in the
+// order it happened.
+func (q *Queries) ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]ListUnfinishedAssistantMessagesRow, error) {
+	rows, err := q.query(ctx, q.listUnfinishedAssistantMessagesStmt, listUnfinishedAssistantMessages, projectPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUnfinishedAssistantMessagesRow{}
+	for rows.Next() {
+		var i ListUnfinishedAssistantMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.Provider,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserMessagesBySession = `-- name: ListUserMessagesBySession :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, origin
 FROM messages

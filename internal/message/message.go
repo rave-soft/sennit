@@ -54,6 +54,13 @@ type Service interface {
 	ListBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	// ListUnfinishedAssistantMessages returns the assistant messages in
+	// projectPath that never recorded a Finish, oldest first. Every path
+	// that ends a turn writes one, and every such path runs inside the
+	// process that owns the turn, so what this returns are the turns a
+	// previous process was killed in the middle of. See
+	// app.finalizeInterruptedTurns, its only caller.
+	ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]Message, error)
 	Delete(ctx context.Context, id string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 
@@ -504,6 +511,31 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	messages := make([]Message, len(dbMessages))
 	for i, dbMessage := range dbMessages {
 		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
+func (s *service) ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]Message, error) {
+	rows, err := s.q.ListUnfinishedAssistantMessages(ctx, projectPath)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]Message, len(rows))
+	for i, row := range rows {
+		messages[i], err = s.fromDBItem(db.Message{
+			ID:         row.ID,
+			SessionID:  row.SessionID,
+			Role:       row.Role,
+			Parts:      row.Parts,
+			Model:      row.Model,
+			Provider:   row.Provider,
+			CreatedAt:  row.CreatedAt,
+			UpdatedAt:  row.UpdatedAt,
+			FinishedAt: row.FinishedAt,
+		})
 		if err != nil {
 			return nil, err
 		}

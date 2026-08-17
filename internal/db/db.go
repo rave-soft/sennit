@@ -171,6 +171,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listThreadsForGCStmt, err = db.PrepareContext(ctx, listThreadsForGC); err != nil {
 		return nil, fmt.Errorf("error preparing query ListThreadsForGC: %w", err)
 	}
+	if q.listUnfinishedAssistantMessagesStmt, err = db.PrepareContext(ctx, listUnfinishedAssistantMessages); err != nil {
+		return nil, fmt.Errorf("error preparing query ListUnfinishedAssistantMessages: %w", err)
+	}
 	if q.listUserMessagesBySessionStmt, err = db.PrepareContext(ctx, listUserMessagesBySession); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUserMessagesBySession: %w", err)
 	}
@@ -457,6 +460,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listThreadsForGCStmt: %w", cerr)
 		}
 	}
+	if q.listUnfinishedAssistantMessagesStmt != nil {
+		if cerr := q.listUnfinishedAssistantMessagesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listUnfinishedAssistantMessagesStmt: %w", cerr)
+		}
+	}
 	if q.listUserMessagesBySessionStmt != nil {
 		if cerr := q.listUserMessagesBySessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listUserMessagesBySessionStmt: %w", cerr)
@@ -605,6 +613,7 @@ type Queries struct {
 	listThreadsStmt                      *sql.Stmt
 	listThreadsAllStmt                   *sql.Stmt
 	listThreadsForGCStmt                 *sql.Stmt
+	listUnfinishedAssistantMessagesStmt  *sql.Stmt
 	listUserMessagesBySessionStmt        *sql.Stmt
 	nextFileVersionStmt                  *sql.Stmt
 	projectStatsSinceStmt                *sql.Stmt
@@ -672,6 +681,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listThreadsStmt:                      q.listThreadsStmt,
 		listThreadsAllStmt:                   q.listThreadsAllStmt,
 		listThreadsForGCStmt:                 q.listThreadsForGCStmt,
+		listUnfinishedAssistantMessagesStmt:  q.listUnfinishedAssistantMessagesStmt,
 		listUserMessagesBySessionStmt:        q.listUserMessagesBySessionStmt,
 		nextFileVersionStmt:                  q.nextFileVersionStmt,
 		projectStatsSinceStmt:                q.projectStatsSinceStmt,

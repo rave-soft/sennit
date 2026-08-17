@@ -133,6 +133,16 @@ type Querier interface {
 	// --project. Scoped by kind = 'thread': gc is a thread-facing caller and
 	// must not see other delegation kinds sharing this table.
 	ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error)
+	// Assistant messages in a project that carry no Finish part, which is
+	// what finished_at records (see message.service.write). Every path that
+	// ends a turn — normal completion, error, cancel — writes one, and every
+	// such path runs inside the process that owns the turn. So a row left
+	// here belongs to a turn that was killed, and is the starting point for
+	// closing it out on the next start.
+	//
+	// Ordered oldest first so a repair walks a session's history in the
+	// order it happened.
+	ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]ListUnfinishedAssistantMessagesRow, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	// Version numbers are allocated per path across every session, which is
 	// what makes ListFilesBySessionTree's cross-session ordering and the

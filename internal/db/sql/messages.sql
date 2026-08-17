@@ -101,3 +101,22 @@ FROM tree
 WHERE tree.session_id IN (
     SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
 );
+
+-- name: ListUnfinishedAssistantMessages :many
+-- Assistant messages in a project that carry no Finish part, which is
+-- what finished_at records (see message.service.write). Every path that
+-- ends a turn — normal completion, error, cancel — writes one, and every
+-- such path runs inside the process that owns the turn. So a row left
+-- here belongs to a turn that was killed, and is the starting point for
+-- closing it out on the next start.
+--
+-- Ordered oldest first so a repair walks a session's history in the
+-- order it happened.
+SELECT m.id, m.session_id, m.role, m.parts, m.model, m.provider,
+       m.created_at, m.updated_at, m.finished_at
+FROM messages m
+JOIN sessions s ON s.id = m.session_id
+WHERE s.project_path = ?
+  AND m.role = 'assistant'
+  AND m.finished_at IS NULL
+ORDER BY m.created_at ASC, m.id ASC;
