@@ -103,7 +103,7 @@ sennit stat [--flags]
 
 | Flag | Meaning |
 |:--|:--|
-| `--by` | one section only: `models`, `agents`, `projects`, `skills` |
+| `--by` | one section only: `models`, `agents`, `projects`, `skills`, `latency` |
 | `--since` | window: `7d`, `30d` (default), `all` |
 | `--all-projects` | with `--by projects`, aggregate across every project |
 | `--json` | machine-readable output |
@@ -111,6 +111,15 @@ sennit stat [--flags]
 Also available as `sennit stats`. Read the accuracy caveats in
 [Sessions and data storage](../concepts/sessions.md) before
 trusting a per-model number.
+
+`--by latency` is the one section not in the default view. It reports two
+internal handoffs as distributions (events, P50, P95, max) rather than
+totals: `steering_fold`, how long a steering message waited between being
+queued and being folded into a step, and `completion_delivery`, how long
+a finished background delegation waited before its result reached the
+parent session. Both waits are dominated by how busy the parent was, so a
+long tail on a session full of long turns is expected — what a regression
+looks like is the P50 rising.
 
 The TUI's `/stats` shows the same aggregation (both run on
 `internal/stats`, so they cannot disagree), with tabs for three scopes:

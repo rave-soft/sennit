@@ -18,7 +18,9 @@ import (
 
 // statCmd prints usage breakdowns by model, agent, project, and skill
 // straight to the terminal, in tokens and time, for use in scripts and
-// quick checks. It absorbed the older `stats` (plural) command, which
+// quick checks, plus an opt-in latency section covering the two internal
+// handoffs that can silently get slower without failing. It absorbed the
+// older `stats` (plural) command, which
 // rendered an HTML dashboard and opened it in a browser; `stats` is kept
 // only as an alias for muscle memory, and `stat` never touches a browser.
 var statCmd = &cobra.Command{
@@ -43,12 +45,20 @@ Caveats baked into this data:
   - Subagent sessions are grouped by their session title, which is the
     best available proxy for "agent name": sessions delegated through the
     generic "task" tool all collapse into a single "New Agent Session"
-    bucket, while custom agents (defined in config) get their own name.`,
+    bucket, while custom agents (defined in config) get their own name.
+
+  - The latency section is opt-in via --by latency and reports two
+    internal handoffs: how long a steering message waited between being
+    queued and being folded into a step, and how long a finished
+    background delegation waited before its completion reached the
+    parent. Both waits are dominated by how busy the parent session was,
+    so a long tail on a session full of long turns is expected; what a
+    regression looks like is the P50 rising.`,
 	RunE: runStat,
 }
 
 func init() {
-	statCmd.Flags().String("by", "", "Show only one section: models, agents, projects, or skills (default: all)")
+	statCmd.Flags().String("by", "", "Show only one section: models, agents, projects, skills, or latency (default: all except latency)")
 	statCmd.Flags().String("since", "30d", "Time window: 7d, 30d, or all")
 	statCmd.Flags().Bool("json", false, "Output machine-readable JSON instead of tables")
 	statCmd.Flags().Bool("all-projects", false, "With --by projects, aggregate across every known project")
@@ -80,6 +90,7 @@ type statOutput struct {
 	Agents   []stats.Agent   `json:"agents,omitempty"`
 	Projects []stats.Project `json:"projects,omitempty"`
 	Skills   []stats.Skill   `json:"skills,omitempty"`
+	Latency  []stats.Latency `json:"latency,omitempty"`
 	Summary  *stats.Project  `json:"summary,omitempty"`
 }
 
@@ -94,9 +105,9 @@ func runStat(cmd *cobra.Command, _ []string) error {
 
 	by, _ := cmd.Flags().GetString("by")
 	switch by {
-	case "", "models", "agents", "projects", "skills":
+	case "", "models", "agents", "projects", "skills", "latency":
 	default:
-		return fmt.Errorf("invalid --by value %q: must be one of models, agents, projects, skills", by)
+		return fmt.Errorf("invalid --by value %q: must be one of models, agents, projects, skills, latency", by)
 	}
 
 	sinceFlag, _ := cmd.Flags().GetString("since")
@@ -142,6 +153,11 @@ func runStat(cmd *cobra.Command, _ []string) error {
 		ProjectPath: cwd,
 		Since:       since,
 		WithSkills:  by == "" || by == "skills",
+		// Latency is not part of the default view: it answers a
+		// question about this build's internals, not about what the
+		// user spent, and putting it in every `sennit stat` would push
+		// the numbers people actually came for off the top of a screen.
+		WithLatency: by == "latency",
 	})
 	if err != nil {
 		return err
@@ -167,6 +183,9 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	}
 	if by == "" || by == "skills" {
 		out.Skills = snap.Skills
+	}
+	if by == "latency" {
+		out.Latency = snap.Latency
 	}
 	if by == "" {
 		summary := snap.Totals
@@ -204,6 +223,11 @@ func renderStatTables(w io.Writer, by string, out statOutput) {
 	if by == "" || by == "skills" {
 		fmt.Fprintln(w, "SKILLS")
 		printSkillsTable(w, out.Skills)
+		fmt.Fprintln(w)
+	}
+	if by == "latency" {
+		fmt.Fprintln(w, "LATENCY")
+		printLatencyTable(w, out.Latency)
 		fmt.Fprintln(w)
 	}
 	if out.Summary != nil {
@@ -285,6 +309,33 @@ func printSkillsTable(w io.Writer, skills []stats.Skill) {
 			s.Name, humanize.Comma(s.LoadCount), humanize.Comma(s.SessionCount), s.FirstUsedAt, s.LastUsedAt)
 	}
 	_ = tw.Flush()
+}
+
+// printLatencyTable prints the per-kind handoff latency breakdown.
+func printLatencyTable(w io.Writer, rows []stats.Latency) {
+	if len(rows) == 0 {
+		fmt.Fprintln(w, "No handoff latency recorded in this period.")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "KIND\tEVENTS\tP50\tP95\tMAX")
+	for _, r := range rows {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			r.Kind, humanize.Comma(r.Events),
+			formatStatMillis(r.P50MS), formatStatMillis(r.P95MS), formatStatMillis(r.MaxMS))
+	}
+	_ = tw.Flush()
+}
+
+// formatStatMillis renders a millisecond count the way a reader scans a
+// latency column: milliseconds stay milliseconds, and only once a value
+// crosses a second does it get time.Duration's compact form. Reusing
+// formatStatDuration here would round every one of these to "0s".
+func formatStatMillis(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	return (time.Duration(ms) * time.Millisecond).Round(time.Millisecond).String()
 }
 
 // formatStatDuration renders a duration in seconds as a compact string

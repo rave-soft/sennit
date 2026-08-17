@@ -36,14 +36,6 @@
   когда появится ключ; если 400 — слить подряд идущие user-контенты,
   предпочтительно в адаптере, иначе нормализацией перед вызовом. До тех пор
   mid-turn steering на Gemini — непроверенный путь.
-- **Метрик по steering и фоновым делегациям нет.** План требовал мерить время
-  от submit сообщения до его injection в turn и от завершения делегации до
-  реакции родителя. Есть только structured logs — `waited_ms` в
-  `internal/agent/turn.go` («Steering folded into turn», «Completion
-  delivered»), — а счётчиков и агрегатов нет, поэтому регрессия задержки
-  видна лишь при чтении логов руками. Следующий шаг: снять эти два значения
-  в счётчики (или хотя бы в `sennit stat`), опираясь на уже существующие
-  точки логирования.
 - **Schema URL указывает на чужой домен.** В `docs/configuration/sennitrc.md` и в
   `internal/skills/builtin/sennit-config/SKILL.md` пример JSON-конфига несёт
   `"$schema": "https://charm.land/sennit.json"` — домен Charm с именем файла

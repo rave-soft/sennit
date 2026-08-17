@@ -23,6 +23,8 @@ type stubQuerier struct {
 	delegations []db.ListDelegationOutcomesSinceRow
 	allDelegs   []db.ListAllDelegationOutcomesSinceRow
 	projects    []db.ProjectStatsSinceRow
+	latency     []db.ListLatencyEventsSinceRow
+	allLatency  []db.ListAllLatencyEventsSinceRow
 }
 
 func (s *stubQuerier) ListSessionTreeSince(context.Context, string) ([]db.ListSessionTreeSinceRow, error) {
@@ -59,6 +61,14 @@ func (s *stubQuerier) ListAllDelegationOutcomesSince(context.Context, int64) ([]
 
 func (s *stubQuerier) ListSkillLoadsSince(context.Context, db.ListSkillLoadsSinceParams) ([]db.ListSkillLoadsSinceRow, error) {
 	return nil, nil
+}
+
+func (s *stubQuerier) ListLatencyEventsSince(context.Context, db.ListLatencyEventsSinceParams) ([]db.ListLatencyEventsSinceRow, error) {
+	return s.latency, nil
+}
+
+func (s *stubQuerier) ListAllLatencyEventsSince(context.Context, int64) ([]db.ListAllLatencyEventsSinceRow, error) {
+	return s.allLatency, nil
 }
 
 func (s *stubQuerier) ProjectStatsSince(context.Context, int64) ([]db.ProjectStatsSinceRow, error) {

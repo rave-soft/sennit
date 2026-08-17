@@ -30,6 +30,7 @@ package stats
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -158,6 +159,30 @@ type Skill struct {
 	LastUsedAt   string `json:"last_used_at,omitempty"`
 }
 
+// LatencyEvent is one recorded internal handoff wait, in the shape the
+// aggregation needs. Kind is one of the values internal/latency writes;
+// this package deliberately does not enumerate them, so a kind added
+// there shows up here as its own row without a change on this side.
+type LatencyEvent struct {
+	Kind     string
+	WaitedMS int64
+}
+
+// Latency is one row of the per-kind latency breakdown: how long that
+// handoff waited across the scope, as a distribution rather than a mean.
+//
+// Percentiles, not an average, because the failure this is meant to
+// catch is a tail — a handoff that is usually instant and occasionally
+// stalls averages out to "fine". P50 answers "what does this normally
+// cost", P95 and Max answer "how bad does it get".
+type Latency struct {
+	Kind   string `json:"kind"`
+	Events int64  `json:"events"`
+	P50MS  int64  `json:"p50_ms"`
+	P95MS  int64  `json:"p95_ms"`
+	MaxMS  int64  `json:"max_ms"`
+}
+
 // Outcome summarizes how background delegations ended within a scope.
 // Landed counts the ones that reached a completed or merged state;
 // Failed counts failures and cancellations. Statuses this build does not
@@ -197,6 +222,7 @@ type Snapshot struct {
 	Agents   []Agent   `json:"agents,omitempty"`
 	Projects []Project `json:"projects,omitempty"`
 	Skills   []Skill   `json:"skills,omitempty"`
+	Latency  []Latency `json:"latency,omitempty"`
 	Outcome  Outcome   `json:"outcome"`
 }
 
@@ -467,4 +493,41 @@ func ComputeOutcome(delegations []Delegation) Outcome {
 		o.count(d.Status)
 	}
 	return o
+}
+
+// ComputeLatency groups recorded waits by kind and reduces each group to
+// a count and three points of its distribution. Rows are ordered by kind
+// so the table is stable between runs — unlike the token breakdowns
+// there is no "biggest" to sort by, and sorting by P95 would make the
+// rows swap places precisely when a reader is comparing two runs.
+func ComputeLatency(events []LatencyEvent) []Latency {
+	byKind := make(map[string][]int64)
+	for _, e := range events {
+		byKind[e.Kind] = append(byKind[e.Kind], e.WaitedMS)
+	}
+
+	rows := make([]Latency, 0, len(byKind))
+	for kind, waits := range byKind {
+		slices.Sort(waits)
+		rows = append(rows, Latency{
+			Kind:   kind,
+			Events: int64(len(waits)),
+			P50MS:  percentile(waits, 0.50),
+			P95MS:  percentile(waits, 0.95),
+			MaxMS:  waits[len(waits)-1],
+		})
+	}
+	slices.SortFunc(rows, func(a, b Latency) int { return strings.Compare(a.Kind, b.Kind) })
+	return rows
+}
+
+// percentile returns the nearest-rank percentile of an ascending slice:
+// the smallest recorded value at or above the p-th position. Nearest
+// rank rather than interpolation because every value here is a real
+// observed wait, and reporting a wait that never happened would invite
+// exactly the "but nothing took 87ms" confusion this table exists to
+// avoid. sorted must be non-empty.
+func percentile(sorted []int64, p float64) int64 {
+	rank := min(max(int(math.Ceil(p*float64(len(sorted)))), 1), len(sorted))
+	return sorted[rank-1]
 }

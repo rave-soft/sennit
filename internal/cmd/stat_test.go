@@ -10,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
 	sennitdb "github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/spf13/cobra"
@@ -508,4 +509,89 @@ func TestRunStat_DefaultProjectsViewScopedToCurrentProject(t *testing.T) {
 	require.Equal(t, int64(3), out.Projects[0].Sessions)
 	require.Equal(t, int64(1000+2000+900), out.Projects[0].PromptTokens)
 	require.Equal(t, int64(500+800+300), out.Projects[0].CompletionTokens)
+}
+
+// seedLatencyEvents records handoff waits against one of the fixture's
+// sessions, so they inherit its project_path and land inside the window
+// the tests query. It writes through the recorder rather than raw SQL to
+// keep the write path under test alongside the read path.
+func seedLatencyEvents(t *testing.T, dataDir string, waits map[latency.Kind][]time.Duration) {
+	t.Helper()
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	rec := latency.NewService(sennitdb.New(conn))
+	for kind, list := range waits {
+		for _, w := range list {
+			rec.Record(t.Context(), kind, "sess-a", w)
+		}
+	}
+}
+
+// The latency section is opt-in, and asking for it must not also drag in
+// the sections it replaces — the point of --by is that one table is what
+// you get.
+func TestStatCmd_LatencySectionIsOptIn(t *testing.T) {
+	setupHermeticConfigEnv(t, `{}`)
+	cwd := t.TempDir()
+	dataDir := statFixture(t, config.GlobalDBDir(), cwd)
+	seedLatencyEvents(t, dataDir, map[latency.Kind][]time.Duration{
+		latency.KindSteeringFold:       {10 * time.Millisecond, 20 * time.Millisecond, 2 * time.Second},
+		latency.KindCompletionDelivery: {5 * time.Millisecond},
+	})
+
+	// Default view: no latency, and none of its query's cost paid.
+	defaultCmd, _ := newStatTestCmd(t)
+	require.NoError(t, defaultCmd.Flags().Set("cwd", cwd))
+	require.NoError(t, defaultCmd.Flags().Set("data-dir", dataDir))
+	require.NoError(t, defaultCmd.Flags().Set("json", "true"))
+	require.NoError(t, runStat(defaultCmd, nil))
+	var defaultOut statOutput
+	require.NoError(t, json.Unmarshal(defaultCmd.OutOrStdout().(*bytes.Buffer).Bytes(), &defaultOut))
+	require.Empty(t, defaultOut.Latency, "latency must not appear unless asked for")
+
+	testCmd, stdout := newStatTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
+	require.NoError(t, testCmd.Flags().Set("by", "latency"))
+	require.NoError(t, testCmd.Flags().Set("json", "true"))
+	require.NoError(t, runStat(testCmd, nil))
+
+	var out statOutput
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &out))
+	require.Empty(t, out.Models, "--by latency shows only latency")
+	require.Empty(t, out.Skills)
+	require.Nil(t, out.Summary)
+
+	require.Len(t, out.Latency, 2)
+	byKind := map[string]stats.Latency{}
+	for _, row := range out.Latency {
+		byKind[row.Kind] = row
+	}
+	steering := byKind["steering_fold"]
+	require.Equal(t, int64(3), steering.Events)
+	require.Equal(t, int64(20), steering.P50MS)
+	require.Equal(t, int64(2000), steering.MaxMS, "the outlier survives into the table rather than averaging away")
+	require.Equal(t, int64(1), byKind["completion_delivery"].Events)
+}
+
+// Sub-second waits are the normal case, and rendering them through the
+// seconds-granularity duration formatter would print every one of them
+// as "0s".
+func TestStatCmd_LatencyTableKeepsMillisecondResolution(t *testing.T) {
+	var buf bytes.Buffer
+	printLatencyTable(&buf, []stats.Latency{
+		{Kind: "steering_fold", Events: 2, P50MS: 12, P95MS: 900, MaxMS: 2500},
+	})
+
+	out := buf.String()
+	require.Contains(t, out, "12ms")
+	require.Contains(t, out, "900ms")
+	require.Contains(t, out, "2.5s", "past a second the compact duration form is easier to read")
+	require.NotContains(t, out, "0s")
+}
+
+func TestStatCmd_LatencyTableSaysSoWhenEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	printLatencyTable(&buf, nil)
+	require.Contains(t, buf.String(), "No handoff latency recorded")
 }

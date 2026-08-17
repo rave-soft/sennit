@@ -24,6 +24,7 @@ import (
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/herdr"
 	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
@@ -63,6 +64,10 @@ type App struct {
 	permissions permission.Service
 	Questions   question.Service
 	FileTracker filetracker.Service
+	// Latency records how long steering messages and finished background
+	// delegations waited before reaching the model. Read back by
+	// `sennit stat --by latency`.
+	Latency latency.Recorder
 
 	AgentCoordinator agent.Coordinator
 
@@ -266,6 +271,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		Questions:        question.NewService(),
 		FileTracker:      filetracker.NewService(q, store.WorkingDir()),
+		Latency:          latency.NewService(q),
 		LSPManager:       lsp.NewManager(store),
 		lsp:              newLSPEvents(),
 		MCP:              mcp.NewRegistry(),
@@ -748,6 +754,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Interactive:      interactive,
 		MCP:              app.MCP,
 		BackgroundShells: app.BackgroundShells,
+		Latency:          app.Latency,
 	})
 	if err != nil {
 		slog.Error("Failed to create coder agent", "err", err)

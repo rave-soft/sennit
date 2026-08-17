@@ -46,6 +46,7 @@ type Querier interface {
 	GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error)
 	ListAllAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAllAssistantMessagesSinceRow, error)
 	ListAllDelegationOutcomesSince(ctx context.Context, createdAt int64) ([]ListAllDelegationOutcomesSinceRow, error)
+	ListAllLatencyEventsSince(ctx context.Context, createdAt int64) ([]ListAllLatencyEventsSinceRow, error)
 	ListAllSessionsSince(ctx context.Context, createdAt int64) ([]ListAllSessionsSinceRow, error)
 	// Prompt-history source: only messages a human typed. Sub-agent child sessions
 	// and thread sessions carry machine-generated prompts as user-role messages.
@@ -60,6 +61,11 @@ type Querier interface {
 	ListDelegationOutcomesSince(ctx context.Context, arg ListDelegationOutcomesSinceParams) ([]ListDelegationOutcomesSinceRow, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error)
+	// Scoped by joining sessions rather than by a project_path column of its
+	// own: the scope of a latency event is the scope of the session that
+	// produced it, and duplicating the path would let the two disagree after
+	// a session moves.
+	ListLatencyEventsSince(ctx context.Context, arg ListLatencyEventsSinceParams) ([]ListLatencyEventsSinceRow, error)
 	// The latest version of each path *within this session*. The maximum has
 	// to be taken over the session's own rows: versions are numbered per
 	// path across all sessions, so a global MAX(version) matches a sibling
@@ -136,6 +142,13 @@ type Querier interface {
 	NextFileVersion(ctx context.Context, path string) (int64, error)
 	ProjectStatsSince(ctx context.Context, createdAt int64) ([]ProjectStatsSinceRow, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
+	// The queries below back `sennit stat --by latency`, the per-kind
+	// breakdown of how long two internal handoffs waited before reaching the
+	// model. Like stats.sql they return raw rows for a time window rather
+	// than pre-aggregating: percentiles are computed Go-side over the whole
+	// distribution (see internal/stats.ComputeLatency), and SQLite has no
+	// percentile aggregate to lean on anyway.
+	RecordLatencyEvent(ctx context.Context, arg RecordLatencyEventParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)

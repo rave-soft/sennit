@@ -15,6 +15,7 @@ import (
 	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openai"
 	"github.com/rave-soft/sennit/internal/agent/tools"
+	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/stringext"
@@ -191,6 +192,7 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 			for i, c := range completions {
 				ids[i] = c.DelegationID
 				waitedMS[i] = now.Sub(c.TerminalAt).Milliseconds()
+				t.agent.recordLatency(callContext, latency.KindCompletionDelivery, t.call.SessionID, now.Sub(c.TerminalAt))
 			}
 			slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions), "waited_ms", waitedMS)
 		}()
@@ -240,6 +242,7 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 				continue
 			}
 			waitedMS = append(waitedMS, now.Sub(queued.queuedAt).Milliseconds())
+			t.agent.recordLatency(callContext, latency.KindSteeringFold, t.call.SessionID, now.Sub(queued.queuedAt))
 		}
 		if len(waitedMS) > 0 {
 			slog.Info("Steering folded into turn", "session", t.call.SessionID, "count", len(waitedMS), "waited_ms", waitedMS)

@@ -11,6 +11,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,6 +75,41 @@ func float64List(t *testing.T, line map[string]any, field string) []float64 {
 	return out
 }
 
+// fakeLatencyRecorder captures what the turn hands to the latency
+// recorder, so a test can assert on the measurement itself rather than
+// on the log line that happens to carry the same number.
+type fakeLatencyRecorder struct {
+	mu       sync.Mutex
+	recorded []recordedLatency
+}
+
+type recordedLatency struct {
+	kind      latency.Kind
+	sessionID string
+	waited    time.Duration
+}
+
+func (f *fakeLatencyRecorder) Record(_ context.Context, kind latency.Kind, sessionID string, waited time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recorded = append(f.recorded, recordedLatency{kind: kind, sessionID: sessionID, waited: waited})
+}
+
+// forKind returns the events recorded under one kind. The turn records
+// both kinds into the same recorder, so every assertion has to say which
+// handoff it is talking about.
+func (f *fakeLatencyRecorder) forKind(kind latency.Kind) []recordedLatency {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []recordedLatency
+	for _, e := range f.recorded {
+		if e.kind == kind {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // driveGatedSteeringAndCompletion runs a turn gated mid-step-1 (via a
 // "hold" tool, the same technique TestPrepareStep_CompletionDeliveredBeforeSteering
 // uses), lands completion and a steering follow-up in the window where the
@@ -82,10 +118,11 @@ func float64List(t *testing.T, line map[string]any, field string) []float64 {
 // TerminalAt and the steering call's own enqueue stamp precede the sleep,
 // so both measurements below span at least that real delay - not a
 // trivially-zero same-instant reading.
-func driveGatedSteeringAndCompletion(t *testing.T, completion TaskCompletion, steeringPrompt string, delay time.Duration) (*syncLogBuffer, string) {
+func driveGatedSteeringAndCompletion(t *testing.T, completion TaskCompletion, steeringPrompt string, delay time.Duration) (*syncLogBuffer, string, *fakeLatencyRecorder) {
 	t.Helper()
 	env := testEnv(t)
 	logs := captureJSONLogs(t)
+	recorder := &fakeLatencyRecorder{}
 
 	gate := make(chan struct{})
 	entered := make(chan struct{})
@@ -102,6 +139,7 @@ func driveGatedSteeringAndCompletion(t *testing.T, completion TaskCompletion, st
 		Sessions: env.sessions,
 		Messages: env.messages,
 		Tools:    []fantasy.AgentTool{hold},
+		Latency:  recorder,
 	}).(*sessionAgent)
 
 	sess, err := env.sessions.Create(t.Context(), "session")
@@ -137,7 +175,7 @@ func driveGatedSteeringAndCompletion(t *testing.T, completion TaskCompletion, st
 		t.Fatal("run never completed step 2")
 	}
 
-	return logs, sess.ID
+	return logs, sess.ID, recorder
 }
 
 // TestPrepareStep_LogsSteeringAndCompletionLatency proves the two
@@ -153,7 +191,7 @@ func TestPrepareStep_LogsSteeringAndCompletionLatency(t *testing.T) {
 	t.Parallel()
 
 	const delay = 60 * time.Millisecond
-	logs, sessionID := driveGatedSteeringAndCompletion(t, TaskCompletion{
+	logs, sessionID, _ := driveGatedSteeringAndCompletion(t, TaskCompletion{
 		Name:       "task-name",
 		Goal:       "background goal",
 		ResultText: "background result",
@@ -189,7 +227,7 @@ func TestPrepareStep_LogsSteeringAndCompletionLatency(t *testing.T) {
 func TestPrepareStep_LatencyLogsCarryNoPromptOrResultText(t *testing.T) {
 	t.Parallel()
 
-	logs, sessionID := driveGatedSteeringAndCompletion(t, TaskCompletion{
+	logs, sessionID, _ := driveGatedSteeringAndCompletion(t, TaskCompletion{
 		Name:       "task-name",
 		Goal:       "SECRET-GOAL-do-not-log-this",
 		ResultText: "SECRET-RESULT-do-not-log-this",
@@ -204,4 +242,47 @@ func TestPrepareStep_LatencyLogsCarryNoPromptOrResultText(t *testing.T) {
 	require.NotContains(t, captured, "SECRET-GOAL-do-not-log-this", "a completion's Goal must never reach a log line")
 	require.NotContains(t, captured, "SECRET-RESULT-do-not-log-this", "a completion's ResultText must never reach a log line")
 	require.NotContains(t, captured, "SECRET-STEERING-PROMPT-do-not-log-this", "a steering call's prompt text must never reach a log line")
+}
+
+// TestPrepareStep_RecordsSteeringAndCompletionLatency is the counterpart
+// to TestPrepareStep_LogsSteeringAndCompletionLatency for the recorder
+// that backs `sennit stat --by latency`. The log line and the recorded
+// event are two separate call sites reading the same clock, and a
+// refactor can easily keep one while dropping the other, so both are
+// asserted independently rather than one standing in for the other.
+func TestPrepareStep_RecordsSteeringAndCompletionLatency(t *testing.T) {
+	t.Parallel()
+
+	const delay = 60 * time.Millisecond
+	_, sessionID, recorder := driveGatedSteeringAndCompletion(t, TaskCompletion{
+		Name:       "task-name",
+		Goal:       "background goal",
+		ResultText: "background result",
+	}, "steering follow-up", delay)
+
+	// The same slack the log-line test allows: the sleep is a floor, not
+	// a promise.
+	minWait := delay - 15*time.Millisecond
+
+	steering := recorder.forKind(latency.KindSteeringFold)
+	require.Len(t, steering, 1, "one steering follow-up was folded, so one wait was recorded")
+	require.Equal(t, sessionID, steering[0].sessionID, "a wait is attributed to the session that waited")
+	require.GreaterOrEqual(t, steering[0].waited, minWait, "must reflect the real delay, not be trivially zero")
+
+	completion := recorder.forKind(latency.KindCompletionDelivery)
+	require.Len(t, completion, 1, "one completion was delivered, so one wait was recorded")
+	require.Equal(t, sessionID, completion[0].sessionID)
+	require.GreaterOrEqual(t, completion[0].waited, minWait, "must reflect the real delay, not be trivially zero")
+}
+
+// A turn must run identically with no recorder wired: measurement is
+// never a precondition for work. Every agent built without a database
+// depends on this.
+func TestPrepareStep_LatencyRecorderIsOptional(t *testing.T) {
+	t.Parallel()
+
+	a := &sessionAgent{}
+	require.NotPanics(t, func() {
+		a.recordLatency(t.Context(), latency.KindSteeringFold, "s1", time.Second)
+	})
 }

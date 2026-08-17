@@ -22,6 +22,7 @@ import (
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/hooks"
+	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -127,6 +128,7 @@ type coordinator struct {
 	interactive bool
 	mcp         *mcp.Registry
 	background  *shell.BackgroundShellManager
+	latency     latency.Recorder
 
 	localVersion atomic.Uint64
 	runtime      *runtimeCache
@@ -303,6 +305,9 @@ type CoordinatorOptions struct {
 	// as Threads.
 	Tasks            tools.TaskManager
 	BackgroundShells *shell.BackgroundShellManager
+	// Latency is nil-safe: when nil, the handoff waits every session
+	// agent observes are logged but not recorded. See internal/latency.
+	Latency latency.Recorder
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -345,6 +350,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		threads:      opts.Threads,
 		tasks:        opts.Tasks,
 		background:   opts.BackgroundShells,
+		latency:      opts.Latency,
 		runtime:      newRuntimeCache(),
 	}
 
@@ -540,6 +546,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
 		MCP:                  c.mcp,
+		Latency:              c.latency,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the

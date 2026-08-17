@@ -55,6 +55,14 @@ type Request struct {
 	// costs a JSON-scanning query over every message in the window and so
 	// is opt-in.
 	WithSkills bool
+	// WithLatency additionally gathers the internal-handoff latency
+	// breakdown. Opt-in for the same reason as WithSkills — it is an
+	// extra query nothing else needs — and ignored for ScopeSession: a
+	// wait is a property of how busy the process was at one moment, and
+	// a handful of samples from one session says nothing a reader can
+	// act on. The question it answers is "is this getting slower over
+	// time", which only a window can answer.
+	WithLatency bool
 }
 
 // Querier is the slice of the generated db API this package needs.
@@ -70,6 +78,8 @@ type Querier interface {
 	ListDelegationOutcomesSince(ctx context.Context, arg db.ListDelegationOutcomesSinceParams) ([]db.ListDelegationOutcomesSinceRow, error)
 	ListAllDelegationOutcomesSince(ctx context.Context, createdAt int64) ([]db.ListAllDelegationOutcomesSinceRow, error)
 	ListSkillLoadsSince(ctx context.Context, arg db.ListSkillLoadsSinceParams) ([]db.ListSkillLoadsSinceRow, error)
+	ListLatencyEventsSince(ctx context.Context, arg db.ListLatencyEventsSinceParams) ([]db.ListLatencyEventsSinceRow, error)
+	ListAllLatencyEventsSince(ctx context.Context, createdAt int64) ([]db.ListAllLatencyEventsSinceRow, error)
 	ProjectStatsSince(ctx context.Context, createdAt int64) ([]db.ProjectStatsSinceRow, error)
 }
 
@@ -114,7 +124,45 @@ func Gather(ctx context.Context, q Querier, req Request) (Snapshot, error) {
 		snap.Skills = ComputeSkills(rows)
 	}
 
+	if req.WithLatency && req.Scope != ScopeSession {
+		events, err := gatherLatency(ctx, q, req)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		snap.Latency = ComputeLatency(events)
+	}
+
 	return snap, nil
+}
+
+// gatherLatency reads the recorded handoff waits for req's scope. Unlike
+// the other breakdowns this one has no session-tree form, so it lives
+// outside fetch rather than adding a fifth return value nothing else
+// wants.
+func gatherLatency(ctx context.Context, q Querier, req Request) ([]LatencyEvent, error) {
+	if req.Scope == ScopeGlobal {
+		rows, err := q.ListAllLatencyEventsSince(ctx, req.Since)
+		if err != nil {
+			return nil, fmt.Errorf("stats: list all latency events: %w", err)
+		}
+		events := make([]LatencyEvent, 0, len(rows))
+		for _, r := range rows {
+			events = append(events, LatencyEvent{Kind: r.Kind, WaitedMS: r.WaitedMs})
+		}
+		return events, nil
+	}
+	rows, err := q.ListLatencyEventsSince(ctx, db.ListLatencyEventsSinceParams{
+		CreatedAt:   req.Since,
+		ProjectPath: req.ProjectPath,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("stats: list project latency events: %w", err)
+	}
+	events := make([]LatencyEvent, 0, len(rows))
+	for _, r := range rows {
+		events = append(events, LatencyEvent{Kind: r.Kind, WaitedMS: r.WaitedMs})
+	}
+	return events, nil
 }
 
 // fetch runs the three per-scope queries. Each scope reads its own row

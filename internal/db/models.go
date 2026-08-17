@@ -18,6 +18,13 @@ type File struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type LatencyEvent struct {
+	SessionID string `json:"session_id"`
+	Kind      string `json:"kind"`
+	WaitedMs  int64  `json:"waited_ms"`
+	CreatedAt int64  `json:"created_at"`
+}
+
 type Message struct {
 	ID               string         `json:"id"`
 	SessionID        string         `json:"session_id"`

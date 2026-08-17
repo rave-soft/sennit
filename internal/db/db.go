@@ -99,6 +99,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAllDelegationOutcomesSinceStmt, err = db.PrepareContext(ctx, listAllDelegationOutcomesSince); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllDelegationOutcomesSince: %w", err)
 	}
+	if q.listAllLatencyEventsSinceStmt, err = db.PrepareContext(ctx, listAllLatencyEventsSince); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAllLatencyEventsSince: %w", err)
+	}
 	if q.listAllSessionsSinceStmt, err = db.PrepareContext(ctx, listAllSessionsSince); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAllSessionsSince: %w", err)
 	}
@@ -116,6 +119,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listFilesBySessionTreeStmt, err = db.PrepareContext(ctx, listFilesBySessionTree); err != nil {
 		return nil, fmt.Errorf("error preparing query ListFilesBySessionTree: %w", err)
+	}
+	if q.listLatencyEventsSinceStmt, err = db.PrepareContext(ctx, listLatencyEventsSince); err != nil {
+		return nil, fmt.Errorf("error preparing query ListLatencyEventsSince: %w", err)
 	}
 	if q.listLatestSessionFilesStmt, err = db.PrepareContext(ctx, listLatestSessionFiles); err != nil {
 		return nil, fmt.Errorf("error preparing query ListLatestSessionFiles: %w", err)
@@ -176,6 +182,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.recordFileReadStmt, err = db.PrepareContext(ctx, recordFileRead); err != nil {
 		return nil, fmt.Errorf("error preparing query RecordFileRead: %w", err)
+	}
+	if q.recordLatencyEventStmt, err = db.PrepareContext(ctx, recordLatencyEvent); err != nil {
+		return nil, fmt.Errorf("error preparing query RecordLatencyEvent: %w", err)
 	}
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
@@ -325,6 +334,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAllDelegationOutcomesSinceStmt: %w", cerr)
 		}
 	}
+	if q.listAllLatencyEventsSinceStmt != nil {
+		if cerr := q.listAllLatencyEventsSinceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAllLatencyEventsSinceStmt: %w", cerr)
+		}
+	}
 	if q.listAllSessionsSinceStmt != nil {
 		if cerr := q.listAllSessionsSinceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAllSessionsSinceStmt: %w", cerr)
@@ -353,6 +367,11 @@ func (q *Queries) Close() error {
 	if q.listFilesBySessionTreeStmt != nil {
 		if cerr := q.listFilesBySessionTreeStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listFilesBySessionTreeStmt: %w", cerr)
+		}
+	}
+	if q.listLatencyEventsSinceStmt != nil {
+		if cerr := q.listLatencyEventsSinceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listLatencyEventsSinceStmt: %w", cerr)
 		}
 	}
 	if q.listLatestSessionFilesStmt != nil {
@@ -455,6 +474,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing recordFileReadStmt: %w", cerr)
 		}
 	}
+	if q.recordLatencyEventStmt != nil {
+		if cerr := q.recordLatencyEventStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing recordLatencyEventStmt: %w", cerr)
+		}
+	}
 	if q.renameSessionStmt != nil {
 		if cerr := q.renameSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
@@ -549,12 +573,14 @@ type Queries struct {
 	getThreadByNameStmt                  *sql.Stmt
 	listAllAssistantMessagesSinceStmt    *sql.Stmt
 	listAllDelegationOutcomesSinceStmt   *sql.Stmt
+	listAllLatencyEventsSinceStmt        *sql.Stmt
 	listAllSessionsSinceStmt             *sql.Stmt
 	listAllUserMessagesStmt              *sql.Stmt
 	listAssistantMessagesSinceStmt       *sql.Stmt
 	listDelegationOutcomesSinceStmt      *sql.Stmt
 	listFilesBySessionStmt               *sql.Stmt
 	listFilesBySessionTreeStmt           *sql.Stmt
+	listLatencyEventsSinceStmt           *sql.Stmt
 	listLatestSessionFilesStmt           *sql.Stmt
 	listMessagesBySessionStmt            *sql.Stmt
 	listMessagesBySessionIDsStmt         *sql.Stmt
@@ -575,6 +601,7 @@ type Queries struct {
 	nextFileVersionStmt                  *sql.Stmt
 	projectStatsSinceStmt                *sql.Stmt
 	recordFileReadStmt                   *sql.Stmt
+	recordLatencyEventStmt               *sql.Stmt
 	renameSessionStmt                    *sql.Stmt
 	updateMessageStmt                    *sql.Stmt
 	updateSessionStmt                    *sql.Stmt
@@ -612,12 +639,14 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getThreadByNameStmt:                  q.getThreadByNameStmt,
 		listAllAssistantMessagesSinceStmt:    q.listAllAssistantMessagesSinceStmt,
 		listAllDelegationOutcomesSinceStmt:   q.listAllDelegationOutcomesSinceStmt,
+		listAllLatencyEventsSinceStmt:        q.listAllLatencyEventsSinceStmt,
 		listAllSessionsSinceStmt:             q.listAllSessionsSinceStmt,
 		listAllUserMessagesStmt:              q.listAllUserMessagesStmt,
 		listAssistantMessagesSinceStmt:       q.listAssistantMessagesSinceStmt,
 		listDelegationOutcomesSinceStmt:      q.listDelegationOutcomesSinceStmt,
 		listFilesBySessionStmt:               q.listFilesBySessionStmt,
 		listFilesBySessionTreeStmt:           q.listFilesBySessionTreeStmt,
+		listLatencyEventsSinceStmt:           q.listLatencyEventsSinceStmt,
 		listLatestSessionFilesStmt:           q.listLatestSessionFilesStmt,
 		listMessagesBySessionStmt:            q.listMessagesBySessionStmt,
 		listMessagesBySessionIDsStmt:         q.listMessagesBySessionIDsStmt,
@@ -638,6 +667,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		nextFileVersionStmt:                  q.nextFileVersionStmt,
 		projectStatsSinceStmt:                q.projectStatsSinceStmt,
 		recordFileReadStmt:                   q.recordFileReadStmt,
+		recordLatencyEventStmt:               q.recordLatencyEventStmt,
 		renameSessionStmt:                    q.renameSessionStmt,
 		updateMessageStmt:                    q.updateMessageStmt,
 		updateSessionStmt:                    q.updateSessionStmt,

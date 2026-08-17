@@ -25,6 +25,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
@@ -245,6 +246,12 @@ type sessionAgent struct {
 	runComplete          pubsub.Publisher[notify.RunComplete]
 	mcp                  *mcp.Registry
 
+	// latency is nil-safe: when nil, the two handoff waits are still
+	// logged, just not recorded. Every test that builds an agent without
+	// a database relies on that, and measurement must never be the
+	// reason a turn cannot run.
+	latency latency.Recorder
+
 	// dispatch owns the accept/queue/cancel protocol state shared by Run
 	// and Summarize's dispatch handoffs. See dispatch.go.
 	dispatch *dispatcher
@@ -262,6 +269,8 @@ type SessionAgentOptions struct {
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
 	MCP                  *mcp.Registry
+	// Latency is optional; see sessionAgent.latency.
+	Latency latency.Recorder
 }
 
 func NewSessionAgent(
@@ -284,6 +293,7 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		mcp:                  opts.MCP,
+		latency:              opts.Latency,
 		dispatch:             newDispatcher(),
 	}
 	// Wired after construction since the hook closes over a: dispatch
@@ -302,6 +312,16 @@ func NewSessionAgent(
 //
 // AcceptedRun and BeginAccepted/endAccepted live in dispatch.go as part of
 // the dispatcher type.
+
+// recordLatency records one observed handoff wait, if a recorder was
+// wired. It exists so the two call sites in turn.go can stay a single
+// line each and need no nil check of their own.
+func (a *sessionAgent) recordLatency(ctx context.Context, kind latency.Kind, sessionID string, waited time.Duration) {
+	if a.latency == nil {
+		return
+	}
+	a.latency.Record(ctx, kind, sessionID, waited)
+}
 
 // publishRunComplete emits the authoritative terminal event for a turn.
 // It honors the per-call OnComplete hook when set (so the coordinator can
