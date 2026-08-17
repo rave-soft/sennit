@@ -39,12 +39,18 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 	ctx := m.com.Context()
 	workspace := m.com.Workspace
 	styles := m.com.Styles
+	// Read here, on the Update goroutine, rather than inside the command:
+	// both enterChildSession and exitChildSession adjust the nav stack
+	// before asking for the load, so this is already the depth the load is
+	// for. See sessionLoadResolver.resumable.
+	resumable := !m.viewingChildSession()
 	return func() tea.Msg {
 		loader := sessionLoadResolver{
 			ctx:       ctx,
 			workspace: workspace,
 			styles:    styles,
 			config:    workspace.Config(),
+			resumable: resumable,
 		}
 		return loader.resolve(sessionID, generation)
 	}
@@ -128,6 +134,11 @@ type sessionLoadResolver struct {
 	workspace workspace.Workspace
 	styles    *styles.Styles
 	config    *config.Config
+	// resumable marks a load the user can go on to type into: a top-level
+	// session, not a sub-agent's transcript they drilled into. Only such a
+	// load restores the session's pinned model, because only such a load
+	// is followed by a turn that would run on it — see resolve.
+	resumable bool
 }
 
 func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
@@ -139,13 +150,24 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 	// it is rendered, so the model shown and the model the next turn runs
 	// on are the same one.
 	//
+	// Only for a session the user can go on to type into. Drilling into a
+	// sub-agent loads its transcript through here too, and that transcript
+	// is read-only (see enterChildSession): there is no next turn to line
+	// the model up with, so switching would only take the user's own model
+	// away — a sub-agent commonly runs on a different one — and rebuild the
+	// coordinator underneath work that is still going, because they looked
+	// at something.
+	//
 	// A failure here is not a failure to open the session: it opens on the
 	// current model, which is what it did before sessions carried a model
 	// at all. Refusing to show a session because its model could not be
 	// restored would be strictly worse than showing it.
-	modelSwitched, err := r.workspace.ApplySessionModel(r.ctx, sessionID)
-	if err != nil {
-		slog.Debug("Failed to restore the session's model", "session_id", sessionID, "error", err)
+	var modelSwitched bool
+	if r.resumable {
+		modelSwitched, err = r.workspace.ApplySessionModel(r.ctx, sessionID)
+		if err != nil {
+			slog.Debug("Failed to restore the session's model", "session_id", sessionID, "error", err)
+		}
 	}
 	sessionFiles, err := loadModifiedFiles(r.ctx, r.workspace, sessionID)
 	if err != nil {
