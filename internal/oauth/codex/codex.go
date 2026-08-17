@@ -49,12 +49,12 @@ const (
 	authorizeURL = "https://auth.openai.com/oauth/authorize"
 	tokenURL     = "https://auth.openai.com/oauth/token"
 
-	// callbackPort and callbackPath together form the one redirect URI the
-	// OAuth client accepts. Neither is negotiable: the port cannot fall
-	// back to :0 the way an ordinary loopback flow would, because the
+	// defaultCallbackPort and callbackPath together form the one redirect
+	// URI the OAuth client accepts. Neither is negotiable: the port cannot
+	// fall back to :0 the way an ordinary loopback flow would, because the
 	// authorization server only redirects to this exact URI.
-	callbackPort = 1455
-	callbackPath = "/auth/callback"
+	defaultCallbackPort = 1455
+	callbackPath        = "/auth/callback"
 
 	// scopes are what the Codex backend expects on the token. offline_access
 	// is what makes a refresh token come back, without which every restart
@@ -73,6 +73,12 @@ const (
 	// knows about.
 	clientVersion = "0.147.0"
 )
+
+// callbackPort is the port a flow binds. It is defaultCallbackPort in every
+// build; only this package's own tests move it, so that a test run does not
+// fight a real sign-in — the user's, another test binary's, or the Codex
+// CLI's — over the single port the redirect URI names. See TestMain.
+var callbackPort = defaultCallbackPort
 
 // RedirectURI is the loopback address the browser is sent back to.
 func RedirectURI() string {

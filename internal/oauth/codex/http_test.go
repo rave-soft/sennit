@@ -88,19 +88,14 @@ func TestStartFlowRejectsBadProxy(t *testing.T) {
 	require.Nil(t, flow)
 
 	// The port is still free, proving nothing was left bound.
-	ok, err := StartFlow("")
-	require.NoError(t, err)
-	require.NotNil(t, ok)
-	require.NoError(t, ok.Close())
+	require.NotNil(t, startTestFlow(t, ""))
 }
 
 // TestFlowKeepsProxyForExchange pins that the value reaches the token
 // exchange: the redirect arrives at a loopback listener that needs no proxy,
 // but the exchange that follows it does.
 func TestFlowKeepsProxyForExchange(t *testing.T) {
-	flow, err := StartFlow("socks5://127.0.0.1:1080")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = flow.Close() })
+	flow := startTestFlow(t, "socks5://127.0.0.1:1080")
 
 	require.Equal(t, "socks5://127.0.0.1:1080", flow.proxyURL)
 

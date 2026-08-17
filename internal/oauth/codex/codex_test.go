@@ -110,9 +110,7 @@ func TestTokensFromDiskNeedsRefreshToken(t *testing.T) {
 // server actually enforces: the fixed redirect URI, S256 PKCE, and a state
 // to bind the callback to this request.
 func TestStartFlowBuildsPKCEURL(t *testing.T) {
-	flow, err := StartFlow("")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = flow.Close() })
+	flow := startTestFlow(t, "")
 
 	parsed, err := url.Parse(flow.URL())
 	require.NoError(t, err)
@@ -120,7 +118,10 @@ func TestStartFlowBuildsPKCEURL(t *testing.T) {
 
 	require.Equal(t, "https://auth.openai.com/oauth/authorize", parsed.Scheme+"://"+parsed.Host+parsed.Path)
 	require.Equal(t, "code", query.Get("response_type"))
-	require.Equal(t, "http://localhost:1455/auth/callback", query.Get("redirect_uri"))
+	// RedirectURI, not a literal: the port is moved for the test run (see
+	// TestMain), and the literal it normally reads is pinned in
+	// TestRedirectURIIsTheOneTheClientAccepts.
+	require.Equal(t, RedirectURI(), query.Get("redirect_uri"))
 	require.Equal(t, "S256", query.Get("code_challenge_method"))
 	require.NotEmpty(t, query.Get("code_challenge"))
 	require.NotEmpty(t, query.Get("state"))
@@ -131,20 +132,16 @@ func TestStartFlowBuildsPKCEURL(t *testing.T) {
 // second concurrent sign-in has to fail loudly rather than bind elsewhere
 // and wait for a redirect that will never come.
 func TestStartFlowPortIsExclusive(t *testing.T) {
-	first, err := StartFlow("")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = first.Close() })
+	startTestFlow(t, "")
 
-	_, err = StartFlow("")
+	_, err := StartFlow("")
 	require.Error(t, err)
 }
 
 // TestFlowRejectsMismatchedState: a callback that does not carry this
 // flow's state belongs to some other authorization and must not settle it.
 func TestFlowRejectsMismatchedState(t *testing.T) {
-	flow, err := StartFlow("")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = flow.Close() })
+	flow := startTestFlow(t, "")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, callbackPath+"?code=abc&state=not-the-state", nil)
@@ -159,9 +156,7 @@ func TestFlowRejectsMismatchedState(t *testing.T) {
 // same origin, and settling on one of those would abort the sign-in with an
 // empty code.
 func TestFlowIgnoresUnrelatedPaths(t *testing.T) {
-	flow, err := StartFlow("")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = flow.Close() })
+	flow := startTestFlow(t, "")
 
 	rec := httptest.NewRecorder()
 	flow.handleCallback(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/favicon.ico", nil))
