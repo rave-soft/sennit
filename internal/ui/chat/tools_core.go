@@ -102,10 +102,14 @@ type ToolRenderOpts struct {
 	Hovered bool
 }
 
-// IsPending returns true if the tool call is still pending (not finished and
-// not canceled).
+// IsPending returns true if the tool call is still pending (not finished, no
+// result yet, and not canceled). Renderers turn this into the pending spinner
+// block, so it has to agree with baseToolMessageItem.isSpinning — including on
+// the result: a call whose result landed while Finished stayed false would
+// otherwise render a spinner that no longer receives animation ticks, which
+// reads as a frozen one rather than an absent one.
 func (o *ToolRenderOpts) IsPending() bool {
-	return !o.ToolCall.Finished && !o.IsCanceled()
+	return !o.ToolCall.Finished && !o.HasResult() && !o.IsCanceled()
 }
 
 // IsCanceled returns true if the tool status is canceled.

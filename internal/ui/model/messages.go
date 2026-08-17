@@ -56,7 +56,13 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 	// even though nothing is running. Starting animations for it here would
 	// leave a ghost "working" spinner (and a second one alongside any tool
 	// spinner) after the session is reloaded.
-	if m.isAgentBusy() {
+	//
+	// The question has to be about *this* session, not the workspace. Any
+	// running thread or background task makes the workspace busy, and a
+	// workspace-wide gate therefore let every reloaded session start its
+	// ghost spinners — which, with delegations in flight most of the time,
+	// is nearly always.
+	if m.isCurrentSessionBusy() {
 		for _, item := range items {
 			if animatable, ok := item.(chat.Animatable); ok {
 				if cmd := animatable.StartAnimation(); cmd != nil {

@@ -45,7 +45,7 @@ func TestManager_ManualPolicyThreadDeliversCompletionToParentOnce(t *testing.T) 
 	require.NoError(t, err)
 
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestManager_AutoMergeThreadDeliversOnceAcrossRunAndMerge(t *testing.T) {
 	writeFile(t, st.WorktreePath, "output.txt", "auto merged\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
 	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
@@ -132,7 +132,7 @@ func TestManager_AutoMergeThreadConflictDeliversOnceNotAgainOnManualRetry(t *tes
 	writeFile(t, st.WorktreePath, "README.md", "thread version\n")
 
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
@@ -174,7 +174,7 @@ func TestManager_ParentlessThreadDeliversNothing(t *testing.T) {
 	require.NoError(t, err)
 
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)

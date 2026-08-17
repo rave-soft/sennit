@@ -28,31 +28,42 @@ import (
 type countingWorkspace struct {
 	workspace.Workspace
 
-	ready     bool
-	agentBusy bool
-	yolo      bool
-	queued    []string
-	model     workspace.AgentModel
-	lspStates map[string]workspace.LSPClientInfo
-	lspDiags  map[string]lsp.DiagnosticCounts
+	ready       bool
+	agentBusy   bool
+	sessionBusy map[string]bool
+	yolo        bool
+	queued      []string
+	model       workspace.AgentModel
+	lspStates   map[string]workspace.LSPClientInfo
+	lspDiags    map[string]lsp.DiagnosticCounts
 
-	readyCalls      int
-	agentBusyCalls  int
-	queuedCalls     int
-	queueListCalls  int
-	permCalls       int
-	permSetCalls    int
-	clearQueueCalls int
-	cancelCalls     int
-	modelCalls      int
-	lspStateCalls   int
-	lspDiagCalls    int
+	readyCalls       int
+	agentBusyCalls   int
+	sessionBusyCalls int
+	queuedCalls      int
+	queueListCalls   int
+	permCalls        int
+	permSetCalls     int
+	clearQueueCalls  int
+	cancelCalls      int
+	modelCalls       int
+	lspStateCalls    int
+	lspDiagCalls     int
 }
 
 func (w *countingWorkspace) SupportsThreads() bool { return false }
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
+
+// AgentIsSessionBusy answers per session. sessionBusy is deliberately separate
+// from agentBusy so a test can express the case the two differ on: the
+// workspace is busy with some other session, thread, or background task while
+// the one under test is idle.
+func (w *countingWorkspace) AgentIsSessionBusy(sessionID string) bool {
+	w.sessionBusyCalls++
+	return w.sessionBusy[sessionID]
+}
 
 func (w *countingWorkspace) AgentReadyErr() error {
 	w.readyCalls++
@@ -133,6 +144,10 @@ func (w *countingWorkspace) WorkingDir() string { return "" }
 // syncProbes sums every synchronous counter; Update/View must keep this at
 // zero — the invariant is that no workspace call ever happens on the Update
 // goroutine (which is also the render loop).
+//
+// sessionBusyCalls is deliberately excluded. AgentIsSessionBusy is not a
+// per-message probe: it runs once per session load, and it resolves to a
+// lookup in the dispatcher's active-request map rather than to IO.
 func (w *countingWorkspace) syncProbes() int {
 	return w.readyCalls + w.agentBusyCalls +
 		w.queuedCalls + w.queueListCalls + w.permCalls +
@@ -523,11 +538,15 @@ func TestBackstopRefreshesStaleCaches(t *testing.T) {
 }
 
 // TestSetSessionMessagesGatesAnimationsOnBusy verifies that reloading a
-// session does not start spinner animations when the agent is not busy.
-// A session that was killed mid-generation can persist an assistant message
-// with no Finish part, which still reports isSpinning() even though nothing
-// is running. Starting animations for it would leave a ghost "working"
-// spinner after the session is reloaded.
+// session starts spinner animations only when that session is itself
+// generating. A session that was killed mid-generation can persist an
+// assistant message with no Finish part, which still reports isSpinning()
+// even though nothing is running. Starting animations for it would leave a
+// ghost "working" spinner after the session is reloaded.
+//
+// The workspace-wide answer is not a usable stand-in for the per-session one:
+// any running thread or background task makes the workspace busy, so gating on
+// it let nearly every reload start its ghosts.
 func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 	pinTTLs(t)
 
@@ -547,14 +566,22 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 		},
 	}
 
-	// When the agent is not busy, setSessionMessages must not start animations.
+	// Nothing running anywhere: setSessionMessages must not start animations.
 	cmd := m.setSessionMessages(msgs)
-	require.Nil(t, cmd, "setSessionMessages must not start animations when agent is idle")
+	require.Nil(t, cmd, "setSessionMessages must not start animations when the agent is idle")
 
-	// When the agent is busy, animations should start.
+	// The workspace is busy with something that is not this session — another
+	// session, a thread, a background task. Still a ghost, still no animation.
 	warmCaches(m, true)
+	ws.agentBusy = true
 	cmd = m.setSessionMessages(msgs)
-	require.NotNil(t, cmd, "setSessionMessages must start animations when agent is busy")
+	require.Nil(t, cmd,
+		"setSessionMessages must not animate a ghost message because the workspace is busy elsewhere")
+
+	// This session is the one generating: animations should start.
+	ws.sessionBusy = map[string]bool{"s1": true}
+	cmd = m.setSessionMessages(msgs)
+	require.NotNil(t, cmd, "setSessionMessages must start animations when this session is busy")
 }
 
 // TestStaleBusyRefreshDiscardedAndReDispatched pins the generation guard for

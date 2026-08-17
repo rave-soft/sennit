@@ -443,12 +443,11 @@ func (m *Message) FinishToolCall(toolCallID string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input,
-					Finished: true,
-				}
+				// Copy and flip the one field, rather than rebuilding from a
+				// field list: the list silently dropped ProviderExecuted, and
+				// would drop whatever is added to ToolCall next.
+				c.Finished = true
+				m.Parts[i] = c
 				return
 			}
 		}

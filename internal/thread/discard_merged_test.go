@@ -103,7 +103,7 @@ func TestDiscardMerged_WritesTheDisappearanceIntoHistory(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "output.txt", "done\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	requireDiscardedEventually(t, mgr, repo, st)
 
 	var notice message.Message
@@ -145,7 +145,7 @@ func TestDiscardMerged_PublishesRemovalSoThePanelDrops(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "output.txt", "done\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	deadline := time.After(5 * time.Second)
 	for {
@@ -178,7 +178,7 @@ func TestDiscardMerged_ConflictKeepsEverything(t *testing.T) {
 	writeFile(t, st.WorktreePath, "README.md", "thread version\n")
 
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err, "a conflicted thread must keep its row")
@@ -213,7 +213,7 @@ func TestDiscardMerged_DeliversTheOutcomeBeforeRemovingTheRow(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "output.txt", "done\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	requireDiscardedEventually(t, mgr, repo, st)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
@@ -298,7 +298,7 @@ func TestResolve_MissingThreadReportsADomainError(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "output.txt", "done\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	requireDiscardedEventually(t, mgr, repo, st)
 
 	_, err = mgr.Get(t.Context(), st.Name)

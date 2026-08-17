@@ -733,6 +733,15 @@ func (s *fakeSpawner) wasReleased(id string) bool {
 	return s.released[id]
 }
 
+// settleTimeout bounds a Manager.Wait in these tests.
+//
+// Generous on purpose: Wait returns the moment the threads settle, so the
+// number only decides how long a genuinely stuck test hangs before failing —
+// while too small a number fails tests that were merely slow. It was two
+// seconds, and CI duly failed with "context deadline exceeded" on a runner
+// executing the whole suite at once.
+const settleTimeout = 60 * time.Second
+
 // newTestManager wires a Manager over a real store, a real git repo (repo),
 // and the fakeSpawner defined above.
 func newTestManager(t *testing.T, repo string) (*Manager, *fakeSpawner) {

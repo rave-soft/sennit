@@ -179,7 +179,7 @@ func TestManager_SendIntoIdleThread(t *testing.T) {
 	// The run completes normally, which means the RunComplete watcher was
 	// installed when the idle workspace was created, not only by startRun.
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	got, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusCompleted, got.Status)
@@ -194,7 +194,7 @@ func TestManager_ActivateFinishedThread(t *testing.T) {
 	st, err := mgr.Create(t.Context(), CreateArgs{Name: "revive", Goal: "do it", MergePolicy: MergeManual})
 	require.NoError(t, err)
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	require.Nil(t, mgr.Handle(st.ID), "a completed thread releases its workspace")
 
 	completed, err := mgr.Get(t.Context(), st.ID)
@@ -447,7 +447,7 @@ func TestManager_ManualPolicyCompleted(t *testing.T) {
 	coord.mu.Unlock()
 	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: runID, Text: "finished"})
 
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
@@ -475,7 +475,7 @@ func TestManager_RunCompleteSuccessAutoMerge(t *testing.T) {
 	writeFile(t, st.WorktreePath, "output.txt", "auto merged\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	require.FileExists(t, filepath.Join(repo, "output.txt"))
 	require.Equal(t, "auto merged\n", runGit(t, repo, "show", "main:output.txt"),
@@ -498,7 +498,7 @@ func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "README.md", "thread version\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	_, mergeErr := mgr.Merge(t.Context(), st.ID)
 	require.NoError(t, mergeErr)
@@ -535,7 +535,7 @@ func TestManager_MergeBlockedWhenBaseCheckedOutAndDirty(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "output.txt", "content\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	writeFile(t, repo, "dirty.txt", "uncommitted\n")
 
@@ -567,7 +567,7 @@ func TestManager_FastForwardWhenBaseNotCheckedOut(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "output.txt", "content\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	_, mergeErr := mgr.Merge(t.Context(), st.ID)
 	require.NoError(t, mergeErr)
@@ -723,7 +723,7 @@ func TestManager_RemoveRefusesDirtyUnmergedWithoutForce(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "uncommitted.txt", "x\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	err = mgr.Remove(t.Context(), st.ID, false, false)
 	require.Error(t, err)
@@ -758,7 +758,7 @@ func TestManager_SendRedispatches(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "output.txt", "content\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "keep going")))
 
@@ -810,7 +810,7 @@ func TestManager_SendReportsResumeAsImmediate(t *testing.T) {
 	st, err := mgr.Create(t.Context(), CreateArgs{Name: "resumed", Goal: "do it", MergePolicy: MergeManual})
 	require.NoError(t, err)
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
-	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, 2*time.Second))
+	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	require.Nil(t, mgr.Handle(st.ID))
 
 	disp, err := mgr.Send(t.Context(), st.ID, "one more thing")

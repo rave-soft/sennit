@@ -557,19 +557,42 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 	t.currentAssistant.FinishThinking()
 	toolCalls := t.currentAssistant.ToolCalls()
 	// INFO: we use the cleanup context here because the genCtx has been cancelled.
-	msgs, createErr := t.agent.messages.List(cleanupCtx, t.currentAssistant.SessionID)
-	if createErr != nil {
-		return nil, createErr
+	//
+	// A failure to read the session back must not abandon the rest of this
+	// cleanup. Bailing out here used to skip both the Finished flags below and
+	// the AddFinish further down, leaving a persisted assistant message with
+	// neither — a state the chat UI reads as "still running" for the rest of
+	// that session's life, every time it is reloaded. Without the list we
+	// cannot tell which calls already have results, so only the synthetic ones
+	// are skipped; compat.go injects those at prompt-build time regardless, so
+	// the conversation still cannot lock on an orphaned call.
+	msgs, listErr := t.agent.messages.List(cleanupCtx, t.currentAssistant.SessionID)
+	if listErr != nil {
+		slog.Error(
+			"Failed to read session messages while closing an interrupted turn, skipping synthetic tool results",
+			"session_id", t.currentAssistant.SessionID,
+			"error", listErr,
+		)
 	}
 	for _, tc := range toolCalls {
 		if !tc.Finished {
 			tc.Finished = true
 			tc.Input = "{}"
 			t.currentAssistant.AddToolCall(tc)
-			updateErr := t.agent.messages.Update(cleanupCtx, *t.currentAssistant)
-			if updateErr != nil {
-				return nil, updateErr
+			// Not fatal either: the Update that follows AddFinish below
+			// persists this same message, so one failed write here must not
+			// cost the turn its finish reason.
+			if updateErr := t.agent.messages.Update(cleanupCtx, *t.currentAssistant); updateErr != nil {
+				slog.Error(
+					"Failed to persist a closed tool call while closing an interrupted turn",
+					"session_id", t.currentAssistant.SessionID,
+					"tool_call_id", tc.ID,
+					"error", updateErr,
+				)
 			}
+		}
+		if listErr != nil {
+			continue
 		}
 
 		found := false
@@ -599,7 +622,7 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 			Content:    content,
 			IsError:    true,
 		}
-		_, createErr = t.agent.messages.Create(cleanupCtx, t.currentAssistant.SessionID, message.CreateMessageParams{
+		_, createErr := t.agent.messages.Create(cleanupCtx, t.currentAssistant.SessionID, message.CreateMessageParams{
 			Role: message.Tool,
 			Parts: []message.ContentPart{
 				toolResult,

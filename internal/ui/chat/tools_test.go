@@ -340,3 +340,58 @@ func TestTruncateToolParam_FitsUnchanged(t *testing.T) {
 	path := "internal/ui/chat/tools_render.go"
 	require.Equal(t, path, truncateToolParam(path, 80))
 }
+
+// TestToolSpinStopsOnResult pins the pair of predicates that decide whether a
+// tool call is still in progress: a recorded result ends the spin even when the
+// call was never marked Finished. The agent flips Finished on a cleanup path a
+// hard kill can skip, so such a call outlives its turn in the database, and
+// without the result check it spun for the rest of the session — while
+// computeStatus already reported it as a success.
+func TestToolSpinStopsOnResult(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	unfinished := message.ToolCall{ID: "tc1", Name: tools.ReadToolName, Input: "{}", Finished: false}
+	result := &message.ToolResult{ToolCallID: "tc1", Name: tools.ReadToolName, Content: "file contents"}
+
+	newItem := func(res *message.ToolResult) *baseToolMessageItem {
+		return newBaseToolMessageItem(&sty, unfinished, res, &GenericToolRenderContext{}, false)
+	}
+
+	t.Run("unfinished without result spins", func(t *testing.T) {
+		t.Parallel()
+
+		require.True(t, newItem(nil).isSpinning())
+		require.True(t, (&ToolRenderOpts{ToolCall: unfinished}).IsPending())
+	})
+
+	t.Run("unfinished with result does not spin", func(t *testing.T) {
+		t.Parallel()
+
+		item := newItem(result)
+		require.False(t, item.isSpinning(), "a recorded result means the call is not in progress")
+		require.Equal(t, ToolStatusSuccess, item.computeStatus(),
+			"guards against the state that made this a bug: spinning while reported successful")
+		require.True(t, item.Finished(), "a resulted call must be freezable, or its animation never stops")
+		// IsPending drives the renderer's spinner block and has to agree,
+		// otherwise the item draws a spinner that gets no further ticks.
+		require.False(t, (&ToolRenderOpts{ToolCall: unfinished, Result: result}).IsPending())
+	})
+
+	t.Run("late result stops an already spinning item", func(t *testing.T) {
+		t.Parallel()
+
+		item := newItem(nil)
+		require.True(t, item.isSpinning())
+		item.SetResult(result)
+		require.False(t, item.isSpinning())
+		require.Nil(t, item.StartAnimation(), "a stopped item must not restart when scrolled back into view")
+	})
+
+	t.Run("canceled call does not spin", func(t *testing.T) {
+		t.Parallel()
+
+		item := newBaseToolMessageItem(&sty, unfinished, nil, &GenericToolRenderContext{}, true)
+		require.False(t, item.isSpinning())
+	})
+}

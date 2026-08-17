@@ -1123,6 +1123,20 @@ func (m *UI) isAgentBusy() bool {
 	return m.wsCache.agentBusyCache.value
 }
 
+// isCurrentSessionBusy reports whether the agent is generating for the session
+// the chat currently has loaded. Deliberately not [UI.isAgentBusy], which
+// answers the workspace-wide question and is true whenever any other session,
+// thread, or background task is running — see applySessionMessageItems for why
+// the difference matters. Unlike that one this is a direct probe, not the
+// memoized value: it is a lookup in the dispatcher's active-request map, and
+// it runs on session load rather than per message.
+func (m *UI) isCurrentSessionBusy() bool {
+	if !m.hasSession() || m.com == nil || m.com.Workspace == nil {
+		return false
+	}
+	return m.com.Workspace.AgentIsSessionBusy(m.sess.current.ID)
+}
+
 // hasSession returns true if there is an active session with a valid ID.
 func (m *UI) hasSession() bool {
 	return m.sess.current != nil && m.sess.current.ID != ""
