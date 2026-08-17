@@ -15,6 +15,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/discover"
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/spf13/cobra"
 )
 
@@ -165,13 +166,20 @@ provider's /models endpoint and overwrites the persisted model list, even if
 models are already configured.
 
 With no arguments, every custom provider (a provider with a base_url that
-isn't part of the built-in catwalk catalog) is refreshed. With a
-provider-id argument, only that provider is refreshed.`,
-	Example: `# Refresh every custom provider
+isn't part of the built-in catwalk catalog) is refreshed, plus Codex when
+signed in. With a provider-id argument, only that provider is refreshed.
+
+Codex is the one catalog provider this covers: its model list is per-account
+and fetched from its own backend, so it would otherwise only be re-read by
+signing in again.`,
+	Example: `# Refresh every custom provider (and Codex, if signed in)
 sennit models refresh
 
 # Refresh a single provider
-sennit models refresh my-local-llm`,
+sennit models refresh my-local-llm
+
+# Re-read the Codex model list
+sennit models refresh codex`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := ResolveCwd(cmd)
@@ -190,6 +198,29 @@ sennit models refresh my-local-llm`,
 		knownIDs := make(map[string]bool)
 		for _, kp := range cfg.KnownProviders() {
 			knownIDs[string(kp.ID)] = true
+		}
+
+		// cmd.Context() is nil unless the command was dispatched through
+		// Execute(); fall back to Background() so RunE also works when
+		// invoked directly (as tests do).
+		baseCtx := cmd.Context()
+		if baseCtx == nil {
+			baseCtx = context.Background()
+		}
+
+		// Codex is a catalog provider, so it is not discovered against a
+		// /models endpoint like the custom ones below — but its list is
+		// per-account, fetched from its own backend, and until now only
+		// written at sign-in. Refresh is where re-reading it belongs.
+		var refreshCodex bool
+		if len(args) == 1 && args[0] == codex.ProviderID {
+			if !codexConfigured(cfg) {
+				return fmt.Errorf("not signed in to Codex; run `sennit login codex`")
+			}
+			return refreshCodexModels(baseCtx, cmd, cfg)
+		}
+		if len(args) == 0 {
+			refreshCodex = codexConfigured(cfg)
 		}
 
 		var targets []string
@@ -216,20 +247,18 @@ sennit models refresh my-local-llm`,
 			sort.Strings(targets)
 		}
 
-		if len(targets) == 0 {
+		if len(targets) == 0 && !refreshCodex {
 			cmd.Println("no custom providers to refresh")
 			return nil
 		}
 
-		// cmd.Context() is nil unless the command was dispatched through
-		// Execute(); fall back to Background() so RunE also works when
-		// invoked directly (as tests do).
-		baseCtx := cmd.Context()
-		if baseCtx == nil {
-			baseCtx = context.Background()
-		}
-
 		var hadFailure bool
+		if refreshCodex {
+			if err := refreshCodexModels(baseCtx, cmd, cfg); err != nil {
+				hadFailure = true
+				cmd.PrintErrf("%s: refresh failed: %v\n", codex.ProviderID, err)
+			}
+		}
 		for _, id := range targets {
 			pc, _ := cfg.Config().Providers.Get(id)
 

@@ -9,8 +9,9 @@ built-in providers with their model catalogues; anything else you add yourself.
 ```sh
 sennit models                  # everything Sennit can see, by provider
 sennit models gpt5             # filter
-sennit models refresh          # re-discover models on custom providers
+sennit models refresh          # re-discover models on custom providers (and Codex)
 sennit models refresh ollama   # …just one
+sennit models refresh codex    # re-read the per-account Codex list
 ```
 
 Providers you have no credentials for are listed as `(not configured)`.

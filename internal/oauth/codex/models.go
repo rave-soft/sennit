@@ -20,14 +20,21 @@ const modelsTimeout = 10 * time.Second
 // returns a great deal more (prompt templates, tool modes, NUX copy) that
 // belongs to the Codex CLI's own UI, not to a model catalog.
 type modelEntry struct {
-	Slug           string   `json:"slug"`
-	DisplayName    string   `json:"display_name"`
-	ContextWindow  int64    `json:"context_window"`
-	Visibility     string   `json:"visibility"`
-	SupportedInAPI bool     `json:"supported_in_api"`
-	InputModals    []string `json:"input_modalities"`
-	DefaultLevel   string   `json:"default_reasoning_level"`
-	ReasoningLevel []struct {
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name"`
+	// ContextWindow is the baseline window, not the ceiling: the backend
+	// publishes it alongside MaxContextWindow, which is what it actually
+	// enforces. For gpt-5.6 the two are 272k and 872k, and a request of
+	// 877k input tokens is accepted while ~1.08M is rejected with
+	// context_length_exceeded; for gpt-5.5, where both read 272k, 400k is
+	// rejected. See toCatwalk.
+	ContextWindow    int64    `json:"context_window"`
+	MaxContextWindow int64    `json:"max_context_window"`
+	Visibility       string   `json:"visibility"`
+	SupportedInAPI   bool     `json:"supported_in_api"`
+	InputModals      []string `json:"input_modalities"`
+	DefaultLevel     string   `json:"default_reasoning_level"`
+	ReasoningLevel   []struct {
 		Effort string `json:"effort"`
 	} `json:"supported_reasoning_levels"`
 }
@@ -128,7 +135,10 @@ func (e modelEntry) toCatwalk() (catwalk.Model, bool) {
 	if name == "" {
 		name = e.Slug
 	}
-	contextWindow := e.ContextWindow
+	// The larger of the two published windows is the one the backend
+	// enforces; taking the smaller made Sennit compact and warn at a third
+	// of the room the account actually has.
+	contextWindow := max(e.ContextWindow, e.MaxContextWindow)
 	if contextWindow <= 0 {
 		contextWindow = 272_000
 	}

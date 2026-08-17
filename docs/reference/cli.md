@@ -65,7 +65,10 @@ sennit models refresh [provider-id]
 ```
 
 Lists every model from known providers, with unconfigured providers marked.
-`refresh` forces model re-discovery for custom providers.
+`refresh` forces model re-discovery for custom providers, and re-reads the
+Codex model list when signed in (`sennit models refresh codex` for that
+alone) — Codex's list is per-account and would otherwise only be fetched at
+sign-in.
 
 ## `session` — browse and manage
 

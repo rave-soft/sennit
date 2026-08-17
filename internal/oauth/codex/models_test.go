@@ -14,6 +14,7 @@ const codexModelsBody = `{
       "slug": "gpt-5.6-sol",
       "display_name": "GPT-5.6-Sol",
       "context_window": 272000,
+      "max_context_window": 872000,
       "visibility": "list",
       "supported_in_api": true,
       "input_modalities": ["text", "image"],
@@ -50,7 +51,11 @@ func TestParseModels(t *testing.T) {
 	sol := models[0]
 	require.Equal(t, "gpt-5.6-sol", sol.ID)
 	require.Equal(t, "GPT-5.6-Sol", sol.Name)
-	require.EqualValues(t, 272000, sol.ContextWindow)
+	// The backend publishes both windows and enforces the larger one: an
+	// 877k-token request to gpt-5.6-sol is accepted, ~1.08M is rejected.
+	// Reading context_window alone left three quarters of the account's
+	// room unused.
+	require.EqualValues(t, 872000, sol.ContextWindow)
 	require.Zero(t, sol.DefaultMaxTokens,
 		"the endpoint rejects max_output_tokens, so no cap may be advertised")
 	require.True(t, sol.CanReason)
@@ -60,6 +65,8 @@ func TestParseModels(t *testing.T) {
 	require.Zero(t, sol.CostPer1MIn, "a subscription is a flat fee, not per-token")
 
 	plain := models[1]
+	require.EqualValues(t, 128000, plain.ContextWindow,
+		"with no max_context_window published, the baseline window is the ceiling")
 	require.Equal(t, "text-only-model", plain.Name, "a model with no display name falls back to its slug")
 	require.False(t, plain.SupportsImages)
 	require.False(t, plain.CanReason)
