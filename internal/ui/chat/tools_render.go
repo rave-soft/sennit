@@ -2,10 +2,12 @@ package chat
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/ui/anim"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
@@ -48,23 +50,89 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	return msg, true
 }
 
+// expectedToolRefusals are phrases marking a tool response that reads as an
+// error to the API but is ordinary protocol here: the agent is told to read
+// the file first, or to re-read one that moved underneath it, and then
+// retries. Nothing failed, so these carry the WARN tag rather than the
+// destructive-red ERROR one, which is reserved for something actually going
+// wrong.
+var expectedToolRefusals = []string{
+	"User denied permission",
+	"User cancelled",
+	"has not been read in this session",
+	"it changed on disk after you read it",
+}
+
+// isExpectedToolRefusal reports whether content is one of the refusals above.
+func isExpectedToolRefusal(content string) bool {
+	for _, phrase := range expectedToolRefusals {
+		if strings.Contains(content, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// shortenPathsToFit fits a one-line error message into width by shrinking the
+// file paths inside it rather than cutting the sentence off at the right.
+// Paths are home-shortened the way tool headers show them, then the longest
+// one is elided from the head — "cannot edit …/chat/tools_render.go: it has
+// not been read" says what happened, where "cannot edit /home/user/Proj…"
+// says nothing at all. Truncation still happens afterwards if the sentence
+// alone overflows; this only keeps the paths from eating the whole budget.
+func shortenPathsToFit(msg string, width int) string {
+	fields := strings.Split(msg, " ")
+	for i, f := range fields {
+		if presentation.IsLikelyPath(f) {
+			fields[i] = fsext.PrettyPath(f)
+		}
+	}
+	for {
+		joined := strings.Join(fields, " ")
+		over := ansi.StringWidth(joined) - width
+		if over <= 0 {
+			return joined
+		}
+		// Shrink the longest path first, and never past its file name: past
+		// that point a path stops identifying anything, so the sentence is
+		// the better thing to spend the remaining cells on.
+		idx, longest, floor := -1, 0, 0
+		for i, f := range fields {
+			w := ansi.StringWidth(f)
+			if !presentation.IsLikelyPath(f) || w <= longest {
+				continue
+			}
+			if base := ansi.StringWidth(filepath.Base(f)) + 1; w > base {
+				idx, longest, floor = i, w, base
+			}
+		}
+		if idx < 0 {
+			return joined
+		}
+		fields[idx] = presentation.TruncatePath(fields[idx], max(floor, longest-over))
+		if ansi.StringWidth(fields[idx]) >= longest {
+			// No progress to be had from this path; stop rather than spin.
+			return strings.Join(fields, " ")
+		}
+	}
+}
+
 // toolErrorContent formats an error message with an ERROR or WARN tag.
 func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int) string {
 	if result == nil {
 		return ""
 	}
-	errContent := strings.ReplaceAll(result.Content, "\n", " ")
-	if strings.Contains(errContent, "User denied permission") ||
-		strings.Contains(errContent, "User cancelled") {
-		deniedTag := sty.Tool.WarnTag.Render("WARN")
-		deniedTagWidth := lipgloss.Width(deniedTag)
-		errContent = ansi.Truncate(errContent, width-deniedTagWidth-3, "…")
-		return fmt.Sprintf("%s %s", deniedTag, sty.Tool.WarnMessage.Render(errContent))
+	errContent := oneLine(result.Content)
+	tag := sty.Tool.ErrorTag.Render("ERROR")
+	msgStyle := sty.Tool.ErrorMessage
+	if isExpectedToolRefusal(errContent) {
+		tag = sty.Tool.WarnTag.Render("WARN")
+		msgStyle = sty.Tool.WarnMessage
 	}
-	errTag := sty.Tool.ErrorTag.Render("ERROR")
-	tagWidth := lipgloss.Width(errTag)
+	tagWidth := lipgloss.Width(tag)
+	errContent = shortenPathsToFit(errContent, width-tagWidth-3)
 	errContent = ansi.Truncate(errContent, width-tagWidth-3, "…")
-	return fmt.Sprintf("%s %s", errTag, sty.Tool.ErrorMessage.Render(errContent))
+	return fmt.Sprintf("%s %s", tag, msgStyle.Render(errContent))
 }
 
 // toolIcon returns the status icon for a tool call.
