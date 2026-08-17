@@ -102,7 +102,13 @@ func TestTaskManager_NoPermissionRelayForParentWorkspace(t *testing.T) {
 	// Capture every permission request the stream carries until the request
 	// is answered. With no relay there is exactly one.
 	seen := 0
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(10 * time.Second)
+	// quiet is armed only once the first copy has landed, and a nil channel
+	// blocks forever until then. An idle window that could also fire before
+	// anything arrived would read "no duplicate" as "nothing at all" —
+	// which is how this failed on a loaded CI runner, asserting 1 == 0
+	// against a request that simply had not been published yet.
+	var quiet <-chan time.Time
 	for {
 		select {
 		case ev := <-events:
@@ -113,11 +119,10 @@ func TestTaskManager_NoPermissionRelayForParentWorkspace(t *testing.T) {
 				// the request does not hang, then keep watching briefly for
 				// a duplicate.
 				parentApp.Permissions().Grant(permission.PermissionRequest{SessionID: st.SessionID})
+				quiet = time.After(150 * time.Millisecond)
 			}
 		case <-granted:
-		// Give a duplicate relay copy a short window to land after the
-		// request resolved, then stop.
-		case <-time.After(150 * time.Millisecond):
+		case <-quiet:
 			require.Equal(t, 1, seen,
 				"a task's request must reach the parent stream exactly once - a relay would double it")
 			return
