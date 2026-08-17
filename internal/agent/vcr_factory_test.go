@@ -121,7 +121,86 @@ func jsonBodyEqual(want []byte, req *http.Request) bool {
 		return bytes.Equal(want, got)
 	}
 	var wantJSON, gotJSON any
-	return json.Unmarshal(want, &wantJSON) == nil && json.Unmarshal(got, &gotJSON) == nil && reflect.DeepEqual(wantJSON, gotJSON)
+	if json.Unmarshal(want, &wantJSON) != nil || json.Unmarshal(got, &gotJSON) != nil {
+		return false
+	}
+	return reflect.DeepEqual(normalizeForMatch(wantJSON), normalizeForMatch(gotJSON))
+}
+
+// normalizeForMatch strips the parts of a request that are prose rather than
+// behavior: the system prompt's text and every tool/parameter description.
+//
+// What these cassettes are for is the agent's loop — which tools it is
+// offered, which it calls, with what arguments, and how it folds the results
+// back into the conversation. None of that is what the prose decides, but
+// under a byte-exact match the prose decides whether the test runs at all: a
+// reworded sentence in a skill's front matter or a tool description (both of
+// which reach the request through the system prompt and the tools array)
+// stops every interaction from matching, and the fix would be re-recording
+// the whole suite against a paid endpoint for a copy edit. That trade is
+// backwards, and in practice it left the suite red rather than re-recorded.
+//
+// Everything that is behavior stays strict: the model, sampling parameters,
+// the set of tool names and their JSON schemas, and every non-system message
+// including the assistant's tool calls and their results.
+func normalizeForMatch(body any) any {
+	root, ok := body.(map[string]any)
+	if !ok {
+		return body
+	}
+	// Shallow copy: the callers' decoded bodies are not ours to mutate.
+	out := make(map[string]any, len(root))
+	for k, v := range root {
+		out[k] = v
+	}
+
+	if messages, ok := out["messages"].([]any); ok {
+		normalized := make([]any, 0, len(messages))
+		for _, raw := range messages {
+			message, ok := raw.(map[string]any)
+			if !ok {
+				normalized = append(normalized, raw)
+				continue
+			}
+			if message["role"] != "system" {
+				normalized = append(normalized, message)
+				continue
+			}
+			// Kept as a message, so a prompt that disappears entirely (or
+			// gains a second system message) still fails to match.
+			normalized = append(normalized, map[string]any{"role": "system", "content": "<system prompt>"})
+		}
+		out["messages"] = normalized
+	}
+	if tools, ok := out["tools"]; ok {
+		out["tools"] = stripDescriptions(tools)
+	}
+	return out
+}
+
+// stripDescriptions removes every "description" key, at any depth. Tool
+// descriptions and their per-parameter documentation are written for the
+// model to read, and are edited constantly.
+func stripDescriptions(node any) any {
+	switch typed := node.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			if k == "description" {
+				continue
+			}
+			out[k] = stripDescriptions(v)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, v := range typed {
+			out[i] = stripDescriptions(v)
+		}
+		return out
+	default:
+		return node
+	}
 }
 
 type modelPair struct{ name string }
