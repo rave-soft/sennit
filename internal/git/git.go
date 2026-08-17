@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -240,19 +241,113 @@ func WorktreeAdd(ctx context.Context, repo, path, newBranch, base string) error 
 // WorktreeRemove removes the worktree at path and prunes stale worktree
 // metadata. If force is true, uncommitted changes and untracked files in
 // the worktree are discarded without complaint.
+//
+// A forced remove restores write permission on the worktree's directories
+// first. Anything a thread builds can leave read-only directories behind —
+// Go's module cache marks every package directory 0555, and a thread whose
+// GOMODCACHE points inside its own worktree fills it with thousands of
+// them — and git cannot unlink through a directory it may not write to.
+//
+// That has to happen before git runs, because git gives us exactly one
+// attempt: it deletes the worktree's administrative directory under
+// .git/worktrees *before* it deletes the working files, so a run that dies
+// on a read-only directory leaves a full worktree on disk that git has
+// already forgotten. No later git command will touch it, a retry reports
+// only "is not a working tree", and the directory leaks permanently. The
+// fallback below cleans up a corpse left by an earlier version, but the
+// chmod is what keeps one from being created.
 func WorktreeRemove(ctx context.Context, repo, path string, force bool) error {
+	if force {
+		// Best effort. If the permissions cannot be fixed, git's own
+		// error is the more informative one to report, so failures here
+		// are deliberately not surfaced.
+		makeDirsWritable(path)
+	}
 	args := []string{"worktree", "remove"}
 	if force {
 		args = append(args, "--force")
 	}
 	args = append(args, path)
 	if _, err := run(ctx, repo, args...); err != nil {
-		return fmt.Errorf("git: worktree remove: %w", err)
+		// Only a forced remove is entitled to delete the directory
+		// itself, and only once removeDeregistered has confirmed it is
+		// a worktree of this repo that git has already given up on.
+		if !force || !removeDeregistered(ctx, repo, path) {
+			return fmt.Errorf("git: worktree remove: %w", err)
+		}
 	}
 	if _, err := run(ctx, repo, "worktree", "prune"); err != nil {
 		return fmt.Errorf("git: worktree prune: %w", err)
 	}
 	return nil
+}
+
+// makeDirsWritable adds owner write permission to every directory at or
+// below root, so that their entries can be unlinked. Only directories are
+// touched: unlinking a file needs write permission on its parent, not on
+// the file, so a read-only file is no obstacle and is left as it is.
+//
+// Symlinks are never followed — [filepath.WalkDir] reports them as
+// non-directory entries — so this cannot reach outside root.
+func makeDirsWritable(root string) {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			// A directory that cannot be read is one this walk cannot
+			// fix; let git report what it means for the removal.
+			return nil //nolint:nilerr // best effort, see the doc comment
+		}
+		info, err := d.Info()
+		if err != nil || info.Mode().Perm()&0o200 != 0 {
+			return nil
+		}
+		// 0o300 rather than 0o200: a directory also needs the execute
+		// bit to be traversed, and a mode like 0o444 has neither.
+		_ = os.Chmod(path, info.Mode().Perm()|0o300)
+		return nil
+	})
+}
+
+// removeDeregistered deletes the directory at path when it is the remains
+// of a worktree of repo that git has already deregistered, and reports
+// whether it did. See [WorktreeRemove] for how that state comes about.
+//
+// The guard is deliberately narrow, because the outcome is an unrecoverable
+// delete of whatever is at path. All of the following must hold: path holds
+// a .git file (not a directory — that would be a repository in its own
+// right, never a worktree), it names a gitdir under this repo's own
+// worktrees directory, and that gitdir no longer exists. The last condition
+// is what distinguishes a corpse from a live worktree whose removal failed
+// for some other reason, such as an unmerged branch: while git still knows
+// about a worktree, its administrative directory is still there.
+func removeDeregistered(ctx context.Context, repo, path string) bool {
+	gitFile, err := os.Lstat(filepath.Join(path, ".git"))
+	if err != nil || !gitFile.Mode().IsRegular() {
+		return false
+	}
+	content, err := os.ReadFile(filepath.Join(path, ".git"))
+	if err != nil {
+		return false
+	}
+	gitDir, ok := strings.CutPrefix(strings.TrimSpace(string(content)), "gitdir: ")
+	if !ok {
+		return false
+	}
+	// The common dir, not --git-dir: called from inside a worktree the
+	// latter points at that worktree's own administrative directory,
+	// while worktrees are always registered under the shared one.
+	commonDir, err := run(ctx, repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return false
+	}
+	worktrees := filepath.Join(commonDir, "worktrees") + string(filepath.Separator)
+	if !strings.HasPrefix(filepath.Clean(gitDir)+string(filepath.Separator), worktrees) {
+		return false
+	}
+	if _, err := os.Stat(gitDir); !os.IsNotExist(err) {
+		return false
+	}
+	makeDirsWritable(path)
+	return os.RemoveAll(path) == nil
 }
 
 // DeleteBranch deletes the local branch name. If force is true, the branch
