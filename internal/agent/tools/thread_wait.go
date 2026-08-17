@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"slices"
@@ -27,8 +28,16 @@ var activeThreadStatuses = []string{"pending", "running", "merging"}
 
 type ThreadWaitParams struct {
 	IDs            []string `json:"ids,omitempty" description:"Thread IDs or names to wait for (default: all)"`
-	TimeoutSeconds int      `json:"timeout_seconds,omitempty" description:"Give up after this many seconds (default: no timeout)"`
+	TimeoutSeconds int      `json:"timeout_seconds,omitempty" description:"Give up after this many seconds (default: 600; negative for no timeout)"`
 }
+
+// defaultThreadWaitTimeout bounds a wait that named no timeout of its own.
+// An unbounded wait rests on two things ending it — the user typing, and
+// the turn being canceled — and a thread that hangs with neither happening
+// parks the turn for as long as the process lives. Ten minutes is longer
+// than the threads worth waiting on together take to settle, and short
+// enough that a stuck one surfaces as a report rather than as silence.
+const defaultThreadWaitTimeout = 10 * time.Minute
 
 // NewThreadWaitTool creates the thread_wait tool. It blocks the tool call
 // until every named thread (or, with no ids, every thread) leaves the
@@ -46,9 +55,15 @@ func NewThreadWaitTool(manager ThreadManager) fantasy.AgentTool {
 		ThreadWaitToolName,
 		renderToolDescription(threadWaitDescriptionTpl),
 		func(ctx context.Context, params ThreadWaitParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			var timeout time.Duration
-			if params.TimeoutSeconds > 0 {
+			// Zero is "said nothing", not "wait forever": bound it. A
+			// negative value is the explicit opt-out for a caller that
+			// really does want to block indefinitely.
+			timeout := defaultThreadWaitTimeout
+			switch {
+			case params.TimeoutSeconds > 0:
 				timeout = time.Duration(params.TimeoutSeconds) * time.Second
+			case params.TimeoutSeconds < 0:
+				timeout = 0
 			}
 
 			// A wait is the one thing an agent does that is not work: the
@@ -85,22 +100,47 @@ func NewThreadWaitTool(manager ThreadManager) fantasy.AgentTool {
 				return fantasy.NewTextResponse(interruptedWaitReport(ctx, manager, params.IDs)), nil
 			default:
 			}
+			// A timeout now happens by default rather than only when the
+			// caller asked for one, so say what it means. Left an error
+			// (the wait did not get what it waited for), but with the
+			// state the model needs to decide something other than
+			// waiting again.
+			if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+				return fantasy.NewTextErrorResponse(timedOutWaitReport(ctx, manager, params.IDs, timeout)), nil
+			}
 			return fantasy.NewTextErrorResponse(err.Error()), nil
 		},
 	)
 }
 
 // interruptedWaitReport describes the wait that was cut short, naming the
-// threads still going. A failure to list them is not worth surfacing as a
-// tool error — the wait ending early is the news, and the model can ask for
-// thread status itself.
+// threads still going.
 func interruptedWaitReport(ctx context.Context, manager ThreadManager, ids []string) string {
 	const lead = "Stopped waiting: the user sent a message. Answer them now; " +
 		"the threads keep running and report when they finish."
 
+	return withStillGoing(lead, activeThreadNames(ctx, manager, ids))
+}
+
+// timedOutWaitReport describes a wait that ran out of time. The threads are
+// still running and still report themselves, so the one thing this must not
+// leave sounding reasonable is calling the same wait again and burning
+// another timeout on it.
+func timedOutWaitReport(ctx context.Context, manager ThreadManager, ids []string, timeout time.Duration) string {
+	lead := fmt.Sprintf("Waited %s and gave up; the threads did not all settle. "+
+		"They keep running and report when they finish, so end your turn rather "+
+		"than waiting again — unless you genuinely cannot continue until they land, "+
+		"in which case wait again with a longer timeout_seconds.", timeout)
+	return withStillGoing(lead, activeThreadNames(ctx, manager, ids))
+}
+
+// activeThreadNames names the threads in scope that are still going. A
+// failure to list them is not worth surfacing as a tool error — the wait
+// ending is the news, and the model can ask for thread status itself.
+func activeThreadNames(ctx context.Context, manager ThreadManager, ids []string) []string {
 	threads, err := manager.List(ctx)
 	if err != nil {
-		return lead
+		return nil
 	}
 
 	var active []string
@@ -117,6 +157,10 @@ func interruptedWaitReport(ctx context.Context, manager ThreadManager, ids []str
 		}
 		active = append(active, fmt.Sprintf("%s (%s)", name, t.Status))
 	}
+	return active
+}
+
+func withStillGoing(lead string, active []string) string {
 	if len(active) == 0 {
 		return lead
 	}

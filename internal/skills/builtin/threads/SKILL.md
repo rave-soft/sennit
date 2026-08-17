@@ -76,16 +76,31 @@ the DST boundary, keep the exported API unchanged" is.
 1. `thread_create` once per independent chunk of work. Leave `merge_policy`
    at its default (`auto`) unless the user wants to review before merging
    — see [Manual merge](#manual-merge-policy) below.
-2. `thread_wait` (with the returned IDs, or no `ids` for all of them) to
-   block until every thread leaves pending/running/merging. Use
-   `timeout_seconds` if you don't want to wait indefinitely.
-3. `thread_status` per thread once `thread_wait` returns, to see how each
-   one actually landed — `thread_wait` only tells you they've settled, not
-   into what state.
+2. **Then finish your turn.** Say what you launched and stop. A thread's
+   outcome is delivered to you on its own the moment it settles — you are
+   woken with it, one thread at a time, and `thread_status` on that thread
+   tells you how it actually landed. Nothing needs to be polled or waited
+   on to find that out, and handling each thread as it arrives beats
+   sitting until the slowest one is done.
 
-Do not poll with `bash sleep` instead: it costs a turn, tells you nothing
-when it returns, and a thread that finishes one second in still leaves you
-sitting there. `thread_wait` returns the moment the threads settle.
+Do not poll with `bash sleep`: it costs a turn, tells you nothing when it
+returns, and the threads were going to reach you without it.
+
+### When to block instead
+
+`thread_wait` (with the returned IDs, or no `ids` for all of them) blocks
+until every named thread leaves pending/running/merging. It is for the one
+case the arriving-outcome path does not cover: **you cannot do anything
+useful until several threads have all settled together** — comparing their
+results against each other, merging them in a fixed order, reviewing the
+combined diff. Waiting on a single thread is never right; its outcome was
+already coming to you.
+
+It gives up after ten minutes by default (`timeout_seconds` to change that).
+A timeout is not a reason to wait again — the threads are still running and
+still report themselves, so end your turn unless you truly cannot proceed
+without them. And a message from the user ends the wait immediately: answer
+them, the threads keep going.
 
 A running thread is not steerable. `thread_send` is not in the default tool
 set, and where it is enabled it does not interrupt anything: a thread that

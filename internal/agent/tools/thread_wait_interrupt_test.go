@@ -104,6 +104,55 @@ func TestThreadWait_TimeoutStillFails(t *testing.T) {
 	require.NotContains(t, resp.Content, "the user sent a message")
 }
 
+// TestThreadWait_TimeoutSaysWhatToDoNext: a timeout is now the default
+// ending, not something the caller asked for, so "context deadline
+// exceeded" is not enough — the report has to name what is still going and
+// steer away from immediately waiting again.
+func TestThreadWait_TimeoutSaysWhatToDoNext(t *testing.T) {
+	t.Parallel()
+
+	ctx := tools.WithUserInput(t.Context(), func() <-chan struct{} { return make(chan struct{}) })
+	mgr := &blockingThreadManager{threads: []tools.ThreadInfo{
+		{ID: "t1", Name: "alpha", Status: "running"},
+		{ID: "t2", Name: "beta", Status: "merged"},
+	}}
+
+	resp := runWaitTool(t, ctx, mgr, tools.ThreadWaitParams{TimeoutSeconds: 1})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "1s")
+	require.Contains(t, resp.Content, "end your turn")
+	require.Contains(t, resp.Content, "alpha (running)")
+	require.NotContains(t, resp.Content, "beta")
+}
+
+// TestThreadWait_NoTimeoutGivenIsStillBounded: an unbounded wait rests
+// entirely on the user typing or the turn being canceled, so a thread that
+// hangs with neither happening would park the turn indefinitely. Saying
+// nothing gets the default bound; only a negative value opts out.
+func TestThreadWait_NoTimeoutGivenIsStillBounded(t *testing.T) {
+	t.Parallel()
+
+	mgr := &recordingWaitManager{}
+	runWaitTool(t, t.Context(), mgr, tools.ThreadWaitParams{})
+	require.Equal(t, 10*time.Minute, mgr.timeout)
+
+	unbounded := &recordingWaitManager{}
+	runWaitTool(t, t.Context(), unbounded, tools.ThreadWaitParams{TimeoutSeconds: -1})
+	require.Zero(t, unbounded.timeout, "a negative timeout is the explicit opt-out")
+}
+
+// recordingWaitManager settles immediately and remembers the timeout it was
+// handed, which is the thing under test.
+type recordingWaitManager struct {
+	tools.ThreadManager
+	timeout time.Duration
+}
+
+func (m *recordingWaitManager) Wait(_ context.Context, _ []string, timeout time.Duration) error {
+	m.timeout = timeout
+	return nil
+}
+
 // TestThreadWait_CancelledTurnIsNotAnInterrupt: pressing escape cancels the
 // whole turn, which is a different thing from typing a follow-up — it must
 // not be reported as "answer the user now".

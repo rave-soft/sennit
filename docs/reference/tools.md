@@ -102,11 +102,14 @@ The `task_*` tools disappear when `options.background_agents` is `false`.
 > TUI's thread view is a separate path and is always available.
 
 > [!NOTE]
-> A single thread's completion arrives on its own, so waiting on one is rarely
-> needed. `thread_wait` is in the default set for the case that is not covered
-> that way: holding work until *several* threads have all settled. Without it,
-> an agent in that position falls back to sleeping in `bash`, which costs a
-> turn and tells it nothing.
+> A thread's completion arrives on its own — the agent is woken with it as
+> each thread settles — so waiting is rarely needed at all. `thread_wait` is
+> in the default set for the case that is not covered that way: holding work
+> until *several* threads have all settled together, before merging or
+> reviewing their combined output. Without it, an agent in that position falls
+> back to sleeping in `bash`, which costs a turn and tells it nothing. The
+> wait gives up after ten minutes unless `timeout_seconds` says otherwise
+> (negative for no timeout), and a message from the user ends it early.
 
 ## MCP
 
