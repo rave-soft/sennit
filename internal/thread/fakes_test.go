@@ -131,17 +131,26 @@ func testTranslateCtx(ctx context.Context) context.Context {
 	if AgentDispatchFromContext(ctx) {
 		ctx = agent.WithAgentDispatch(ctx)
 	}
-	if onFolded, ok := SteeringFromContext(ctx); ok {
+	if onDispatch, ok := SteeringFromContext(ctx); ok {
 		ctx = agent.WithSteering(ctx, func(outcome agent.SteerOutcome) {
-			if onFolded != nil {
-				onFolded(outcome != agent.SteerRan)
+			if onDispatch == nil {
+				return
+			}
+			switch outcome {
+			case agent.SteerEnqueued:
+				onDispatch(DispatchFolded)
+			case agent.SteerCanceled:
+				onDispatch(DispatchCancelled)
+			default:
+				onDispatch(DispatchRan)
 			}
 		})
 	}
 	return ctx
 }
 
-func (a *testCoordinatorAdapter) Run(ctx context.Context, sessionID, prompt string, attachments []Attachment) error {
+func (a *testCoordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string, attachments []Attachment) error {
+	ar, _ := accept.(*agent.AcceptedRun)
 	msgAttachments := make([]message.Attachment, 0, len(attachments))
 	for _, at := range attachments {
 		msgAttachments = append(msgAttachments, message.Attachment{
@@ -151,13 +160,7 @@ func (a *testCoordinatorAdapter) Run(ctx context.Context, sessionID, prompt stri
 			Content:  at.Content,
 		})
 	}
-	_, err := a.inner.Run(testTranslateCtx(ctx), sessionID, prompt, msgAttachments...)
-	return err
-}
-
-func (a *testCoordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string) error {
-	ar, _ := accept.(*agent.AcceptedRun)
-	_, err := a.inner.RunAccepted(testTranslateCtx(ctx), ar, sessionID, prompt)
+	_, err := a.inner.RunAccepted(testTranslateCtx(ctx), ar, sessionID, prompt, msgAttachments...)
 	return err
 }
 
@@ -468,6 +471,19 @@ type fakeCoordinator struct {
 	// session in the state lifecycle.send reports as a queued delivery.
 	busy   bool
 	queued int
+	// cancelOnEntry makes a steering dispatch resolve the way the real
+	// coordinator resolves one that a cancel already covered when it
+	// arrived: neither run nor folded. Only reachable because the dispatch
+	// reserves acceptance — see agent.SteerCanceled.
+	cancelOnEntry bool
+}
+
+// setCancelOnEntry makes every subsequent steering dispatch land on the
+// cancelled branch.
+func (f *fakeCoordinator) setCancelOnEntry(v bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelOnEntry = v
 }
 
 // setQueue makes the fake report sessions as mid-turn with queued prompts
@@ -543,16 +559,23 @@ type fakeRun struct {
 	origin     message.Origin
 }
 
-// Run records the dispatch and, for a steering call, reproduces the real
-// dispatch decision sessionAgent.run would have taken under its
-// per-session mutex: a busy session folds the call into the turn in flight
-// (dropping its RunID on the way into the queue, exactly as the real one
-// does), an idle session runs it as its own turn under that RunID. The
-// hook fires after the fake's own lock is released, matching production's
-// "the hook must not take a lock this call already holds".
-func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+// dispatch records a dispatch and, for a steering call, reproduces the
+// real decision sessionAgent.run would have taken under its per-session
+// mutex: a busy session folds the call into the turn in flight (dropping
+// its RunID on the way into the queue, exactly as the real one does), an
+// idle session runs it as its own turn under that RunID. The hook fires
+// after the fake's own lock is released, matching production's "the hook
+// must not take a lock this call already holds".
+func (f *fakeCoordinator) dispatch(ctx context.Context, sessionID, prompt string) error {
 	onDispatch, steering := agent.SteeringFromContext(ctx)
 	f.mu.Lock()
+	if steering && f.cancelOnEntry {
+		f.mu.Unlock()
+		if onDispatch != nil {
+			onDispatch(agent.SteerCanceled)
+		}
+		return nil
+	}
 	runID := agent.RunIDFromContext(ctx)
 	folded := steering && f.busy
 	if folded {
@@ -574,23 +597,17 @@ func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ .
 			onDispatch(agent.SteerRan)
 		}
 	}
-	return nil, err
+	return err
+}
+
+func (f *fakeCoordinator) Run(ctx context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+	return nil, f.dispatch(ctx, sessionID, prompt)
 }
 
 func (f *fakeCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
 
 func (f *fakeCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
-	f.mu.Lock()
-	f.runs = append(f.runs, fakeRun{
-		sessionID:  sessionID,
-		prompt:     prompt,
-		runID:      agent.RunIDFromContext(ctx),
-		delegation: permission.DelegationFromContext(ctx),
-		origin:     agent.PromptOriginFromContext(ctx),
-	})
-	err := f.runErr
-	f.mu.Unlock()
-	return nil, err
+	return nil, f.dispatch(ctx, sessionID, prompt)
 }
 
 func (f *fakeCoordinator) CancelAll() {

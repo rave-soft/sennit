@@ -315,7 +315,7 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 	coord := handle.Workspace().Coordinator()
 	accept := coord.BeginAccepted(sessionID)
 	l.goWorker(func() {
-		if err := coord.RunAccepted(WithRunID(ctx, runID), accept, sessionID, prompt); err != nil {
+		if err := coord.RunAccepted(WithRunID(ctx, runID), accept, sessionID, prompt, nil); err != nil {
 			slog.Error("Agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 			// backend.runAgent documents this fallback for pre-execution
 			// failures. Local coordinators do not provide that wrapper.
@@ -429,19 +429,26 @@ func (l *lifecycle) forwardPermissions(ctx context.Context, handle Handle) {
 // from acting on the older run's completion in between.
 func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeState, id, sessionID, msg, runID string, attachments []Attachment, disp SendDisposition) (SendDisposition, error) {
 	var (
-		decided = make(chan bool, 1)
+		decided = make(chan DispatchOutcome, 1)
 		failed  = make(chan error, 1)
-		folded  atomic.Bool
+		ranOwn  atomic.Bool
 	)
-	steerCtx := WithSteering(WithRunID(bgCtx, runID), func(f bool) {
-		folded.Store(f)
+	steerCtx := WithSteering(WithRunID(bgCtx, runID), func(outcome DispatchOutcome) {
+		ranOwn.Store(outcome == DispatchRan)
 		select {
-		case decided <- f:
+		case decided <- outcome:
 		default:
 		}
 	})
+	coord := rt.handle.Workspace().Coordinator()
+	// Reserved before dispatch for the reason startRun reserves: this call
+	// reaches the coordinator on a goroutine, and a cancel arriving in
+	// between must resolve to a definite answer rather than leaving a run
+	// unaccounted for. The reservation is what makes DispatchCancelled
+	// reachable at all.
+	accept := coord.BeginAccepted(sessionID)
 	l.goWorker(func() {
-		err := rt.handle.Workspace().Coordinator().Run(steerCtx, sessionID, msg, attachments)
+		err := coord.RunAccepted(steerCtx, accept, sessionID, msg, attachments)
 		select {
 		case failed <- err:
 		default:
@@ -452,21 +459,35 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 		slog.Error("Steered agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 		// Same fallback as the queued dispatch above, and for the same
 		// reason — but only for a message that actually became a run of
-		// its own. A folded message never owned runID (the coordinator
-		// drops it when it folds), so synthesizing a completion for it
-		// would either match nothing or, worse, tear down a workspace
-		// whose turn is still running.
-		if !folded.Load() {
+		// its own. A folded or cancelled dispatch never owned runID (the
+		// coordinator drops a folded call's RunID, and a cancelled one
+		// publishes its own terminal event), so synthesizing a completion
+		// for it would either match nothing or, worse, tear down a
+		// workspace whose turn is still running.
+		if ranOwn.Load() {
 			l.handleRunComplete(bgCtx, id, RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
 		}
 	})
 
 	select {
-	case f := <-decided:
-		if f {
+	case outcome := <-decided:
+		switch outcome {
+		case DispatchFolded:
 			// Folded into the turn in flight: that turn's completion is
 			// still the one this entity ends on, so leave rt.runID alone.
 			return SendDisposition{Steered: true}, nil
+		case DispatchCancelled:
+			// A cancel got here first. Nothing ran, nothing folded, and
+			// nothing is owed an owner — which is exactly what reserving
+			// acceptance buys: this is a definite answer, not a run that
+			// may or may not still appear.
+			//
+			// The caller moved the delegation to running before dispatching
+			// (it had no way to know this would happen), and since no run
+			// exists, no completion will ever move it back. Rest it here
+			// instead: a live workspace with nothing in flight is idle.
+			l.restIdleAfterPersonTurn(bgCtx, id, RunComplete{SessionID: sessionID})
+			return SendDisposition{}, nil
 		}
 		// It became the active turn, so it owns the workspace from here.
 		// Still under opMu, so the run it displaced (if any) has not been
@@ -631,8 +652,15 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		c.mu.Lock()
 		rt.runID = runID
 		c.mu.Unlock()
+		// Reserved before dispatch, exactly as startRun and steer do: a
+		// follow-up sent to a delegation can be cancelled the moment after
+		// it is sent, and the reservation is what keeps that cancel from
+		// landing in the gap between this goroutine being scheduled and
+		// the coordinator admitting the call.
+		coord := rt.handle.Workspace().Coordinator()
+		accept := coord.BeginAccepted(sessionID)
 		l.goWorker(func() {
-			if err := rt.handle.Workspace().Coordinator().Run(WithRunID(bgCtx, runID), sessionID, msg, nil); err != nil {
+			if err := coord.RunAccepted(WithRunID(bgCtx, runID), accept, sessionID, msg, nil); err != nil {
 				slog.Error("Queued agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 				// Mirror startRun's fallback for pre-execution failures so
 				// the workspace is not stranded on a run that never

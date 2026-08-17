@@ -135,7 +135,7 @@ func TestCoordinatorAdapter_TranslateCtxCarriesDispatchTag(t *testing.T) {
 	adapter := NewCoordinatorAdapter(coord)
 
 	ctx := thread.WithAgentDispatch(thread.WithRunID(context.Background(), "run-123"))
-	require.NoError(t, adapter.Run(ctx, "sess", "do it", nil))
+	require.NoError(t, adapter.RunAccepted(ctx, nil, "sess", "do it", nil))
 
 	require.Equal(t, message.OriginAgent, seenOrigin.Load().(message.Origin),
 		"the agent-dispatch origin tag must be re-applied on the agent's own key")
@@ -144,14 +144,15 @@ func TestCoordinatorAdapter_TranslateCtxCarriesDispatchTag(t *testing.T) {
 }
 
 // tagRecodingCoordinator is an agent.Coordinator that records the context
-// origin/run-id it observes in Run, for the translateCtx test. It embeds
-// the interface (nil) so it only implements the one method under test.
+// origin/run-id it observes in RunAccepted — the port's only dispatch —
+// for the translateCtx test. It embeds the interface (nil) so it only
+// implements the one method under test.
 type tagRecodingCoordinator struct {
 	agent.Coordinator
 	run func(ctx context.Context)
 }
 
-func (c *tagRecodingCoordinator) Run(ctx context.Context, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
+func (c *tagRecodingCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun, sessionID, prompt string, _ ...message.Attachment) (*fantasy.AgentResult, error) {
 	c.run(ctx)
 	return nil, nil
 }

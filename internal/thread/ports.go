@@ -69,27 +69,52 @@ func AgentDispatchFromContext(ctx context.Context) bool {
 // copies it onto the agent's own steering key.
 type steeringContextKey struct{}
 
+// DispatchOutcome is what a coordinator did with a steering dispatch, as
+// reported through [WithSteering]'s hook. It is the domain's spelling of
+// agent.SteerOutcome; the composition seam maps the three one-to-one.
+//
+// Only [DispatchRan] produces a run the lifecycle can own — that is the
+// whole reason this is reported at all, rather than inferred afterwards
+// from a queue probe that would race the turn it is about.
+type DispatchOutcome int
+
+const (
+	// DispatchRan means the session was idle and the prompt became its
+	// own run, under the RunID the dispatching context carried.
+	DispatchRan DispatchOutcome = iota
+	// DispatchFolded means a turn was already in flight and the prompt
+	// folded into its next step, extending that turn instead of
+	// sequencing a new one. It has no RunID of its own and produces no
+	// terminal event: the turn it joined still reports for both.
+	DispatchFolded
+	// DispatchCancelled means a cancel covering this dispatch was already
+	// recorded when it reached the coordinator, so it neither ran nor
+	// folded. Reachable only because the dispatch reserves acceptance
+	// (see Coordinator.BeginAccepted) — which is the point of reserving:
+	// a cancel racing a dispatch resolves to a definite answer instead of
+	// an unaccounted-for run.
+	DispatchCancelled
+)
+
 // WithSteering returns ctx tagged so the prompt dispatched through it
 // folds into the target session's turn in flight, if there is one,
 // instead of queueing behind it. It is the thread-domain spelling of
 // agent.WithSteering.
 //
-// onFolded is called once with the decision the coordinator reached: true
-// when the prompt folded into a turn already running, false when the
-// session was idle and the prompt became its own run under the ctx's
-// RunID. The distinction is not cosmetic here — only the second case
-// produces a run whose completion the lifecycle can own, which is why
-// [lifecycle.send] installs a runtime's RunID only after seeing it. The
-// hook runs under the coordinator's dispatch mutex and must not block.
-func WithSteering(ctx context.Context, onFolded func(folded bool)) context.Context {
-	return context.WithValue(ctx, steeringContextKey{}, onFolded)
+// onDispatch is called once with the decision the coordinator reached,
+// from under its own dispatch mutex and before any turn starts streaming
+// — the moment [lifecycle.steer] needs it, since it decides from that
+// whether the delegation's workspace has a new owner. The hook must not
+// block.
+func WithSteering(ctx context.Context, onDispatch func(DispatchOutcome)) context.Context {
+	return context.WithValue(ctx, steeringContextKey{}, onDispatch)
 }
 
 // SteeringFromContext returns the hook set by [WithSteering] and whether
 // ctx was tagged at all. Exported so the composition seam can re-apply the
 // tag to the agent's own steering context key.
-func SteeringFromContext(ctx context.Context) (func(folded bool), bool) {
-	v, ok := ctx.Value(steeringContextKey{}).(func(folded bool))
+func SteeringFromContext(ctx context.Context) (func(DispatchOutcome), bool) {
+	v, ok := ctx.Value(steeringContextKey{}).(func(DispatchOutcome))
 	return v, ok
 }
 
@@ -176,20 +201,22 @@ type Attachment struct {
 // completion into a parent session. Declared here, on the consumer side, so
 // internal/thread stays free of internal/agent.
 //
-// RunAccepted takes no attachments: only the person attaches files, and
-// the person's dispatch is never an accepted one. accept is an opaque
-// accept handle ([BeginAccepted]'s result) carried opaquely so the port
-// never names the agent's AcceptedRun type.
+// There is deliberately no unreserved dispatch here. Every prompt this
+// package sends reaches the coordinator on a goroutine, so every one of
+// them can race a cancel between being scheduled and being admitted;
+// reserving acceptance first is what makes that race resolve to a
+// definite answer rather than a run nobody accounted for. A port that
+// also offered a bare Run would be offering that hole back.
 type Coordinator interface {
-	// Run dispatches prompt into sessionID as a fire-and-forget run whose
-	// completion is delivered through the workspace's RunCompletionBroker.
-	// err is non-nil only for a pre-execution failure (the caller then
-	// synthesizes the terminal event itself). attachments is nil for every
-	// dispatch this package makes on an agent's behalf; see [Attachment].
-	Run(ctx context.Context, sessionID, prompt string, attachments []Attachment) error
-	// RunAccepted runs a call already reserved by BeginAccepted, for the
-	// same fire-and-forget semantics. accept is the [BeginAccepted] result.
-	RunAccepted(ctx context.Context, accept any, sessionID, prompt string) error
+	// RunAccepted dispatches prompt into sessionID as a fire-and-forget
+	// run, reserved by an earlier [BeginAccepted], whose completion is
+	// delivered through the workspace's RunCompletionBroker. err is
+	// non-nil only for a pre-execution failure (the caller then
+	// synthesizes the terminal event itself). accept is the
+	// [BeginAccepted] result, carried opaquely so the port never names the
+	// agent's AcceptedRun type. attachments is nil for every dispatch this
+	// package makes on an agent's behalf; see [Attachment].
+	RunAccepted(ctx context.Context, accept any, sessionID, prompt string, attachments []Attachment) error
 	// BeginAccepted reserves acceptance for sessionID before a run is
 	// dispatched, so cancellation cannot leave a run unaccounted for
 	// between scheduling and coordinator admission.

@@ -16,7 +16,7 @@ import (
 // internal/config and internal/db), so the domain declares its own
 // Coordinator port and this seam maps between the two spellings.
 //
-// The mapping is behavior-preserving: Run/RunAccepted forward the prompt
+// The mapping is behavior-preserving: RunAccepted forwards the prompt
 // (with the attachments only the person's own dispatch carries — see
 // thread.Attachment) and discard the agent result the domain never reads;
 // the per-run RunID, the agent-dispatch origin tag and the steering tag the
@@ -52,29 +52,33 @@ func (a *coordinatorAdapter) translateCtx(ctx context.Context) context.Context {
 	if thread.AgentDispatchFromContext(ctx) {
 		ctx = agent.WithAgentDispatch(ctx)
 	}
-	if onFolded, ok := thread.SteeringFromContext(ctx); ok {
-		// The domain's hook speaks in "did it fold", the agent's in
-		// SteerOutcome; SteerEnqueued is the folding branch for a steering
-		// call, since the agent drops such a call's RunID as it enqueues
-		// (see agent.SessionAgentCall.Steering). SteerCanceled is
-		// unreachable from this path — it needs an Accepted handle, which
-		// the lifecycle's steering dispatch does not take — and reads as
-		// "no run of ours started", the same as folding, for the one
-		// decision the domain makes from this.
+	if onDispatch, ok := thread.SteeringFromContext(ctx); ok {
+		// The two spellings of the same three-way decision map one to one.
+		// SteerEnqueued is the folding branch for a steering call, since
+		// the agent drops such a call's RunID as it enqueues (see
+		// agent.SessionAgentCall.Steering).
 		ctx = agent.WithSteering(ctx, func(outcome agent.SteerOutcome) {
-			if onFolded != nil {
-				onFolded(outcome != agent.SteerRan)
+			if onDispatch == nil {
+				return
+			}
+			switch outcome {
+			case agent.SteerEnqueued:
+				onDispatch(thread.DispatchFolded)
+			case agent.SteerCanceled:
+				onDispatch(thread.DispatchCancelled)
+			default:
+				onDispatch(thread.DispatchRan)
 			}
 		})
 	}
 	return ctx
 }
 
-// runCoordinator is intentionally absent: Run and RunAccepted below each
-// translate the context and forward directly, discarding the agent result
-// the domain never reads and surfacing only the error.
-func (a *coordinatorAdapter) Run(ctx context.Context, sessionID, prompt string, attachments []thread.Attachment) error {
-	_, err := a.inner.Run(a.translateCtx(ctx), sessionID, prompt, toMessageAttachments(attachments)...)
+// RunAccepted translates the context and forwards directly, discarding
+// the agent result the domain never reads and surfacing only the error.
+func (a *coordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string, attachments []thread.Attachment) error {
+	ar, _ := accept.(*agent.AcceptedRun)
+	_, err := a.inner.RunAccepted(a.translateCtx(ctx), ar, sessionID, prompt, toMessageAttachments(attachments)...)
 	return err
 }
 
@@ -95,12 +99,6 @@ func toMessageAttachments(in []thread.Attachment) []message.Attachment {
 		})
 	}
 	return out
-}
-
-func (a *coordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string) error {
-	ar, _ := accept.(*agent.AcceptedRun)
-	_, err := a.inner.RunAccepted(a.translateCtx(ctx), ar, sessionID, prompt)
-	return err
 }
 
 func (a *coordinatorAdapter) BeginAccepted(sessionID string) any {

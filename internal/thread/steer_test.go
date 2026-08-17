@@ -201,3 +201,34 @@ func publishFailure(t *testing.T, a *app.App, sessionID, errText string) {
 	coord.mu.Unlock()
 	a.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: sessionID, RunID: runID, Error: errText})
 }
+
+// A cancel that lands between a person's dispatch being scheduled and the
+// coordinator admitting it is the race the dispatch reserves acceptance
+// for (see Coordinator.BeginAccepted). It must resolve to a definite
+// answer: no run started, so nothing takes the workspace — and the
+// delegation must not be left sitting at running with nothing in flight to
+// ever move it off.
+func TestManager_SendFromPersonCancelledOnEntryRestsAtIdle(t *testing.T) {
+	repo := initRepo(t)
+	mgr, spawner := newTestManager(t, repo)
+
+	st, err := mgr.Create(t.Context(), CreateArgs{Name: "raced", Goal: "do it", MergePolicy: MergeManual})
+	require.NoError(t, err)
+
+	coord := spawner.coordFor(st.WorktreePath)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	goalRunID := runtimeRunID(t, mgr, st.ID)
+	coord.setQueue(false, 0)
+	coord.setCancelOnEntry(true)
+
+	disp, err := mgr.SendFromPerson(t.Context(), st.ID, "never mind")
+	require.NoError(t, err, "a cancelled dispatch is an outcome, not a failure")
+	require.False(t, disp.Steered)
+
+	require.Equal(t, goalRunID, runtimeRunID(t, mgr, st.ID),
+		"nothing ran, so nothing may take the workspace from the run that owns it")
+	got, err := mgr.Get(t.Context(), st.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusIdle, got.Status,
+		"a live workspace with nothing in flight is idle, not running")
+}
