@@ -31,22 +31,27 @@ type LocalSpawner struct {
 	parentAgents func() map[string]config.Agent
 	parentSkills func() []*skills.Skill
 	parentYOLO   func() bool
+	parentModel  func() config.SelectedModel
 }
 
 // NewLocalSpawner returns a ready-to-use LocalSpawner. parentSkills, when
 // non-nil, supplies the parent workspace's skills to every thread it
 // spawns; see skills.DiscoveryConfig.InheritedSkills for why a thread
-// cannot find them on its own.
+// cannot find them on its own. parentModel, when non-nil, is read at every
+// Spawn so a thread runs the model its parent is running right now -- see
+// app.BootstrapOptions.PreferredModel.
 func NewLocalSpawner(
 	parentAgents func() map[string]config.Agent,
 	parentSkills func() []*skills.Skill,
 	parentYOLO func() bool,
+	parentModel func() config.SelectedModel,
 ) *LocalSpawner {
 	return &LocalSpawner{
 		apps:         csync.NewMap[string, *app.App](),
 		parentAgents: parentAgents,
 		parentSkills: parentSkills,
 		parentYOLO:   parentYOLO,
+		parentModel:  parentModel,
 	}
 }
 
@@ -75,11 +80,21 @@ func (s *LocalSpawner) Spawn(ctx context.Context, path string) (thread.Handle, e
 	if s.parentYOLO != nil {
 		yolo = s.parentYOLO()
 	}
+	// Read per Spawn, not once at construction: a thread that is stopped
+	// and started again is a fresh Spawn, and it has to pick up whatever
+	// the parent is running by then.
+	var model *config.SelectedModel
+	if s.parentModel != nil {
+		if m := s.parentModel(); m.Model != "" {
+			model = &m
+		}
+	}
 	boot, err := app.Bootstrap(ctx, path, app.BootstrapOptions{
 		WorkspaceLock:      true,
 		GlobalSkillsMirror: false,
 		InheritedAgents:    inheritedAgents,
 		InheritedSkills:    inheritedSkills,
+		PreferredModel:     model,
 		YOLO:               yolo,
 		ConfineWrites:      true,
 	})

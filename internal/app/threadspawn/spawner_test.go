@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/app"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
@@ -36,7 +37,7 @@ func TestLocalSpawnerInheritsParentYOLO(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Cleanup(func() { db.ResetPool() })
 
-	spawner := NewLocalSpawner(nil, nil, func() bool { return true })
+	spawner := NewLocalSpawner(nil, nil, func() bool { return true }, nil)
 	handle, err := spawner.Spawn(context.Background(), t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
@@ -50,7 +51,7 @@ func TestLocalSpawnerInheritsParentYOLO(t *testing.T) {
 
 func TestLocalSpawnerConfinesWritesToWorktree(t *testing.T) {
 	repo := initRepo(t)
-	spawner := NewLocalSpawner(nil, nil, nil)
+	spawner := NewLocalSpawner(nil, nil, nil, nil)
 
 	handle, err := spawner.Spawn(t.Context(), repo)
 	require.NoError(t, err)
@@ -76,7 +77,7 @@ func TestLocalSpawnerInheritsParentSkills(t *testing.T) {
 		Description:  "Handed down to every thread.",
 		Instructions: "Parent instructions.",
 	}
-	spawner := NewLocalSpawner(nil, func() []*skills.Skill { return []*skills.Skill{parentSkill} }, nil)
+	spawner := NewLocalSpawner(nil, func() []*skills.Skill { return []*skills.Skill{parentSkill} }, nil, nil)
 
 	handle, err := spawner.Spawn(context.Background(), t.TempDir())
 	require.NoError(t, err)
@@ -114,7 +115,7 @@ func TestForwardSkillsToThreadsPushesUpdateToLiveThread(t *testing.T) {
 	t.Cleanup(parent.ShutdownForTest)
 	parent.Skills = skills.NewManager(nil, nil, nil)
 
-	spawner := NewLocalSpawner(nil, nil, nil)
+	spawner := NewLocalSpawner(nil, nil, nil, nil)
 	handle, err := spawner.Spawn(ctx, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
@@ -138,4 +139,54 @@ func TestForwardSkillsToThreadsPushesUpdateToLiveThread(t *testing.T) {
 		}
 		return false
 	}, 5*time.Second, 20*time.Millisecond, "the edit never reached the running thread")
+}
+
+// A thread must run the model the parent workspace is actually running,
+// not the one its config file happens to hold. The parent's selection can
+// be an in-memory override (a session's pinned model, `sennit run
+// --model`) that was never persisted, and a thread bootstraps its own
+// config from disk.
+func TestLocalSpawnerInheritsParentModel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Cleanup(func() { db.ResetPool() })
+
+	parent := config.SelectedModel{Provider: "openai", Model: "gpt-5.6-sol"}
+	spawner := NewLocalSpawner(nil, nil, nil, func() config.SelectedModel { return parent })
+
+	handle, err := spawner.Spawn(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
+
+	lh, ok := handle.(*localHandle)
+	require.True(t, ok)
+	require.Equal(t, parent, lh.app.Config().Model)
+}
+
+// Restarting a thread is a fresh Spawn, so the parent's model is read
+// then -- not captured once when the spawner was built. A thread the user
+// stops and starts again after switching models must come back on the new
+// one.
+func TestLocalSpawnerReadsParentModelPerSpawn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Cleanup(func() { db.ResetPool() })
+
+	current := config.SelectedModel{Provider: "openai", Model: "first"}
+	spawner := NewLocalSpawner(nil, nil, nil, func() config.SelectedModel { return current })
+
+	first, err := spawner.Spawn(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), first.ID())) })
+	require.Equal(t, current, first.(*localHandle).app.Config().Model)
+
+	current = config.SelectedModel{Provider: "anthropic", Model: "second"}
+	second, err := spawner.Spawn(context.Background(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), second.ID())) })
+	require.Equal(t, current, second.(*localHandle).app.Config().Model)
 }

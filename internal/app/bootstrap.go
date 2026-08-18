@@ -31,6 +31,16 @@ type BootstrapOptions struct {
 	// The child workspace's own definitions take precedence.
 	InheritedAgents map[string]config.Agent
 
+	// PreferredModel, when set, overrides the model this workspace runs
+	// on in memory only, before the agent coordinator is built. It is how
+	// a thread inherits the model its parent workspace is actually
+	// running: the parent's own selection may be an in-memory override
+	// (a session's pinned model, `sennit run --model`) that was never
+	// written to the config file this bootstrap reads, so without it a
+	// thread would silently start on the file's model instead -- and
+	// again on every restart.
+	PreferredModel *config.SelectedModel
+
 	// InheritedSkills supplies skills from a parent workspace, for a
 	// child that cannot discover them itself — see
 	// skills.DiscoveryConfig.InheritedSkills. The child workspace's own
@@ -97,6 +107,13 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 	cfg.Overrides().EnabledChannels = opts.Channels
 	if len(opts.InheritedAgents) > 0 {
 		cfg.SetupAgentsWithInherited(opts.InheritedAgents)
+	}
+	// Before New: the agent coordinator is built from the config's model,
+	// so overriding it here means the workspace starts on the inherited
+	// model rather than switching onto it afterwards. An empty model is
+	// "nothing inherited", not "clear the selection".
+	if opts.PreferredModel != nil && opts.PreferredModel.Model != "" {
+		cfg.OverridePreferredModel(*opts.PreferredModel)
 	}
 
 	// ensureDataDir already wraps its own errors with context, so no

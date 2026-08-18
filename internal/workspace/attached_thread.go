@@ -64,6 +64,27 @@ func (w *attachedThreadWorkspace) SubscribeWith(send func(tea.Msg)) func() {
 	return sub.SubscribeWith(send)
 }
 
+// ApplySessionModel is refused for the thread's own session: a thread runs
+// the model its parent workspace is running, and it is handed that model
+// at spawn (see app.BootstrapOptions.PreferredModel). The pin on this
+// session records whichever model the thread happened to run on before —
+// possibly several restarts and model switches ago — so honoring it here
+// would quietly undo the inheritance the moment the person opened the
+// thread's screen, which is the one thing they do before typing into it.
+//
+// Reported as "not switched" rather than as an error: nothing failed, and
+// the caller only uses the bool to decide whether to re-probe the memoized
+// model state, which has not changed.
+//
+// Any other session reachable from here is not the delegation and passes
+// through, matching AgentRun.
+func (w *attachedThreadWorkspace) ApplySessionModel(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID != w.sessionID {
+		return w.Workspace.ApplySessionModel(ctx, sessionID)
+	}
+	return false, nil
+}
+
 // AgentRun routes a turn in the thread's own session through the Manager,
 // which records it as running, owns its completion, and rests the thread
 // at idle when it ends (see thread.Manager.RunFromPerson).

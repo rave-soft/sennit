@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -59,3 +60,40 @@ func (s *subscribeStubWorkspace) SubscribeWith(func(tea.Msg)) func() {
 
 // plainStubWorkspace is a Workspace with no subscription of its own.
 type plainStubWorkspace struct{ Workspace }
+
+// The thread's own session must not drag the thread back onto the model it
+// used to run on: it runs whatever its parent runs, handed down at spawn.
+func TestAttachedThreadWorkspace_IgnoresSessionModelPinForItsOwnSession(t *testing.T) {
+	inner := &applyModelStubWorkspace{}
+	ws := &attachedThreadWorkspace{Workspace: inner, sessionID: "thread-session"}
+
+	switched, err := ws.ApplySessionModel(t.Context(), "thread-session")
+	require.NoError(t, err)
+	require.False(t, switched)
+	require.Empty(t, inner.applied, "the thread's own session must not reach the wrapped workspace")
+}
+
+// Every other session reachable from the thread's screen is not the
+// delegation, so it keeps the ordinary behavior.
+func TestAttachedThreadWorkspace_AppliesSessionModelForOtherSessions(t *testing.T) {
+	inner := &applyModelStubWorkspace{switched: true}
+	ws := &attachedThreadWorkspace{Workspace: inner, sessionID: "thread-session"}
+
+	switched, err := ws.ApplySessionModel(t.Context(), "other-session")
+	require.NoError(t, err)
+	require.True(t, switched)
+	require.Equal(t, []string{"other-session"}, inner.applied)
+}
+
+// applyModelStubWorkspace records the session IDs ApplySessionModel was
+// called with.
+type applyModelStubWorkspace struct {
+	Workspace
+	applied  []string
+	switched bool
+}
+
+func (s *applyModelStubWorkspace) ApplySessionModel(_ context.Context, sessionID string) (bool, error) {
+	s.applied = append(s.applied, sessionID)
+	return s.switched, nil
+}
