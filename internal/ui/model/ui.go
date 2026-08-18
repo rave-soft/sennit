@@ -719,8 +719,17 @@ func (m *UI) checkConfigProblems() tea.Cmd {
 // loadInitialSession loads the initial session if one was specified on startup.
 func (m *UI) loadInitialSession() tea.Cmd {
 	switch {
-	case m.state != uiLanding:
-		// Only load if we're in landing state (i.e., fully configured)
+	case m.state == uiOnboarding || m.state == uiInitialize:
+		// Nothing to load until the workspace is set up: those two states
+		// own the screen and end by moving to one of the states below.
+		//
+		// This used to read "only in uiLanding", which was the same test
+		// while landing was the only other state a UI could start in. It
+		// stopped being the same test once a thread's embedded chat began
+		// opening straight into uiChat when it knows its session
+		// (see New): the load it was opening *for* was then refused here,
+		// so the frame it opened into stayed empty forever. Drilling into
+		// a thread showed a blank screen.
 		return nil
 	case m.sess.initialSessionID != "":
 		return m.requestSessionLoad(m.sess.initialSessionID)

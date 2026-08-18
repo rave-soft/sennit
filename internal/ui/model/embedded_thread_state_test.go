@@ -37,3 +37,35 @@ func TestNewEmbedded_WithoutSessionOpensOnLanding(t *testing.T) {
 
 	require.Equal(t, uiLanding, ui.state)
 }
+
+// Opening straight into the chat frame must not cost the load that frame
+// is waiting for. loadInitialSession used to refuse anything but the
+// landing screen, which silently turned every thread drill-in into a blank
+// screen that never filled.
+func TestLoadInitialSession_DispatchesFromTheChatFrame(t *testing.T) {
+	ws := &cmdDrivingWorkspace{
+		agentReady:          true,
+		sessionsBySessionID: map[string]session.Session{"sess": {ID: "sess", Title: "T"}},
+	}
+
+	ui := New(common.DefaultCommon(context.Background(), ws), "sess", false, WithEmbedded())
+	require.Equal(t, uiChat, ui.state)
+
+	require.NotNil(t, ui.loadInitialSession(),
+		"the frame a thread opens into must still ask for its session")
+}
+
+// The states that own the screen while the workspace is being set up have
+// no session to load yet; they end by moving to one of the others.
+func TestLoadInitialSession_SkippedWhileSettingUp(t *testing.T) {
+	ws := &cmdDrivingWorkspace{
+		agentReady:          true,
+		sessionsBySessionID: map[string]session.Session{"sess": {ID: "sess", Title: "T"}},
+	}
+
+	ui := New(common.DefaultCommon(context.Background(), ws), "sess", false, WithEmbedded())
+	for _, state := range []uiState{uiOnboarding, uiInitialize} {
+		ui.state = state
+		require.Nil(t, ui.loadInitialSession())
+	}
+}
