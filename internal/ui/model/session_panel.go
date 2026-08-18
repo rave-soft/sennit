@@ -353,7 +353,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		return plan
 	}
 
-	if m.surfacesThreads() {
+	if m.panelSurfacesThreads() {
 		active := activeDockThreads(m.threadsDock.cache.value)
 		plan.threadsActive = len(active)
 		plan.threadsExpanded = !m.panel.threadsCollapsed

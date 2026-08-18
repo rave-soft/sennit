@@ -76,3 +76,49 @@ func TestThreadsDock_StatusEventStillOnlyInvalidates(t *testing.T) {
 	})
 	require.Len(t, u.threadsDock.cache.value, 2, "an update must not drop the row")
 }
+
+// Drilling into a sub-agent's transcript must not bring the threads block
+// with it. That view is somebody else's turn, read-only, and the block is
+// a way into the threads of the session you are driving -- there is no
+// driving there.
+func TestSessionPanelPlan_NoThreadsBlockInASubAgentTranscript(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.threadsDock.cache.value = mkDockThreads(3)
+	require.Len(t, u.sessionPanelPlan(100).threads, 3, "precondition: the block shows on the session itself")
+
+	u.sess.navStack = append(u.sess.navStack, sessionNavFrame{})
+
+	plan := u.sessionPanelPlan(100)
+	require.Empty(t, plan.threads)
+	require.Zero(t, plan.threadsRows)
+	require.Zero(t, plan.threadsActive)
+}
+
+// Coming back out restores it: the block belongs to the session being
+// driven, and that is the session again.
+func TestSessionPanelPlan_ThreadsBlockReturnsOnLeavingTheSubAgent(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.threadsDock.cache.value = mkDockThreads(3)
+	u.sess.navStack = append(u.sess.navStack, sessionNavFrame{})
+	require.Empty(t, u.sessionPanelPlan(100).threads)
+
+	u.sess.navStack = nil
+	require.Len(t, u.sessionPanelPlan(100).threads, 3)
+}
+
+// The header badge and the refreshes behind it are deliberately not gated
+// this way: threads keep running while a transcript is being read, and the
+// badge is the only sign of it.
+func TestSurfacesThreads_StaysOnInASubAgentTranscript(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.sess.navStack = append(u.sess.navStack, sessionNavFrame{})
+
+	require.True(t, u.surfacesThreads(), "live thread status is still this workspace's business")
+	require.False(t, u.panelSurfacesThreads())
+}

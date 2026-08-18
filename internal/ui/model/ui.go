@@ -496,6 +496,24 @@ func (m *UI) surfacesThreads() bool {
 	return !m.embedded
 }
 
+// panelSurfacesThreads reports whether the session panel shows its threads
+// block: surfacesThreads, and not while the user has drilled into a
+// sub-agent's transcript.
+//
+// That transcript is somebody else's turn, read-only and already finished
+// or running without you (see enterChildSession). The block is a way into
+// the threads of the session you are driving, and there is no driving
+// here -- offering it from a sub-agent's messages puts navigation into a
+// view that has none.
+//
+// Deliberately narrower than surfacesThreads: the header badge and the
+// refreshes behind it stay, because threads keep running while the
+// transcript is being read and losing the only sign of that would hide
+// live state rather than tidy it away.
+func (m *UI) panelSurfacesThreads() bool {
+	return m.surfacesThreads() && !m.viewingChildSession()
+}
+
 // New creates a new instance of the [UI] model.
 func New(com *common.Common, initialSessionID string, continueLast bool, opts ...Option) *UI {
 	// Editor components
