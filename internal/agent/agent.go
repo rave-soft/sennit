@@ -597,6 +597,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		model = call.Runtime.model
 		agentTools = slices.Clone(call.Runtime.tools)
 	}
+	agentTools = withoutUnusableParentTool(agentTools, a.dispatch, call.SessionID)
 	systemPrompt := a.systemPrompt.Get()
 	promptPrefix := a.systemPromptPrefix.Get()
 	disableAutoSummarize := a.disableAutoSummarize
@@ -970,4 +971,40 @@ func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {
 
 func (a *sessionAgent) Model() Model {
 	return a.model.Get()
+}
+
+// withoutUnusableParentTool drops ask_parent from a turn's tool list when
+// the session running it has no registered parent to message.
+//
+// The coordinator cannot make this call: buildTools runs once per
+// coordinator, not per session, and a task shares its parent's exact
+// coordinator and tool list, so there is no build-time list that
+// distinguishes a delegation's own session from its parent's (see
+// coordinator.buildTools). ask_parent was therefore offered to every
+// top-level turn as well, where it can only fail -- and a model that is
+// handed a tool tends to reach for it. One did: a top-level session
+// called ask_parent to send instructions *down* to a thread it had
+// created, got "no registered parent to message", and spent the turn on
+// nothing. Deciding it here, where the session id is known, is the only
+// place the answer exists.
+//
+// Order is preserved, which matters more than it looks: the fixed
+// provider policy stamps the cache-control breakpoint onto the last tool
+// in the list (see NewSessionAgent), and buildTools sorts tools by name,
+// so ask_parent sits near the front and removing it cannot move that
+// breakpoint.
+func withoutUnusableParentTool(agentTools []fantasy.AgentTool, dispatch *dispatcher, sessionID string) []fantasy.AgentTool {
+	if dispatch == nil {
+		return agentTools
+	}
+	if _, hasParent := dispatch.delegationParents.Get(sessionID); hasParent {
+		return agentTools
+	}
+	idx := slices.IndexFunc(agentTools, func(t fantasy.AgentTool) bool {
+		return t.Info().Name == tools.AskParentToolName
+	})
+	if idx < 0 {
+		return agentTools
+	}
+	return slices.Delete(slices.Clone(agentTools), idx, idx+1)
 }

@@ -795,13 +795,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// parent's exact coordinator and tool list (only a thread gets a
 	// wholly separate coordinator/App), so there is currently no way to
 	// build a different tool list for a delegation's own session versus
-	// its parent's. That means ask_parent ends up offered to every
-	// top-level turn of a coordinator that has it in AllowedTools,
-	// including the parent's own top-level session, where invoking it
-	// will simply fail cleanly (SendToParent finds no registered parent)
-	// rather than being unavailable. It is therefore gated at runtime,
-	// via SendToParent's own lookup, rather than at build time the way
-	// thread/task tools are gated by manager presence.
+	// its parent's. That means ask_parent goes into every tool list this
+	// coordinator builds, including the one its parent's own top-level
+	// session runs on. It is therefore gated at runtime rather than at
+	// build time the way thread/task tools are gated by manager
+	// presence: sessionAgent.Run drops it for a session with no
+	// registered parent (see withoutUnusableParentTool), which is the
+	// first point where the session id is known. Leaving it visible and
+	// letting SendToParent's own lookup fail was not enough -- a
+	// top-level session reached for it to send instructions *down* to a
+	// thread it had created, and spent the turn on the error.
 	if !isSubAgent {
 		allTools = append(allTools, tools.NewAskParentTool(c))
 	}
