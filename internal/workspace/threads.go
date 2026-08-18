@@ -196,7 +196,7 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 			slog.Debug("Attached thread could not be resolved; its turns will not be tracked", "thread", id, "error", err)
 			return ws, func() {}, nil
 		}
-		return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
+		return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, parent: w, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
 	}
 	// Thread is not currently spawned (completed, interrupted, failed).
 	// Verify the thread actually exists before returning a workspace —
@@ -217,7 +217,7 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 				// definition, and everything that happens in it next is the
 				// person's own doing.
 				ws := NewAppWorkspace(a.App, a.App.Store())
-				return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
+				return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, parent: w, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
 			}
 		}
 	} else {

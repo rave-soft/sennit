@@ -184,3 +184,62 @@ func TestOpenPermissionsDialog_SameIDReopensAfterClose(t *testing.T) {
 	require.Greater(t, u.ops.permissionGeneration, gen)
 	require.True(t, u.dialog.ContainsDialog(dialog.PermissionsID))
 }
+
+// A refused answer means no permission service still has this request
+// pending: it was already decided, or the run that raised it ended.
+// Leaving the dialog up was the worse half of that failure -- the prompt
+// could be neither answered nor dismissed, and the session sat behind a
+// dead modal.
+func TestPermissionResponse_RefusedAnswerClosesTheDialog(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIForOpeningPermissions(t)
+	perm := permission.PermissionRequest{ID: "perm-1", ToolName: "bash", Action: "execute"}
+	u.openPermissionsDialog(perm)
+	require.NotNil(t, u.dialog.Dialog(dialog.PermissionsID), "precondition: the prompt is on screen")
+
+	_, _ = u.updateSettings(permissionResponseMsg{
+		Accepted:   false,
+		Permission: perm.ID,
+		generation: u.ops.permissionGeneration,
+	}, nil)
+
+	require.Nil(t, u.dialog.Dialog(dialog.PermissionsID),
+		"a prompt nothing is waiting on must not stay on screen")
+	require.False(t, u.ops.permissionLoading)
+}
+
+// An accepted answer still closes it, and does not report an error.
+func TestPermissionResponse_AcceptedAnswerClosesTheDialog(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIForOpeningPermissions(t)
+	perm := permission.PermissionRequest{ID: "perm-1", ToolName: "bash", Action: "execute"}
+	u.openPermissionsDialog(perm)
+
+	_, _ = u.updateSettings(permissionResponseMsg{
+		Accepted:   true,
+		Permission: perm.ID,
+		generation: u.ops.permissionGeneration,
+	}, nil)
+
+	require.Nil(t, u.dialog.Dialog(dialog.PermissionsID))
+}
+
+// A stale response -- one whose generation no longer matches, because a
+// newer request replaced it -- must not close the prompt now on screen.
+func TestPermissionResponse_StaleAnswerLeavesTheDialogAlone(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUIForOpeningPermissions(t)
+	perm := permission.PermissionRequest{ID: "perm-1", ToolName: "bash", Action: "execute"}
+	u.openPermissionsDialog(perm)
+
+	_, _ = u.updateSettings(permissionResponseMsg{
+		Accepted:   false,
+		Permission: perm.ID,
+		generation: u.ops.permissionGeneration - 1,
+	}, nil)
+
+	require.NotNil(t, u.dialog.Dialog(dialog.PermissionsID))
+}

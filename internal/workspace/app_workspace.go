@@ -479,30 +479,75 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 // service that is still blocking on it. Falls back to this workspace's own
 // service for everything else — the user's own turn, and tasks, which run
 // in this very App.
-func (w *AppWorkspace) permissionsFor(perm permission.PermissionRequest) permission.Service {
+func (w *AppWorkspace) permissionsFor(perm permission.PermissionRequest) []permission.Service {
+	own := w.app.Permissions()
 	if perm.Delegation.ID == "" {
-		return w.app.Permissions()
+		return []permission.Service{own}
 	}
 	mgr, ok := w.threadManager()
 	if !ok {
-		return w.app.Permissions()
+		return []permission.Service{own}
 	}
 	if svc := mgr.PermissionsFor(perm.Delegation.ID); svc != nil {
-		return svc
+		return []permission.Service{svc, own}
 	}
-	return w.app.Permissions()
+	return []permission.Service{own}
+}
+
+// answerPermission hands perm to each candidate service in turn until one
+// accepts it.
+//
+// Routing has to guess, and a wrong guess used to be fatal to the prompt.
+// The tag a request carries is the delegation whose run raised it, which
+// is not the same question as "which permission service is blocked on
+// this id": a thread's runtime can have been replaced since the prompt was
+// published, and the screen the answer is given on is not necessarily the
+// workspace the prompt came from -- while the user is drilled into a
+// thread, every event is routed to that thread's UI, including prompts
+// raised by the parent workspace behind it. Answering the wrong service
+// leaves the right one blocked forever with its dialog still on screen,
+// and every further click reports "permission response was not accepted".
+//
+// Trying the others is safe rather than merely convenient: a service
+// resolves a request only if it wins the take of that id from its own
+// pending map (see permission.resolve), so a service that is not holding
+// the request does nothing at all and says so. Order still matters --
+// the routed service is asked first -- but only for cost, not
+// correctness.
+func answerPermission(attempts ...func() bool) bool {
+	for _, attempt := range attempts {
+		if attempt != nil && attempt() {
+			return true
+		}
+	}
+	return false
+}
+
+// serviceAttempts adapts candidate services into answerPermission attempts.
+func serviceAttempts(services []permission.Service, answer func(permission.Service) bool) []func() bool {
+	attempts := make([]func() bool, 0, len(services))
+	for _, svc := range services {
+		if svc == nil {
+			continue
+		}
+		attempts = append(attempts, func() bool { return answer(svc) })
+	}
+	return attempts
 }
 
 func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
-	return w.permissionsFor(perm).Grant(perm)
+	return answerPermission(serviceAttempts(w.permissionsFor(perm),
+		func(s permission.Service) bool { return s.Grant(perm) })...)
 }
 
 func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
-	return w.permissionsFor(perm).GrantPersistent(perm)
+	return answerPermission(serviceAttempts(w.permissionsFor(perm),
+		func(s permission.Service) bool { return s.GrantPersistent(perm) })...)
 }
 
 func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
-	return w.permissionsFor(perm).Deny(perm)
+	return answerPermission(serviceAttempts(w.permissionsFor(perm),
+		func(s permission.Service) bool { return s.Deny(perm) })...)
 }
 
 func (w *AppWorkspace) PermissionSkipRequests() bool {

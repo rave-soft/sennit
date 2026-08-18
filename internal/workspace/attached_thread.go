@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/thread"
 )
 
@@ -32,10 +33,59 @@ type attachedThreadWorkspace struct {
 	// does not override is its behavior, unchanged.
 	Workspace
 	mgr *thread.Manager
+	// parent is the workspace this thread was attached from -- the one
+	// whose screen the user came in from. Kept for permission answers;
+	// see PermissionGrant.
+	parent *AppWorkspace
 	// threadID and sessionID identify the one delegation, and the one
 	// session within it, this redirect applies to.
 	threadID  string
 	sessionID string
+}
+
+// PermissionGrant, PermissionGrantPersistent and PermissionDeny answer on
+// the thread's own workspace first and fall back to the parent's.
+//
+// While the user is drilled into a thread, every event is routed to that
+// thread's UI -- including a permission raised by the parent workspace
+// behind it, whose agent goes on working while the thread screen is up.
+// Answering it here reached only the thread's own permission service,
+// which is not holding that request, so the answer went nowhere: the
+// prompt stayed on screen and every click reported "permission response
+// was not accepted", with no way to dismiss it or get on with the work.
+//
+// Trying both is safe for the reason answerPermission spells out: a
+// service that is not holding the request does nothing at all.
+func (w *attachedThreadWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+	return answerPermission(
+		func() bool { return w.Workspace.PermissionGrant(perm) },
+		w.parentAttempt(func(p *AppWorkspace) bool { return p.PermissionGrant(perm) }),
+	)
+}
+
+func (w *attachedThreadWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+	return answerPermission(
+		func() bool { return w.Workspace.PermissionGrantPersistent(perm) },
+		w.parentAttempt(func(p *AppWorkspace) bool { return p.PermissionGrantPersistent(perm) }),
+	)
+}
+
+func (w *attachedThreadWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+	return answerPermission(
+		func() bool { return w.Workspace.PermissionDeny(perm) },
+		w.parentAttempt(func(p *AppWorkspace) bool { return p.PermissionDeny(perm) }),
+	)
+}
+
+// parentAttempt wraps an answer against the parent workspace, or nil when
+// there is none to fall back to. Going through the parent workspace rather
+// than straight to its permission service keeps its own routing (a
+// delegation's prompt relayed into it) in play.
+func (w *attachedThreadWorkspace) parentAttempt(answer func(*AppWorkspace) bool) func() bool {
+	if w.parent == nil {
+		return nil
+	}
+	return func() bool { return answer(w.parent) }
 }
 
 // SubscribeWith forwards to the wrapped workspace's own subscription.

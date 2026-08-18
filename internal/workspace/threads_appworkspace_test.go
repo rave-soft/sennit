@@ -645,3 +645,60 @@ func TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt(t *testing.T) {
 		t.Fatal("the thread stayed blocked after the parent granted its request")
 	}
 }
+
+// The mirror image of the test above, and the one that was missing. While
+// the user is drilled into a thread, the router hands every event to that
+// thread's screen -- including a prompt the parent workspace raised behind
+// it, whose agent goes on working. Answering it reached only the thread's
+// own service, which is not holding that request, so the prompt could
+// never be answered or dismissed: every click reported "permission
+// response was not accepted".
+func TestAttachedThread_PermissionAnswerReachesTheParentThatRaisedIt(t *testing.T) {
+	ws, mgr := newTestThreadAppWorkspace(t)
+
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name:        "attached",
+		Goal:        "do the thing",
+		MergePolicy: thread.MergeManual,
+	})
+	require.NoError(t, err)
+
+	attached, detach, err := ws.AttachThread(t.Context(), st.ID)
+	require.NoError(t, err)
+	t.Cleanup(detach)
+
+	// A prompt from the parent's own turn: no delegation tag, and it is
+	// the parent's service that blocks on it.
+	parentPerms := ws.app.Permissions()
+	raised := parentPerms.Subscribe(t.Context())
+	granted := make(chan bool, 1)
+	go func() {
+		ok, _ := parentPerms.Request(t.Context(), permission.CreatePermissionRequest{
+			SessionID:  "parent-session",
+			ToolCallID: "call-1",
+			ToolName:   "bash",
+			Action:     "execute",
+			Path:       ws.WorkingDir(),
+		})
+		granted <- ok
+	}()
+
+	var req permission.PermissionRequest
+	select {
+	case ev := <-raised:
+		req = ev.Payload
+	case <-time.After(5 * time.Second):
+		t.Fatal("the parent never raised its permission request")
+	}
+	require.Empty(t, req.Delegation.ID, "precondition: this is the parent's own turn")
+
+	require.True(t, attached.PermissionGrant(req),
+		"answering on the thread's screen must still reach the service that raised the prompt")
+
+	select {
+	case ok := <-granted:
+		require.True(t, ok)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the parent stayed blocked after its request was answered from the thread's screen")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
 
@@ -96,4 +97,82 @@ type applyModelStubWorkspace struct {
 func (s *applyModelStubWorkspace) ApplySessionModel(_ context.Context, sessionID string) (bool, error) {
 	s.applied = append(s.applied, sessionID)
 	return s.switched, nil
+}
+
+// While the user is drilled into a thread, every event is routed to that
+// thread's UI -- including a prompt raised by the parent workspace behind
+// it. Answering reached only the thread's own permission service, which is
+// not holding that request, so the prompt could never be answered or
+// dismissed.
+func TestAttachedThreadWorkspace_FallsBackToTheParentForPermissions(t *testing.T) {
+	inner := &permissionStubWorkspace{}
+	ws := &attachedThreadWorkspace{Workspace: inner}
+
+	require.False(t, ws.PermissionGrant(permission.PermissionRequest{ID: "req"}),
+		"with no parent to fall back to, the thread's own answer stands")
+	require.Equal(t, []string{"grant"}, inner.calls)
+}
+
+// The thread's own workspace is asked first: a prompt raised inside the
+// thread is the common case, and a service that is not holding the request
+// does nothing, so asking is cheap but not free.
+func TestAttachedThreadWorkspace_AsksTheThreadFirst(t *testing.T) {
+	inner := &permissionStubWorkspace{accept: true}
+	ws := &attachedThreadWorkspace{Workspace: inner}
+
+	require.True(t, ws.PermissionGrant(permission.PermissionRequest{ID: "req"}))
+	require.Equal(t, []string{"grant"}, inner.calls)
+}
+
+// Deny and the persistent grant travel the same path as a plain grant.
+func TestAttachedThreadWorkspace_RoutesEveryPermissionAnswer(t *testing.T) {
+	inner := &permissionStubWorkspace{accept: true}
+	ws := &attachedThreadWorkspace{Workspace: inner}
+
+	require.True(t, ws.PermissionGrantPersistent(permission.PermissionRequest{ID: "req"}))
+	require.True(t, ws.PermissionDeny(permission.PermissionRequest{ID: "req"}))
+	require.Equal(t, []string{"grant-persistent", "deny"}, inner.calls)
+}
+
+// answerPermission stops at the first acceptance and skips nil attempts
+// (there is no parent to fall back to when a thread is attached without
+// one).
+func TestAnswerPermission_StopsAtTheFirstAcceptance(t *testing.T) {
+	var ran []string
+	accepted := answerPermission(
+		nil,
+		func() bool { ran = append(ran, "first"); return false },
+		func() bool { ran = append(ran, "second"); return true },
+		func() bool { ran = append(ran, "third"); return true },
+	)
+
+	require.True(t, accepted)
+	require.Equal(t, []string{"first", "second"}, ran)
+}
+
+func TestAnswerPermission_ReportsNoAcceptance(t *testing.T) {
+	require.False(t, answerPermission(func() bool { return false }))
+	require.False(t, answerPermission())
+}
+
+// permissionStubWorkspace records which permission answer was asked of it.
+type permissionStubWorkspace struct {
+	Workspace
+	calls  []string
+	accept bool
+}
+
+func (s *permissionStubWorkspace) PermissionGrant(permission.PermissionRequest) bool {
+	s.calls = append(s.calls, "grant")
+	return s.accept
+}
+
+func (s *permissionStubWorkspace) PermissionGrantPersistent(permission.PermissionRequest) bool {
+	s.calls = append(s.calls, "grant-persistent")
+	return s.accept
+}
+
+func (s *permissionStubWorkspace) PermissionDeny(permission.PermissionRequest) bool {
+	s.calls = append(s.calls, "deny")
+	return s.accept
 }

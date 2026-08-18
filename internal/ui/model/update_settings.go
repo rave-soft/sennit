@@ -141,7 +141,16 @@ func (m *UI) updateSettings(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		m.ops.permissionLoading = false
 		if !msg.Accepted {
-			cmds = append(cmds, util.ReportError(errors.New("permission response was not accepted")))
+			// Nothing is holding this request any more: an answer is
+			// refused only when no permission service still has the id
+			// pending (see permission.resolve), which means it was
+			// already decided, or the run that raised it ended. Close
+			// the dialog anyway. Leaving it up was the worse half of
+			// this failure -- the prompt could not be answered and could
+			// not be dismissed either, so the session was stuck behind a
+			// dead modal.
+			m.dialog.CloseDialog(dialog.PermissionsID)
+			cmds = append(cmds, util.ReportError(errors.New("permission request is no longer waiting for an answer")))
 			break
 		}
 		m.dialog.CloseDialog(dialog.PermissionsID)
