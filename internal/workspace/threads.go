@@ -209,27 +209,54 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 	// worktree and branch are still on disk, so the workspace can simply
 	// be respawned, and a thread whose run is over is exactly the one a
 	// user wants to open and keep working in by hand.
-	if _, err := mgr.Activate(ctx, id); err == nil {
-		if h := mgr.Handle(id); h != nil {
-			if a, ok := h.Workspace().(*threadspawn.AppWorkspaceAdapter); ok && a.App != nil {
-				// Same wrapping as the live branch — and this is the branch
-				// that most needs it: a thread revived here is idle by
-				// definition, and everything that happens in it next is the
-				// person's own doing.
-				ws := NewAppWorkspace(a.App, a.App.Store())
-				return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, parent: w, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
-			}
-		}
-	} else {
-		slog.Debug("Thread reactivation unavailable during attach, falling back to read-only", "thread", id, "error", err)
+	//
+	// Reactivation is not always possible — threads in the merge flow are
+	// deliberately refused, the worktree may be gone, and a spawn can fail
+	// outright — so this falls back to a read-only workspace bound to the
+	// main app with the thread's worktree as WorkingDir, which still shows
+	// the persisted session data.
+	//
+	// Whatever went wrong is carried into that fallback rather than only
+	// into the log. A read-only thread looks exactly like a live one until
+	// the person types into it, and what they were told then named the
+	// symptom and nothing else ("AgentRun is not allowed"), for a decision
+	// taken silently minutes earlier. The log line is WARN for the same
+	// reason: this is a thread the user asked to work in and cannot, not a
+	// detail worth having to turn debug logging on to see.
+	a, err := reactivate(ctx, mgr, id)
+	if err != nil {
+		slog.Warn("Thread could not be reactivated; opening it read-only",
+			"component", "thread", "thread", id, "error", err)
+		return newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID, err.Error()), func() {}, nil
 	}
-	// Reactivation is not always possible — threads in the merge flow
-	// are deliberately refused, and the worktree may be gone. Fall back
-	// to a read-only workspace bound to the main app with the thread's
-	// worktree as WorkingDir, so the caller can still inspect persisted
-	// session data.
-	aw := newReadOnlyWorkspace(w, st.WorktreePath, st.SessionID)
-	return aw, func() {}, nil
+	// Same wrapping as the live branch — and this is the branch that most
+	// needs it: a thread revived here is idle by definition, and everything
+	// that happens in it next is the person's own doing.
+	ws := NewAppWorkspace(a.App, a.App.Store())
+	return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, parent: w, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
+}
+
+// reactivate brings a thread's own workspace back up and returns the
+// in-process app behind it, or an error saying why it could not. Every
+// outcome that leaves the caller without a writable workspace is an error
+// here, including the two that are not Activate's own: reactivation that
+// reports success but leaves no handle installed, and a handle wrapping
+// something other than an in-process app. Both are unreachable in local
+// mode today, and both used to fall through to the read-only fallback
+// with nothing said at all.
+func reactivate(ctx context.Context, mgr *thread.Manager, id string) (*threadspawn.AppWorkspaceAdapter, error) {
+	if _, err := mgr.Activate(ctx, id); err != nil {
+		return nil, err
+	}
+	h := mgr.Handle(id)
+	if h == nil {
+		return nil, fmt.Errorf("thread: reactivated workspace was released before it could be attached")
+	}
+	a, ok := h.Workspace().(*threadspawn.AppWorkspaceAdapter)
+	if !ok || a.App == nil {
+		return nil, fmt.Errorf("thread: reactivated workspace is not an in-process app")
+	}
+	return a, nil
 }
 
 // SubscribeWith runs a second, independently stoppable event subscription

@@ -28,7 +28,7 @@ import (
 func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 	t.Parallel()
 	stub := &stubWorkspace{}
-	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
 
 	// Session mutations denied.
 	_, err := ro.CreateSession(t.Context(), "title")
@@ -114,7 +114,7 @@ func TestReadOnlyWorkspace_DeniesMutations(t *testing.T) {
 func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	t.Parallel()
 	stub := &stubWorkspace{}
-	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
 
 	// Session reads pass through.
 	sess, err := ro.GetSession(t.Context(), "sess-1")
@@ -236,7 +236,7 @@ func TestReadOnlyWorkspace_AllowsOnlyRootToolDescendants(t *testing.T) {
 		"root$$unrelated":            {ID: "root$$unrelated", ParentSessionID: "other-root"},
 		"root$$forged":               {ID: "root$$forged", ParentSessionID: "root-prefix"},
 	}}
-	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "root")
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "root", "")
 
 	for _, id := range []string{"root", "root$$child", "child-message$$nested-tool"} {
 		_, err := ro.ListMessages(t.Context(), id)
@@ -252,7 +252,7 @@ func TestReadOnlyWorkspace_AllowsOnlyRootToolDescendants(t *testing.T) {
 func TestReadOnlyWorkspace_ShutdownIsNoop(t *testing.T) {
 	t.Parallel()
 	stub := &stubWorkspace{}
-	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
 
 	require.NotPanics(t, func() { ro.Shutdown() })
 	require.NotPanics(t, func() { ro.Shutdown() })
@@ -272,7 +272,7 @@ func TestReadOnlyError_TypeCheck(t *testing.T) {
 func TestReadOnlyWorkspace_NoopMethods(t *testing.T) {
 	t.Parallel()
 	stub := &stubWorkspace{}
-	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
 
 	require.NotPanics(t, func() { ro.AgentCancel("sess-1") })
 	require.NotPanics(t, func() { ro.AgentClearQueue("sess-1") })
@@ -561,7 +561,7 @@ func TestReadOnlyWorkspace_BatchMessages_ChildAndSibling(t *testing.T) {
 			"other$$child": {ID: "other$$child", ParentSessionID: "other"},
 		},
 	}
-	ro := newReadOnlyWorkspace(stub, "/tmp/worktree", "root")
+	ro := newReadOnlyWorkspace(stub, "/tmp/worktree", "root", "")
 
 	msgs, err := ro.ListMessagesBySessionIDs(t.Context(), "root", 7, []string{"root", "root$$child", "root$$sib"})
 	require.NoError(t, err)
@@ -589,7 +589,7 @@ func TestSupportsThreadAttach_ReadOnlyRefusesUpFront(t *testing.T) {
 	require.True(t, SupportsThreadAttach(stub),
 		"a workspace that says nothing is assumed capable; the opposite default would silently strip the capability from any implementation that forgot to opt in")
 
-	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1")
+	ro := newReadOnlyWorkspace(stub, "/tmp/thread-worktree", "sess-1", "")
 	require.False(t, SupportsThreadAttach(ro))
 
 	_, _, err := ro.AttachThread(t.Context(), "thread-1")

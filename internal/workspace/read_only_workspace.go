@@ -27,10 +27,21 @@ import (
 // mutating operation is attempted.
 type ErrReadOnlyOperation struct {
 	Operation string
+	// Reason says why this workspace is read-only rather than writable,
+	// in the words of whatever refused to make it writable. A thread is
+	// opened read-only only as a fallback (see AppWorkspace.AttachThread),
+	// and without carrying the reason this far the refusal the user
+	// eventually runs into names the symptom and nothing else - the thread
+	// looks ordinary until they type into it and are told a bare "not
+	// allowed". Empty when the caller had nothing to say.
+	Reason string
 }
 
 func (e *ErrReadOnlyOperation) Error() string {
-	return fmt.Sprintf("read-only workspace: %s is not allowed", e.Operation)
+	if e.Reason == "" {
+		return fmt.Sprintf("read-only workspace: %s is not allowed", e.Operation)
+	}
+	return fmt.Sprintf("read-only workspace: %s is not allowed: the thread could not be reactivated: %s", e.Operation, e.Reason)
 }
 
 // readOnlyWorkspace wraps an underlying Workspace and restricts all
@@ -41,17 +52,21 @@ type readOnlyWorkspace struct {
 	underlying Workspace
 	workingDir string
 	sessionID  string
+	reason     string
 }
 
 // readOnlyError returns a typed error for the given operation name.
 func (w *readOnlyWorkspace) readOnlyError(op string) error {
-	return &ErrReadOnlyOperation{Operation: op}
+	return &ErrReadOnlyOperation{Operation: op, Reason: w.reason}
 }
 
 // newReadOnlyWorkspace creates a read-only wrapper over the given workspace.
 // workingDir is the thread worktree path (not the parent's workdir).
-func newReadOnlyWorkspace(ws Workspace, workingDir, sessionID string) *readOnlyWorkspace {
-	return &readOnlyWorkspace{underlying: ws, workingDir: workingDir, sessionID: sessionID}
+// reason is why this view is read-only, carried into every refusal this
+// workspace returns - see ErrReadOnlyOperation.Reason. Pass "" when there
+// is nothing to explain.
+func newReadOnlyWorkspace(ws Workspace, workingDir, sessionID, reason string) *readOnlyWorkspace {
+	return &readOnlyWorkspace{underlying: ws, workingDir: workingDir, sessionID: sessionID, reason: reason}
 }
 
 // allowsSession permits the thread's root session and genuine agent-tool

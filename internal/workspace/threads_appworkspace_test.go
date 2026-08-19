@@ -588,6 +588,53 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 	require.NoError(t, err, "parent workspace should still be functional after attached shutdown")
 }
 
+// TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly pins
+// the half of the fallback the user actually meets. Opening a thread that
+// cannot be reactivated succeeds and looks ordinary; the refusal only
+// arrives later, when they type into it. Naming just the operation there
+// ("AgentRun is not allowed") describes a decision taken silently minutes
+// earlier and leaves the reason reachable only by turning on debug logging.
+func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testing.T) {
+	repo := initRepoForWorkspaceThreadsTest(t)
+
+	a := app.NewForTest(t.Context())
+	t.Cleanup(a.ShutdownForTest)
+	fs := newFakeThreadSessions()
+	a.SetSessionsForTest(fs)
+
+	store := newTestThreadStoreDB(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       store,
+		Spawner:     newFakeThreadSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+	a.SetThreadManager(mgr)
+
+	_, err := fs.Create(t.Context(), "reason-check")
+	require.NoError(t, err)
+	created, err := store.Create(t.Context(), thread.CreateParams{
+		Name:         "reason-check",
+		Goal:         "do the thing",
+		BaseBranch:   "main",
+		Branch:       "thread/reason-check",
+		WorktreePath: t.TempDir(),
+		SessionID:    "sess-1",
+	})
+	require.NoError(t, err)
+	_, err = store.SetStatus(t.Context(), created.ID, thread.SetStatusParams{Status: thread.StatusMerged})
+	require.NoError(t, err)
+
+	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
+	attached, _, err := aw.AttachThread(t.Context(), created.ID)
+	require.NoError(t, err)
+
+	runErr := attached.AgentRun(t.Context(), "sess-1", "hello")
+	require.True(t, IsReadOnlyError(runErr))
+	require.Contains(t, runErr.Error(), "AgentRun", "the refusal must still name the operation")
+	require.Contains(t, runErr.Error(), "merge flow", "the refusal must carry why reactivation was refused")
+}
+
 // TestAppWorkspace_PermissionAnswerRoutesToTheThreadHoldingIt covers the
 // return half of the thread-permission relay. A thread's prompt is raised
 // inside its own isolated workspace and only displayed here, so answering
