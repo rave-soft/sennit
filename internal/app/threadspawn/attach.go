@@ -27,6 +27,7 @@ type attachDeps struct {
 	addShutdownHook    func(*app.App, func(context.Context) error) error
 	addCriticalCleanup func(*app.App, func(context.Context) error) error
 	forwardEvents      func(*app.App, *thread.Manager)
+	finalizeTurns      func(context.Context, *app.App, *thread.Manager)
 }
 
 var productionAttachDeps = attachDeps{
@@ -50,6 +51,7 @@ var productionAttachDeps = attachDeps{
 	forwardEvents: func(a *app.App, mgr *thread.Manager) {
 		app.ForwardEvents(a, "thread", mgr.Subscribe)
 	},
+	finalizeTurns: finalizeThreadTurns,
 }
 
 // AttachDeps is the [attachDeps] type, exported (as a type alias) so tests
@@ -124,6 +126,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	if err := deps.recover(mgr, ctx); err != nil {
 		slog.Warn("Failed to recover thread state", "error", err)
 	}
+	deps.finalizeTurns(ctx, a, mgr)
 
 	// TaskManager shares mgr's own lifecycle and context (both unexported,
 	// so only constructible from inside the thread package) rather than
@@ -200,4 +203,48 @@ func threadSkillsConfig(threadApp *app.App, inherited []*skills.Skill) skills.Di
 	cfg := app.SkillsDiscoveryConfig(threadApp.Store())
 	cfg.InheritedSkills = inherited
 	return cfg
+}
+
+// finalizeThreadTurns closes out the turns a killed process left mid-flight
+// inside this project's thread worktrees, the same way app.Bootstrap does
+// for the workspace it starts.
+//
+// Bootstrap's own sweep cannot reach them. It scopes by project path, and a
+// thread's sessions — its own and every sub-agent's — are recorded under
+// the thread's worktree, not under the repository the parent workspace was
+// started in. The thread's App sweeps them when it is spawned, which covers
+// every thread that gets reactivated; a thread that is never reactivated,
+// or that cannot be (see workspace.AppWorkspace.AttachThread's read-only
+// fallback), keeps a transcript full of tool calls that never came back.
+// The UI reads that shape as still running, so the thread sits there
+// spinning "Waiting for tool response..." forever, across every restart,
+// for work that ended when a process died hours ago.
+//
+// Safe here for the same reason it is safe in Bootstrap, and for one more.
+// Threads were recovered on the line above and none of them is running in
+// this process yet. And a thread worktree does not have a workspace lock of
+// its own: it locks its repository's git common directory, the very lock
+// the workspace being attached holds — so no other sennit is running turns
+// in these worktrees either.
+//
+// Best-effort throughout: this repairs the record of work already over, and
+// nothing about it is worth failing an attach for.
+func finalizeThreadTurns(ctx context.Context, a *app.App, mgr *thread.Manager) {
+	threads, err := mgr.List(ctx)
+	if err != nil {
+		slog.Warn("Failed to list threads while closing out interrupted turns", "error", err)
+		return
+	}
+	for _, st := range threads {
+		// Kinds that share their parent's workspace (a task) have no
+		// worktree of their own, and their sessions are under the parent's
+		// project path, which Bootstrap already swept.
+		if st.WorktreePath == "" {
+			continue
+		}
+		if err := app.FinalizeInterruptedTurns(ctx, st.WorktreePath, a.Messages()); err != nil {
+			slog.Warn("Failed to close out interrupted turns in a thread worktree",
+				"thread", st.ID, "worktree", st.WorktreePath, "error", err)
+		}
+	}
 }

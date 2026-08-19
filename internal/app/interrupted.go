@@ -130,3 +130,16 @@ func answeredToolCalls(ctx context.Context, messages message.Service, sessionID 
 	}
 	return answered, nil
 }
+
+// FinalizeInterruptedTurns is [finalizeInterruptedTurns] for callers
+// outside this package, which today means the thread wiring: a thread's
+// sessions are recorded under its own worktree, so the sweep Bootstrap
+// runs for the workspace being started never reaches them (see
+// threadspawn.finalizeThreadTurns, its only caller).
+//
+// The caller owns the judgement this rests on — that no turn of
+// projectPath's is running anywhere. Read that argument in
+// finalizeInterruptedTurns before adding a second caller.
+func FinalizeInterruptedTurns(ctx context.Context, projectPath string, messages message.Service) error {
+	return finalizeInterruptedTurns(ctx, projectPath, messages)
+}

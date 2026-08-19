@@ -14,7 +14,9 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
@@ -295,4 +297,68 @@ func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 	gotThread, err := mgr.Get(t.Context(), threadSt.ID)
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusInterrupted, gotThread.Status)
+}
+
+// TestAttach_ClosesOutInterruptedTurnsInThreadWorktrees covers the sweep
+// app.Bootstrap cannot reach. A thread's sessions are recorded under its
+// worktree, not under the repository the parent workspace was started in,
+// so the parent's own sweep walks straight past them and a thread killed
+// mid-run keeps a transcript of tool calls that never came back — which
+// the UI reads as still running, forever.
+func TestAttach_ClosesOutInterruptedTurnsInThreadWorktrees(t *testing.T) {
+	repo := initRepo(t)
+	a := newAttachTestApp(t, repo)
+
+	conn, err := db.Connect(t.Context(), config.GlobalDBDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Release(config.GlobalDBDir())) })
+	q := db.New(conn)
+
+	// A thread of this project's, and a session belonging to its worktree
+	// holding exactly what a killed process leaves behind: an assistant
+	// turn with no Finish and a tool call with no result.
+	worktree := t.TempDir()
+	sessions := session.NewService(q, conn, worktree)
+	sess, err := sessions.Create(t.Context(), "thread session")
+	require.NoError(t, err)
+	_, err = NewStore(q, a.Store().WorkingDir()).Create(t.Context(), thread.CreateParams{
+		Name:         "interrupted-thread",
+		Goal:         "do the thing",
+		BaseBranch:   "main",
+		Branch:       "thread/interrupted-thread",
+		WorktreePath: worktree,
+		SessionID:    sess.ID,
+	})
+	require.NoError(t, err)
+	msg, err := a.Messages().Create(t.Context(), sess.ID, message.CreateMessageParams{
+		Role: message.Assistant,
+		Parts: []message.ContentPart{message.ToolCall{
+			ID: "call-1", Name: "ripgrep", Input: "{}", Finished: false,
+		}},
+	})
+	require.NoError(t, err)
+
+	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
+
+	require.NoError(t, a.Messages().FlushAll(t.Context()))
+	msgs, err := a.Messages().List(t.Context(), sess.ID)
+	require.NoError(t, err)
+
+	var answered bool
+	var closed *message.Message
+	for i, m := range msgs {
+		if m.ID == msg.ID {
+			closed = &msgs[i]
+		}
+		for _, tr := range m.ToolResults() {
+			if tr.ToolCallID == "call-1" {
+				answered = true
+				require.True(t, tr.IsError, "an abandoned call must be recorded as an error, not an empty success")
+			}
+		}
+	}
+	require.NotNil(t, closed, "the assistant message should still be there")
+	require.NotNil(t, closed.FinishPart(), "the interrupted turn must be closed out")
+	require.Equal(t, message.FinishReasonCanceled, closed.FinishReason())
+	require.True(t, answered, "the dangling tool call must be answered")
 }
