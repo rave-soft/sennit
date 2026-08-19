@@ -226,6 +226,11 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 			resolvedProxy, err := resolver.ResolveValue(config.ProxyURL)
 			if err != nil || resolvedProxy == "" {
 				slog.Warn("Ignoring provider proxy_url due to resolution failure", "provider", p.ID, "error", err)
+				// prepared started as a copy of the user config, so the
+				// unresolved template is still in the field: clear it or
+				// it reaches the HTTP client builder verbatim and fails
+				// the whole provider instead of being ignored.
+				prepared.ProxyURL = ""
 			} else {
 				prepared.ProxyURL = resolvedProxy
 			}

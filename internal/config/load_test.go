@@ -2669,3 +2669,35 @@ func TestGlobalLogFile(t *testing.T) {
 	require.Equal(t, filepath.Join(GlobalDBDir(), "logs", "sennit.log"), got)
 	require.Equal(t, filepath.Join(globalDir, "logs", "sennit.log"), got)
 }
+
+// TestConfig_configureProvidersUnresolvableProxy: an unresolvable proxy_url
+// must leave the provider with no proxy at all. Leaking the unexpanded
+// template through to the provider config makes every later request fail
+// with `invalid proxy_url "$HTTP_PROXY"` — the opposite of the "warn and
+// ignore" contract the merge path documents.
+func TestConfig_configureProvidersUnresolvableProxy(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          "openai",
+			APIKey:      "$OPENAI_API_KEY",
+			APIEndpoint: "https://api.openai.com/v1",
+			Models:      []catwalk.Model{{ID: "test-model"}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMap[string, ProviderConfig](),
+	}
+	cfg.Providers.Set("openai", ProviderConfig{ProxyURL: "$HTTP_PROXY_NOT_SET"})
+	cfg.setDefaults("/tmp", "")
+	env := testenv.New(map[string]string{
+		"OPENAI_API_KEY": "test-key",
+	})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
+	require.NoError(t, err)
+
+	pc, ok := cfg.Providers.Get("openai")
+	require.True(t, ok)
+	require.Empty(t, pc.ProxyURL, "an unresolved proxy template must be cleared, not carried forward")
+}
