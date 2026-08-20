@@ -454,16 +454,20 @@ func (m *Message) FinishToolCall(toolCallID string) {
 	}
 }
 
+// AppendToolCallInput grows a streaming tool call's arguments by one
+// delta. The call is left unfinished: only the end of the stream decides
+// that, and until then Input holds a partial - almost always unparseable -
+// fragment of JSON.
 func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ToolCall); ok {
 			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Finished: c.Finished,
-				}
+				// Copy and grow the one field rather than rebuilding from
+				// a field list, which used to drop ProviderExecuted and
+				// would drop whatever is added to ToolCall next - the same
+				// reason FinishToolCall above copies.
+				c.Input += inputDelta
+				m.Parts[i] = c
 				return
 			}
 		}

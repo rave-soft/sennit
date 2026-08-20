@@ -734,6 +734,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		OnReasoningEnd:   t.onReasoningEnd,
 		OnTextDelta:      t.onTextDelta,
 		OnToolInputStart: t.onToolInputStart,
+		OnToolInputDelta: t.onToolInputDelta,
 		OnRetry:          t.onRetry,
 		OnAuthRefresh:    call.OnAuthRefresh,
 		ModelProvider:    t.modelProvider,

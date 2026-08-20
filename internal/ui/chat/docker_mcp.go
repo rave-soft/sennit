@@ -113,7 +113,10 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	}
 
 	if opts.IsPending() {
-		return pendingTool(sty, d.formatToolName(sty, tool), opts.Anim, false)
+		// Never nested, whatever opts.Compact says - a Docker MCP call is
+		// always rendered at top level - so this goes through the line
+		// helper rather than pendingTool.
+		return pendingToolLine(sty, d.formatToolName(sty, tool), opts.Anim, false, len(opts.ToolCall.Input))
 	}
 
 	header := d.makeHeader(sty, tool, cappedWidth, opts, toolParams...)

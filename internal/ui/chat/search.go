@@ -46,7 +46,7 @@ type GlobToolRenderContext struct{}
 func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Glob", opts.Anim, opts.Compact)
+		return pendingTool(sty, "Glob", opts)
 	}
 
 	var params tools.GlobParams
@@ -107,7 +107,7 @@ type GrepToolRenderContext struct {
 func (g *GrepToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, g.title, opts.Anim, opts.Compact)
+		return pendingTool(sty, g.title, opts)
 	}
 
 	// RipgrepParams is a superset of GrepParams, so it decodes both tools'
@@ -160,7 +160,7 @@ type LSToolRenderContext struct{}
 func (l *LSToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "List", opts.Anim, opts.Compact)
+		return pendingTool(sty, "List", opts)
 	}
 
 	var params tools.LSParams

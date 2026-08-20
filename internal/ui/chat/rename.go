@@ -15,7 +15,7 @@ type RenameToolRenderContext struct{}
 func (r *RenameToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Rename Symbol", opts.Anim, opts.Compact)
+		return pendingTool(sty, "Rename Symbol", opts)
 	}
 
 	var params tools.RenameParams

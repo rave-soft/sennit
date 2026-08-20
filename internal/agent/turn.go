@@ -349,6 +349,28 @@ func (t *runTurn) onToolInputStart(id string, toolName string) error {
 	return t.agent.messages.Update(t.ctx, *t.currentAssistant)
 }
 
+// onToolInputDelta grows the current tool call's arguments as the provider
+// streams them, the way onTextDelta grows the assistant's text.
+//
+// Without this the arguments existed nowhere until the call landed whole:
+// onToolInputStart records the call with an empty Input, and the next thing
+// to touch it is onToolCall with the finished input. A tool call whose
+// arguments are large - a write of a file the model composes in one go -
+// therefore leaves the message untouched for as long as it takes to
+// generate them, minutes on a local model. Nothing is persisted, so nothing
+// is published, and the transcript sits on a bare spinner with no sign that
+// work is happening at all. The message layer already expected these
+// deltas: shouldFlushNow debounces input growth and flushes on the
+// transition to finished (see internal/message).
+//
+// Deltas are streaming state, so they ride genCtx like the text ones: a
+// cancel mid-stream is meant to stop them, and what has to survive it is
+// written by the turn's own cleanup with a detached context.
+func (t *runTurn) onToolInputDelta(id string, delta string) error {
+	t.currentAssistant.AppendToolCallInput(id, delta)
+	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
+}
+
 func (t *runTurn) onRetry(err *fantasy.ProviderError, delay time.Duration) {
 	slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
 	// Reset streamed content so the retried response doesn't

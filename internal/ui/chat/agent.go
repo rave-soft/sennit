@@ -941,7 +941,7 @@ func pendingDelegation(
 	nestedTools []ToolMessageItem,
 	promptTokens, completionTokens int64,
 ) string {
-	head := pendingTool(sty, name, opts.Anim, opts.Compact)
+	head := pendingTool(sty, name, opts)
 	if opts.Compact {
 		return head
 	}

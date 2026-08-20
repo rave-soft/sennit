@@ -231,3 +231,25 @@ func TestPromptWithTextAttachmentsWithoutAPathStillWraps(t *testing.T) {
 	require.Contains(t, prompt, "<file>")
 	require.Contains(t, prompt, "</file>")
 }
+
+// TestAppendToolCallInputKeepsTheRestOfTheCall: the append used to rebuild
+// the ToolCall from a field list, which silently dropped ProviderExecuted -
+// and would drop whatever is added to ToolCall next. A provider-executed
+// call demoted to a local one mid-stream would be run again by us.
+func TestAppendToolCallInputKeepsTheRestOfTheCall(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{}
+	msg.AddToolCall(ToolCall{ID: "1", Name: "web_search", ProviderExecuted: true})
+
+	msg.AppendToolCallInput("1", `{"query":`)
+	msg.AppendToolCallInput("1", `"go"}`)
+	// A delta for a call this message does not have changes nothing.
+	msg.AppendToolCallInput("2", `{"x":1}`)
+
+	calls := msg.ToolCalls()
+	require.Len(t, calls, 1)
+	require.Equal(t, `{"query":"go"}`, calls[0].Input)
+	require.True(t, calls[0].ProviderExecuted, "provider execution must survive the deltas")
+	require.False(t, calls[0].Finished, "an append never finishes the call")
+}

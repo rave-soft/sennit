@@ -14,8 +14,39 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
-// pendingTool renders a tool that is still in progress with an animation.
-func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) string {
+// pendingTool renders a tool that is still in progress with an animation,
+// and says how much of the call's arguments has arrived when there is
+// enough of them for the wait to be about them (see streamingArgsHint).
+func pendingTool(sty *styles.Styles, name string, opts *ToolRenderOpts) string {
+	return pendingToolLine(sty, name, opts.Anim, opts.Compact, len(opts.ToolCall.Input))
+}
+
+// argsStreamingThreshold is how much of a call's arguments has to have
+// arrived before the pending line mentions them at all. Most calls carry a
+// path or a command and land in one breath; saying "0.2 KB" about those
+// would be noise on every tool in the transcript. What this is for is the
+// call whose arguments are the work - a write of a file composed in one go
+// - where the wait is minutes long and otherwise indistinguishable from a
+// hang.
+const argsStreamingThreshold = 2 * 1024
+
+// streamingArgsHint renders how much of a pending call's arguments has
+// streamed in so far, or nothing while that is still small. It reads a
+// partial, unparseable fragment of JSON on purpose: its size is the one
+// thing about it that is meaningful mid-stream, and a number that keeps
+// growing is what separates a model still writing from one that stopped.
+func streamingArgsHint(sty *styles.Styles, streamedArgs int) string {
+	if streamedArgs < argsStreamingThreshold {
+		return ""
+	}
+	return sty.Tool.StateWaiting.Render(formatSize(streamedArgs))
+}
+
+// pendingToolLine is pendingTool for the callers that do not render straight
+// from a [ToolRenderOpts]. streamedArgs is how many bytes of the call's
+// arguments have arrived; pass 0 for a caller that has no streaming
+// arguments to report.
+func pendingToolLine(sty *styles.Styles, name string, anim *anim.Anim, nested bool, streamedArgs int) string {
 	icon := sty.Tool.IconPending.Render()
 	nameStyle := sty.Tool.NameNormal
 	if nested {
@@ -28,7 +59,11 @@ func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) 
 		animView = anim.Render()
 	}
 
-	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
+	line := fmt.Sprintf("%s %s %s", icon, toolName, animView)
+	if hint := streamingArgsHint(sty, streamedArgs); hint != "" {
+		line += " " + hint
+	}
+	return line
 }
 
 // toolEarlyStateContent handles error/cancelled/pending states before content rendering.
