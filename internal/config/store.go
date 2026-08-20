@@ -772,18 +772,28 @@ func nextRecentModels(cfg *Config, model SelectedModel) ([]SelectedModel, bool) 
 		return nil, false
 	}
 
-	eq := func(a, b SelectedModel) bool {
+	// Identity is the provider/model pair: one entry per model, however
+	// many times it is picked or re-tuned.
+	sameModel := func(a, b SelectedModel) bool {
 		return a.Provider == b.Provider && a.Model == b.Model
+	}
+	// The list is also where a model's last-used reasoning effort is kept
+	// (see Config.RememberedReasoningEffort), so re-tuning the model in
+	// place is a change worth persisting even though the order is
+	// untouched.
+	same := func(a, b SelectedModel) bool {
+		return sameModel(a, b) && a.ReasoningEffort == b.ReasoningEffort
 	}
 
 	entry := SelectedModel{
-		Provider: model.Provider,
-		Model:    model.Model,
+		Provider:        model.Provider,
+		Model:           model.Model,
+		ReasoningEffort: model.ReasoningEffort,
 	}
 
 	current := cfg.RecentModels
 	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
-		return eq(existing, entry)
+		return sameModel(existing, entry)
 	})
 
 	updated := append([]SelectedModel{entry}, withoutCurrent...)
@@ -791,7 +801,7 @@ func nextRecentModels(cfg *Config, model SelectedModel) ([]SelectedModel, bool) 
 		updated = updated[:maxRecentModels]
 	}
 
-	if slices.EqualFunc(current, updated, eq) {
+	if slices.EqualFunc(current, updated, same) {
 		return current, false
 	}
 

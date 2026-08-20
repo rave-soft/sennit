@@ -148,3 +148,57 @@ func TestUpdatePreferredModel_AddsToRecentsFront(t *testing.T) {
 	require.Equal(t, second, store.Config().RecentModels[0])
 	require.Equal(t, first, store.Config().RecentModels[1])
 }
+
+// TestNextRecentModels_CarriesTheReasoningEffort: the recent list is where a
+// model's last-used effort is kept, so switching away and back restores how
+// hard it was told to think (see Config.RememberedReasoningEffort).
+func TestNextRecentModels_CarriesTheReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	cfg := configWithRecents()
+	updated, changed := nextRecentModels(cfg, SelectedModel{
+		Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "xhigh", MaxTokens: 4096,
+	})
+	require.True(t, changed)
+	require.Equal(t, []SelectedModel{
+		{Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "xhigh"},
+	}, updated, "only the identity and the effort belong in the entry")
+}
+
+// TestNextRecentModels_EffortChangeAloneIsAChange: re-tuning the model at
+// the front of the list leaves the order untouched, and the new level still
+// has to reach disk.
+func TestNextRecentModels_EffortChangeAloneIsAChange(t *testing.T) {
+	t.Parallel()
+
+	cfg := configWithRecents(SelectedModel{Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "low"})
+	updated, changed := nextRecentModels(cfg, SelectedModel{
+		Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "high",
+	})
+	require.True(t, changed)
+	require.Equal(t, "high", updated[0].ReasoningEffort)
+
+	_, changed = nextRecentModels(configWithRecents(updated...), SelectedModel{
+		Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "high",
+	})
+	require.False(t, changed, "re-picking the same model at the same effort changes nothing")
+}
+
+// TestRememberedReasoningEffort covers the lookup the model picker uses to
+// restore a level: the live selection first, then the recent list, and ""
+// for a model neither knows.
+func TestRememberedReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	cfg := configWithRecents(
+		SelectedModel{Provider: "codex", Model: "gpt-5.6-terra", ReasoningEffort: "xhigh"},
+		SelectedModel{Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "low"},
+	)
+	cfg.Model = SelectedModel{Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "high"}
+
+	require.Equal(t, "high", cfg.RememberedReasoningEffort("codex", "gpt-5.6-sol"),
+		"the live selection is fresher than the recent entry built from it")
+	require.Equal(t, "xhigh", cfg.RememberedReasoningEffort("codex", "gpt-5.6-terra"))
+	require.Empty(t, cfg.RememberedReasoningEffort("codex", "gpt-5.4"))
+	require.Empty(t, cfg.RememberedReasoningEffort("", ""))
+}

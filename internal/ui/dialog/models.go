@@ -149,7 +149,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 
 			return ActionSelectModel{
 				Provider:       modelItem.prov,
-				Model:          modelItem.SelectedModel(),
+				Model:          m.rememberEffort(modelItem),
 				ReAuthenticate: isEdit,
 			}
 		default:
@@ -164,6 +164,27 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 		}
 	}
 	return nil
+}
+
+// rememberEffort is the picked model with the reasoning effort it was last
+// used at, falling back to the catalog default the item carries.
+//
+// Picking a model is not a request to reset how hard it thinks: a user who
+// moves to another model and back would otherwise find their effort silently
+// back at the default, with only the model name in the status bar to say
+// otherwise. A remembered level the model no longer offers (its catalog
+// entry changed since) is dropped rather than sent.
+func (m *Models) rememberEffort(item *ModelItem) config.SelectedModel {
+	selected := item.SelectedModel()
+	cfg := m.com.Config()
+	if cfg == nil {
+		return selected
+	}
+	effort := cfg.RememberedReasoningEffort(selected.Provider, selected.Model)
+	if effort != "" && slices.Contains(item.model.ReasoningLevels, effort) {
+		selected.ReasoningEffort = effort
+	}
+	return selected
 }
 
 // Cursor returns the cursor for the dialog.

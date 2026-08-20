@@ -704,6 +704,30 @@ func (c *Config) SelectedCatalogModel() *catwalk.Model {
 	return c.GetModel(c.Model.Provider, c.Model.Model)
 }
 
+// RememberedReasoningEffort returns the reasoning effort provider/model was
+// last used at, or "" when the pair has never been tuned.
+//
+// Effort is a property of the model, not of the app: "high" on a small
+// reasoner and "high" on a frontier one buy different things, and a user who
+// switches between two models expects each to come back the way they left
+// it. The current selection is checked first (it is the freshest value, and
+// it is written before the recent list catches up), then the recent-models
+// list, which carries the effort of every model still on it.
+func (c *Config) RememberedReasoningEffort(provider, model string) string {
+	if provider == "" || model == "" {
+		return ""
+	}
+	if c.Model.Provider == provider && c.Model.Model == model {
+		return c.Model.ReasoningEffort
+	}
+	for _, recent := range c.RecentModels {
+		if recent.Provider == provider && recent.Model == model {
+			return recent.ReasoningEffort
+		}
+	}
+	return ""
+}
+
 // DefaultModelForProvider resolves the default large model for a single,
 // already-configured provider: its catalog DefaultLargeModelID when the
 // provider is known, otherwise the first model in its configured list
