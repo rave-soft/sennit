@@ -84,10 +84,19 @@ func (c *coordinator) carryOverMessages(ctx context.Context, parentSessionID, ag
 
 // applyCarryOverBudget keeps the newest whole sessions that fit in
 // budget and reports how many older ones it dropped. The newest session
-// is always kept even when it alone exceeds the budget: returning
-// nothing there would silently turn the most recent exchange - the one
-// the next delegation almost certainly follows on from - into the one
-// piece of context that goes missing.
+// is always kept: returning nothing there would silently turn the most
+// recent exchange - the one the next delegation almost certainly follows
+// on from - into the one piece of context that goes missing.
+//
+// Kept, but no longer kept whole. A single delegation can run for
+// hundreds of messages and carry megabytes of tool output, and replaying
+// one of those verbatim put a quarter of a million tokens in front of a
+// sub-agent whose own task had not started yet. Every turn then died on
+// the provider's context limit, and auto-summarize could not save it -
+// the session's own history was a rounding error next to the carried
+// one, so there was nothing there to summarize (see
+// runTurn.stopOnContextWindow). The budget has to bind here too, or it
+// is not a budget.
 func applyCarryOverBudget(perSession [][]message.Message, budget int) ([]message.Message, int) {
 	if len(perSession) == 0 {
 		return nil, 0
@@ -108,7 +117,46 @@ func applyCarryOverBudget(perSession [][]message.Message, budget int) ([]message
 	for _, msgs := range perSession[first:] {
 		carried = append(carried, msgs...)
 	}
+	if first == len(perSession)-1 {
+		carried = trimToBudget(carried, budget)
+	}
 	return carried, first
+}
+
+// trimToBudget drops whole messages from the front of a single session's
+// history until what is left fits in budget, keeping its tail: the end of
+// a delegation - what was decided, what was handed back - is what the next
+// one builds on, while the start is the exploration that got there.
+//
+// The last message is always kept, however big it is, for the same reason
+// the newest session is: something of the previous exchange has to
+// survive. Cutting mid-session can leave a tool result whose call is gone,
+// or a call whose result is; preparePrompt already drops the one and
+// answers the other (see compat.go), so the cut does not have to fall on
+// an exchange boundary.
+func trimToBudget(msgs []message.Message, budget int) []message.Message {
+	if len(msgs) == 0 || messagesTextLen(msgs) <= budget {
+		return msgs
+	}
+
+	first := len(msgs) - 1
+	total := messagesTextLen(msgs[first:])
+	for i := len(msgs) - 2; i >= 0; i-- {
+		size := messagesTextLen(msgs[i : i+1])
+		if total+size > budget {
+			break
+		}
+		total += size
+		first = i
+	}
+	slog.Info(
+		"Trimmed the carried sub-agent session to the budget",
+		"dropped_messages", first,
+		"kept_messages", len(msgs)-first,
+		"kept_chars", total,
+		"budget", budget,
+	)
+	return msgs[first:]
 }
 
 // messagesTextLen sizes a session by the text its messages carry.

@@ -275,6 +275,33 @@ func TestApplyCarryOverBudget(t *testing.T) {
 			"dropping the most recent exchange would lose exactly the context the next delegation follows on from")
 	})
 
+	t.Run("the newest session is trimmed to its tail, not carried whole", func(t *testing.T) {
+		t.Parallel()
+		long := []message.Message{
+			{Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("a", 100)}}},
+			{Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("b", 100)}}},
+			{Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("c", 10)}}},
+		}
+		kept, dropped := applyCarryOverBudget([][]message.Message{session("old"), long}, 30)
+		assert.Equal(t, 1, dropped)
+		require.Len(t, kept, 1,
+			"a session that alone blows the budget is carried as its tail, not in full")
+		assert.Equal(t, strings.Repeat("c", 10), kept[0].Parts[0].(message.TextContent).Text,
+			"the end of the delegation is what the next one follows on from")
+	})
+
+	t.Run("the last message survives a budget it cannot fit", func(t *testing.T) {
+		t.Parallel()
+		huge := []message.Message{
+			{Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("a", 100)}}},
+			{Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("z", 5_000)}}},
+		}
+		kept, dropped := applyCarryOverBudget([][]message.Message{huge}, 10)
+		assert.Equal(t, 0, dropped)
+		require.Len(t, kept, 1, "carrying nothing is worse than carrying one oversized message")
+		assert.Equal(t, strings.Repeat("z", 5_000), kept[0].Parts[0].(message.TextContent).Text)
+	})
+
 	t.Run("nothing to carry", func(t *testing.T) {
 		t.Parallel()
 		kept, dropped := applyCarryOverBudget(nil, 10)
