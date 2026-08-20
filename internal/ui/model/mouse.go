@@ -336,16 +336,22 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			if cmd := m.chat.ScrollByAndAnimate(lines); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			// The wheel moves the viewport; the selection follows it into
+			// the nearest message still on screen. It must not be the other
+			// way round: scrolling back to the selection (what the arrow
+			// keys do, where one press is one line) undoes the tick that
+			// just happened, because a wheel tick is several lines and a
+			// tall message holds the selection across many of them — the
+			// view snapped straight back to where it started, so the wheel
+			// could not scroll at all.
 			if !m.chat.SelectedItemInView() {
-				if lines < 0 {
-					m.chat.SelectPrev()
-				} else if m.chat.AtBottom() {
+				switch {
+				case lines < 0:
+					m.chat.SelectLastInView()
+				case m.chat.AtBottom():
 					m.chat.SelectLast()
-				} else {
-					m.chat.SelectNext()
-				}
-				if cmd := m.chat.ScrollToSelectedAndAnimate(); cmd != nil {
-					cmds = append(cmds, cmd)
+				default:
+					m.chat.SelectFirstInView()
 				}
 			}
 		}
