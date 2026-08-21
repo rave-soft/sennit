@@ -50,6 +50,22 @@ var _ ConfigProvider = (*config.ConfigStore)(nil)
 
 func (a attemptID) valid() bool { return a.seq != 0 }
 
+// serverLocks groups the two per-server mutexes a Registry needs: one to
+// serialize lazy session renewal, one to serialize browser-suppressed OAuth.
+// A server's pair lives behind a single map lookup instead of two, so the
+// locking a server needs is a fixed set of fields on one struct rather than
+// two independently grown-and-shrunk maps that happen to be keyed the same
+// way by convention.
+type serverLocks struct {
+	renew    sync.Mutex
+	suppress sync.Mutex
+}
+
+// serverLock returns the lock pair for name, creating it on first use.
+func (r *Registry) serverLock(name string) *serverLocks {
+	return r.locks.GetOrSet(name, func() *serverLocks { return &serverLocks{} })
+}
+
 type tokenWriteOwner struct {
 	name    string
 	attempt attemptID
@@ -71,10 +87,16 @@ type Registry struct {
 	initDone    chan struct{}
 	initStarted bool
 
-	// renewMus serializes lazy session renewals per server so concurrent tool
-	// calls cannot race to rebuild the same session.
-	renewMusMu sync.Mutex
-	renewMus   map[string]*sync.Mutex
+	// locks holds two mutexes per server: renew (serializes lazy session
+	// renewals so concurrent tool calls cannot race to rebuild the same
+	// session) and suppress (serializes browser-suppression so only one
+	// remote, server-driven OAuth flow is active for a server at a time).
+	// They are grouped on one per-server struct, keyed by one map, rather
+	// than kept as two independently-guarded mutex maps: two servers never
+	// contend with each other, and the compiler enforces that "the renewal
+	// lock" and "the suppress lock" for a given server always mean the same
+	// two fields instead of two hand-maintained lookups that could drift.
+	locks *csync.Map[string, *serverLocks]
 
 	// gens hands out a per-server generation number. teardown bumps a
 	// server's generation; an init goroutine captures it at launch and only
@@ -84,10 +106,6 @@ type Registry struct {
 	// catalogMu makes the three catalogs and their version a single snapshot.
 	catalogMu sync.RWMutex
 	version   atomic.Uint64
-
-	// suppressMus serializes browser-suppression per server so only one
-	// remote (server-driven) OAuth flow is active for a server at a time.
-	suppressMus *csync.Map[string, *sync.Mutex]
 
 	// publishMu serializes every externally visible per-server publication.
 	// A generation check and the corresponding session, catalog, count and state
@@ -145,9 +163,8 @@ func NewRegistry() *Registry {
 		authURLs:          csync.NewMap[string, authPublication](),
 		broker:            pubsub.NewBroker[Event](),
 		initDone:          make(chan struct{}),
-		renewMus:          map[string]*sync.Mutex{},
+		locks:             csync.NewMap[string, *serverLocks](),
 		gens:              csync.NewMap[string, uint64](),
-		suppressMus:       csync.NewMap[string, *sync.Mutex](),
 		authFlows:         map[string]*authFlow{},
 		tokenWrites:       map[tokenWriteOwner]map[*tokenWrite]struct{}{},
 		tokenReservations: map[tokenWriteOwner]*config.MCPTokenMutation{},
@@ -171,9 +188,9 @@ func NewRegistry() *Registry {
 
 // defaultRegistry is the shared, process-wide MCP registry every
 // package-level function below operates on. It exists purely for source
-// compatibility with the many pre-existing callers (agent, workspace,
-// backend, ui, commands, server packages); new code that can construct its
-// own [Registry] should prefer doing so.
+// compatibility with the many pre-existing callers (agent, workspace, app,
+// commands packages); new code that can construct its own [Registry]
+// should prefer doing so.
 var defaultRegistry = NewRegistry()
 
 // ArmInit marks that MCP initialization is expected so WaitForInit blocks

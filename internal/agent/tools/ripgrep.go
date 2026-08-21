@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"os"
@@ -58,7 +59,7 @@ func NewRipgrepTool(workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
 		ripgrepDescription(),
 		func(ctx context.Context, params RipgrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
-				return fantasy.NewTextErrorResponse("pattern is required"), nil
+				return invalidParam("pattern"), nil
 			}
 
 			searchPattern := params.Pattern
@@ -104,7 +105,8 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string, caseI
 
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return []grepMatch{}, nil
 		}
 		return nil, err

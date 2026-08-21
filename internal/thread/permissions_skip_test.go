@@ -1,7 +1,9 @@
-package thread
+package thread_test
 
 import (
 	"testing"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/stretchr/testify/require"
 )
@@ -17,10 +19,10 @@ func TestManager_SetPermissionsSkipReachesLiveThreads(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "yolo-follower",
 		Goal:        "implement the thing",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 	})
 	require.NoError(t, err)
 
@@ -45,10 +47,10 @@ func TestManager_SetPermissionsSkipIgnoresThreadsWithNoLiveWorkspace(t *testing.
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "cancelled",
 		Goal:        "implement the thing",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 	})
 	require.NoError(t, err)
 	require.NoError(t, mgr.Cancel(t.Context(), st.ID, "done with it"))

@@ -9,7 +9,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/notify"
-	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -250,12 +249,12 @@ func TestRun_AutoSummarizeContinuationPreservesAcceptedSequence(t *testing.T) {
 
 	cancelAnchor := sa.BeginAccepted(sess.ID)
 	active := &activeCancel{cancel: func() {}}
-	sa.dispatch.activeRequests.Set(sess.ID, active)
-	sa.dispatch.cancel(sess.ID)
+	sa.setActiveForTest(sess.ID, active)
+	sa.cancel(sess.ID)
 	concurrent := sa.BeginAccepted(sess.ID)
 	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "concurrent", Accepted: concurrent})
 	require.NoError(t, err)
-	csync.CompareAndDelete(sa.dispatch.activeRequests, sess.ID, active)
+	sa.clearActiveIfMatch(sess.ID, active)
 
 	close(model.releaseSummary)
 	require.NoError(t, <-runDone)
@@ -294,7 +293,7 @@ func TestRun_AutoSummarizeDoesNotClobberConcurrentActiveRequest(t *testing.T) {
 	}).(*sessionAgent)
 
 	model.onFinish = func() {
-		sa.dispatch.activeRequests.Set(sess.ID, racer)
+		sa.setActiveForTest(sess.ID, racer)
 	}
 
 	_, err = sa.Run(t.Context(), SessionAgentCall{
@@ -306,7 +305,7 @@ func TestRun_AutoSummarizeDoesNotClobberConcurrentActiveRequest(t *testing.T) {
 	// shouldSummarize cleanup instead of being erased.
 	require.ErrorIs(t, err, ErrSessionBusy)
 
-	got, ok := sa.dispatch.activeRequests.Get(sess.ID)
+	got, ok := sa.getActiveForTest(sess.ID)
 	require.True(t, ok, "the concurrently-installed entry must survive this run's cleanup")
 	require.Same(t, racer, got, "this run's cleanup must not replace a newer run's entry")
 	require.False(t, racerCanceled.Load(), "this run's cleanup must not cancel a newer run's context")

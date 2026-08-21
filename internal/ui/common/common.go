@@ -46,7 +46,7 @@ func (c *Common) Config() *config.Config {
 // tests).
 func (c *Common) Context() context.Context {
 	if c.Ctx == nil {
-		return context.Background()
+		return context.Background() //nolint:forbidigo // this *is* the fallback the lint rule tells callers to use instead
 	}
 	return c.Ctx
 }

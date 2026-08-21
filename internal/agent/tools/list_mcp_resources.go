@@ -48,12 +48,12 @@ func NewListMCPResourcesTool(cfg mcpResourceConfig, reg *mcp.Registry, permissio
 		func(ctx context.Context, params ListMCPResourcesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			params.MCPName = strings.TrimSpace(params.MCPName)
 			if params.MCPName == "" {
-				return fantasy.NewTextErrorResponse("mcp_name parameter is required"), nil
+				return invalidParam("mcp_name"), nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for listing MCP resources")
+				return fantasy.ToolResponse{}, missingSessionID("listing MCP resources")
 			}
 
 			relPath := filepathext.SmartJoin(cfg.WorkingDir(), params.MCPName)

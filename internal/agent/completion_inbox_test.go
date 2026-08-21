@@ -336,7 +336,7 @@ func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {
 	// isolating - it wants the completion sitting in the inbox exactly
 	// as if a task had completed while this session last went busy, for
 	// PrepareStep's own step-0 drain to pick up.
-	sa.dispatch.enqueueCompletion(sess.ID, completion)
+	sa.enqueueCompletion(sess.ID, completion)
 
 	_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "main"})
 	require.Error(t, runErr, "the assistant-message create failure must propagate out of Run")

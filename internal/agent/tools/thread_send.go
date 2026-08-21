@@ -30,10 +30,10 @@ func NewThreadSendTool(manager ThreadManager) fantasy.AgentTool {
 		renderToolDescription(threadSendDescriptionTpl),
 		func(ctx context.Context, params ThreadSendParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ID == "" {
-				return fantasy.NewTextErrorResponse("id is required"), nil
+				return invalidParam("id"), nil
 			}
 			if params.Message == "" {
-				return fantasy.NewTextErrorResponse("message is required"), nil
+				return invalidParam("message"), nil
 			}
 
 			outcome, err := manager.Send(ctx, params.ID, params.Message)

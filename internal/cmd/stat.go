@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,8 +8,6 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/rave-soft/sennit/internal/config"
-	sennitdb "github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/spf13/cobra"
@@ -95,13 +92,7 @@ type statOutput struct {
 }
 
 func runStat(cmd *cobra.Command, _ []string) error {
-	// cmd.Context() is nil unless the command was dispatched through
-	// Execute(); fall back to Background() so RunE also works when
-	// invoked directly (as tests do). See the same pattern in models.go.
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := cmdContext(cmd)
 
 	by, _ := cmd.Flags().GetString("by")
 	switch by {
@@ -119,27 +110,21 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	jsonOut, _ := cmd.Flags().GetBool("json")
 	allProjects, _ := cmd.Flags().GetBool("all-projects")
 
-	// Resolve the actual cwd via ResolveCwd (the --cwd flag, or
+	// initConfig resolves the actual cwd via ResolveCwd (the --cwd flag, or
 	// os.Getwd()), the same way doctor.go/models.go do — not
-	// cfg.WorkingDir() off an empty-string config.Init(), which never
+	// cfg.WorkingDir() off an empty-string config.Load(), which never
 	// matches the absolute paths real sessions record as project_path.
-	cwd, err := ResolveCwd(cmd)
+	cwd, _, err := initConfig(cmd, false)
 	if err != nil {
-		return err
-	}
-
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	if _, err := config.Init(cwd, dataDir, false); err != nil {
 		return fmt.Errorf("failed to initialize config: %w", err)
 	}
 	event.StatsViewed()
 
-	conn, err := sennitdb.Connect(ctx, config.GlobalDBDir())
+	queries, _, cleanup, err := connectDB(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return err
 	}
-	defer sennitdb.Release(config.GlobalDBDir()) //nolint:errcheck // best-effort refcount release on exit
-	queries := sennitdb.New(conn)
+	defer cleanup()
 
 	// The aggregation itself lives in internal/stats, shared with the
 	// TUI's /stats screen, so the two can never disagree about the same
@@ -148,7 +133,7 @@ func runStat(cmd *cobra.Command, _ []string) error {
 	snap, err := stats.Gather(ctx, queries, stats.Request{
 		Scope: stats.ScopeProject,
 		// cwd, not cfg.WorkingDir(): sessions record project_path as an
-		// absolute path, which an empty-string config.Init() never
+		// absolute path, which an empty-string config.Load() never
 		// matches. Same reasoning as doctor.go/models.go.
 		ProjectPath: cwd,
 		Since:       since,

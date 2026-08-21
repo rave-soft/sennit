@@ -85,6 +85,23 @@ func GetDepthFromContext(ctx context.Context) int {
 	return getContextValue(ctx, DepthContextKey, 0)
 }
 
+// invalidParam returns the standard tool response for a missing or invalid
+// argument the model supplied. Bad input is model-recoverable — the model
+// can see the message and retry with a corrected call — so it goes back as
+// a normal (if IsError) tool result rather than a Go error. See the
+// error-vs-response rule next to "Tools are self-documenting" in AGENTS.md.
+func invalidParam(name string) fantasy.ToolResponse {
+	return fantasy.NewTextErrorResponse(name + " is required")
+}
+
+// missingSessionID reports that a tool ran without a session ID bound to
+// its context while performing action. The model has no way to supply
+// one — it is wired in by the caller, not a tool argument — so unlike
+// invalidParam this is an infrastructure failure and returns a Go error.
+func missingSessionID(action string) error {
+	return fmt.Errorf("session ID is required for %s", action)
+}
+
 // NewPermissionDeniedResponse returns a tool response indicating the user
 // denied permission, with StopTurn set so the agent loop does not retry.
 func NewPermissionDeniedResponse() fantasy.ToolResponse {

@@ -23,7 +23,7 @@ const OriginAgent = message.OriginAgent
 // [PromptOriginFromContext] path and persistence behavior is identical.
 // It is still persisted with Role == message.User and reaches the model
 // exactly like any other user turn (Origin has zero effect on what the
-// model sees — see Message.ToAIMessage), but the UI can use it to mark
+// model sees — see toAIMessage in message_convert.go), but the UI can use it to mark
 // the message as not the person's own words.
 func WithAgentDispatch(ctx context.Context) context.Context {
 	return context.WithValue(ctx, promptOriginContextKey{}, OriginAgent)

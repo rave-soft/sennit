@@ -19,8 +19,10 @@ func TestSkillStatusItemsIncludesBuiltinSkills(t *testing.T) {
 	st := uistyles.SennitDark()
 	ui := &UI{
 		com: &common.Common{Styles: &st},
-		skillStates: []*skills.SkillState{
-			{Name: "go-doc", Path: "/tmp/go-doc/SKILL.md", State: skills.StateNormal},
+		integrationsState: integrationsState{
+			skillStates: []*skills.SkillState{
+				{Name: "go-doc", Path: "/tmp/go-doc/SKILL.md", State: skills.StateNormal},
+			},
 		},
 	}
 
@@ -67,8 +69,10 @@ func TestSkillStatusItemsExcludesDisabledSkills(t *testing.T) {
 			Styles:    &st,
 			Workspace: &testWorkspace{cfg: &config.Config{Options: &config.Options{DisabledSkills: []string{"go-doc", "sennit-config"}}}},
 		},
-		skillStates: []*skills.SkillState{
-			{Name: "go-doc", Path: "/tmp/go-doc/SKILL.md", State: skills.StateNormal},
+		integrationsState: integrationsState{
+			skillStates: []*skills.SkillState{
+				{Name: "go-doc", Path: "/tmp/go-doc/SKILL.md", State: skills.StateNormal},
+			},
 		},
 	}
 

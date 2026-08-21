@@ -106,7 +106,7 @@ func (s *ConfigStore) mutateMCPToken(reservation *MCPTokenMutation, clearExpecte
 	reservation.expectedToken = token
 	s.setConfig(next)
 	if path, pathErr := s.ConfigPath(ScopeGlobal); pathErr == nil {
-		s.captureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
+		s.CaptureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
 	}
 	return true, nil
 }

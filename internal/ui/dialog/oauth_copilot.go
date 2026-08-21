@@ -18,10 +18,11 @@ func NewOAuthCopilot(
 	provider catwalk.Provider,
 	model *config.SelectedModel,
 ) (*OAuth, tea.Cmd) {
-	return newOAuth(com, isOnboarding, provider, model, &OAuthCopilot{})
+	return newOAuth(com, isOnboarding, provider, model, &OAuthCopilot{com: com})
 }
 
 type OAuthCopilot struct {
+	com        *common.Common
 	deviceCode *copilot.DeviceCode
 	cancelFunc func()
 }
@@ -33,7 +34,7 @@ func (m *OAuthCopilot) name() string {
 }
 
 func (m *OAuthCopilot) initiateAuth() tea.Msg {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(m.com.Context(), 30*time.Second)
 	defer cancel()
 
 	deviceCode, err := copilot.RequestDeviceCode(ctx)
@@ -53,10 +54,9 @@ func (m *OAuthCopilot) initiateAuth() tea.Msg {
 }
 
 func (m *OAuthCopilot) startPolling(deviceCode string, expiresIn int) tea.Cmd {
+	ctx, cancel := context.WithCancel(m.com.Context())
+	m.cancelFunc = cancel
 	return func() tea.Msg {
-		ctx, cancel := context.WithCancel(context.Background())
-		m.cancelFunc = cancel
-
 		token, err := copilot.PollForToken(ctx, m.deviceCode)
 		if err != nil {
 			if ctx.Err() != nil {

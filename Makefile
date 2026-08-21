@@ -6,7 +6,7 @@ GO       ?= go
 BINARY   ?= sennit
 SCRATCH  ?= /tmp/sennit-fresh
 
-.PHONY: all build install run dev fresh test race lint fmt tidy vet \
+.PHONY: all build install link run dev fresh test race lint fmt tidy vet \
         schema schema-check check ci hooks clean help
 
 all: build
@@ -41,13 +41,9 @@ fresh: build
 test:
 	$(GO) test -count=1 ./...
 
-## race: full suite exactly as CI runs it
+## race: full suite with the race detector, as CI's race job runs it
 race:
-	@set -eu; \
-	test_binary=$$(mktemp "$${TMPDIR:-/tmp}/sennit-test.XXXXXX"); \
-	trap 'rm -f "$$test_binary"' EXIT; \
-	$(GO) build -o "$$test_binary" .; \
-	SENNIT_TEST_BINARY="$$test_binary" $(GO) test -race -failfast ./...
+	$(GO) test -race -failfast ./...
 
 ## lint: golangci-lint with the CI config
 lint:
@@ -79,7 +75,7 @@ schema-check:
 check: tidy build lint schema-check
 
 ## ci: full local equivalent of the CI matrix job + lint
-ci: check client-server race
+ci: check race
 
 ## hooks: enable the versioned pre-commit hook
 hooks:
@@ -88,6 +84,8 @@ hooks:
 ## clean: remove build artifacts
 clean:
 	rm -f $(BINARY)
+	rm -f *.test
+	rm -rf site/ .venv-docs/
 	$(GO) clean
 
 ## help: list targets

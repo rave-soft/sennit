@@ -89,7 +89,7 @@ func modelAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 
 	model := map[string]any{"id": id}
-	if err := applyFlags(modelAddFlags, args, model, "model add", stderr); err != nil {
+	if err := applyFlags(modelAddFlags, args, 3, model, "model add", stderr); err != nil {
 		return err
 	}
 
@@ -184,12 +184,9 @@ func modelSet(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	sel["provider"] = provider
 	sel["model"] = id
 
-	// applyFlags always reads flags starting at args[applyFlagsStart]
-	// (offset 3, matching "builtin subcommand name"), but the no-slot
-	// form only has "model <provider/id>" before its flags. Pad with a
-	// placeholder token to keep the shared offset.
-	padded := append([]string{args[0], "model", args[1]}, args[2:]...)
-	if err := applyFlags(modelSelectFlags, padded, sel, "model", stderr); err != nil {
+	// The no-slot form is "model <provider/id> [flags]": only two tokens
+	// precede the flags, unlike the three-token prefix most builtins have.
+	if err := applyFlags(modelSelectFlags, args, 2, sel, "model", stderr); err != nil {
 		return err
 	}
 

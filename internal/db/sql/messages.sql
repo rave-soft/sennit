@@ -47,6 +47,19 @@ WHERE session_id = ?;
 SELECT COUNT(*) FROM messages
 WHERE session_id = ?;
 
+-- name: CountMessagesForSessionIDs :one
+-- gc's dependent-row count for a batch of sessions it is about to delete.
+-- One aggregate query via json_each rather than an IN-list, so the bound
+-- parameter count does not grow with the number of sessions selected --
+-- see ListMessagesBySessionIDs for the same pattern.
+WITH input AS (
+    SELECT CAST(sqlc.arg(session_ids_json) AS TEXT) AS session_ids_json
+)
+SELECT COUNT(*) FROM messages
+WHERE messages.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+);
+
 -- name: ListUserMessagesBySession :many
 SELECT *
 FROM messages

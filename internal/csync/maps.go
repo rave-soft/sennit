@@ -14,11 +14,17 @@ type Map[K comparable, V any] struct {
 	mu    sync.RWMutex
 }
 
-// NewMap creates a thread-safe map, optionally initialized from a map.
+// NewMap creates a thread-safe map, optionally initialized from a map. The
+// initial map is copied, so the caller keeps ownership of it: later reads or
+// writes to the original don't bypass the lock, and mutations via Map don't
+// leak back into it.
 func NewMap[K comparable, V any](initial ...map[K]V) *Map[K, V] {
 	inner := make(map[K]V)
 	if len(initial) > 0 {
-		inner = initial[0]
+		inner = maps.Clone(initial[0])
+		if inner == nil {
+			inner = make(map[K]V)
+		}
 	}
 	return &Map[K, V]{inner: inner}
 }

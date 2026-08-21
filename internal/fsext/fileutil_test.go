@@ -267,3 +267,139 @@ func TestGlobWithDoubleStar(t *testing.T) {
 		require.Equal(t, []string{oldestFile, middleDir, newestFile}, matches)
 	})
 }
+
+func TestHasPrefix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		path     string
+		prefix   string
+		expected bool
+	}{
+		{
+			name:     "sibling directory that merely starts with ..",
+			path:     filepath.Join(string(filepath.Separator), "a", "..foo"),
+			prefix:   filepath.Join(string(filepath.Separator), "a"),
+			expected: true,
+		},
+		{
+			name:     "nested path under a sibling that starts with ..",
+			path:     filepath.Join(string(filepath.Separator), "a", "..foo", "bar"),
+			prefix:   filepath.Join(string(filepath.Separator), "a"),
+			expected: true,
+		},
+		{
+			name:     "unrelated path is not a prefix match",
+			path:     filepath.Join(string(filepath.Separator), "b"),
+			prefix:   filepath.Join(string(filepath.Separator), "a"),
+			expected: false,
+		},
+		{
+			name:     "genuine parent-directory escape",
+			path:     filepath.Join(string(filepath.Separator), "a", "..", "b"),
+			prefix:   filepath.Join(string(filepath.Separator), "a"),
+			expected: false,
+		},
+		{
+			name:     "identical path",
+			path:     filepath.Join(string(filepath.Separator), "a"),
+			prefix:   filepath.Join(string(filepath.Separator), "a"),
+			expected: true,
+		},
+		{
+			name:     "normal nested path",
+			path:     filepath.Join(string(filepath.Separator), "a", "b", "c"),
+			prefix:   filepath.Join(string(filepath.Separator), "a"),
+			expected: true,
+		},
+		{
+			name:     "sibling with a shared textual prefix but different path",
+			path:     filepath.Join(string(filepath.Separator), "ab"),
+			prefix:   filepath.Join(string(filepath.Separator), "a"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.expected, HasPrefix(tt.path, tt.prefix))
+		})
+	}
+}
+
+func TestToWindowsLineEndings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		content     string
+		expected    string
+		expectedChg bool
+	}{
+		{
+			name:        "pure LF converts fully",
+			content:     "a\nb\nc",
+			expected:    "a\r\nb\r\nc",
+			expectedChg: true,
+		},
+		{
+			name:        "mixed LF and CRLF is normalized to all CRLF",
+			content:     "a\r\nb\nc",
+			expected:    "a\r\nb\r\nc",
+			expectedChg: true,
+		},
+		{
+			name:        "already CRLF is unchanged",
+			content:     "a\r\nb\r\nc",
+			expected:    "a\r\nb\r\nc",
+			expectedChg: false,
+		},
+		{
+			name:        "empty string",
+			content:     "",
+			expected:    "",
+			expectedChg: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, changed := ToWindowsLineEndings(tt.content)
+			require.Equal(t, tt.expected, got)
+			require.Equal(t, tt.expectedChg, changed)
+			// The bool must faithfully report whether the content changed.
+			require.Equal(t, got != tt.content, changed)
+
+			// Idempotency: applying twice equals applying once.
+			got2, changed2 := ToWindowsLineEndings(got)
+			require.Equal(t, got, got2)
+			require.False(t, changed2)
+		})
+	}
+}
+
+func TestLineEndingsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// Simulates the edit-tool path: a CRLF file is normalized to LF, edited
+	// (possibly introducing literal CRLF from the model output), and
+	// converted back to CRLF. The round trip must not leave mixed endings.
+	original := "line1\r\nline2\r\nline3"
+
+	unix, _ := ToUnixLineEndings(original)
+	require.Equal(t, "line1\nline2\nline3", unix)
+
+	back, _ := ToWindowsLineEndings(unix)
+	require.Equal(t, original, back)
+
+	// Splice in LF-only content between the two conversions, as an edit tool
+	// applying a model-provided replacement might.
+	spliced := unix + "\nline4"
+	backMixed, changed := ToWindowsLineEndings(spliced)
+	require.True(t, changed)
+	require.Equal(t, "line1\r\nline2\r\nline3\r\nline4", backMixed)
+	require.NotContains(t, backMixed, "\n\n") // no stray bare LF left over
+}

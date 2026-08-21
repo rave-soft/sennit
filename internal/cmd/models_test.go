@@ -93,7 +93,7 @@ func TestModelsRefreshCmd_SingleProvider(t *testing.T) {
 
 	// A subsequent load must see the refreshed models via the cache
 	// without needing the (now closed-by-defer) network endpoint.
-	cfg, err := config.Init(t.TempDir(), "", false)
+	cfg, err := config.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 	pc, ok := cfg.Config().Providers.Get("custom")
 	require.True(t, ok)
@@ -131,7 +131,7 @@ func TestModelsRefreshCmd_AllProviders(t *testing.T) {
 	require.False(t, gjson.GetBytes(persisted, "providers.custom-a.models").Exists())
 	require.False(t, gjson.GetBytes(persisted, "providers.custom-b.models").Exists())
 
-	cfg, err := config.Init(t.TempDir(), "", false)
+	cfg, err := config.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 	pcA, ok := cfg.Config().Providers.Get("custom-a")
 	require.True(t, ok)
@@ -157,7 +157,7 @@ func TestModelsRefreshCmd_UnreachableEndpointLeavesDiskUntouched(t *testing.T) {
 	// A plain load leaves the seeded models in place (see the threshold
 	// note above); do it once up front so "before" reflects the steady
 	// state a failed refresh must preserve.
-	_, err := config.Init(t.TempDir(), "", false)
+	_, err := config.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 	before, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
@@ -229,7 +229,7 @@ func TestModelsRefreshCmd_ExplicitConfigModelsSkipped(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, string(before), string(after), "explicit config models must not be touched on disk")
 
-	cfg, err := config.Init(t.TempDir(), "", false)
+	cfg, err := config.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 	pc, ok := cfg.Config().Providers.Get("custom")
 	require.True(t, ok)

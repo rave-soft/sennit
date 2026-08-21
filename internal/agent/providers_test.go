@@ -16,7 +16,7 @@ import (
 // different (env/providerCfg-based) purpose.
 func newProxyTestCoordinator(t *testing.T, debug bool) *coordinator {
 	t.Helper()
-	cfg, err := config.Init(t.TempDir(), t.TempDir(), debug)
+	cfg, err := config.Load(t.TempDir(), t.TempDir(), debug)
 	require.NoError(t, err)
 	return &coordinator{cfg: cfg}
 }

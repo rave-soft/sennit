@@ -15,10 +15,10 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 )
 
-// BootstrapOptions configures Bootstrap. Fields marked "backend" or
-// "local" below note where the two current callers (the multi-workspace
-// backend and the single-workspace CLI) diverge; everything else is
-// shared verbatim.
+// BootstrapOptions configures Bootstrap. Fields marked "top-level" or
+// "spawned thread" below note where the two current callers (the CLI's
+// single top-level workspace and a thread's spawned sub-workspace)
+// diverge; everything else is shared verbatim.
 type BootstrapOptions struct {
 	// DataDir, Debug, YOLO and Channels feed config.Init and the
 	// resulting store's overrides.
@@ -58,26 +58,27 @@ type BootstrapOptions struct {
 	// workspaces lock their data directory.
 	WorkspaceLock bool
 
-	// GlobalSkillsMirror enables skills.WithGlobalMirror. Local mode
-	// hosts a single workspace per process and sets this so the
-	// package-level globals the TUI reads stay in sync; the backend
-	// hosts multiple workspaces concurrently and leaves it off to avoid
+	// GlobalSkillsMirror enables skills.WithGlobalMirror. The top-level
+	// workspace sets this so the package-level globals the TUI reads
+	// stay in sync; a spawned thread's workspace runs concurrently
+	// alongside it in the same process and leaves it off to avoid
 	// last-writer-wins cross-talk between them.
 	GlobalSkillsMirror bool
 
 	// PostDataDir, if set, runs after the .sennit data directory has
-	// been created and before the DB connection is opened. Local mode
-	// uses this to register the project with the projects package.
+	// been created and before the DB connection is opened. The
+	// top-level workspace uses this to register the project with the
+	// projects package.
 	PostDataDir func(cfg *config.ConfigStore) error
 
 	// PostConnect, if set, runs after the DB connection is opened and
-	// before skills discovery. Local mode uses this to point logging at
-	// the workspace's log file.
+	// before skills discovery. The top-level workspace uses this to
+	// point logging at the workspace's log file.
 	PostConnect func(cfg *config.ConfigStore) error
 
 	// OnAppInitFailure, if set, is called with New's raw error if it
-	// fails. Local mode uses this to log the failure; the backend
-	// reports it to its caller instead.
+	// fails. The top-level workspace uses this to log the failure; a
+	// spawned thread's workspace reports it to its caller instead.
 	OnAppInitFailure func(err error)
 
 	newApp func(context.Context, *sql.DB, *config.ConfigStore, *skills.Manager) (*App, error)
@@ -98,7 +99,7 @@ type BootstrapResult struct {
 // discover its skills, then construct the App. Callers differ only in
 // the details captured by BootstrapOptions; see its field comments.
 func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*BootstrapResult, error) {
-	cfg, err := config.Init(path, opts.DataDir, opts.Debug)
+	cfg, err := config.Load(path, opts.DataDir, opts.Debug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
@@ -221,8 +222,8 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 }
 
 func workspaceLockDir(ctx context.Context, workspaceDir, dataDir string) (string, error) {
-	// A path that does not exist cannot be a repository. This preserves the
-	// backend's ability to create a workspace at a new path without treating
+	// A path that does not exist cannot be a repository. This preserves
+	// the ability to create a workspace at a new path without treating
 	// git's chdir failure as a non-repository signal.
 	if _, err := os.Stat(workspaceDir); errors.Is(err, os.ErrNotExist) {
 		return dataDir, nil

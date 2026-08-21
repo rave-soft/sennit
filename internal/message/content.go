@@ -2,19 +2,13 @@ package message
 
 import (
 	"encoding/base64"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"charm.land/fantasy"
-	"charm.land/fantasy/providers/anthropic"
-	"charm.land/fantasy/providers/google"
-	"charm.land/fantasy/providers/openai"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/stringext"
 )
 
 type MessageRole string
@@ -47,7 +41,7 @@ func (r *MessageRole) UnmarshalText(data []byte) error {
 // it, or another agent dispatched it on their behalf (a delegation's
 // initial goal, or a thread_send/task_send follow-up). It is metadata
 // about authorship only — it never changes Role or what reaches the
-// model; see [Message.ToAIMessage].
+// model; see the toAIMessage conversion in internal/agent.
 type Origin string
 
 const (
@@ -59,10 +53,6 @@ const (
 	// person's behalf, rather than something the person typed.
 	OriginAgent Origin = "agent"
 )
-
-// mediaLoadFailedPlaceholder is the text substituted for image data that
-// cannot be decoded during session replay.
-const mediaLoadFailedPlaceholder = "[Image data could not be loaded]"
 
 type FinishReason string
 
@@ -100,13 +90,62 @@ type ContentPart interface {
 }
 
 type ReasoningContent struct {
-	Thinking         string                             `json:"thinking"`
-	Signature        string                             `json:"signature"`
-	ThoughtSignature string                             `json:"thought_signature"` // Used for google
-	ToolID           string                             `json:"tool_id"`           // Used for openrouter google models
-	ResponsesData    *openai.ResponsesReasoningMetadata `json:"responses_data"`
-	StartedAt        int64                              `json:"started_at,omitempty"`
-	FinishedAt       int64                              `json:"finished_at,omitempty"`
+	Thinking         string                      `json:"thinking"`
+	Signature        string                      `json:"signature"`
+	ThoughtSignature string                      `json:"thought_signature"` // Used for google
+	ToolID           string                      `json:"tool_id"`           // Used for openrouter google models
+	ResponsesData    *ResponsesReasoningMetadata `json:"responses_data"`
+	StartedAt        int64                       `json:"started_at,omitempty"`
+	FinishedAt       int64                       `json:"finished_at,omitempty"`
+}
+
+// responsesReasoningMetadataType tags [ResponsesReasoningMetadata] in its
+// JSON envelope. It matches the wire tag
+// fantasy/providers/openai.ResponsesReasoningMetadata used before this type
+// moved into message, so sessions persisted by older binaries keep decoding.
+const responsesReasoningMetadataType = "openai.responses.reasoning_metadata"
+
+// ResponsesReasoningMetadata carries the OpenAI Responses-API bookkeeping
+// (reasoning item id, encrypted content, summary) needed to resume a
+// reasoning item across turns. It is a local mirror of
+// fantasy/providers/openai.ResponsesReasoningMetadata's data shape, kept
+// deliberately provider-SDK-free: message is a leaf data model (see
+// AGENTS.md's "Proto boundary" section), and internal/agent converts to and
+// from the SDK type at the provider boundary.
+type ResponsesReasoningMetadata struct {
+	ItemID           string   `json:"item_id"`
+	EncryptedContent *string  `json:"encrypted_content"`
+	Summary          []string `json:"summary"`
+}
+
+// MarshalJSON reproduces fantasy's provider-data envelope
+// ({"type":...,"data":...}) byte for byte, so a message persisted before
+// this type moved out of fantasy/providers/openai still round-trips the
+// same way (including the fact that decoding the wrapped bytes back through
+// this same envelope shape, mirrored from
+// fantasy.MarshalProviderType/UnmarshalProviderType, is a pre-existing
+// upstream quirk this move does not change).
+func (m ResponsesReasoningMetadata) MarshalJSON() ([]byte, error) {
+	type plain ResponsesReasoningMetadata
+	data, err := json.Marshal(plain(m))
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}{Type: responsesReasoningMetadataType, Data: data})
+}
+
+// UnmarshalJSON is the counterpart to MarshalJSON above.
+func (m *ResponsesReasoningMetadata) UnmarshalJSON(data []byte) error {
+	type plain ResponsesReasoningMetadata
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*m = ResponsesReasoningMetadata(p)
+	return nil
 }
 
 func (tc ReasoningContent) String() string {
@@ -395,7 +434,7 @@ func (m *Message) AppendReasoningSignature(signature string) {
 	m.Parts = append(m.Parts, ReasoningContent{Signature: signature})
 }
 
-func (m *Message) SetReasoningResponsesData(data *openai.ResponsesReasoningMetadata) {
+func (m *Message) SetReasoningResponsesData(data *ResponsesReasoningMetadata) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			m.Parts[i] = ReasoningContent{
@@ -594,123 +633,4 @@ func PromptWithTextAttachments(prompt string, attachments []Attachment) string {
 		fmt.Fprintf(&sb, "\n</%s>\n", tag)
 	}
 	return sb.String()
-}
-
-func (m *Message) ToAIMessage() []fantasy.Message {
-	var messages []fantasy.Message
-	switch m.Role {
-	case User:
-		var parts []fantasy.MessagePart
-		text := strings.TrimSpace(m.Content().Text)
-		var textAttachments []Attachment
-		for _, content := range m.BinaryContent() {
-			if !strings.HasPrefix(content.MIMEType, "text/") {
-				continue
-			}
-			textAttachments = append(textAttachments, Attachment{
-				FilePath: content.Path,
-				MimeType: content.MIMEType,
-				Content:  content.Data,
-			})
-		}
-		text = PromptWithTextAttachments(text, textAttachments)
-		// Include bang-mode shell commands as context for the agent.
-		for _, sc := range m.ShellCommands() {
-			shellText := fmt.Sprintf("$ %s\n%s\n(exit code %d)", sc.Command, ansi.Strip(sc.Output), sc.ExitCode)
-			if text != "" {
-				text += "\n\n" + shellText
-			} else {
-				text = shellText
-			}
-		}
-		if text != "" {
-			parts = append(parts, fantasy.TextPart{Text: text})
-		}
-		for _, content := range m.BinaryContent() {
-			// skip text attachements
-			if strings.HasPrefix(content.MIMEType, "text/") {
-				continue
-			}
-			parts = append(parts, fantasy.FilePart{
-				Filename:  content.Path,
-				Data:      content.Data,
-				MediaType: content.MIMEType,
-			})
-		}
-		messages = append(messages, fantasy.Message{
-			Role:    fantasy.MessageRoleUser,
-			Content: parts,
-		})
-	case Assistant:
-		var parts []fantasy.MessagePart
-		text := strings.TrimSpace(m.Content().Text)
-		if text != "" {
-			parts = append(parts, fantasy.TextPart{Text: text})
-		}
-		reasoning := m.ReasoningContent()
-		if reasoning.Thinking != "" {
-			reasoningPart := fantasy.ReasoningPart{Text: reasoning.Thinking, ProviderOptions: fantasy.ProviderOptions{}}
-			if reasoning.Signature != "" {
-				reasoningPart.ProviderOptions[anthropic.Name] = &anthropic.ReasoningOptionMetadata{
-					Signature: reasoning.Signature,
-				}
-			}
-			if reasoning.ResponsesData != nil {
-				reasoningPart.ProviderOptions[openai.Name] = reasoning.ResponsesData
-			}
-			if reasoning.ThoughtSignature != "" {
-				reasoningPart.ProviderOptions[google.Name] = &google.ReasoningMetadata{
-					Signature: reasoning.ThoughtSignature,
-					ToolID:    reasoning.ToolID,
-				}
-			}
-			parts = append(parts, reasoningPart)
-		}
-		for _, call := range m.ToolCalls() {
-			parts = append(parts, fantasy.ToolCallPart{
-				ToolCallID:       call.ID,
-				ToolName:         call.Name,
-				Input:            call.Input,
-				ProviderExecuted: call.ProviderExecuted,
-			})
-		}
-		messages = append(messages, fantasy.Message{
-			Role:    fantasy.MessageRoleAssistant,
-			Content: parts,
-		})
-	case Tool:
-		var parts []fantasy.MessagePart
-		for _, result := range m.ToolResults() {
-			var content fantasy.ToolResultOutputContent
-			if result.IsError {
-				content = fantasy.ToolResultOutputContentError{
-					Error: errors.New(result.Content),
-				}
-			} else if result.Data != "" {
-				if stringext.IsValidBase64(result.Data) {
-					content = fantasy.ToolResultOutputContentMedia{
-						Data:      result.Data,
-						MediaType: result.MIMEType,
-					}
-				} else {
-					content = fantasy.ToolResultOutputContentText{
-						Text: mediaLoadFailedPlaceholder,
-					}
-				}
-			} else {
-				content = fantasy.ToolResultOutputContentText{
-					Text: result.Content,
-				}
-			}
-			parts = append(parts, fantasy.ToolResultPart{
-				ToolCallID: result.ToolCallID,
-				Output:     content,
-			})
-		}
-		messages = append(messages, fantasy.Message{
-			Role:    fantasy.MessageRoleTool,
-			Content: parts,
-		})
-	}
-	return messages
 }

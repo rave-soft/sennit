@@ -139,7 +139,7 @@ func stripContinuationPlaceholder(messages []fantasy.Message) ([]fantasy.Message
 // to drain it via the ordinary mid-turn path - the common case, since
 // most turns are a single step.
 func (a *sessionAgent) wakeFromInboxIfIdle(ctx context.Context, sessionID string) {
-	if !a.dispatch.wakeEligible(sessionID) {
+	if !a.wakeEligible(sessionID) {
 		return
 	}
 	a.startContinuation(ctx, sessionID, "session went idle with a completion already queued")

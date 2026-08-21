@@ -7,7 +7,6 @@ import (
 
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
-	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -60,33 +59,6 @@ func TestThreadDockStatusWordIdleIsExplicit(t *testing.T) {
 	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusCompleted), word)
 	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusRunning), word)
 	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusFailed), word, "must not fall through to an unhandled-status default indistinguishable from idle")
-}
-
-// The dock lists threads only, mirroring
-// TestDispatchThreadsRefreshExcludesTasks. A task is the `agent` tool's own
-// delegation, already visible inline in the chat that started it, and a
-// finished one was never removed from the shared table — so a running task
-// no longer takes a slot in the dock's list.
-func TestDispatchThreadsDockRefreshExcludesTasks(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsDockTestWorkspace{
-		supported:     true,
-		threads:       []proto.Thread{{ID: "thr-1", Name: "a-thread", Status: "running"}},
-		taskSupported: true,
-		tasks:         []proto.Thread{{ID: "task-1", Name: "a-task", Kind: "task", Status: "running"}},
-	}
-	com := &common.Common{Workspace: ws}
-	c := &threadsDockState{}
-
-	cmd := c.dispatchThreadsDockRefresh(com)
-	require.NotNil(t, cmd)
-	msg := cmd()
-	loaded, ok := msg.(threadsDockLoadedMsg)
-	require.True(t, ok)
-
-	active := activeDockThreads(loaded.threads)
-	require.Equal(t, []string{"thr-1"}, dockThreadIDs(active))
 }
 
 // TestVisibleDockThreadsReturnsEveryThread pins the removal of the old
@@ -172,56 +144,20 @@ func TestThreadDockStatusLine(t *testing.T) {
 	require.Contains(t, threadDockStatusLine(proto.ThreadStatusRunning, threadDockActivity{}, 45*time.Second), "45s")
 }
 
-func TestApplyThreadEventInvalidatesThreadsDock(t *testing.T) {
+// TestDropActivityDiscardsCachedSnapshot proves the Deleted-event cleanup
+// UI.updateThreads performs (dropActivity), now that the shared thread list
+// (threads_cache.go) owns removing the row itself: the dock must still
+// forget any live activity snapshot for a thread that's gone, or a stale
+// snapshot could linger keyed by an ID nothing will ever look up again.
+func TestDropActivityDiscardsCachedSnapshot(t *testing.T) {
 	t.Parallel()
 
-	c := &threadsDockState{}
-	c.cache.timestamp = time.Now()
-	gen := c.cache.generation
-
-	c.applyThreadEvent(pubsub.Event[proto.Thread]{
-		Type:    pubsub.UpdatedEvent,
-		Payload: proto.Thread{ID: "s1"},
-	})
-
-	require.False(t, c.cache.fresh(threadsDockTTL))
-	require.Greater(t, c.cache.generation, gen)
-}
-
-func TestInvalidateThreadsDockDiscardsInFlightResult(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsDockTestWorkspace{supported: true}
-	com := &common.Common{Workspace: ws}
-	c := &threadsDockState{}
-	c.cache.timestamp = time.Now()
-
-	cmd := c.dispatchThreadsDockRefresh(com) // captures gen 0
-	require.NotNil(t, cmd)
-
-	c.invalidateThreadsDock() // a concurrent event bumps gen, clears checkedAt
-
-	msg := cmd() // the in-flight fetch (still gen 0) lands
-	loaded, ok := msg.(threadsDockLoadedMsg)
-	require.True(t, ok)
-	require.Equal(t, uint64(0), loaded.gen)
-
-	redispatch := c.applyThreadsDockLoaded(com, loaded)
-	require.NotNil(t, redispatch, "stale-gen result should be discarded and re-dispatched")
-	require.Zero(t, c.cache.timestamp, "the discarded result must not mark the cache fresh again")
-}
-
-func TestApplyThreadsDockLoadedBumpsActivityGen(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsDockTestWorkspace{supported: true}
-	com := &common.Common{Workspace: ws}
-	c := &threadsDockState{}
-	activityGen := c.activityGen
-
-	cmd := c.applyThreadsDockLoaded(com, threadsDockLoadedMsg{gen: c.cache.generation, threads: []proto.Thread{{ID: "s1"}}})
-	require.Nil(t, cmd)
-	require.Greater(t, c.activityGen, activityGen, "a new thread list should invalidate stale per-thread activity")
+	c := &threadsDockState{activity: map[string]ttlCache[threadDockActivity]{
+		"s1": {value: threadDockActivity{MessageCount: 3}},
+	}}
+	c.dropActivity("s1")
+	_, ok := c.activity["s1"]
+	require.False(t, ok)
 }
 
 func TestStaleThreadActivityRefreshCmds(t *testing.T) {

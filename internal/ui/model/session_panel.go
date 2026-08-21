@@ -15,6 +15,7 @@ package model
 
 import (
 	"fmt"
+	"image"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -52,7 +53,7 @@ func (m *UI) panelSpinnerWanted() bool {
 	if m.isAgentBusy() && hasInProgressTodo(m.sess.current.Todos) {
 		return true
 	}
-	for _, t := range m.threadsDock.cache.value {
+	for _, t := range m.threadList.cache.value {
 		switch proto.ThreadStatus(t.Status) {
 		case proto.ThreadStatusRunning, proto.ThreadStatusMerging:
 			return true
@@ -354,7 +355,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	}
 
 	if m.panelSurfacesThreads() {
-		active := activeDockThreads(m.threadsDock.cache.value)
+		active := activeDockThreads(m.threadList.cache.value)
 		plan.threadsActive = len(active)
 		plan.threadsExpanded = !m.panel.threadsCollapsed
 		if plan.threadsExpanded {
@@ -395,7 +396,7 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.todosViewportRows = plan.todosContentRows
 	}
 
-	plan.queue = m.wsCache.promptQueueItems
+	plan.queue = m.wsCache.promptQueueCache.value
 
 	headerRows := func() int {
 		if !plan.todosVisible {
@@ -570,6 +571,48 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 	}
 
 	return threadBlockRects, todosHeaderRect, todosListRect, threadsHeaderRect
+}
+
+// panelHit is what panelHitTest reports for a screen point against the
+// current session panel layout: which row (if any) the point lands on,
+// plus the plan it was computed from so callers can read thread identity
+// (plan.threads[ThreadIndex]) or todosScrollable without a second call.
+type panelHit struct {
+	plan            sessionPanelPlan
+	inTodosHeader   bool
+	inThreadsHeader bool
+	inTodosList     bool
+	// ThreadIndex is -1 when pt isn't over a thread block.
+	threadIndex int
+}
+
+// panelHitTest computes the session panel's plan and row layout once and
+// hit-tests pt against it. tea.MouseClickMsg, tea.MouseMotionMsg, and
+// CoalescedWheelMsg each need this same plan+rects pair — for a click
+// action, a hover highlight, and a wheel-scroll target respectively — so
+// this is the single place that pairs sessionPanelPlan with
+// sessionPanelRowLayout for mouse handling, instead of each handler
+// re-deriving both. It must be called fresh at event time, not cached
+// across events: like sessionPanelRowLayout's callers, a mouse event can
+// arrive before drawSessionPanel has painted the current layout.
+func (m *UI) panelHitTest(pt image.Point) panelHit {
+	plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
+	threadBlockRects, todosHeaderRect, todosListRect, threadsHeaderRect := sessionPanelRowLayout(m.lay.layout.panel, plan)
+
+	hit := panelHit{
+		plan:            plan,
+		inTodosHeader:   pt.In(todosHeaderRect),
+		inThreadsHeader: pt.In(threadsHeaderRect),
+		inTodosList:     pt.In(todosListRect),
+		threadIndex:     -1,
+	}
+	for i, rect := range threadBlockRects {
+		if pt.In(rect) {
+			hit.threadIndex = i
+			break
+		}
+	}
+	return hit
 }
 
 // panelBlockDrawSpec supplies the context-specific content for the shared

@@ -66,7 +66,7 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			}
 			continue
 		}
-		aiMsgs := m.ToAIMessage()
+		aiMsgs := toAIMessage(&m)
 		if !supportsImages {
 			for i := range aiMsgs {
 				if aiMsgs[i].Role == fantasy.MessageRoleUser {
@@ -121,7 +121,7 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 // subsequent turn, permanently locking the session. Returns the filtered
 // message and true if at least one valid part remains.
 func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]struct{}) (fantasy.Message, bool) {
-	aiMsgs := m.ToAIMessage()
+	aiMsgs := toAIMessage(&m)
 	if len(aiMsgs) == 0 {
 		return fantasy.Message{}, false
 	}

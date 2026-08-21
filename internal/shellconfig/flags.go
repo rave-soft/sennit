@@ -62,16 +62,15 @@ type flagSpec struct {
 	validate func(any) error
 }
 
-// applyFlagsStart is the fixed offset into args where flags begin: builtin
-// name, subcommand, and target name/positional (e.g. "provider add NAME")
-// always occupy the first three tokens.
-const applyFlagsStart = 3
-
-// applyFlags parses args[applyFlagsStart:] against specs and writes the
-// results into target. cmd names the invoking command for error messages
-// (e.g. "provider add"). An unrecognized flag is an error.
-func applyFlags(specs []flagSpec, args []string, target map[string]any, cmd string, stderr io.Writer) error {
-	i := applyFlagsStart
+// applyFlags parses args[start:] against specs and writes the results into
+// target. start is the index of the first possible flag token; most
+// builtins take three fixed tokens before flags begin (e.g. "provider add
+// NAME"), but callers with a shorter positional prefix (e.g. the bare
+// "model <provider/id>" form) pass a smaller start instead of padding args.
+// cmd names the invoking command for error messages (e.g. "provider add").
+// An unrecognized flag is an error.
+func applyFlags(specs []flagSpec, args []string, start int, target map[string]any, cmd string, stderr io.Writer) error {
+	i := start
 	for i < len(args) {
 		spec, ok := findFlag(specs, args[i])
 		if !ok {
@@ -175,7 +174,7 @@ func parseFlagValue(spec flagSpec, args []string, i int) (any, int, error) {
 		}
 		var parsed any
 		if err := json.Unmarshal([]byte(v), &parsed); err != nil {
-			return nil, 0, fmt.Errorf("%s: --%s expects valid JSON, got %q: %s", args[0], name, v, err)
+			return nil, 0, fmt.Errorf("%s: --%s expects valid JSON, got %q: %w", args[0], name, v, err)
 		}
 		return parsed, i + 2, nil
 

@@ -60,6 +60,25 @@ func DropIncompatibleRecentModels(data []byte, path string) []byte {
 	return out
 }
 
+// Attribution resolves a deprecated Options.Attribution.co_authored_by bool
+// into the trailer_style string it replaced. current is whatever
+// trailer_style is already set to (possibly empty); if it is non-empty it
+// always wins, so a config that already opted into the new field is never
+// touched. coAuthoredBy nil means the deprecated field was never set
+// either, in which case the result is assistedBy, the same default applied
+// to a config with no attribution block at all. assistedBy and none are the
+// caller's TrailerStyle constants, passed in rather than duplicated here so
+// migrate stays a leaf package with no config-specific enum knowledge.
+func Attribution(current string, coAuthoredBy *bool, assistedBy, none string) string {
+	if current != "" {
+		return current
+	}
+	if coAuthoredBy != nil && !*coAuthoredBy {
+		return none
+	}
+	return assistedBy
+}
+
 // MigrateDeprecatedKey renames a deprecated JSON key (gjson/sjson dotted
 // path) to its replacement in-memory so old config files (e.g. an
 // "options.strands" key from before the threads rename) keep working

@@ -51,7 +51,7 @@ type Coordinator interface {
 	Run(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	// RunAccepted runs a call that was already accepted via
 	// BeginAccepted on the fire-and-forget dispatch path. The handle is
-	// the only carrier of accept-state across the backend.runAgent /
+	// the only carrier of accept-state across the AgentDispatcher.run /
 	// Coordinator / sessionAgent.Run layers: it reaches
 	// sessionAgent.Run as SessionAgentCall.Accepted, where it is
 	// consumed under dispatchMu once the accepted -> (cancel-on-entry |
@@ -104,8 +104,9 @@ type Coordinator interface {
 	// registered parent. See SessionAgent.SendToParent.
 	SendToParent(ctx context.Context, sessionID, message string) error
 	// RefreshSkills replaces the coordinator's cached skill discovery
-	// results — called by the backend after its skills-directory watcher
-	// detects a SKILL.md added, edited, or removed outside this process,
+	// results — called by app.startExternalChangeWatchers (see
+	// internal/app/watch.go) after its skills-directory watcher detects a
+	// SKILL.md added, edited, or removed outside this process,
 	// so a hot-reload takes effect on the next Run without a restart. It
 	// preserves the skill tracker's loaded-state for names that are still
 	// active rather than resetting it, so a skill already read earlier in
@@ -132,9 +133,6 @@ type coordinator struct {
 
 	localVersion atomic.Uint64
 	runtime      *runtimeCache
-	// toolsCache remains a compatibility alias for coordinators assembled by
-	// focused tests; runtime owns the actual compiled cache.
-	toolsCache *runtimeCache
 
 	// threadsMu guards threads, which SetThreads may set after
 	// construction (thread managers are wired in post-bootstrap; see
@@ -154,8 +152,9 @@ type coordinator struct {
 	agents       map[string]SessionAgent
 
 	// skillsMu guards allSkills/activeSkills/skillTracker. They start as a
-	// session-start snapshot, but RefreshSkills (called from the backend's
-	// skills-directory watcher goroutine) can replace them mid-session
+	// session-start snapshot, but RefreshSkills (called from the app's
+	// skills-directory watcher goroutine, internal/app/watch.go) can
+	// replace them mid-session
 	// while a Run is concurrently reading them via buildTools/
 	// logTurnSkillUsage — a plain field would race those reads. The
 	// skillTracker pointer itself is not replaced (see RefreshSkills), so
@@ -315,8 +314,8 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, errBackgroundShellsRequired
 	}
 
-	// Skills are pre-discovered by the caller (see app.New /
-	// backend.CreateWorkspace) and passed in via the manager. If no
+	// Skills are pre-discovered by the caller (see app.Bootstrap) and
+	// passed in via the manager. If no
 	// manager was provided (legacy callers), fall back to an in-line
 	// discovery so the coordinator still works.
 	var allSkills, activeSkills []*skills.Skill
@@ -438,7 +437,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 		hasLatest = true
 	}
 	// Propagate the caller-supplied RunID (set via agent.WithRunID
-	// at the HTTP boundary in backend.SendMessage) onto the
+	// at the dispatch boundary in AgentDispatcher.Send) onto the
 	// SessionAgentCall so the terminal RunComplete event echoes it
 	// back. Both attempts in the retry chain reuse the same RunID;
 	// the coalesce closure publishes the final outcome under that
@@ -491,7 +490,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// notification here.
 	if hasLatest && c.runComplete != nil {
 		c.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, latest)
-		// Signal to the dispatcher (backend.runAgent) that the
+		// Signal to the dispatcher (AgentDispatcher.run) that the
 		// authoritative terminal RunComplete for this run was already
 		// emitted, so it does not publish a duplicate fallback for the
 		// error it is about to receive.
@@ -669,51 +668,19 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	return result, nil
 }
 
+// buildTools assembles the tool set an agent build gets, from toolSpecs
+// (tool_registry.go) plus two groups that can't be fixed rows there: the
+// user-defined agent tools (one per config.Agents entry — never offered
+// to a sub-agent, or delegation could recurse without bound) and the
+// per-MCP-server tools (gated by AllowedMCP, not AllowedTools).
+//
+// c.cfg.Config() is read exactly once, into an agentConfig snapshot (see
+// newAgentConfig): ConfigStore.Config() takes no lock spanning multiple
+// calls, so reading it repeatedly across one build let a concurrent
+// config reload hand different tools in the same set different values.
+// One snapshot means every tool here sees the same config.
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
-	var allTools []fantasy.AgentTool
-	if slices.Contains(agent.AllowedTools, AgentToolName) {
-		agentTool, err := c.agentTool(ctx)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, agentTool)
-	}
-
-	// User-defined agents are offered to the top-level agent only. Handing
-	// them to a sub-agent would let delegation nest without bound and would
-	// recurse here at build time, since building a delegation tool builds the
-	// target agent, which builds its own tool list.
-	if !isSubAgent {
-		customTools, err := c.customAgentTools(ctx)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, customTools...)
-	}
-
-	if slices.Contains(agent.AllowedTools, tools.AgenticFetchToolName) {
-		agenticFetchTool, err := c.agenticFetchTool(ctx, nil)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, agenticFetchTool)
-	}
-
-	// Get the model name for the agent.
-	modelID := ""
-	if modelCfg := c.cfg.Config().Model; modelCfg.Model != "" {
-		if model := c.cfg.Config().GetModel(modelCfg.Provider, modelCfg.Model); model != nil {
-			modelID = model.ID
-		}
-	}
-
-	logFile := config.GlobalLogFile()
-
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
-	}
+	cfg := newAgentConfig(c.cfg.Config())
 
 	searchBackend, err := c.webSearchBackend()
 	if err != nil {
@@ -722,119 +689,48 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot := c.skillsSnapshot()
 
-	allTools = append(
-		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, c.background),
-		tools.NewSennitInfoTool(c.cfg, c.mcp, c.lspManager, allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot, c.skillStates()),
-		tools.NewSennitLogsTool(logFile),
-		tools.NewJobOutputTool(c.background),
-		tools.NewJobKillTool(c.background),
-		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewWebFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil, searchBackend),
-		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
-		tools.NewSearchTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
-		tools.NewTodosTool(c.sessions),
-		tools.NewReadTool(c.lspManager, c.permissions, c.filetracker, skillTrackerSnapshot, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-	)
+	b := &buildToolsCtx{
+		agent:              agent,
+		isSubAgent:         isSubAgent,
+		interactive:        c.interactive,
+		cfg:                cfg,
+		modelID:            cfg.ModelID(),
+		logFile:            config.GlobalLogFile(),
+		searchBackend:      searchBackend,
+		allSkills:          allSkillsSnapshot,
+		activeSkills:       activeSkillsSnapshot,
+		skillTracker:       skillTrackerSnapshot,
+		threads:            c.threadsManager(),
+		taskManager:        c.tasksManager(),
+		backgroundAgentsOn: c.backgroundAgentsEnabled(),
+	}
 
-	// Thread tools manage parallel agent work streams in their own git
-	// worktrees. Offered only to the top-level agent of the workspace
-	// that owns the thread manager: sub-agents never get them (spawning
-	// threads from a delegated task would nest workspace ownership in a
-	// way the manager doesn't support), and there simply is no manager
-	// for non-git or thread-spawned workspaces (see internal/app/app.go
-	// and internal/app/threadspawn/attach.go).
-	if !isSubAgent {
-		if threads := c.threadsManager(); threads != nil {
-			allTools = append(
-				allTools,
-				tools.NewThreadCreateTool(threads, c.permissions),
-				tools.NewThreadListTool(threads),
-				tools.NewThreadStatusTool(threads),
-				tools.NewThreadSendTool(threads),
-				tools.NewThreadWaitTool(threads),
-				tools.NewThreadMergeTool(threads, c.permissions),
-				tools.NewThreadRemoveTool(threads, c.permissions),
-			)
+	var allTools []fantasy.AgentTool
+	for _, spec := range toolSpecs() {
+		if !spec.Gate(b) {
+			continue
 		}
-	}
-
-	// Task tools observe and steer background task delegations (see the
-	// "agent" tool's background mode, which creates them). Same
-	// restriction as thread tools, for the same reason: only the
-	// top-level agent of the workspace that owns the task manager gets
-	// them, and there is no manager for a workspace that doesn't own one.
-	// options.background_agents is a further, explicit opt-out: when it is
-	// off the tools are not registered at all, regardless of whether a
-	// task manager is wired. This only affects what a *new* turn is
-	// offered — it does not reach into any task already running.
-	if !isSubAgent && c.backgroundAgentsEnabled() {
-		if taskManager := c.tasksManager(); taskManager != nil {
-			allTools = append(
-				allTools,
-				tools.NewTaskListTool(taskManager),
-				tools.NewTaskResultTool(taskManager),
-				tools.NewTaskCancelTool(taskManager, c.permissions),
-				tools.NewTaskSendTool(taskManager),
-				tools.NewTaskOutputTool(taskManager),
-			)
+		built, err := spec.Build(ctx, c, b)
+		if err != nil {
+			return nil, err
 		}
+		allTools = append(allTools, built...)
 	}
 
-	// ask_parent lets a delegation's own agent send a non-blocking
-	// mid-run message to whichever session created it (see
-	// Coordinator.SendToParent). Gated the same way as thread/task tools
-	// (!isSubAgent) but for a different, weaker reason: buildTools runs
-	// once per coordinator/App, not once per session — a task shares its
-	// parent's exact coordinator and tool list (only a thread gets a
-	// wholly separate coordinator/App), so there is currently no way to
-	// build a different tool list for a delegation's own session versus
-	// its parent's. That means ask_parent goes into every tool list this
-	// coordinator builds, including the one its parent's own top-level
-	// session runs on. It is therefore gated at runtime rather than at
-	// build time the way thread/task tools are gated by manager
-	// presence: sessionAgent.Run drops it for a session with no
-	// registered parent (see withoutUnusableParentTool), which is the
-	// first point where the session id is known. Leaving it visible and
-	// letting SendToParent's own lookup fail was not enough -- a
-	// top-level session reached for it to send instructions *down* to a
-	// thread it had created, and spent the turn on the error.
+	// User-defined agents are offered to the top-level agent only (see
+	// this function's doc comment).
 	if !isSubAgent {
-		allTools = append(allTools, tools.NewAskParentTool(c))
+		customTools, err := c.customAgentTools(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, customTools...)
 	}
 
-	// Question tool is interactive-only and not available to sub-agents.
-	if !isSubAgent && c.interactive {
-		allTools = append(allTools, tools.NewQuestionTool(c.questions))
-	}
-
-	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
-	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(
-			allTools,
-			tools.NewDiagnosticsTool(c.lspManager),
-			tools.NewReferencesTool(c.lspManager),
-			tools.NewLSPRestartTool(c.lspManager),
-			tools.NewSymbolsTool(c.lspManager),
-			tools.NewDefinitionTool(c.lspManager),
-			tools.NewCallHierarchyTool(c.lspManager),
-			tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker),
-			tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker),
-		)
-	}
-
-	if len(c.cfg.Config().MCP) > 0 {
-		allTools = append(
-			allTools,
-			tools.NewListMCPResourcesTool(c.cfg, c.mcp, c.permissions),
-			tools.NewReadMCPResourceTool(c.cfg, c.mcp, c.permissions),
-		)
+	// Build hook runner if PreToolUse hooks are configured.
+	var hookRunner *hooks.Runner
+	if preToolHooks := cfg.PreToolUseHooks(); len(preToolHooks) > 0 {
+		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
 	}
 
 	// grep and ripgrep are alternative registrations of the same content
@@ -1167,10 +1063,7 @@ func (c *coordinator) invalidateRuntime() {
 
 func (c *coordinator) runtimeFor(ctx context.Context) (*compiledRuntime, error) {
 	if c.runtime == nil {
-		c.runtime = c.toolsCache
-		if c.runtime == nil {
-			c.runtime = newRuntimeCache()
-		}
+		c.runtime = newRuntimeCache()
 	}
 	return c.runtime.getOrBuild(ctx, c.runtimeKey, func(ctx context.Context, key runtimeKey) (*compiledRuntime, error) {
 		model, err := c.buildAgentModel(ctx, false)
@@ -1276,8 +1169,8 @@ func (c *coordinator) GenerateTitle(ctx context.Context, sessionID, prompt strin
 
 // discoverSkills is a thin fallback wrapper used only when no
 // skills.Manager has been threaded through to the coordinator. All
-// production call sites (backend.CreateWorkspace, setupLocalWorkspace)
-// run discovery in advance and pass the results via the manager;
+// production call sites (app.Bootstrap) run discovery in advance and
+// pass the results via the manager;
 // reaching this path means a caller bypassed both. It deliberately does
 // NOT publish to the package-level broker — there are no subscribers in
 // that case, so doing so would be misleading without delivering the

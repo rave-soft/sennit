@@ -37,11 +37,30 @@ func ResolveSession(ctx context.Context, ws Workspace, continueSessionID string,
 		if err != nil || len(sessions) == 0 {
 			return session.Session{}, fmt.Errorf("no sessions found to continue")
 		}
-		last := sessions[0]
-		for _, s := range sessions[1:] {
-			if s.UpdatedAt > last.UpdatedAt && s.ParentSessionID == "" {
-				last = s
+		// ListSessions is a flat list that includes child sessions (agent-tool
+		// sub-sessions, title-generation sessions), so we must apply the same
+		// eligibility rules as the continueSessionID branch above rather than
+		// seeding the scan with sessions[0], which may itself be ineligible.
+		// TODO: replace this scan with session.Service.GetLast, scoped in SQL,
+		// once it is exposed on the Workspace interface.
+		var (
+			last  session.Session
+			found bool
+		)
+		for _, s := range sessions {
+			if s.ParentSessionID != "" {
+				continue
 			}
+			if _, _, ok := ws.ParseAgentToolSessionID(s.ID); ok {
+				continue
+			}
+			if !found || s.UpdatedAt > last.UpdatedAt {
+				last = s
+				found = true
+			}
+		}
+		if !found {
+			return session.Session{}, fmt.Errorf("no sessions found to continue")
 		}
 		return last, nil
 

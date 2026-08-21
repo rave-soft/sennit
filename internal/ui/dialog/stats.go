@@ -14,6 +14,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/rave-soft/sennit/internal/stats"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
@@ -162,11 +163,12 @@ func (d *Stats) loadTab(i int) tea.Cmd {
 	case stats.ScopeProject:
 		req.ProjectPath = d.com.Workspace.WorkingDir()
 	}
+	ctx := d.com.Context()
 	return func() tea.Msg {
-		// The dialog has no context of its own to cancel — it is torn
-		// down by being dropped — so this bounds the query itself. A
-		// global sweep over a large history is the case worth bounding.
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Bounded on top of the lifecycle context: a global sweep over a
+		// large history is the case worth bounding on its own, separate
+		// from whatever the program-wide timeout (if any) would allow.
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		snap, err := ws.Stats(ctx, req)
 		return StatsLoadedMsg{Scope: scope, Snapshot: snap, Err: err}
@@ -445,8 +447,9 @@ func section(t *styles.Styles, title string, width int, rows []string) string {
 // whatever trailing figures the section carries.
 func statsRow(t *styles.Styles, name string, tokens, maxTokens int64, width int, extras ...string) string {
 	const nameWidth = 26
-	label := t.Resource.Name.Render(truncate(name, nameWidth))
-	pad := max(0, nameWidth-lipgloss.Width(truncate(name, nameWidth)))
+	truncated := presentation.Truncate(name, nameWidth)
+	label := t.Resource.Name.Render(truncated)
+	pad := max(0, nameWidth-lipgloss.Width(truncated))
 
 	trailing := make([]string, 0, len(extras)+1)
 	trailing = append(trailing, fmt.Sprintf("%10s", humanize.Comma(tokens)))
@@ -486,18 +489,6 @@ func outcomeSuffix(total, landed int64) string {
 		return ""
 	}
 	return fmt.Sprintf("%d/%d ok", landed, total)
-}
-
-// truncate shortens s to width, marking the cut with an ellipsis.
-func truncate(s string, width int) string {
-	if width <= 1 || lipgloss.Width(s) <= width {
-		return s
-	}
-	runes := []rune(s)
-	if len(runes) <= width {
-		return s
-	}
-	return string(runes[:width-1]) + "…"
 }
 
 // shortenPath renders a project path by its last two segments, which is

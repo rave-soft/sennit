@@ -37,7 +37,7 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 
 func (m *UI) handleStateChanged() tea.Cmd {
 	return m.updateAgentModelCmd(func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
+		if err := m.com.Workspace.UpdateAgentModel(m.com.Context()); err != nil {
 			return util.NewErrorMsg(err)
 		}
 		return mcpStateChangedMsg{
@@ -46,29 +46,29 @@ func (m *UI) handleStateChanged() tea.Cmd {
 	})
 }
 
-func handleMCPPromptsEvent(ws workspace.MCPController, name string) tea.Cmd {
+func handleMCPPromptsEvent(ctx context.Context, ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.MCPRefreshPrompts(context.Background(), name)
+		ws.MCPRefreshPrompts(ctx, name)
 		return nil
 	}
 }
 
-func handleMCPToolsEvent(ws workspace.MCPController, name string) tea.Cmd {
+func handleMCPToolsEvent(ctx context.Context, ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.RefreshMCPTools(context.Background(), name)
+		ws.RefreshMCPTools(ctx, name)
 		return nil
 	}
 }
 
-func handleMCPResourcesEvent(ws workspace.MCPController, name string) tea.Cmd {
+func handleMCPResourcesEvent(ctx context.Context, ws workspace.MCPController, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.MCPRefreshResources(context.Background(), name)
+		ws.MCPRefreshResources(ctx, name)
 		return nil
 	}
 }
 
 func (m *UI) enableDockerMCP() tea.Msg {
-	ctx := context.Background()
+	ctx := m.com.Context()
 	if err := m.com.Workspace.EnableDockerMCP(ctx); err != nil {
 		return util.ReportError(err)()
 	}

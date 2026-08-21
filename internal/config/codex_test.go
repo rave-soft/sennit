@@ -31,8 +31,7 @@ func codexAccessToken(t *testing.T, accountID string) string {
 func TestCodexProviderInCatalog(t *testing.T) {
 	t.Parallel()
 
-	providers, err := Providers(&Config{Options: &Options{}})
-	require.NoError(t, err)
+	providers := Providers(&Config{Options: &Options{}})
 
 	idx := slices.IndexFunc(providers, func(p catwalk.Provider) bool {
 		return string(p.ID) == codex.ProviderID
@@ -51,8 +50,7 @@ func TestCodexProviderInCatalog(t *testing.T) {
 func TestCodexProviderSkippedWhenDefaultsDisabled(t *testing.T) {
 	t.Parallel()
 
-	providers, err := Providers(&Config{Options: &Options{DisableDefaultProviders: true}})
-	require.NoError(t, err)
+	providers := Providers(&Config{Options: &Options{DisableDefaultProviders: true}})
 	require.Empty(t, providers)
 }
 

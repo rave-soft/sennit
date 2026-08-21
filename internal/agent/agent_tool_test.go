@@ -75,7 +75,7 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
 }`
 	writeGlobalConfig(t, sennitJSON)
 
-	cfg, err := config.Init(env.workingDir, "", false)
+	cfg, err := config.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.SetupAgents()
 
@@ -101,7 +101,7 @@ func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.agentTool(t.Context())
+	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -133,7 +133,7 @@ func TestAgentTool_ForegroundUnchanged(t *testing.T) {
 	fake := &fakeTaskManager{}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	tool, err := coord.agentTool(t.Context())
+	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
@@ -155,7 +155,7 @@ func TestAgentTool_ForegroundUnchanged(t *testing.T) {
 func TestAgentTool_BackgroundUnavailableReturnsClearError(t *testing.T) {
 	coord := newAgentToolTestCoordinator(t, nil)
 
-	tool, err := coord.agentTool(t.Context())
+	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")

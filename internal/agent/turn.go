@@ -99,9 +99,10 @@ func newRunTurn(
 	}
 }
 
-// prepareStep is the turn's fantasy.PrepareStepFunction. It folds queued
-// follow-up prompts into the step, applies cache-control provider options,
-// and creates the step's assistant message.
+// prepareStep is the turn's fantasy.PrepareStepFunction. It folds
+// completions and queued follow-up prompts into the step (foldCompletions,
+// foldSteering), applies cache-control provider options (applyCacheControl),
+// and creates the step's assistant message (createStepAssistant).
 func (t *runTurn) prepareStep(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 	prepared.Messages = options.Messages
 	for i := range prepared.Messages {
@@ -117,9 +118,9 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 	// user/tool message - not the case for a freshly-idle session waking
 	// from an ordinary assistant reply. Strip the user message fantasy
 	// synthesized from it before the model ever sees it. What replaces it
-	// is exactly the completion-inbox drain below - the same mechanism,
-	// the same non-persisted delivery, as the mid-turn fold case, so the
-	// two paths cannot record the same event differently.
+	// is exactly the completion-inbox drain in foldCompletions - the same
+	// mechanism, the same non-persisted delivery, as the mid-turn fold
+	// case, so the two paths cannot record the same event differently.
 	//
 	// stripContinuationPlaceholder verifies the entry it removes actually
 	// is the placeholder rather than trusting its position (always last -
@@ -135,81 +136,105 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 		}
 	}
 
-	// Drain the completion inbox before touching the steering queue, so
-	// a turn that has both sees a task's finished work ahead of a
-	// follow-up that may refer to it. Completions travel as a user-role
-	// message (see taskCompletionsMessage for why: a system-role message
-	// here is silently dropped by the Anthropic and Google adapters once
-	// any other message has come before it), but the message text plainly
-	// labels it as a system-generated report - not something the user
-	// typed - and it is never persisted via createUserMessage/
-	// message.Service the way a real steering follow-up is. That holds
-	// for a continuation's own step 0 exactly as it does for a mid-turn
-	// fold: this is the *only* place either path turns a completion into
-	// conversation content.
-	//
-	// At-most-once mirrors the steering drain immediately below: if
-	// this step fails before the completions are actually appended, put
-	// them back at the front of the inbox rather than lose them - and,
-	// critically, never re-drain and re-append ones already folded in
-	// successfully. A completion delivered twice would tell the model a
-	// task finished twice, which is worse than delivering it late. For a
-	// continuation, run()'s exit hook (wakeFromInboxIfIdle) will retry a
-	// requeued batch automatically once this failed attempt goes idle.
-	completions := t.agent.drainCompletionsForStep(t.call.SessionID)
-	if len(completions) > 0 {
-		if t.call.Continuation && options.StepNumber == 0 {
-			// Only knowable now that we see what actually woke this
-			// turn: one level deeper than the deepest delegation in the
-			// batch - see maxTaskCascadeDepth.
-			depth := 0
-			for _, c := range completions {
-				if c.Depth > depth {
-					depth = c.Depth
-				}
-			}
-			t.call.Depth = depth + 1
+	// rollback undoes a drain that only becomes "delivered" once this
+	// step actually reaches the model - currently just foldCompletions'.
+	// It runs in reverse registration order against the step's final
+	// err, whichever stage produced it: a completions drain must go back
+	// even when the failure comes from a later stage (foldSteering,
+	// applyCacheControl, createStepAssistant) rather than from
+	// foldCompletions itself, since nothing later can tell the model
+	// "actually, forget that" once it has been sent.
+	var rollback []func(error)
+	defer func() {
+		for i := len(rollback) - 1; i >= 0; i-- {
+			rollback[i](err)
 		}
-		// Nothing below this point persists a completion anywhere durable
-		// (unlike a folded steering prompt, which is written via
-		// createUserMessage before it's appended): a completion lives
-		// only in the inbox and, once appended here, in this step's
-		// in-memory prepared.Messages. So "delivered" can only be
-		// declared once prepareStep itself returns successfully - any
-		// error from here on (including one unrelated to completions,
-		// e.g. the steering fold below, or the assistant-message create
-		// at the bottom) means this step never actually reached the
-		// model, and the drained batch must go back rather than vanish.
-		defer func() {
-			if err != nil {
-				t.agent.requeueCompletions(t.call.SessionID, completions)
-				return
-			}
-			// ids, statuses, and durations only, never Goal/ResultText/Error.
-			ids := make([]string, len(completions))
-			waitedMS := make([]int64, len(completions))
-			now := time.Now()
-			for i, c := range completions {
-				ids[i] = c.DelegationID
-				waitedMS[i] = now.Sub(c.TerminalAt).Milliseconds()
-				t.agent.recordLatency(callContext, latency.KindCompletionDelivery, t.call.SessionID, now.Sub(c.TerminalAt))
-			}
-			slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions), "waited_ms", waitedMS)
-		}()
-		prepared.Messages = append(prepared.Messages, taskCompletionsMessage(completions))
+	}()
+
+	var finishCompletions func(error)
+	prepared.Messages, finishCompletions = t.foldCompletions(callContext, prepared.Messages, options.StepNumber)
+	if finishCompletions != nil {
+		rollback = append(rollback, finishCompletions)
 	}
 
-	// Drain queued follow-up prompts for this step. Calls covered
-	// by a cancel recorded while they sat in the queue are dropped:
-	// a cancel that arrived after a prompt was queued must not let
-	// it run as part of this step. Coverage is per-call by accept
-	// sequence so a follow-up queued after the cancel (higher seq)
-	// is not dropped. A dropped prompt carrying a RunID still gets
-	// its terminal cancelled RunComplete so a caller waiting on it
-	// does not hang. Uncanceled prompts without a RunID are folded
-	// into this turn; uncanceled prompts with a RunID are left
-	// queued so each runs as its own turn (with its own
-	// RunComplete) via the recursive run path below.
+	// foldSteering owns its own rollback: a follow-up it successfully
+	// persists via createUserMessage is durable session history the
+	// instant it's written, so a later stage's failure has nothing to
+	// undo there - only the unpersisted remainder (if persisting one
+	// mid-batch fails) goes back to the queue, which foldSteering does
+	// itself before returning its error.
+	prepared.Messages, err = t.foldSteering(callContext, prepared.Messages)
+	if err != nil {
+		return callContext, prepared, err
+	}
+
+	prepared.Messages = t.applyCacheControl(prepared.Messages)
+
+	callContext, err = t.createStepAssistant(callContext, prepared.Messages)
+	return callContext, prepared, err
+}
+
+// foldCompletions drains this step's completion inbox and, if anything was
+// waiting, appends it to messages as a labeled system-generated report (see
+// taskCompletionsMessage) and stamps a continuation's cascade depth from the
+// deepest delegation in the batch.
+//
+// finish is non-nil exactly when something was drained; the caller must
+// invoke it exactly once with the step's final error after every later
+// stage has run: nothing here persists a completion anywhere durable (unlike
+// a folded steering prompt, which is written via createUserMessage before
+// it's appended) — a completion lives only in the inbox and, once appended
+// here, in this step's in-memory messages. So "delivered" can only be
+// declared once the whole step reaches the model; any error from here on
+// means it never did, and finish(err) puts the drained batch back rather
+// than losing it. On success, finish logs delivery latency (ids, statuses,
+// and durations only, never Goal/ResultText/Error).
+func (t *runTurn) foldCompletions(callContext context.Context, messages []fantasy.Message, stepNumber int) (_ []fantasy.Message, finish func(error)) {
+	completions := t.agent.drainCompletionsForStep(t.call.SessionID)
+	if len(completions) == 0 {
+		return messages, nil
+	}
+	if t.call.Continuation && stepNumber == 0 {
+		// Only knowable now that we see what actually woke this turn:
+		// one level deeper than the deepest delegation in the batch -
+		// see maxTaskCascadeDepth.
+		depth := 0
+		for _, c := range completions {
+			if c.Depth > depth {
+				depth = c.Depth
+			}
+		}
+		t.call.Depth = depth + 1
+	}
+	finish = func(err error) {
+		if err != nil {
+			t.agent.requeueCompletions(t.call.SessionID, completions)
+			return
+		}
+		ids := make([]string, len(completions))
+		waitedMS := make([]int64, len(completions))
+		now := time.Now()
+		for i, c := range completions {
+			ids[i] = c.DelegationID
+			waitedMS[i] = now.Sub(c.TerminalAt).Milliseconds()
+			t.agent.recordLatency(callContext, latency.KindCompletionDelivery, t.call.SessionID, now.Sub(c.TerminalAt))
+		}
+		slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions), "waited_ms", waitedMS)
+	}
+	return append(messages, taskCompletionsMessage(completions)), finish
+}
+
+// foldSteering drains queued follow-up prompts for this step and appends
+// each as a persisted user message. Calls covered by a cancel recorded
+// while they sat in the queue are dropped: a cancel that arrived after a
+// prompt was queued must not let it run as part of this step. Coverage is
+// per-call by accept sequence so a follow-up queued after the cancel
+// (higher seq) is not dropped. A dropped prompt carrying a RunID still gets
+// its terminal cancelled RunComplete so a caller waiting on it does not
+// hang. Uncanceled prompts without a RunID are folded into this turn;
+// uncanceled prompts with a RunID are left queued so each runs as its own
+// turn (with its own RunComplete) via run's queue handoff.
+func (t *runTurn) foldSteering(callContext context.Context, messages []fantasy.Message) ([]fantasy.Message, error) {
 	fold, canceledRunIDs := t.agent.drainQueueForStep(t.call.SessionID)
 	t.agent.publishCanceledQueueDrops(canceledRunIDs)
 	for i, queued := range fold {
@@ -221,9 +246,9 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 			// user-typed steering messages, and losing them silently is
 			// worse than leaving them queued for the next step to retry.
 			t.agent.requeueDrained(t.call.SessionID, fold[i:])
-			return callContext, prepared, createErr
+			return messages, createErr
 		}
-		prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+		messages = append(messages, toAIMessage(&userMessage)...)
 	}
 	// Every queued call in fold reached this point only once it was
 	// successfully persisted above (an error returns early, before this
@@ -248,49 +273,61 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 			slog.Info("Steering folded into turn", "session", t.call.SessionID, "count", len(waitedMS), "waited_ms", waitedMS)
 		}
 	}
+	return messages, nil
+}
 
-	prepared.Messages = t.agent.workaroundProviderMediaLimitations(prepared.Messages, t.model)
+// applyCacheControl works around provider media limitations, then marks
+// provider options for cache-control breakpoints: the last system message
+// and the last two messages overall.
+func (t *runTurn) applyCacheControl(messages []fantasy.Message) []fantasy.Message {
+	messages = t.agent.workaroundProviderMediaLimitations(messages, t.model)
 
 	lastSystemRoleInx := 0
 	systemMessageUpdated := false
-	for i, msg := range prepared.Messages {
+	for i, msg := range messages {
 		// Only add cache control to the last message.
 		if msg.Role == fantasy.MessageRoleSystem {
 			lastSystemRoleInx = i
 		} else if !systemMessageUpdated {
-			prepared.Messages[lastSystemRoleInx].ProviderOptions = t.agent.getCacheControlOptions()
+			messages[lastSystemRoleInx].ProviderOptions = t.agent.getCacheControlOptions()
 			systemMessageUpdated = true
 		}
 		// Than add cache control to the last 2 messages.
-		if i > len(prepared.Messages)-3 {
-			prepared.Messages[i].ProviderOptions = t.agent.getCacheControlOptions()
+		if i > len(messages)-3 {
+			messages[i].ProviderOptions = t.agent.getCacheControlOptions()
 		}
 	}
 
 	if t.promptPrefix != "" {
-		prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(t.promptPrefix)}, prepared.Messages...)
+		messages = append([]fantasy.Message{fantasy.NewSystemMessage(t.promptPrefix)}, messages...)
 	}
+	return messages
+}
 
+// createStepAssistant records this step's final message list for
+// onStepFinish's usage accounting, creates the step's assistant message,
+// and stamps callContext with the values tools read from it for the
+// duration of the step.
+func (t *runTurn) createStepAssistant(callContext context.Context, messages []fantasy.Message) (context.Context, error) {
 	t.sessionLock.Lock()
-	t.stepMessages = cloneFantasyMessages(prepared.Messages)
+	t.stepMessages = cloneFantasyMessages(messages)
 	t.sessionLock.Unlock()
 
-	var assistantMsg message.Message
-	assistantMsg, err = t.agent.messages.Create(callContext, t.call.SessionID, message.CreateMessageParams{
+	assistantMsg, err := t.agent.messages.Create(callContext, t.call.SessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
 		Parts:    []message.ContentPart{},
 		Model:    t.model.ModelCfg.Model,
 		Provider: t.model.ModelCfg.Provider,
 	})
 	if err != nil {
-		return callContext, prepared, err
+		return callContext, err
 	}
 	callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.model.CatalogCfg.SupportsImages)
 	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.model.CatalogCfg.Name)
 	callContext = context.WithValue(callContext, tools.DepthContextKey, t.call.Depth)
 	t.currentAssistant = &assistantMsg
-	return callContext, prepared, err
+	return callContext, nil
 }
 
 func (t *runTurn) onReasoningStart(id string, reasoning fantasy.ReasoningContent) error {
@@ -317,7 +354,14 @@ func (t *runTurn) onReasoningEnd(id string, reasoning fantasy.ReasoningContent) 
 	}
 	if openaiData, ok := reasoning.ProviderMetadata[openai.Name]; ok {
 		if reasoning, ok := openaiData.(*openai.ResponsesReasoningMetadata); ok {
-			t.currentAssistant.SetReasoningResponsesData(reasoning)
+			// message stays free of provider SDK types (see message's
+			// ResponsesReasoningMetadata doc comment), so convert here at
+			// the provider boundary.
+			t.currentAssistant.SetReasoningResponsesData(&message.ResponsesReasoningMetadata{
+				ItemID:           reasoning.ItemID,
+				EncryptedContent: reasoning.EncryptedContent,
+				Summary:          reasoning.Summary,
+			})
 		}
 	}
 	t.currentAssistant.FinishThinking()
@@ -499,7 +543,7 @@ func (t *runTurn) maxOutputTokens() int64 {
 // the turn once the session's token usage crosses the context-window
 // threshold, so Run's tail can kick off a summarize pass.
 func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
-	cw := int64(t.model.CatalogCfg.ContextWindow)
+	cw := t.model.CatalogCfg.ContextWindow
 	// If context window is unknown (0), skip auto-summarize
 	// to avoid immediately truncating custom/local models.
 	if cw == 0 {
@@ -663,7 +707,7 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 	if isCancelErr {
 		t.currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 	} else if errors.As(err, &providerErr) {
-		if providerErr.Message == "The requested model is not supported." {
+		if classifyStreamError(providerErr) == classModelNotEnabled {
 			// The TUI owns the display copy: return a typed error so
 			// callers can render their own styled hyperlink instead of
 			// agent baking terminal escape codes into persisted

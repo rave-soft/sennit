@@ -116,7 +116,7 @@ func TestThreadStatusStyleClasses(t *testing.T) {
 func newTestThreadsDashboard(t *testing.T, ws *threadsTestWorkspace) *threadsDashboard {
 	t.Helper()
 	com := &common.Common{Workspace: ws, Styles: testStyles()}
-	m := newThreadsDashboard(com)
+	m := newThreadsDashboard(com, &threadListCache{})
 	m.SetSize(80, 20)
 	return m
 }

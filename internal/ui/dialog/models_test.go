@@ -70,7 +70,7 @@ func TestSetProviderItems_OnlyConfiguredProvidersAppear(t *testing.T) {
 	})
 	com := newModelsTestCommon(t, cfg)
 
-	m, err := NewModels(com)
+	m, _, err := NewModels(com)
 	require.NoError(t, err)
 
 	var nonRecentGroups []ModelGroup
@@ -97,7 +97,7 @@ func TestSetProviderItems_DisabledCatalogProviderIsSkipped(t *testing.T) {
 	})
 	com := newModelsTestCommon(t, cfg)
 
-	m, err := NewModels(com)
+	m, _, err := NewModels(com)
 	require.NoError(t, err)
 
 	require.Empty(t, flattenModelItems(m.list.groups),
@@ -119,7 +119,7 @@ func TestSetProviderItems_RecentEntriesFromUnconfiguredProviderAreDropped(t *tes
 	}
 	com := newModelsTestCommon(t, cfg)
 
-	m, err := NewModels(com)
+	m, pruneCmd, err := NewModels(com)
 	require.NoError(t, err)
 
 	for _, g := range m.list.groups {
@@ -127,9 +127,14 @@ func TestSetProviderItems_RecentEntriesFromUnconfiguredProviderAreDropped(t *tes
 			"the only recent entry belonged to an unconfigured provider, so no recent group should be added")
 	}
 
-	// Pruning the stale recent entry writes back through SetConfigField;
-	// confirm that happened rather than silently mutating cfg in place.
+	// Pruning the stale recent entry writes back through SetConfigField,
+	// but off the Update goroutine — NewModels only hands back a Cmd, it
+	// must not have called SetConfigField itself yet.
 	ws := com.Workspace.(*modelsTestWorkspace)
+	require.NotNil(t, pruneCmd, "a stale recent entry must produce a prune Cmd")
+	require.Empty(t, ws.setConfigFields, "the prune write must not happen until the Cmd runs")
+
+	pruneCmd()
 	require.Contains(t, ws.setConfigFields, "recent_models")
 	require.Empty(t, ws.setConfigFields["recent_models"])
 }
@@ -138,7 +143,7 @@ func TestSetProviderItems_EmptyStateShowsPlaceholderAndNoPanic(t *testing.T) {
 	cfg := newModelsTestConfig()
 	com := newModelsTestCommon(t, cfg)
 
-	m, err := NewModels(com)
+	m, _, err := NewModels(com)
 	require.NoError(t, err)
 
 	require.Empty(t, flattenModelItems(m.list.groups),
@@ -173,7 +178,7 @@ func TestModels_NoTabToggle(t *testing.T) {
 	})
 	com := newModelsTestCommon(t, cfg)
 
-	m, err := NewModels(com)
+	m, _, err := NewModels(com)
 	require.NoError(t, err)
 
 	for _, kb := range m.ShortHelp() {
@@ -198,7 +203,7 @@ func TestModels_SelectReportsChosenModel(t *testing.T) {
 	})
 	com := newModelsTestCommon(t, cfg)
 
-	m, err := NewModels(com)
+	m, _, err := NewModels(com)
 	require.NoError(t, err)
 
 	items := flattenModelItems(m.list.groups)

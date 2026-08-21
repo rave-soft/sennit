@@ -167,7 +167,7 @@ func (r *Registry) runAuthFlow(ctx context.Context, cfg ConfigProvider, name str
 // suppressLock returns the per-server mutex used to serialize
 // browser-suppressed OAuth flows, creating it on first use.
 func (r *Registry) suppressLock(name string) *sync.Mutex {
-	return r.suppressMus.GetOrSet(name, func() *sync.Mutex { return &sync.Mutex{} })
+	return &r.serverLock(name).suppress
 }
 
 func (r *Registry) cancelAuthFlow(name string) {

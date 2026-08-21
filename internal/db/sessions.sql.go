@@ -53,7 +53,7 @@ type CreateSessionParams struct {
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
-	row := q.queryRow(ctx, q.createSessionStmt, createSession,
+	row := q.db.QueryRowContext(ctx, createSession,
 		arg.ID,
 		arg.ParentSessionID,
 		arg.Title,
@@ -91,7 +91,7 @@ WHERE id = ?
 `
 
 func (q *Queries) DeleteSession(ctx context.Context, id string) error {
-	_, err := q.exec(ctx, q.deleteSessionStmt, deleteSession, id)
+	_, err := q.db.ExecContext(ctx, deleteSession, id)
 	return err
 }
 
@@ -104,7 +104,7 @@ LIMIT 1
 `
 
 func (q *Queries) GetLastSession(ctx context.Context, projectPath string) (Session, error) {
-	row := q.queryRow(ctx, q.getLastSessionStmt, getLastSession, projectPath)
+	row := q.db.QueryRowContext(ctx, getLastSession, projectPath)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -133,7 +133,7 @@ WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error) {
-	row := q.queryRow(ctx, q.getSessionByIDStmt, getSessionByID, id)
+	row := q.db.QueryRowContext(ctx, getSessionByID, id)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -173,7 +173,7 @@ SELECT tree.id FROM tree
 // operate on: parent_session_id carries no foreign key, so nothing
 // cascades from a parent to its children on its own.
 func (q *Queries) ListSessionTreeIDs(ctx context.Context, sessionID string) ([]string, error) {
-	rows, err := q.query(ctx, q.listSessionTreeIDsStmt, listSessionTreeIDs, sessionID)
+	rows, err := q.db.QueryContext(ctx, listSessionTreeIDs, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListSessions(ctx context.Context, projectPath string) ([]Session, error) {
-	rows, err := q.query(ctx, q.listSessionsStmt, listSessions, projectPath)
+	rows, err := q.db.QueryContext(ctx, listSessions, projectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +258,7 @@ type ListSessionsForGCRow struct {
 // expansion) without pulling message/file bodies into memory. Unscoped by
 // project_path; the caller filters by project in Go for --project.
 func (q *Queries) ListSessionsForGC(ctx context.Context) ([]ListSessionsForGCRow, error) {
-	rows, err := q.query(ctx, q.listSessionsForGCStmt, listSessionsForGC)
+	rows, err := q.db.QueryContext(ctx, listSessionsForGC)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +306,7 @@ type ListSubAgentSessionsParams struct {
 // empty for sessions that are not a named delegation, and the caller must
 // never pass ” here - that would sweep up every unrelated child session.
 func (q *Queries) ListSubAgentSessions(ctx context.Context, arg ListSubAgentSessionsParams) ([]Session, error) {
-	rows, err := q.query(ctx, q.listSubAgentSessionsStmt, listSubAgentSessions, arg.ParentSessionID, arg.AgentID, arg.ID)
+	rows, err := q.db.QueryContext(ctx, listSubAgentSessions, arg.ParentSessionID, arg.AgentID, arg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ type RenameSessionParams struct {
 }
 
 func (q *Queries) RenameSession(ctx context.Context, arg RenameSessionParams) error {
-	_, err := q.exec(ctx, q.renameSessionStmt, renameSession, arg.Title, arg.ID)
+	_, err := q.db.ExecContext(ctx, renameSession, arg.Title, arg.ID)
 	return err
 }
 
@@ -382,7 +382,7 @@ type SetSessionModelParams struct {
 // Deliberately not RETURNING the row: this is written on every turn, from
 // the dispatch path, and its result is never read back.
 func (q *Queries) SetSessionModel(ctx context.Context, arg SetSessionModelParams) error {
-	_, err := q.exec(ctx, q.setSessionModelStmt, setSessionModel, arg.ModelProvider, arg.ModelID, arg.ID)
+	_, err := q.db.ExecContext(ctx, setSessionModel, arg.ModelProvider, arg.ModelID, arg.ID)
 	return err
 }
 
@@ -410,7 +410,7 @@ type UpdateSessionParams struct {
 }
 
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error) {
-	row := q.queryRow(ctx, q.updateSessionStmt, updateSession,
+	row := q.db.QueryRowContext(ctx, updateSession,
 		arg.Title,
 		arg.PromptTokens,
 		arg.CompletionTokens,
@@ -460,7 +460,7 @@ type UpdateSessionTitleAndUsageParams struct {
 }
 
 func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error {
-	_, err := q.exec(ctx, q.updateSessionTitleAndUsageStmt, updateSessionTitleAndUsage,
+	_, err := q.db.ExecContext(ctx, updateSessionTitleAndUsage,
 		arg.Title,
 		arg.PromptTokens,
 		arg.CompletionTokens,

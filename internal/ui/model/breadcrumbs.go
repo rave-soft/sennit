@@ -22,6 +22,29 @@ import (
 // The rule stays a plain rule at the top level, where there is nowhere to
 // go back to. Height never changes either way, so nothing below it moves.
 
+// breadcrumbState holds the breadcrumb bar's own state: the name of the
+// thread this UI is embedded in (crumbRoot), and hover/hit-test bookkeeping
+// for the Back button.
+//
+// Embedded anonymously (by value) on UI so its fields keep promoting
+// unchanged (m.crumbRoot, ...); see widgets.go for why.
+type breadcrumbState struct {
+	// crumbRoot names the thread this UI is embedded in, for the second
+	// crumb of the breadcrumb bar ("main › <crumbRoot> › …"). Empty on the
+	// top-level UI, which has no thread above it. Set by the router when it
+	// attaches (see Root.handleThreadAttached).
+	crumbRoot string
+
+	// breadcrumbHover is set while the pointer is over the breadcrumb bar's
+	// Back button, for hover feedback.
+	breadcrumbHover bool
+	// breadcrumbButtonRect is the screen area of that button as last
+	// painted. Hit-testing recomputes it instead (see
+	// breadcrumbButtonHit) — this is kept only so the bar can be inspected
+	// after a draw.
+	breadcrumbButtonRect image.Rectangle
+}
+
 // breadcrumbRootName is the first crumb of every non-empty trail: the
 // top-level session the whole path hangs off. It is only rendered when
 // there is at least one level below it — a lone "main" would be noise.

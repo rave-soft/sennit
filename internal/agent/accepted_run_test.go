@@ -23,18 +23,15 @@ func newCancelTestAgent(t *testing.T) (*sessionAgent, fakeEnv) {
 }
 
 func (a *sessionAgent) acceptedCount(sessionID string) int {
-	c, _ := a.dispatch.acceptedRuns.Get(sessionID)
-	return c
+	return a.acceptedRunsForTest(sessionID)
 }
 
 func (a *sessionAgent) hasPendingCancel(sessionID string) bool {
-	mark, ok := a.dispatch.cancelMark.Get(sessionID)
-	return ok && mark > 0
+	return a.cancelMarkForTest(sessionID) > 0
 }
 
 func (a *sessionAgent) pendingCancelMark(sessionID string) uint64 {
-	mark, _ := a.dispatch.cancelMark.Get(sessionID)
-	return mark
+	return a.cancelMarkForTest(sessionID)
 }
 
 func TestAcceptedRun_CloseIsIdempotent(t *testing.T) {
@@ -215,17 +212,4 @@ func TestPersistCanceledTurn_SucceedsWithCanceledContext(t *testing.T) {
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
 	require.Len(t, msgs, 2)
-}
-
-func TestClearPendingCancel(t *testing.T) {
-	t.Parallel()
-	sa, _ := newCancelTestAgent(t)
-
-	accept := sa.BeginAccepted("sid")
-	defer accept.Close()
-	sa.Cancel("sid")
-	require.True(t, sa.hasPendingCancel("sid"))
-
-	sa.clearPendingCancel("sid")
-	require.False(t, sa.hasPendingCancel("sid"))
 }

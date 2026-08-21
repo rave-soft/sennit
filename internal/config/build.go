@@ -1,0 +1,139 @@
+package config
+
+import (
+	"context"
+	"fmt"
+
+	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/env"
+)
+
+// buildConfigOptions parameterizes buildConfig, the pipeline shared by Load
+// and reloadFromDisk. Every field is either identical between the two
+// callers or a deliberate, named divergence — see each field's comment.
+type buildConfigOptions struct {
+	ctx        context.Context
+	workingDir string
+	dataDir    string
+
+	// debug forces Options.Debug on. Only Load sets this; reloadFromDisk
+	// leaves it false, which is a pre-existing gap (Options.Debug is never
+	// persisted, so --debug's provider HTTP logging drops on first reload),
+	// not a deliberate choice — left as-is, see the refactor report.
+	debug bool
+
+	// migrateModelCache runs the one-time bloated-model-cache migration.
+	// Idempotent but pointless to repeat every reload, so only Load sets it.
+	migrateModelCache bool
+
+	// presetModel, non-nil, seeds cfg.Model before resolution: reloadFromDisk
+	// reapplies the model it already pinned (pinPreferredModelLocked) so a
+	// reload can't let a sibling instance's write swap it out. nil for Load.
+	presetModel *SelectedModel
+
+	// persistFallback: persist a fallback model correction found during
+	// resolution. Load does; reloadFromDisk does not (persisting mid-reload
+	// would need its own failure handling, unlike Load discarding the whole
+	// store on error). The one explicitly-known behavioral divergence here.
+	persistFallback bool
+}
+
+// builtConfig is the result of one buildConfig run. configured mirrors
+// cfg.IsConfigured() at the point resolution would otherwise run; when
+// false, resolved is unset. persistFallback is opts.persistFallback &&
+// resolved.Fallback — callers act on it under their own writeMu section,
+// since that write choreography differs between Load and reloadFromDisk.
+type builtConfig struct {
+	cfg             *Config
+	configPaths     []string
+	loadedPaths     []string
+	providers       []catwalk.Provider
+	resolver        VariableResolver
+	configured      bool
+	resolved        resolvedModel
+	persistFallback bool
+}
+
+// buildConfig runs the config-building pipeline shared by Load and
+// reloadFromDisk: discover config paths, merge every layer (including the
+// workspace config), apply defaults and env-derived overrides, configure
+// providers (which may run model-discovery HTTP calls), and resolve the
+// selected model. It has no store-publishing side effects — store is used
+// only for globalDataPath and atomicWrite, both disk-only and already safe
+// before a reload's writeMu swap. Callers own everything after: creating or
+// updating the ConfigStore, pinning/persisting the model,
+// SetupAgents(WithInherited), and the staleness snapshot.
+func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, error) {
+	configPaths := lookupConfigs(opts.workingDir)
+
+	cfg, loadedPaths, err := loadFromConfigPaths(opts.ctx, configPaths)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
+	}
+
+	cfg.setDefaults(opts.workingDir, opts.dataDir)
+
+	if opts.debug {
+		cfg.Options.Debug = true
+	}
+
+	// Load workspace config last so it has highest priority.
+	if err := applyWorkspaceConfig(cfg, opts.workingDir, &loadedPaths); err != nil {
+		return nil, err
+	}
+
+	// Validate hooks after all config merging is complete so workspace
+	// hooks also get their matcher regexes compiled.
+	if err := cfg.ValidateHooks(); err != nil {
+		return nil, fmt.Errorf("invalid hook configuration: %w", err)
+	}
+
+	applyEnvironmentDefaults(cfg)
+
+	if opts.presetModel != nil {
+		cfg.Model = *opts.presetModel
+	}
+
+	providers := Providers(cfg)
+
+	if opts.migrateModelCache {
+		migrateBloatedModelCache(store.globalDataPath, providers)
+	}
+
+	envInst := env.New()
+	resolver := NewShellVariableResolver(envInst)
+
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
+	cfg.applyEnv(resolver)
+
+	// configureProviders may run model-discovery HTTP calls for custom
+	// providers. It runs here, without writeMu held, so a slow discovery
+	// round trip never blocks a concurrent mutator; see the callers.
+	if err := cfg.configureProviders(opts.ctx, store, envInst, resolver, providers); err != nil {
+		return nil, fmt.Errorf("failed to configure providers: %w", err)
+	}
+
+	built := &builtConfig{
+		cfg:         cfg,
+		configPaths: configPaths,
+		loadedPaths: loadedPaths,
+		providers:   providers,
+		resolver:    resolver,
+	}
+
+	built.configured = cfg.IsConfigured()
+	if !built.configured {
+		return built, nil
+	}
+
+	resolved, err := resolveSelectedModel(cfg, providers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to configure selected models: %w", err)
+	}
+	cfg.Model = resolved.Model
+	built.resolved = resolved
+	built.persistFallback = opts.persistFallback && resolved.Fallback
+
+	return built, nil
+}

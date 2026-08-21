@@ -139,13 +139,12 @@ func GlobalWorkspaceDir() string {
 	return filepath.Dir(GlobalConfigData())
 }
 
-func isInsideWorktree() bool {
-	bts, err := exec.CommandContext(
-		context.Background(),
-		"git", "rev-parse",
-		"--is-inside-work-tree",
-	).CombinedOutput()
-	return err == nil && strings.TrimSpace(string(bts)) == "true"
+// isInsideWorktree reports whether dir is inside a git working tree
+// (regular or linked worktree), as opposed to a bare repository or a
+// plain non-git directory. It answers for dir, not the process cwd, so
+// callers must pass the workspace directory they actually care about.
+func isInsideWorktree(dir string) bool {
+	return worktreeRoot(dir) != ""
 }
 
 // worktreeRoot returns the absolute path of the git working tree root for

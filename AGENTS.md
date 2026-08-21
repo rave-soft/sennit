@@ -67,6 +67,15 @@ internal/
 - **Config is a Service**: accessed via `config.Service`, not global state.
 - **Tools are self-documenting**: each tool has a `.go` implementation and a
   `.md` description file in `internal/agent/tools/`.
+- **Tool failures: text response vs. Go error**: a model-recoverable failure
+  (bad or missing argument, invalid enum value, a target URL/ID that doesn't
+  resolve) returns `fantasy.NewTextErrorResponse(...)` so the model sees it
+  as a normal tool result and can retry; an infrastructure failure (missing
+  session ID, disk/network faults in Sennit's own I/O, a wiring bug) returns
+  a `%w`-wrapped Go `error`, which aborts the whole tool-call batch instead
+  of continuing the conversation. Use `invalidParam(name)` for the "X is
+  required" case and `missingSessionID(action)` for the missing-session-ID
+  case so the wording stays consistent (`internal/agent/tools/tools.go`).
 - **Proto boundary**: `internal/proto` may alias leaf data types with no
   behavior or transitive dependencies (for example, `message`, `session`, and
   `skills`). Types with behavior, runtime references, or transitive

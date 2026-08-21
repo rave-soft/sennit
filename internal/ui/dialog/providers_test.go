@@ -49,8 +49,7 @@ func TestNewProviders_ListsCatalogAndCustomEntry(t *testing.T) {
 	providers, err := NewProviders(com, false)
 	require.NoError(t, err)
 
-	knownProviders, err := config.Providers(com.Config())
-	require.NoError(t, err)
+	knownProviders := config.Providers(com.Config())
 	require.NotEmpty(t, knownProviders)
 
 	items := providers.list.FilteredItems()

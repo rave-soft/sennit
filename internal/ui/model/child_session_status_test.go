@@ -52,9 +52,11 @@ func newChildSessionTestUI(t *testing.T) *UI {
 	t.Helper()
 	com := common.DefaultCommon(context.Background(), agentSessionWorkspace{})
 	return &UI{
-		com:    com,
-		chat:   NewChat(com, config.ScrollbarDefault),
-		status: NewStatus(com, nil),
+		com: com,
+		widgets: widgets{
+			chat:   NewChat(com, config.ScrollbarDefault),
+			status: NewStatus(com, nil),
+		},
 	}
 }
 

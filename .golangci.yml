@@ -1,31 +1,39 @@
 version: "2"
 linters:
+  # Linters not listed below were considered and rejected.
   enable:
     - bodyclose
-    # - exhaustive
-    # - goconst
-    # - godot
-    # - godox
-    # - gomoddirectives
+    - errorlint
     - goprintffuncname
-    # - gosec
     - misspell
-    # - nakedret
-    # - nestif
-    # - nilerr
     - noctx
     - nolintlint
-    # - prealloc
-    # - revive
     - rowserrcheck
     - sqlclosecheck
     - staticcheck
     - tparallel
-    # - unconvert
+    - unconvert
     - unparam
     - whitespace
     - depguard
+    - forbidigo
   settings:
+    forbidigo:
+      forbid:
+        # internal/ui/common.Common.Context() carries the TUI's lifecycle
+        # context, cancelled on shutdown. context.Background()/TODO() in
+        # its place is invisible to that cancellation: an in-flight
+        # workspace call (most concretely, an OAuth device-flow poll)
+        # keeps running after the user quits. Scoped to internal/ui below
+        # via exclusions.rules' path-except — this pattern is fine
+        # anywhere else, including common.go's own fallback inside
+        # Context() and the one documented exception in oauth_codex.go
+        # (both carry a //nolint:forbidigo with their reasoning).
+        - pattern: '^context\.Background$'
+          msg: "use common.Common.Context() instead of context.Background() so workspace calls are cancelled when the TUI shuts down; see internal/ui/common/common.go"
+        - pattern: '^context\.TODO$'
+          msg: "use common.Common.Context() instead of context.TODO() so workspace calls are cancelled when the TUI shuts down; see internal/ui/common/common.go"
+      exclude-godoc-examples: true
     depguard:
       rules:
         # C3 UI boundary inventory/rationale: the deny-list forbids orchestration and
@@ -40,8 +48,9 @@ linters:
             - pkg: github.com/rave-soft/sennit/internal/thread
             - pkg: github.com/rave-soft/sennit/internal/db
             - pkg: github.com/rave-soft/sennit/internal/app
-    # - wrapcheck
   disable:
+    # Disabled since this config was inherited wholesale from the upstream
+    # Crush/Braid config; no rationale for disabling it is on record.
     - ineffassign
   exclusions:
     generated: lax
@@ -59,9 +68,21 @@ linters:
       - '\.claude/'
       - '\.sennit/'
     rules:
-      - text: '(slog|log)\.\w+'
+      # forbidigo's context.Background()/TODO() ban above only makes sense
+      # against internal/ui's own lifecycle context — everywhere else
+      # (agent, workspace, cmd, ...) context.Background() is the ordinary,
+      # correct way to start a root context, so the rule is scoped off
+      # everywhere but internal/ui rather than applied repo-wide.
+      - path-except: 'internal/ui/'
         linters:
-          - noctx
+          - forbidigo
+      # Tests build a *common.Common directly (there is no running TUI, so
+      # no lifecycle context to inherit) and context.Background() is the
+      # right, ordinary choice there — the same case common.go's own
+      # Context() fallback documents.
+      - path: '_test\.go'
+        linters:
+          - forbidigo
       - path: internal/shell/run.go
         text: "SA1019.*interp.ExecHandler"
         linters:

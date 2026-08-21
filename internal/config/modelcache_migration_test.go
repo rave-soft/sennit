@@ -168,7 +168,7 @@ func TestConfig_Load_DiscoverModelsFalseNeverDiscovers(t *testing.T) {
 
 	testEnv := testenv.New(map[string]string{})
 	resolver := NewShellVariableResolver(testEnv)
-	err := cfg.configureProviders(context.Background(), testStore(cfg), testEnv, resolver, []catwalk.Provider{})
+	err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), testEnv, resolver, []catwalk.Provider{})
 	require.NoError(t, err)
 
 	pc, ok := cfg.Providers.Get("qwen36-local")

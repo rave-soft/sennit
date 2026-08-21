@@ -347,7 +347,7 @@ func TestThreadStatusTool_ReturnsDetails(t *testing.T) {
 	resp := callTool(t, tool, tools.ThreadStatusParams{ID: st.ID})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "gamma")
-	require.Contains(t, resp.Content, string(st.Status))
+	require.Contains(t, resp.Content, st.Status)
 }
 
 func TestThreadStatusTool_MissingID(t *testing.T) {

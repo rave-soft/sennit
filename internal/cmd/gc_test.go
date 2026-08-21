@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -50,6 +51,15 @@ type gcFixtureIDs struct {
 	ThreadOldDone    string // project A, status completed, 120d old -- must go
 	ThreadOldRunning string // project A, status running, 120d old -- must survive (never touch running)
 	ThreadRecentDone string // project A, status merged, 1h old -- must survive (not old enough)
+
+	// Worktree-orphan fixtures: WorktreeExists holds a real directory on
+	// disk, WorktreeGone's directory is never created, so the two exercise
+	// the os.Stat gate that decides whether a selected thread's worktree is
+	// reported as orphaned.
+	WorktreeExists   string // project A, status completed, 120d old, worktree_path exists -- must be reported
+	WorktreeGone     string // project A, status completed, 120d old, worktree_path missing -- must NOT be reported
+	WorktreeDir      string // the directory WorktreeExists's worktree_path points at
+	TaskWithWorktree string // project A, kind=task, 120d old, worktree_path exists -- must NOT be reported (tasks own no worktree)
 }
 
 // gcFixture opens a fresh migrated DB at dir (config.GlobalDBDir() for
@@ -117,6 +127,10 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 		ThreadOldDone:    "thread-old-done",
 		ThreadOldRunning: "thread-old-running",
 		ThreadRecentDone: "thread-recent-done",
+
+		WorktreeExists:   "thread-worktree-exists",
+		WorktreeGone:     "thread-worktree-gone",
+		TaskWithWorktree: "task-with-worktree",
 	}
 
 	mustSession(ids.OldParent, "old parent", projectA, "")
@@ -161,6 +175,31 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 	mustThread(ids.ThreadOldRunning, "old-running", projectA)
 	mustThread(ids.ThreadRecentDone, "recent-done", projectA)
 
+	// A real directory on disk, standing in for a worktree gc must report
+	// as orphaned rather than an already-cleaned-up one it must not.
+	ids.WorktreeDir = filepath.Join(t.TempDir(), "worktree-exists")
+	require.NoError(t, os.MkdirAll(ids.WorktreeDir, 0o755))
+
+	_, err = q.CreateThread(ctx, sennitdb.CreateThreadParams{
+		ID: ids.WorktreeExists, Name: "worktree-exists", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
+		Branch: "thread/worktree-exists", WorktreePath: ids.WorktreeDir, Status: "pending", MergePolicy: "auto", Kind: "thread",
+	})
+	require.NoError(t, err)
+	// worktree_path points at a directory that was never created, so gc
+	// must treat it as already cleaned up rather than as an orphan.
+	_, err = q.CreateThread(ctx, sennitdb.CreateThreadParams{
+		ID: ids.WorktreeGone, Name: "worktree-gone", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
+		Branch: "thread/worktree-gone", WorktreePath: filepath.Join(t.TempDir(), "never-created"), Status: "pending", MergePolicy: "auto", Kind: "thread",
+	})
+	require.NoError(t, err)
+	// A task whose worktree_path happens to be set and exist on disk: gc
+	// must gate reporting on kind, not merely on the path existing.
+	_, err = q.CreateThread(ctx, sennitdb.CreateThreadParams{
+		ID: ids.TaskWithWorktree, Name: "task-with-worktree", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
+		Branch: "", WorktreePath: ids.WorktreeDir, Status: "pending", MergePolicy: "auto", Kind: "task",
+	})
+	require.NoError(t, err)
+
 	// Backdating writes go last: both sessions.updated_at and
 	// threads.updated_at are stamped to "now" by an AFTER UPDATE trigger
 	// on every UPDATE to that row (by design, so real usage always
@@ -176,6 +215,9 @@ func gcFixture(t *testing.T, dir string, cutoff int64, projectA, projectB string
 	setThread(ids.ThreadOldDone, "completed", old)
 	setThread(ids.ThreadOldRunning, "running", old)
 	setThread(ids.ThreadRecentDone, "merged", recent)
+	setThread(ids.WorktreeExists, "completed", old)
+	setThread(ids.WorktreeGone, "completed", old)
+	setThread(ids.TaskWithWorktree, "completed", old)
 
 	return ids
 }
@@ -187,7 +229,7 @@ func sessionExists(t *testing.T, dataDir, id string) bool {
 	defer sennitdb.Release(dataDir) //nolint:errcheck
 	q := sennitdb.New(conn)
 	_, err = q.GetSessionByID(t.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false
 	}
 	require.NoError(t, err)
@@ -201,7 +243,7 @@ func threadExists(t *testing.T, dataDir, id string) bool {
 	defer sennitdb.Release(dataDir) //nolint:errcheck
 	q := sennitdb.New(conn)
 	_, err = q.GetThread(t.Context(), id)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false
 	}
 	require.NoError(t, err)
@@ -532,4 +574,128 @@ func TestGC_CollectsFinishedTasksToo(t *testing.T) {
 	require.False(t, threadExists(t, dataDir, "task-old-done"))
 	require.True(t, threadExists(t, dataDir, "task-recent-done"))
 	require.True(t, threadExists(t, dataDir, "task-old-running"))
+}
+
+// TestGC_ReportOnly_OrphanedWorktree covers the field, human, and JSON
+// surfaces together for a single fixture run, plus the negative cases:
+// an already-cleaned-up worktree, an empty worktree_path, a task, and an
+// ineligible thread must never be reported.
+func TestGC_ReportOnly_OrphanedWorktree(t *testing.T) {
+	setupHermeticConfigEnv(t, `{}`)
+	dataDir := config.GlobalDBDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	testCmd, stdout := newGCTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	require.NoError(t, testCmd.Flags().Set("json", "true"))
+	require.NoError(t, runGC(testCmd, nil))
+
+	var report gcReport
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &report))
+	require.Contains(t, report.OrphanedWorktrees, ids.WorktreeDir)
+	require.Len(t, report.OrphanedWorktrees, 1)
+
+	// ThreadOldDone's worktree_path ("/tmp/old-done" from the base
+	// fixture) does not exist on disk, so it must not be reported even
+	// though its row was eligible and deleted.
+	require.False(t, threadExists(t, dataDir, ids.ThreadOldDone))
+	// The gone-worktree and task-with-worktree rows were also deleted
+	// (both are eligible), but neither contributes an orphan path.
+	require.False(t, threadExists(t, dataDir, ids.WorktreeGone))
+	require.False(t, threadExists(t, dataDir, ids.TaskWithWorktree))
+}
+
+// TestGC_ReportsOrphanedWorktree_HumanOutput confirms the rendered text
+// names the orphaned path and tells the user how to clean it up.
+func TestGC_ReportsOrphanedWorktree_HumanOutput(t *testing.T) {
+	setupHermeticConfigEnv(t, `{}`)
+	dataDir := config.GlobalDBDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	testCmd, stdout := newGCTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	require.NoError(t, runGC(testCmd, nil))
+
+	require.Contains(t, stdout.String(), ids.WorktreeDir)
+	require.Contains(t, stdout.String(), "git worktree remove")
+	require.NotContains(t, stdout.String(), "Would orphan") // not a dry run
+}
+
+// TestGC_IneligibleThread_WorktreeNotReported confirms a thread that fails
+// selection (too recent, or non-terminal) never contributes its worktree to
+// the report, and its row survives.
+func TestGC_IneligibleThread_WorktreeNotReported(t *testing.T) {
+	dataDir := t.TempDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA := t.TempDir()
+
+	conn, err := sennitdb.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := sennitdb.New(conn)
+
+	worktreeDir := filepath.Join(t.TempDir(), "ineligible-worktree")
+	require.NoError(t, os.MkdirAll(worktreeDir, 0o755))
+	_, err = q.CreateThread(t.Context(), sennitdb.CreateThreadParams{
+		ID: "thread-ineligible", Name: "ineligible", ProjectPath: projectA, Goal: "goal", BaseBranch: "main",
+		Branch: "thread/ineligible", WorktreePath: worktreeDir, Status: "running", MergePolicy: "auto", Kind: "thread",
+	})
+	require.NoError(t, err)
+	old := time.Unix(cutoff, 0).Add(-30 * 24 * time.Hour).Unix()
+	_, err = conn.ExecContext(t.Context(), `UPDATE threads SET updated_at = ? WHERE id = ?`, old, "thread-ineligible")
+	require.NoError(t, err)
+
+	selection, err := gcCollect(t.Context(), q, conn, cutoff, "")
+	require.NoError(t, err)
+	require.NotContains(t, selection.threadIDs, "thread-ineligible")
+	require.NotContains(t, selection.orphanedWorktrees, worktreeDir)
+
+	require.NoError(t, sennitdb.Release(dataDir))
+	require.True(t, threadExists(t, dataDir, "thread-ineligible"))
+}
+
+// TestGC_DryRun_ReportsWouldBeOrphaned exercises the dry-run wording and
+// confirms nothing is touched: neither the DB row nor the worktree
+// directory on disk.
+func TestGC_DryRun_ReportsWouldBeOrphaned(t *testing.T) {
+	setupHermeticConfigEnv(t, `{}`)
+	dataDir := config.GlobalDBDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	testCmd, stdout := newGCTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	require.NoError(t, testCmd.Flags().Set("dry-run", "true"))
+	require.NoError(t, runGC(testCmd, nil))
+
+	require.Contains(t, stdout.String(), ids.WorktreeDir)
+	require.Contains(t, stdout.String(), "Would orphan")
+
+	require.True(t, threadExists(t, dataDir, ids.WorktreeExists))
+	_, err := os.Stat(ids.WorktreeDir)
+	require.NoError(t, err)
+}
+
+// TestGC_NeverRemovesOrphanedWorktree pins the report-only contract: a real
+// gc run deletes the owning thread row but the worktree directory it
+// pointed at is still present on disk afterward.
+func TestGC_NeverRemovesOrphanedWorktree(t *testing.T) {
+	setupHermeticConfigEnv(t, `{}`)
+	dataDir := config.GlobalDBDir()
+	cutoff := time.Now().AddDate(0, 0, -90).Unix()
+	projectA, projectB := t.TempDir(), t.TempDir()
+	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
+
+	testCmd, _ := newGCTestCmd(t)
+	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	require.NoError(t, runGC(testCmd, nil))
+
+	require.False(t, threadExists(t, dataDir, ids.WorktreeExists))
+	info, err := os.Stat(ids.WorktreeDir)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
 }

@@ -11,6 +11,19 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
+// mouseState holds UI-level mouse hover/click bookkeeping used for
+// highlight and double-click detection at the UI level (distinct from
+// Chat's own mouse-selection state in chat.go, which tracks drag/click
+// inside the message list).
+//
+// Embedded anonymously (by value) on UI so its fields keep promoting
+// unchanged (m.lastClickTime, ...); see widgets.go for why.
+type mouseState struct {
+	lastClickTime time.Time
+	hoverX        int
+	hoverY        int
+}
+
 // updateMouse handles the mouse-driven branches of UI.Update: clicks,
 // motion, release, delayed (double-)click resolution, and coalesced wheel
 // events. It is called from Update's message-type switch and shares that
@@ -98,24 +111,19 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// to a session/todos event), which would leave the cached rects
 		// stale or zero and silently swallow the click.
 		if msg.Button == tea.MouseLeft && m.state == uiChat && m.hasSession() {
-			pt := image.Pt(msg.X, msg.Y)
-			plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
-			threadBlockRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.lay.layout.panel, plan)
-			if pt.In(todosHeaderRect) {
+			hit := m.panelHitTest(image.Pt(msg.X, msg.Y))
+			if hit.inTodosHeader {
 				if cmd := m.toggleTodosExpanded(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 				return cmds, true
 			}
-			if pt.In(threadsHeaderRect) {
+			if hit.inThreadsHeader {
 				m.toggleThreadsCollapsed()
 				return cmds, true
 			}
-			for i, rect := range threadBlockRects {
-				if !pt.In(rect) {
-					continue
-				}
-				th := plan.threads[i]
+			if hit.threadIndex >= 0 {
+				th := hit.plan.threads[hit.threadIndex]
 				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID, name: th.Name}))
 				return cmds, true
 			}
@@ -171,18 +179,10 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// blocks, and delegation blocks, mirroring the child-session
 		// panel's hover pattern above.
 		if m.state == uiChat {
-			pt := image.Pt(msg.X, msg.Y)
-			plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
-			threadRects, todosHeaderRect, _, threadsHeaderRect := sessionPanelRowLayout(m.lay.layout.panel, plan)
-			m.panel.todosHover = pt.In(todosHeaderRect)
-			m.panel.threadsHover = pt.In(threadsHeaderRect)
-			m.panel.hoveredThread = -1
-			for i, rect := range threadRects {
-				if pt.In(rect) {
-					m.panel.hoveredThread = i
-					break
-				}
-			}
+			hit := m.panelHitTest(image.Pt(msg.X, msg.Y))
+			m.panel.todosHover = hit.inTodosHeader
+			m.panel.threadsHover = hit.inThreadsHeader
+			m.panel.hoveredThread = hit.threadIndex
 		}
 
 		// Track hover position for inline editors.
@@ -314,16 +314,13 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// can arrive before drawSessionPanel has painted the current
 			// layout.
 			if m.hasSession() {
-				plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
-				if plan.todosScrollable {
-					_, _, todosListRect, _ := sessionPanelRowLayout(m.lay.layout.panel, plan)
-					if image.Pt(msg.Mouse.X, msg.Mouse.Y).In(todosListRect) {
-						lines := int(msg.DeltaY)
-						if lines != 0 {
-							m.panel.todosScrollOffset = clampPanelTodosScrollOffset(m.panel.todosScrollOffset+lines, plan)
-						}
-						break
+				hit := m.panelHitTest(image.Pt(msg.Mouse.X, msg.Mouse.Y))
+				if hit.plan.todosScrollable && hit.inTodosList {
+					lines := int(msg.DeltaY)
+					if lines != 0 {
+						m.panel.todosScrollOffset = clampPanelTodosScrollOffset(m.panel.todosScrollOffset+lines, hit.plan)
 					}
+					break
 				}
 			}
 			if msg.DeltaX != 0 {

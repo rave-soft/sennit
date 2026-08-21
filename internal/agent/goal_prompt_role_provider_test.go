@@ -12,17 +12,17 @@ import (
 
 // originTaggedHistory builds the fantasy.Prompt history for a single
 // message.User message carrying origin, converted the same way
-// preparePrompt converts any persisted message: via Message.ToAIMessage.
+// preparePrompt converts any persisted message: via toAIMessage.
 func originTaggedHistory(text string, origin message.Origin) []fantasy.Message {
 	msg := message.Message{
 		Role:   message.User,
 		Parts:  []message.ContentPart{message.TextContent{Text: text}},
 		Origin: origin,
 	}
-	return msg.ToAIMessage()
+	return toAIMessage(&msg)
 }
 
-// TestOriginDoesNotAffectToAIMessage proves Message.ToAIMessage produces
+// TestOriginDoesNotAffectToAIMessage proves toAIMessage produces
 // byte-for-byte identical fantasy.Message output for a message.User
 // message regardless of Origin. This is the in-process half of the
 // invisible-on-the-wire guarantee: Origin is authorship metadata only

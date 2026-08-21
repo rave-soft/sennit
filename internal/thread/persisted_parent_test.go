@@ -1,7 +1,9 @@
-package thread
+package thread_test
 
 import (
 	"testing"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/stretchr/testify/require"
 )
@@ -16,25 +18,25 @@ import (
 // longer depends on any in-memory state the original Create stashed.
 func TestManager_ResolveDeliveryTarget_SurvivesRestart(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	parentApp := newTestParentApp(t)
 
-	mgr1 := NewManager(ManagerOptions{
+	mgr1 := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
-	st, err := mgr1.Create(t.Context(), CreateArgs{
+	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:            "restart-thread",
 		Goal:            "do it",
-		MergePolicy:     MergeManual,
+		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
 
-	mgr2 := NewManager(ManagerOptions{
+	mgr2 := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
@@ -44,7 +46,7 @@ func TestManager_ResolveDeliveryTarget_SurvivesRestart(t *testing.T) {
 	fresh, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 
-	target, parentSessionID, ok := mgr2.resolveDeliveryTarget(t.Context(), nil, fresh)
+	target, parentSessionID, ok := mgr2.ResolveDeliveryTargetForTest(t.Context(), nil, fresh)
 	require.True(t, ok)
 	require.Same(t, parentApp, target.(*testAppWorkspace).app)
 	require.Equal(t, "parent-sess", parentSessionID)
@@ -59,20 +61,20 @@ func TestManager_ResolveDeliveryTarget_SurvivesRestart(t *testing.T) {
 // Create.
 func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	parentApp := newTestParentApp(t)
 
-	mgr1 := NewManager(ManagerOptions{
+	mgr1 := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
-	st, err := mgr1.Create(t.Context(), CreateArgs{
+	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:            "resume-thread",
 		Goal:            "do it",
-		MergePolicy:     MergeManual,
+		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
@@ -81,7 +83,7 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 	// process: mgr1's lifecycle/controls and the DelegationParent it
 	// registered on the old spawned app are both irrelevant here.
 	spawner2 := newFakeSpawner(t)
-	mgr2 := NewManager(ManagerOptions{
+	mgr2 := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     spawner2,
 		RepoRoot:    repo,
@@ -99,7 +101,7 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 	require.Same(t, parentApp.AgentCoordinator, got.parent.Parent.(*testCoordinatorAdapter).inner)
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
-	require.Equal(t, string(KindThread), got.parent.Kind)
+	require.Equal(t, string(thread.KindThread), got.parent.Kind)
 	require.Equal(t, st.Name, got.parent.Name)
 }
 
@@ -110,20 +112,20 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 // DelegationParent, reading the persisted ParentSessionID off the row
 // rather than any in-memory control.
 func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	parentApp1 := newTestParentApp(t)
-	mgr1 := NewManager(ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
-	tasks1 := NewTaskManager(store, NewTestParentAppSpawner(parentApp1), NewTestMessageService(parentApp1.Messages()), mgr1.lc, mgr1.ctx)
+	mgr1 := thread.NewManager(thread.ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
+	tasks1 := thread.NewTaskManagerForTest(mgr1, NewTestParentAppSpawner(parentApp1), NewTestMessageService(parentApp1.Messages()))
 
-	st, err := tasks1.Create(t.Context(), TaskCreateArgs{Goal: "do it", ParentSessionID: "parent-sess"})
+	st, err := tasks1.Create(t.Context(), thread.TaskCreateArgs{Goal: "do it", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
 	// A fresh Manager/TaskManager pair sharing only the store, standing in
 	// for a restarted process: mgr1's lifecycle/controls and parentApp1's
 	// registration are both gone.
 	parentApp2 := newTestParentApp(t)
-	mgr2 := NewManager(ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
-	tasks2 := NewTaskManager(store, NewTestParentAppSpawner(parentApp2), NewTestMessageService(parentApp2.Messages()), mgr2.lc, mgr2.ctx)
+	mgr2 := thread.NewManager(thread.ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
+	tasks2 := thread.NewTaskManagerForTest(mgr2, NewTestParentAppSpawner(parentApp2), NewTestMessageService(parentApp2.Messages()))
 
 	require.NoError(t, sendErr(tasks2.Send(t.Context(), st.ID, "resume message")))
 
@@ -135,7 +137,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	require.Same(t, parentApp2.AgentCoordinator, got.parent.Parent.(*testCoordinatorAdapter).inner)
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
-	require.Equal(t, string(KindTask), got.parent.Kind)
+	require.Equal(t, string(thread.KindTask), got.parent.Kind)
 	require.Equal(t, st.Name, got.parent.Name)
 }
 
@@ -146,26 +148,26 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 // parent.
 func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	parentApp := newTestParentApp(t)
 
-	mgr1 := NewManager(ManagerOptions{
+	mgr1 := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
-	st, err := mgr1.Create(t.Context(), CreateArgs{
+	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:        "restart-solo",
 		Goal:        "do it",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 		// No ParentSessionID.
 	})
 	require.NoError(t, err)
 
 	spawner2 := newFakeSpawner(t)
-	mgr2 := NewManager(ManagerOptions{
+	mgr2 := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     spawner2,
 		RepoRoot:    repo,
@@ -175,7 +177,7 @@ func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 
 	fresh, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	_, _, ok := mgr2.resolveDeliveryTarget(t.Context(), nil, fresh)
+	_, _, ok := mgr2.ResolveDeliveryTargetForTest(t.Context(), nil, fresh)
 	require.False(t, ok, "a thread with no recorded parent must not resolve a delivery target after restart")
 
 	require.NoError(t, sendErr(mgr2.Send(t.Context(), st.ID, "resume message")))

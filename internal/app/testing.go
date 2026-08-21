@@ -27,6 +27,16 @@ func (app *App) MessagesForTest() message.Service           { return app.message
 func (app *App) SetPermissionsForTest(p permission.Service) { app.permissions = p }
 func (app *App) PermissionsForTest() permission.Service     { return app.permissions }
 
+// SetAgentCoordinatorForTest installs coordinator directly, bypassing
+// InitCoderAgent. AgentCoordinator itself stays a plain assignable field
+// (promoted from appServices), but a bare &App{} literal from outside this
+// package can no longer set it inline the way it could before appServices
+// existed, since appServices is unexported: construct the App with New or
+// NewForTest first (so appServices is non-nil), then call this.
+func (app *App) SetAgentCoordinatorForTest(coordinator agent.Coordinator) {
+	app.AgentCoordinator = coordinator
+}
+
 // SetConfigForTest installs store as this App's config store and rebuilds
 // its credentials manager to match, mirroring how New wires the two
 // together. It exists for tests (outside this package) that need a real
@@ -59,17 +69,24 @@ func (app *App) SetConfigForTest(store *config.ConfigStore) {
 // tear down the fan-in goroutines and the events broker.
 func NewForTest(ctx context.Context) *App {
 	app := &App{
-		permissions:        permission.NewPermissionService("", false, nil),
-		Questions:          question.NewService(),
-		BackgroundShells:   shell.NewBackgroundShellManager(),
-		globalCtx:          ctx,
-		events:             pubsub.NewBroker[any](),
-		serviceEventsWG:    &sync.WaitGroup{},
-		tuiWG:              &sync.WaitGroup{},
-		agentNotifications: pubsub.NewBroker[notify.Notification](),
-		runCompletions:     pubsub.NewBroker[notify.RunComplete](),
-		shutdownTimeout:    defaultShutdownTimeout,
+		appServices: appServices{
+			permissions:      permission.NewPermissionService("", false, nil),
+			Questions:        question.NewService(),
+			BackgroundShells: shell.NewBackgroundShellManager(),
+		},
+		appEvents: appEvents{
+			events:             pubsub.NewBroker[any](),
+			serviceEventsWG:    &sync.WaitGroup{},
+			tuiWG:              &sync.WaitGroup{},
+			agentNotifications: pubsub.NewBroker[notify.Notification](),
+			runCompletions:     pubsub.NewBroker[notify.RunComplete](),
+		},
+		shutdownPhases: shutdownPhases{
+			shutdownTimeout: defaultShutdownTimeout,
+		},
+		globalCtx: ctx,
 	}
+	app.app = app
 	app.agentDispatcher = NewAgentDispatcher(app.globalCtx, func() agent.Coordinator { return app.AgentCoordinator }, app.agentNotifications, app.runCompletions)
 
 	eventsCtx, cancel := context.WithCancel(ctx)

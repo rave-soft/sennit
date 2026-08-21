@@ -85,7 +85,9 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
 			PresencePenalty:  model.ModelCfg.PresencePenalty,
 			NonInteractive:   true,
-			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
+			// Sub-agents don't track an active runtime of their own, so
+			// there's nothing for a refresh to update.
+			OnAuthRefresh: c.makeAuthRefreshCallback(providerCfg, nil),
 		})
 	}
 	result, err := run()

@@ -2,8 +2,6 @@ package dialog
 
 import (
 	"cmp"
-	"fmt"
-	"log/slog"
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -73,13 +71,7 @@ func providerItems(com *common.Common) ([]list.FilterableItem, int, error) {
 	t := com.Styles
 	cfg := com.Config()
 
-	// A stale catalog must not keep this dialog from opening.
-	providers, err := config.Providers(cfg)
-	if err != nil && len(providers) == 0 {
-		return nil, 0, fmt.Errorf("failed to get providers: %w", err)
-	} else if err != nil {
-		slog.Warn("Listing the previously known providers", "error", err)
-	}
+	providers := config.Providers(cfg)
 
 	sorted := slices.Clone(providers)
 	slices.SortFunc(sorted, func(a, b catwalk.Provider) int {

@@ -200,18 +200,7 @@ func (m MCPConfig) ResolvedEnv(r VariableResolver) ([]string, error) {
 //
 // See ResolvedEnv for guidance on picking a resolver.
 func (m MCPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
-	if len(m.Args) == 0 {
-		return nil, nil
-	}
-	out := make([]string, len(m.Args))
-	for i, a := range m.Args {
-		v, err := r.ResolveValue(a)
-		if err != nil {
-			return nil, fmt.Errorf("arg %d: %w", i, err)
-		}
-		out[i] = v
-	}
-	return out, nil
+	return resolveSlice(m.Args, r)
 }
 
 // ResolvedURL returns m.URL expanded through the given resolver. The
@@ -251,28 +240,7 @@ func (m MCPConfig) ResolvedURL(r VariableResolver) (string, error) {
 //
 // See ResolvedEnv for guidance on picking a resolver.
 func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error) {
-	if len(m.Headers) == 0 {
-		return map[string]string{}, nil
-	}
-	out := make(map[string]string, len(m.Headers))
-	// Sort keys so failures are reported deterministically when more
-	// than one header would fail.
-	keys := make([]string, 0, len(m.Headers))
-	for k := range m.Headers {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	for _, k := range keys {
-		v, err := r.ResolveValue(m.Headers[k])
-		if err != nil {
-			return nil, fmt.Errorf("header %s: %w", k, err)
-		}
-		if v == "" {
-			continue
-		}
-		out[k] = v
-	}
-	return out, nil
+	return resolveMap(m.Headers, r, func(k string) string { return "header " + k }, true)
 }
 
 // ResolvedArgs returns l.Args with every element expanded through the
@@ -289,18 +257,7 @@ func (m MCPConfig) ResolvedHeaders(r VariableResolver) (map[string]string, error
 // so $VAR / $(cmd) expand; in client mode pass IdentityResolver so the
 // template is forwarded verbatim.
 func (l LSPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
-	if len(l.Args) == 0 {
-		return nil, nil
-	}
-	out := make([]string, len(l.Args))
-	for i, a := range l.Args {
-		v, err := r.ResolveValue(a)
-		if err != nil {
-			return nil, fmt.Errorf("arg %d: %w", i, err)
-		}
-		out[i] = v
-	}
-	return out, nil
+	return resolveSlice(l.Args, r)
 }
 
 // ResolvedEnv returns l.Env with every value expanded through the
@@ -321,25 +278,7 @@ func (l LSPConfig) ResolvedArgs(r VariableResolver) ([]string, error) {
 //
 // See ResolvedArgs for guidance on picking a resolver.
 func (l LSPConfig) ResolvedEnv(r VariableResolver) (map[string]string, error) {
-	if len(l.Env) == 0 {
-		return map[string]string{}, nil
-	}
-	out := make(map[string]string, len(l.Env))
-	// Sort keys so failures are reported deterministically when more
-	// than one value would fail.
-	keys := make([]string, 0, len(l.Env))
-	for k := range l.Env {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	for _, k := range keys {
-		v, err := r.ResolveValue(l.Env[k])
-		if err != nil {
-			return nil, fmt.Errorf("env %q: %w", k, err)
-		}
-		out[k] = v
-	}
-	return out, nil
+	return resolveMap(l.Env, r, func(k string) string { return fmt.Sprintf("env %q", k) }, false)
 }
 
 // resolveEnvs expands every value in envs through the given resolver
@@ -365,4 +304,60 @@ func resolveEnvs(envs map[string]string, r VariableResolver) ([]string, error) {
 		res = append(res, fmt.Sprintf("%s=%s", k, v))
 	}
 	return res, nil
+}
+
+// resolveSlice resolves every element of items through r, in order,
+// returning a fresh slice (items is never mutated); a nil/empty input
+// returns nil, nil. On the first resolution failure it returns nil and an
+// error identifying the offending positional index; the inner resolver
+// error is already sanitized by ResolveValue and is wrapped with %w so
+// errors.Is/As continues to work. Shared by MCPConfig.ResolvedArgs and
+// LSPConfig.ResolvedArgs, which agree on every aspect of this contract
+// (including keeping empty resolved values, unlike resolveMap's
+// dropEmpty option).
+func resolveSlice(items []string, r VariableResolver) ([]string, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	out := make([]string, len(items))
+	for i, a := range items {
+		v, err := r.ResolveValue(a)
+		if err != nil {
+			return nil, fmt.Errorf("arg %d: %w", i, err)
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+// resolveMap resolves every value of m through r, visiting keys in sorted
+// order so a failure is reported deterministically when more than one
+// value would fail; a nil/empty input returns an empty, non-nil map. The
+// input map is never mutated. errKey builds the error-message prefix for
+// the offending key on failure (callers disagree on quoting, e.g. "header
+// X" vs. `env "X"`, so this is left to them rather than baked in here).
+// dropEmpty omits a key whose resolved value is "" — MCPConfig.ResolvedHeaders
+// wants that (some providers reject an empty header value); LSPConfig.ResolvedEnv
+// does not (an explicit "FOO=" is a legitimate request).
+func resolveMap(m map[string]string, r VariableResolver, errKey func(key string) string, dropEmpty bool) (map[string]string, error) {
+	if len(m) == 0 {
+		return map[string]string{}, nil
+	}
+	out := make(map[string]string, len(m))
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		v, err := r.ResolveValue(m[k])
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", errKey(k), err)
+		}
+		if dropEmpty && v == "" {
+			continue
+		}
+		out[k] = v
+	}
+	return out, nil
 }

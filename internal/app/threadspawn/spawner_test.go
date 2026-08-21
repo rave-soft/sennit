@@ -14,8 +14,8 @@ import (
 
 // TestWorkspaceAdaptersAreOwnershipScoped prevents reintroducing global
 // canonicalization. A globally retained adapter also retains its App and all
-// of the App's services after LocalSpawner.Release or backend release. Each
-// handle/spawner instead owns the one adapter whose identity it must keep
+// of the App's services after LocalSpawner.Release or ParentAppSpawner.Release.
+// Each handle/spawner instead owns the one adapter whose identity it must keep
 // stable for its own lifetime.
 func TestWorkspaceAdaptersAreOwnershipScoped(t *testing.T) {
 	a := app.NewForTest(context.Background())

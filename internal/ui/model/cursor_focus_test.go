@@ -56,9 +56,13 @@ func newCursorTestUI(t *testing.T) *UI {
 	ta.Focus()
 
 	u := &UI{
-		com:    com,
-		status: NewStatus(com, nil),
-		chat:   NewChat(com, config.ScrollbarDefault),
+		com: com,
+		widgets: widgets{
+			status: NewStatus(com, nil),
+			chat:   NewChat(com, config.ScrollbarDefault),
+			dialog: dialog.NewOverlay(),
+			header: newHeader(com),
+		},
 		editor: editorState{
 			textarea:    ta,
 			attachments: attachments.New(nil, attachments.Keymap{}),
@@ -66,8 +70,6 @@ func newCursorTestUI(t *testing.T) *UI {
 		state:  uiChat,
 		focus:  uiFocusEditor,
 		keyMap: DefaultKeyMap(),
-		dialog: dialog.NewOverlay(),
-		header: newHeader(com),
 		lay: layoutState{
 			width:            140,
 			height:           45,

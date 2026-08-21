@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/rave-soft/sennit/main/schema.json",
   "lsp": {
     "gopls": {
-      "command": "/home/borodulin/go/bin/gopls",
+      "command": "gopls",
       "options": {
         "gofumpt": true,
         "codelenses": {

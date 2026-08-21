@@ -53,7 +53,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 		fetchDescription(),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
-				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
+				return invalidParam("url"), nil
 			}
 
 			format := strings.ToLower(params.Format)
@@ -67,7 +67,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+				return fantasy.ToolResponse{}, missingSessionID("fetching a URL")
 			}
 
 			permResp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
@@ -100,16 +100,21 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				defer cancel()
 			}
 
+			// A malformed URL or an unreachable target is information about
+			// what the model asked for, not about this process, so both
+			// come back as a normal tool result the model can react to
+			// (e.g. by trying a different URL) — matching web_fetch's
+			// handling of the same failure.
 			req, err := http.NewRequestWithContext(requestCtx, "GET", params.URL, nil)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create request: %s", err)), nil
 			}
 
 			req.Header.Set("User-Agent", brand.Slug+"/1.0")
 
 			resp, err := client.Do(req)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to fetch URL: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 			}
 			defer resp.Body.Close()
 

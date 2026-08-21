@@ -15,7 +15,6 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/format"
-	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/anim"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -105,7 +104,7 @@ sennit run --continue "Follow up on your last response"
 		}
 
 		if sessionID != "" {
-			sess, err := resolveSessionByID(ctx, ws, sessionID)
+			sess, err := resolveSessionID(ctx, workspaceSessionLookup{ws}, sessionID)
 			if err != nil {
 				return err
 			}
@@ -271,34 +270,4 @@ func overrideModel(ctx context.Context, ws workspace.Workspace, model string) er
 	}
 
 	return ws.UpdateAgentModel(ctx)
-}
-
-// resolveSessionByID resolves a session ID that may be a full UUID or a hash
-// prefix returned by sennit session list.
-func resolveSessionByID(ctx context.Context, ws workspace.Workspace, id string) (session.Session, error) {
-	if sess, err := ws.GetSession(ctx, id); err == nil {
-		return sess, nil
-	}
-
-	sessions, err := ws.ListSessions(ctx)
-	if err != nil {
-		return session.Session{}, err
-	}
-
-	var matches []session.Session
-	for _, s := range sessions {
-		hash := session.HashID(s.ID)
-		if hash == id || strings.HasPrefix(hash, id) {
-			matches = append(matches, s)
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		return session.Session{}, fmt.Errorf("session %q not found", id)
-	case 1:
-		return matches[0], nil
-	default:
-		return session.Session{}, fmt.Errorf("session ID %q is ambiguous (%d matches)", id, len(matches))
-	}
 }

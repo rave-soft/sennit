@@ -45,12 +45,14 @@ func TestNew_ConfigBypassSkipsPermissionsAtStartup(t *testing.T) {
 func TestApplyConfigPermissionsBypass_AppliesChange(t *testing.T) {
 	setBootstrapTestEnv(t)
 
-	store, err := config.Init(t.TempDir(), t.TempDir(), false)
+	store, err := config.Load(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)
 
 	app := &App{
-		config:      store,
-		permissions: permission.NewPermissionService("", false, nil),
+		appServices: appServices{
+			config:      store,
+			permissions: permission.NewPermissionService("", false, nil),
+		},
 	}
 	require.False(t, app.Permissions().SkipRequests())
 
@@ -69,12 +71,14 @@ func TestApplyConfigPermissionsBypass_AppliesChange(t *testing.T) {
 func TestApplyConfigPermissionsBypass_DoesNotClobberManualToggle(t *testing.T) {
 	setBootstrapTestEnv(t)
 
-	store, err := config.Init(t.TempDir(), t.TempDir(), false)
+	store, err := config.Load(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)
 
 	app := &App{
-		config:      store,
-		permissions: permission.NewPermissionService("", false, nil),
+		appServices: appServices{
+			config:      store,
+			permissions: permission.NewPermissionService("", false, nil),
+		},
 	}
 
 	// Simulate a manual ctrl+y toggle: session-only, config.bypass stays false.

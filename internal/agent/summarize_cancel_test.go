@@ -174,11 +174,11 @@ func TestSummarize_CleansUpActiveEntryOnEarlyError(t *testing.T) {
 	<-readStarted
 
 	newer := &activeCancel{cancel: func() {}}
-	sa.dispatch.activeRequests.Set(sessionID, newer)
+	sa.setActiveForTest(sessionID, newer)
 	close(releaseRead)
 	require.ErrorContains(t, <-errCh, "failed to get session")
 
-	got, ok := sa.dispatch.activeRequests.Get(sessionID)
+	got, ok := sa.getActiveForTest(sessionID)
 	require.True(t, ok)
 	require.Same(t, newer, got, "early cleanup must not erase a newer active entry")
 }
@@ -246,8 +246,8 @@ func TestSummarize_QueuedThenCanceledDoesNotRun(t *testing.T) {
 	// so Summarize's own stream is unaffected and completes normally.
 	model.onFinish = func() {
 		require.True(t, sa.IsSessionBusy(sess.ID), "onFinish must fire while Summarize is still active")
-		sa.dispatch.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-followup", Prompt: "should-not-run"})
-		sa.dispatch.cancelMark.Set(sess.ID, 1)
+		sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, RunID: "run-followup", Prompt: "should-not-run"})
+		sa.setCancelMarkForTest(sess.ID, 1)
 	}
 
 	err = sa.Summarize(t.Context(), sess.ID, fantasy.ProviderOptions{}, nil)

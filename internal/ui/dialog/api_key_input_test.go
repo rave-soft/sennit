@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"errors"
 	"image"
 	"strings"
 	"testing"
@@ -23,11 +24,22 @@ type apiKeyTestWorkspace struct {
 	workspace.Workspace
 	savedProviderID string
 	savedAPIKey     string
+	saveErr         error
+
+	// setCalls counts SetProviderAPIKey invocations, mirroring
+	// countingWorkspace.syncProbes() in internal/ui/model/session_busy_test.go:
+	// saveAPIKeyCmd must only ever be reached through the [tea.Cmd] HandleMsg
+	// returns, never synchronously from HandleMsg itself.
+	setCalls int
 }
 
 func (w *apiKeyTestWorkspace) SupportsThreads() bool { return false }
 
 func (w *apiKeyTestWorkspace) SetProviderAPIKey(_ config.Scope, providerID string, apiKey any) error {
+	w.setCalls++
+	if w.saveErr != nil {
+		return w.saveErr
+	}
 	w.savedProviderID = providerID
 	w.savedAPIKey = apiKey.(string)
 	return nil
@@ -69,10 +81,13 @@ func TestAPIKeyInput_DrawFramedFromConstructor(t *testing.T) {
 
 // TestAPIKeyInput_WithModelReturnsActionSelectModel is a regression test
 // for the pre-existing model-switch/onboarding flow: with a non-nil model,
-// submitting a verified key must still produce ActionSelectModel, driven
-// through HandleMsg exactly as a real user interaction would (skip past
-// the network-calling verifyAPIKey by injecting the "verified" state
-// directly, then press the submit key).
+// submitting a verified key must still produce ActionSelectModel. The save
+// itself happens off the Update goroutine (see saveAPIKeyCmd), so the test
+// drives it the way the real program loop would: HandleMsg returns an
+// ActionCmd, running that Cmd performs the save and yields
+// ActionAPIKeySaved, and feeding that back into HandleMsg produces the
+// final action — skip past the network-calling verifyAPIKey by injecting
+// the "verified" state directly, then press the submit key.
 func TestAPIKeyInput_WithModelReturnsActionSelectModel(t *testing.T) {
 	com, ws := newAPIKeyTestCommon(t)
 
@@ -86,10 +101,17 @@ func TestAPIKeyInput_WithModelReturnsActionSelectModel(t *testing.T) {
 	}
 
 	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected ActionCmd carrying the async save, got %#v", action)
+	require.Zero(t, ws.setCalls, "HandleMsg must not call SetProviderAPIKey synchronously")
+
+	saved := cmdAction.Cmd()
+	action = dlg.HandleMsg(saved)
 	selectAction, ok := action.(ActionSelectModel)
 	require.True(t, ok, "expected ActionSelectModel, got %#v", action)
 	require.Equal(t, provider, selectAction.Provider)
 	require.Equal(t, model, selectAction.Model)
+	require.Equal(t, 1, ws.setCalls)
 	require.Equal(t, "test-provider", ws.savedProviderID)
 	require.Equal(t, "sk-test-key", ws.savedAPIKey)
 }
@@ -97,7 +119,8 @@ func TestAPIKeyInput_WithModelReturnsActionSelectModel(t *testing.T) {
 // TestAPIKeyInput_WithoutModelReturnsActionProviderConfigured covers the
 // new model-less mode (used by the providers-configuration dialog): with a
 // nil model, submitting a verified key produces ActionProviderConfigured
-// instead of ActionSelectModel.
+// instead of ActionSelectModel, once the async save (see
+// TestAPIKeyInput_WithModelReturnsActionSelectModel) completes.
 func TestAPIKeyInput_WithoutModelReturnsActionProviderConfigured(t *testing.T) {
 	com, ws := newAPIKeyTestCommon(t)
 
@@ -110,9 +133,36 @@ func TestAPIKeyInput_WithoutModelReturnsActionProviderConfigured(t *testing.T) {
 	}
 
 	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected ActionCmd carrying the async save, got %#v", action)
+
+	saved := cmdAction.Cmd()
+	action = dlg.HandleMsg(saved)
 	configuredAction, ok := action.(ActionProviderConfigured)
 	require.True(t, ok, "expected ActionProviderConfigured, got %#v", action)
 	require.Equal(t, "test-provider", configuredAction.ProviderID)
 	require.Equal(t, "test-provider", ws.savedProviderID)
 	require.Equal(t, "sk-test-key", ws.savedAPIKey)
+}
+
+// TestAPIKeyInput_SaveErrorReportsAndKeepsDialogOpen pins the error path:
+// a failed save must not silently drop the failure, and must not produce a
+// follow-up action that would close the dialog or advance the flow.
+func TestAPIKeyInput_SaveErrorReportsAndKeepsDialogOpen(t *testing.T) {
+	com, ws := newAPIKeyTestCommon(t)
+	ws.saveErr = errors.New("disk full")
+
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider("test-provider"), Name: "Test Provider"}
+	dlg, _ := NewAPIKeyInput(com, false, provider, nil)
+
+	dlg.HandleMsg(ActionChangeAPIKeyState{State: APIKeyInputStateVerified})
+	action := dlg.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected ActionCmd carrying the async save, got %#v", action)
+
+	saved := cmdAction.Cmd()
+	action = dlg.HandleMsg(saved)
+	reportAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected the error to be reported via ActionCmd, got %#v", action)
+	require.NotNil(t, reportAction.Cmd)
 }

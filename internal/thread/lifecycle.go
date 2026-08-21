@@ -317,8 +317,9 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 	l.goWorker(func() {
 		if err := coord.RunAccepted(WithRunID(ctx, runID), accept, sessionID, prompt, nil); err != nil {
 			slog.Error("Agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
-			// backend.runAgent documents this fallback for pre-execution
-			// failures. Local coordinators do not provide that wrapper.
+			// AgentDispatcher.run documents this fallback for pre-execution
+			// failures. This direct RunAccepted call bypasses that wrapper,
+			// so the thread lifecycle provides its own fallback here.
 			l.handleRunComplete(ctx, id, RunComplete{SessionID: sessionID, RunID: runID, Error: err.Error(), Cancelled: errors.Is(err, context.Canceled)})
 		}
 	})

@@ -6,9 +6,9 @@ import (
 )
 
 // runCompleteMarkerKey is the unexported context key carrying a
-// [runCompleteMarker] from the dispatch boundary (backend.runAgent)
-// down into the coordinator. It lets the dispatcher learn whether the
-// coordinator already published the authoritative terminal
+// [runCompleteMarker] from the dispatch boundary ([AgentDispatcher.run]
+// in internal/app) down into the coordinator. It lets the dispatcher
+// learn whether the coordinator already published the authoritative terminal
 // notify.RunComplete for the run, so a fallback terminal event is only
 // emitted when one is actually missing (e.g. an error returned before
 // sessionAgent.Run ever executed). It avoids a breaking change to the
@@ -35,7 +35,7 @@ func WithRunCompleteMarker(ctx context.Context) context.Context {
 // MarkRunCompletePublished records that the authoritative terminal
 // RunComplete has been published for the run carried by ctx. It is a
 // no-op when no marker is present (e.g. the in-process/local Run path,
-// which is not dispatched through backend.runAgent).
+// which is not dispatched through [AgentDispatcher.run]).
 func MarkRunCompletePublished(ctx context.Context) {
 	if m, ok := ctx.Value(runCompleteMarkerKey{}).(*runCompleteMarker); ok {
 		m.published.Store(true)

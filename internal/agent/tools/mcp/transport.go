@@ -19,11 +19,6 @@ import (
 	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
 )
 
-func (r *Registry) createTransport(ctx context.Context, m config.MCPConfig, resolver config.VariableResolver) (mcp.Transport, *mcpoauth.Handler, error) {
-	const name = "test"
-	return r.createTransportFor(ctx, nil, name, m, r.currentGen(name), r.authAttempt.Add(1), resolver)
-}
-
 func (r *Registry) buildHTTPTransport(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, gen, attempt uint64, resolver config.VariableResolver) (string, http.RoundTripper, *mcpoauth.Handler, error) {
 	url, err := m.ResolvedURL(resolver)
 	if err != nil {

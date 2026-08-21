@@ -38,27 +38,27 @@ func newAttachedTaskTestApp(t *testing.T, repo string) *app.App {
 func TestAppWorkspace_SupportsTasks(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 	a := newAttachedTaskTestApp(t, repo)
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
 	require.True(t, aw.SupportsTasks())
 
 	plain := app.NewForTest(t.Context())
 	t.Cleanup(plain.ShutdownForTest)
-	plainWS := NewAppWorkspace(plain, config.NewTestStore(&config.Config{}, t.TempDir()))
+	plainWS := NewAppWorkspace(plain, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
 	require.False(t, plainWS.SupportsTasks())
 }
 
 func TestAppWorkspace_ListTasks(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 	a := newAttachedTaskTestApp(t, repo)
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
 	ctx := t.Context()
 
 	tasks, err := aw.ListTasks(ctx)
 	require.NoError(t, err)
 	require.Empty(t, tasks)
 
-	tm, ok := a.TaskManager().(*thread.TaskManager)
-	require.True(t, ok)
+	tm := a.TaskManager()
+	require.NotNil(t, tm)
 	parent, err := a.Sessions().Create(ctx, "parent")
 	require.NoError(t, err)
 	created, err := tm.Create(ctx, thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: parent.ID})
@@ -77,11 +77,11 @@ func TestAppWorkspace_ListTasks(t *testing.T) {
 func TestAppWorkspace_CancelTask(t *testing.T) {
 	repo := initRepoForWorkspaceThreadsTest(t)
 	a := newAttachedTaskTestApp(t, repo)
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, repo))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo)))
 	ctx := t.Context()
 
-	tm, ok := a.TaskManager().(*thread.TaskManager)
-	require.True(t, ok)
+	tm := a.TaskManager()
+	require.NotNil(t, tm)
 	parent, err := a.Sessions().Create(ctx, "parent")
 	require.NoError(t, err)
 	created, err := tm.Create(ctx, thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: parent.ID})
@@ -98,7 +98,7 @@ func TestAppWorkspace_CancelTask(t *testing.T) {
 func TestAppWorkspace_Tasks_NotSupported(t *testing.T) {
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, t.TempDir()))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
 
 	require.False(t, aw.SupportsTasks())
 	_, err := aw.ListTasks(t.Context())

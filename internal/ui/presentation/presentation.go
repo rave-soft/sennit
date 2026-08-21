@@ -171,3 +171,28 @@ func TruncatePathAware(s string, width int) string {
 	}
 	return ansi.Truncate(s, width, "…")
 }
+
+// Truncate shortens s to width cells, marking the cut with an ellipsis. It
+// is the plain (non-path-aware) counterpart to TruncatePathAware, for
+// table cells and labels where the head, not the tail, carries the
+// meaning — the ANSI-safe replacement for ad hoc rune-slicing.
+func Truncate(s string, width int) string {
+	if width < 0 || ansi.StringWidth(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, width, "…")
+}
+
+// PadTo truncates (via Truncate) or right-pads s with spaces so it occupies
+// exactly n cells — the shape a fixed-width table column needs. n <= 0
+// yields an empty string.
+func PadTo(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	s = Truncate(s, n)
+	if pad := n - ansi.StringWidth(s); pad > 0 {
+		s += strings.Repeat(" ", pad)
+	}
+	return s
+}

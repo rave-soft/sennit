@@ -96,7 +96,7 @@ func (m *OAuthCodex) initiateAuth() tea.Msg {
 			return ActionCompleteOAuth{Token: token}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(m.com.Context(), 30*time.Second)
 		defer cancel()
 		if token, err := codex.RefreshToken(ctx, m.proxy, disk.RefreshToken); err == nil {
 			return ActionCompleteOAuth{Token: token}
@@ -125,7 +125,7 @@ func (m *OAuthCodex) startPolling(_ string, _ int) tea.Cmd {
 		if m.flow == nil {
 			return ActionOAuthErrored{Error: fmt.Errorf("codex sign-in was not started")}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), codexAuthTimeout)
+		ctx, cancel := context.WithTimeout(m.com.Context(), codexAuthTimeout)
 		m.cancelFunc = cancel
 
 		token, err := m.flow.Wait(ctx)
@@ -170,7 +170,13 @@ func (m *OAuthCodex) afterSave(ws workspace.Workspace, token *oauth.Token) error
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// afterSave runs after the token is already good and the browser half
+	// of the flow is done — it only persists what was won. Binding this to
+	// the program's lifecycle context would mean a shutdown that lands in
+	// this narrow window silently drops a completed sign-in's model list,
+	// leaving a saved credential with no models to show for it. A fresh
+	// context lets the save finish regardless.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) //nolint:forbidigo // post-auth persistence must outlive shutdown; see comment above
 	defer cancel()
 
 	models, err := codex.FetchModels(ctx, m.proxy, token.AccessToken, codex.AccountID(token.AccessToken))

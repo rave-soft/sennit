@@ -30,15 +30,8 @@ sennit models
 sennit models gpt5`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := ResolveCwd(cmd)
-		if err != nil {
-			return err
-		}
-
-		dataDir, _ := cmd.Flags().GetString("data-dir")
 		debug, _ := cmd.Flags().GetBool("debug")
-
-		cfg, err := config.Init(cwd, dataDir, debug)
+		_, cfg, err := initConfig(cmd, debug)
 		if err != nil {
 			return err
 		}
@@ -182,15 +175,8 @@ sennit models refresh my-local-llm
 sennit models refresh codex`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := ResolveCwd(cmd)
-		if err != nil {
-			return err
-		}
-
-		dataDir, _ := cmd.Flags().GetString("data-dir")
 		debug, _ := cmd.Flags().GetBool("debug")
-
-		cfg, err := config.Init(cwd, dataDir, debug)
+		_, cfg, err := initConfig(cmd, debug)
 		if err != nil {
 			return err
 		}
@@ -200,13 +186,7 @@ sennit models refresh codex`,
 			knownIDs[string(kp.ID)] = true
 		}
 
-		// cmd.Context() is nil unless the command was dispatched through
-		// Execute(); fall back to Background() so RunE also works when
-		// invoked directly (as tests do).
-		baseCtx := cmd.Context()
-		if baseCtx == nil {
-			baseCtx = context.Background()
-		}
+		baseCtx := cmdContext(cmd)
 
 		// Codex is a catalog provider, so it is not discovered against a
 		// /models endpoint like the custom ones below — but its list is

@@ -1,8 +1,10 @@
-package thread
+package thread_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/stretchr/testify/require"
@@ -13,12 +15,12 @@ import (
 // Manager.resolveDeliveryTarget) can actually be observed. Most of
 // manager_test.go's tests have no reason to care about delivery and use
 // newTestManager instead; these do.
-func newTestManagerWithParentApp(t *testing.T, repo string) (*Manager, *fakeSpawner, *app.App) {
+func newTestManagerWithParentApp(t *testing.T, repo string) (*thread.Manager, *fakeSpawner, *app.App) {
 	t.Helper()
 	parentApp := newTestParentApp(t)
 	spawner := newFakeSpawner(t)
-	mgr := NewManager(ManagerOptions{
-		Store:       newTestStoreDB(t),
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       thread.NewStoreForTest(t),
 		Spawner:     spawner,
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
@@ -36,10 +38,10 @@ func TestManager_ManualPolicyThreadDeliversCompletionToParentOnce(t *testing.T) 
 	repo := initRepo(t)
 	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:            "alpha",
 		Goal:            "do the thing",
-		MergePolicy:     MergeManual,
+		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
@@ -49,7 +51,7 @@ func TestManager_ManualPolicyThreadDeliversCompletionToParentOnce(t *testing.T) 
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCompleted, st.Status,
+	require.Equal(t, thread.StatusCompleted, st.Status,
 		"a manual-policy thread rests at completed - no merge flow to hand off to")
 
 	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
@@ -63,8 +65,8 @@ func TestManager_ManualPolicyThreadDeliversCompletionToParentOnce(t *testing.T) 
 	got := delivered[0]
 	require.Equal(t, "parent-sess", got.sessionID)
 	require.Equal(t, st.ID, got.completion.DelegationID)
-	require.Equal(t, string(KindThread), got.completion.Kind)
-	require.Equal(t, string(StatusCompleted), got.completion.Status)
+	require.Equal(t, string(thread.KindThread), got.completion.Kind)
+	require.Equal(t, string(thread.StatusCompleted), got.completion.Status)
 	require.Equal(t, st.SessionID, got.completion.ChildSessionID)
 	require.Equal(t, "finished", got.completion.ResultText)
 }
@@ -78,13 +80,13 @@ func TestManager_AutoMergeThreadDeliversOnceAcrossRunAndMerge(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:            "gamma",
 		Goal:            "do it",
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
-	require.Equal(t, MergeAuto, st.MergePolicy)
+	require.Equal(t, thread.MergeAuto, st.MergePolicy)
 
 	writeFile(t, st.WorktreePath, "output.txt", "auto merged\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
@@ -101,7 +103,7 @@ func TestManager_AutoMergeThreadDeliversOnceAcrossRunAndMerge(t *testing.T) {
 	delivered := parentCoord.deliveredCompletions()
 	require.Len(t, delivered, 1,
 		"must deliver exactly once across run-completion and the merge landing, not twice")
-	require.Equal(t, string(StatusMerged), delivered[0].completion.Status,
+	require.Equal(t, string(thread.StatusMerged), delivered[0].completion.Status,
 		"the delivered event must be the merge outcome, not the run finishing mid-flight")
 }
 
@@ -116,13 +118,13 @@ func TestManager_AutoMergeThreadConflictDeliversOnceNotAgainOnManualRetry(t *tes
 	repo := initRepo(t)
 	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:            "delta",
 		Goal:            "do it",
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
-	require.Equal(t, MergeAuto, st.MergePolicy)
+	require.Equal(t, thread.MergeAuto, st.MergePolicy)
 
 	// The base branch and the thread branch each edit README.md,
 	// guaranteeing a conflict on the automatic merge attempt.
@@ -136,12 +138,12 @@ func TestManager_AutoMergeThreadConflictDeliversOnceNotAgainOnManualRetry(t *tes
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusConflict, st.Status)
+	require.Equal(t, thread.StatusConflict, st.Status)
 
 	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
 	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
 	require.Len(t, parentCoord.deliveredCompletions(), 1)
-	require.Equal(t, string(StatusConflict), parentCoord.deliveredCompletions()[0].completion.Status)
+	require.Equal(t, string(thread.StatusConflict), parentCoord.deliveredCompletions()[0].completion.Status)
 
 	// Resolve by hand and retry manually - the caller of Merge gets the
 	// outcome directly from its return value.
@@ -165,10 +167,10 @@ func TestManager_ParentlessThreadDeliversNothing(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "solo",
 		Goal:        "do it",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 		// No ParentSessionID.
 	})
 	require.NoError(t, err)
@@ -178,7 +180,7 @@ func TestManager_ParentlessThreadDeliversNothing(t *testing.T) {
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCompleted, st.Status,
+	require.Equal(t, thread.StatusCompleted, st.Status,
 		"a parentless thread's own lifecycle is otherwise unaffected by having nobody to deliver to")
 
 	time.Sleep(50 * time.Millisecond)
@@ -197,10 +199,10 @@ func TestManager_CreateWithParentRegistersDelegationParent(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner, parentApp := newTestManagerWithParentApp(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:            "with-parent",
 		Goal:            "do the thing",
-		MergePolicy:     MergeManual,
+		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-sess",
 	})
 	require.NoError(t, err)
@@ -216,7 +218,7 @@ func TestManager_CreateWithParentRegistersDelegationParent(t *testing.T) {
 		"a thread's Parent must resolve to the Manager's parentApp coordinator, not its own isolated one")
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
-	require.Equal(t, string(KindThread), got.parent.Kind)
+	require.Equal(t, string(thread.KindThread), got.parent.Kind)
 	require.Equal(t, st.Name, got.parent.Name)
 	require.Equal(t, 0, got.parent.Depth)
 }
@@ -229,10 +231,10 @@ func TestManager_CreateWithoutParentRegistersNothing(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner, _ := newTestManagerWithParentApp(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "no-parent",
 		Goal:        "do the thing",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 		// No ParentSessionID.
 	})
 	require.NoError(t, err)
@@ -253,9 +255,9 @@ func TestManager_ResolveDeliveryTarget_ThreadEdgeCases(t *testing.T) {
 
 	t.Run("no ParentApp configured", func(t *testing.T) {
 		mgr, _ := newTestManager(t, repo) // no ParentApp
-		st, err := mgr.Create(t.Context(), CreateArgs{Name: "no-parent-app", Goal: "x", MergePolicy: MergeManual, ParentSessionID: "parent-sess"})
+		st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "no-parent-app", Goal: "x", MergePolicy: thread.MergeManual, ParentSessionID: "parent-sess"})
 		require.NoError(t, err)
-		target, parentSessionID, ok := mgr.resolveDeliveryTarget(t.Context(), nil, st)
+		target, parentSessionID, ok := mgr.ResolveDeliveryTargetForTest(t.Context(), nil, st)
 		require.False(t, ok)
 		require.Nil(t, target)
 		require.Empty(t, parentSessionID)
@@ -263,7 +265,7 @@ func TestManager_ResolveDeliveryTarget_ThreadEdgeCases(t *testing.T) {
 
 	t.Run("unknown thread id has no control", func(t *testing.T) {
 		mgr, _, _ := newTestManagerWithParentApp(t, repo)
-		target, parentSessionID, ok := mgr.resolveDeliveryTarget(t.Context(), nil, Thread{Delegation: Delegation{ID: "never-created", Kind: KindThread, SessionID: "sess"}})
+		target, parentSessionID, ok := mgr.ResolveDeliveryTargetForTest(t.Context(), nil, thread.Thread{Delegation: thread.Delegation{ID: "never-created", Kind: thread.KindThread, SessionID: "sess"}})
 		require.False(t, ok)
 		require.Nil(t, target)
 		require.Empty(t, parentSessionID)
@@ -271,9 +273,9 @@ func TestManager_ResolveDeliveryTarget_ThreadEdgeCases(t *testing.T) {
 
 	t.Run("empty parent link", func(t *testing.T) {
 		mgr, _, _ := newTestManagerWithParentApp(t, repo)
-		st, err := mgr.Create(t.Context(), CreateArgs{Name: "empty-parent-link", Goal: "x", MergePolicy: MergeManual})
+		st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "empty-parent-link", Goal: "x", MergePolicy: thread.MergeManual})
 		require.NoError(t, err)
-		target, parentSessionID, ok := mgr.resolveDeliveryTarget(t.Context(), nil, st)
+		target, parentSessionID, ok := mgr.ResolveDeliveryTargetForTest(t.Context(), nil, st)
 		require.False(t, ok)
 		require.Nil(t, target)
 		require.Empty(t, parentSessionID)

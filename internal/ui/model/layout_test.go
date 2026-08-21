@@ -81,9 +81,11 @@ func newTestUI() *UI {
 	ta.Focus()
 
 	u := &UI{
-		com:    com,
-		status: NewStatus(com, nil),
-		chat:   NewChat(com, config.ScrollbarDefault),
+		com: com,
+		widgets: widgets{
+			status: NewStatus(com, nil),
+			chat:   NewChat(com, config.ScrollbarDefault),
+		},
 		editor: editorState{textarea: ta},
 		state:  uiChat,
 		focus:  uiFocusEditor,
@@ -319,7 +321,7 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		u := newTestUI()
 		u.lay.height = 50
 		u.sess.current = &session.Session{ID: "s1", Todos: []session.Todo{}}
-		u.wsCache.promptQueue = 2
+		u.wsCache.promptQueueCache.value = make([]string, 2)
 
 		u.autoExpandTodosIfReasonable()
 

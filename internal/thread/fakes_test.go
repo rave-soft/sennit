@@ -1,9 +1,19 @@
-package thread
+// Package thread_test holds this package's own tests. It is split from
+// package thread (the in-package tests in store_test.go, which need no
+// fakes at all) because everything below spawns real *app.App values to
+// exercise thread.Manager/TaskManager end to end, and internal/app is the
+// composition root that imports this package — a package-thread test file
+// importing internal/app back would close that cycle the moment
+// production code (internal/app.go) names *thread.Manager, which is
+// exactly the point of keeping the two packages properly layered. See
+// githelpers_test.go for the git-repo scaffolding shared across this
+// package's files.
+package thread_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -13,28 +23,28 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/app"
-	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/thread"
 	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
-// fakes and manager scaffolding for the thread package's own tests.
-//
-// These live in package thread (not thread_test) because the internal test
-// files reference them by short name. They must not import
-// internal/app/threadspawn (that would be a test import cycle: threadspawn
-// imports thread). Where the original code used a threadspawn type, a small
-// local stand-in is used instead:
-//   - testAppWorkspace adapts *app.App into the domain [Workspace] using the
-//     exported test adapters in test_adapters_test.go.
-//   - newTestStoreDB builds a sqlc-backed Store inline (the same queries
-//     threadspawn.NewStore uses), because that constructor cannot be imported
-//     here.
+// fakes and manager scaffolding for this package's own tests, plus
+// test_adapters_test.go's exported adapters. Where production code would
+// use a threadspawn type, a small local stand-in is used instead, since
+// threadspawn cannot be imported here (threadspawn imports thread, and
+// this package's tests already import thread — importing threadspawn too
+// would make thread.Manager reachable through two different adapter
+// implementations depending on path, which is not worth chasing down for
+// tests, so threadspawn stays untouched by this package):
+//   - testAppWorkspace adapts *app.App into the domain [thread.Workspace]
+//     using the exported test adapters in test_adapters_test.go.
+//   - thread.NewStoreForTest (store_testing.go) builds a sqlc-backed
+//     Store inline, because threadspawn.NewStore cannot be imported here.
 // ---------------------------------------------------------------------------
 
 // testAppWorkspace adapts an *app.App to the domain [Workspace] for tests
@@ -54,9 +64,9 @@ type testAppWorkspace struct {
 	rc *testRunCompletionBrokerAdapter
 }
 
-var _ Workspace = (*testAppWorkspace)(nil)
+var _ thread.Workspace = (*testAppWorkspace)(nil)
 
-func (w *testAppWorkspace) Coordinator() Coordinator {
+func (w *testAppWorkspace) Coordinator() thread.Coordinator {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.co == nil {
@@ -71,14 +81,14 @@ func (w *testAppWorkspace) Coordinator() Coordinator {
 	return w.co
 }
 
-func (w *testAppWorkspace) Sessions() SessionService {
+func (w *testAppWorkspace) Sessions() thread.SessionService {
 	if w.app.Sessions() == nil {
 		return nil
 	}
 	return NewTestSessionService(w.app.Sessions())
 }
 
-func (w *testAppWorkspace) Messages() MessageService {
+func (w *testAppWorkspace) Messages() thread.MessageService {
 	if w.app.Messages() == nil {
 		return nil
 	}
@@ -89,7 +99,7 @@ func (w *testAppWorkspace) Permissions() permission.Service {
 	return w.app.Permissions()
 }
 
-func (w *testAppWorkspace) RunCompletions() RunCompletionBroker {
+func (w *testAppWorkspace) RunCompletions() thread.RunCompletionBroker {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.rc == nil {
@@ -105,7 +115,7 @@ func (w *testAppWorkspace) SendEvent(msg any) {
 // sendErr drops a Send's [SendDisposition], for the many tests that only
 // assert the message was accepted. Tests that care what the disposition
 // says read it directly instead.
-func sendErr(_ SendDisposition, err error) error { return err }
+func sendErr(_ thread.SendDisposition, err error) error { return err }
 
 // testCoordinatorAdapter wraps an agent.Coordinator into the domain's
 // narrow Coordinator port for in-package tests. It mirrors the production
@@ -115,7 +125,7 @@ type testCoordinatorAdapter struct {
 	inner agent.Coordinator
 }
 
-var _ Coordinator = (*testCoordinatorAdapter)(nil)
+var _ thread.Coordinator = (*testCoordinatorAdapter)(nil)
 
 // testTranslateCtx mirrors the production coordinatorAdapter.translateCtx
 // (see internal/app/threadspawn/coordinator_adapter.go): it re-applies the
@@ -125,31 +135,31 @@ var _ Coordinator = (*testCoordinatorAdapter)(nil)
 // WithRunID tags (carried on the domain's own keys) would be dropped and a
 // dispatched run's origin would read empty.
 func testTranslateCtx(ctx context.Context) context.Context {
-	if runID := RunIDFromContext(ctx); runID != "" {
+	if runID := thread.RunIDFromContext(ctx); runID != "" {
 		ctx = agent.WithRunID(ctx, runID)
 	}
-	if AgentDispatchFromContext(ctx) {
+	if thread.AgentDispatchFromContext(ctx) {
 		ctx = agent.WithAgentDispatch(ctx)
 	}
-	if onDispatch, ok := SteeringFromContext(ctx); ok {
+	if onDispatch, ok := thread.SteeringFromContext(ctx); ok {
 		ctx = agent.WithSteering(ctx, func(outcome agent.SteerOutcome) {
 			if onDispatch == nil {
 				return
 			}
 			switch outcome {
 			case agent.SteerEnqueued:
-				onDispatch(DispatchFolded)
+				onDispatch(thread.DispatchFolded)
 			case agent.SteerCanceled:
-				onDispatch(DispatchCancelled)
+				onDispatch(thread.DispatchCancelled)
 			default:
-				onDispatch(DispatchRan)
+				onDispatch(thread.DispatchRan)
 			}
 		})
 	}
 	return ctx
 }
 
-func (a *testCoordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string, attachments []Attachment) error {
+func (a *testCoordinatorAdapter) RunAccepted(ctx context.Context, accept any, sessionID, prompt string, attachments []thread.Attachment) error {
 	ar, _ := accept.(*agent.AcceptedRun)
 	msgAttachments := make([]message.Attachment, 0, len(attachments))
 	for _, at := range attachments {
@@ -176,7 +186,7 @@ func (a *testCoordinatorAdapter) SessionQueue(sessionID string) (bool, int) {
 	return a.inner.IsSessionBusy(sessionID), a.inner.QueuedPrompts(sessionID)
 }
 
-func (a *testCoordinatorAdapter) RegisterDelegationParent(sessionID string, parent DelegationParent) {
+func (a *testCoordinatorAdapter) RegisterDelegationParent(sessionID string, parent thread.DelegationParent) {
 	a.inner.RegisterDelegationParent(sessionID, agent.DelegationParent{
 		Parent:          testUnwrapCoordinator(parent.Parent),
 		ParentSessionID: parent.ParentSessionID,
@@ -192,14 +202,14 @@ func (a *testCoordinatorAdapter) RegisterDelegationParent(sessionID string, pare
 // sees in these tests is a *testCoordinatorAdapter produced by
 // testAppWorkspace.Coordinator, so the assertion is safe; a nil or foreign
 // value degrades to nil, matching the domain's "no parent" handling.
-func testUnwrapCoordinator(c Coordinator) agent.Coordinator {
+func testUnwrapCoordinator(c thread.Coordinator) agent.Coordinator {
 	if a, ok := c.(*testCoordinatorAdapter); ok {
 		return a.inner
 	}
 	return nil
 }
 
-func (a *testCoordinatorAdapter) DeliverTaskCompletion(ctx context.Context, parentSessionID string, completion TaskCompletion) {
+func (a *testCoordinatorAdapter) DeliverTaskCompletion(ctx context.Context, parentSessionID string, completion thread.TaskCompletion) {
 	a.inner.DeliverTaskCompletion(ctx, parentSessionID, agent.TaskCompletion{
 		DelegationID:   completion.DelegationID,
 		Kind:           completion.Kind,
@@ -220,17 +230,17 @@ type testRunCompletionBrokerAdapter struct {
 	inner *pubsub.Broker[notify.RunComplete]
 }
 
-var _ RunCompletionBroker = (*testRunCompletionBrokerAdapter)(nil)
+var _ thread.RunCompletionBroker = (*testRunCompletionBrokerAdapter)(nil)
 
-func (a *testRunCompletionBrokerAdapter) Subscribe(ctx context.Context) <-chan pubsub.Event[RunComplete] {
+func (a *testRunCompletionBrokerAdapter) Subscribe(ctx context.Context) <-chan pubsub.Event[thread.RunComplete] {
 	in := a.inner.Subscribe(ctx)
-	out := make(chan pubsub.Event[RunComplete])
+	out := make(chan pubsub.Event[thread.RunComplete])
 	go func() {
 		defer close(out)
 		for ev := range in {
-			out <- pubsub.Event[RunComplete]{
+			out <- pubsub.Event[thread.RunComplete]{
 				Type: ev.Type,
-				Payload: RunComplete{
+				Payload: thread.RunComplete{
 					SessionID: ev.Payload.SessionID,
 					RunID:     ev.Payload.RunID,
 					MessageID: ev.Payload.MessageID,
@@ -244,7 +254,7 @@ func (a *testRunCompletionBrokerAdapter) Subscribe(ctx context.Context) <-chan p
 	return out
 }
 
-func (a *testRunCompletionBrokerAdapter) Publish(typ pubsub.EventType, v RunComplete) {
+func (a *testRunCompletionBrokerAdapter) Publish(typ pubsub.EventType, v thread.RunComplete) {
 	a.inner.Publish(typ, notify.RunComplete{
 		SessionID: v.SessionID,
 		RunID:     v.RunID,
@@ -253,167 +263,6 @@ func (a *testRunCompletionBrokerAdapter) Publish(typ pubsub.EventType, v RunComp
 		Error:     v.Error,
 		Cancelled: v.Cancelled,
 	})
-}
-
-// ---------------------------------------------------------------------------
-// store scaffolding
-// ---------------------------------------------------------------------------
-
-// newTestStoreDB builds a real (sqlite-backed) Store using the same sqlc
-// queries threadspawn.NewStore uses, scoped to a throwaway project path. It
-// lives here because the internal test files call it and this package cannot
-// import threadspawn.
-func newTestStoreDB(t *testing.T) Store {
-	t.Helper()
-	dataDir := t.TempDir()
-	t.Cleanup(func() {
-		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
-	})
-	conn, err := db.Connect(t.Context(), dataDir)
-	require.NoError(t, err)
-	return &testStoreDB{q: db.New(conn), projectPath: dataDir}
-}
-
-// testStoreDB is a minimal Store over the sqlc queries, mirroring the
-// threadspawn implementation (which cannot be imported here).
-type testStoreDB struct {
-	q           db.Querier
-	projectPath string
-}
-
-var _ Store = (*testStoreDB)(nil)
-
-func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, error) {
-	kind := params.Kind
-	if kind == "" {
-		kind = KindThread
-	}
-	mergePolicy := params.MergePolicy
-	if mergePolicy == "" && kind == KindThread {
-		mergePolicy = MergeAuto
-	}
-	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
-		ID:              fmt.Sprintf("thread-%d", time.Now().UnixNano()),
-		Name:            params.Name,
-		ProjectPath:     s.projectPath,
-		Goal:            params.Goal,
-		BaseBranch:      params.BaseBranch,
-		Branch:          params.Branch,
-		WorktreePath:    params.WorktreePath,
-		SessionID:       params.SessionID,
-		Status:          string(StatusPending),
-		MergePolicy:     string(mergePolicy),
-		Kind:            string(kind),
-		ParentSessionID: params.ParentSessionID,
-	})
-	if err != nil {
-		return Thread{}, err
-	}
-	return testFromDBItem(dbThread), nil
-}
-
-func (s *testStoreDB) Get(ctx context.Context, id string) (Thread, error) {
-	dbThread, err := s.q.GetThread(ctx, id)
-	if err != nil {
-		return Thread{}, err
-	}
-	return testFromDBItem(dbThread), nil
-}
-
-func (s *testStoreDB) GetByName(ctx context.Context, name string) (Thread, error) {
-	dbThread, err := s.q.GetThreadByName(ctx, db.GetThreadByNameParams{
-		Name:        name,
-		ProjectPath: s.projectPath,
-	})
-	if err != nil {
-		return Thread{}, err
-	}
-	return testFromDBItem(dbThread), nil
-}
-
-func (s *testStoreDB) List(ctx context.Context) ([]Thread, error) {
-	rows, err := s.q.ListThreads(ctx, s.projectPath)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Thread, len(rows))
-	for i, r := range rows {
-		out[i] = testFromDBItem(r)
-	}
-	return out, nil
-}
-
-func (s *testStoreDB) ListAll(ctx context.Context) ([]Thread, error) {
-	rows, err := s.q.ListThreadsAll(ctx, s.projectPath)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Thread, len(rows))
-	for i, r := range rows {
-		out[i] = testFromDBItem(r)
-	}
-	return out, nil
-}
-
-func (s *testStoreDB) SetStatus(ctx context.Context, id string, params SetStatusParams) (Thread, error) {
-	dbThread, err := s.q.UpdateThreadStatus(ctx, db.UpdateThreadStatusParams{
-		ID:            id,
-		Status:        string(params.Status),
-		Error:         params.Error,
-		ResultSummary: params.ResultSummary,
-		CompletedAt:   sqlInt64(params.CompletedAt),
-	})
-	if err != nil {
-		return Thread{}, err
-	}
-	return testFromDBItem(dbThread), nil
-}
-
-func (s *testStoreDB) SetSession(ctx context.Context, id, sessionID string) (Thread, error) {
-	dbThread, err := s.q.UpdateThreadSession(ctx, db.UpdateThreadSessionParams{
-		ID:        id,
-		SessionID: sessionID,
-	})
-	if err != nil {
-		return Thread{}, err
-	}
-	return testFromDBItem(dbThread), nil
-}
-
-func (s *testStoreDB) Delete(ctx context.Context, id string) error {
-	return s.q.DeleteThread(ctx, id)
-}
-
-// sqlInt64 mirrors the threadspawn store's CompletedAt handling: zero leaves
-// the column NULL.
-func sqlInt64(v int64) sql.NullInt64 {
-	return sql.NullInt64{Int64: v, Valid: v != 0}
-}
-
-// testFromDBItem mirrors threadspawn.fromDBItem (which cannot be imported
-// here); the field mapping is identical.
-func testFromDBItem(item db.Thread) Thread {
-	return Thread{
-		Delegation: Delegation{
-			ID:              item.ID,
-			Name:            item.Name,
-			Goal:            item.Goal,
-			SessionID:       item.SessionID,
-			Status:          Status(item.Status),
-			Kind:            Kind(item.Kind),
-			ResultSummary:   item.ResultSummary,
-			Error:           item.Error,
-			CreatedAt:       item.CreatedAt,
-			UpdatedAt:       item.UpdatedAt,
-			CompletedAt:     item.CompletedAt.Int64,
-			ParentSessionID: item.ParentSessionID,
-		},
-		BaseBranch:   item.BaseBranch,
-		Branch:       item.Branch,
-		WorktreePath: item.WorktreePath,
-		MergePolicy:  MergePolicy(item.MergePolicy),
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -426,11 +275,18 @@ type fakeSessions struct {
 	mu             sync.Mutex
 	n              int
 	createdSession session.Session
+	// createErr, when set, makes both Create and CreateTaskSession fail
+	// instead of fabricating a session — for tests driving Manager.Create's
+	// rollback on a session-creation failure.
+	createErr error
 }
 
 func (f *fakeSessions) Create(_ context.Context, title string) (session.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.createErr != nil {
+		return session.Session{}, f.createErr
+	}
 	f.n++
 	return session.Session{ID: fmt.Sprintf("sess-%d", f.n), Title: title}, nil
 }
@@ -438,6 +294,9 @@ func (f *fakeSessions) Create(_ context.Context, title string) (session.Session,
 func (f *fakeSessions) CreateTaskSession(_ context.Context, id, parentSessionID, title string) (session.Session, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.createErr != nil {
+		return session.Session{}, f.createErr
+	}
 	f.createdSession = session.Session{ID: id, ParentSessionID: parentSessionID, Title: title}
 	return f.createdSession, nil
 }
@@ -499,13 +358,13 @@ func (f *fakeCoordinator) setQueue(busy bool, queued int) {
 // id with the DelegationParent it recorded.
 type registeredParent struct {
 	sessionID string
-	parent    DelegationParent
+	parent    thread.DelegationParent
 }
 
 func (f *fakeCoordinator) RegisterDelegationParent(sessionID string, parent agent.DelegationParent) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.registeredParents = append(f.registeredParents, registeredParent{sessionID: sessionID, parent: DelegationParent{
+	f.registeredParents = append(f.registeredParents, registeredParent{sessionID: sessionID, parent: thread.DelegationParent{
 		Parent:          &testCoordinatorAdapter{inner: parent.Parent},
 		ParentSessionID: parent.ParentSessionID,
 		DelegationID:    parent.DelegationID,
@@ -525,13 +384,13 @@ func (f *fakeCoordinator) registeredDelegationParents() []registeredParent {
 // with the event it carried.
 type deliveredCompletion struct {
 	sessionID  string
-	completion TaskCompletion
+	completion thread.TaskCompletion
 }
 
 func (f *fakeCoordinator) DeliverTaskCompletion(_ context.Context, sessionID string, completion agent.TaskCompletion) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.delivered = append(f.delivered, deliveredCompletion{sessionID: sessionID, completion: TaskCompletion{
+	f.delivered = append(f.delivered, deliveredCompletion{sessionID: sessionID, completion: thread.TaskCompletion{
 		DelegationID:   completion.DelegationID,
 		Kind:           completion.Kind,
 		Name:           completion.Name,
@@ -683,7 +542,7 @@ type fakeHandle struct {
 
 func (h *fakeHandle) ID() string    { return h.id }
 func (h *fakeHandle) App() *app.App { return h.app }
-func (h *fakeHandle) Workspace() Workspace {
+func (h *fakeHandle) Workspace() thread.Workspace {
 	return &testAppWorkspace{app: h.app}
 }
 
@@ -700,12 +559,26 @@ type fakeSpawner struct {
 	coordByPath  map[string]*fakeCoordinator
 	released     map[string]bool
 	releaseCount map[string]int
-	spawnCount   int
-	spawnErr     error
-	runErr       error
-	blockSpawn   bool
-	spawnEntered chan struct{}
-	spawnRelease chan struct{}
+	// releaseSawWorktree records, per id, whether the worktree at that
+	// path was still on disk at the moment Release was called — see
+	// Release and releaseSawWorktreeAt.
+	releaseSawWorktree map[string]bool
+	spawnCount         int
+	spawnErr           error
+	runErr             error
+	blockSpawn         bool
+	spawnEntered       chan struct{}
+	spawnRelease       chan struct{}
+	// sessionsErr, when set, is handed to every fakeSessions this spawner
+	// builds, so its Create/CreateTaskSession calls fail — for tests
+	// driving Manager.Create's rollback on a session-creation failure.
+	sessionsErr error
+	// afterSpawn, when set, runs after a successful Spawn has built its
+	// handle but before returning it — for tests that need to cancel the
+	// manager's own context exactly between a successful spawn and the
+	// caller's next ctx.Err() check (Manager.Create/Activate), which
+	// nothing else can time deterministically.
+	afterSpawn func(path string)
 }
 
 func newFakeSpawner(t *testing.T) *fakeSpawner {
@@ -718,7 +591,7 @@ func newFakeSpawner(t *testing.T) *fakeSpawner {
 	}
 }
 
-func (s *fakeSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
+func (s *fakeSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
 	if s.blockSpawn {
 		close(s.spawnEntered)
 		<-ctx.Done()
@@ -733,13 +606,16 @@ func (s *fakeSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
 
 	a := app.NewForTest(context.Background())
 	s.t.Cleanup(a.ShutdownForTest)
-	a.SetSessionsForTest(&fakeSessions{})
+	a.SetSessionsForTest(&fakeSessions{createErr: s.sessionsErr})
 	coord := &fakeCoordinator{runErr: s.runErr}
 	a.AgentCoordinator = coord
 
 	h := &fakeHandle{id: path, app: a}
 	s.byPath[path] = h
 	s.coordByPath[path] = coord
+	if s.afterSpawn != nil {
+		s.afterSpawn(path)
+	}
 	return h, nil
 }
 
@@ -750,11 +626,32 @@ func (s *fakeSpawner) spawns() int {
 }
 
 func (s *fakeSpawner) Release(ctx context.Context, id string) error {
+	// Recorded before taking the lock, and before mutating any of this
+	// fake's own state: id is the worktree path itself (see Spawn), so a
+	// caller unwinding release-before-worktree-removal (the correct
+	// order — see [unwinder]'s doc comment) always finds it still present
+	// here. TestManager_CreateRollbackOrder_ReleasesBeforeRemovingWorktree
+	// is what actually asserts on this.
+	_, statErr := os.Stat(id)
+	sawWorktree := statErr == nil
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.released[id] = true
 	s.releaseCount[id]++
+	if s.releaseSawWorktree == nil {
+		s.releaseSawWorktree = make(map[string]bool)
+	}
+	s.releaseSawWorktree[id] = sawWorktree
 	return nil
+}
+
+// releaseSawWorktreeAt reports whether the worktree at id was still present
+// on disk at the moment Release was called for it.
+func (s *fakeSpawner) releaseSawWorktreeAt(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.releaseSawWorktree[id]
 }
 
 func (s *fakeSpawner) releases(id string) int {
@@ -798,11 +695,11 @@ const settleTimeout = 60 * time.Second
 
 // newTestManager wires a Manager over a real store, a real git repo (repo),
 // and the fakeSpawner defined above.
-func newTestManager(t *testing.T, repo string) (*Manager, *fakeSpawner) {
+func newTestManager(t *testing.T, repo string) (*thread.Manager, *fakeSpawner) {
 	t.Helper()
 	spawner := newFakeSpawner(t)
-	mgr := NewManager(ManagerOptions{
-		Store:       newTestStoreDB(t),
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       thread.NewStoreForTest(t),
 		Spawner:     spawner,
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),

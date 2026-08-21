@@ -47,7 +47,7 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 		func(ctx context.Context, params TodosParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for managing todos")
+				return fantasy.ToolResponse{}, missingSessionID("managing todos")
 			}
 
 			currentSession, err := sessions.Get(ctx, sessionID)
@@ -75,7 +75,13 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 				switch item.Status {
 				case "pending", "in_progress", "completed":
 				default:
-					return fantasy.ToolResponse{}, fmt.Errorf("invalid status %q for todo %q", item.Status, item.Content)
+					// A bad status is bad input the model supplied, not a
+					// failure of this tool — it can see the message and
+					// resend the call with a valid status, so this is a
+					// text response rather than a Go error.
+					return fantasy.NewTextErrorResponse(fmt.Sprintf(
+						"invalid status %q for todo %q: must be pending, in_progress, or completed",
+						item.Status, item.Content)), nil
 				}
 			}
 

@@ -1,4 +1,4 @@
-package thread
+package thread_test
 
 import (
 	"os"
@@ -9,11 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// git test helpers. These live in package thread (not thread_test) because
-// many of the package's own test files call initRepo, and they import none
-// of app/threadspawn/db, so they cannot create an import cycle. (The
-// threadspawn-backed scaffolding and the app-referencing fakes live in the
-// external test files: fakes_test.go / scaffold_test.go, package thread_test.)
+// git test helpers, shared by this package's files. They live here rather
+// than next to any one of them because every file below that drives a real
+// git worktree (discard_merged_test.go, manager_test.go, and friends) needs
+// them, and none of them import anything these three do not already need.
 
 func requireGit(t *testing.T) {
 	t.Helper()

@@ -40,10 +40,14 @@ func NewAskParentTool(messenger ParentMessenger) fantasy.AgentTool {
 		func(ctx context.Context, params AskParentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.NewTextErrorResponse("session ID is required to ask the parent"), nil
+				// The model has no way to supply a session ID — it is wired
+				// in by the caller — so this is the same infrastructure
+				// failure every other tool reports as a Go error, not a
+				// text response.
+				return fantasy.ToolResponse{}, missingSessionID("asking the parent")
 			}
 			if params.Message == "" {
-				return fantasy.NewTextErrorResponse("message is required"), nil
+				return invalidParam("message"), nil
 			}
 
 			if err := messenger.SendToParent(ctx, sessionID, params.Message); err != nil {

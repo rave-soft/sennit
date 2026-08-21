@@ -1,35 +1,28 @@
 package model
 
-// Memoized state for the threads dock: a compact panel (wired in a later
-// step) that sits above the chat input and shows a handful of active
-// background threads, each with a live one-line status.
+// Memoized state for the threads dock: a compact panel that sits above the
+// chat input and shows a handful of active background threads, each with a
+// live one-line status.
 //
-// Unlike the threads dashboard (threads_cache.go), the dock needs two
-// different things at two different costs:
-//   - The thread list itself, which is cheap (one ListThreads round trip)
-//     and shared with every consumer that wants "all threads" — so this
-//     file re-lists rather than trying to share threadsCacheState's
-//     memoized slice, mirroring how thread_indicator.go keeps its own copy
-//     independent of the dashboard's.
-//   - Per-thread live activity (in-progress todo, message count), which
-//     requires AttachThread into the thread's own isolated workspace before
-//     GetSession can see its session — cheap for a live thread, but a
-//     completed one must first be reactivated (respawning its worktree and
-//     process; see AttachThread). Because of that cost this is fetched on
-//     its own, longer TTL and only for the small, bounded set of threads
-//     the dock actually renders (threadsDockVisibleCap).
+// The thread list itself lives in threadListCache (threads_cache.go),
+// shared with the dashboard and the header badge — one ListThreads round
+// trip serves every consumer. What's specific to the dock, and stays here,
+// is per-thread live activity (in-progress todo, message count): it
+// requires AttachThread into the thread's own isolated workspace before
+// GetSession can see its session — cheap for a live thread, but a completed
+// one must first be reactivated (respawning its worktree and process; see
+// AttachThread). Because of that cost this is fetched on its own, longer
+// TTL and only for the threads the dock actually renders.
 //
-// Both halves follow the same TTL-cache idiom as threads_cache.go and
-// thread_indicator.go: a memoized value, checkedAt/inFlight/gen
-// bookkeeping, a dispatchXRefresh that fetches off-thread, an applyXLoaded
-// that writes through on the Update goroutine (discarding stale
-// generations), and a staleXRefreshCmd TTL backstop. The activity half
+// Follows the same TTL-cache idiom as threads_cache.go: a memoized value,
+// checkedAt/inFlight/gen bookkeeping, a dispatchXRefresh that fetches
+// off-thread, an applyXLoaded that writes through on the Update goroutine
+// (discarding stale generations), and a staleXRefreshCmd TTL backstop. It
 // additionally keys inFlight and generation per thread ID, since multiple
 // per-thread fetches can be in flight at once and a thread can drop out of
 // the visible set independently of the others.
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -40,7 +33,6 @@ import (
 
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
-	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -48,28 +40,24 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
-// threadsDockTTL bounds how long the memoized thread list may go without a
-// re-probe being scheduled. Package var so tests can pin it.
-var threadsDockTTL = 5 * time.Second
-
 // threadsDockActivityTTL bounds how long a per-thread activity snapshot may
-// go without a re-probe. Longer than threadsDockTTL because refreshing it
+// go without a re-probe. Longer than threadsCacheTTL because refreshing it
 // costs an AttachThread round trip, not just a list. Package var so tests
 // can pin it.
 var threadsDockActivityTTL = 8 * time.Second
 
-// threadsRefreshBackoff is how long a failed thread-list, indicator, or
-// activity refresh waits before being retried. Without it a refresh that
-// fails every time re-dispatches on every Update — and since the failure's
-// own result message is itself an Update, the loop feeds itself and pins
-// the event loop (observed: ~830 attempts a second, 10MB of identical
-// error lines every half minute, a UI that looks frozen and background
-// work that looks like it stopped on its own).
+// threadsRefreshBackoff is how long a failed thread-list or activity
+// refresh waits before being retried. Without it a refresh that fails every
+// time re-dispatches on every Update — and since the failure's own result
+// message is itself an Update, the loop feeds itself and pins the event
+// loop (observed: ~830 attempts a second, 10MB of identical error lines
+// every half minute, a UI that looks frozen and background work that looks
+// like it stopped on its own).
 //
-// Longer than any of the TTLs it backs: a repeatedly failing probe is
-// worth far less than a successful one, and the states that produce a
-// permanent failure (a read-only workspace, a removed worktree) do not
-// resolve on their own in seconds.
+// Longer than any of the TTLs it backs: a repeatedly failing probe is worth
+// far less than a successful one, and the states that produce a permanent
+// failure (a read-only workspace, a removed worktree) do not resolve on
+// their own in seconds.
 var threadsRefreshBackoff = 30 * time.Second
 
 // threadDockActivity is a per-thread live snapshot fetched from the
@@ -86,140 +74,29 @@ type threadDockActivity struct {
 	MessageCount int64
 }
 
-// threadsDockState holds the memoized thread list plus per-thread live
-// activity (see the package doc comment above) and their independent
-// TTL-cache/in-flight/generation bookkeeping.
+// threadsDockState holds the dock's per-thread live activity (see the
+// package doc comment above) and its independent TTL-cache/in-flight/
+// generation bookkeeping.
 type threadsDockState struct {
-	// threads mirrors the workspace's full thread list, refreshed on
-	// threadsDockTTL. The dock filters this down to the active, visible
-	// subset itself at render time (activeDockThreads/visibleDockThreads)
-	// rather than storing a pre-filtered list, matching the "just relist"
-	// idiom used elsewhere in this package.
-	cache ttlCache[[]proto.Thread]
-
 	// activity holds the last known live snapshot per thread ID.
 	activity map[string]ttlCache[threadDockActivity]
-	// activityGen is bumped whenever threads changes, so a per-thread
-	// fetch that started before the thread list moved on (e.g. the thread
-	// was removed) is discarded when it lands, mirroring gen but scoped to
-	// the activity half.
+	// activityGen is bumped whenever the shared thread list changes, so a
+	// per-thread fetch that started before the thread list moved on (e.g.
+	// the thread was removed) is discarded when it lands, mirroring gen but
+	// scoped to the activity half. Bumped by UI.updateThreads on every
+	// applied threadsLoadedMsg (see threadListCache.applyLoaded's applied
+	// return).
 	activityGen uint64
 }
 
-// fresh reports whether the cached thread list is within its TTL.
-// threadsDockLoadedMsg delivers the result of an off-thread thread list
-// fetch for the dock.
-type threadsDockLoadedMsg struct {
-	mainScreenOwned
-	// gen is the generation captured when the fetch was dispatched; see
-	// threadsDockState.gen.
-	gen     uint64
-	threads []proto.Thread
-	err     error
-}
-
-// dispatchThreadsDockRefresh returns a command that lists threads off the
-// Update goroutine, delivering a threadsDockLoadedMsg. It returns nil while
-// a fetch is already in flight, or if the workspace doesn't support
-// threads.
-func (c *threadsDockState) dispatchThreadsDockRefresh(com *common.Common) tea.Cmd {
-	if c.cache.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
-		return nil
-	}
-	gen, started := c.cache.begin()
-	if !started {
-		return nil
-	}
-	ws := com.Workspace
-	return func() tea.Msg {
-		// Threads only, for the reason threads_cache.go gives: a task is
-		// the `agent` tool's own delegation, already visible inline in the
-		// chat that started it, and one that finished was never removed
-		// from this table by anything.
-		threads, err := ws.ListThreads(context.Background())
-		if err != nil {
-			slog.Error("Failed to list threads for dock", "error", err)
-		}
-		return threadsDockLoadedMsg{gen: gen, threads: threads, err: err}
-	}
-}
-
-// applyThreadsDockLoaded stores an off-thread fetch result. Runs on the
-// Update goroutine.
-func (c *threadsDockState) applyThreadsDockLoaded(com *common.Common, msg threadsDockLoadedMsg) tea.Cmd {
-	if msg.err != nil {
-		if !c.cache.fail(msg.gen) {
-			// Started before a newer state transition; discard and
-			// re-dispatch so the authoritative refresh isn't lost.
-			return c.dispatchThreadsDockRefresh(com)
-		}
-		return nil
-	}
-	if !c.cache.complete(msg.gen) {
-		return c.dispatchThreadsDockRefresh(com)
-	}
-	c.cache.set(msg.threads)
-	c.activityGen++
-	return nil
-}
-
-// invalidateThreadsDock marks the cached list stale and bumps the
-// generation so any in-flight fetch result is discarded when it lands.
-func (c *threadsDockState) invalidateThreadsDock() {
-	c.cache.invalidate()
-}
-
-// applyThreadEvent reacts to a thread pubsub event by invalidating the
-// cached list, so the next stale-refresh reconciles with the authoritative
-// list. It does not upsert an updated row optimistically — the dock's list
-// is a coarse input to filtering/capping logic, not something rendered
-// field-by-field, so brief staleness in a row's fields is unremarkable.
-//
-// A removal is different in kind and is applied immediately. A stale row
-// for a thread that no longer exists is not slightly-out-of-date detail:
-// it is a panel entry that cannot be opened, because attaching resolves
-// the id and finds nothing. Waiting for a re-list to notice leaves that
-// dead row on screen for as long as the refresh takes — or forever, if it
-// never lands.
-func (c *threadsDockState) applyThreadEvent(ev pubsub.Event[proto.Thread]) {
-	if ev.Type == pubsub.DeletedEvent {
-		c.dropThread(ev.Payload.ID)
-	}
-	c.invalidateThreadsDock()
-}
-
-// dropThread removes one entry from the cached list in place, leaving the
-// cache's freshness bookkeeping alone: the caller invalidates separately,
-// so this only makes the current frame stop painting a row that is gone.
-func (c *threadsDockState) dropThread(id string) {
-	if id == "" || len(c.cache.value) == 0 {
-		return
-	}
-	kept := make([]proto.Thread, 0, len(c.cache.value))
-	for _, t := range c.cache.value {
-		if t.ID != id {
-			kept = append(kept, t)
-		}
-	}
-	c.cache.value = kept
+// dropActivity discards a thread's cached live activity, leaving the shared
+// thread list alone: the caller (UI.updateThreads, on a Deleted event) is
+// responsible for that. A stale activity snapshot for a thread that no
+// longer exists is otherwise silently harmless — nothing reads it once the
+// thread is gone from the shared list — but there is no reason to keep it
+// or let its next TTL tick attach to a thread that isn't there.
+func (c *threadsDockState) dropActivity(id string) {
 	delete(c.activity, id)
-}
-
-// staleThreadsDockRefreshCmd is the TTL backstop for the thread list: while
-// active (the caller reports whether the chat screen the dock lives on is
-// currently visible) and the memoized list has outlived its TTL, it
-// schedules an off-thread re-probe. It never does IO itself.
-func (c *threadsDockState) staleThreadsDockRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	if !active || c.cache.fresh(threadsDockTTL) || c.cache.backingOff(threadsRefreshBackoff) {
-		return nil
-	}
-	// A fetched-and-empty list stays empty until a thread event
-	// invalidates it (checkedAt is zeroed then) — don't re-poll
-	// ListThreads forever for projects that have no threads at all.
-	if len(c.cache.value) == 0 && !c.cache.timestamp.IsZero() {
-		return nil
-	}
-	return c.dispatchThreadsDockRefresh(com)
 }
 
 // activeDockThreads filters threads down to the ones worth showing in the
@@ -293,8 +170,8 @@ func (c *threadsDockState) dispatchThreadActivityRefresh(com *common.Common, thr
 	}
 	c.activity[threadID] = entry
 	prev, hasPrev := entry.value, !entry.timestamp.IsZero()
+	ctx := com.Context()
 	return func() tea.Msg {
-		ctx := context.Background()
 		attached, detach, err := ws.AttachThread(ctx, threadID)
 		if err != nil {
 			slog.Error("Failed to attach thread for dock activity", "thread", threadID, "error", err)
@@ -366,11 +243,10 @@ func (c *threadsDockState) applyThreadActivityLoaded(msg threadDockActivityLoade
 }
 
 // staleThreadActivityRefreshCmds schedules off-thread activity refreshes
-// for every thread in visible (already capped to threadsDockVisibleCap by
-// the caller) that isn't already in flight and whose cached activity is
-// missing or has outlived threadsDockActivityTTL. Threads without a
-// session yet (SessionID == "") are skipped — there's nothing to attach
-// to.
+// for every thread in visible that isn't already in flight and whose
+// cached activity is missing or has outlived threadsDockActivityTTL.
+// Threads without a session yet (SessionID == "") are skipped — there's
+// nothing to attach to.
 func (c *threadsDockState) staleThreadActivityRefreshCmds(com *common.Common, visible []proto.Thread) []tea.Cmd {
 	// Activity needs AttachThread, which a read-only workspace refuses
 	// unconditionally — that happens whenever the user is inside a thread

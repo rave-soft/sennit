@@ -9,13 +9,32 @@ import (
 	"context"
 )
 
+const countReadFilesForSessionIDs = `-- name: CountReadFilesForSessionIDs :one
+WITH input AS (
+    SELECT CAST(?1 AS TEXT) AS session_ids_json
+)
+SELECT COUNT(*) FROM read_files
+WHERE read_files.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+)
+`
+
+// gc's dependent-row count for a batch of sessions it is about to delete;
+// see CountMessagesForSessionIDs for why json_each replaces an IN-list.
+func (q *Queries) CountReadFilesForSessionIDs(ctx context.Context, sessionIdsJson string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countReadFilesForSessionIDs, sessionIdsJson)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSessionReadFiles = `-- name: CountSessionReadFiles :one
 SELECT COUNT(*) FROM read_files
 WHERE session_id = ?
 `
 
 func (q *Queries) CountSessionReadFiles(ctx context.Context, sessionID string) (int64, error) {
-	row := q.queryRow(ctx, q.countSessionReadFilesStmt, countSessionReadFiles, sessionID)
+	row := q.db.QueryRowContext(ctx, countSessionReadFiles, sessionID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -27,7 +46,7 @@ WHERE session_id = ?
 `
 
 func (q *Queries) DeleteSessionReadFiles(ctx context.Context, sessionID string) error {
-	_, err := q.exec(ctx, q.deleteSessionReadFilesStmt, deleteSessionReadFiles, sessionID)
+	_, err := q.db.ExecContext(ctx, deleteSessionReadFiles, sessionID)
 	return err
 }
 
@@ -42,7 +61,7 @@ type GetFileReadParams struct {
 }
 
 func (q *Queries) GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error) {
-	row := q.queryRow(ctx, q.getFileReadStmt, getFileRead, arg.SessionID, arg.Path)
+	row := q.db.QueryRowContext(ctx, getFileRead, arg.SessionID, arg.Path)
 	var i ReadFile
 	err := row.Scan(
 		&i.SessionID,
@@ -60,7 +79,7 @@ ORDER BY read_at DESC
 `
 
 func (q *Queries) ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error) {
-	rows, err := q.query(ctx, q.listSessionReadFilesStmt, listSessionReadFiles, sessionID)
+	rows, err := q.db.QueryContext(ctx, listSessionReadFiles, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +129,6 @@ type RecordFileReadParams struct {
 }
 
 func (q *Queries) RecordFileRead(ctx context.Context, arg RecordFileReadParams) error {
-	_, err := q.exec(ctx, q.recordFileReadStmt, recordFileRead, arg.SessionID, arg.Path, arg.ReadRanges)
+	_, err := q.db.ExecContext(ctx, recordFileRead, arg.SessionID, arg.Path, arg.ReadRanges)
 	return err
 }

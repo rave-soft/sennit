@@ -21,6 +21,58 @@ import (
 	"github.com/rave-soft/sennit/internal/version"
 )
 
+// layoutState holds the terminal dimensions and the derived compact/details
+// layout mode.
+type layoutState struct {
+	// The width and height of the terminal in cells.
+	width  int
+	height int
+	layout uiLayout
+
+	// forceCompactMode tracks whether compact mode is forced by user toggle
+	forceCompactMode bool
+
+	// isCompact tracks whether we're currently in compact layout mode (either
+	// by user toggle or auto-switch based on window size)
+	isCompact bool
+
+	// detailsOpen tracks whether the details panel is open (in compact mode)
+	detailsOpen bool
+
+	isTransparent bool
+}
+
+// uiLayout defines the positioning of UI elements.
+type uiLayout struct {
+	// area is the overall available area.
+	area uv.Rectangle
+
+	// header is the header shown in special cases
+	// e.x when the sidebar is collapsed
+	// or when in the landing page
+	// or in init/config
+	header uv.Rectangle
+
+	// main is the area for the main pane. (e.x chat, configure, landing)
+	main uv.Rectangle
+
+	// panel is the area for the merged session panel (active threads +
+	// todos + queued prompts) between chat and the editor.
+	panel uv.Rectangle
+
+	// editor is the area for the editor pane.
+	editor uv.Rectangle
+
+	// sidebar is the area for the sidebar.
+	sidebar uv.Rectangle
+
+	// status is the area for the status view.
+	status uv.Rectangle
+
+	// session details is the area for the session details overlay in compact mode.
+	sessionDetails uv.Rectangle
+}
+
 // Compact mode breakpoints.
 const (
 	compactModeWidthBreakpoint  = 120

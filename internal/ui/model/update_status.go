@@ -12,6 +12,9 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
+// cancelTimerExpiredMsg is sent when the cancel timer expires.
+type cancelTimerExpiredMsg struct{}
+
 // updateStatus handles the status-line branches of UI.Update: info/clear
 // messages, server notices, update-available and connection notices, agent
 // notifications, and the cancel-confirmation timer. It is called from
@@ -44,8 +47,8 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case pubsub.Event[proto.ServerNotice]:
-		// Backend-originated notices arrive as the transport-neutral
-		// proto.ServerNotice so backend code doesn't need to depend on
+		// Notices from core code arrive as the transport-neutral
+		// proto.ServerNotice so that code doesn't need to depend on
 		// internal/ui; convert to util.InfoMsg here at the boundary.
 		info := util.InfoMsg{
 			Type: serverNoticeLevelToInfoType(msg.Payload.Level),

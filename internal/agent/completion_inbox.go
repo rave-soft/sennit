@@ -84,25 +84,24 @@ type TaskCompletion struct {
 // fold) ends up draining the inbox via drainCompletionsForStep - see
 // that method and startContinuation.
 //
-// Locking mirrors enqueueCall/requeueContinuation: the per-session
-// dispatch mutex also guards this session's completion inbox, so a
-// concurrent drain (PrepareStep) and enqueue (a task finishing
-// mid-step) can never interleave into a torn read, and the eligibility
-// read below can never observe a stale busy/canceled state a concurrent
-// Run has already changed by the time this returns.
+// Locking mirrors enqueueCall/requeueContinuation: the session's own
+// dispatch mutex also guards its completion inbox, so a concurrent drain
+// (PrepareStep) and enqueue (a task finishing mid-step) can never
+// interleave into a torn read, and the eligibility read below can never
+// observe a stale busy/canceled state a concurrent Run has already
+// changed by the time this returns.
 func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompletion) (wakeEligible bool) {
-	mu := d.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
-	existing, _ := d.completionInbox.Get(sessionID)
-	queued := append(existing, completion)
-	d.completionInbox.Set(sessionID, queued)
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completionInbox = append(s.completionInbox, completion)
 	// ids, kind, status, and the is-message flag only — never
 	// completion.Goal, .ResultText, .Error, or .Message, which are the
 	// user's own work (or the delegation's own words) and must not end
 	// up in a log that outlives the session.
-	slog.Info("Completion enqueued", "delegation", completion.DelegationID, "kind", completion.Kind, "status", completion.Status, "is_message", completion.IsMessage, "session", sessionID, "inbox_size", len(queued))
-	return d.wakeEligibleLocked(sessionID)
+	slog.Info("Completion enqueued", "delegation", completion.DelegationID, "kind", completion.Kind, "status", completion.Status, "is_message", completion.IsMessage, "session", sessionID, "inbox_size", len(s.completionInbox))
+	return d.wakeEligibleLocked(s)
 }
 
 // drainCompletionsForStep removes and returns every completion queued for
@@ -111,14 +110,15 @@ func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompleti
 // filtering to apply: a completion was never "accepted" the way a
 // prompt is, so nothing about a session cancel makes one stale.
 func (d *dispatcher) drainCompletionsForStep(sessionID string) []TaskCompletion {
-	mu := d.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
-	drained, ok := d.completionInbox.Get(sessionID)
-	if !ok || len(drained) == 0 {
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.completionInbox) == 0 {
 		return nil
 	}
-	d.completionInbox.Del(sessionID)
+	drained := s.completionInbox
+	s.completionInbox = nil
 	return drained
 }
 
@@ -140,14 +140,14 @@ func (d *dispatcher) requeueCompletions(sessionID string, remainder []TaskComple
 	if len(remainder) == 0 {
 		return
 	}
-	mu := d.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
-	existing, _ := d.completionInbox.Get(sessionID)
-	merged := make([]TaskCompletion, 0, len(remainder)+len(existing))
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	merged := make([]TaskCompletion, 0, len(remainder)+len(s.completionInbox))
 	merged = append(merged, remainder...)
-	merged = append(merged, existing...)
-	d.completionInbox.Set(sessionID, merged)
+	merged = append(merged, s.completionInbox...)
+	s.completionInbox = merged
 }
 
 // wakeEligible reports whether sessionID currently has something in its
@@ -165,30 +165,29 @@ func (d *dispatcher) requeueCompletions(sessionID string, remainder []TaskComple
 // startContinuation for why a separate pre-drain step would reintroduce
 // exactly the "fabricated user message" problem this design avoids.
 func (d *dispatcher) wakeEligible(sessionID string) bool {
-	mu := d.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
-	return d.wakeEligibleLocked(sessionID)
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return d.wakeEligibleLocked(s)
 }
 
-// wakeEligibleLocked is wakeEligible's body. Callers must hold
-// sessionID's dispatch mutex - see enqueueCompletion's doc comment for
-// why this decision has to be made under that same lock a normal run's
-// own busy-check uses.
-func (d *dispatcher) wakeEligibleLocked(sessionID string) bool {
-	existing, ok := d.completionInbox.Get(sessionID)
-	if !ok || len(existing) == 0 {
+// wakeEligibleLocked is wakeEligible's body. Callers must hold s.mu -
+// see enqueueCompletion's doc comment for why this decision has to be
+// made under that same lock a normal run's own busy-check uses.
+func (d *dispatcher) wakeEligibleLocked(s *sessionState) bool {
+	if len(s.completionInbox) == 0 {
 		return false
 	}
-	if _, busy := d.activeRequests.Get(sessionID); busy {
+	if s.active != nil {
 		return false
 	}
-	if _, canceled := d.cancelledSessions.Get(sessionID); canceled {
+	if s.cancelled {
 		// The user explicitly canceled this session and no new turn has
 		// started since. Leave the event queued; it is delivered the
 		// ordinary way (drainCompletionsForStep) on whatever the next
 		// real user turn turns out to be.
-		slog.Info("Delivery skipped: session cancelled, completion left queued", "session", sessionID, "inbox_size", len(existing))
+		slog.Info("Delivery skipped: session cancelled, completion left queued", "inbox_size", len(s.completionInbox))
 		return false
 	}
 	return true

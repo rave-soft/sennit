@@ -32,6 +32,12 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
+// showThreadsDashboardMsg requests switching to the threads dashboard
+// screen. Handled by the Root router below; a bare *UI has no dashboard
+// screen of its own, so this falls through Update's default case
+// harmlessly when UI is driven directly (e.g. in tests).
+type showThreadsDashboardMsg struct{}
+
 // screenID identifies which child owns the terminal right now.
 type screenID uint8
 
@@ -189,24 +195,41 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, cmd := r.main.Update(msg)
 		cmds = append(cmds, cmd)
 		if r.dashboard != nil {
-			cmds = append(cmds, r.dashboard.ApplyThreadEvent(msg))
+			// r.main.Update above already applied this event to the shared
+			// thread list cache both screens read (see threads_cache.go)
+			// and dispatched any re-fetch it needs — calling
+			// ApplyThreadEvent here too would apply the same event twice
+			// and, while the dashboard is active, dispatch a second,
+			// redundant ListThreads. Only the dashboard's own list.Items
+			// need rebuilding to pick up the change.
+			r.dashboard.rebuildItems()
 		}
 		return r, tea.Batch(cmds...)
 	case tea.KeyPressMsg:
 		return r.handleKeyPress(msg)
 	case showThreadsDashboardMsg:
 		if r.dashboard == nil {
-			r.dashboard = newThreadsDashboard(r.com)
+			r.dashboard = newThreadsDashboard(r.com, &r.main.threadList)
 			r.dashboard.SetSize(r.width, r.height)
 		}
 		cmd := r.dashboard.SetActive(true)
 		r.active = screenDashboard
 		return r, cmd
 	case threadsLoadedMsg:
-		if r.dashboard == nil {
-			return r, nil
+		// The shared cache (threads_cache.go) feeds the header badge and
+		// dock too, so the result always goes to the main screen first,
+		// regardless of which fetch — dashboard's or main's — actually
+		// started it; r.main.Update applies it to the cache exactly once
+		// (including any stale-generation re-dispatch). The dashboard only
+		// needs its own list.Items rebuilt to reflect the now-current
+		// cache.
+		var cmds []tea.Cmd
+		_, cmd := r.main.Update(msg)
+		cmds = append(cmds, cmd)
+		if r.dashboard != nil {
+			r.dashboard.rebuildItems()
 		}
-		return r, tea.Batch(r.dashboard.ApplyThreadsLoaded(msg)...)
+		return r, tea.Batch(cmds...)
 	case enterThreadMsg:
 		return r, r.attachThreadCmd(msg.id, msg.sessionID, msg.name)
 	case leaveThreadRequestedMsg:
@@ -543,7 +566,7 @@ func (r *Root) leaveThread() tea.Cmd {
 		// The thread may have changed status while attached (e.g.
 		// completed); invalidate so the dashboard doesn't sit on a stale
 		// row until the TTL backstop catches up.
-		r.dashboard.cache.invalidateThreads()
+		r.dashboard.cache.invalidate()
 		cmds = append(cmds, r.dashboard.Refresh())
 	}
 	return tea.Batch(cmds...)
@@ -656,7 +679,5 @@ func (mainScreenOwned) isMainScreenMsg() {}
 // silently fails to promote that method, so without these the marker can
 // look present and do nothing.
 var (
-	_ mainScreenMsg = threadsDockLoadedMsg{}
 	_ mainScreenMsg = threadDockActivityLoadedMsg{}
-	_ mainScreenMsg = threadIndicatorLoadedMsg{}
 )

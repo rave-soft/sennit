@@ -32,7 +32,7 @@ func NewTaskOutputTool(manager TaskManager) fantasy.AgentTool {
 		renderToolDescription(taskOutputDescriptionTpl),
 		func(ctx context.Context, params TaskOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ID == "" {
-				return fantasy.NewTextErrorResponse("id is required"), nil
+				return invalidParam("id"), nil
 			}
 
 			out, err := manager.Output(ctx, params.ID, params.Limit)

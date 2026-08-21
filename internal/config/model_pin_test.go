@@ -146,3 +146,57 @@ func TestModelSelectionStillFollowsOwnChoice(t *testing.T) {
 	require.Equal(t, "anthropic", store.Config().Model.Provider)
 	require.Equal(t, "claude-3", store.Config().Model.Model)
 }
+
+// TestReloadFromDisk_DoesNotPersistFallbackCorrection pins the one
+// deliberate divergence between Load and reloadFromDisk (see buildConfig's
+// persistFallback doc comment): a fallback model correction discovered
+// during a reload is applied in memory only, never written back to the
+// config file. Load, by contrast, does persist such a correction. Before
+// this test existed, flipping reload's persistFallback to true broke no
+// test in the suite — this pins that behavior so a future regression is
+// caught.
+func TestReloadFromDisk_DoesNotPersistFallbackCorrection(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sennit.json")
+
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("anthropic", "claude-3")), 0o600))
+
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+	require.Equal(t, "anthropic", store.Config().Model.Provider)
+
+	// A sibling instance drops the anthropic provider entirely, so this
+	// instance's pinned model (anthropic/claude-3) no longer resolves and
+	// a reload must fall back to whatever provider is left.
+	siblingConfig := `{
+		"model": {"provider": "anthropic", "model": "claude-3"},
+		"providers": {
+			"openai": {
+				"api_key": "test-key",
+				"models": [{"id": "gpt-4", "name": "GPT-4"}]
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(configPath, []byte(siblingConfig), 0o600))
+	before, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+
+	// In memory, the instance falls back to the only provider left (the
+	// exact model chosen is the catalog's default for it, not asserted
+	// here to avoid coupling this test to the embedded catalog).
+	require.Equal(t, "openai", store.Config().Model.Provider)
+
+	// On disk, the fallback correction must not have been written: the
+	// file must still read exactly as the sibling left it, still naming
+	// the now-invalid anthropic/claude-3 selection.
+	after, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after), "reload must not persist a fallback model correction to disk")
+}

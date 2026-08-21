@@ -12,17 +12,6 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
-// setSessionMessages sets the messages for the current session in the chat
-func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
-	items, lastUserMessageTime := m.sessionMessageItems(msgs)
-	m.loadNestedToolCalls(items)
-	return m.applySessionMessageItems(items, lastUserMessageTime)
-}
-
-func (m *UI) sessionMessageItems(msgs []message.Message) ([]chat.MessageItem, int64) {
-	return sessionMessageItems(m.com.Styles, m.com.Config(), msgs)
-}
-
 func sessionMessageItems(sty *styles.Styles, cfg *config.Config, msgs []message.Message) ([]chat.MessageItem, int64) {
 	msgPtrs := make([]*message.Message, len(msgs))
 	for i := range msgs {
@@ -87,12 +76,6 @@ func (m *UI) applySessionMessageItems(items []chat.MessageItem, lastUserMessageT
 	}
 	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
-}
-
-func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
-	if m.sess.current != nil {
-		_ = loadNestedToolCalls(context.Background(), m.com.Workspace, m.com.Styles, m.com.Config(), m.sess.current.ID, m.sess.loadGen, items)
-	}
 }
 
 type childLoad struct {

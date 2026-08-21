@@ -31,7 +31,7 @@ func NewThreadStatusTool(manager ThreadManager) fantasy.AgentTool {
 		renderToolDescription(threadStatusDescriptionTpl),
 		func(ctx context.Context, params ThreadStatusParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ID == "" {
-				return fantasy.NewTextErrorResponse("id is required"), nil
+				return invalidParam("id"), nil
 			}
 
 			st, err := manager.Get(ctx, params.ID)

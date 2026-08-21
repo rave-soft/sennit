@@ -100,11 +100,27 @@ type Manager struct {
 	authSignals  map[string]chan struct{}
 }
 
+// Option configures a Manager at construction time.
+type Option func(*Manager)
+
+// WithExchangeToken overrides the OAuth token exchange function used by
+// RefreshOAuthToken. It exists so tests outside this package can drive a
+// Manager through a real refresh without making a network call; production
+// callers must not pass this and should leave exchange on the real
+// provider clients (see exchange).
+func WithExchangeToken(exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) Option {
+	return func(m *Manager) { m.exchangeToken = exchange }
+}
+
 // New constructs a Manager backed by store. Callers must construct
 // exactly one Manager per process and share it with every consumer — see
 // the package doc.
-func New(store Store) *Manager {
-	return &Manager{store: store}
+func New(store Store, opts ...Option) *Manager {
+	m := &Manager{store: store}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.

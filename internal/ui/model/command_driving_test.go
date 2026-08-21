@@ -439,9 +439,12 @@ func (w *cmdDrivingWorkspace) Shutdown()                                       {
 func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
 	com := common.DefaultCommon(context.Background(), ws)
 	return &UI{
-		com:    com,
-		status: NewStatus(com, nil),
-		chat:   NewChat(com, config.ScrollbarDefault),
+		com: com,
+		widgets: widgets{
+			status: NewStatus(com, nil),
+			chat:   NewChat(com, config.ScrollbarDefault),
+			dialog: dialog.NewOverlay(),
+		},
 		editor: editorState{
 			textarea:    textarea.New(),
 			attachments: attachments.New(nil, attachments.Keymap{}),
@@ -454,7 +457,6 @@ func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
 		},
 		sess:   sessionState{current: &session.Session{ID: "s1"}},
 		keyMap: DefaultKeyMap(),
-		dialog: dialog.NewOverlay(),
 	}
 }
 
@@ -463,8 +465,8 @@ func newCmdDrivenUI(ws *cmdDrivingWorkspace) *UI {
 func warmCmdDrivenCaches(m *UI) {
 	m.wsCache.agentBusyCache.set(false)
 	m.wsCache.yoloCache.set(false)
-	m.wsCache.agentReady = true
-	m.wsCache.promptQueueCheckedAt = time.Now()
+	m.wsCache.agentCache.set(agentReadyModel{ready: true})
+	m.wsCache.promptQueueCache.set(m.wsCache.promptQueueCache.value)
 	m.lsp.checkedAt = time.Now()
 }
 
@@ -730,15 +732,15 @@ func TestCmdDriving_Routing_DistinctMsgTypes(t *testing.T) {
 
 	// 1. busyStateMsg → applyBusyState path. Start from the opposite
 	// readiness value so this proves the routing branch changed state.
-	m.wsCache.agentReady = false
+	m.wsCache.agentCache.value.ready = false
 	_, cmd := m.Update(busyStateMsg{gen: m.wsCache.busyFetchGen, ready: true, agentBusy: false})
 	_ = runCmdTree(m, cmd, nil)
-	require.True(t, m.wsCache.agentReady, "busyStateMsg must route to applyBusyState")
+	require.True(t, m.wsCache.agentCache.value.ready, "busyStateMsg must route to applyBusyState")
 
 	// 2. promptQueueMsg → applyPromptQueue path.
-	_, cmd = m.Update(promptQueueMsg{forSession: "s1", gen: m.wsCache.promptQueueGen, prompts: []string{"p1"}})
+	_, cmd = m.Update(promptQueueMsg{forSession: "s1", gen: m.wsCache.promptQueueCache.generation, prompts: []string{"p1"}})
 	_ = runCmdTree(m, cmd, nil)
-	require.Equal(t, 1, m.wsCache.promptQueue, "promptQueueMsg must update queue")
+	require.Equal(t, 1, len(m.wsCache.promptQueueCache.value), "promptQueueMsg must update queue")
 
 	// 3. agentRunSubmittedMsg → invalidation + re-dispatch path.
 	m.wsCache.agentBusyCache.set(true)
@@ -767,7 +769,7 @@ func TestCmdDriving_StalePromptQueue_WrongSession(t *testing.T) {
 
 	// The current session is "s1". A stale fetch from "s2" arrives via
 	// runCmdTree so the full Update → applyPromptQueue chain runs.
-	staleGen := m.wsCache.promptQueueGen
+	staleGen := m.wsCache.promptQueueCache.generation
 	staleCmd := func() tea.Msg {
 		return promptQueueMsg{
 			forSession: "s2",
@@ -777,10 +779,10 @@ func TestCmdDriving_StalePromptQueue_WrongSession(t *testing.T) {
 	}
 
 	_, freshCmd := driveCmdStep(m, staleCmd)
-	require.Zero(t, m.wsCache.promptQueue,
+	require.Zero(t, len(m.wsCache.promptQueueCache.value),
 		"result from different session must not populate queue before refresh runs")
 	require.NotNil(t, freshCmd, "session-mismatched result must schedule a refresh")
-	require.True(t, m.wsCache.promptQueueInFlight,
+	require.True(t, m.wsCache.promptQueueCache.inFlight,
 		"session-mismatched result must leave the replacement fetch in flight")
 
 	// Execute the replacement separately and verify the command performs its
@@ -1089,7 +1091,7 @@ func TestCmdDriving_LoadSession_FreshResultApplied(t *testing.T) {
 	require.Equal(t, "s-new", m.sess.current.ID, "session must be set")
 	require.GreaterOrEqual(t, m.chat.Len(), 1, "chat must contain the loaded message")
 	require.GreaterOrEqual(t, ws.agentReadyCalls, 1, "must probe AgentIsReady")
-	require.True(t, m.wsCache.agentReady, "ready state must be cached")
+	require.True(t, m.wsCache.agentCache.value.ready, "ready state must be cached")
 }
 
 func TestCmdDriving_LoadSession_NestedToolsApplied(t *testing.T) {

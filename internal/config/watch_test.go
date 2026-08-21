@@ -28,6 +28,7 @@ func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)
 	require.Empty(t, store.Config().MCP)
+	store.externalChangePollInterval = 100 * time.Millisecond
 
 	notified := make(chan struct{}, 1)
 	store.OnExternalChange(func() { notified <- struct{}{} })
@@ -44,7 +45,7 @@ func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 
 	select {
 	case <-notified:
-	case <-time.After(5 * time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("OnExternalChange callback was not invoked after external edit")
 	}
 
@@ -66,6 +67,8 @@ func TestWatchForExternalChanges_IgnoresOwnWrites(t *testing.T) {
 
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)
+	const pollInterval = 100 * time.Millisecond
+	store.externalChangePollInterval = pollInterval
 
 	var notifications int
 	notified := make(chan struct{}, 8)
@@ -84,7 +87,7 @@ func TestWatchForExternalChanges_IgnoresOwnWrites(t *testing.T) {
 	select {
 	case <-notified:
 		t.Fatal("WatchForExternalChanges fired for this process's own write")
-	case <-time.After(3 * externalChangePollInterval):
+	case <-time.After(3 * pollInterval):
 	}
 	require.Zero(t, notifications)
 }
@@ -126,6 +129,7 @@ func TestWatchForExternalChanges_DetectsAgentFileChanges(t *testing.T) {
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)
 	require.NotContains(t, store.Config().Agents, "dev")
+	store.externalChangePollInterval = 100 * time.Millisecond
 
 	notified := make(chan struct{}, 8)
 	store.OnExternalChange(func() {
@@ -152,7 +156,7 @@ func TestWatchForExternalChanges_DetectsAgentFileChanges(t *testing.T) {
 		t.Helper()
 		select {
 		case <-notified:
-		case <-time.After(5 * time.Second):
+		case <-time.After(2 * time.Second):
 			t.Fatal(msg)
 		}
 	}
@@ -187,6 +191,7 @@ func TestWatchForExternalChanges_DetectsAgentDirCreatedLater(t *testing.T) {
 
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)
+	store.externalChangePollInterval = 100 * time.Millisecond
 
 	notified := make(chan struct{}, 1)
 	store.OnExternalChange(func() {
@@ -207,7 +212,7 @@ func TestWatchForExternalChanges_DetectsAgentDirCreatedLater(t *testing.T) {
 
 	select {
 	case <-notified:
-	case <-time.After(5 * time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("OnExternalChange was not invoked after the agents directory was created and populated")
 	}
 	require.Contains(t, store.Config().Agents, "dev")

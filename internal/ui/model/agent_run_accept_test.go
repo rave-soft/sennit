@@ -9,10 +9,9 @@ import (
 )
 
 // acceptTimeAgentRunWorkspace records every AgentRun call and returns
-// nil immediately, the way both ClientWorkspace.AgentRun (a POST that
-// returns once the backend accepts) and, since the local-mode dispatch
-// change, AppWorkspace.AgentRun (dispatch through AgentDispatcher.Send)
-// behave: the call returns at accept time, not once the turn finishes.
+// nil immediately, the way AppWorkspace.AgentRun behaves (dispatch through
+// AgentDispatcher.Send): the call returns at accept time, not once the
+// turn finishes.
 // agentBusy stays whatever the test sets it to, standing in for the
 // real turn still being active on the coordinator side after AgentRun
 // has already returned.

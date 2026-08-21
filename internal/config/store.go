@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,19 +12,11 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
-
-// configLockDeadline bounds how long lockConfig waits for the
-// cross-process flock before giving up. A few seconds is plenty for
-// honest contention; longer suggests something is wedged.
-const configLockDeadline = 5 * time.Second
-
-var errAtomicWriteNoop = errors.New("config mutation is a no-op")
 
 // credentialWriteLockDeadline bounds how long a credential write (e.g.
 // storing the token from a fresh interactive login) waits for the
@@ -58,10 +49,10 @@ type RuntimeOverrides struct {
 // pure-data Config, runtime state (working directory, resolver, known
 // providers), and persistence to both global and workspace config files.
 //
-// mu serialises all config file mutations (SetConfigFields,
+// file.mu serialises all config file mutations (SetConfigFields,
 // RemoveConfigField, PersistRefreshedToken) to prevent both in-process
 // goroutine races and, together with the shared lock.File, cross-process
-// races on the config file.
+// races on the config file. See configFile's doc comment.
 //
 // writeMu serialises every operation that produces a new in-memory Config:
 // the typed copy-on-write mutators (SetCompactMode, UpdatePreferredModel,
@@ -97,8 +88,8 @@ type ConfigStore struct {
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
 
 	// stalenessMu guards trackedConfigPaths and snapshots. Writers
-	// (CaptureStalenessSnapshot, RefreshStalenessSnapshot) already run
-	// under writeMu via updateLocked/reloadFromDisk, but ConfigStaleness
+	// (CaptureStalenessSnapshot) already run under writeMu via
+	// updateLocked/reloadFromDisk, but ConfigStaleness
 	// is a read-only diagnostic called from other goroutines without
 	// writeMu (the sennit_info tool, and WatchForExternalChanges' poll
 	// loop in watch.go) — a separate mutex, rather than reusing writeMu,
@@ -116,7 +107,11 @@ type ConfigStore struct {
 	credentialVersion atomic.Uint64
 	mcpMutationEpochs map[string]uint64
 
-	mu       sync.Mutex   // serialises config file writes
+	// file serialises config file writes (both the in-process mutex and
+	// the cross-process flock); see configFile's doc comment for how it
+	// nests under writeMu.
+	file configFile
+
 	writeMu  sync.RWMutex // serialises in-memory config production (mutators + the reload swap); RLock for readers
 	reloadMu sync.Mutex   // serialises reload attempts against each other; see the ConfigStore doc comment
 
@@ -125,7 +120,15 @@ type ConfigStore struct {
 	// (as opposed to one caused by this process's own writes). See
 	// watch.go.
 	onExternalChangeMu sync.Mutex
-	onExternalChange   func()
+
+	// externalChangePollInterval overrides how often WatchForExternalChanges
+	// polls; see the externalChangePollInterval constant in watch.go for the
+	// production default. Tests set this directly to run the poll loop at
+	// millisecond scale. Must be set before WatchForExternalChanges' poll
+	// goroutine starts (it is read without synchronization); a zero value
+	// falls back to the default rather than panicking on time.NewTicker(0).
+	externalChangePollInterval time.Duration
+	onExternalChange           func()
 
 	// agentSnapshotMu guards agentFileSnapshot, the last-seen state of
 	// every *.md file under agentDirs (agents_markdown.go) plus the global
@@ -260,72 +263,20 @@ func (s *ConfigStore) LoadedPaths() []string {
 	return slices.Clone(s.loadedPaths)
 }
 
-// lockConfig acquires both the in-process mutex and a cross-process flock
-// on the config file for the given scope. Callers that need to do I/O
-// between reading and writing (e.g. an HTTP token exchange) must use
-// lockConfig explicitly rather than atomicWrite.
-//
-// The returned release function drops both locks. Callers must call it
-// as soon as the file access is complete — no I/O should be performed
-// while the lock is held.
-func (s *ConfigStore) lockConfig(scope Scope) (func(), error) {
-	s.mu.Lock()
-	path, err := s.ConfigPath(scope)
-	if err != nil {
-		s.mu.Unlock()
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("create config directory: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), configLockDeadline)
-	defer cancel()
-	release, err := lock.File(ctx, path+".lock")
-	if err != nil {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("acquire config lock: %w", err)
-	}
-	return func() {
-		release()
-		s.mu.Unlock()
-	}, nil
-}
-
 // atomicWrite handles the lock-read-transform-write-unlock cycle for
 // config file mutations. The fn callback receives the current file
 // contents (raw bytes, or {} if the file is missing) and must return the
 // new contents. fn must be pure — no I/O, no network calls.
+//
+// Callers that need to do I/O between reading and writing (e.g. an HTTP
+// token exchange) must resolve the path via ConfigPath and lock it with
+// s.file.lock explicitly rather than going through atomicWrite.
 func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, error)) error {
-	unlock, err := s.lockConfig(scope)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
 	path, err := s.ConfigPath(scope)
 	if err != nil {
 		return err
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			data = []byte("{}")
-		} else {
-			return fmt.Errorf("read config file: %w", err)
-		}
-	}
-
-	newData, err := fn(data)
-	if errors.Is(err, errAtomicWriteNoop) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	return atomicWriteFile(path, newData, 0o600)
+	return s.file.atomicWrite(path, fn)
 }
 
 // ConfigPath returns the file path for the given scope.
@@ -479,7 +430,7 @@ func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]
 	// our own write as an external change. Safe to touch the snapshot map
 	// here because we hold writeMu.
 	if path, err := s.ConfigPath(scope); err == nil {
-		s.captureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
+		s.CaptureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
 	}
 	return nil
 }
@@ -724,10 +675,10 @@ func (s *ConfigStore) PersistRefreshedToken(scope Scope, providerID string, cfg 
 	}
 
 	// Use update() rather than SetConfigFields: applyToken already
-	// published the refreshed token in memory (Providers is a shared
-	// csync.Map, visible without a clone-and-swap), so the full
-	// disk-reparse-and-reload that SetConfigFields triggers is unnecessary
-	// here and would discard anything else this refresh doesn't own.
+	// published the refreshed token in memory via UpdateProviderCredentials's
+	// clone-and-swap, so the full disk-reparse-and-reload that
+	// SetConfigFields triggers is unnecessary here and would discard
+	// anything else this refresh doesn't own.
 	if err := s.update(scope, func(*Config) map[string]any { return fields }); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
@@ -806,13 +757,4 @@ func nextRecentModels(cfg *Config, model SelectedModel) ([]SelectedModel, bool) 
 	}
 
 	return updated, true
-}
-
-// NewTestStore creates a ConfigStore for testing purposes.
-func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
-	return &ConfigStore{
-		config:      cfg,
-		loadedPaths: loadedPaths,
-		resolver:    NewShellVariableResolver(env.New()),
-	}
 }

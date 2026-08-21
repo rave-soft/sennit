@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -78,6 +79,36 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.True(t, meta.Background)
 	require.NotEmpty(t, meta.ShellID)
 	require.Contains(t, resp.Content, "moved to background")
+}
+
+// TestBashTool_RunInBackgroundReportsCompletionWithoutSleeping pins the
+// completion-signal behavior: a background command that finishes almost
+// immediately must be observed via BackgroundShell.Done() rather than by
+// waiting out the fixed fast-failure sleep. Before the fix, this path always
+// slept 1s before checking output; if that regresses, this test's deadline
+// will fail it well before a human notices the latency in practice.
+func TestBashTool_RunInBackgroundReportsCompletionWithoutSleeping(t *testing.T) {
+	workingDir := t.TempDir()
+	tool := newBashToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	start := time.Now()
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description:     "fast background command",
+		Command:         "echo fast-done",
+		RunInBackground: true,
+	})
+	elapsed := time.Since(start)
+
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "fast-done")
+	// The command finishes in a few ms; observing it should take a similar
+	// order of magnitude, not the full 1s fast-failure budget.
+	require.Less(t, elapsed, 500*time.Millisecond, "background completion should be observed via Done(), not a fixed sleep")
+
+	var meta BashResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Empty(t, meta.ShellID, "a command that finished within the fast-failure window should not still be tracked as a running job")
 }
 
 type recordingPermissionService struct {

@@ -81,6 +81,17 @@ WHERE session_id = ?;
 SELECT COUNT(*) FROM files
 WHERE session_id = ?;
 
+-- name: CountFilesForSessionIDs :one
+-- gc's dependent-row count for a batch of sessions it is about to delete;
+-- see CountMessagesForSessionIDs for why json_each replaces an IN-list.
+WITH input AS (
+    SELECT CAST(sqlc.arg(session_ids_json) AS TEXT) AS session_ids_json
+)
+SELECT COUNT(*) FROM files
+WHERE files.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+);
+
 -- name: ListLatestSessionFiles :many
 -- The latest version of each path *within this session*. The maximum has
 -- to be taken over the session's own rows: versions are numbered per

@@ -1,9 +1,11 @@
-package thread
+package thread_test
 
 import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -19,18 +21,18 @@ import (
 // parent (see lifecycle.forwardPermissions and Manager.PermissionsFor), so
 // this fixture must not allocate a fresh adapter per Workspace() call the
 // way a naive spawner would — that is the regression the reviewer flagged.
-func newTestTaskManagerWiredLikeProduction(t *testing.T) (*Manager, *TaskManager, *app.App) {
+func newTestTaskManagerWiredLikeProduction(t *testing.T) (*thread.Manager, *thread.TaskManager, *app.App) {
 	t.Helper()
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	parentApp := newTestParentApp(t)
 	parent := &testAppWorkspace{app: parentApp} // one stable adapter instance
-	mgr := NewManager(ManagerOptions{
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:     store,
 		Spawner:   newFakeSpawner(t),
 		RepoRoot:  t.TempDir(),
 		ParentApp: parent,
 	})
-	tasks := NewTaskManagerForTest(mgr, stableParentAppSpawner{ws: parent}, NewTestMessageService(parentApp.Messages()))
+	tasks := thread.NewTaskManagerForTest(mgr, stableParentAppSpawner{ws: parent}, NewTestMessageService(parentApp.Messages()))
 	return mgr, tasks, parentApp
 }
 
@@ -39,20 +41,20 @@ func newTestTaskManagerWiredLikeProduction(t *testing.T) (*Manager, *TaskManager
 // one stable workspace adapter the Manager's ParentApp is. It stands in for
 // threadspawn.NewParentAppSpawner, which an in-package test cannot import.
 type stableParentAppSpawner struct {
-	ws Workspace
+	ws thread.Workspace
 }
 
-func (s stableParentAppSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
+func (s stableParentAppSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
 	return &stableParentAppHandle{ws: s.ws}, nil
 }
 func (s stableParentAppSpawner) Release(ctx context.Context, id string) error { return nil }
 
 type stableParentAppHandle struct {
-	ws Workspace
+	ws thread.Workspace
 }
 
-func (h *stableParentAppHandle) ID() string           { return "" }
-func (h *stableParentAppHandle) Workspace() Workspace { return h.ws }
+func (h *stableParentAppHandle) ID() string                  { return "" }
+func (h *stableParentAppHandle) Workspace() thread.Workspace { return h.ws }
 
 // TestTaskManager_NoPermissionRelayForParentWorkspace is the regression
 // test for a task being mis-detected as an isolated thread. A task runs
@@ -69,13 +71,14 @@ func (h *stableParentAppHandle) Workspace() Workspace { return h.ws }
 func TestTaskManager_NoPermissionRelayForParentWorkspace(t *testing.T) {
 	mgr, tasks, parentApp := newTestTaskManagerWiredLikeProduction(t)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do it", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do it", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
 	// The task's runtime is live (a run was dispatched), so a delegation id
 	// resolves to a runtime — the precondition PermissionsFor checks before
 	// it can return the workspace's service.
-	require.NotNil(t, mgr.lc.existingControl(st.ID).runtime,
+	_, live := mgr.RuntimeForTest(st.ID)
+	require.True(t, live,
 		"a created task must have a live runtime for the relay decision to be reachable")
 
 	// The task shares the parent workspace, so there is nothing to relay to

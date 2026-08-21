@@ -1,8 +1,10 @@
-package thread
+package thread_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -25,10 +27,10 @@ func TestManager_ThreadPermissionRequestReachesTheParentStream(t *testing.T) {
 	mgr, spawner, parent := newTestManagerWithParentApp(t, repo)
 	events := parent.Events(t.Context())
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "asks-for-bash",
 		Goal:        "implement the thing",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 	})
 	require.NoError(t, err)
 
@@ -64,10 +66,10 @@ func TestManager_ForwardedPermissionCarriesItsDelegation(t *testing.T) {
 	mgr, spawner, parent := newTestManagerWithParentApp(t, repo)
 	events := parent.Events(t.Context())
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "named-thread",
 		Goal:        "implement the thing",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 	})
 	require.NoError(t, err)
 
@@ -94,7 +96,7 @@ func TestManager_ForwardedPermissionCarriesItsDelegation(t *testing.T) {
 	req := awaitPermissionRequest(t, events)
 	require.Equal(t, st.ID, req.Delegation.ID)
 	require.Equal(t, "named-thread", req.Delegation.Name)
-	require.Equal(t, string(KindThread), req.Delegation.Kind)
+	require.Equal(t, string(thread.KindThread), req.Delegation.Kind)
 }
 
 // TestManager_PermissionsForRoutesToTheThreadThatIsWaiting covers the
@@ -107,10 +109,10 @@ func TestManager_PermissionsForRoutesToTheThreadThatIsWaiting(t *testing.T) {
 	mgr, spawner, parent := newTestManagerWithParentApp(t, repo)
 	events := parent.Events(t.Context())
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "waiting-thread",
 		Goal:        "implement the thing",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 	})
 	require.NoError(t, err)
 

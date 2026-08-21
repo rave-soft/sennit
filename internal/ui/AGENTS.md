@@ -37,14 +37,14 @@ The UI uses a **hybrid rendering** approach:
 
 The `UI` struct is the top-level Bubble Tea model. Key fields:
 
-- `width`, `height` — terminal dimensions
-- `layout uiLayout` — computed layout rectangles
+- `lay layoutState` — `width`, `height`, and `layout uiLayout` (computed
+  layout rectangles) among other layout state
 - `state uiState` — `uiOnboarding | uiInitialize | uiLanding | uiChat`
 - `focus uiFocusState` — `uiFocusNone | uiFocusEditor | uiFocusMain`
 - `chat *Chat` — wraps `list.List` for the message view
-- `textarea textarea.Model` — the input editor
+- `editor editorState` — the input `textarea`, `completions` popup, and
+  `attachments` list
 - `dialog *dialog.Overlay` — stacked dialog system
-- `completions`, `attachments` — sub-components
 
 Keep most logic and state here. This is where:
 
@@ -161,6 +161,56 @@ tool names to specific types:
 - Dialogs draw last and overlay everything else.
 - Use `RenderContext` from `dialog/common.go` for consistent layout (title
   gradients, width, gap, cursor offset helpers).
+
+#### Dialogs are pure view + Action
+
+A dialog's `HandleMsg` must never call `com.Workspace` directly for
+anything that does IO (file writes, config saves, network calls) or
+otherwise blocks. `Update` is the render loop; a synchronous workspace call
+there stalls the whole TUI for as long as that call takes, and it makes the
+dialog untestable without a real workspace.
+
+Instead, the side effect goes through a `tea.Cmd`, exactly like any other
+command:
+
+- Return the `[dialog.Action]` for the effect if one already exists
+  (`ActionSelectSession`, `ActionSummarize`, etc.) — `dialog_actions.go`'s
+  `applyDialogAction` runs the actual `com.Workspace` call inside a
+  `tea.Cmd` closure.
+- If no existing `Action` fits, wrap a closure that performs the call in
+  `ActionCmd{cmd}`, the same way `Session.deleteSessionCmd` and
+  `OAuth.saveCredential` do — `func() tea.Msg { return
+  ws.Method(...) }`, capturing `com.Workspace` and any needed fields by
+  value so the dialog itself doesn't race with the closure.
+- When the dialog needs to react to the result (choose a follow-up
+  `Action`, show an error, keep itself open), have the `tea.Cmd` return a
+  dedicated result type (e.g. `ActionAPIKeySaved`) and add a case for it in
+  the same dialog's `HandleMsg`. This message isn't a real Bubble Tea
+  event — it round-trips back to the front dialog through the generic
+  "unhandled Action" path (`applyChromeDialogAction`'s `default` case),
+  the same mechanism `ActionCustomProviderResult` uses; see that type's
+  doc comment in `dialog/actions.go`.
+- A constructor (`NewX`) that needs to fire a side effect as part of
+  building the dialog (not in response to a later message) returns the
+  `tea.Cmd` alongside the dialog, following `NewFilePicker`/`NewMCPAuth`'s
+  `(*X, tea.Cmd)` shape; the caller in `model/dialogs.go` appends it to the
+  command batch instead of running it inline. See `Models.setProviderItems`
+  for an example: pruning stale "recently used" entries used to save
+  synchronously during construction — now the save only happens when the
+  returned `tea.Cmd` runs.
+- Cheap, non-blocking reads of already-loaded state (`WorkingDir`,
+  `Config`, `SupportsThreads`, `AgentIsReady`/`AgentIsSessionBusy`, and
+  similar in-memory accessors used to build render output or dialog
+  content) are not IO and are fine to call directly from `HandleMsg`,
+  `Draw`, or a constructor — this rule is about writes and anything that
+  can block, not every `com.Workspace` reference.
+
+A test for a converted dialog should prove the effect never runs
+synchronously: drive `HandleMsg` (or the constructor) with a stub
+workspace, assert nothing was recorded on the stub yet, then run the
+returned `tea.Cmd` and assert it was. `session_busy_test.go`'s
+`countingWorkspace.syncProbes()` is the same idea applied at the `UI`
+level.
 
 #### Dialog rendering rules
 

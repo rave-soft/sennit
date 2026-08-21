@@ -1,10 +1,12 @@
-package thread
+package thread_test
 
 import (
 	"context"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/app"
@@ -39,10 +41,10 @@ func newTestParentApp(t *testing.T) *app.App {
 // inserts real message rows, and the messages table has a FK to
 // sessions that fakeSessions (which fabricates a Session value without
 // persisting it) would violate.
-func newTestTaskManagerWithRealMessages(t *testing.T) (*TaskManager, *app.App, session.Service, message.Service) {
+func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app.App, session.Service, message.Service) {
 	t.Helper()
-	store := newTestStoreDB(t)
-	mgr := NewManager(ManagerOptions{
+	store := thread.NewStoreForTest(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:    store,
 		Spawner:  newFakeSpawner(t),
 		RepoRoot: t.TempDir(),
@@ -65,7 +67,7 @@ func newTestTaskManagerWithRealMessages(t *testing.T) (*TaskManager, *app.App, s
 	parentApp.SetMessagesForTest(messages)
 	parentApp.AgentCoordinator = &fakeCoordinator{}
 
-	tasks := NewTaskManager(store, NewTestParentAppSpawner(parentApp), NewTestMessageService(messages), mgr.lc, mgr.ctx)
+	tasks := thread.NewTaskManagerForTest(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(messages))
 	return tasks, parentApp, sessions, messages
 }
 
@@ -75,29 +77,29 @@ func newTestTaskManagerWithRealMessages(t *testing.T) (*TaskManager, *app.App, s
 // exists only as the shared lc/ctx source and as the thread-facing entry
 // point (Handle, Shutdown) that also reaches task entries, since both
 // kinds register in the one lifecycle both share.
-func newTestTaskManager(t *testing.T, store Store) (*Manager, *TaskManager, *app.App) {
+func newTestTaskManager(t *testing.T, store thread.Store) (*thread.Manager, *thread.TaskManager, *app.App) {
 	t.Helper()
-	mgr := NewManager(ManagerOptions{
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:    store,
 		Spawner:  newFakeSpawner(t),
 		RepoRoot: t.TempDir(),
 	})
 	parentApp := newTestParentApp(t)
-	tasks := NewTaskManager(store, NewTestParentAppSpawner(parentApp), NewTestMessageService(parentApp.Messages()), mgr.lc, mgr.ctx)
+	tasks := thread.NewTaskManagerForTest(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(parentApp.Messages()))
 	return mgr, tasks, parentApp
 }
 
 func TestTaskManager_CreateRunsToCompletion(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	require.Equal(t, KindTask, st.Kind)
+	require.Equal(t, thread.KindTask, st.Kind)
 	require.Empty(t, st.WorktreePath)
 	require.Empty(t, st.Branch)
 	require.Empty(t, st.BaseBranch)
-	require.Equal(t, StatusRunning, st.Status)
+	require.Equal(t, thread.StatusRunning, st.Status)
 	require.NotEmpty(t, st.SessionID)
 
 	// The child session nests under the caller's session, the same
@@ -115,11 +117,11 @@ func TestTaskManager_CreateRunsToCompletion(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), st.ID)
-		return err == nil && got.Status == StatusCompleted
+		return err == nil && got.Status == thread.StatusCompleted
 	}, time.Second, time.Millisecond)
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, KindTask, got.Kind)
+	require.Equal(t, thread.KindTask, got.Kind)
 	require.Equal(t, "finished", got.ResultSummary)
 }
 
@@ -132,10 +134,10 @@ func TestTaskManager_CreateRunsToCompletion(t *testing.T) {
 // call site, and st.SessionID is far closer at hand than the parent
 // link).
 func TestTaskManager_CompletionDeliveredToParentNotChild(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
@@ -154,10 +156,10 @@ func TestTaskManager_CompletionDeliveredToParentNotChild(t *testing.T) {
 		"the completion must never land in the task's own child session")
 
 	require.Equal(t, st.ID, got.completion.DelegationID)
-	require.Equal(t, string(KindTask), got.completion.Kind)
+	require.Equal(t, string(thread.KindTask), got.completion.Kind)
 	require.Equal(t, st.Name, got.completion.Name)
 	require.Equal(t, "do the thing", got.completion.Goal)
-	require.Equal(t, string(StatusCompleted), got.completion.Status)
+	require.Equal(t, string(thread.StatusCompleted), got.completion.Status)
 	require.Equal(t, st.SessionID, got.completion.ChildSessionID,
 		"the child session id travels inside the event for the model's benefit, even though delivery targets the parent")
 	require.Equal(t, "finished", got.completion.ResultText)
@@ -171,10 +173,10 @@ func TestTaskManager_CompletionDeliveredToParentNotChild(t *testing.T) {
 // DelegationParent's doc comment), keyed by the task's own child session
 // id, pointing back at the caller's session.
 func TestTaskManager_CreateRegistersDelegationParent(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess", Depth: 2})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess", Depth: 2})
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
@@ -188,7 +190,7 @@ func TestTaskManager_CreateRegistersDelegationParent(t *testing.T) {
 		"a task shares its parent's own coordinator")
 	require.Equal(t, "parent-sess", got.parent.ParentSessionID)
 	require.Equal(t, st.ID, got.parent.DelegationID)
-	require.Equal(t, string(KindTask), got.parent.Kind)
+	require.Equal(t, string(thread.KindTask), got.parent.Kind)
 	require.Equal(t, st.Name, got.parent.Name)
 	require.Equal(t, 2, got.parent.Depth)
 }
@@ -201,10 +203,10 @@ func TestTaskManager_CreateRegistersDelegationParent(t *testing.T) {
 // for the zero case, wildly large) without any test noticing, since
 // nothing else here depends on the field's value.
 func TestTaskManager_CompletionCarriesTerminalAtStamp(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
@@ -230,10 +232,10 @@ func TestTaskManager_CompletionCarriesTerminalAtStamp(t *testing.T) {
 // cheaper than a thread), and releasing its runtime once the run
 // completes must never tear the shared parent App down.
 func TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
 	// No second App was spawned: the task's Handle wraps the exact same
@@ -264,10 +266,10 @@ func TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable(t *testin
 // closeAdmission-then-wait sequence covers both without Manager knowing
 // tasks exist.
 func TestTaskManager_ShutdownJoinsInFlightRun(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
@@ -279,7 +281,7 @@ func TestTaskManager_ShutdownJoinsInFlightRun(t *testing.T) {
 
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, got.Status)
+	require.Equal(t, thread.StatusInterrupted, got.Status)
 	require.Nil(t, mgr.Handle(st.ID))
 
 	// Shutdown released the task's runtime via its own Spawner
@@ -297,10 +299,10 @@ func TestTaskManager_ShutdownJoinsInFlightRun(t *testing.T) {
 // dispatched run actually received — no real tool is needed to prove the
 // context is threaded through correctly.
 func TestTaskManager_CreateAttributesRunToDelegation(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
@@ -325,7 +327,7 @@ func TestTaskManager_CreateAttributesRunToDelegation(t *testing.T) {
 // a thread (its App is its own) but, for a task, indistinguishable from
 // cancelling the user's own foreground turn.
 func TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
@@ -334,7 +336,7 @@ func TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork(t *testing.T)
 	_, err := coord.Run(t.Context(), "foreground-session", "the user's own prompt")
 	require.NoError(t, err)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
 	// Deliberately no RunComplete published for the task: its run is left
@@ -371,76 +373,76 @@ func publishSuccessForSession(t *testing.T, a *app.App, sessionID string) {
 	a.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: sessionID, RunID: runID, Text: "finished"})
 }
 
-// TestTaskManager_CreateRefusedAtWorkspaceCap proves maxActiveTasksPerWorkspace:
+// TestTaskManager_CreateRefusedAtWorkspaceCap proves MaxActiveTasksPerWorkspaceForTest:
 // once that many tasks are active, a further Create is refused with a
 // clear message naming the count and the limit, and finishing one of the
 // existing tasks frees a slot for the next Create to succeed. Each task
 // gets its own ParentSessionID, so this exercises the workspace cap alone
 // — every one of them is well under the per-parent cap individually.
 func TestTaskManager_CreateRefusedAtWorkspaceCap(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
-	var created []Thread
-	for i := range maxActiveTasksPerWorkspace {
-		st, err := tasks.Create(t.Context(), TaskCreateArgs{
+	var created []thread.Thread
+	for i := range thread.MaxActiveTasksPerWorkspaceForTest {
+		st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
 			Goal:            fmt.Sprintf("task %d", i),
 			ParentSessionID: fmt.Sprintf("parent-%d", i),
 		})
 		require.NoError(t, err)
 		created = append(created, st)
 	}
-	require.Eventually(t, func() bool { return coord.runCount() == maxActiveTasksPerWorkspace }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == thread.MaxActiveTasksPerWorkspaceForTest }, time.Second, time.Millisecond)
 
-	_, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "one too many", ParentSessionID: "parent-overflow"})
+	_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "one too many", ParentSessionID: "parent-overflow"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), fmt.Sprintf("%d background tasks already running", maxActiveTasksPerWorkspace))
-	require.Contains(t, err.Error(), fmt.Sprintf("limit %d", maxActiveTasksPerWorkspace))
-	require.Equal(t, maxActiveTasksPerWorkspace, coord.runCount(), "the refused call must never dispatch a run")
+	require.Contains(t, err.Error(), fmt.Sprintf("%d background tasks already running", thread.MaxActiveTasksPerWorkspaceForTest))
+	require.Contains(t, err.Error(), fmt.Sprintf("limit %d", thread.MaxActiveTasksPerWorkspaceForTest))
+	require.Equal(t, thread.MaxActiveTasksPerWorkspaceForTest, coord.runCount(), "the refused call must never dispatch a run")
 
 	// Finish one of the existing tasks - its slot is freed for the next
 	// Create.
 	publishSuccessForSession(t, parentApp, created[0].SessionID)
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), created[0].ID)
-		return err == nil && got.Status == StatusCompleted
+		return err == nil && got.Status == thread.StatusCompleted
 	}, time.Second, time.Millisecond)
 
-	_, err = tasks.Create(t.Context(), TaskCreateArgs{Goal: "now it fits", ParentSessionID: "parent-overflow"})
+	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "now it fits", ParentSessionID: "parent-overflow"})
 	require.NoError(t, err, "completing one task must free a slot for the next Create")
 }
 
 // TestTaskManager_PerParentCapIndependentOfWorkspaceCap proves
-// maxActiveTasksPerParentTurn is its own, tighter limit: one parent
+// MaxActiveTasksPerParentTurnForTest is its own, tighter limit: one parent
 // session can be refused for having too many of its own tasks active
-// while the workspace as a whole is nowhere near maxActiveTasksPerWorkspace,
+// while the workspace as a whole is nowhere near MaxActiveTasksPerWorkspaceForTest,
 // and a *different* parent is unaffected by the first one's refusal.
 func TestTaskManager_PerParentCapIndependentOfWorkspaceCap(t *testing.T) {
-	require.Less(t, maxActiveTasksPerParentTurn, maxActiveTasksPerWorkspace,
+	require.Less(t, thread.MaxActiveTasksPerParentTurnForTest, thread.MaxActiveTasksPerWorkspaceForTest,
 		"this test only proves something if the per-parent cap is reached well before the workspace cap")
 
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
-	for i := range maxActiveTasksPerParentTurn {
-		_, err := tasks.Create(t.Context(), TaskCreateArgs{
+	for i := range thread.MaxActiveTasksPerParentTurnForTest {
+		_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
 			Goal:            fmt.Sprintf("task %d", i),
 			ParentSessionID: "busy-parent",
 		})
 		require.NoError(t, err)
 	}
-	require.Eventually(t, func() bool { return coord.runCount() == maxActiveTasksPerParentTurn }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == thread.MaxActiveTasksPerParentTurnForTest }, time.Second, time.Millisecond)
 
-	_, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "one too many for this turn", ParentSessionID: "busy-parent"})
+	_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "one too many for this turn", ParentSessionID: "busy-parent"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), fmt.Sprintf("this turn already has %d background tasks running", maxActiveTasksPerParentTurn))
-	require.Contains(t, err.Error(), fmt.Sprintf("limit %d", maxActiveTasksPerParentTurn))
+	require.Contains(t, err.Error(), fmt.Sprintf("this turn already has %d background tasks running", thread.MaxActiveTasksPerParentTurnForTest))
+	require.Contains(t, err.Error(), fmt.Sprintf("limit %d", thread.MaxActiveTasksPerParentTurnForTest))
 
 	// A different parent, with none of its own tasks active yet, is
 	// unaffected - the workspace cap has plenty of headroom left.
-	_, err = tasks.Create(t.Context(), TaskCreateArgs{Goal: "unrelated turn's own task", ParentSessionID: "idle-parent"})
+	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "unrelated turn's own task", ParentSessionID: "idle-parent"})
 	require.NoError(t, err, "the per-parent cap must not leak across different parent sessions")
 }
 
@@ -453,24 +455,24 @@ func TestTaskManager_PerParentCapIndependentOfWorkspaceCap(t *testing.T) {
 // creates - the same "run left in flight" shape
 // TestTaskManager_ShutdownJoinsInFlightRun and the permission-attribution
 // tests use for a task blocked mid-run - and shows that in-flight task
-// alone is enough to exhaust maxActiveTasksPerWorkspace.
+// alone is enough to exhaust MaxActiveTasksPerWorkspaceForTest.
 func TestTaskManager_InFlightTaskStillHoldsSlot(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
 	// One task, left running indefinitely (e.g. blocked on a permission
 	// prompt the user has not answered yet) - never completed.
-	blocked, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "waiting on a prompt", ParentSessionID: "parent-blocked"})
+	blocked, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "waiting on a prompt", ParentSessionID: "parent-blocked"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 	got, err := store.Get(t.Context(), blocked.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusRunning, got.Status, "blocked mid-run is still StatusRunning, not a distinct 'waiting' status")
+	require.Equal(t, thread.StatusRunning, got.Status, "blocked mid-run is still StatusRunning, not a distinct 'waiting' status")
 
 	// Fill every remaining slot with other, distinct-parent tasks.
-	for i := range maxActiveTasksPerWorkspace - 1 {
-		_, err := tasks.Create(t.Context(), TaskCreateArgs{
+	for i := range thread.MaxActiveTasksPerWorkspaceForTest - 1 {
+		_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
 			Goal:            fmt.Sprintf("filler %d", i),
 			ParentSessionID: fmt.Sprintf("parent-filler-%d", i),
 		})
@@ -480,22 +482,22 @@ func TestTaskManager_InFlightTaskStillHoldsSlot(t *testing.T) {
 	// The workspace is now at its cap purely because of one still-blocked
 	// task plus the filler - the blocked one never finished and never
 	// stopped counting.
-	_, err = tasks.Create(t.Context(), TaskCreateArgs{Goal: "over the cap", ParentSessionID: "parent-overflow"})
+	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "over the cap", ParentSessionID: "parent-overflow"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "background tasks already running")
 }
 
 // TestTaskManager_TerminalTasksDoNotOccupySlots proves the other half of
-// "active, not rows": maxActiveTasksPerWorkspace many tasks that have all
+// "active, not rows": MaxActiveTasksPerWorkspaceForTest many tasks that have all
 // since finished do not, together, block a new one - only tasks still
 // Status.Active() count.
 func TestTaskManager_TerminalTasksDoNotOccupySlots(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
-	for i := range maxActiveTasksPerWorkspace {
-		st, err := tasks.Create(t.Context(), TaskCreateArgs{
+	for i := range thread.MaxActiveTasksPerWorkspaceForTest {
+		st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
 			Goal:            fmt.Sprintf("task %d", i),
 			ParentSessionID: fmt.Sprintf("parent-%d", i),
 		})
@@ -503,40 +505,40 @@ func TestTaskManager_TerminalTasksDoNotOccupySlots(t *testing.T) {
 		publishSuccessForSession(t, parentApp, st.SessionID)
 		require.Eventually(t, func() bool {
 			got, err := store.Get(t.Context(), st.ID)
-			return err == nil && got.Status == StatusCompleted
+			return err == nil && got.Status == thread.StatusCompleted
 		}, time.Second, time.Millisecond)
 	}
-	require.Equal(t, maxActiveTasksPerWorkspace, coord.runCount())
+	require.Equal(t, thread.MaxActiveTasksPerWorkspaceForTest, coord.runCount())
 
-	_, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "workspace is actually idle", ParentSessionID: "parent-fresh"})
-	require.NoError(t, err, "maxActiveTasksPerWorkspace terminal tasks must not occupy any slots")
+	_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "workspace is actually idle", ParentSessionID: "parent-fresh"})
+	require.NoError(t, err, "MaxActiveTasksPerWorkspaceForTest terminal tasks must not occupy any slots")
 }
 
 // seedThreadRow inserts a bare kind = KindThread row directly through
 // store, bypassing Manager.Create's git machinery entirely: these tests
 // only need a thread's id to exist in the shared table, to prove the
 // task_* guards reject it.
-func seedThreadRow(t *testing.T, store Store) Thread {
+func seedThreadRow(t *testing.T, store thread.Store) thread.Thread {
 	t.Helper()
-	st, err := store.Create(t.Context(), CreateParams{
+	st, err := store.Create(t.Context(), thread.CreateParams{
 		Name:         "a-thread",
 		Goal:         "x",
 		BaseBranch:   "main",
 		Branch:       "thread/a-thread",
 		WorktreePath: t.TempDir(),
-		Kind:         KindThread,
+		Kind:         thread.KindThread,
 	})
 	require.NoError(t, err)
 	return st
 }
 
 func TestTaskManager_ListReturnsOnlyTasks(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, _ := newTestTaskManager(t, store)
 
-	task1, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "a", ParentSessionID: "p1"})
+	task1, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "a", ParentSessionID: "p1"})
 	require.NoError(t, err)
-	task2, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "b", ParentSessionID: "p2"})
+	task2, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "b", ParentSessionID: "p2"})
 	require.NoError(t, err)
 	threadRow := seedThreadRow(t, store)
 
@@ -551,21 +553,21 @@ func TestTaskManager_ListReturnsOnlyTasks(t *testing.T) {
 }
 
 func TestTaskManager_GetHappyPath(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, _ := newTestTaskManager(t, store)
 
-	created, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "look into it", ParentSessionID: "p1"})
+	created, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "look into it", ParentSessionID: "p1"})
 	require.NoError(t, err)
 
 	got, err := tasks.Get(t.Context(), created.ID)
 	require.NoError(t, err)
 	require.Equal(t, created.ID, got.ID)
 	require.Equal(t, "look into it", got.Goal)
-	require.Equal(t, KindTask, got.Kind)
+	require.Equal(t, thread.KindTask, got.Kind)
 }
 
 func TestTaskManager_GetRejectsThreadID(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, _ := newTestTaskManager(t, store)
 	threadRow := seedThreadRow(t, store)
 
@@ -580,14 +582,14 @@ func TestTaskManager_GetRejectsThreadID(t *testing.T) {
 // its parent's — it must reach only the task's own session, never the
 // foreground work sharing that same App and coordinator.
 func TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
 	_, err := coord.Run(t.Context(), "foreground-session", "the user's own prompt")
 	require.NoError(t, err)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
 	// Deliberately no RunComplete published: the run is left in flight.
@@ -596,7 +598,7 @@ func TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched(t *testing
 
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCancelled, got.Status)
+	require.Equal(t, thread.StatusCancelled, got.Status)
 	require.Equal(t, "no longer needed", got.Error)
 
 	require.False(t, coord.cancelAllWasCalled())
@@ -606,11 +608,11 @@ func TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched(t *testing
 }
 
 func TestTaskManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 
@@ -618,39 +620,39 @@ func TestTaskManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCancelled, got.Status)
+	require.Equal(t, thread.StatusCancelled, got.Status)
 	require.Equal(t, "cancelled", got.Error)
 }
 
 // TestTaskManager_CancelAlreadyFinishedIsNoop proves a finished task's
 // real outcome is never clobbered by a Cancel call that arrives too late.
 func TestTaskManager_CancelAlreadyFinishedIsNoop(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 	publishSuccess(t, parentApp, st.SessionID)
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), st.ID)
-		return err == nil && got.Status == StatusCompleted
+		return err == nil && got.Status == thread.StatusCompleted
 	}, time.Second, time.Millisecond)
 
 	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "too late"))
 
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCompleted, got.Status, "a finished task's real outcome must not be overwritten")
+	require.Equal(t, thread.StatusCompleted, got.Status, "a finished task's real outcome must not be overwritten")
 	require.Empty(t, coord.canceledSessions(), "no live runtime means nothing to cancel")
 }
 
 func TestTaskManager_CancelRejectsThreadID(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, _ := newTestTaskManager(t, store)
 	threadRow := seedThreadRow(t, store)
-	_, err := store.SetStatus(t.Context(), threadRow.ID, SetStatusParams{Status: StatusRunning})
+	_, err := store.SetStatus(t.Context(), threadRow.ID, thread.SetStatusParams{Status: thread.StatusRunning})
 	require.NoError(t, err)
 
 	err = tasks.Cancel(t.Context(), threadRow.ID, "nope")
@@ -659,7 +661,7 @@ func TestTaskManager_CancelRejectsThreadID(t *testing.T) {
 
 	got, err := store.Get(t.Context(), threadRow.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusRunning, got.Status, "a rejected call must not touch the thread's row")
+	require.Equal(t, thread.StatusRunning, got.Status, "a rejected call must not touch the thread's row")
 }
 
 // TestTaskManager_SendReachesLiveTask proves the live-runtime branch of
@@ -667,11 +669,11 @@ func TestTaskManager_CancelRejectsThreadID(t *testing.T) {
 // flight (no RunComplete published yet) gets the follow-up queued into
 // that same runtime, not a respawned one.
 func TestTaskManager_SendReachesLiveTask(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 
@@ -692,17 +694,17 @@ func TestTaskManager_SendReachesLiveTask(t *testing.T) {
 // respawns — for a task, that only means rebinding to the same parent
 // App via ParentAppSpawner — and dispatches there.
 func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	mgr, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 	publishSuccess(t, parentApp, st.SessionID)
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), st.ID)
-		return err == nil && got.Status == StatusCompleted
+		return err == nil && got.Status == thread.StatusCompleted
 	}, time.Second, time.Millisecond)
 	require.Nil(t, mgr.Handle(st.ID), "runtime must have been released once the run completed")
 
@@ -716,7 +718,7 @@ func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusRunning, got.Status)
+	require.Equal(t, thread.StatusRunning, got.Status)
 	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
 }
 
@@ -725,11 +727,11 @@ func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 // be silently resumed by task_send, because cancelling was a decision,
 // not a pause.
 func TestTaskManager_SendRefusesCancelledTask(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, parentApp := newTestTaskManager(t, store)
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
 
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 
@@ -742,7 +744,7 @@ func TestTaskManager_SendRefusesCancelledTask(t *testing.T) {
 }
 
 func TestTaskManager_SendRejectsThreadID(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, _ := newTestTaskManager(t, store)
 	threadRow := seedThreadRow(t, store)
 
@@ -773,7 +775,7 @@ func TestTaskManager_OutputReturnsUserAndAssistantTextOnly(t *testing.T) {
 
 	parentSess, err := sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "investigate X", ParentSessionID: parentSess.ID})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "investigate X", ParentSessionID: parentSess.ID})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 
@@ -799,7 +801,7 @@ func TestTaskManager_OutputReportsTruncation(t *testing.T) {
 
 	parentSess, err := sessions.Create(t.Context(), "parent")
 	require.NoError(t, err)
-	st, err := tasks.Create(t.Context(), TaskCreateArgs{Goal: "go", ParentSessionID: parentSess.ID})
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "go", ParentSessionID: parentSess.ID})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
 
@@ -816,7 +818,7 @@ func TestTaskManager_OutputReportsTruncation(t *testing.T) {
 }
 
 func TestTaskManager_OutputRejectsThreadID(t *testing.T) {
-	store := newTestStoreDB(t)
+	store := thread.NewStoreForTest(t)
 	_, tasks, _ := newTestTaskManager(t, store)
 	threadRow := seedThreadRow(t, store)
 

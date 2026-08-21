@@ -1,7 +1,9 @@
 // Package event used to report usage analytics to Charm's PostHog instance at
 // data.charm.land. That reporting is removed: Sennit sends nothing anywhere.
 //
-// The call sites are kept as no-ops rather than deleted so that adding a
+// The analytics lifecycle and identity hooks (client init, machine ID,
+// user aliasing) were removed along with their call sites. The per-event
+// no-ops in all.go are kept rather than deleted so that adding a
 // self-hosted sink later is a change in one file instead of a hunt through
 // nine.
 package event
@@ -17,16 +19,6 @@ func SetContinueBySessionID(bool) {}
 
 // SetContinueLastSession records nothing.
 func SetContinueLastSession(bool) {}
-
-// Init previously created the analytics client and a persistent machine
-// identifier. Both are gone; nothing is initialised.
-func Init() {}
-
-// GetID returns an empty string. There is no machine identifier to report.
-func GetID() string { return "" }
-
-// Alias records nothing.
-func Alias(string) {}
 
 // Error records nothing. Errors still reach the local log through slog.
 func Error(any, ...any) {}

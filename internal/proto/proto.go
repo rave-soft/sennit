@@ -4,8 +4,8 @@ import (
 	"github.com/rave-soft/sennit/internal/lsp"
 )
 
-// ServerNoticeLevel mirrors the client's status-line severity taxonomy
-// without depending on it, so backend code can flag a notice's
+// ServerNoticeLevel mirrors the UI's status-line severity taxonomy
+// without depending on it, so core code can flag a notice's
 // severity without importing internal/ui.
 type ServerNoticeLevel string
 
@@ -16,9 +16,9 @@ const (
 )
 
 // ServerNotice carries a human-readable notice for display in the
-// client's status area. It is the transport-neutral payload backend
-// code publishes instead of reaching into internal/ui/util directly;
-// the UI converts it to its own util.InfoMsg on receipt.
+// UI's status area. It is the payload core code publishes instead of
+// reaching into internal/ui/util directly; the UI converts it to its
+// own util.InfoMsg on receipt.
 type ServerNotice struct {
 	Level   ServerNoticeLevel `json:"level"`
 	Message string            `json:"message"`

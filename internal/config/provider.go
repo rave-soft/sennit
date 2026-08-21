@@ -25,23 +25,16 @@ import (
 // slice, so recomputing per call is cheap; callers that already hold a
 // ConfigStore should prefer its cached ConfigStore.KnownProviders() instead
 // of calling this repeatedly.
-//
-// A returned error is advisory: it reports that the catalog could not be
-// cached, or that an upstream returned nothing usable. It never means that no
-// providers are available, so callers should surface it as a warning and keep
-// using the returned list. A refresh that simply could not reach the network
-// is not an error at all: the cached or embedded catalog is a sound answer, so
-// those are logged and the fallback is returned.
-func Providers(cfg *Config) ([]catwalk.Provider, error) {
+func Providers(cfg *Config) []catwalk.Provider {
 	// The provider catalog ships with the binary. Upstream refreshed it
 	// from Charm's catwalk service at startup; that call is removed, so
 	// Sennit never reaches the network to decide what models exist.
 	// Anything the embedded list does not know about is declared in the
 	// user's own config.
 	if cfg.Options.DisableDefaultProviders {
-		return nil, nil
+		return nil
 	}
-	return append(embedded.GetAll(), CodexProvider()), nil
+	return append(embedded.GetAll(), CodexProvider())
 }
 
 // CodexProvider is the catalog entry for OpenAI Codex.
@@ -54,8 +47,9 @@ func Providers(cfg *Config) ([]catwalk.Provider, error) {
 // values it was set up with.
 //
 // The model list stays empty on purpose: which models an account may use is
-// per-plan and changes over time, so it is fetched from the backend at
-// sign-in and merged in from the user's config (see mergeCatalogProviders).
+// per-plan and changes over time, so it is fetched from OpenAI's Codex API at
+// sign-in (see oauth/codex.FetchModels) and merged in from the user's config
+// (see mergeCatalogProviders).
 func CodexProvider() catwalk.Provider {
 	return catwalk.Provider{
 		ID:          catwalk.InferenceProvider(codex.ProviderID),

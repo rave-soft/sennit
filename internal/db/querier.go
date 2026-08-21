@@ -10,6 +10,17 @@ import (
 
 type Querier interface {
 	BatchValidateSessionIDsInTree(ctx context.Context, arg BatchValidateSessionIDsInTreeParams) ([]string, error)
+	// gc's dependent-row count for a batch of sessions it is about to delete;
+	// see CountMessagesForSessionIDs for why json_each replaces an IN-list.
+	CountFilesForSessionIDs(ctx context.Context, sessionIdsJson string) (int64, error)
+	// gc's dependent-row count for a batch of sessions it is about to delete.
+	// One aggregate query via json_each rather than an IN-list, so the bound
+	// parameter count does not grow with the number of sessions selected --
+	// see ListMessagesBySessionIDs for the same pattern.
+	CountMessagesForSessionIDs(ctx context.Context, sessionIdsJson string) (int64, error)
+	// gc's dependent-row count for a batch of sessions it is about to delete;
+	// see CountMessagesForSessionIDs for why json_each replaces an IN-list.
+	CountReadFilesForSessionIDs(ctx context.Context, sessionIdsJson string) (int64, error)
 	CountSessionFiles(ctx context.Context, sessionID string) (int64, error)
 	CountSessionMessages(ctx context.Context, sessionID string) (int64, error)
 	CountSessionReadFiles(ctx context.Context, sessionID string) (int64, error)
@@ -139,6 +150,10 @@ type Querier interface {
 	// own. Scoping this to threads meant finished tasks accumulated for the
 	// life of the database. A task carries no worktree, so reclaiming one is
 	// the row and its retention alone, with nothing left orphaned on disk.
+	//
+	// kind, worktree_path and branch are selected so gc can report the
+	// worktrees it strands: deleting a thread row leaves its worktree on disk
+	// with nothing left to find it by, so gc names them before the row goes.
 	ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error)
 	// Assistant messages in a project that carry no Finish part, which is
 	// what finished_at records (see message.service.write). Every path that

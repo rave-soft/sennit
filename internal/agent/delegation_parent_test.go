@@ -190,7 +190,7 @@ func TestSendToParent_AndCompletionBothSurviveSameDrain(t *testing.T) {
 	// enqueue itself rather than also exercising DeliverTaskCompletion's
 	// own idle-wake attempt, which SendToParent below already covers.
 	completion := testCompletion("both-completion-marker")
-	sa.dispatch.enqueueCompletion(parentSess.ID, completion)
+	sa.enqueueCompletion(parentSess.ID, completion)
 
 	err = sa.SendToParent(t.Context(), childSessionID, "both-message-marker")
 	require.NoError(t, err)

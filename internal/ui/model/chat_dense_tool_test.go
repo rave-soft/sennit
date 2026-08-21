@@ -26,23 +26,20 @@ func TestChatDenseToolGroup_NoGapBetweenConsecutiveOneLinerTools(t *testing.T) {
 	u.chat.SetSize(80, 40)
 	sty := u.com.Styles
 
-	view := chat.NewReadToolMessageItem(sty,
+	view := chat.NewToolMessageItem(sty, "m-view",
 		message.ToolCall{ID: "tc-view", Name: tools.ReadToolName, Input: `{"file_path":"internal/foo.go"}`, Finished: true},
 		&message.ToolResult{ToolCallID: "tc-view", Content: strings.Repeat("x\n", 341) + "x"},
-		false)
-	view.SetMessageID("m-view")
+		false, nil)
 
-	grep := chat.NewGrepToolMessageItem(sty,
+	grep := chat.NewToolMessageItem(sty, "m-grep",
 		message.ToolCall{ID: "tc-grep", Name: tools.GrepToolName, Input: `{"pattern":"Provider"}`, Finished: true},
 		&message.ToolResult{ToolCallID: "tc-grep", Content: "match", Metadata: `{"number_of_matches":27}`},
-		false)
-	grep.SetMessageID("m-grep")
+		false, nil)
 
-	glob := chat.NewGlobToolMessageItem(sty,
+	glob := chat.NewToolMessageItem(sty, "m-glob",
 		message.ToolCall{ID: "tc-glob", Name: tools.GlobToolName, Input: `{"pattern":"*.go"}`, Finished: true},
 		&message.ToolResult{ToolCallID: "tc-glob", Content: "f.go", Metadata: `{"number_of_files":4}`},
-		false)
-	glob.SetMessageID("m-glob")
+		false, nil)
 
 	reply := chat.NewAssistantMessageItem(sty, &message.Message{
 		ID:   "m-assistant",

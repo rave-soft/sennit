@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/diff"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/fsext"
@@ -65,7 +64,7 @@ func NewEditTool(
 		editDescription,
 		func(ctx context.Context, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
-				return fantasy.NewTextErrorResponse("file_path is required"), nil
+				return invalidParam("file_path"), nil
 			}
 
 			params.FilePath = filepathext.SmartJoin(workingDir, params.FilePath)
@@ -123,53 +122,30 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 
 	sessionID := GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+		return fantasy.ToolResponse{}, missingSessionID("creating a new file")
 	}
 
-	_, additions, removals := diff.GenerateDiff(
-		"",
-		content,
-		strings.TrimPrefix(filePath, edit.workingDir),
-	)
-	resp, denied, err := requirePermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-		ToolCallID:  call.ID,
-		ToolName:    EditToolName,
-		Action:      "write",
-		Description: fmt.Sprintf("Create file %s", filePath),
-		Params: EditPermissionsParams{
+	return applyFileMutation(fileMutationRequest{
+		editContext:    edit,
+		call:           call,
+		filePath:       filePath,
+		sessionID:      sessionID,
+		oldContent:     "",
+		diffContent:    content,
+		writeContent:   content,
+		wholeFileRead:  true,
+		toolName:       EditToolName,
+		description:    fmt.Sprintf("Create file %s", filePath),
+		successMessage: "File created: " + filePath,
+		permParams: EditPermissionsParams{
 			FilePath:   filePath,
 			OldContent: "",
 			NewContent: content,
 		},
-	})
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if denied {
-		return fantasy.WithResponseMetadata(resp, EditResponseMetadata{
-			OldContent: "",
-			NewContent: content,
-			Additions:  additions,
-			Removals:   removals,
-		}), nil
-	}
-
-	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, "", content); err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	recordWholeFileRead(edit.ctx, edit.filetracker, sessionID, filePath)
-
-	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse("File created: "+filePath),
-		EditResponseMetadata{
-			OldContent: "",
-			NewContent: content,
-			Additions:  additions,
-			Removals:   removals,
+		metadata: func(content, _ string, additions, removals int) any {
+			return EditResponseMetadata{OldContent: "", NewContent: content, Additions: additions, Removals: removals}
 		},
-	), nil
+	})
 }
 
 // findAndReplace performs a find-and-replace on content. When replaceAll is
@@ -304,27 +280,39 @@ func notFoundError(content, old string) error {
 	return errors.New(msg)
 }
 
-func loadExistingFile(edit editContext, filePath, sessionError string) (sessionID, oldContent string, isCrlf bool, resp fantasy.ToolResponse, err error) {
+// existingFileResult is what loadExistingFile resolves for an edit that
+// targets a file already on disk.
+type existingFileResult struct {
+	sessionID  string
+	oldContent string
+	isCrlf     bool
+}
+
+// loadExistingFile reads filePath's current on-disk state for an edit that
+// targets an existing file. sessionAction names the action for
+// missingSessionID's message (e.g. "editing a file") if no session ID is
+// bound to the context.
+func loadExistingFile(edit editContext, filePath, sessionAction string) (existingFileResult, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)), nil
+			return existingFileResult{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)))
 		}
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return existingFileResult{}, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	if fileInfo.IsDir() {
-		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
+		return existingFileResult{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)))
 	}
 
-	sessionID = GetSessionFromContext(edit.ctx)
+	sessionID := GetSessionFromContext(edit.ctx)
 	if sessionID == "" {
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("%s", sessionError)
+		return existingFileResult{}, missingSessionID(sessionAction)
 	}
 
-	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
-	if lastRead.IsZero() {
-		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf(
+	switch state, lastRead := checkFileFreshness(edit.ctx, edit.filetracker, sessionID, filePath, fileInfo.ModTime()); state {
+	case fileNeverRead:
+		return existingFileResult{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf(
 			"cannot edit %s: it has not been read in this session.\n\n"+
 				"Edit replaces old_string with new_string literally, so old_string has to be "+
 				"copied from the file as it is on disk right now — not recalled or guessed. "+
@@ -332,12 +320,9 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 				"the file changed underneath it.\n\n"+
 				"Read %s, then retry this edit.",
 			filePath, filePath,
-		)), nil
-	}
-
-	modTime := fileInfo.ModTime().Truncate(time.Second)
-	if modTime.After(lastRead) {
-		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf(
+		)))
+	case fileStale:
+		return existingFileResult{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf(
 			"cannot edit %s: it changed on disk after you read it "+
 				"(modified %s, last read %s).\n\n"+
 				"Something outside this edit — the user, a formatter, a build step, another "+
@@ -345,28 +330,30 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 				"there, and editing now would overwrite that change.\n\n"+
 				"Read %s again to see the current content, then redo the edit against it.",
 			filePath,
-			modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
+			fileInfo.ModTime().Truncate(time.Second).Format(time.RFC3339), lastRead.Format(time.RFC3339),
 			filePath,
-		)), nil
+		)))
 	}
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
+		return existingFileResult{}, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
-	return sessionID, oldContent, isCrlf, fantasy.ToolResponse{}, nil
+	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
+	return existingFileResult{sessionID: sessionID, oldContent: oldContent, isCrlf: isCrlf}, nil
 }
 
 func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for deleting content")
+	existing, err := loadExistingFile(edit, filePath, "deleting content")
 	if err != nil {
+		var stop *mutationStop
+		if errors.As(err, &stop) {
+			return stop.Response, nil
+		}
 		return fantasy.ToolResponse{}, err
 	}
-	if resp.Content != "" || resp.IsError {
-		return resp, nil
-	}
+	sessionID, oldContent, isCrlf := existing.sessionID, existing.oldContent, existing.isCrlf
 
 	newContent, whitespaceCorrected, err := findAndReplace(oldContent, oldString, "", replaceAll)
 	if err != nil {
@@ -376,35 +363,53 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return resp, nil
 	}
 
-	_, additions, removals := diff.GenerateDiff(
-		oldContent,
-		newContent,
-		strings.TrimPrefix(filePath, edit.workingDir),
-	)
+	writeContent := newContent
+	if isCrlf {
+		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
+	}
 
-	permResp, denied, err := requirePermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-		ToolCallID:  call.ID,
-		ToolName:    EditToolName,
-		Action:      "write",
-		Description: fmt.Sprintf("Delete content from file %s", filePath),
-		Params: EditPermissionsParams{
+	return applyFileMutation(fileMutationRequest{
+		editContext:    edit,
+		call:           call,
+		filePath:       filePath,
+		sessionID:      sessionID,
+		oldContent:     oldContent,
+		diffContent:    newContent,
+		writeContent:   writeContent,
+		toolName:       EditToolName,
+		description:    fmt.Sprintf("Delete content from file %s", filePath),
+		successMessage: withWhitespaceNote("Content deleted from file: "+filePath, whitespaceCorrected),
+		permParams: EditPermissionsParams{
 			FilePath:   filePath,
 			OldContent: oldContent,
 			NewContent: newContent,
 		},
+		metadata: func(content, _ string, additions, removals int) any {
+			return EditResponseMetadata{OldContent: oldContent, NewContent: content, Additions: additions, Removals: removals}
+		},
 	})
+}
+
+func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	existing, err := loadExistingFile(edit, filePath, "editing a file")
 	if err != nil {
+		var stop *mutationStop
+		if errors.As(err, &stop) {
+			return stop.Response, nil
+		}
 		return fantasy.ToolResponse{}, err
 	}
-	if denied {
-		return fantasy.WithResponseMetadata(permResp, EditResponseMetadata{
-			OldContent: oldContent,
-			NewContent: newContent,
-			Additions:  additions,
-			Removals:   removals,
-		}), nil
+	sessionID, oldContent, isCrlf := existing.sessionID, existing.oldContent, existing.isCrlf
+
+	newContent, whitespaceCorrected, err := findAndReplace(oldContent, oldString, newString, replaceAll)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+	if newContent == oldContent {
+		return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
+	}
+	if resp, ok := requireReadCoverage(edit, sessionID, filePath, oldContent, newContent); !ok {
+		return resp, nil
 	}
 
 	writeContent := newContent
@@ -412,90 +417,24 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, oldContent, writeContent); err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	recordEditedSpan(edit.ctx, edit.filetracker, sessionID, filePath, oldContent, newContent)
-
-	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(withWhitespaceNote("Content deleted from file: "+filePath, whitespaceCorrected)),
-		EditResponseMetadata{
-			OldContent: oldContent,
-			NewContent: writeContent,
-			Additions:  additions,
-			Removals:   removals,
-		},
-	), nil
-}
-
-func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for editing a file")
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if resp.Content != "" || resp.IsError {
-		return resp, nil
-	}
-
-	result, whitespaceCorrected, err := findAndReplace(oldContent, oldString, newString, replaceAll)
-	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
-	}
-	if result == oldContent {
-		return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
-	}
-	if resp, ok := requireReadCoverage(edit, sessionID, filePath, oldContent, result); !ok {
-		return resp, nil
-	}
-
-	_, additions, removals := diff.GenerateDiff(
-		oldContent,
-		result,
-		strings.TrimPrefix(filePath, edit.workingDir),
-	)
-
-	permResp, denied, err := requirePermission(edit.ctx, edit.permissions, permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-		ToolCallID:  call.ID,
-		ToolName:    EditToolName,
-		Action:      "write",
-		Description: fmt.Sprintf("Replace content in file %s", filePath),
-		Params: EditPermissionsParams{
+	return applyFileMutation(fileMutationRequest{
+		editContext:    edit,
+		call:           call,
+		filePath:       filePath,
+		sessionID:      sessionID,
+		oldContent:     oldContent,
+		diffContent:    newContent,
+		writeContent:   writeContent,
+		toolName:       EditToolName,
+		description:    fmt.Sprintf("Replace content in file %s", filePath),
+		successMessage: withWhitespaceNote("Content replaced in file: "+filePath, whitespaceCorrected),
+		permParams: EditPermissionsParams{
 			FilePath:   filePath,
 			OldContent: oldContent,
-			NewContent: result,
+			NewContent: newContent,
+		},
+		metadata: func(content, _ string, additions, removals int) any {
+			return EditResponseMetadata{OldContent: oldContent, NewContent: content, Additions: additions, Removals: removals}
 		},
 	})
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if denied {
-		return fantasy.WithResponseMetadata(permResp, EditResponseMetadata{
-			OldContent: oldContent,
-			NewContent: result,
-			Additions:  additions,
-			Removals:   removals,
-		}), nil
-	}
-
-	writeContent := result
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
-
-	if err := writeFileWithHistory(edit.ctx, edit.files, sessionID, filePath, oldContent, writeContent); err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	recordEditedSpan(edit.ctx, edit.filetracker, sessionID, filePath, oldContent, result)
-
-	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(withWhitespaceNote("Content replaced in file: "+filePath, whitespaceCorrected)),
-		EditResponseMetadata{
-			OldContent: oldContent,
-			NewContent: writeContent,
-			Additions:  additions,
-			Removals:   removals,
-		},
-	), nil
 }

@@ -138,6 +138,76 @@ func TestResolveSession_Last_SkipsChildSessions(t *testing.T) {
 	require.Equal(t, "top-level", sess.ID)
 }
 
+// TestResolveSession_Last_SkipsChildSessionFirst covers the regression where
+// the accumulator was seeded with sessions[0] unconditionally: a child
+// session with the newest UpdatedAt, listed first, must not win over an
+// older top-level session.
+func TestResolveSession_Last_SkipsChildSessionFirst(t *testing.T) {
+	t.Parallel()
+	ws := &fakeSessionWorkspace{
+		sessions: []session.Session{
+			{ID: "child", ParentSessionID: "top-level", Title: "Child", UpdatedAt: 100},
+			{ID: "top-level", Title: "Top level", UpdatedAt: 50},
+		},
+	}
+
+	sess, err := ResolveSession(t.Context(), ws, "", true, "non-interactive")
+	require.NoError(t, err)
+	require.Equal(t, "top-level", sess.ID)
+}
+
+// TestResolveSession_Last_SkipsAgentToolSessionFirst covers that an
+// agent-tool sub-session listed first (and newest) must not be returned,
+// matching the continueSessionID branch's rejection of such sessions.
+func TestResolveSession_Last_SkipsAgentToolSessionFirst(t *testing.T) {
+	t.Parallel()
+	ws := &fakeSessionWorkspace{
+		sessions: []session.Session{
+			{ID: "msg123$$tool456", Title: "Agent tool session", UpdatedAt: 100},
+			{ID: "top-level", Title: "Top level", UpdatedAt: 50},
+		},
+	}
+
+	sess, err := ResolveSession(t.Context(), ws, "", true, "non-interactive")
+	require.NoError(t, err)
+	require.Equal(t, "top-level", sess.ID)
+}
+
+// TestResolveSession_Last_AllChildSessions covers that when every session is
+// ineligible, ResolveSession reports the same error as an empty list rather
+// than falling back to sessions[0].
+func TestResolveSession_Last_AllChildSessions(t *testing.T) {
+	t.Parallel()
+	ws := &fakeSessionWorkspace{
+		sessions: []session.Session{
+			{ID: "child-1", ParentSessionID: "parent", Title: "Child 1", UpdatedAt: 100},
+			{ID: "child-2", ParentSessionID: "parent", Title: "Child 2", UpdatedAt: 50},
+		},
+	}
+
+	_, err := ResolveSession(t.Context(), ws, "", true, "non-interactive")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no sessions found to continue")
+}
+
+// TestResolveSession_Last_NewestFirst covers that list order doesn't matter
+// when all sessions are eligible: the newest one wins whether it's listed
+// first or last.
+func TestResolveSession_Last_NewestFirst(t *testing.T) {
+	t.Parallel()
+	ws := &fakeSessionWorkspace{
+		sessions: []session.Session{
+			{ID: "most-recent", Title: "Latest session", UpdatedAt: 100},
+			{ID: "older", Title: "Older session", UpdatedAt: 50},
+			{ID: "oldest", Title: "Oldest session", UpdatedAt: 10},
+		},
+	}
+
+	sess, err := ResolveSession(t.Context(), ws, "", true, "non-interactive")
+	require.NoError(t, err)
+	require.Equal(t, "most-recent", sess.ID)
+}
+
 func TestResolveSession_Last_NoSessions(t *testing.T) {
 	t.Parallel()
 	ws := &fakeSessionWorkspace{}

@@ -232,40 +232,39 @@ func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string
 }
 
 func (s *service) Delete(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	qtx := s.q.WithTx(tx)
-
-	dbSession, err := qtx.GetSessionByID(ctx, id)
+	var dbSession db.Session
+	var treeIDs []string
+	err := db.InTx(ctx, s.db, func(qtx *db.Queries) error {
+		var err error
+		dbSession, err = qtx.GetSessionByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		// parent_session_id carries no foreign key, so nothing cascades
+		// from a session to its sub-sessions. Adding one would mean
+		// rebuilding the sessions table, and renaming it away with
+		// foreign keys on rewrites the references in messages, files
+		// and read_files to point at the renamed copy; the usual
+		// PRAGMA foreign_keys = OFF around that is silently ignored
+		// inside the transaction goose runs a migration in. So the
+		// subtree is deleted here instead: without it every agent-tool
+		// and title session under this one is left orphaned, invisible
+		// to the UI and reachable only by `sennit gc`.
+		treeIDs, err = qtx.ListSessionTreeIDs(ctx, dbSession.ID)
+		if err != nil {
+			return fmt.Errorf("listing session tree: %w", err)
+		}
+		for _, treeID := range treeIDs {
+			// Messages, files and read_files go with each row through
+			// their own ON DELETE CASCADE.
+			if err = qtx.DeleteSession(ctx, treeID); err != nil {
+				return fmt.Errorf("deleting session %s: %w", treeID, err)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	// parent_session_id carries no foreign key, so nothing cascades from
-	// a session to its sub-sessions. Adding one would mean rebuilding
-	// the sessions table, and renaming it away with foreign keys on
-	// rewrites the references in messages, files and read_files to point
-	// at the renamed copy; the usual PRAGMA foreign_keys = OFF around
-	// that is silently ignored inside the transaction goose runs a
-	// migration in. So the subtree is deleted here instead: without it
-	// every agent-tool and title session under this one is left
-	// orphaned, invisible to the UI and reachable only by `sennit gc`.
-	treeIDs, err := qtx.ListSessionTreeIDs(ctx, dbSession.ID)
-	if err != nil {
-		return fmt.Errorf("listing session tree: %w", err)
-	}
-	for _, treeID := range treeIDs {
-		// Messages, files and read_files go with each row through their
-		// own ON DELETE CASCADE.
-		if err = qtx.DeleteSession(ctx, treeID); err != nil {
-			return fmt.Errorf("deleting session %s: %w", treeID, err)
-		}
-	}
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	session := s.fromDBItem(dbSession)

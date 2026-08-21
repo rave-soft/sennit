@@ -79,8 +79,9 @@ func (m *UI) openMCPAuthDialog() tea.Cmd {
 // checks whether any OAuth MCPs need authentication. This runs as a
 // Bubble Tea command so it doesn't block the UI.
 func (m *UI) checkPendingMCPAuth() tea.Cmd {
+	parentCtx := m.com.Context()
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 		defer cancel()
 		if err := m.com.Workspace.WaitForMCPInit(ctx); err != nil {
 			return nil

@@ -12,6 +12,113 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
+// settingsOps holds the generation counters and in-flight flags for the
+// settings that apply asynchronously (compact mode, notifications, yolo,
+// model, transparency, theme, permission responses). A generation is
+// bumped each time an operation starts, and the result handler discards
+// any reply whose generation doesn't match the latest one, so a stale
+// response from a superseded operation can't clobber a newer one.
+type settingsOps struct {
+	compactModeGeneration    uint64
+	notificationGeneration   uint64
+	yoloGeneration           uint64
+	modelOperationGeneration uint64
+	modelOperationLoading    bool
+	notificationLoading      bool
+	transparentLoading       bool
+	transparentGeneration    uint64
+	themeGeneration          uint64
+	// themeLive is the palette ID currently on screen. It can differ from
+	// the configured one while the theme picker previews a highlighted
+	// palette, which is exactly why the live value is tracked separately
+	// instead of being read back from config.
+	themeLive string
+	// themePreviewFrom is the palette to restore when a preview is
+	// abandoned (the picker closed without a choice). Empty means no
+	// preview is in progress.
+	themePreviewFrom     string
+	compactModeLoading   bool
+	yoloLoading          bool
+	permissionLoading    bool
+	permissionGeneration uint64
+	permissionID         string
+}
+
+// transparentToggledMsg carries the result of a transparency-toggle config mutation.
+type transparentToggledMsg struct {
+	Err        error
+	Enabled    bool
+	generation uint64
+}
+
+// themeSetMsg carries the result of persisting a theme selection. The
+// palette itself is swapped synchronously when the user picks it, so this
+// message only reports whether the choice survived to disk; Previous is the
+// palette to fall back to if it did not.
+type themeSetMsg struct {
+	Err        error
+	ID         string
+	Previous   string
+	generation uint64
+}
+
+// compactModeToggledMsg carries the result of a compact-mode config mutation.
+type compactModeToggledMsg struct {
+	Err        error
+	Enabled    bool
+	generation uint64
+}
+
+// providerConfiguredResult carries the outcome of the async provider-config
+// flow (UpdatePreferredModel + init) dispatched by ActionProviderConfigured.
+type providerConfiguredResult struct {
+	Err        error
+	Model      config.SelectedModel
+	Onboarding bool
+	generation uint64
+}
+
+// modelSelectResult carries the outcome of the async model-select flow
+// dispatched by handleSelectModel.
+type modelSelectResult struct {
+	Err        error
+	Onboarding bool
+	Model      config.SelectedModel
+	generation uint64
+}
+
+type agentModelInitializedMsg struct {
+	Err        error
+	Onboarding bool
+	Model      config.SelectedModel
+	generation uint64
+}
+
+type modelSettingUpdatedMsg struct {
+	Err        error
+	Info       string
+	generation uint64
+}
+
+// notificationStyleSetMsg carries the result of a notification-style config mutation.
+type notificationStyleSetMsg struct {
+	Err        error
+	Style      string
+	generation uint64
+}
+
+type yoloToggledMsg struct {
+	Err        error
+	Enabled    bool
+	generation uint64
+}
+
+type permissionResponseMsg struct {
+	Accepted   bool
+	Permission string
+	generation uint64
+}
+
 // updateSettings handles the dialog-result and settings branches of
 // UI.Update: provider/model selection, theme, transparency, compact mode,
 // notification style, permission responses, yolo toggling, notification

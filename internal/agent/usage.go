@@ -11,7 +11,6 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/openrouter"
-	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 )
@@ -69,22 +68,23 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 }
 
 func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, model Model, systemPromptPrefix string, active *activeRuntime) (retErr error) {
-	sessMu := a.dispatch.sessionMu(sessionID)
-	sessMu.Lock()
-	if a.IsSessionBusy(sessionID) {
-		sessMu.Unlock()
+	s, release := a.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	if s.active != nil {
+		s.mu.Unlock()
 		return ErrSessionBusy
 	}
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
-	a.dispatch.activeRequests.Set(sessionID, ac)
-	sessMu.Unlock()
+	s.active = ac
+	s.mu.Unlock()
 
 	defer func() {
-		csync.CompareAndDelete(a.dispatch.activeRequests, sessionID, ac)
+		a.clearActiveIfMatch(sessionID, ac)
 		cancel()
 
-		_, next, canceledRunIDDrops := a.dispatch.drainNext(sessionID)
+		_, next, canceledRunIDDrops := a.drainNext(sessionID)
 		a.publishCanceledQueueDrops(canceledRunIDDrops)
 		if next == nil {
 			return

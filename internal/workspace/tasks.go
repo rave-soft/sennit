@@ -11,12 +11,10 @@ import (
 // -- AppWorkspace: Tasks --
 
 // taskManager returns this workspace's *thread.TaskManager and whether one
-// is attached. app.TaskManager() returns `any` for the same layering
-// reason as threadManager (see its doc comment): internal/app cannot
-// import internal/thread directly.
+// is attached.
 func (w *AppWorkspace) taskManager() (*thread.TaskManager, bool) {
-	mgr, ok := w.app.TaskManager().(*thread.TaskManager)
-	return mgr, ok && mgr != nil
+	mgr := w.app.TaskManager()
+	return mgr, mgr != nil
 }
 
 func (w *AppWorkspace) SupportsTasks() bool {

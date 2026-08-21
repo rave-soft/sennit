@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -87,6 +88,7 @@ func setupAgentWithVCR(t *testing.T, cfg testVCRConfig, cassetteBasename, worksp
 	} else {
 		env = testEnvAt(t, workspaceDir)
 	}
+	initGitWorktree(t, env.workingDir)
 	if scenario != nil {
 		_, server := NewFixtureHTTPServer(FixtureConfig{Scenario: scenario, DefaultModel: cfg.Model})
 		fixtureResourceURLs.Store(env.workingDir, server.URL)
@@ -103,6 +105,19 @@ func setupAgentWithVCR(t *testing.T, cfg testVCRConfig, cassetteBasename, worksp
 	agent, err := coderAgent(recorder.GetDefaultClient(), env, model)
 	require.NoError(t, err)
 	return agent, env
+}
+
+// initGitWorktree makes dir a git worktree so config's isInsideWorktree(dir)
+// sees the same "real project" shape as a production workspace and leaves
+// the ls-tool file-walk limits unclamped, matching what the recorded VCR
+// cassettes expect. Skips the test if git is not on PATH.
+func initGitWorktree(t *testing.T, dir string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found on PATH")
+	}
+	_, err := exec.CommandContext(t.Context(), "git", "-C", dir, "init").CombinedOutput()
+	require.NoError(t, err)
 }
 
 func createSimpleGoProject(t *testing.T, dir string) {

@@ -1,8 +1,6 @@
 package model
 
 import (
-	"time"
-
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
@@ -89,9 +87,10 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// message exists, so the memoized model only needs re-probing.
 			cmds = append(cmds, agentModelChangedCmd)
 		}
-		m.wsCache.promptQueue = 0
-		m.wsCache.promptQueueItems = nil
-		m.wsCache.promptQueueCheckedAt = time.Time{}
+		// invalidatePromptQueue above already zeroed the cache's timestamp
+		// (marking it stale) and bumped its generation; only the displayed
+		// items belong to the departed session and need clearing too.
+		m.wsCache.promptQueueCache.value = nil
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

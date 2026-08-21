@@ -103,6 +103,17 @@ func (m *APIKeyInput) ID() string {
 // HandleMsg implements [Dialog].
 func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case ActionAPIKeySaved:
+		if msg.Err != nil {
+			return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", msg.Err))}
+		}
+		if m.model == nil {
+			return ActionProviderConfigured{ProviderID: string(m.provider.ID)}
+		}
+		return ActionSelectModel{
+			Provider: m.provider,
+			Model:    *m.model,
+		}
 	case ActionChangeAPIKeyState:
 		m.state = msg.State
 		switch m.state {
@@ -126,7 +137,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, m.keyMap.Close):
 			switch m.state {
 			case APIKeyInputStateVerified:
-				return m.saveKeyAndContinue()
+				return ActionCmd{m.saveAPIKeyCmd()}
 			default:
 				return ActionClose{}
 			}
@@ -135,7 +146,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 			case APIKeyInputStateInitial, APIKeyInputStateError:
 				return ActionChangeAPIKeyState{State: APIKeyInputStateVerifying}
 			case APIKeyInputStateVerified:
-				return m.saveKeyAndContinue()
+				return ActionCmd{m.saveAPIKeyCmd()}
 			}
 		default:
 			var cmd tea.Cmd
@@ -306,18 +317,14 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 	return ActionChangeAPIKeyState{APIKeyInputStateError}
 }
 
-func (m *APIKeyInput) saveKeyAndContinue() Action {
-	err := m.com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(m.provider.ID), m.input.Value())
-	if err != nil {
-		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
-	}
-
-	if m.model == nil {
-		return ActionProviderConfigured{ProviderID: string(m.provider.ID)}
-	}
-
-	return ActionSelectModel{
-		Provider: m.provider,
-		Model:    *m.model,
+// saveAPIKeyCmd persists the entered key off the Update goroutine and
+// reports the outcome as [ActionAPIKeySaved], which HandleMsg turns into
+// the actual follow-up action (see that case above).
+func (m *APIKeyInput) saveAPIKeyCmd() tea.Cmd {
+	ws := m.com.Workspace
+	providerID := string(m.provider.ID)
+	apiKey := m.input.Value()
+	return func() tea.Msg {
+		return ActionAPIKeySaved{Err: ws.SetProviderAPIKey(config.ScopeGlobal, providerID, apiKey)}
 	}
 }

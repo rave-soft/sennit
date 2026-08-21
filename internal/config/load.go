@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config/migrate"
 	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/shellconfig"
 	"github.com/tidwall/gjson"
@@ -29,98 +30,44 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 
-	configPaths := lookupConfigs(workingDir)
-
-	cfg, loadedPaths, err := loadFromConfigPaths(context.Background(), configPaths)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
-	}
-
-	cfg.setDefaults(workingDir, dataDir)
-
 	store := &ConfigStore{
-		config:         cfg,
-		workingDir:     workingDir,
-		globalDataPath: GlobalConfigData(),
-		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
-		loadedPaths:    loadedPaths,
+		workingDir:                 workingDir,
+		globalDataPath:             GlobalConfigData(),
+		externalChangePollInterval: externalChangePollInterval,
 	}
 
-	if debug {
-		cfg.Options.Debug = true
-	}
-
-	// Load workspace config last so it has highest priority.
-	if err := applyWorkspaceConfig(cfg, workingDir, &store.loadedPaths); err != nil {
+	built, err := buildConfig(store, buildConfigOptions{
+		ctx:               context.Background(),
+		workingDir:        workingDir,
+		dataDir:           dataDir,
+		debug:             debug,
+		migrateModelCache: true,
+		persistFallback:   true,
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	// Validate hooks after all config merging is complete so workspace
-	// hooks also get their matcher regexes compiled.
-	if err := cfg.ValidateHooks(); err != nil {
-		return nil, fmt.Errorf("invalid hook configuration: %w", err)
-	}
+	// The store is not published anywhere until Load returns, so nothing
+	// can race these field assignments; writeMu is taken further down only
+	// because updateLocked/SetupAgents document it as a precondition.
+	store.config = built.cfg
+	store.workspacePath = filepath.Join(built.cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
+	store.loadedPaths = built.loadedPaths
+	store.knownProviders = built.providers
+	store.resolver = built.resolver
 
-	applyEnvironmentDefaults(cfg)
-
-	// Load known providers, this loads the config from catwalk. A failed
-	// refresh still yields the cached or embedded catalog, so only an empty
-	// list is fatal: starting up without providers is worse than starting
-	// up with slightly stale ones.
-	providers, err := Providers(cfg)
-	if err != nil {
-		if len(providers) == 0 {
-			return nil, err
-		}
-		slog.Warn("Continuing with the previously known providers", "error", err)
-	}
-	store.knownProviders = providers
-
-	// One-time migration: move any auto-discovered models still sitting in
-	// the data-dir config file (from before the model-discovery cache
-	// existed) into the cache, so the JSON config stops carrying arrays that
-	// can run into the thousands of entries for providers with large
-	// catalogs. Needs the known-provider list to tell a catalog provider's
-	// legitimate override apart from a custom provider's discovery dump.
-	migrateBloatedModelCache(store.globalDataPath, providers)
-
-	env := env.New()
-	// Configure providers
-	valueResolver := NewShellVariableResolver(env)
-	store.resolver = valueResolver
-
-	// Apply top-level env vars before configuring providers so variables
-	// like AWS_PROFILE are visible to the AWS SDK credential chain.
-	cfg.applyEnv(valueResolver)
-
-	// configureProviders may run model-discovery HTTP calls for custom
-	// providers (see discoverCustomProviderModels). It runs here, without
-	// writeMu held, so the store is never seen mid-lock by anything for the
-	// full duration of a slow discovery round trip. The store is not
-	// published anywhere until Load returns, so nothing can race this
-	// section regardless; writeMu is taken further down only because
-	// updateLocked/SetupAgents document it as a precondition.
-	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
-		return nil, fmt.Errorf("failed to configure providers: %w", err)
-	}
-
-	if !cfg.IsConfigured() {
+	if !built.configured {
 		slog.Warn("No providers configured")
 		// Capture the staleness snapshot even on this early return.
 		// Without it, trackedConfigPaths stays empty and a background
 		// watcher (WatchForExternalChanges) would treat every discovered
 		// config path as "new" on every poll, reloading in a busy loop
 		// until a provider gets configured.
-		store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
+		store.CaptureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...))
 		store.captureAgentFileSnapshot()
 		return store, nil
 	}
-
-	resolved, err := resolveSelectedModel(cfg, store.knownProviders)
-	if err != nil {
-		return nil, fmt.Errorf("failed to configure selected models: %w", err)
-	}
-	cfg.Model = resolved.Model
 
 	store.writeMu.Lock()
 	defer store.writeMu.Unlock()
@@ -137,12 +84,12 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// Pinning at startup rather than at first selection keeps the other
 	// half of the contract working: the file is read fresh here, so a new
 	// instance still starts on whatever default was chosen most recently.
-	store.pinPreferredModelLocked(resolved.Model)
+	store.pinPreferredModelLocked(built.resolved.Model)
 
 	// Persist any fallback correction.
-	if resolved.Fallback {
+	if built.persistFallback {
 		if err := store.updateLocked(ScopeGlobal, func(c *Config) map[string]any {
-			return store.updatePreferredModelFields(c, resolved.Model)
+			return store.updatePreferredModelFields(c, built.resolved.Model)
 		}); err != nil {
 			return nil, fmt.Errorf("failed to update preferred model: %w", err)
 		}
@@ -152,7 +99,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// Capture initial staleness snapshot. Track every discovered config path,
 	// not just the ones that loaded, so a config file created after startup
 	// (e.g. a sennitrc added mid-session) is detected as a change.
-	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
+	store.CaptureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...))
 	store.captureAgentFileSnapshot()
 
 	return store, nil
@@ -207,7 +154,29 @@ func mustMarshalConfig(cfg *Config) []byte {
 	return data
 }
 
+// processEnvMu guards every os.Setenv call in this package. os.Setenv
+// mutates state shared by the whole process (any concurrent os.Getenv
+// anywhere races it), and Sennit runs one config store per workspace, so
+// PushPopEnvOverrides' push/restore window and applyEnv's writes must never
+// interleave across workspaces loading or reloading concurrently. The real
+// fix is for config to stop mutating the process environment at all and
+// thread values through explicitly instead; this mutex is the documented
+// minimum until that happens.
+var processEnvMu sync.Mutex
+
+// PushPopEnvOverrides copies every SENNIT_-prefixed process environment
+// variable into its bare name (SENNIT_FOO=x sets FOO=x), mutating the
+// process-wide environment for every goroutine until the returned restore
+// function is called. It takes processEnvMu before its first os.Setenv and
+// the returned function releases it after putting the previous values back,
+// so the caller MUST always call the returned function — its only caller
+// uses defer restore() for exactly this reason — or every subsequent config
+// load/reload deadlocks waiting on the lock. The call is not reentrant:
+// calling PushPopEnvOverrides again, or calling applyEnv, before the first
+// restore() returns will also deadlock.
 func PushPopEnvOverrides() func() {
+	processEnvMu.Lock()
+
 	var found []string
 	for _, ev := range os.Environ() {
 		if strings.HasPrefix(ev, brand.EnvPrefix) {
@@ -230,6 +199,7 @@ func PushPopEnvOverrides() func() {
 	}
 
 	restore := func() {
+		defer processEnvMu.Unlock()
 		for k, v := range backups {
 			if err := os.Setenv(k, v); err != nil {
 				slog.Warn("Failed to restore env var", "key", k, "error", err)
@@ -239,10 +209,18 @@ func PushPopEnvOverrides() func() {
 	return restore
 }
 
-// applyEnv sets top-level env vars from the config. Keys are sorted for
-// deterministic ordering so that vars referencing other vars via the
-// value resolver produce consistent results.
+// applyEnv sets top-level env vars from the config, mutating the
+// process-wide environment (every os.Setenv here races any concurrent
+// os.Getenv anywhere in the process). It takes processEnvMu around its
+// writes and releases it before returning, so it must not be called while
+// PushPopEnvOverrides' restore function is still outstanding — see
+// processEnvMu's doc comment. Keys are sorted for deterministic ordering so
+// that vars referencing other vars via the value resolver produce
+// consistent results.
 func (c *Config) applyEnv(resolver VariableResolver) {
+	processEnvMu.Lock()
+	defer processEnvMu.Unlock()
+
 	keys := make([]string, 0, len(c.Env))
 	for k := range c.Env {
 		keys = append(keys, k)
@@ -388,7 +366,7 @@ func addTopLevelKeys(m map[string]map[string]bool, dir string, data []byte) {
 // package; this wrapper wires in config's model-cache persistence
 // (saveCachedModelsWithError) and atomic file writer.
 func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Provider) {
-	migrate.BloatedModelCache(globalDataPath, knownProviders, saveCachedModelsWithError, atomicWriteFile)
+	migrate.BloatedModelCache(globalDataPath, knownProviders, saveCachedModelsWithError, fsext.AtomicWriteFile)
 }
 
 // loadFromBytes is the single choke point every JSON config layer passes
@@ -474,7 +452,7 @@ func hasAWSCredentials(env env.Env) bool {
 // config/migrate package; this wrapper wires in config's global path
 // resolution and atomic file writer.
 func migrateDisableNotifications() {
-	migrate.DisableNotifications(GlobalConfig(), GlobalConfigData(), atomicWriteFile)
+	migrate.DisableNotifications(GlobalConfig(), GlobalConfigData(), fsext.AtomicWriteFile)
 }
 
 func assignIfNil[T any](ptr **T, val T) {
@@ -484,46 +462,3 @@ func assignIfNil[T any](ptr **T, val T) {
 }
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
-
-// normalizeHookEvent maps user-provided event names to their canonical
-// form. Matching is case-insensitive and accepts snake_case variants
-// (e.g. "pre_tool_use" → "PreToolUse").
-func normalizeHookEvent(name string) string {
-	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
-	case "pretooluse":
-		return "PreToolUse"
-	default:
-		return name
-	}
-}
-
-// ValidateHooks normalizes event names and checks that every configured
-// hook has a command and a syntactically valid matcher regex. Matcher
-// compilation used for matching is owned by hooks.Runner; this function
-// only validates up front so the user sees config errors at load time
-// rather than on the first tool call.
-func (c *Config) ValidateHooks() error {
-	// Normalize event name keys.
-	for event, eventHooks := range c.Hooks {
-		canonical := normalizeHookEvent(event)
-		if canonical != event {
-			c.Hooks[canonical] = append(c.Hooks[canonical], eventHooks...)
-			delete(c.Hooks, event)
-		}
-	}
-
-	for event, eventHooks := range c.Hooks {
-		for i, h := range eventHooks {
-			if h.Command == "" {
-				return fmt.Errorf("hook %s[%d]: command is required", event, i)
-			}
-			if h.Matcher == "" {
-				continue
-			}
-			if _, err := regexp.Compile(h.Matcher); err != nil {
-				return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
-			}
-		}
-	}
-	return nil
-}

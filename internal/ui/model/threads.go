@@ -35,6 +35,7 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/list"
+	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
@@ -171,7 +172,7 @@ func (k threadsKeyMap) ShortHelp() []key.Binding {
 type threadsDashboard struct {
 	com    *common.Common
 	list   *list.List
-	cache  threadsCacheState
+	cache  *threadListCache
 	keyMap threadsKeyMap
 
 	filter threadsFilter
@@ -196,14 +197,18 @@ type threadsDashboard struct {
 	styleRev uint64
 }
 
-// newThreadsDashboard creates a new threads dashboard.
-func newThreadsDashboard(com *common.Common) *threadsDashboard {
+// newThreadsDashboard creates a new threads dashboard over the given shared
+// thread list cache (threads_cache.go) — the same instance the main UI's
+// dock and header badge read, so all three stay in sync off a single
+// ListThreads round trip.
+func newThreadsDashboard(com *common.Common, cache *threadListCache) *threadsDashboard {
 	l := list.NewList()
 	l.RegisterRenderCallback(list.FocusedRenderCallback(l))
 	l.Focus()
 	return &threadsDashboard{
 		com:     com,
 		list:    l,
+		cache:   cache,
 		keyMap:  defaultThreadsKeyMap(),
 		hovered: -1,
 	}
@@ -276,7 +281,7 @@ func (m *threadsDashboard) SetActive(active bool) tea.Cmd {
 	if m.cache.cache.fresh(threadsCacheTTL) {
 		return nil
 	}
-	return m.cache.dispatchThreadsRefresh(m.com)
+	return m.cache.dispatchRefresh(m.com)
 }
 
 // Draw renders the administration screen top to bottom: title bar with a
@@ -512,7 +517,7 @@ func shortHelpText(bindings []key.Binding, width int) string {
 // ApplyThreadsLoaded writes through an off-thread thread list fetch and
 // rebuilds the list items to reflect it.
 func (m *threadsDashboard) ApplyThreadsLoaded(msg threadsLoadedMsg) []tea.Cmd {
-	cmds := m.cache.applyThreadsLoaded(m.com, msg)
+	cmds, _ := m.cache.applyLoaded(m.com, msg)
 	m.rebuildItems()
 	return cmds
 }
@@ -522,12 +527,12 @@ func (m *threadsDashboard) ApplyThreadsLoaded(msg threadsLoadedMsg) []tea.Cmd {
 // always invalidates the TTL — re-arms a refresh immediately while the
 // dashboard is active so the optimistic update is reconciled promptly.
 func (m *threadsDashboard) ApplyThreadEvent(evt pubsub.Event[proto.Thread]) tea.Cmd {
-	m.cache.applyThreadEvent(evt)
+	m.cache.applyEvent(evt)
 	m.rebuildItems()
 	if !m.active {
 		return nil
 	}
-	return m.cache.dispatchThreadsRefresh(m.com)
+	return m.cache.dispatchRefresh(m.com)
 }
 
 // Refresh dispatches an off-thread thread list re-fetch, bypassing the TTL.
@@ -535,14 +540,14 @@ func (m *threadsDashboard) ApplyThreadEvent(evt pubsub.Event[proto.Thread]) tea.
 // that changes thread state out of band, without reaching into the
 // unexported cache field itself.
 func (m *threadsDashboard) Refresh() tea.Cmd {
-	return m.cache.dispatchThreadsRefresh(m.com)
+	return m.cache.dispatchRefresh(m.com)
 }
 
 // Tick is the TTL backstop, mirroring UI.staleWorkspaceRefreshCmds: called
 // at the tail of Update, it schedules an off-thread re-probe if the cache
 // has gone stale while the dashboard is active.
 func (m *threadsDashboard) Tick(active bool, com *common.Common) tea.Cmd {
-	return m.cache.staleThreadsRefreshCmd(com, active)
+	return m.cache.staleRefreshCmd(com, active)
 }
 
 // rebuildItems applies the active filter to the cache and converts the
@@ -694,7 +699,7 @@ func (m *threadsDashboard) runAction(action threadAction) tea.Cmd {
 		id, name := sel.ID, sel.Name
 		return func() tea.Msg { return confirmRemoveThreadMsg{id: id, name: name} }
 	case actionRefresh:
-		return m.cache.dispatchThreadsRefresh(m.com)
+		return m.cache.dispatchRefresh(m.com)
 	case actionBack:
 		return func() tea.Msg { return leaveDashboardMsg{} }
 	default:
@@ -828,18 +833,18 @@ func (it *threadItem) Render(width int) string {
 	c := it.columns
 
 	var b strings.Builder
-	b.WriteString(padTo(s.Name, c.name))
+	b.WriteString(presentation.PadTo(s.Name, c.name))
 	b.WriteString("  ")
-	statusCell := padTo(strings.ToUpper(s.Status), c.status)
+	statusCell := presentation.PadTo(strings.ToUpper(s.Status), c.status)
 	b.WriteString(threadStatusStyle(it.sty, s.Status).Render(statusCell))
 	if c.branch > 0 {
-		b.WriteString("  " + padTo(s.Branch, c.branch))
+		b.WriteString("  " + presentation.PadTo(s.Branch, c.branch))
 	}
 	if c.updated > 0 {
-		b.WriteString("  " + padTo(humanize.Time(time.Unix(s.UpdatedAt, 0)), c.updated))
+		b.WriteString("  " + presentation.PadTo(humanize.Time(time.Unix(s.UpdatedAt, 0)), c.updated))
 	}
 	if c.goal > 0 {
-		b.WriteString("  " + padTo(s.Goal, c.goal))
+		b.WriteString("  " + presentation.PadTo(s.Goal, c.goal))
 	}
 
 	return style.Render(ansi.Truncate(b.String(), lineWidth, "…"))

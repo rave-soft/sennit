@@ -13,13 +13,13 @@ package herdr
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/rave-soft/sennit/internal/brand"
@@ -118,7 +118,7 @@ func newFromEnv() *Client {
 	// A test binary inherits the launching shell's HERDR_* env, so
 	// without this it would attach to the developer's live pane and
 	// release its agent on teardown. Skip herdr entirely under test.
-	if flag.Lookup("test.v") != nil {
+	if testing.Testing() {
 		slog.Debug("Herdr integration disabled: running under go test")
 		return nil
 	}

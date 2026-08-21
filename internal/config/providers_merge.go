@@ -61,7 +61,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	applyPendingDiskActions(store, actions)
 
 	if c.Providers.Len() == 0 && c.Options.DisableDefaultProviders {
-		return fmt.Errorf("default providers are disabled and there are no custom providers are configured")
+		return fmt.Errorf("default providers are disabled and no custom providers are configured")
 	}
 
 	return nil
@@ -101,28 +101,16 @@ func applyPendingDiskActions(store *ConfigStore, actions []pendingDiskAction) {
 			continue
 		}
 
-		// Sort keys for deterministic output regardless of map iteration
-		// order, same as writeConfigFields. This is a deliberate inline
-		// duplicate of that logic rather than a call to it (or to
-		// SetConfigFields): both of those trigger autoReload, which
-		// would recursively reload mid-load.
-		keys := make([]string, 0, len(action.fields))
-		for k := range action.fields {
-			keys = append(keys, k)
-		}
-		slices.Sort(keys)
-
-		err := store.atomicWrite(action.scope, func(data []byte) ([]byte, error) {
-			v := string(data)
-			for _, key := range keys {
-				var sErr error
-				if v, sErr = sjson.Set(v, key, action.fields[key]); sErr != nil {
-					return nil, fmt.Errorf("failed to set config field %s: %w", key, sErr)
-				}
+		// writeConfigFields is the same no-reload disk write SetConfigFields
+		// uses, minus the autoReload that follows it there — calling it
+		// directly (rather than SetConfigFields) is what avoids recursively
+		// reloading mid-load; writeConfigFields itself never reloads.
+		if err := store.writeConfigFields(action.scope, action.fields); err != nil {
+			keys := make([]string, 0, len(action.fields))
+			for k := range action.fields {
+				keys = append(keys, k)
 			}
-			return []byte(v), nil
-		})
-		if err != nil {
+			slices.Sort(keys)
 			slog.Warn("Failed to persist config fields", "keys", keys, "error", err)
 		}
 	}
@@ -138,6 +126,11 @@ func applyPendingDiskActions(store *ConfigStore, actions []pendingDiskAction) {
 // This is pure in-memory work plus resolver calls (which may run shell
 // commands for $(...) substitutions, but never network I/O) — no HTTP,
 // unlike discoverCustomProviderModels.
+//
+// Per provider, this runs three passes, each factored out below so it reads
+// and tests on its own: mergeProviderOverride (user overrides onto the
+// catalog entry), applyProviderVendorSetup (OAuth wiring), and
+// applyProviderCredentials (the checks that decide whether it loads).
 func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) (map[string]bool, []pendingDiskAction, error) {
 	knownProviderNames := make(map[string]bool)
 	var actions []pendingDiskAction
@@ -145,42 +138,7 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
-		// if the user configured a known provider we need to allow it to override a couple of parameters
-		if configExists {
-			if config.BaseURL != "" {
-				p.APIEndpoint = config.BaseURL
-			}
-			if config.APIKey != "" {
-				p.APIKey = config.APIKey
-			}
-			if len(config.Models) > 0 {
-				models := []catwalk.Model{}
-				seen := make(map[string]bool)
-
-				for _, model := range config.Models {
-					if seen[model.ID] {
-						continue
-					}
-					seen[model.ID] = true
-					if model.Name == "" {
-						model.Name = model.ID
-					}
-					models = append(models, model)
-				}
-				for _, model := range p.Models {
-					if seen[model.ID] {
-						continue
-					}
-					seen[model.ID] = true
-					if model.Name == "" {
-						model.Name = model.ID
-					}
-					models = append(models, model)
-				}
-
-				p.Models = models
-			}
-		}
+		p = mergeProviderOverride(p, config, configExists)
 
 		headers := map[string]string{}
 		if len(p.DefaultHeaders) > 0 {
@@ -189,22 +147,10 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 		if len(config.ExtraHeaders) > 0 {
 			maps.Copy(headers, config.ExtraHeaders)
 		}
-		// Provider headers use the same error contract as MCP headers:
-		// a failing $(...) aborts the provider load with a clear
-		// message, and a header that resolves to the empty string
-		// (unset bare $VAR under lenient nounset, $(echo), or literal
-		// "") is dropped from the outgoing request.
-		for k, v := range headers {
-			resolved, err := resolver.ResolveValue(v)
-			if err != nil {
-				return nil, nil, fmt.Errorf("resolving provider %s header %q: %w", p.ID, k, err)
-			}
-			if resolved == "" {
-				delete(headers, k)
-				continue
-			}
-			headers[k] = resolved
+		if err := resolveProviderHeaders(headers, resolver, string(p.ID)); err != nil {
+			return nil, nil, err
 		}
+
 		// Start from user config so all user fields survive without
 		// explicit copying. Overlay catwalk identity/endpoint fields
 		// (already merged with user overrides above).
@@ -218,120 +164,155 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 		prepared.Models = p.Models
 		prepared.ExtraHeaders = headers
 		// The proxy URL only ever comes from the user's override (the
-		// catwalk catalog has no notion of a proxy), and it's purely
-		// optional: unlike api_key, a failed or empty resolution must
-		// not block the provider from loading, so we just warn and
-		// leave it unset.
-		if config.ProxyURL != "" {
-			resolvedProxy, err := resolver.ResolveValue(config.ProxyURL)
-			if err != nil || resolvedProxy == "" {
-				slog.Warn("Ignoring provider proxy_url due to resolution failure", "provider", p.ID, "error", err)
-				// prepared started as a copy of the user config, so the
-				// unresolved template is still in the field: clear it or
-				// it reaches the HTTP client builder verbatim and fails
-				// the whole provider instead of being ignored.
-				prepared.ProxyURL = ""
-			} else {
-				prepared.ProxyURL = resolvedProxy
-			}
-		}
+		// catwalk catalog has no notion of a proxy). prepared started as a
+		// copy of the user config, so an unresolved/failed template must be
+		// explicitly cleared here or it reaches the HTTP client builder
+		// verbatim and fails the whole provider instead of being ignored.
+		prepared.ProxyURL = resolveOptionalProxy(config.ProxyURL, resolver, string(p.ID))
 		if prepared.ExtraParams == nil {
 			prepared.ExtraParams = make(map[string]string)
 		}
 
-		switch {
-		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
-			// Claude Code subscription is not supported anymore. Remove to
-			// show onboarding. The disk deletion is deferred to the caller
-			// (applyPendingDiskActions) rather than performed here; the
-			// in-memory state is kept consistent by the Providers.Del call
-			// below, and any concurrent reload that races with the deferred
-			// write will also see the removal because it re-reads from disk.
-			actions = append(actions, pendingDiskAction{scope: ScopeGlobal, key: "providers.anthropic"})
-			c.Providers.Del(string(p.ID))
+		prepared, dropped, diskAction := c.applyProviderVendorSetup(prepared, p, config)
+		if diskAction != nil {
+			actions = append(actions, *diskAction)
+		}
+		if dropped {
 			continue
-		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
-			prepared.SetupGitHubCopilot()
-		case string(p.ID) == codex.ProviderID:
-			prepared.SetupCodex()
 		}
 
-		switch p.ID {
-		// Handle specific providers that require additional configuration
-		case catwalk.InferenceProviderVertexAI:
-			var (
-				project  = env.Get("VERTEXAI_PROJECT")
-				location = env.Get("VERTEXAI_LOCATION")
-			)
-			if project == "" || location == "" {
-				if configExists {
-					slog.Warn("Skipping Vertex AI provider due to missing credentials")
-					c.addProblem(Problem{
-						Severity: SeverityWarn,
-						Area:     AreaProvider,
-						Subject:  string(p.ID),
-						Message:  fmt.Sprintf("provider %s dropped: VERTEXAI_PROJECT/VERTEXAI_LOCATION not set", p.ID),
-						Hint:     "static check only; set both env vars and reload",
-					})
-					c.Providers.Del(string(p.ID))
-				}
-				continue
-			}
-			prepared.ExtraParams["project"] = project
-			prepared.ExtraParams["location"] = location
-		case catwalk.InferenceProviderAzure:
-			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
-			if err != nil || endpoint == "" {
-				if configExists {
-					slog.Warn("Skipping Azure provider due to missing API endpoint", "provider", p.ID, "error", err)
-					c.addProblem(Problem{
-						Severity: SeverityWarn,
-						Area:     AreaProvider,
-						Subject:  string(p.ID),
-						Message:  fmt.Sprintf("provider %s dropped: missing API endpoint", p.ID),
-						Hint:     "static check only; set base_url and reload",
-					})
-					c.Providers.Del(string(p.ID))
-				}
-				continue
-			}
-			prepared.BaseURL = endpoint
-			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
-		case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
-			if p.APIKey == "" && !hasAWSCredentials(env) {
-				if configExists {
-					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
-					c.addProblem(Problem{
-						Severity: SeverityWarn,
-						Area:     AreaProvider,
-						Subject:  string(p.ID),
-						Message:  fmt.Sprintf("provider %s dropped: no api_key and no AWS credentials found", p.ID),
-						Hint:     "static check only; set api_key or AWS credentials and reload",
-					})
-					c.Providers.Del(string(p.ID))
-				}
-				continue
-			}
-		default:
-			// if the provider api or endpoint are missing we skip them
-			v, err := resolver.ResolveValue(p.APIKey)
-			if v == "" || err != nil {
-				if configExists {
-					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)
-					c.addProblem(Problem{
-						Severity: SeverityWarn,
-						Area:     AreaProvider,
-						Subject:  string(p.ID),
-						Message:  fmt.Sprintf("provider %s dropped: missing api_key", p.ID),
-						Hint:     "static check only; set api_key and reload",
-					})
-					c.Providers.Del(string(p.ID))
-				}
-				continue
-			}
+		prepared, ok := c.applyProviderCredentials(env, resolver, p, configExists, prepared)
+		if !ok {
+			continue
 		}
+
 		c.Providers.Set(string(p.ID), prepared)
 	}
 
 	return knownProviderNames, actions, nil
+}
+
+// mergeProviderOverride applies the user's config overrides (base_url,
+// api_key, models) onto a catalog provider entry. Pure transform, no
+// resolver/disk/log side effects, so it can be tested with plain structs.
+func mergeProviderOverride(p catwalk.Provider, config ProviderConfig, configExists bool) catwalk.Provider {
+	if !configExists {
+		return p
+	}
+	if config.BaseURL != "" {
+		p.APIEndpoint = config.BaseURL
+	}
+	if config.APIKey != "" {
+		p.APIKey = config.APIKey
+	}
+	if len(config.Models) > 0 {
+		models := []catwalk.Model{}
+		seen := make(map[string]bool)
+
+		for _, model := range config.Models {
+			if seen[model.ID] {
+				continue
+			}
+			seen[model.ID] = true
+			if model.Name == "" {
+				model.Name = model.ID
+			}
+			models = append(models, model)
+		}
+		for _, model := range p.Models {
+			if seen[model.ID] {
+				continue
+			}
+			seen[model.ID] = true
+			if model.Name == "" {
+				model.Name = model.ID
+			}
+			models = append(models, model)
+		}
+
+		p.Models = models
+	}
+	return p
+}
+
+// applyProviderVendorSetup handles providers needing vendor-specific OAuth
+// wiring. Returns the (possibly modified) prepared config, whether the
+// provider was dropped (caller should `continue` without Providers.Set),
+// and a pending disk cleanup for the caller to collect, if any.
+func (c *Config) applyProviderVendorSetup(prepared ProviderConfig, p catwalk.Provider, config ProviderConfig) (ProviderConfig, bool, *pendingDiskAction) {
+	switch {
+	case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
+		// Claude Code subscription is not supported anymore. Remove to
+		// show onboarding. The disk deletion is deferred to the caller
+		// (applyPendingDiskActions) rather than performed here; the
+		// in-memory state is kept consistent by the Providers.Del call
+		// below, and any concurrent reload that races with the deferred
+		// write will also see the removal because it re-reads from disk.
+		action := pendingDiskAction{scope: ScopeGlobal, key: "providers.anthropic"}
+		c.Providers.Del(string(p.ID))
+		return prepared, true, &action
+	case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
+		prepared.SetupGitHubCopilot()
+	case string(p.ID) == codex.ProviderID:
+		prepared.SetupCodex()
+	}
+	return prepared, false, nil
+}
+
+// applyProviderCredentials runs the per-vendor credential checks deciding
+// whether a catalog provider loads at all, returning the (possibly
+// modified) prepared config and whether to keep it.
+//
+// !configExists drops silently on missing credentials: this runs against
+// the whole embedded catalog on every load, and warning about every
+// catalog entry the user never configured would be noise. A provider the
+// user did configure gets a slog.Warn and a doctor Problem.
+func (c *Config) applyProviderCredentials(env env.Env, resolver VariableResolver, p catwalk.Provider, configExists bool, prepared ProviderConfig) (ProviderConfig, bool) {
+	switch p.ID {
+	// Handle specific providers that require additional configuration
+	case catwalk.InferenceProviderVertexAI:
+		var (
+			project  = env.Get("VERTEXAI_PROJECT")
+			location = env.Get("VERTEXAI_LOCATION")
+		)
+		if project == "" || location == "" {
+			if configExists {
+				problem := providerDropProblem(string(p.ID), "VERTEXAI_PROJECT/VERTEXAI_LOCATION not set", "static check only; set both env vars and reload")
+				c.dropProvider(string(p.ID), slog.Warn, "Skipping Vertex AI provider due to missing credentials", nil, &problem)
+			}
+			return prepared, false
+		}
+		prepared.ExtraParams["project"] = project
+		prepared.ExtraParams["location"] = location
+	case catwalk.InferenceProviderAzure:
+		endpoint, err := resolver.ResolveValue(p.APIEndpoint)
+		if err != nil || endpoint == "" {
+			if configExists {
+				problem := providerDropProblem(string(p.ID), "missing API endpoint", "static check only; set base_url and reload")
+				c.dropProvider(string(p.ID), slog.Warn, "Skipping Azure provider due to missing API endpoint", []any{"provider", p.ID, "error", err}, &problem)
+			}
+			return prepared, false
+		}
+		prepared.BaseURL = endpoint
+		prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
+	case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
+		if p.APIKey == "" && !hasAWSCredentials(env) {
+			if configExists {
+				problem := providerDropProblem(string(p.ID), "no api_key and no AWS credentials found", "static check only; set api_key or AWS credentials and reload")
+				c.dropProvider(string(p.ID), slog.Warn, "Skipping Bedrock provider due to missing AWS credentials", nil, &problem)
+			}
+			return prepared, false
+		}
+	default:
+		// if the provider api or endpoint are missing we skip them
+		v, err := resolver.ResolveValue(p.APIKey)
+		if v == "" || err != nil {
+			if configExists {
+				problem := providerDropProblem(string(p.ID), "missing api_key", "static check only; set api_key and reload")
+				c.dropProvider(string(p.ID), slog.Warn, "Skipping provider due to missing API key", []any{"provider", p.ID}, &problem)
+			}
+			return prepared, false
+		}
+	}
+	return prepared, true
 }

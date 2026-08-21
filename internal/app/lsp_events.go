@@ -31,10 +31,11 @@ type LSPClientInfo = lsp.ClientInfo
 
 // lspEvents holds one workspace's LSP client state and event broker. It
 // used to be a pair of package-level vars, which meant every App in a
-// process (multi-client backend mode) shared one LSP status table: a
-// second workspace's LSP clients silently overwrote the first's, and
-// GetLSPStates() had no way to answer "which workspace's LSP clients?".
-// Embedded directly in App so each workspace owns its own.
+// process (the top-level workspace and any spawned thread's workspace)
+// shared one LSP status table: a second workspace's LSP clients silently
+// overwrote the first's, and GetLSPStates() had no way to answer "which
+// workspace's LSP clients?". Embedded directly in App so each workspace
+// owns its own.
 type lspEvents struct {
 	states *csync.Map[string, LSPClientInfo]
 	broker *pubsub.Broker[LSPEvent]

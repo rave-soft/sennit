@@ -247,7 +247,7 @@ func TestAppWorkspace_AgentRun_QueuedPromptVisibleWhileFirstActive_RealMachinery
 	t.Cleanup(a.ShutdownForTest)
 	a.AgentCoordinator = coord
 
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, t.TempDir()))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
 
 	require.NoError(t, aw.AgentRun(t.Context(), sess.ID, "first"))
 
@@ -329,7 +329,7 @@ func TestAppWorkspace_AgentRun_CancelBetweenAcceptAndActive_RealMachinery(t *tes
 	t.Cleanup(a.ShutdownForTest)
 	a.AgentCoordinator = coord
 
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, t.TempDir()))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
 
 	require.NoError(t, aw.AgentRun(t.Context(), sess.ID, "hi"))
 

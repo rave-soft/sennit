@@ -111,5 +111,9 @@ WHERE id = ?;
 -- own. Scoping this to threads meant finished tasks accumulated for the
 -- life of the database. A task carries no worktree, so reclaiming one is
 -- the row and its retention alone, with nothing left orphaned on disk.
-SELECT id, project_path, status, updated_at
+--
+-- kind, worktree_path and branch are selected so gc can report the
+-- worktrees it strands: deleting a thread row leaves its worktree on disk
+-- with nothing left to find it by, so gc names them before the row goes.
+SELECT id, project_path, status, updated_at, kind, worktree_path, branch
 FROM threads;

@@ -32,7 +32,7 @@ type ListAllAssistantMessagesSinceRow struct {
 }
 
 func (q *Queries) ListAllAssistantMessagesSince(ctx context.Context, createdAt int64) ([]ListAllAssistantMessagesSinceRow, error) {
-	rows, err := q.query(ctx, q.listAllAssistantMessagesSinceStmt, listAllAssistantMessagesSince, createdAt)
+	rows, err := q.db.QueryContext(ctx, listAllAssistantMessagesSince, createdAt)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ type ListAllDelegationOutcomesSinceRow struct {
 }
 
 func (q *Queries) ListAllDelegationOutcomesSince(ctx context.Context, createdAt int64) ([]ListAllDelegationOutcomesSinceRow, error) {
-	rows, err := q.query(ctx, q.listAllDelegationOutcomesSinceStmt, listAllDelegationOutcomesSince, createdAt)
+	rows, err := q.db.QueryContext(ctx, listAllDelegationOutcomesSince, createdAt)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ type ListAllSessionsSinceRow struct {
 }
 
 func (q *Queries) ListAllSessionsSince(ctx context.Context, createdAt int64) ([]ListAllSessionsSinceRow, error) {
-	rows, err := q.query(ctx, q.listAllSessionsSinceStmt, listAllSessionsSince, createdAt)
+	rows, err := q.db.QueryContext(ctx, listAllSessionsSince, createdAt)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +209,7 @@ type ListAssistantMessagesSinceRow struct {
 }
 
 func (q *Queries) ListAssistantMessagesSince(ctx context.Context, arg ListAssistantMessagesSinceParams) ([]ListAssistantMessagesSinceRow, error) {
-	rows, err := q.query(ctx, q.listAssistantMessagesSinceStmt, listAssistantMessagesSince, arg.CreatedAt, arg.ProjectPath)
+	rows, err := q.db.QueryContext(ctx, listAssistantMessagesSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +277,7 @@ type ListDelegationOutcomesSinceRow struct {
 // this work land" as the database gets: whether a reviewer approved the
 // change is not something this process records.
 func (q *Queries) ListDelegationOutcomesSince(ctx context.Context, arg ListDelegationOutcomesSinceParams) ([]ListDelegationOutcomesSinceRow, error) {
-	rows, err := q.query(ctx, q.listDelegationOutcomesSinceStmt, listDelegationOutcomesSince, arg.CreatedAt, arg.ProjectPath)
+	rows, err := q.db.QueryContext(ctx, listDelegationOutcomesSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +337,7 @@ type ListSessionTreeAssistantMessagesRow struct {
 }
 
 func (q *Queries) ListSessionTreeAssistantMessages(ctx context.Context, id string) ([]ListSessionTreeAssistantMessagesRow, error) {
-	rows, err := q.query(ctx, q.listSessionTreeAssistantMessagesStmt, listSessionTreeAssistantMessages, id)
+	rows, err := q.db.QueryContext(ctx, listSessionTreeAssistantMessages, id)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +407,7 @@ type ListSessionTreeSinceRow struct {
 // return the same columns as their project-scoped counterparts so the
 // Go-side aggregation (internal/stats) can treat all three identically.
 func (q *Queries) ListSessionTreeSince(ctx context.Context, id string) ([]ListSessionTreeSinceRow, error) {
-	rows, err := q.query(ctx, q.listSessionTreeSinceStmt, listSessionTreeSince, id)
+	rows, err := q.db.QueryContext(ctx, listSessionTreeSince, id)
 	if err != nil {
 		return nil, err
 	}
@@ -478,7 +478,7 @@ type ListSessionsSinceRow struct {
 // model/agent grouping requires Go-side logic (proportional token
 // attribution for multi-model sessions, see internal/cmd/stat.go).
 func (q *Queries) ListSessionsSince(ctx context.Context, arg ListSessionsSinceParams) ([]ListSessionsSinceRow, error) {
-	rows, err := q.query(ctx, q.listSessionsSinceStmt, listSessionsSince, arg.CreatedAt, arg.ProjectPath)
+	rows, err := q.db.QueryContext(ctx, listSessionsSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -544,7 +544,7 @@ type ListSessionsSinceWithAgentRow struct {
 }
 
 func (q *Queries) ListSessionsSinceWithAgent(ctx context.Context, arg ListSessionsSinceWithAgentParams) ([]ListSessionsSinceWithAgentRow, error) {
-	rows, err := q.query(ctx, q.listSessionsSinceWithAgentStmt, listSessionsSinceWithAgent, arg.CreatedAt, arg.ProjectPath)
+	rows, err := q.db.QueryContext(ctx, listSessionsSinceWithAgent, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -628,7 +628,7 @@ type ListSkillLoadsSinceRow struct {
 // along with it. Substituting an empty object makes such a row contribute
 // nothing instead of taking the report down.
 func (q *Queries) ListSkillLoadsSince(ctx context.Context, arg ListSkillLoadsSinceParams) ([]ListSkillLoadsSinceRow, error) {
-	rows, err := q.query(ctx, q.listSkillLoadsSinceStmt, listSkillLoadsSince, arg.CreatedAt, arg.ProjectPath)
+	rows, err := q.db.QueryContext(ctx, listSkillLoadsSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -680,7 +680,7 @@ type ProjectStatsSinceRow struct {
 }
 
 func (q *Queries) ProjectStatsSince(ctx context.Context, createdAt int64) ([]ProjectStatsSinceRow, error) {
-	rows, err := q.query(ctx, q.projectStatsSinceStmt, projectStatsSince, createdAt)
+	rows, err := q.db.QueryContext(ctx, projectStatsSince, createdAt)
 	if err != nil {
 		return nil, err
 	}

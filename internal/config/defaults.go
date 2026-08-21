@@ -11,6 +11,7 @@ import (
 
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/config/migrate"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/fsext"
@@ -23,7 +24,7 @@ import (
 // reload does not silently drop a default that was only ever applied at
 // startup — see TestLoad_AppleTerminalDefaultSurvivesReload.
 func applyEnvironmentDefaults(cfg *Config) {
-	if !isInsideWorktree() {
+	if !isInsideWorktree(cfg.workingDir) {
 		const depth = 2
 		const items = 100
 		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
@@ -119,17 +120,15 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 			TrailerStyle:  TrailerStyleAssistedBy,
 			GeneratedWith: true,
 		}
-	} else if c.Options.Attribution.TrailerStyle == "" {
-		// Migrate deprecated co_authored_by or apply default
-		if c.Options.Attribution.CoAuthoredBy != nil {
-			if *c.Options.Attribution.CoAuthoredBy {
-				c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
-			} else {
-				c.Options.Attribution.TrailerStyle = TrailerStyleNone
-			}
-		} else {
-			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
-		}
+	} else {
+		// Migrate deprecated co_authored_by, or apply the default, when
+		// trailer_style itself is unset. See migrate.Attribution.
+		c.Options.Attribution.TrailerStyle = TrailerStyle(migrate.Attribution(
+			string(c.Options.Attribution.TrailerStyle),
+			c.Options.Attribution.CoAuthoredBy,
+			string(TrailerStyleAssistedBy),
+			string(TrailerStyleNone),
+		))
 	}
 
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)

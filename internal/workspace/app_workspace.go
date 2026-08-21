@@ -146,8 +146,7 @@ func (w *AppWorkspace) AgentRun(_ context.Context, sessionID, prompt string, att
 	if dispatcher == nil {
 		// Only reachable for a hand-built *app.App that skipped both
 		// New and NewForTest (every real construction path sets a
-		// dispatcher unconditionally); guard it the same way
-		// Backend.SendMessage guards ws.dispatcher, rather than
+		// dispatcher unconditionally); guard it explicitly rather than
 		// dereferencing a nil pointer.
 		return app.ErrCoordinatorNotInitialized
 	}

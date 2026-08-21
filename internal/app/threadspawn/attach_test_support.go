@@ -231,3 +231,9 @@ func (s *attachTestSpawner) coordFor(path string) *attachFakeCoordinator {
 	defer s.mu.Unlock()
 	return s.coordByPath[path]
 }
+
+func (s *attachTestSpawner) handleFor(path string) *attachTestHandle {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.byPath[path]
+}

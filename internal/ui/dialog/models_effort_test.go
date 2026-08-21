@@ -35,7 +35,7 @@ func TestRememberEffortRestoresTheModelsLastLevel(t *testing.T) {
 	cfg.RecentModels = []config.SelectedModel{
 		{Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "xhigh"},
 	}
-	m, err := NewModels(newModelsTestCommon(t, cfg))
+	m, _, err := NewModels(newModelsTestCommon(t, cfg))
 	require.NoError(t, err)
 
 	require.Equal(t, "xhigh", m.rememberEffort(effortModelItem(t)).ReasoningEffort)
@@ -50,7 +50,7 @@ func TestRememberEffortPrefersTheLiveSelection(t *testing.T) {
 	cfg.RecentModels = []config.SelectedModel{
 		{Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "xhigh"},
 	}
-	m, err := NewModels(newModelsTestCommon(t, cfg))
+	m, _, err := NewModels(newModelsTestCommon(t, cfg))
 	require.NoError(t, err)
 
 	require.Equal(t, "high", m.rememberEffort(effortModelItem(t)).ReasoningEffort)
@@ -64,7 +64,7 @@ func TestRememberEffortDropsALevelTheModelNoLongerOffers(t *testing.T) {
 	cfg.RecentModels = []config.SelectedModel{
 		{Provider: "codex", Model: "gpt-5.6-sol", ReasoningEffort: "ultra"},
 	}
-	m, err := NewModels(newModelsTestCommon(t, cfg))
+	m, _, err := NewModels(newModelsTestCommon(t, cfg))
 	require.NoError(t, err)
 
 	require.Equal(t, "low", m.rememberEffort(effortModelItem(t)).ReasoningEffort,
@@ -78,7 +78,7 @@ func TestRememberEffortLeavesAnUnknownModelAlone(t *testing.T) {
 	cfg.RecentModels = []config.SelectedModel{
 		{Provider: "codex", Model: "gpt-5.6-terra", ReasoningEffort: "xhigh"},
 	}
-	m, err := NewModels(newModelsTestCommon(t, cfg))
+	m, _, err := NewModels(newModelsTestCommon(t, cfg))
 	require.NoError(t, err)
 
 	require.Equal(t, "low", m.rememberEffort(effortModelItem(t)).ReasoningEffort)

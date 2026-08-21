@@ -14,6 +14,26 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/common"
 )
 
+// term holds the negotiated terminal capability/runtime state: the
+// capability probe results, the keyboard-enhancement negotiation result,
+// and whether the terminal progress bar is enabled/should be sent. All of
+// it is populated from the terminal-probe branches handled below (EnvMsg,
+// KeyboardEnhancementsMsg, TerminalVersionMsg) and read back out during
+// layout/dialog draws.
+//
+// Embedded anonymously (by value) on UI so its fields keep promoting
+// unchanged (m.caps, m.keyenh, ...); see widgets.go for why.
+type term struct {
+	// caps hold different terminal capabilities that we query for.
+	caps   common.Capabilities
+	keyenh tea.KeyboardEnhancementsMsg
+
+	// sendProgressBar instructs the TUI to send progress bar updates to the
+	// terminal.
+	sendProgressBar    bool
+	progressBarEnabled bool
+}
+
 // updateSystem handles the terminal/runtime and animation-tick branches of
 // UI.Update: terminal capability probes (env, mode report, OSC, focus/blur),
 // window resize, keyboard enhancement negotiation, chat/panel animation

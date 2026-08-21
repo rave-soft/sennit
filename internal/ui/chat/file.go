@@ -23,16 +23,6 @@ type ReadToolMessageItem struct {
 
 var _ ToolMessageItem = (*ReadToolMessageItem)(nil)
 
-// NewReadToolMessageItem creates a new [ReadToolMessageItem].
-func NewReadToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ReadToolRenderContext{}, canceled)
-}
-
 // registerReadToolRenderer registers the read tool renderer, including
 // the legacy pre-rename tool name so old sessions keep rendering.
 func registerReadToolRenderer() {

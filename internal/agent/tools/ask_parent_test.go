@@ -70,10 +70,17 @@ func TestAskParentTool_MissingSessionIDIsRejected(t *testing.T) {
 	t.Parallel()
 
 	messenger := &fakeParentMessenger{}
+	tool := NewAskParentTool(messenger)
 
-	resp := runAskParentTool(t, t.Context(), messenger, "anything")
+	input, err := json.Marshal(AskParentParams{Message: "anything"})
+	require.NoError(t, err)
 
-	require.True(t, resp.IsError)
+	// A missing session ID is not something the model's call can fix — it
+	// is wired in by the caller — so this is a Go error, not a text
+	// response the model would see as a retryable tool result.
+	_, err = tool.Run(t.Context(), fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "session ID is required for asking the parent")
 	require.False(t, messenger.called)
 }
 

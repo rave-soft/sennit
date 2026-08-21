@@ -17,15 +17,27 @@ import (
 // from a real fsnotify watch.
 const externalChangePollInterval = 2 * time.Second
 
+// pollInterval returns how often WatchForExternalChanges should poll: the
+// store's override if one was set, otherwise externalChangePollInterval. A
+// non-positive override (including the zero value of a ConfigStore built
+// without going through Load or NewTestStore) falls back to the default
+// rather than handing time.NewTicker a duration it will panic on.
+func (s *ConfigStore) pollInterval() time.Duration {
+	if s.externalChangePollInterval > 0 {
+		return s.externalChangePollInterval
+	}
+	return externalChangePollInterval
+}
+
 // OnExternalChange registers fn to run after WatchForExternalChanges
 // reloads config because of a change made outside this process — for
 // example an agent's Edit/Write tool touching .sennit/sennit.json directly,
 // instead of going through SetConfigFields. Only one callback is kept; a
 // later call replaces the previous one. fn runs synchronously on the
 // watcher goroutine, so it should not block; callers that need to touch
-// shared state (like backend's publishConfigChanged, which re-inits MCP
-// servers and publishes a ConfigChanged event) should dispatch async work
-// themselves rather than block the poll loop.
+// shared state (like App.startExternalChangeWatchers's callback, which
+// re-inits MCP servers and publishes a ConfigChanged event) should
+// dispatch async work themselves rather than block the poll loop.
 //
 // A reload triggered by this process's own writes (SetConfigFields,
 // the typed mutators, ...) does not run fn — those callers already know
@@ -52,7 +64,7 @@ func (s *ConfigStore) WatchForExternalChanges(ctx context.Context) {
 		return
 	}
 
-	ticker := time.NewTicker(externalChangePollInterval)
+	ticker := time.NewTicker(s.pollInterval())
 	defer ticker.Stop()
 
 	for {
@@ -158,7 +170,7 @@ func (s *ConfigStore) scanAgentFiles() map[string]fileSnapshot {
 
 // captureAgentFileSnapshot records the current state of agent files
 // without reporting a diff — used right after a (re)load, mirroring
-// captureStalenessSnapshot, so the first watcher poll compares against
+// CaptureStalenessSnapshot, so the first watcher poll compares against
 // what was actually loaded rather than against nothing.
 func (s *ConfigStore) captureAgentFileSnapshot() {
 	current := s.scanAgentFiles()
@@ -170,7 +182,7 @@ func (s *ConfigStore) captureAgentFileSnapshot() {
 // agentFilesChanged reports whether any agent markdown file was added,
 // removed, or edited since the last snapshot, and refreshes the snapshot
 // as a side effect. Folding the refresh in here (rather than a separate
-// call, as ConfigStaleness/RefreshStalenessSnapshot do) is safe because
+// call, as ConfigStaleness/CaptureStalenessSnapshot do) is safe because
 // the poll loop is the only caller and always wants both together.
 func (s *ConfigStore) agentFilesChanged() bool {
 	current := s.scanAgentFiles()

@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/dustin/go-humanize"
 	"github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
@@ -244,30 +245,18 @@ func computeThreadsColumns(width int) threadsColumns {
 // renderThreadsColumnHeader renders the table's header row.
 func renderThreadsColumnHeader(sty *styles.Styles, c threadsColumns, width int) string {
 	var b strings.Builder
-	b.WriteString(padTo("NAME", c.name))
-	b.WriteString("  " + padTo("STATUS", c.status))
+	b.WriteString(presentation.PadTo("NAME", c.name))
+	b.WriteString("  " + presentation.PadTo("STATUS", c.status))
 	if c.branch > 0 {
-		b.WriteString("  " + padTo("BRANCH", c.branch))
+		b.WriteString("  " + presentation.PadTo("BRANCH", c.branch))
 	}
 	if c.updated > 0 {
-		b.WriteString("  " + padTo("UPDATED", c.updated))
+		b.WriteString("  " + presentation.PadTo("UPDATED", c.updated))
 	}
 	if c.goal > 0 {
-		b.WriteString("  " + padTo("GOAL", c.goal))
+		b.WriteString("  " + presentation.PadTo("GOAL", c.goal))
 	}
 	return sty.Threads.ColumnHeader.Render(ansi.Truncate(b.String(), width, "…"))
-}
-
-// padTo pads (or truncates) s to exactly n cells.
-func padTo(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	s = ansi.Truncate(s, n, "…")
-	if pad := n - ansi.StringWidth(s); pad > 0 {
-		s += strings.Repeat(" ", pad)
-	}
-	return s
 }
 
 // threadsDetailLines renders the detail pane's content for the selected
@@ -283,7 +272,7 @@ func threadsDetailLines(sty *styles.Styles, sel *proto.Thread, width int) []stri
 		if value == "" {
 			return ""
 		}
-		l := sty.Threads.DetailLabel.Render(padTo(label, 10))
+		l := sty.Threads.DetailLabel.Render(presentation.PadTo(label, 10))
 		v := sty.Threads.DetailValue.Render(ansi.Truncate(value, max(0, width-11), "…"))
 		return l + " " + v
 	}

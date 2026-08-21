@@ -42,37 +42,36 @@ var busyCacheTTL = 500 * time.Millisecond
 // state; the queue is otherwise refreshed on event edges.
 var promptQueueTTL = 2 * time.Second
 
+// agentReadyModel bundles AgentIsReady/AgentModel, probed together by one
+// off-thread call and so cached as a unit.
+type agentReadyModel struct {
+	ready bool
+	model workspace.AgentModel
+}
+
 // workspaceCacheState holds the memoized workspace busy/permission/queue
 // state (see the package doc comment above) plus its TTL-cache and
 // in-flight/generation bookkeeping.
 type workspaceCacheState struct {
-	// promptQueue / promptQueueItems mirror the session's queued prompts.
-	// They are event-driven with a TTL backstop, fetched off-thread by
-	// dispatchPromptQueueRefresh; promptQueue is always
-	// len(promptQueueItems).
-	promptQueue          int
-	promptQueueItems     []string
-	promptQueueCheckedAt time.Time
-	promptQueueInFlight  bool
-	// promptQueueGen is bumped by every queue state transition; an
-	// in-flight fetch captures it at dispatch and its result is discarded
-	// if the generation has moved on.
-	promptQueueGen uint64
+	// promptQueueCache mirrors the session's queued prompts. It is
+	// event-driven with a TTL backstop, fetched off-thread by
+	// dispatchPromptQueueRefresh; the queue count is always
+	// len(promptQueueCache.value).
+	promptQueueCache ttlCache[[]string]
 	// agentBusyCache / yoloCache memoize the workspace busy and permission
 	// probes (treated as IO — see the package doc comment above). Reads
 	// never probe; refreshes happen off-thread.
 	agentBusyCache    ttlCache[bool]
 	yoloCache         ttlCache[bool]
 	busyFetchInFlight bool
-	// agentReady / agentModel memoize the coordinator readiness and
-	// selected model (AgentIsReady/AgentModel are treated as IO, and
-	// modelInfo renders them every frame). Seeded once at construction and
-	// refreshed by the same off-thread probe as agentBusyCache.
-	agentReady bool
-	agentModel workspace.AgentModel
-	// busyFetchGen is bumped by every busy/permission state transition;
-	// like promptQueueGen it lets a stale in-flight probe result be
-	// discarded and re-fetched instead of clobbering newer state.
+	// agentCache memoizes the coordinator readiness/model (treated as IO;
+	// modelInfo renders it every frame). Seeded at construction, refreshed
+	// by the same off-thread probe as agentBusyCache/yoloCache above.
+	agentCache ttlCache[agentReadyModel]
+	// busyFetchGen is bumped by every busy/permission state transition; a
+	// stale in-flight probe result is discarded and re-fetched instead of
+	// clobbering newer state. It gates agentBusyCache, yoloCache, and
+	// agentCache together, since one probe fetches all three at once.
 	busyFetchGen uint64
 }
 
@@ -143,11 +142,13 @@ func (m *UI) invalidateBusyCaches() {
 	m.wsCache.busyFetchGen++
 }
 
-// invalidatePromptQueue bumps the prompt-queue generation so any in-flight
-// queue fetch result is discarded when it lands (and re-fetched) instead of
-// overwriting newer optimistic or cleared queue state.
+// invalidatePromptQueue marks the cached queue stale and bumps its
+// generation, so any in-flight queue fetch result is discarded when it
+// lands (and re-fetched) instead of overwriting newer optimistic or cleared
+// queue state. Callers that already know the authoritative new value
+// re-freshen it with a follow-up set, per ttlCache's invalidate doc.
 func (m *UI) invalidatePromptQueue() {
-	m.wsCache.promptQueueGen++
+	m.wsCache.promptQueueCache.invalidate()
 }
 
 // dispatchBusyRefresh returns a command that probes the workspace busy and
@@ -201,8 +202,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	prevYolo := m.yoloModeCached()
 	m.wsCache.agentBusyCache.set(msg.agentBusy)
 	m.wsCache.yoloCache.set(msg.yolo)
-	m.wsCache.agentReady = msg.ready
-	m.wsCache.agentModel = msg.model
+	m.wsCache.agentCache.set(agentReadyModel{ready: msg.ready, model: msg.model})
 	if prevYolo != msg.yolo {
 		// A remote/async toggle changed yolo mode: update the editor
 		// prompt function so the prompt icon/style tracks the new mode.
@@ -223,26 +223,28 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 // nil while a fetch is already in flight. With no active session the queue
 // is simply cleared.
 func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
-	if m.wsCache.promptQueueInFlight || m.com == nil || m.com.Workspace == nil {
+	if m.wsCache.promptQueueCache.inFlight || m.com == nil || m.com.Workspace == nil {
 		return nil
 	}
 	if !m.hasSession() {
-		m.wsCache.promptQueueItems = nil
-		m.wsCache.promptQueueCheckedAt = time.Now()
+		hadItems := len(m.wsCache.promptQueueCache.value) != 0
 		// Bump the generation so any in-flight fetch scoped to the
 		// now-departed session is discarded rather than repopulating the
-		// queue.
+		// queue, then write the now-authoritative empty queue through as
+		// fresh.
 		m.invalidatePromptQueue()
-		if m.wsCache.promptQueue != 0 {
-			m.wsCache.promptQueue = 0
+		m.wsCache.promptQueueCache.set(nil)
+		if hadItems {
 			m.updateLayoutAndSize()
 		}
 		return nil
 	}
-	m.wsCache.promptQueueInFlight = true
 	ws := m.com.Workspace
 	sessionID := m.sess.current.ID
-	gen := m.wsCache.promptQueueGen
+	gen, started := m.wsCache.promptQueueCache.begin()
+	if !started {
+		return nil
+	}
 	return func() tea.Msg {
 		msg := promptQueueMsg{forSession: sessionID, gen: gen}
 		if ws.AgentIsReady() {
@@ -255,8 +257,11 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 // applyPromptQueue stores an off-thread queue fetch and re-layouts when the
 // count changed. Runs on the Update goroutine.
 func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
-	m.wsCache.promptQueueInFlight = false
-	if msg.forSession != m.currentSessionID() || msg.gen != m.wsCache.promptQueueGen {
+	// complete clears the in-flight marker unconditionally (even when the
+	// session-scope check below rejects the result), matching complete's
+	// contract of always being called once per dispatched fetch.
+	genOK := m.wsCache.promptQueueCache.complete(msg.gen)
+	if msg.forSession != m.currentSessionID() || !genOK {
 		// The fetch raced a session switch or a newer queue transition
 		// (submit, clear, invalidation). Discard the stale result and
 		// re-fetch so newer state is not clobbered and the authoritative
@@ -266,10 +271,8 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 		}
 		return nil
 	}
-	m.wsCache.promptQueueCheckedAt = time.Now()
-	countChanged := len(msg.prompts) != m.wsCache.promptQueue
-	m.wsCache.promptQueueItems = msg.prompts
-	m.wsCache.promptQueue = len(msg.prompts)
+	countChanged := len(msg.prompts) != len(m.wsCache.promptQueueCache.value)
+	m.wsCache.promptQueueCache.set(msg.prompts)
 	if countChanged {
 		// A row-count change moves the panel/chat split; anything else
 		// (item text edited in place) is picked up on the next draw, since
@@ -293,7 +296,7 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	}
-	if m.hasSession() && time.Since(m.wsCache.promptQueueCheckedAt) >= promptQueueTTL {
+	if m.hasSession() && !m.wsCache.promptQueueCache.fresh(promptQueueTTL) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -312,25 +315,28 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 	return cmds
 }
 
-// threadViewsRefreshCmds re-probes the thread indicator, the dock's thread
-// list, and per-thread activity wherever a TTL has expired or an
-// invalidation demands it. Shared by the thread-event handler and the
-// Update-tail backstop so the sequence exists exactly once. It never does
-// IO itself, and it costs nothing beyond time comparisons while the
-// project has no threads.
+// threadViewsRefreshCmds re-probes the shared thread list (feeding the
+// header badge, the dashboard, and the dock) and the dock's per-thread
+// activity wherever a TTL has expired or an invalidation demands it.
+// Shared by the thread-event handler and the Update-tail backstop so the
+// sequence exists exactly once. It never does IO itself, and it costs
+// nothing beyond time comparisons while the project has no threads.
+//
+// The list refresh is unconditional (not gated on m.state) because the
+// header badge needs it current on every screen this UI ever draws, and
+// gating it to uiChat would just make the dock wait for the badge's own
+// next tick to catch up — the same round trip either way, so there is
+// nothing to save by narrowing it.
 func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 	if !m.surfacesThreads() {
 		return nil
 	}
 	var cmds []tea.Cmd
-	if cmd := m.threadIndicator.staleRefreshCmd(m.com); cmd != nil {
+	if cmd := m.threadList.staleRefreshCmd(m.com, true); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	if cmd := m.threadsDock.staleThreadsDockRefreshCmd(m.com, m.state == uiChat); cmd != nil {
-		cmds = append(cmds, cmd)
-	}
-	if m.state == uiChat && len(m.threadsDock.cache.value) > 0 {
-		visible, _ := visibleDockThreads(activeDockThreads(m.threadsDock.cache.value))
+	if m.state == uiChat && len(m.threadList.cache.value) > 0 {
+		visible, _ := visibleDockThreads(activeDockThreads(m.threadList.cache.value))
 		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds

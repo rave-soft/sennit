@@ -28,7 +28,7 @@ func NewCallHierarchyTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		callHierarchyDescription,
 		func(ctx context.Context, params CallHierarchyParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Symbol == "" {
-				return fantasy.NewTextErrorResponse("symbol is required"), nil
+				return invalidParam("symbol"), nil
 			}
 			if params.Direction != "incoming" && params.Direction != "outgoing" {
 				return fantasy.NewTextErrorResponse("direction must be 'incoming' or 'outgoing'"), nil

@@ -9,7 +9,6 @@ import (
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/rave-soft/sennit/internal/env"
 )
 
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
@@ -65,33 +64,6 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	startCredentialVersion := s.CredentialVersion()
 	startConfig := s.Config()
 	s.writeMu.RUnlock()
-	configPaths := lookupConfigs(s.workingDir)
-	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
-	if err != nil {
-		return fmt.Errorf("failed to reload config: %w", err)
-	}
-
-	// Apply defaults (using existing data directory if set)
-	var dataDir string
-	if cur := s.Config(); cur != nil && cur.Options != nil {
-		dataDir = cur.Options.DataDirectory
-	}
-	cfg.setDefaults(s.workingDir, dataDir)
-
-	if err := applyWorkspaceConfig(cfg, s.workingDir, &loadedPaths); err != nil {
-		return err
-	}
-
-	// Apply the same environment-derived defaults Load applies at startup,
-	// so a reload does not silently drop them — see
-	// TestLoad_AppleTerminalDefaultSurvivesReload.
-	applyEnvironmentDefaults(cfg)
-
-	// Validate hooks after all config merging is complete so matcher
-	// regexes are recompiled on the reloaded config (mirrors Load).
-	if err := cfg.ValidateHooks(); err != nil {
-		return fmt.Errorf("invalid hook configuration on reload: %w", err)
-	}
 
 	// Snapshot runtime overrides up front (a brief writeMu.RLock) rather
 	// than reading s.overrides directly, since the rest of this function
@@ -99,56 +71,36 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// race a later read of the same field.
 	overrides := s.snapshotOverrides()
 
-	// Reapply this instance's model. The global config file is shared, so
-	// it may now name a model a sibling instance selected; a reload — which
-	// any write by any instance triggers — must not swap the model out from
-	// under a running session. The pin is set at startup (see Load) and
-	// updated whenever this instance picks a model, so a new instance still
-	// starts on whatever the file says.
+	// Reapply this instance's pinned model as buildConfig's presetModel —
+	// see that field's doc comment for why.
+	var presetModel *SelectedModel
 	if overrides.Model != nil {
-		cfg.Model = *overrides.Model
+		m := *overrides.Model
+		presetModel = &m
 	}
 
-	// Reconfigure providers
-	env := env.New()
-	resolver := NewShellVariableResolver(env)
+	// Apply defaults using the existing data directory, if set.
+	var dataDir string
+	if cur := s.Config(); cur != nil && cur.Options != nil {
+		dataDir = cur.Options.DataDirectory
+	}
 
-	// Apply top-level env vars before configuring providers so variables
-	// like AWS_PROFILE are visible to the AWS SDK credential chain.
-	cfg.applyEnv(resolver)
-
-	providers, err := Providers(cfg)
+	// buildConfig runs configureProviders (which may perform model-discovery
+	// HTTP calls) before writeMu is taken below — see the writeMu doc
+	// comment on ConfigStore and TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu.
+	built, err := buildConfig(s, buildConfigOptions{
+		ctx:             ctx,
+		workingDir:      s.workingDir,
+		dataDir:         dataDir,
+		presetModel:     presetModel,
+		persistFallback: false, // see buildConfigOptions.persistFallback
+	})
 	if err != nil {
-		if len(providers) == 0 {
-			return fmt.Errorf("failed to load providers during reload: %w", err)
-		}
-		slog.Warn("Reload continuing with the previously known providers", "error", err)
+		return err
 	}
+	cfg := built.cfg
 
-	// configureProviders may run model-discovery HTTP calls for custom
-	// providers (see discoverCustomProviderModels). This runs here, before
-	// writeMu is taken below — see the writeMu doc comment on ConfigStore
-	// and TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu.
-	if err := cfg.configureProviders(ctx, s, env, resolver, providers); err != nil {
-		return fmt.Errorf("failed to configure providers during reload: %w", err)
-	}
-
-	var resolved resolvedModel
-	configured := cfg.IsConfigured()
-	if configured {
-		resolved, err = resolveSelectedModel(cfg, providers)
-		if err != nil {
-			return fmt.Errorf("failed to configure selected models during reload: %w", err)
-		}
-		// Unlike Load, a fallback model correction (resolved.Fallback)
-		// is not persisted to disk here, only applied in memory. This
-		// matches reloadFromDiskLocked's pre-existing behavior; persisting
-		// via updateLocked here would need its own failure handling (Load
-		// can simply discard the whole store on error, but a reload has
-		// already published a config other goroutines may be reading).
-		// Left as-is rather than risked as part of this refactor.
-		cfg.Model = resolved.Model
-	} else {
+	if !built.configured {
 		slog.Warn("No providers configured after reload")
 	}
 
@@ -166,7 +118,7 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	if configured {
+	if built.configured {
 		// Set up agents on the new config before publishing it.
 		// This preserves the invariant that a published Config is never
 		// mutated in place: SetupAgents is called on cfg (the not-yet-
@@ -197,16 +149,16 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	}
 
 	s.setConfig(cfg)
-	s.loadedPaths = loadedPaths
-	s.resolver = resolver
-	s.knownProviders = providers
+	s.loadedPaths = built.loadedPaths
+	s.resolver = built.resolver
+	s.knownProviders = built.providers
 	s.overrides = overrides
 	s.workspacePath = filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
 
 	// Rebuild staleness tracking. Track every discovered config path, not
 	// just the ones that loaded, so a config file created after this reload
 	// is detected as a change on the next staleness check.
-	s.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
+	s.CaptureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...))
 	s.captureAgentFileSnapshot()
 
 	return nil

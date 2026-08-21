@@ -16,6 +16,9 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
+// closeDialogMsg is sent to close the current dialog.
+type closeDialogMsg struct{}
+
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	action := m.dialog.Update(msg)
 	if action == nil {
@@ -121,14 +124,14 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return nil
 	}
 
-	modelsDialog, err := dialog.NewModels(m.com)
+	modelsDialog, pruneCmd, err := dialog.NewModels(m.com)
 	if err != nil {
 		return util.ReportError(err)
 	}
 
 	m.dialog.OpenDialog(modelsDialog)
 
-	return nil
+	return pruneCmd
 }
 
 // openCommandsDialog opens the commands palette dialog (ctrl+p): the
@@ -148,7 +151,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		sessionID = m.sess.current.ID
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.sess.current.Todos)
-	hasQueue := m.wsCache.promptQueue > 0
+	hasQueue := len(m.wsCache.promptQueueCache.value) > 0
 
 	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasTodos, hasQueue, m.customCommands, m.mcpPrompts)
 	if err != nil {
@@ -170,7 +173,7 @@ func (m *UI) commandCompletionItems() []completions.CommandCompletionValue {
 		sessionID = m.sess.current.ID
 	}
 	hasTodos := hasSession && hasIncompleteTodos(m.sess.current.Todos)
-	hasQueue := m.wsCache.promptQueue > 0
+	hasQueue := len(m.wsCache.promptQueueCache.value) > 0
 
 	var dockerMCPAvailable *bool
 	if available, known := config.DockerMCPAvailabilityCached(); known {
@@ -261,10 +264,7 @@ func (m *UI) openProviderFormDialog() {
 // dialog is opened in its model-less mode (nil model) since this flow
 // isn't switching a model, just authenticating a provider.
 func (m *UI) configureProvider(providerID string) tea.Cmd {
-	providers, err := config.Providers(m.com.Config())
-	if err != nil && len(providers) == 0 {
-		return util.ReportError(err)
-	}
+	providers := config.Providers(m.com.Config())
 
 	idx := slices.IndexFunc(providers, func(p catwalk.Provider) bool {
 		return string(p.ID) == providerID

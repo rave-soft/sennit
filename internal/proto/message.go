@@ -24,7 +24,7 @@ type Message struct {
 // belongs to [message]. Everything below is a type alias over the
 // canonical definitions there rather than a copy, so a
 // [proto.ContentPart] and a [message.ContentPart] are the same Go
-// value with no conversion needed between the UI and the backend. This
+// value with no conversion needed between the UI and core code. This
 // mirrors the pattern already used for tool parameter types in
 // tools.go.
 //

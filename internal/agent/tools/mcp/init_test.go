@@ -198,7 +198,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$MCP_HOST/api",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), shell)
 		require.NoError(t, err)
 		require.NotNil(t, tr)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
@@ -212,7 +212,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPSSE,
 			URL:  "https://$(echo mcp.example.com)/events",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), shell)
 		require.NoError(t, err)
 		sse, ok := tr.(*mcp.SSEClientTransport)
 		require.True(t, ok, "expected SSEClientTransport, got %T", tr)
@@ -229,7 +229,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$(false)/api",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shellResolverWithPath(t, nil))
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), shellResolverWithPath(t, nil))
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "url:")
@@ -248,7 +248,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPHttp,
 			URL:  "https://$MCP_MISSING_HOST/api",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), shell)
 		require.NoError(t, err)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
 		require.True(t, ok)
@@ -261,7 +261,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 			Type: config.MCPSSE,
 			URL:  "https://$(false)/events",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), shell)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "url:")
@@ -271,13 +271,13 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 	t.Run("http empty-after-resolve still fails the non-empty guard", func(t *testing.T) {
 		t.Parallel()
 		// ${MCP_EMPTY:-} resolves to the empty string (no error),
-		// then the existing TrimSpace guard in defaultRegistry.createTransport must
+		// then the existing TrimSpace guard in defaultRegistry.createTransportFor must
 		// reject it so we never spawn a transport against "".
 		m := config.MCPConfig{
 			Type: config.MCPHttp,
 			URL:  "${MCP_EMPTY:-}",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, shell)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), shell)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "non-empty 'url'")
@@ -289,7 +289,7 @@ func TestCreateTransport_URLResolution(t *testing.T) {
 		// expansion, no error on unset vars.
 		tmpl := "https://$MCP_MISSING_HOST/api"
 		m := config.MCPConfig{Type: config.MCPHttp, URL: tmpl}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, config.IdentityResolver())
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), config.IdentityResolver())
 		require.NoError(t, err)
 		sct, ok := tr.(*mcp.StreamableClientTransport)
 		require.True(t, ok)
@@ -320,7 +320,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 				"REFERENCE": "$MY_TOKEN",
 			},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.NoError(t, err)
 		require.NotNil(t, tr)
 
@@ -346,7 +346,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"TOKEN": "$(false)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "env TOKEN")
@@ -365,7 +365,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"FORGEJO_ACCESS_TOKEN": "$(exit 5)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "env FORGEJO_ACCESS_TOKEN")
@@ -386,7 +386,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Env:     map[string]string{"FORGEJO_ACCESS_TOKEN": "$FORGEJO_TOKEN_UNSET"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.NoError(t, err)
 		ct, ok := tr.(*mcp.CommandTransport)
 		require.True(t, ok)
@@ -401,7 +401,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Command: "forgejo-mcp",
 			Args:    []string{"--token", "$(false)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "arg 1")
@@ -414,7 +414,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Type:    config.MCPStdio,
 			Command: "$(false)",
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "invalid mcp command")
@@ -429,7 +429,7 @@ func TestCreateTransport_StdioResolution(t *testing.T) {
 			Args:    []string{"--token", "$MCP_MISSING"},
 			Env:     map[string]string{"TOKEN": "$(vault read -f token)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, config.IdentityResolver())
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), config.IdentityResolver())
 		require.NoError(t, err)
 		ct, ok := tr.(*mcp.CommandTransport)
 		require.True(t, ok)
@@ -457,7 +457,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 				"X-Static":      "kept",
 			},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.NoError(t, err)
 
 		sct, ok := tr.(*mcp.StreamableClientTransport)
@@ -478,7 +478,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/api",
 			Headers: map[string]string{"Authorization": "$(false)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "header Authorization")
@@ -496,7 +496,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/events",
 			Headers: map[string]string{"Authorization": "$(false)"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.Error(t, err)
 		require.Nil(t, tr)
 		require.Contains(t, err.Error(), "header Authorization")
@@ -516,7 +516,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 			URL:     "https://mcp.example.com/events",
 			Headers: map[string]string{"Authorization": "$MISSING_TOKEN"},
 		}
-		tr, _, err := defaultRegistry.createTransport(t.Context(), m, r)
+		tr, _, err := defaultRegistry.createTransportFor(t.Context(), nil, "test", m, defaultRegistry.currentGen("test"), defaultRegistry.authAttempt.Add(1), r)
 		require.NoError(t, err)
 		sse, ok := tr.(*mcp.SSEClientTransport)
 		require.True(t, ok)
@@ -584,7 +584,7 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 		{
 			// A URL whose shell expansion yields the empty
 			// string (here via ${VAR:-}) is not a ResolvedURL
-			// error, but the non-empty guard in defaultRegistry.createTransport
+			// error, but the non-empty guard in defaultRegistry.createTransportFor
 			// must still reject it so the state card renders an
 			// error instead of spawning a transport against "".
 			name:    "http empty-resolved url",
@@ -896,7 +896,7 @@ func setDistinct(typ reflect.Type, field reflect.Value) {
 func TestBeginAuth_HungWorkerRetainsExecutionSlotUntilExit(t *testing.T) {
 	const name = "hung-auth"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	release := make(chan struct{})
 	started := make(chan struct{}, 2)
 	var sideEffects atomic.Int32
@@ -948,7 +948,7 @@ func TestBeginAuth_HungWorkerRetainsExecutionSlotUntilExit(t *testing.T) {
 func TestBeginAuth_CancelSettlesExactStartingOwner(t *testing.T) {
 	const name = "cancel-auth"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	started := make(chan struct{})
 	exited := make(chan struct{})
 	r.runAuth = func(ctx context.Context, _ ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
@@ -988,7 +988,7 @@ func TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			const name = "stale-cancel"
 			r := NewRegistry()
-			cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+			cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 			started := make(chan struct{})
 			release := make(chan struct{})
 			r.runAuth = func(context.Context, ConfigProvider, string, config.MCPConfig, attemptID) error {
@@ -1024,7 +1024,7 @@ func TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState(t *testing.T) {
 func TestBeginAuth_PanicClosesPublishedHandlerOnce(t *testing.T) {
 	const name = "panic-auth"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	var closes atomic.Int32
 	r.runAuth = func(_ context.Context, _ ConfigProvider, name string, _ config.MCPConfig, owner attemptID) error {
 		auth := &ownedAuthHandler{closeFn: func() { closes.Add(1) }}
@@ -1050,7 +1050,7 @@ func TestBeginAuth_PanicClosesPublishedHandlerOnce(t *testing.T) {
 func TestAuthenticateMCP_NoTokenStartsInteractiveFlow(t *testing.T) {
 	const name = "auth-no-token"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
 	// A cancelled context makes createSession fail fast without network,
 	// exercising the full AuthenticateMCP → connectAndRegister → setAuthTerminal
 	// path. The handler is created and published before the connect attempt.
@@ -1075,7 +1075,7 @@ func TestAuthenticateMCP_NoTokenStartsInteractiveFlow(t *testing.T) {
 func TestAuthenticateMCP_CancelReturnsCancelledAndSettlesNeedsAuth(t *testing.T) {
 	const name = "auth-cancel"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp", OAuth: true}}})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	err := r.AuthenticateMCP(ctx, cfg, name)
@@ -1092,7 +1092,7 @@ func TestAuthenticateMCP_CancelReturnsCancelledAndSettlesNeedsAuth(t *testing.T)
 func TestInitClient_NonOAuthCancellationIsError(t *testing.T) {
 	const name = "non-oauth-cancel"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp"}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "http://127.0.0.1:1/mcp"}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1129,7 +1129,7 @@ func TestPublishSessionFailureCleansDetachedAuthOnce(t *testing.T) {
 func TestOAuthTokenPersistenceCurrentOwnerPersistsOnce(t *testing.T) {
 	const name = "token-owner"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
@@ -1151,7 +1151,7 @@ func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T
 		t.Run(action, func(t *testing.T) {
 			const name = "token-owner"
 			r := NewRegistry()
-			cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+			cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
 			owner, err := r.beginAttempt(name)
 			require.NoError(t, err)
 			r.updateStateFor(name, owner, StateStarting, nil)
@@ -1195,7 +1195,7 @@ func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T
 func TestOAuthTokenPersistenceReservedWriteDelaysTeardown(t *testing.T) {
 	const name = "token-owner"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, OAuth: true}}})
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
@@ -1345,7 +1345,7 @@ func TestSuppressLockConcurrentAccess(t *testing.T) {
 func TestBeginAuth_FinishTimeoutRestoresStateNeedsAuth(t *testing.T) {
 	const name = "finish-timeout-auth"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.test", OAuth: true}}})
 	started := make(chan struct{})
 	r.runAuth = func(ctx context.Context, _ ConfigProvider, name string, m config.MCPConfig, owner attemptID) error {
 		r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
@@ -1422,7 +1422,7 @@ func TestBuildHTTPTransportOAuth(t *testing.T) {
 			owner, err := r.beginAttempt(name)
 			require.NoError(t, err)
 			t.Cleanup(func() { r.detachAuth(name, owner, nil).Close() })
-			cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: tc.typ, URL: tc.wantURL, OAuth: true}}})
+			cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: tc.typ, URL: tc.wantURL, OAuth: true}}})
 			m := cfg.Config().MCP[name]
 			transport, handler, err := r.createTransportFor(t.Context(), cfg, name, m, owner.gen, owner.seq, cfg.Resolver())
 			require.NoError(t, err)
@@ -1445,7 +1445,7 @@ func TestBuildHTTPTransportOAuth(t *testing.T) {
 }
 
 func TestBeginAuth_UnknownServer(t *testing.T) {
-	cfg := config.NewTestStore(&config.Config{})
+	cfg := config.NewTestStore(t, &config.Config{})
 	_, _, err := BeginAuth(cfg, "missing")
 	require.ErrorContains(t, err, "not found")
 }
@@ -1453,7 +1453,7 @@ func TestBeginAuth_UnknownServer(t *testing.T) {
 // TestBeginAuth_NonOAuth proves BeginAuth rejects a server that does not use
 // OAuth over HTTP.
 func TestBeginAuth_NonOAuth(t *testing.T) {
-	cfg := config.NewTestStore(&config.Config{
+	cfg := config.NewTestStore(t, &config.Config{
 		MCP: config.MCPs{
 			"stdio": {Type: config.MCPStdio},
 			"plain": {Type: config.MCPHttp, URL: "https://example.com/mcp"},

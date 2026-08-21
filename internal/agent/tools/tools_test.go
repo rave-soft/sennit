@@ -117,6 +117,22 @@ func TestNewHTTPClientAppliesTimeout(t *testing.T) {
 	require.Equal(t, 90*time.Second, transport.IdleConnTimeout)
 }
 
+// TestInvalidParamFormat pins invalidParam's wording so the ~40 "X is
+// required" call sites it replaced stay consistent instead of drifting back
+// to per-tool phrasing.
+func TestInvalidParamFormat(t *testing.T) {
+	resp := invalidParam("file_path")
+	require.True(t, resp.IsError)
+	require.Equal(t, "file_path is required", resp.Content)
+}
+
+// TestMissingSessionIDFormat pins missingSessionID's wording, the error-side
+// counterpart to invalidParam for the "session ID absent from context" case.
+func TestMissingSessionIDFormat(t *testing.T) {
+	err := missingSessionID("editing a file")
+	require.EqualError(t, err, "session ID is required for editing a file")
+}
+
 func (s *stubPermissionService) ActiveRequest() (permission.PermissionRequest, bool) {
 	return permission.PermissionRequest{}, false
 }

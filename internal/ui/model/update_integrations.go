@@ -1,7 +1,6 @@
 package model
 
 import (
-	"context"
 	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
@@ -11,6 +10,37 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
+
+// integrationsState holds the memoized results of the external-integration
+// loads this file drives: MCP client state (for the header badge and
+// /mcp), the discovered skill states (for the skills status list), and the
+// user-invocable custom commands and MCP prompts (for the commands
+// palette).
+//
+// Embedded anonymously (by value) on UI so its fields keep promoting
+// unchanged (m.mcpStates, ...); see widgets.go for why.
+type integrationsState struct {
+	mcpStates   map[string]workspace.MCPClientInfo
+	skillStates []*skills.SkillState
+
+	customCommands []commands.CustomCommand
+	mcpPrompts     []commands.MCPPrompt
+}
+
+// userCommandsLoadedMsg is sent when user commands are loaded.
+type userCommandsLoadedMsg struct {
+	Commands []commands.CustomCommand
+}
+
+// mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
+type mcpPromptsLoadedMsg struct {
+	Prompts []commands.MCPPrompt
+}
+
+// mcpStateChangedMsg is sent when there is a change in MCP client states.
+type mcpStateChangedMsg struct {
+	states map[string]workspace.MCPClientInfo
+}
 
 // updateIntegrations handles the LSP, custom-command, and MCP branches of
 // UI.Update: LSP state refresh, custom-command and MCP-prompt loads, prompt
@@ -93,13 +123,13 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			))
 			return cmds, true
 		case workspace.MCPEventPromptsListChanged:
-			cmds = append(cmds, handleMCPPromptsEvent(m.com.Workspace, msg.Payload.Name))
+			cmds = append(cmds, handleMCPPromptsEvent(m.com.Context(), m.com.Workspace, msg.Payload.Name))
 			return cmds, true
 		case workspace.MCPEventToolsListChanged:
-			cmds = append(cmds, handleMCPToolsEvent(m.com.Workspace, msg.Payload.Name))
+			cmds = append(cmds, handleMCPToolsEvent(m.com.Context(), m.com.Workspace, msg.Payload.Name))
 			return cmds, true
 		case workspace.MCPEventResourcesListChanged:
-			cmds = append(cmds, handleMCPResourcesEvent(m.com.Workspace, msg.Payload.Name))
+			cmds = append(cmds, handleMCPResourcesEvent(m.com.Context(), m.com.Workspace, msg.Payload.Name))
 			return cmds, true
 		}
 	}
@@ -108,7 +138,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 
 // loadMCPrompts loads the MCP prompts asynchronously.
 func (m *UI) loadMCPrompts() tea.Msg {
-	prompts, err := m.com.Workspace.ListMCPPrompts(context.Background())
+	prompts, err := m.com.Workspace.ListMCPPrompts(m.com.Context())
 	if err != nil {
 		slog.Error("Failed to load MCP prompts", "error", err)
 	}

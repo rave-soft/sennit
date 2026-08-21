@@ -47,7 +47,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 }`
 	writeGlobalConfig(t, sennitJSON)
 
-	cfg, err := config.Init(env.workingDir, "", false)
+	cfg, err := config.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.SetupAgents()
 

@@ -24,7 +24,7 @@ func TestMCPTokenMutationIsConditionalAndOwnerOrdered(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sennit.json")
 	mcp := MCPConfig{Type: MCPHttp, URL: "https://example.test", OAuth: true, OAuthToken: &oauth.Token{AccessToken: "initial"}}
 	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true,"oauth_token":{"access_token":"initial"}}}}`), 0o600))
-	store := NewTestStore(&Config{MCP: MCPs{"server": mcp}})
+	store := NewTestStore(t, &Config{MCP: MCPs{"server": mcp}})
 	store.globalDataPath = path
 
 	old, ok := store.ReserveMCPTokenMutation("server", mcp)
@@ -67,9 +67,9 @@ func TestMCPTokenMutationRejectsStaleStore(t *testing.T) {
 	mcp := MCPConfig{Type: MCPHttp, URL: "https://example.test", OAuth: true, OAuthToken: initial}
 	require.NoError(t, os.WriteFile(path, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true,"oauth_token":{"access_token":"initial"}}}}`), 0o600))
 
-	staleStore := NewTestStore(&Config{MCP: MCPs{"server": mcp}})
+	staleStore := NewTestStore(t, &Config{MCP: MCPs{"server": mcp}})
 	staleStore.globalDataPath = path
-	freshStore := NewTestStore(&Config{MCP: MCPs{"server": mcp}})
+	freshStore := NewTestStore(t, &Config{MCP: MCPs{"server": mcp}})
 	freshStore.globalDataPath = path
 	stale, ok := staleStore.ReserveMCPTokenMutation("server", mcp)
 	require.True(t, ok)
@@ -239,6 +239,18 @@ func TestScope_String(t *testing.T) {
 	require.Contains(t, Scope(99).String(), "Scope(99)")
 }
 
+// newStalenessStore builds a bare ConfigStore rooted at globalDataPath and
+// captures a staleness snapshot over snapshotPaths, the setup every
+// TestConfigStaleness_* test needs before exercising ConfigStaleness().
+func newStalenessStore(globalDataPath string, snapshotPaths []string) *ConfigStore {
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: globalDataPath,
+	}
+	store.CaptureStalenessSnapshot(snapshotPaths)
+	return store
+}
+
 func TestConfigStaleness_CleanImmediatelyAfterSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -249,11 +261,7 @@ func TestConfigStaleness_CleanImmediatelyAfterSnapshot(t *testing.T) {
 	content := []byte(`{"options": {"debug": true}}`)
 	require.NoError(t, os.WriteFile(configPath, content, 0o600))
 
-	store := &ConfigStore{
-		config:         &Config{},
-		globalDataPath: configPath,
-	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store := newStalenessStore(configPath, []string{configPath})
 
 	result := store.ConfigStaleness()
 	require.False(t, result.Dirty)
@@ -270,11 +278,7 @@ func TestConfigStaleness_DetectsFileContentChange(t *testing.T) {
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
 
-	store := &ConfigStore{
-		config:         &Config{},
-		globalDataPath: configPath,
-	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store := newStalenessStore(configPath, []string{configPath})
 
 	// Modify the file
 	time.Sleep(10 * time.Millisecond) // Ensure different mtime
@@ -295,11 +299,7 @@ func TestConfigStaleness_DetectsFileDeletion(t *testing.T) {
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": true}`), 0o600))
 
-	store := &ConfigStore{
-		config:         &Config{},
-		globalDataPath: configPath,
-	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store := newStalenessStore(configPath, []string{configPath})
 
 	// Delete the file
 	require.NoError(t, os.Remove(configPath))
@@ -317,11 +317,7 @@ func TestConfigStaleness_DetectsNewFile(t *testing.T) {
 	configPath := filepath.Join(dir, "sennit.json")
 
 	// Don't create file initially
-	store := &ConfigStore{
-		config:         &Config{},
-		globalDataPath: configPath,
-	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store := newStalenessStore(configPath, []string{configPath})
 
 	// Now create the file
 	time.Sleep(10 * time.Millisecond)
@@ -346,12 +342,8 @@ func TestConfigStaleness_SortedOutput(t *testing.T) {
 		require.NoError(t, os.WriteFile(p, []byte(`{}`), 0o600))
 	}
 
-	store := &ConfigStore{
-		config:         &Config{},
-		globalDataPath: pathA,
-	}
-	// Add in reverse order to test sorting
-	store.captureStalenessSnapshot([]string{pathC, pathA, pathB})
+	// Add in reverse order to test sorting.
+	store := newStalenessStore(pathA, []string{pathC, pathA, pathB})
 
 	// Modify all files
 	time.Sleep(10 * time.Millisecond)
@@ -374,11 +366,7 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 	// Create initial config file
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
 
-	store := &ConfigStore{
-		config:         &Config{},
-		globalDataPath: configPath,
-	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store := newStalenessStore(configPath, []string{configPath})
 
 	// Modify the file
 	time.Sleep(10 * time.Millisecond)
@@ -389,7 +377,7 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 	require.True(t, result.Dirty)
 
 	// Refresh snapshot
-	require.NoError(t, store.RefreshStalenessSnapshot())
+	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// Verify clean now
 	result = store.ConfigStaleness()

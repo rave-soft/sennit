@@ -63,9 +63,9 @@ func TestManager_PublishStatesUpdatesCache(t *testing.T) {
 	t.Cleanup(mgr.Shutdown)
 
 	// PublishStates must update every observable snapshot, not just the
-	// SSE subscribers: Manager.States() (used by workspaceToProto on
-	// the backend) and skills.GetLatestStates() (read by the TUI on the
-	// client process and in local mode) must reflect the new value.
+	// pubsub subscribers: Manager.States() (read by coordinator.skillStates
+	// for sennit_info) and skills.GetLatestStates() (read by the TUI)
+	// must reflect the new value.
 	mgr.PublishStates([]*SkillState{{Name: "new"}})
 
 	got := mgr.States()
@@ -102,7 +102,8 @@ func TestManager_ConcurrentWorkspacesAreIsolated(t *testing.T) {
 	t.Parallel()
 
 	// Two managers without WithGlobalMirror should not see each other's
-	// events; this models the multi-workspace backend.
+	// events; this models a top-level workspace and a spawned thread's
+	// workspace running concurrently in the same process.
 	mgrA := NewManager(nil, nil, nil)
 	mgrB := NewManager(nil, nil, nil)
 	t.Cleanup(mgrA.Shutdown)

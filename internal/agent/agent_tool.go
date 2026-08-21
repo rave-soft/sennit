@@ -40,8 +40,8 @@ type AgentBackgroundResponseMetadata struct {
 	Status    string `json:"status"`
 }
 
-func (c *coordinator) agentTool(ctx context.Context) (fantasy.AgentTool, error) {
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
+func (c *coordinator) agentTool(ctx context.Context, cfg agentConfig) (fantasy.AgentTool, error) {
+	agentCfg, ok := cfg.Agents()[config.AgentTask]
 	if !ok {
 		return nil, errors.New("task agent not configured")
 	}

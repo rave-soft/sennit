@@ -1,10 +1,8 @@
 package model
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"image"
 	"log/slog"
 	"runtime"
 	"time"
@@ -35,97 +33,6 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
-
-// transparentToggledMsg carries the result of a transparency-toggle config mutation.
-type transparentToggledMsg struct {
-	Err        error
-	Enabled    bool
-	generation uint64
-}
-
-// themeSetMsg carries the result of persisting a theme selection. The
-// palette itself is swapped synchronously when the user picks it, so this
-// message only reports whether the choice survived to disk; Previous is the
-// palette to fall back to if it did not.
-type themeSetMsg struct {
-	Err        error
-	ID         string
-	Previous   string
-	generation uint64
-}
-
-// compactModeToggledMsg carries the result of a compact-mode config mutation.
-type compactModeToggledMsg struct {
-	Err        error
-	Enabled    bool
-	generation uint64
-}
-
-// providerConfiguredResult carries the outcome of the async provider-config
-// flow (UpdatePreferredModel + init) dispatched by ActionProviderConfigured.
-type providerConfiguredResult struct {
-	Err        error
-	Model      config.SelectedModel
-	Onboarding bool
-	generation uint64
-}
-
-// modelSelectResult carries the outcome of the async model-select flow
-// dispatched by handleSelectModel.
-type modelSelectResult struct {
-	Err        error
-	Onboarding bool
-	Model      config.SelectedModel
-	generation uint64
-}
-
-type agentModelInitializedMsg struct {
-	Err        error
-	Onboarding bool
-	Model      config.SelectedModel
-	generation uint64
-}
-
-type modelSettingUpdatedMsg struct {
-	Err        error
-	Info       string
-	generation uint64
-}
-
-// notificationStyleSetMsg carries the result of a notification-style config mutation.
-type notificationStyleSetMsg struct {
-	Err        error
-	Style      string
-	generation uint64
-}
-
-type yoloToggledMsg struct {
-	Err        error
-	Enabled    bool
-	generation uint64
-}
-
-type permissionResponseMsg struct {
-	Accepted   bool
-	Permission string
-	generation uint64
-}
-
-// sendPendingQueueMsg advances one pending send after a session load completes.
-type sendPendingQueueMsg struct{}
-
-type notificationSentMsg struct{}
-
-// sendQueueItem holds one pending-send entry with generation tracking.
-type sendQueueItem struct {
-	content        string
-	attachments    []message.Attachment
-	generation     uint64
-	sessionID      string
-	loadGeneration uint64
-	bang           bool
-	isFirstMessage bool
-}
 
 // TextareaMaxHeight is the maximum height of the prompt textarea before it
 // scrolls internally instead of growing further.
@@ -173,169 +80,32 @@ const (
 	uiChat
 )
 
-type openEditorMsg struct {
-	Text string
-}
+// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
+type copyChatHighlightMsg struct{}
 
-type shellResultMsg struct {
-	PendingID  string // ID of the pending ShellItem to update.
-	Command    string
-	Output     string
-	ExitCode   int
-	Err        error
-	Canceled   bool
-	sessionID  string
-	generation uint64
-}
-
-// shellStreamMsg carries incremental output from a streaming shell command.
-type shellStreamMsg struct {
-	PendingID string
-	Chunk     string
-	streamCh  <-chan string // unexported; used to continue draining
-}
-
-type (
-	// cancelTimerExpiredMsg is sent when the cancel timer expires.
-	cancelTimerExpiredMsg struct{}
-	// userCommandsLoadedMsg is sent when user commands are loaded.
-	userCommandsLoadedMsg struct {
-		Commands []commands.CustomCommand
-	}
-	// mcpPromptsLoadedMsg is sent when mcp prompts are loaded.
-	mcpPromptsLoadedMsg struct {
-		Prompts []commands.MCPPrompt
-	}
-	// mcpStateChangedMsg is sent when there is a change in MCP client states.
-	mcpStateChangedMsg struct {
-		states map[string]workspace.MCPClientInfo
-	}
-	// sendMessageMsg is sent to send a message.
-	// currently only used for mcp prompts.
-	sendMessageMsg struct {
-		Content     string
-		Attachments []message.Attachment
-	}
-
-	// closeDialogMsg is sent to close the current dialog.
-	closeDialogMsg struct{}
-
-	// showThreadsDashboardMsg requests switching to the threads dashboard
-	// screen. Handled by the Root router (root.go); a bare *UI has no
-	// dashboard screen of its own, so this falls through Update's default
-	// case harmlessly when UI is driven directly (e.g. in tests).
-	showThreadsDashboardMsg struct{}
-
-	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
-	copyChatHighlightMsg struct{}
-
-	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
-	sessionFilesUpdatesMsg struct {
-		sessionFiles []SessionFile
-	}
-
-	// createSessionMsg carries a newly created session and the captured send
-	// parameters so that Update can apply the session creation and then
-	// dispatch the AgentRun cmd.
-	createSessionMsg struct {
-		session     session.Session
-		content     string
-		attachments []message.Attachment
-		generation  uint64
-	}
-)
-
-// settingsOps holds the generation counters and in-flight flags for the
-// settings that apply asynchronously (compact mode, notifications, yolo,
-// model, transparency, theme, permission responses). A generation is
-// bumped each time an operation starts, and the result handler discards
-// any reply whose generation doesn't match the latest one, so a stale
-// response from a superseded operation can't clobber a newer one.
-type settingsOps struct {
-	compactModeGeneration    uint64
-	notificationGeneration   uint64
-	yoloGeneration           uint64
-	modelOperationGeneration uint64
-	modelOperationLoading    bool
-	notificationLoading      bool
-	transparentLoading       bool
-	transparentGeneration    uint64
-	themeGeneration          uint64
-	// themeLive is the palette ID currently on screen. It can differ from
-	// the configured one while the theme picker previews a highlighted
-	// palette, which is exactly why the live value is tracked separately
-	// instead of being read back from config.
-	themeLive string
-	// themePreviewFrom is the palette to restore when a preview is
-	// abandoned (the picker closed without a choice). Empty means no
-	// preview is in progress.
-	themePreviewFrom     string
-	compactModeLoading   bool
-	yoloLoading          bool
-	permissionLoading    bool
-	permissionGeneration uint64
-	permissionID         string
-}
-
-// sessionState holds the active session and the bookkeeping around loading,
-// continuing, and navigating between sessions.
-type sessionState struct {
-	current *session.Session
-	files   []SessionFile
-
-	// keeps track of read files while we don't have a session id
-	fileReads []string
-
-	// initialSessionID is set when loading a specific session on startup.
-	initialSessionID string
-	// continueLastSession is set to continue the most recent session on startup.
-	continueLastSession bool
-
-	lastUserMessageTime int64
-
-	// modelUsed is the model the loaded session's own assistant messages
-	// were produced by — which is not the selected model for a sub-agent's
-	// session or one opened from history. See viewedModel.
-	modelUsed sessionModelRef
-
-	loadGen        uint64
-	loadExpectedID string
-
-	// dialogLoading / dialogGen track the off-thread
-	// ListSessions fetch dispatched by openSessionsDialog; see
-	// sessionsLoadedMsg.
-	dialogLoading bool
-	dialogGen     uint64
-
-	// navStack tracks sub-agent session navigation: each frame records
-	// where alt+up should return to and the sibling delegations
-	// alt+left/alt+right can cycle through, without re-scanning the
-	// (possibly no-longer-loaded) parent chat. See enterChildSession.
-	navStack []sessionNavFrame
-}
-
-// layoutState holds the terminal dimensions and the derived compact/details
-// layout mode.
-type layoutState struct {
-	// The width and height of the terminal in cells.
-	width  int
-	height int
-	layout uiLayout
-
-	// forceCompactMode tracks whether compact mode is forced by user toggle
-	forceCompactMode bool
-
-	// isCompact tracks whether we're currently in compact layout mode (either
-	// by user toggle or auto-switch based on window size)
-	isCompact bool
-
-	// detailsOpen tracks whether the details panel is open (in compact mode)
-	detailsOpen bool
-
-	isTransparent bool
-}
-
-// UI represents the main user interface model.
+// UI represents the main user interface model. Its fields fall into two
+// kinds:
+//
+//   - Named sub-state structs (sess, queued, ops, lay, editor, lsp,
+//     sidebar, panel, wsCache, threadList, threadsDock), each covering one
+//     narrow concern (session lifecycle, layout, the editor, ...) and
+//     referenced explicitly (m.sess.current, m.lay.width, ...). This is
+//     the pre-existing convention in this package; each has its own doc
+//     comment at its definition.
+//   - Anonymously embedded groupings (widgets, term, notifyState,
+//     breadcrumbState, integrationsState, mouseState) added for fields
+//     that were flat on UI and didn't already have a narrow home. They are
+//     embedded by value, not by pointer, for the same reason
+//     appServices/appEvents/shutdownPhases are in internal/app/app.go: a
+//     promoted field on a nil pointer embedding panics on first touch,
+//     and this package's tests build bare UI{} values directly. Value
+//     embedding keeps every field usable with its original m.field name
+//     via Go's promotion rules; only struct literals that name these
+//     fields (New below, and a few tests) need to qualify them by group.
+//
+// com, embedded, focus, state, keyMap, and isCanceling stay directly on UI:
+// each is either the one shared dependency handle or reflects a piece of
+// state central to the whole model rather than owned by one grouping.
 type UI struct {
 	com *common.Common
 
@@ -359,10 +129,6 @@ type UI struct {
 	state uiState
 
 	keyMap KeyMap
-	keyenh tea.KeyboardEnhancementsMsg
-
-	dialog *dialog.Overlay
-	status *Status
 
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
@@ -371,42 +137,13 @@ type UI struct {
 	// state, bang (!) shell-mode flags, and prompt history. See editor.go.
 	editor editorState
 
-	header *header
+	// widgets holds the stateful sub-components (dialog stack, status
+	// line, header, chat list, active inline editor). See widgets.go.
+	widgets
 
-	// sendProgressBar instructs the TUI to send progress bar updates to the
-	// terminal.
-	sendProgressBar    bool
-	progressBarEnabled bool
-
-	// caps hold different terminal capabilities that we query for.
-	caps common.Capabilities
-
-	// Active inline editor replaces the textarea when non-nil.
-	activeInline dialog.InlineEditor
-	// inlineCursor stores the cursor from the last inline editor
-	// Draw call, used by the cursor positioning logic below.
-	inlineCursor *tea.Cursor
-
-	readyPlaceholder   string
-	workingPlaceholder string
-
-	// Chat components
-	chat *Chat
-
-	// crumbRoot names the thread this UI is embedded in, for the second
-	// crumb of the breadcrumb bar ("main › <crumbRoot> › …"). Empty on the
-	// top-level UI, which has no thread above it. Set by the router when it
-	// attaches (see Root.handleThreadAttached).
-	crumbRoot string
-
-	// breadcrumbHover is set while the pointer is over the breadcrumb bar's
-	// Back button, for hover feedback.
-	breadcrumbHover bool
-	// breadcrumbButtonRect is the screen area of that button as last
-	// painted. Hit-testing recomputes it instead (see
-	// breadcrumbButtonHit) — this is kept only so the bar can be inspected
-	// after a draw.
-	breadcrumbButtonRect image.Rectangle
+	// term holds negotiated terminal capability/runtime state (capability
+	// probe, keyboard enhancements, progress bar). See update_system.go.
+	term
 
 	// onboarding state
 	onboarding struct {
@@ -417,49 +154,43 @@ type UI struct {
 	// counts. See lsp.go.
 	lsp lspState
 
-	// mcp
-	mcpStates map[string]workspace.MCPClientInfo
-
-	// skills
-	skillStates []*skills.SkillState
+	// integrationsState holds MCP/skill/custom-command state loaded by
+	// updateIntegrations. See update_integrations.go.
+	integrationsState
 
 	// sidebar holds virtual-scroll state and cached rendered content for the
 	// chat sidebar. See sidebar.go.
 	sidebar sidebarState
 
-	// Notification state
-	notifyBackend       notification.Backend
-	notifyWindowFocused bool
-	// custom commands & mcp commands
-	customCommands []commands.CustomCommand
-	mcpPrompts     []commands.MCPPrompt
+	// notifyState holds desktop-notification backend/focus/per-thread
+	// status state. See notifications.go.
+	notifyState
+
+	// breadcrumbState holds the breadcrumb bar's own state (crumbRoot,
+	// hover, hit-test rect). See breadcrumbs.go.
+	breadcrumbState
 
 	// panel holds the expand state of the merged session panel (threads +
 	// todos + queue, between chat and the editor). See session_panel.go.
 	panel sessionPanelState
 
-	// threadLastStatus tracks each thread's last-seen status, so
-	// notifyThreadCompletion (thread_completion.go) can detect the exact
-	// edge transition into a terminal state and toast it exactly once.
-	threadLastStatus map[string]string
-
 	// wsCache holds the memoized workspace busy/yolo/ready/model/queue
 	// state and its TTL-cache bookkeeping. See workspace_cache.go.
 	wsCache workspaceCacheState
 
-	// threadIndicator holds the memoized active-thread count shown as a
-	// header badge. See thread_indicator.go.
-	threadIndicator threadIndicatorState
+	// threadList holds the memoized thread list shared by the header
+	// badge, the session panel's dock, and (via a pointer handed to
+	// newThreadsDashboard) the threads dashboard — one ListThreads round
+	// trip serves all three. See threads_cache.go.
+	threadList threadListCache
 
-	// threadsDock holds the memoized thread list and per-thread live
-	// activity shown by the session panel's threads section. See
-	// threads_dock.go / session_panel.go.
+	// threadsDock holds the session panel's per-thread live activity
+	// (in-progress todo, message count). See threads_dock.go /
+	// session_panel.go.
 	threadsDock threadsDockState
 
-	// mouse highlighting related state
-	lastClickTime time.Time
-	hoverX        int
-	hoverY        int
+	// mouseState holds UI-level hover/click bookkeeping. See mouse.go.
+	mouseState
 }
 
 // Option configures a [UI] instance at construction time.
@@ -578,15 +309,17 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 
 	ui := &UI{
 		com:    com,
-		dialog: dialog.NewOverlay(),
 		keyMap: keyMap,
 		editor: editorState{
 			textarea:    ta,
 			completions: comp,
 			attachments: attachments,
 		},
-		chat:   ch,
-		header: header,
+		widgets: widgets{
+			dialog: dialog.NewOverlay(),
+			chat:   ch,
+			header: header,
+		},
 		panel: sessionPanelState{
 			spinner:       panelSpinner,
 			hoveredThread: -1,
@@ -594,14 +327,18 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		lsp: lspState{
 			states: make(map[string]workspace.LSPClientInfo),
 		},
-		mcpStates:           make(map[string]workspace.MCPClientInfo),
-		notifyBackend:       notification.NoopBackend{},
-		notifyWindowFocused: true,
+		integrationsState: integrationsState{
+			mcpStates:   make(map[string]workspace.MCPClientInfo),
+			skillStates: skills.GetLatestStates(),
+		},
+		notifyState: notifyState{
+			notifyBackend:       notification.NoopBackend{},
+			notifyWindowFocused: true,
+		},
 		sess: sessionState{
 			initialSessionID:    initialSessionID,
 			continueLastSession: continueLast,
 		},
-		skillStates: skills.GetLatestStates(),
 	}
 	for _, opt := range opts {
 		opt(ui)
@@ -619,12 +356,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	// frame renders the model info; the busy probe keeps it fresh
 	// afterwards.
 	if com.Workspace.AgentIsReady() {
-		ui.wsCache.agentReady = true
-		ui.wsCache.agentModel = com.Workspace.AgentModel()
+		ui.wsCache.agentCache.set(agentReadyModel{ready: true, model: com.Workspace.AgentModel()})
 	}
 	ui.setEditorPrompt(yolo)
 	ui.randomizePlaceholders()
-	ui.editor.textarea.Placeholder = ui.readyPlaceholder
+	ui.editor.textarea.Placeholder = ui.editor.readyPlaceholder
 	ui.status = status
 
 	// Initialize compact mode from config
@@ -754,7 +490,7 @@ func (m *UI) loadInitialSession() tea.Cmd {
 	case m.sess.continueLastSession:
 		ws := m.com.Workspace
 		return func() tea.Msg {
-			sessions, err := ws.ListSessions(context.Background())
+			sessions, err := ws.ListSessions(m.com.Context())
 			if err != nil || len(sessions) == 0 {
 				return nil
 			}
@@ -785,7 +521,7 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
 		// Append user-invocable skills as commands.
-		skillEntries, err := m.com.Workspace.ListSkills(context.Background())
+		skillEntries, err := m.com.Workspace.ListSkills(m.com.Context())
 		if err != nil {
 			slog.Error("Failed to load skill commands", "error", err)
 		}
@@ -883,7 +619,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmds, done = m.updateStatus(msg, cmds); done {
 			return m, tea.Batch(cmds...)
 		}
-	case pubsub.Event[proto.Thread], threadIndicatorLoadedMsg, threadsDockLoadedMsg, threadDockActivityLoadedMsg:
+	case pubsub.Event[proto.Thread], threadsLoadedMsg, threadDockActivityLoadedMsg:
 		var done bool
 		if cmds, done = m.updateThreads(msg, cmds); done {
 			return m, tea.Batch(cmds...)
@@ -916,9 +652,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.editor.bangMode {
 			m.editor.textarea.Placeholder = "Run a shell command"
 		} else if m.isAgentBusy() {
-			m.editor.textarea.Placeholder = m.workingPlaceholder
+			m.editor.textarea.Placeholder = m.editor.workingPlaceholder
 		} else {
-			m.editor.textarea.Placeholder = m.readyPlaceholder
+			m.editor.textarea.Placeholder = m.editor.readyPlaceholder
 		}
 		if !m.editor.bangMode && m.yoloModeCached() {
 			m.editor.textarea.Placeholder = "Yolo mode!"
@@ -1090,7 +826,7 @@ func (m *UI) activeThreadBadgeCount() int {
 	if !m.surfacesThreads() {
 		return 0
 	}
-	return m.threadIndicator.cache.value
+	return activeThreadCount(m.threadList.cache.value)
 }
 
 func (m *UI) currentModelSupportsImages() bool {
@@ -1122,37 +858,6 @@ func (m *UI) toggleCompactMode() tea.Cmd {
 	return func() tea.Msg {
 		return compactModeToggledMsg{Err: workspace.SetCompactMode(config.ScopeGlobal, desired), Enabled: desired, generation: generation}
 	}
-}
-
-// uiLayout defines the positioning of UI elements.
-type uiLayout struct {
-	// area is the overall available area.
-	area uv.Rectangle
-
-	// header is the header shown in special cases
-	// e.x when the sidebar is collapsed
-	// or when in the landing page
-	// or in init/config
-	header uv.Rectangle
-
-	// main is the area for the main pane. (e.x chat, configure, landing)
-	main uv.Rectangle
-
-	// panel is the area for the merged session panel (active threads +
-	// todos + queued prompts) between chat and the editor.
-	panel uv.Rectangle
-
-	// editor is the area for the editor pane.
-	editor uv.Rectangle
-
-	// sidebar is the area for the sidebar.
-	sidebar uv.Rectangle
-
-	// status is the area for the status view.
-	status uv.Rectangle
-
-	// session details is the area for the session details overlay in compact mode.
-	sessionDetails uv.Rectangle
 }
 
 // isAgentBusy returns true if the agent coordinator exists and is currently
@@ -1326,7 +1031,7 @@ func (m *UI) setTheme(id string) tea.Cmd {
 // return one.
 func (m *UI) attachSkill(skillID, name string) tea.Cmd {
 	return func() tea.Msg {
-		content, result, err := m.com.Workspace.ReadSkill(context.Background(), skillID)
+		content, result, err := m.com.Workspace.ReadSkill(m.com.Context(), skillID)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
@@ -1410,16 +1115,14 @@ func (m *UI) newSession() tea.Cmd {
 	m.panel.expanded = false
 	m.panel.autoExpanded = false
 	m.panel.todosScrollOffset = 0
-	m.wsCache.promptQueue = 0
-	m.wsCache.promptQueueItems = nil
-	m.wsCache.promptQueueCheckedAt = time.Now()
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
+	m.wsCache.promptQueueCache.set(nil)
 	m.editor.historyReset()
 	workspace.ResetAgentToolCache()
 	return tea.Batch(
 		func() tea.Msg {
-			m.com.Workspace.LSPStopAll(context.Background())
+			m.com.Workspace.LSPStopAll(m.com.Context())
 			return nil
 		},
 		m.loadPromptHistory(),

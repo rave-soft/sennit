@@ -143,9 +143,9 @@ func TestHandleMCPEventsUseNarrowWorkspaceInterface(t *testing.T) {
 
 	ws := &mcpEventsWorkspace{}
 
-	handleMCPPromptsEvent(ws, "server-a")()
-	handleMCPToolsEvent(ws, "server-b")()
-	handleMCPResourcesEvent(ws, "server-c")()
+	handleMCPPromptsEvent(context.Background(), ws, "server-a")()
+	handleMCPToolsEvent(context.Background(), ws, "server-b")()
+	handleMCPResourcesEvent(context.Background(), ws, "server-c")()
 
 	require.Equal(t, []string{"server-a"}, ws.promptsRefreshed)
 	require.Equal(t, []string{"server-b"}, ws.toolsRefreshed)

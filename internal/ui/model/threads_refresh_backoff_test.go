@@ -99,69 +99,9 @@ func TestThreadActivityStaleGenerationFailureIsNotRecorded(t *testing.T) {
 		"a stale-generation failure must not hold back the newer request that replaced it")
 }
 
-// TestThreadsDockListRefreshBacksOffAfterFailure covers the second cache
-// with the same shape. It doesn't spin today only because ListThreads
-// happens to be permitted where AttachThread isn't; the defect is the
-// same.
-func TestThreadsDockListRefreshBacksOffAfterFailure(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsDockTestWorkspace{supported: true, err: errors.New("boom")}
-	com := &common.Common{Workspace: ws}
-
-	c := &threadsDockState{}
-	cmd := c.staleThreadsDockRefreshCmd(com, true)
-	require.NotNil(t, cmd)
-
-	loaded, ok := cmd().(threadsDockLoadedMsg)
-	require.True(t, ok)
-	require.Error(t, loaded.err)
-	require.Nil(t, c.applyThreadsDockLoaded(com, loaded),
-		"a failed list must not immediately re-dispatch itself")
-
-	require.Nil(t, c.staleThreadsDockRefreshCmd(com, true),
-		"a list refresh that just failed must not be re-dispatched on the next Update")
-}
-
-// TestThreadsDockListStaleGenerationFailureRedispatches keeps the existing
-// contract intact for the other branch: a result whose generation was
-// superseded is still discarded and re-dispatched, failure or not.
-func TestThreadsDockListStaleGenerationFailureRedispatches(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsDockTestWorkspace{supported: true, err: errors.New("boom")}
-	com := &common.Common{Workspace: ws}
-
-	c := &threadsDockState{}
-	cmd := c.dispatchThreadsDockRefresh(com) // captures generation 0
-	require.NotNil(t, cmd)
-	loaded := cmd().(threadsDockLoadedMsg)
-
-	c.invalidateThreadsDock() // bumps the generation while the fetch is out
-
-	require.NotNil(t, c.applyThreadsDockLoaded(com, loaded),
-		"a superseded failure must still re-dispatch the authoritative refresh")
-	require.False(t, c.cache.backingOff(threadsRefreshBackoff),
-		"and it must not record a backoff that would stall that re-dispatch")
-}
-
-// TestThreadIndicatorRefreshBacksOffAfterFailure covers the third cache
-// with the same shape.
-func TestThreadIndicatorRefreshBacksOffAfterFailure(t *testing.T) {
-	t.Parallel()
-
-	ws := &threadsDockTestWorkspace{supported: true, err: errors.New("boom")}
-	com := &common.Common{Workspace: ws}
-
-	c := &threadIndicatorState{}
-	cmd := c.staleRefreshCmd(com)
-	require.NotNil(t, cmd)
-
-	loaded, ok := cmd().(threadIndicatorLoadedMsg)
-	require.True(t, ok)
-	require.Error(t, loaded.err)
-	require.Nil(t, c.applyLoaded(com, loaded))
-
-	require.Nil(t, c.staleRefreshCmd(com),
-		"an indicator refresh that just failed must not be re-dispatched on the next Update")
-}
+// The dock's and indicator's own list-refresh backoff tests moved to
+// threads_cache_test.go (TestApplyThreadsLoadedErrorBacksOff,
+// TestApplyThreadsLoadedStaleGenerationFailureRedispatches): both caches
+// (and the dashboard's) collapsed onto the single threadListCache in
+// threads_cache.go, so there is exactly one list-refresh backoff path left
+// to pin instead of three copies of it.

@@ -84,7 +84,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 		renderWebSearchDescription(backend),
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
-				return fantasy.NewTextErrorResponse("query is required"), nil
+				return invalidParam("query"), nil
 			}
 
 			maxResults := params.MaxResults
@@ -98,7 +98,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 			if permissions != nil {
 				sessionID := GetSessionFromContext(ctx)
 				if sessionID == "" {
-					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for web_search")
+					return fantasy.ToolResponse{}, missingSessionID("web_search")
 				}
 
 				permResp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{

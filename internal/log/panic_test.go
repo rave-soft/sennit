@@ -45,3 +45,40 @@ func TestRecoverPanicWritesToConfiguredLogDir(t *testing.T) {
 		require.NotContains(t, e.Name(), "sennit-panic-test-")
 	}
 }
+
+func TestRecoverPanicRunsCleanupOnSuccess(t *testing.T) {
+	// Not run in parallel: mutates the package-level logDir shared with
+	// other tests in this file.
+	dir := t.TempDir()
+	logDir.Store(dir)
+	t.Cleanup(func() { logDir.Store("") })
+
+	cleaned := false
+	func() {
+		defer RecoverPanic("test-cleanup-success", func() { cleaned = true })
+		panic("boom")
+	}()
+
+	require.True(t, cleaned, "cleanup should run when the panic log file is written successfully")
+}
+
+func TestRecoverPanicRunsCleanupWhenLogFileCannotBeCreated(t *testing.T) {
+	// Not run in parallel: mutates the package-level logDir shared with
+	// other tests in this file.
+	//
+	// Point logDir at a path that is itself a regular file, so
+	// panicLogPath returns <file>/<name>.log and os.Create fails with
+	// ENOTDIR.
+	notADir := filepath.Join(t.TempDir(), "not-a-dir-file")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+	logDir.Store(notADir)
+	t.Cleanup(func() { logDir.Store("") })
+
+	cleaned := false
+	func() {
+		defer RecoverPanic("test-cleanup-failure", func() { cleaned = true })
+		panic("boom")
+	}()
+
+	require.True(t, cleaned, "cleanup should run even when the panic log file cannot be created")
+}

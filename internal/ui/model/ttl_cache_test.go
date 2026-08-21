@@ -29,18 +29,7 @@ func TestTTLCacheBeginIsSingleFlight(t *testing.T) {
 	require.False(t, started)
 }
 
-func TestTTLCacheApplyMatchingGeneration(t *testing.T) {
-	var cache ttlCache[int]
-	generation, started := cache.begin()
-	require.True(t, started)
-
-	require.True(t, cache.apply(generation, 7))
-	require.Equal(t, 7, cache.value)
-	require.True(t, cache.fresh(time.Hour))
-	require.False(t, cache.inFlight)
-}
-
-func TestTTLCacheInvalidatePreservesValueAndRejectsStaleApply(t *testing.T) {
+func TestTTLCacheInvalidatePreservesValue(t *testing.T) {
 	var cache ttlCache[string]
 	cache.set("old")
 	generation, started := cache.begin()
@@ -50,8 +39,4 @@ func TestTTLCacheInvalidatePreservesValueAndRejectsStaleApply(t *testing.T) {
 	require.Equal(t, "old", cache.value)
 	require.False(t, cache.fresh(time.Hour))
 	require.Equal(t, generation+1, cache.generation)
-
-	require.False(t, cache.apply(generation, "stale"))
-	require.Equal(t, "old", cache.value)
-	require.False(t, cache.inFlight)
 }

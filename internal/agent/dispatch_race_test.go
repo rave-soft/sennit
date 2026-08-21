@@ -122,3 +122,88 @@ func TestRun_ConcurrentInProcessDispatchStartsOneRun(t *testing.T) {
 	close(model.release)
 	wg.Wait()
 }
+
+// TestDispatchDecision_AcceptIsAtomicUnderConcurrentRuns pins the
+// invariant dispatchDecision's whole design rests on: the busy-check ->
+// (enqueue | become-active) decision for one session must execute as a
+// single, uninterrupted critical section under that session's mu. If a
+// future edit caches a fact about session state (e.g. "is it idle") and
+// then drops and reacquires the mutex before acting on it, two
+// concurrent dispatches can each capture "idle" and each become the
+// active run - this test's job is to make that observable as maxSeen > 1
+// instead of a silent, occasional double-stream in production.
+//
+// The contention here is forced, not left to luck: this takes the
+// session's own dispatch mutex directly (via the test-only
+// sessionMuForTest, the same *sessionState.mu dispatchDecision uses)
+// before starting any Run call, so both goroutines below are genuinely
+// parked waiting on it - not staggered by goroutine-startup jitter the
+// way an unsynchronized burst would be - by the time it is released.
+//
+// What this does NOT claim: it cannot guarantee catching a lock drop
+// with literally zero work between the drop and the reacquire (e.g. a
+// bare `mu.Unlock(); mu.Lock()` with nothing read or computed in
+// between). Measured directly against exactly that shape of mutation -
+// with real work restored around it so the drop is otherwise identical
+// to a genuine stale-read bug - the reacquiring goroutine's own next
+// Lock() call consistently wins the race back before the parked
+// competitor is even rescheduled: dispatchDecision's critical section
+// executes in low-microsecond time, well under typical goroutine wakeup
+// latency, so a contended competitor essentially never wins a race whose
+// entire window is that short, no matter how much concurrency or how
+// many trials are thrown at it (verified up to 64-way concurrency and
+// hundreds of trials under -race: zero hits). That is a property of how
+// fast the function is, not a gap in this test's contention - and it
+// means a lock drop with any realistic amount of interposed work (a
+// function call, a channel op, anything slower than a couple of
+// instructions) is exactly what this test is built to catch.
+func TestDispatchDecision_AcceptIsAtomicUnderConcurrentRuns(t *testing.T) {
+	t.Parallel()
+
+	const trials = 10
+	const concurrency = 2
+
+	for trial := range trials {
+		env := testEnv(t)
+		model := &concurrencyProbeModel{
+			entered: make(chan struct{}, concurrency),
+			release: make(chan struct{}),
+		}
+		sa := testSessionAgent(env, model, "system").(*sessionAgent)
+
+		sess, err := env.sessions.Create(t.Context(), "session")
+		require.NoError(t, err)
+
+		// Hold the session's own dispatch mutex before any Run call can,
+		// so every concurrent dispatch below is forced to queue behind
+		// it rather than race to acquire it first.
+		gate := sa.sessionMuForTest(sess.ID)
+		gate.Lock()
+
+		var wg sync.WaitGroup
+		for range concurrency {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _ = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "event"})
+			}()
+		}
+
+		// Comfortably over the 1ms starvation threshold: by the time this
+		// releases the gate, both goroutines above have been queued on
+		// the mutex long enough that the runtime's own fairness guarantee
+		// takes over from here, not luck.
+		time.Sleep(20 * time.Millisecond)
+		gate.Unlock()
+
+		// Give both dispatches time to land (whichever branch they take)
+		// before any stream is allowed to finish and the count is read.
+		time.Sleep(50 * time.Millisecond)
+		close(model.release)
+		wg.Wait()
+
+		require.Equal(t, int32(1), model.maxSeen.Load(),
+			"trial %d: at most one run may become active for a session at a time - "+
+				"the accept decision must be atomic under s.mu, not check-then-act", trial)
+	}
+}

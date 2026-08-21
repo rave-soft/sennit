@@ -12,7 +12,7 @@ import (
 func TestListResourcesStaleResultDoesNotRepublishAfterTeardown(t *testing.T) {
 	const name = "stale-resources"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 	old := liveSessionWithCapabilities(t, "old", "old", "res://old")
 	owner, err := r.beginAttempt(name)
 	require.NoError(t, err)

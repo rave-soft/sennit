@@ -87,11 +87,7 @@ tasks:
   test:race:
     desc: Run the full test suite with the race detector
     cmds:
-      - |
-        test_binary="$(mktemp "${TMPDIR:-/tmp}/sennit-test.XXXXXX")"
-        trap 'rm -f "$test_binary"' EXIT
-        go build -o "$test_binary" .
-        SENNIT_TEST_BINARY="$test_binary" go test -race -failfast ./... {{.CLI_ARGS}}
+      - go test -race -failfast ./... {{.CLI_ARGS}}
 
   test:record:
     desc: Run tests and record all VCR cassettes again

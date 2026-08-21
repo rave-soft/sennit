@@ -30,7 +30,7 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	const sessionID = "queued-session"
 	// Mark the session as busy so Run takes the queue branch
 	// without needing a real model.
-	a.dispatch.activeRequests.Set(sessionID, &activeCancel{cancel: func() {}})
+	a.setActiveForTest(sessionID, &activeCancel{cancel: func() {}})
 
 	var called bool
 	hook := func(notify.RunComplete) { called = true }
@@ -46,7 +46,7 @@ func TestSessionAgentRun_QueueStripsOnComplete(t *testing.T) {
 	require.False(t, called,
 		"OnComplete must not fire on the enqueue path; the caller's scope is still live")
 
-	queued, ok := a.dispatch.messageQueue.Get(sessionID)
+	queued, ok := a.getMessageQueueForTest(sessionID)
 	require.True(t, ok)
 	require.Len(t, queued, 1)
 	require.Nil(t, queued[0].OnComplete,
@@ -76,14 +76,14 @@ func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	}).(*sessionAgent)
 
 	const sessionID = "drain-session"
-	a.dispatch.messageQueue.Set(sessionID, []SessionAgentCall{
+	a.setMessageQueueForTest(sessionID, []SessionAgentCall{
 		{SessionID: sessionID, Prompt: "below", acceptSeq: 1},
 		{SessionID: sessionID, Prompt: "at-mark", acceptSeq: 2},
 		{SessionID: sessionID, Prompt: "after", acceptSeq: 3},
 		{SessionID: sessionID, Prompt: "untracked", acceptSeq: 0},
 	})
 	// Cancel high-water mark at seq 2: seq <= 2 and seq == 0 are covered.
-	a.dispatch.cancelMark.Set(sessionID, 2)
+	a.setCancelMarkForTest(sessionID, 2)
 
 	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
 
@@ -93,7 +93,7 @@ func TestDrainQueueForStep_FiltersUnderDispatchLock(t *testing.T) {
 	require.Empty(t, canceledWithRunID,
 		"no dropped call carried a RunID, so none need a terminal RunComplete")
 
-	_, ok := a.dispatch.messageQueue.Get(sessionID)
+	_, ok := a.getMessageQueueForTest(sessionID)
 	require.False(t, ok, "drain must clear the session message queue when nothing is kept")
 }
 
@@ -109,7 +109,7 @@ func TestDrainQueueForStep_NoMarkFoldsAllNonRunID(t *testing.T) {
 	}).(*sessionAgent)
 
 	const sessionID = "drain-nomark"
-	a.dispatch.messageQueue.Set(sessionID, []SessionAgentCall{
+	a.setMessageQueueForTest(sessionID, []SessionAgentCall{
 		{SessionID: sessionID, Prompt: "a", acceptSeq: 0},
 		{SessionID: sessionID, Prompt: "b", acceptSeq: 5},
 	})
@@ -136,7 +136,7 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 	}).(*sessionAgent)
 
 	const sessionID = "drain-runid"
-	a.dispatch.messageQueue.Set(sessionID, []SessionAgentCall{
+	a.setMessageQueueForTest(sessionID, []SessionAgentCall{
 		{SessionID: sessionID, Prompt: "fold-me", acceptSeq: 1},
 		{SessionID: sessionID, RunID: "run-a", Prompt: "keep-me", acceptSeq: 2},
 		{SessionID: sessionID, RunID: "run-b", Prompt: "keep-me-too", acceptSeq: 3},
@@ -148,7 +148,7 @@ func TestDrainQueueForStep_KeepsRunIDPromptsQueued(t *testing.T) {
 	require.Equal(t, "fold-me", fold[0].Prompt)
 	require.Empty(t, canceledWithRunID)
 
-	kept, ok := a.dispatch.messageQueue.Get(sessionID)
+	kept, ok := a.getMessageQueueForTest(sessionID)
 	require.True(t, ok, "RunID-bearing prompts must remain queued for the recursive run path")
 	require.Len(t, kept, 2)
 	require.Equal(t, "run-a", kept[0].RunID)
@@ -170,12 +170,12 @@ func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
 	}).(*sessionAgent)
 
 	const sessionID = "drain-cancel-runid"
-	a.dispatch.messageQueue.Set(sessionID, []SessionAgentCall{
+	a.setMessageQueueForTest(sessionID, []SessionAgentCall{
 		{SessionID: sessionID, RunID: "run-canceled", Prompt: "canceled", acceptSeq: 1},
 		{SessionID: sessionID, Prompt: "canceled-no-runid", acceptSeq: 1},
 		{SessionID: sessionID, RunID: "run-survives", Prompt: "survives", acceptSeq: 5},
 	})
-	a.dispatch.cancelMark.Set(sessionID, 2)
+	a.setCancelMarkForTest(sessionID, 2)
 
 	fold, canceledWithRunID := a.drainQueueForStep(sessionID)
 
@@ -184,7 +184,7 @@ func TestDrainQueueForStep_ReportsCanceledRunIDDrops(t *testing.T) {
 		"only the dropped RunID-bearing prompt needs a terminal RunComplete")
 	require.Equal(t, "run-canceled", canceledWithRunID[0].RunID)
 
-	kept, ok := a.dispatch.messageQueue.Get(sessionID)
+	kept, ok := a.getMessageQueueForTest(sessionID)
 	require.True(t, ok)
 	require.Len(t, kept, 1, "the uncanceled RunID prompt stays queued")
 	require.Equal(t, "run-survives", kept[0].RunID)
@@ -270,7 +270,7 @@ func TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
 	ch := broker.Subscribe(subCtx)
 
 	const sessionID = "cancel-queued-runid"
-	a.dispatch.messageQueue.Set(sessionID, []SessionAgentCall{
+	a.setMessageQueueForTest(sessionID, []SessionAgentCall{
 		{SessionID: sessionID, Prompt: "no-runid", acceptSeq: 1},
 		{SessionID: sessionID, RunID: "run-queued", Prompt: "queued", acceptSeq: 2},
 	})
@@ -279,7 +279,7 @@ func TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete(t *testing.T) {
 
 	requireSingleCancelledRunComplete(t, ch, sessionID, "run-queued")
 
-	_, ok := a.dispatch.messageQueue.Get(sessionID)
+	_, ok := a.getMessageQueueForTest(sessionID)
 	require.False(t, ok, "Cancel must clear the queue")
 }
 
@@ -308,11 +308,11 @@ func TestDrainQueueForStep_DroppedRunIDPublishesCancelledRunComplete(t *testing.
 	ch := broker.Subscribe(subCtx)
 
 	const sessionID = "drain-drop-runid"
-	a.dispatch.messageQueue.Set(sessionID, []SessionAgentCall{
+	a.setMessageQueueForTest(sessionID, []SessionAgentCall{
 		{SessionID: sessionID, RunID: "run-dropped", Prompt: "dropped", acceptSeq: 1},
 		{SessionID: sessionID, Prompt: "dropped-no-runid", acceptSeq: 1},
 	})
-	a.dispatch.cancelMark.Set(sessionID, 2)
+	a.setCancelMarkForTest(sessionID, 2)
 
 	_, canceledWithRunID := a.drainQueueForStep(sessionID)
 	require.Len(t, canceledWithRunID, 1)

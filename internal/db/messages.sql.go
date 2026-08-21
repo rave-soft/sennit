@@ -40,7 +40,7 @@ type BatchValidateSessionIDsInTreeParams struct {
 }
 
 func (q *Queries) BatchValidateSessionIDsInTree(ctx context.Context, arg BatchValidateSessionIDsInTreeParams) ([]string, error) {
-	rows, err := q.query(ctx, q.batchValidateSessionIDsInTreeStmt, batchValidateSessionIDsInTree, arg.SessionIdsJson, arg.RootSessionID, arg.ProjectPath)
+	rows, err := q.db.QueryContext(ctx, batchValidateSessionIDsInTree, arg.SessionIdsJson, arg.RootSessionID, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -62,13 +62,34 @@ func (q *Queries) BatchValidateSessionIDsInTree(ctx context.Context, arg BatchVa
 	return items, nil
 }
 
+const countMessagesForSessionIDs = `-- name: CountMessagesForSessionIDs :one
+WITH input AS (
+    SELECT CAST(?1 AS TEXT) AS session_ids_json
+)
+SELECT COUNT(*) FROM messages
+WHERE messages.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+)
+`
+
+// gc's dependent-row count for a batch of sessions it is about to delete.
+// One aggregate query via json_each rather than an IN-list, so the bound
+// parameter count does not grow with the number of sessions selected --
+// see ListMessagesBySessionIDs for the same pattern.
+func (q *Queries) CountMessagesForSessionIDs(ctx context.Context, sessionIdsJson string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countMessagesForSessionIDs, sessionIdsJson)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSessionMessages = `-- name: CountSessionMessages :one
 SELECT COUNT(*) FROM messages
 WHERE session_id = ?
 `
 
 func (q *Queries) CountSessionMessages(ctx context.Context, sessionID string) (int64, error) {
-	row := q.queryRow(ctx, q.countSessionMessagesStmt, countSessionMessages, sessionID)
+	row := q.db.QueryRowContext(ctx, countSessionMessages, sessionID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -104,7 +125,7 @@ type CreateMessageParams struct {
 }
 
 func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error) {
-	row := q.queryRow(ctx, q.createMessageStmt, createMessage,
+	row := q.db.QueryRowContext(ctx, createMessage,
 		arg.ID,
 		arg.SessionID,
 		arg.Role,
@@ -137,7 +158,7 @@ WHERE id = ?
 `
 
 func (q *Queries) DeleteMessage(ctx context.Context, id string) error {
-	_, err := q.exec(ctx, q.deleteMessageStmt, deleteMessage, id)
+	_, err := q.db.ExecContext(ctx, deleteMessage, id)
 	return err
 }
 
@@ -147,7 +168,7 @@ WHERE session_id = ?
 `
 
 func (q *Queries) DeleteSessionMessages(ctx context.Context, sessionID string) error {
-	_, err := q.exec(ctx, q.deleteSessionMessagesStmt, deleteSessionMessages, sessionID)
+	_, err := q.db.ExecContext(ctx, deleteSessionMessages, sessionID)
 	return err
 }
 
@@ -158,7 +179,7 @@ WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
-	row := q.queryRow(ctx, q.getMessageStmt, getMessage, id)
+	row := q.db.QueryRowContext(ctx, getMessage, id)
 	var i Message
 	err := row.Scan(
 		&i.ID,
@@ -194,7 +215,7 @@ ORDER BY messages.created_at DESC
 // Prompt-history source: only messages a human typed. Sub-agent child sessions
 // and thread sessions carry machine-generated prompts as user-role messages.
 func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
-	rows, err := q.query(ctx, q.listAllUserMessagesStmt, listAllUserMessages)
+	rows, err := q.db.QueryContext(ctx, listAllUserMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +257,7 @@ ORDER BY created_at ASC
 `
 
 func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
-	rows, err := q.query(ctx, q.listMessagesBySessionStmt, listMessagesBySession, sessionID)
+	rows, err := q.db.QueryContext(ctx, listMessagesBySession, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +304,7 @@ ORDER BY messages.session_id, messages.created_at ASC
 `
 
 func (q *Queries) ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson string) ([]Message, error) {
-	rows, err := q.query(ctx, q.listMessagesBySessionIDsStmt, listMessagesBySessionIDs, sessionIdsJson)
+	rows, err := q.db.QueryContext(ctx, listMessagesBySessionIDs, sessionIdsJson)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +371,7 @@ type ListUnfinishedAssistantMessagesRow struct {
 // Ordered oldest first so a repair walks a session's history in the
 // order it happened.
 func (q *Queries) ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]ListUnfinishedAssistantMessagesRow, error) {
-	rows, err := q.query(ctx, q.listUnfinishedAssistantMessagesStmt, listUnfinishedAssistantMessages, projectPath)
+	rows, err := q.db.QueryContext(ctx, listUnfinishedAssistantMessages, projectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +411,7 @@ ORDER BY created_at DESC
 `
 
 func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
-	rows, err := q.query(ctx, q.listUserMessagesBySessionStmt, listUserMessagesBySession, sessionID)
+	rows, err := q.db.QueryContext(ctx, listUserMessagesBySession, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -440,6 +461,6 @@ type UpdateMessageParams struct {
 }
 
 func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) error {
-	_, err := q.exec(ctx, q.updateMessageStmt, updateMessage, arg.Parts, arg.FinishedAt, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateMessage, arg.Parts, arg.FinishedAt, arg.ID)
 	return err
 }

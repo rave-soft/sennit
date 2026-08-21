@@ -203,8 +203,11 @@ func newOnboardingTestUI(ws *onboardingTestWorkspace, state uiState, action dial
 	com := common.DefaultCommon(context.Background(), ws)
 	overlay := dialog.NewOverlay(&stubActionDialog{id: "stub", action: action})
 	ui := &UI{
-		com:    com,
-		chat:   NewChat(com, config.ScrollbarDefault),
+		com: com,
+		widgets: widgets{
+			chat:   NewChat(com, config.ScrollbarDefault),
+			dialog: overlay,
+		},
 		editor: editorState{textarea: textarea.New()},
 		state:  state,
 		focus:  uiFocusEditor,
@@ -213,7 +216,6 @@ func newOnboardingTestUI(ws *onboardingTestWorkspace, state uiState, action dial
 			height: 45,
 		},
 		keyMap: DefaultKeyMap(),
-		dialog: overlay,
 	}
 	ui.status = NewStatus(com, ui)
 	return ui

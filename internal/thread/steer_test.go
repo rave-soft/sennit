@@ -1,8 +1,10 @@
-package thread
+package thread_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/app"
@@ -16,14 +18,11 @@ import (
 // completion against before tearing anything down. The steering path's
 // whole correctness rests on when this does and does not move, so the
 // tests below read it directly rather than inferring it from behavior.
-func runtimeRunID(t *testing.T, mgr *Manager, id string) string {
+func runtimeRunID(t *testing.T, mgr *thread.Manager, id string) string {
 	t.Helper()
-	c := mgr.lc.existingControl(id)
-	require.NotNil(t, c)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	require.NotNil(t, c.runtime, "thread has no live runtime")
-	return c.runtime.runID
+	runID, live := mgr.RuntimeForTest(id)
+	require.True(t, live, "thread has no live runtime")
+	return runID
 }
 
 // A message the person types into a thread's session reaches the turn the
@@ -35,7 +34,7 @@ func TestManager_SendFromPersonFoldsIntoRunningTurn(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "busy", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "busy", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -73,7 +72,7 @@ func TestManager_SendFromPersonStartsOwnTurnWhenIdle(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "idle", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "idle", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -103,7 +102,7 @@ func TestManager_SendFromAgentStillQueuesBehindRunningTurn(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "agentsend", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "agentsend", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -138,7 +137,7 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "revived", Goal: "do it", MergePolicy: MergeAuto})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "revived", Goal: "do it", MergePolicy: thread.MergeAuto})
 	require.NoError(t, err)
 	worktree := st.WorktreePath
 
@@ -148,11 +147,11 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusFailed, st.Status)
+	require.Equal(t, thread.StatusFailed, st.Status)
 
 	st, err = mgr.Activate(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusIdle, st.Status)
+	require.Equal(t, thread.StatusIdle, st.Status)
 	require.Equal(t, "stream error: overloaded", st.Error, "activation preserves what went wrong")
 
 	// Reviving respawns the workspace, so the coordinator to watch is the
@@ -165,7 +164,7 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	// While the person's turn runs, the thread says so — the whole point.
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusRunning, st.Status)
+	require.Equal(t, thread.StatusRunning, st.Status)
 	require.Empty(t, st.Error, "a turn is in flight; the old failure is no longer the current state")
 
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
@@ -179,14 +178,14 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	publishSuccess(t, spawner.appFor(worktree), st.SessionID)
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
-		return err == nil && got.Status == StatusIdle
+		return err == nil && got.Status == thread.StatusIdle
 	}, time.Second, time.Millisecond)
 
 	require.NotNil(t, mgr.Handle(st.ID), "the workspace stays live: the person is working in it")
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 	require.Empty(t, got.Error, "the turn succeeded, so the stale failure is finally gone")
-	require.Equal(t, MergeAuto, got.MergePolicy)
+	require.Equal(t, thread.MergeAuto, got.MergePolicy)
 	require.DirExists(t, worktree, "an auto-policy thread is not merged and discarded because the person stopped typing")
 }
 
@@ -212,7 +211,7 @@ func TestManager_SendFromPersonCancelledOnEntryRestsAtIdle(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "raced", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "raced", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -229,6 +228,6 @@ func TestManager_SendFromPersonCancelledOnEntryRestsAtIdle(t *testing.T) {
 		"nothing ran, so nothing may take the workspace from the run that owns it")
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusIdle, got.Status,
+	require.Equal(t, thread.StatusIdle, got.Status,
 		"a live workspace with nothing in flight is idle, not running")
 }

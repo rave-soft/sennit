@@ -21,7 +21,6 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
@@ -36,14 +35,6 @@ var sessionCmd = &cobra.Command{
 	Short:   "Manage sessions",
 	Long:    "Manage Sennit sessions. Agents can use --json for machine-readable output.",
 }
-
-var (
-	sessionListJSON   bool
-	sessionShowJSON   bool
-	sessionLastJSON   bool
-	sessionDeleteJSON bool
-	sessionRenameJSON bool
-)
 
 var sessionListCmd = &cobra.Command{
 	Use:     "list",
@@ -86,11 +77,11 @@ var sessionRenameCmd = &cobra.Command{
 }
 
 func init() {
-	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "output in JSON format")
-	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
-	sessionLastCmd.Flags().BoolVar(&sessionLastJSON, "json", false, "output in JSON format")
-	sessionDeleteCmd.Flags().BoolVar(&sessionDeleteJSON, "json", false, "output in JSON format")
-	sessionRenameCmd.Flags().BoolVar(&sessionRenameJSON, "json", false, "output in JSON format")
+	sessionListCmd.Flags().Bool("json", false, "output in JSON format")
+	sessionShowCmd.Flags().Bool("json", false, "output in JSON format")
+	sessionLastCmd.Flags().Bool("json", false, "output in JSON format")
+	sessionDeleteCmd.Flags().Bool("json", false, "output in JSON format")
+	sessionRenameCmd.Flags().Bool("json", false, "output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
 	sessionCmd.AddCommand(sessionLastCmd)
@@ -105,35 +96,27 @@ type sessionServices struct {
 }
 
 func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
-	dataDir, _ := cmd.Flags().GetString("data-dir")
-	ctx := cmd.Context()
+	ctx := cmdContext(cmd)
 
-	// Resolve the actual cwd (the --cwd flag, or os.Getwd()) the same way
-	// doctor.go/stat.go do — an empty-string workingDir would make the
-	// session service filter by project_path = "" and list nothing.
-	cwd, err := ResolveCwd(cmd)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	cfg, err := config.Init(cwd, dataDir, false)
+	// initConfig resolves the actual cwd (the --cwd flag, or os.Getwd())
+	// the same way doctor.go/stat.go do — an empty-string workingDir would
+	// make the session service filter by project_path = "" and list
+	// nothing.
+	_, cfg, err := initConfig(cmd, false)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
-	conn, err := db.Connect(ctx, config.GlobalDBDir())
+	queries, conn, cleanup, err := connectDB(ctx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to connect to database: %w", err)
+		return nil, nil, nil, err
 	}
 
-	queries := db.New(conn)
 	svc := &sessionServices{
 		sessions: session.NewService(queries, conn, cfg.WorkingDir()),
 		messages: message.NewService(queries),
 		cfg:      cfg,
 	}
-	// Release, not conn.Close: Connect pools by absolute path, and another
-	// caller in this process may hold the same shared global DB open, so
-	// closing it directly would corrupt the pool's refcount for them.
-	return ctx, svc, func() { _ = db.Release(config.GlobalDBDir()) }, nil
+	return ctx, svc, cleanup, nil
 }
 
 func runSessionList(cmd *cobra.Command, _ []string) error {
@@ -145,15 +128,15 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	}
 	defer cleanup()
 
-	event.SessionListed(sessionListJSON)
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	event.SessionListed(jsonOut)
 
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list sessions: %w", err)
 	}
 
-	if sessionListJSON {
-		out := cmd.OutOrStdout()
+	if jsonOut {
 		output := make([]sessionJSON, len(list))
 		for i, s := range list {
 			output[i] = sessionJSON{
@@ -164,9 +147,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 				Modified: time.Unix(s.UpdatedAt, 0).Format(time.RFC3339),
 			}
 		}
-		enc := json.NewEncoder(out)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(output)
+		return emitJSON(cmd.OutOrStdout(), output)
 	}
 
 	w, cleanup, usingPager := sessionWriter(ctx, len(list))
@@ -215,51 +196,6 @@ type sessionMutationResult struct {
 	Renamed bool   `json:"renamed,omitempty"`
 }
 
-// resolveSessionID resolves a session ID that can be a UUID, full hash, or hash prefix.
-// Returns an error if the prefix is ambiguous (matches multiple sessions).
-func resolveSessionID(ctx context.Context, svc session.Service, id string) (session.Session, error) {
-	// Try direct UUID lookup first
-	if s, err := svc.Get(ctx, id); err == nil {
-		return s, nil
-	}
-
-	// List all sessions and check for hash matches
-	sessions, err := svc.List(ctx)
-	if err != nil {
-		return session.Session{}, err
-	}
-
-	var matches []session.Session
-	for _, s := range sessions {
-		hash := session.HashID(s.ID)
-		if hash == id || strings.HasPrefix(hash, id) {
-			matches = append(matches, s)
-		}
-	}
-
-	if len(matches) == 0 {
-		return session.Session{}, fmt.Errorf("session not found: %s", id)
-	}
-
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-
-	// Ambiguous - show matches like Git does
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "session ID '%s' is ambiguous. Matches:\n\n", id)
-	for _, m := range matches {
-		hash := session.HashID(m.ID)
-		created := time.Unix(m.CreatedAt, 0).Format("2006-01-02")
-		// Keep title on one line by replacing newlines with spaces, and truncate.
-		title := strings.ReplaceAll(m.Title, "\n", " ")
-		title = ansi.Truncate(title, 50, "…")
-		fmt.Fprintf(&sb, "  %s... %q (created %s)\n", hash[:12], title, created)
-	}
-	sb.WriteString("\nUse more characters or the full hash")
-	return session.Session{}, errors.New(sb.String())
-}
-
 func runSessionShow(cmd *cobra.Command, args []string) error {
 	event.SetNonInteractive(true)
 
@@ -269,7 +205,8 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
-	event.SessionShown(sessionShowJSON)
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	event.SessionShown(jsonOut)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -282,7 +219,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 	}
 
 	msgPtrs := messagePtrs(msgs)
-	if sessionShowJSON {
+	if jsonOut {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
 	return outputSessionHuman(ctx, svc.cfg, sess, msgPtrs)
@@ -297,7 +234,8 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
-	event.SessionDeletedCommand(sessionDeleteJSON)
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	event.SessionDeletedCommand(jsonOut)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -309,10 +247,8 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	out := cmd.OutOrStdout()
-	if sessionDeleteJSON {
-		enc := json.NewEncoder(out)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(sessionMutationResult{
+	if jsonOut {
+		return emitJSON(out, sessionMutationResult{
 			ID:      session.HashID(sess.ID),
 			UUID:    sess.ID,
 			Title:   sess.Title,
@@ -333,7 +269,8 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
-	event.SessionRenamed(sessionRenameJSON)
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	event.SessionRenamed(jsonOut)
 
 	sess, err := resolveSessionID(ctx, svc.sessions, args[0])
 	if err != nil {
@@ -346,10 +283,8 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 	}
 
 	out := cmd.OutOrStdout()
-	if sessionRenameJSON {
-		enc := json.NewEncoder(out)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(sessionMutationResult{
+	if jsonOut {
+		return emitJSON(out, sessionMutationResult{
 			ID:      session.HashID(sess.ID),
 			UUID:    sess.ID,
 			Title:   newTitle,
@@ -370,7 +305,8 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	}
 	defer cleanup()
 
-	event.SessionLastShown(sessionLastJSON)
+	jsonOut, _ := cmd.Flags().GetBool("json")
+	event.SessionLastShown(jsonOut)
 
 	list, err := svc.sessions.List(ctx)
 	if err != nil {
@@ -389,7 +325,7 @@ func runSessionLast(cmd *cobra.Command, _ []string) error {
 	}
 
 	msgPtrs := messagePtrs(msgs)
-	if sessionLastJSON {
+	if jsonOut {
 		return outputSessionJSON(cmd.OutOrStdout(), sess, msgPtrs)
 	}
 	return outputSessionHuman(ctx, svc.cfg, sess, msgPtrs)
@@ -437,9 +373,7 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 		}
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	return enc.Encode(output)
+	return emitJSON(w, output)
 }
 
 func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {

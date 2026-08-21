@@ -33,9 +33,7 @@ func newTestTodosToolItem(t *testing.T, u *UI) chat.ToolMessageItem {
 	toolCall := message.ToolCall{ID: "tc-todos", Name: tools.TodosToolName, Input: `{"todos":[]}`, Finished: true}
 	result := &message.ToolResult{ToolCallID: toolCall.ID, Metadata: string(metaJSON)}
 
-	item := chat.NewTodosToolMessageItem(u.com.Styles, toolCall, result, false)
-	item.SetMessageID("m-todos")
-	return item
+	return chat.NewToolMessageItem(u.com.Styles, "m-todos", toolCall, result, false, nil)
 }
 
 // TestChatSetTodosCompact_HidesAndRestoresTranscriptBody covers the new

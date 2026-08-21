@@ -21,12 +21,10 @@ func TestProviders_PerConfigDisableDefaultProviders(t *testing.T) {
 	// Call in this order so a cache primed by the first call would leak
 	// into the second: with a process-global cache, "disabled" would
 	// incorrectly see the embedded catalog "enabled" produced.
-	got, err := Providers(enabled)
-	require.NoError(t, err)
+	got := Providers(enabled)
 	require.NotEmpty(t, got, "embedded catalog should load when defaults are enabled")
 
-	got, err = Providers(disabled)
-	require.NoError(t, err)
+	got = Providers(disabled)
 	require.Empty(t, got, "the embedded catalog must not leak into a config with defaults disabled")
 }
 

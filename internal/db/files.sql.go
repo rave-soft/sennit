@@ -9,13 +9,32 @@ import (
 	"context"
 )
 
+const countFilesForSessionIDs = `-- name: CountFilesForSessionIDs :one
+WITH input AS (
+    SELECT CAST(?1 AS TEXT) AS session_ids_json
+)
+SELECT COUNT(*) FROM files
+WHERE files.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+)
+`
+
+// gc's dependent-row count for a batch of sessions it is about to delete;
+// see CountMessagesForSessionIDs for why json_each replaces an IN-list.
+func (q *Queries) CountFilesForSessionIDs(ctx context.Context, sessionIdsJson string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countFilesForSessionIDs, sessionIdsJson)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSessionFiles = `-- name: CountSessionFiles :one
 SELECT COUNT(*) FROM files
 WHERE session_id = ?
 `
 
 func (q *Queries) CountSessionFiles(ctx context.Context, sessionID string) (int64, error) {
-	row := q.queryRow(ctx, q.countSessionFilesStmt, countSessionFiles, sessionID)
+	row := q.db.QueryRowContext(ctx, countSessionFiles, sessionID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -45,7 +64,7 @@ type CreateFileParams struct {
 }
 
 func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, error) {
-	row := q.queryRow(ctx, q.createFileStmt, createFile,
+	row := q.db.QueryRowContext(ctx, createFile,
 		arg.ID,
 		arg.SessionID,
 		arg.Path,
@@ -71,7 +90,7 @@ WHERE id = ?
 `
 
 func (q *Queries) DeleteFile(ctx context.Context, id string) error {
-	_, err := q.exec(ctx, q.deleteFileStmt, deleteFile, id)
+	_, err := q.db.ExecContext(ctx, deleteFile, id)
 	return err
 }
 
@@ -81,7 +100,7 @@ WHERE session_id = ?
 `
 
 func (q *Queries) DeleteSessionFiles(ctx context.Context, sessionID string) error {
-	_, err := q.exec(ctx, q.deleteSessionFilesStmt, deleteSessionFiles, sessionID)
+	_, err := q.db.ExecContext(ctx, deleteSessionFiles, sessionID)
 	return err
 }
 
@@ -92,7 +111,7 @@ WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetFile(ctx context.Context, id string) (File, error) {
-	row := q.queryRow(ctx, q.getFileStmt, getFile, id)
+	row := q.db.QueryRowContext(ctx, getFile, id)
 	var i File
 	err := row.Scan(
 		&i.ID,
@@ -120,7 +139,7 @@ type GetFileByPathAndSessionParams struct {
 }
 
 func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error) {
-	row := q.queryRow(ctx, q.getFileByPathAndSessionStmt, getFileByPathAndSession, arg.Path, arg.SessionID)
+	row := q.db.QueryRowContext(ctx, getFileByPathAndSession, arg.Path, arg.SessionID)
 	var i File
 	err := row.Scan(
 		&i.ID,
@@ -142,7 +161,7 @@ ORDER BY version ASC, created_at ASC
 `
 
 func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]File, error) {
-	rows, err := q.query(ctx, q.listFilesBySessionStmt, listFilesBySession, sessionID)
+	rows, err := q.db.QueryContext(ctx, listFilesBySession, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +222,7 @@ ORDER BY files.version ASC, files.created_at ASC
 `
 
 func (q *Queries) ListFilesBySessionTree(ctx context.Context, sessionID string) ([]File, error) {
-	rows, err := q.query(ctx, q.listFilesBySessionTreeStmt, listFilesBySessionTree, sessionID)
+	rows, err := q.db.QueryContext(ctx, listFilesBySessionTree, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +271,7 @@ ORDER BY f.path
 // session's newer row and this session's files drop out of the result
 // entirely.
 func (q *Queries) ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error) {
-	rows, err := q.query(ctx, q.listLatestSessionFilesStmt, listLatestSessionFiles, sessionID)
+	rows, err := q.db.QueryContext(ctx, listLatestSessionFiles, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +313,7 @@ WHERE path = ?
 // that holds this up, so callers must allocate inside the same
 // transaction as the insert.
 func (q *Queries) NextFileVersion(ctx context.Context, path string) (int64, error) {
-	row := q.queryRow(ctx, q.nextFileVersionStmt, nextFileVersion, path)
+	row := q.db.QueryRowContext(ctx, nextFileVersion, path)
 	var next_version int64
 	err := row.Scan(&next_version)
 	return next_version, err

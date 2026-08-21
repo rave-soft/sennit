@@ -229,8 +229,11 @@ func HasPrefix(path, prefix string) bool {
 	if err != nil {
 		return false
 	}
-	// If path is within prefix, Rel will not return a path starting with ".."
-	return !strings.HasPrefix(rel, "..")
+	// A real escape is exactly ".." or starts with ".." followed by a
+	// separator. A sibling name that merely starts with ".." (e.g. "..foo")
+	// must not be mistaken for an escape.
+	sep := string(filepath.Separator)
+	return rel != ".." && !strings.HasPrefix(rel, ".."+sep)
 }
 
 // ToUnixLineEndings converts Windows line endings (CRLF) to Unix line endings (LF).
@@ -241,12 +244,13 @@ func ToUnixLineEndings(content string) (string, bool) {
 	return content, false
 }
 
-// ToWindowsLineEndings converts Unix line endings (LF) to Windows line endings (CRLF).
+// ToWindowsLineEndings converts line endings to Windows line endings (CRLF).
+// It first normalizes any existing CRLF to LF so mixed input ends up
+// consistently CRLF instead of staying mixed. The bool reports whether the
+// returned string differs from content.
 func ToWindowsLineEndings(content string) (string, bool) {
-	if !strings.Contains(content, "\r\n") {
-		return strings.ReplaceAll(content, "\n", "\r\n"), true
-	}
-	return content, false
+	converted := strings.ReplaceAll(strings.ReplaceAll(content, "\r\n", "\n"), "\n", "\r\n")
+	return converted, converted != content
 }
 
 func truncate[T any](input []T, limit int) ([]T, bool) {

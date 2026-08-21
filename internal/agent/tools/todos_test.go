@@ -216,3 +216,25 @@ func TestTodosTool_RepeatedCompletedListDoesNotStartNewCycle(t *testing.T) {
 	require.False(t, meta.IsNew)
 	require.Equal(t, 1, meta.Completed)
 }
+
+// TestTodosTool_InvalidStatusIsTextResponseNotError pins an error-vs-response
+// fix: an invalid status is bad input the model supplied, so it is a normal
+// (IsError) tool result the model can see and correct, not a Go error that
+// aborts the whole tool-call batch.
+func TestTodosTool_InvalidStatusIsTextResponseNotError(t *testing.T) {
+	t.Parallel()
+
+	sessions := &fakeTodoSessions{sess: session.Session{ID: "session-1"}}
+	tool := NewTodosTool(sessions)
+
+	input, err := json.Marshal(TodosParams{Todos: []TodoItem{
+		{Content: "write tests", Status: "in-progress"},
+	}})
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "session-1")
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, `invalid status "in-progress" for todo "write tests"`)
+}

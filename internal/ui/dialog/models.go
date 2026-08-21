@@ -3,7 +3,6 @@ package dialog
 import (
 	"cmp"
 	"fmt"
-	"log/slog"
 	"slices"
 
 	"charm.land/bubbles/v2/help"
@@ -14,6 +13,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // modelInputPlaceholder is shown in the filter input.
@@ -46,8 +46,10 @@ type Models struct {
 
 var _ Dialog = (*Models)(nil)
 
-// NewModels creates a new Models dialog.
-func NewModels(com *common.Common) (*Models, error) {
+// NewModels creates a new Models dialog. The returned [tea.Cmd] is non-nil
+// when opening the dialog also needs to prune stale entries from the
+// "recently used" list — see setProviderItems.
+func NewModels(com *common.Common) (*Models, tea.Cmd, error) {
 	t := com.Styles
 	m := &Models{Base: NewBase(com, defaultModelsDialogMaxWidth)}
 	m.com = com
@@ -88,22 +90,9 @@ func NewModels(com *common.Common) (*Models, error) {
 	)
 	m.keyMap.Close = CloseKey
 
-	// A stale catalog must not keep this dialog from opening: it is the
-	// only way for the user to choose a model.
-	var err error
-	m.providers, err = config.Providers(m.com.Config())
-	if err != nil {
-		if len(m.providers) == 0 {
-			return nil, fmt.Errorf("failed to get providers: %w", err)
-		}
-		slog.Warn("Listing the previously known providers", "error", err)
-	}
+	m.providers = config.Providers(m.com.Config())
 
-	if err := m.setProviderItems(); err != nil {
-		return nil, fmt.Errorf("failed to set provider items: %w", err)
-	}
-
-	return m, nil
+	return m, m.setProviderItems(), nil
 }
 
 // ID implements Dialog.
@@ -253,8 +242,13 @@ func (m *Models) isSelectedConfigured() bool {
 	return isConfigured
 }
 
-// setProviderItems sets the provider items in the list.
-func (m *Models) setProviderItems() error {
+// setProviderItems sets the provider items in the list. Providers that were
+// removed or disabled since a "recently used" entry was recorded leave that
+// entry stale; setProviderItems filters those out of the rendered list and
+// returns a [tea.Cmd] that persists the pruned list, so the write happens
+// off the Update goroutine instead of inline here (this used to save
+// synchronously during dialog construction — see the FIXME this replaced).
+func (m *Models) setProviderItems() tea.Cmd {
 	t := m.com.Styles
 	cfg := m.com.Config()
 
@@ -266,10 +260,7 @@ func (m *Models) setProviderItems() error {
 	addedProviders := make(map[string]bool)
 
 	// Get a list of known providers to compare against
-	knownProviders, err := config.Providers(cfg)
-	if err != nil && len(knownProviders) == 0 {
-		return fmt.Errorf("failed to get providers: %w", err)
-	}
+	knownProviders := config.Providers(cfg)
 
 	containsProviderFunc := func(id string) func(p catwalk.Provider) bool {
 		return func(p catwalk.Provider) bool {
@@ -371,9 +362,13 @@ func (m *Models) setProviderItems() error {
 		groups = append(groups, NewModelGroup(t, `No providers configured — open "Configure Providers" to add one`))
 	}
 
-	// Providers that were removed or disabled after a model was last picked
-	// simply never make it into itemsMap above, so the lookup below already
-	// drops their recent entries — no extra filtering needed here.
+	// pruneCmd persists validRecentItems if the list below finds any recent
+	// entries whose provider/model no longer exists. Providers that were
+	// removed or disabled after a model was last picked simply never make
+	// it into itemsMap above, so the lookup below already drops their
+	// recent entries from the rendered list — no extra filtering needed
+	// there.
+	var pruneCmd tea.Cmd
 	if len(recentItems) > 0 {
 		recentGroup := NewModelGroup(t, "Recently used")
 
@@ -397,9 +392,12 @@ func (m *Models) setProviderItems() error {
 		}
 
 		if len(validRecentItems) != len(recentItems) {
-			// FIXME: Does this need to be here? Is it mutating the config during a read?
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "recent_models", validRecentItems); err != nil {
-				return fmt.Errorf("failed to update recent models: %w", err)
+			ws := m.com.Workspace
+			pruneCmd = func() tea.Msg {
+				if err := ws.SetConfigField(config.ScopeGlobal, "recent_models", validRecentItems); err != nil {
+					return util.NewErrorMsg(fmt.Errorf("failed to update recent models: %w", err))
+				}
+				return nil
 			}
 		}
 
@@ -417,7 +415,7 @@ func (m *Models) setProviderItems() error {
 		m.list.ScrollToTop()
 	}
 
-	return nil
+	return pruneCmd
 }
 
 func modelKey(providerID, modelID string) string {

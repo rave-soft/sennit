@@ -10,8 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var doctorJSON bool
-
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Check the loaded configuration for problems",
@@ -31,14 +29,10 @@ Exit code is 1 if any problem is severity "error", 0 otherwise (including
 when only warnings were found).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := ResolveCwd(cmd)
-		if err != nil {
-			return err
-		}
-		dataDir, _ := cmd.Flags().GetString("data-dir")
 		debug, _ := cmd.Flags().GetBool("debug")
+		jsonOut, _ := cmd.Flags().GetBool("json")
 
-		cfg, err := config.Init(cwd, dataDir, debug)
+		_, cfg, err := initConfig(cmd, debug)
 		if err != nil {
 			return err
 		}
@@ -46,7 +40,7 @@ when only warnings were found).`,
 		problems := config.Doctor(cfg.Config())
 		problems = append(problems, config.EnvironmentProblems()...)
 
-		if doctorJSON {
+		if jsonOut {
 			bts, err := json.MarshalIndent(problems, "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal problems: %w", err)
@@ -102,6 +96,6 @@ func printDoctorProblems(cmd *cobra.Command, problems []config.Problem) {
 }
 
 func init() {
-	doctorCmd.Flags().BoolVar(&doctorJSON, "json", false, "output problems as JSON")
+	doctorCmd.Flags().Bool("json", false, "output problems as JSON")
 	rootCmd.AddCommand(doctorCmd)
 }

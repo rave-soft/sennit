@@ -22,8 +22,9 @@ import (
 )
 
 // setBootstrapTestEnv isolates config/skills discovery from the running
-// user's real home and XDG directories, matching the pattern backend
-// tests use for exercising the same underlying config.Init/db.Connect path.
+// user's real home and XDG directories, so tests can exercise the
+// underlying config.Init/db.Connect path without touching the machine's
+// real config.
 func setBootstrapTestEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
@@ -146,7 +147,8 @@ func TestBootstrap_PostDataDirError(t *testing.T) {
 
 // TestBootstrap_WorkspaceLockOptionApplies is a smoke test for the
 // WorkspaceLock option: Bootstrap must acquire the workspace lock and
-// still complete successfully, matching how the backend calls
+// still complete successfully, matching how both the top-level CLI
+// (internal/cmd/root.go) and a spawned thread (LocalSpawner) call
 // Bootstrap.
 func TestBootstrap_WorkspaceLockOptionApplies(t *testing.T) {
 	setBootstrapTestEnv(t)
@@ -403,8 +405,8 @@ func requireWorkspaceLockAcquired(t *testing.T, lockDir string) {
 // TestBootstrap_TwoProjectsConcurrentWrites simulates the scenario the
 // shared-database migration exists to support: two independent sennit
 // "instances" (distinct working directories, distinct project-local
-// .sennit data directories, each with its own WorkspaceLock like the
-// backend takes) bootstrapped in the same process against the SAME
+// .sennit data directories, each taking its own WorkspaceLock) bootstrapped
+// in the same process against the SAME
 // global database (HOME/XDG are shared across both goroutines here,
 // unlike setBootstrapTestEnv's usual one-dir-per-test isolation). Both
 // then write sessions concurrently. Nothing here should dead-lock or

@@ -1,13 +1,89 @@
 package agent
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/pubsub"
 )
+
+// sessionState is one session's accept/queue/cancel dispatch state: its
+// queued follow-up calls, the active run's cancel handle, its completion
+// inbox, and the bookkeeping dispatchDecision and Cancel serialize
+// against each other. It replaces what used to be seven parallel maps
+// (messageQueue, activeRequests, dispatchMu, completionInbox,
+// cancelledSessions, acceptedRuns, cancelMark) keyed by session id.
+//
+// Field locking is split in two, not uniform, because it has to be:
+//
+//   - mu guards messageQueue, active, completionInbox, and cancelled. It
+//     is the per-session "dispatch mutex" dispatchDecision and Cancel
+//     serialize the accept -> (cancel-on-entry | queued | active)
+//     transition on.
+//   - acceptedRuns and cancelMark are guarded by dispatcher.acceptedMu
+//     instead — a lock shared by every session, not this one's own mu.
+//     dispatchDecision closes an AcceptedRun (which touches
+//     acceptedRuns/cancelMark) while it still holds mu; a sync.Mutex is
+//     not reentrant, so guarding those two fields with mu would deadlock
+//     the very goroutine holding it. Every place that needs both takes
+//     mu first and acceptedMu second (never the reverse), so this never
+//     becomes a lock-ordering deadlock across goroutines either.
+//
+// Instances are refcounted and created/removed lazily by
+// dispatcher.session/release — see those for the removal invariant that
+// fixes the mutex-map's old leak (dispatch.go used to never remove an
+// entry once created).
+type sessionState struct {
+	mu sync.Mutex
+
+	messageQueue    []SessionAgentCall
+	active          *activeCancel
+	completionInbox []TaskCompletion
+	// cancelled mirrors the old cancelledSessions map: "the user
+	// explicitly canceled this session" until the next turn actually
+	// starts (dispatchDecision's idle branch clears it). It exists
+	// solely to gate auto-waking a continuation from the completion
+	// inbox — see wakeEligibleLocked.
+	cancelled bool
+
+	// acceptedRuns counts dispatched-but-not-yet-active runs for this
+	// session. Guarded by dispatcher.acceptedMu, not mu — see the
+	// struct doc comment.
+	acceptedRuns int
+	// cancelMark records a high-water accept sequence: an accepted
+	// handle is canceled by it iff the handle's sequence is at or below
+	// the mark. 0 means no pending cancel. Guarded by
+	// dispatcher.acceptedMu, not mu — see the struct doc comment.
+	cancelMark uint64
+
+	// refs is the number of callers currently holding a reference to
+	// this state — between a dispatcher.session call and its paired
+	// release — whether or not mu happens to be locked at any given
+	// instant. Guarded by dispatcher.statesMu, along with creating or
+	// removing this session's entry in dispatcher.states. See
+	// dispatcher.session for the refcounting invariant this protects.
+	refs int
+}
+
+// idle reports whether s carries nothing worth keeping once refs drops
+// to zero: an empty queue and completion inbox, no active run, no
+// cancellation the user is owed, and no accepted-but-not-active run in
+// flight. Called only from dispatcher's release, under both statesMu and
+// acceptedMu, so the acceptedRuns/cancelMark read here is consistent;
+// the other fields are safe to read without mu at that point because
+// refs == 0 there means no other caller can be holding or about to lock
+// mu (see dispatcher.session).
+func (s *sessionState) idle() bool {
+	return len(s.messageQueue) == 0 && s.active == nil && len(s.completionInbox) == 0 &&
+		!s.cancelled && s.acceptedRuns == 0 && s.cancelMark == 0
+}
 
 // dispatcher owns the "accept/queue/cancel" dispatch protocol shared by
 // sessionAgent.Run and sessionAgent.Summarize: tracking which sessions are
@@ -17,98 +93,23 @@ import (
 // callers (sessionAgent) are responsible for publishing RunComplete events
 // for whatever this type reports as dropped.
 type dispatcher struct {
-	messageQueue   *csync.Map[string, []SessionAgentCall]
-	activeRequests *csync.Map[string, *activeCancel]
+	// states holds one *sessionState per session currently in use. See
+	// session/release for the create-on-demand, remove-when-idle
+	// lifecycle that replaces the old dispatchMu map's permanent leak.
+	states *csync.Map[string, *sessionState]
+	// statesMu serializes creating, refcounting, and removing entries in
+	// states. It is only ever held briefly (map bookkeeping, no I/O) and
+	// is never held while acquiring a *sessionState's own mu or
+	// acceptedMu — see session's doc comment for the full ordering
+	// argument.
+	statesMu sync.Mutex
 
-	// dispatchMu holds a per-session mutex that serializes the
-	// accepted -> (cancel-on-entry | queued | active) transition in
-	// Run against a concurrent Cancel. The lock is held only during
-	// the brief handoff (no DB or LLM I/O under the lock).
-	//
-	// Entries are never removed: sessionMu below hands out the *sync.Mutex
-	// pointer without holding dispatchMuCreate on the fast path, so a
-	// caller can be holding (or about to look up) a session's mutex at
-	// the same time a cleanup elsewhere decides the session is idle and
-	// deletes it. If a new mutex were then created for the same session,
-	// the two instances would no longer exclude each other, silently
-	// breaking the invariant this map exists to provide. Safe removal
-	// needs a refcount on top of the mutex (increment under
-	// dispatchMuCreate in sessionMu, decrement - and delete at zero - when
-	// the caller is done with it), which is a bigger change than this
-	// leak justifies: the map is bounded by the number of distinct
-	// sessions touched over the process lifetime, not by request volume.
-	dispatchMu *csync.Map[string, *sync.Mutex]
-	// completionInbox holds per-session TaskCompletion events - internal
-	// notifications that a background task finished, kept separate from
-	// messageQueue because a completion is not a steering follow-up and
-	// must never be folded in as if the user had typed it. It lives here
-	// rather than in a new type specifically so it inherits dispatcher's
-	// existing shape (in-memory, per-session, no persistence, no
-	// pubsub): a completion is durably recorded in internal/thread's
-	// store first (that row is what task_result polls), and this inbox
-	// only carries the lossy, at-most-once-delivery copy of it that
-	// prepareStep drains - if the process dies with an event still
-	// queued here, the underlying task is still terminal and can still
-	// be polled, so nothing but the (already best-effort) push
-	// notification is lost.
-	//
-	// See enqueueCompletion/drainCompletionsForStep/requeueCompletions
-	// in completion_inbox.go for the operations, and runTurn.prepareStep
-	// for the drain-before-steering ordering, and the Continuation
-	// branch that drains this same way for a continuation's own step 0.
-	// wakeEligible (also completion_inbox.go) is the idle-session
-	// trigger: when a session is idle, not user-canceled, and this map
-	// holds something for it, sessionAgent attempts a continuation turn
-	// instead of leaving the event to wait indefinitely - see
-	// startContinuation. It only decides to attempt, never drains: the
-	// actual consumption always happens in PrepareStep, so the mid-turn
-	// and wake paths can never record the same event differently.
-	completionInbox *csync.Map[string, []TaskCompletion]
-	// delegationParents maps a running delegation's own (child) session
-	// id to where its mid-run asks (SendToParent) should be delivered.
-	// Registered once, at delegation-create time, by internal/thread -
-	// separate from completionInbox because a parent target must be
-	// resolvable from *inside* the delegation's own turn, on demand,
-	// unlike a terminal completion's target, which is resolved once,
-	// externally, and handed straight to DeliverTaskCompletion. See
-	// DelegationParent and RegisterDelegationParent.
-	delegationParents *csync.Map[string, DelegationParent]
-	// cancelledSessions marks a session as "the user explicitly canceled
-	// this" until the next turn actually starts (see run's idle branch,
-	// which clears it). It exists solely to gate auto-waking a
-	// continuation from the completion inbox: cancelMark above is the
-	// wrong signal for that (it is scoped to covering accepted-but-not-
-	// active runs and is dropped once none remain — see endAccepted —
-	// so by the time a session is genuinely idle with an empty queue, a
-	// plain Escape has usually already cleared it). Presence means
-	// canceled; absence means not. Set only by cancel(); cleared only by
-	// run() admitting a new active turn, whichever call — a real user
-	// Run/Steer or our own auto-continuation — gets there next.
-	cancelledSessions *csync.Map[string, struct{}]
-	// acceptedRuns counts dispatched-but-not-yet-active runs per
-	// session. A counter > 0 means a dispatched prompt is in flight
-	// and has not yet completed the dispatch handoff in Run. Only
-	// BeginAccepted increments it; only AcceptedRun.Close decrements
-	// it.
-	acceptedRuns *csync.Map[string, int]
-	// cancelMark records, per session, a high-water accept sequence: an
-	// accepted handle is canceled by it iff the handle's sequence is at
-	// or below the mark. Cancel raises the mark to the latest sequence
-	// assigned at cancel time, so a single Cancel covers every prompt
-	// accepted-but-not-yet-active then, while a prompt accepted later
-	// (higher sequence) is never poisoned. Absent or 0 means no pending
-	// cancel. It is only raised by Cancel when acceptedRuns > 0, so an
-	// idle Escape never records a mark.
-	cancelMark *csync.Map[string, uint64]
-	// dispatchMuCreate guards lazy creation of per-session entries in
-	// dispatchMu so two goroutines can't race to lock different mutex
-	// instances for the same session.
-	dispatchMuCreate sync.Mutex
-	// acceptedMu serializes increments/decrements of acceptedRuns and
-	// the assignment of accept sequence numbers from acceptSeqGen. It
-	// is separate from dispatchMu so AcceptedRun.Close (which may run
-	// while Run holds dispatchMu for the same session) does not
-	// deadlock by re-entering the dispatch lock.
+	// acceptedMu guards every session's acceptedRuns/cancelMark fields
+	// and acceptSeqGen below. It is a single lock shared across all
+	// sessions (not one per session) specifically so AcceptedRun.Close
+	// can run while dispatchDecision holds that session's own mu for an
+	// entirely different session without contending on session-specific
+	// state - see sessionState's doc comment.
 	acceptedMu sync.Mutex
 	// acceptSeqGen is the monotonic source of accept sequence numbers.
 	// Each BeginAccepted increments it under acceptedMu and stamps the
@@ -116,6 +117,20 @@ type dispatcher struct {
 	// across the agent. Cancel uses its current value as the per-session
 	// high-water mark.
 	acceptSeqGen uint64
+
+	// delegationParents maps a running delegation's own (child) session
+	// id to where its mid-run asks (SendToParent) should be delivered.
+	// Registered once, at delegation-create time, by internal/thread -
+	// separate from sessionState because a parent target must be
+	// resolvable from *inside* the delegation's own turn, on demand,
+	// unlike a terminal completion's target, which is resolved once,
+	// externally, and handed straight to DeliverTaskCompletion. It also
+	// outlives any one turn's accept/queue/cancel bookkeeping for the
+	// session's whole lifetime, so it does not belong in the
+	// refcounted, idle-reclaimed sessionState. See DelegationParent and
+	// RegisterDelegationParent.
+	delegationParents *csync.Map[string, DelegationParent]
+
 	// onQueueChanged, when non-nil, is called (with the per-session
 	// dispatch mutex already released - see notifyQueueChanged) whenever
 	// a mutation actually changes what's queued for a session: enqueue,
@@ -132,12 +147,128 @@ type dispatcher struct {
 	// a turn waiting on something else (thread_wait) select on it so they
 	// can cut the wait short and let the user be answered — see
 	// tools.WaitForUserInput. The entry is dropped as it is closed, so the
-	// next request arms a fresh one.
+	// next request arms a fresh one. Kept separate from sessionState: it
+	// is its own small, self-contained get-or-create/close-and-delete
+	// protocol, unrelated to the accept/queue/cancel state above.
 	userInput *csync.Map[string, chan struct{}]
 	// userInputMu guards the get-or-create and close-and-delete pair
 	// against each other; without it two goroutines can hand out different
 	// channels for the same session and one of them never closes.
 	userInputMu sync.Mutex
+}
+
+// dispatch is a plain alias for dispatcher, used only so sessionAgent can
+// embed *dispatcher anonymously while keeping the field's promoted name
+// "dispatch" (Go names an embedded field after the identifier written at
+// the embed site) - preserving every existing a.X call site
+// verbatim while also promoting dispatcher's exported pass-through
+// methods (BeginAccepted, IsBusy, IsSessionBusy, QueuedPrompts,
+// QueuedPromptsList, RegisterDelegationParent) straight onto
+// SessionAgent's method set, with no forwarding wrapper needed.
+type dispatch = dispatcher
+
+func newDispatcher() *dispatcher {
+	return &dispatcher{
+		states:            csync.NewMap[string, *sessionState](),
+		userInput:         csync.NewMap[string, chan struct{}](),
+		delegationParents: csync.NewMap[string, DelegationParent](),
+	}
+}
+
+// session returns sessionID's dispatch state, creating it on first use,
+// and increments its refcount so it cannot be removed while in use. The
+// returned release func must be called exactly once when the caller is
+// completely done with the returned state — typically via a `defer`
+// registered immediately after this call — regardless of whether, or
+// when, the caller locks or unlocks state.mu itself.
+//
+// Refcounting invariant: refs counts callers currently between session
+// and their paired release call for a given session id. Creating an
+// entry, mutating refs, and removing an entry are all decided under the
+// single statesMu lock, and every accessor in this file (and
+// dispatchDecision in agent.go) obtains its reference via session
+// before it can touch state.mu or any field guarded by it, releasing
+// that reference no earlier than it is done. So a state can never be
+// removed out from under a caller currently using it (refs > 0 blocks
+// removal), and two callers that need to observe each other's effects
+// on the same session always do so through the identical *sessionState
+// instance — recreating a fresh one only ever happens after the old one
+// was confirmed idle with no outstanding references, at which point a
+// zero-valued replacement is behaviorally identical to the one it
+// replaced. That is the guarantee dispatchDecision relies on to
+// serialize the accept decision against a concurrent Cancel, and it is
+// also what makes state removal itself safe: idle() is only trusted at
+// refs == 0, when no other goroutine can be holding or about to lock
+// mu.
+func (d *dispatcher) session(sessionID string) (state *sessionState, release func()) {
+	d.statesMu.Lock()
+	s, ok := d.states.Get(sessionID)
+	if !ok {
+		s = &sessionState{}
+		d.states.Set(sessionID, s)
+	}
+	s.refs++
+	d.statesMu.Unlock()
+
+	var released bool
+	return s, func() {
+		if released {
+			// Every call site pairs session/release exactly once
+			// (normally via a single top-level defer), but guard
+			// against a stray double-call anyway: it must not
+			// underflow refs and corrupt another session's occupancy
+			// accounting.
+			return
+		}
+		released = true
+		d.statesMu.Lock()
+		s.refs--
+		if s.refs == 0 {
+			d.acceptedMu.Lock()
+			idle := s.idle()
+			d.acceptedMu.Unlock()
+			if idle {
+				// Removing only when the map still points at this exact
+				// instance is belt-and-suspenders, not load-bearing: a
+				// concurrent session() call for the same id can't
+				// interleave here, since both it and this whole release
+				// hold statesMu for their entire body.
+				if cur, ok := d.states.Get(sessionID); ok && cur == s {
+					d.states.Del(sessionID)
+				}
+			}
+		}
+		d.statesMu.Unlock()
+	}
+}
+
+// DelegationParent describes where a running delegation should send an
+// ask, and how to attribute it. Registered once, at delegation-create
+// time, by internal/thread (a later change - not part of this step),
+// keyed by the delegation's own (child) session id.
+type DelegationParent struct {
+	// Parent is the Coordinator owning the parent session's completion
+	// inbox. For a task this is the delegation's own Coordinator (a
+	// task shares its parent's App/coordinator); for a thread with a
+	// parent it is a different Coordinator entirely (the thread spawns
+	// its own isolated App) - see internal/thread's
+	// resolveDeliveryTarget for the existing analogous split on the
+	// terminal-completion path.
+	Parent          Coordinator
+	ParentSessionID string
+	DelegationID    string
+	Kind            string
+	Name            string
+	Depth           int
+}
+
+// RegisterDelegationParent records where sessionID (a delegation's own
+// child session) should deliver a mid-run ask - see DelegationParent and
+// SendToParent. A plain Set: a later registration for the same session
+// id simply replaces the earlier one, which is fine since a session only
+// ever has one parent for its lifetime.
+func (d *dispatcher) RegisterDelegationParent(sessionID string, parent DelegationParent) {
+	d.delegationParents.Set(sessionID, parent)
 }
 
 // userInputChan returns the channel that closes when the user next sends a
@@ -167,52 +298,9 @@ func (d *dispatcher) signalUserInput(sessionID string) {
 	close(ch)
 }
 
-// DelegationParent describes where a running delegation should send an
-// ask, and how to attribute it. Registered once, at delegation-create
-// time, by internal/thread (a later change - not part of this step),
-// keyed by the delegation's own (child) session id.
-type DelegationParent struct {
-	// Parent is the Coordinator owning the parent session's completion
-	// inbox. For a task this is the delegation's own Coordinator (a
-	// task shares its parent's App/coordinator); for a thread with a
-	// parent it is a different Coordinator entirely (the thread spawns
-	// its own isolated App) - see internal/thread's
-	// resolveDeliveryTarget for the existing analogous split on the
-	// terminal-completion path.
-	Parent          Coordinator
-	ParentSessionID string
-	DelegationID    string
-	Kind            string
-	Name            string
-	Depth           int
-}
-
-func newDispatcher() *dispatcher {
-	return &dispatcher{
-		messageQueue:      csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:    csync.NewMap[string, *activeCancel](),
-		dispatchMu:        csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:      csync.NewMap[string, int](),
-		cancelMark:        csync.NewMap[string, uint64](),
-		completionInbox:   csync.NewMap[string, []TaskCompletion](),
-		cancelledSessions: csync.NewMap[string, struct{}](),
-		userInput:         csync.NewMap[string, chan struct{}](),
-		delegationParents: csync.NewMap[string, DelegationParent](),
-	}
-}
-
-// RegisterDelegationParent records where sessionID (a delegation's own
-// child session) should deliver a mid-run ask - see DelegationParent and
-// SendToParent. A plain Set: a later registration for the same session
-// id simply replaces the earlier one, which is fine since a session only
-// ever has one parent for its lifetime.
-func (d *dispatcher) RegisterDelegationParent(sessionID string, parent DelegationParent) {
-	d.delegationParents.Set(sessionID, parent)
-}
-
 // AcceptedRun owns exactly one accept reservation taken by
 // BeginAccepted. It is the only carrier of accept-state across the
-// backend.runAgent / Coordinator.Run / sessionAgent.Run layers: a
+// AgentDispatcher.run / Coordinator.Run / sessionAgent.Run layers: a
 // counter > 0 means a dispatched prompt is in flight and has not yet
 // completed the dispatch handoff in Run. Close is the only way to
 // release the reservation and is idempotent.
@@ -252,60 +340,67 @@ func (r *AcceptedRun) SessionID() string {
 // a handle whose Close is the only way to decrement it. It is the only
 // entry point that mutates acceptedRuns.
 func (d *dispatcher) BeginAccepted(sessionID string) *AcceptedRun {
+	s, release := d.session(sessionID)
+	defer release()
 	d.acceptedMu.Lock()
-	defer d.acceptedMu.Unlock()
-	count, _ := d.acceptedRuns.Get(sessionID)
-	d.acceptedRuns.Set(sessionID, count+1)
+	s.acceptedRuns++
 	d.acceptSeqGen++
-	return &AcceptedRun{d: d, sessionID: sessionID, seq: d.acceptSeqGen}
+	seq := d.acceptSeqGen
+	d.acceptedMu.Unlock()
+	return &AcceptedRun{d: d, sessionID: sessionID, seq: seq}
 }
 
 // endAccepted decrements the accept counter for sessionID. It is only
-// called via AcceptedRun.Close. It uses a dedicated lock (not the
-// per-session dispatch mutex) so it can run while Run holds dispatchMu
-// for the same session without deadlocking.
+// called via AcceptedRun.Close. It uses acceptedMu (not a session's own
+// mu) so it can run while dispatchDecision holds that mu for the same
+// session without deadlocking — see sessionState's doc comment.
 //
 // When the count reaches zero the session's cancel mark is dropped: no
 // accepted handle remains for it to cover, and any handle accepted later
 // gets a strictly higher sequence that the mark would not match anyway.
 // Handles canceled on entry never reach RunComplete, so this is the only
 // place that clears the mark for an all-canceled batch. Sibling handles
-// covered by the same mark are serialized on the per-session dispatch
-// mutex and read the mark before they Close, so this never clears it out
-// from under a covered handle still waiting to enter Run.
+// covered by the same mark are serialized on the session's own mu and
+// read the mark before they Close, so this never clears it out from
+// under a covered handle still waiting to enter dispatchDecision.
 func (d *dispatcher) endAccepted(sessionID string) {
+	s, release := d.session(sessionID)
+	defer release()
 	d.acceptedMu.Lock()
-	defer d.acceptedMu.Unlock()
-	count, ok := d.acceptedRuns.Get(sessionID)
-	if !ok || count <= 1 {
-		d.acceptedRuns.Del(sessionID)
-		d.cancelMark.Del(sessionID)
-		return
+	if s.acceptedRuns <= 1 {
+		s.acceptedRuns = 0
+		s.cancelMark = 0
+	} else {
+		s.acceptedRuns--
 	}
-	d.acceptedRuns.Set(sessionID, count-1)
+	d.acceptedMu.Unlock()
 }
 
-// sessionMu returns the per-session dispatch mutex, creating it on first
-// use. Creation is guarded so concurrent callers always observe the same
-// mutex instance for a given session.
-func (d *dispatcher) sessionMu(sessionID string) *sync.Mutex {
-	if mu, ok := d.dispatchMu.Get(sessionID); ok {
-		return mu
+// canceledBySeq reports whether an accepted handle or queued call with
+// the given accept sequence is covered by a pending cancel recorded for
+// s. Callers must already hold s.mu — that requirement serializes the
+// cancel-on-entry decision against a concurrent enqueue or dequeue on
+// the same session; this additionally takes acceptedMu itself to read
+// cancelMark, since that field is guarded by acceptedMu, not mu (see
+// sessionState's doc comment). A tracked sequence (seq > 0) is covered
+// only when it is at or below the cancel high-water mark, so a prompt
+// accepted after the cancel (higher seq) is never poisoned. An untracked
+// sequence (seq == 0, an in-process enqueue with no accept reservation)
+// is covered whenever any mark is present, preserving the
+// pre-sequence behavior. The mark is not consumed: it stays so every
+// sibling handle it covers observes the same cancel, and a later handle
+// (higher seq) ignores it regardless.
+func (d *dispatcher) canceledBySeq(s *sessionState, seq uint64) bool {
+	d.acceptedMu.Lock()
+	mark := s.cancelMark
+	d.acceptedMu.Unlock()
+	if mark == 0 {
+		return false
 	}
-	d.dispatchMuCreate.Lock()
-	defer d.dispatchMuCreate.Unlock()
-	if mu, ok := d.dispatchMu.Get(sessionID); ok {
-		return mu
-	}
-	mu := &sync.Mutex{}
-	d.dispatchMu.Set(sessionID, mu)
-	return mu
+	return seq == 0 || seq <= mark
 }
 
 // notifyQueueChanged invokes onQueueChanged if one is set. Every caller
-// - internal (the self-locking methods below, via a defer registered
-// before the mutex's own so it runs after the mutex's Unlock) and
-// external (run's busy-enqueue branch, after its own explicit Unlock) -
 // must call this only once the per-session dispatch mutex has been
 // released: onQueueChanged ultimately reaches a pubsub broker, whose
 // subscriber callbacks are unbounded work that must never run under a
@@ -316,24 +411,19 @@ func (d *dispatcher) notifyQueueChanged(sessionID string) {
 	}
 }
 
-// enqueueCall appends call to the session's message queue. The
-// OnComplete hook is stripped: the caller that supplied it (typically
-// coordinator.Run) has its own retry/coalesce scope that ends when it
-// returns, so by the time the queue drains nobody is left to consume the
-// buffered terminal event. The recursive Run falls back to the default
-// broker publish, which is what existing subscribers expect for queued
-// turns.
+// enqueueLocked appends call to s's message queue. Callers must already
+// hold s.mu. It exists separately from enqueueCall so dispatchDecision's
+// busy branch — which already holds the session's mu across the whole
+// accept decision — can enqueue without relocking a mutex it already
+// owns (sync.Mutex is not reentrant).
 //
-// Unlike the methods below, enqueueCall does not call notifyQueueChanged
-// itself: its only caller (run's busy branch) already holds the
-// per-session dispatch mutex when it calls this, so notifying here would
-// violate the "never under the lock" rule. run calls notifyQueueChanged
-// explicitly, right after its own Unlock.
-func (d *dispatcher) enqueueCall(call SessionAgentCall) {
-	existing, ok := d.messageQueue.Get(call.SessionID)
-	if !ok {
-		existing = []SessionAgentCall{}
-	}
+// The OnComplete hook is stripped: the caller that supplied it
+// (typically coordinator.Run) has its own retry/coalesce scope that ends
+// when it returns, so by the time the queue drains nobody is left to
+// consume the buffered terminal event. The recursive Run falls back to
+// the default broker publish, which is what existing subscribers expect
+// for queued turns.
+func enqueueLocked(s *sessionState, call SessionAgentCall) {
 	queued := call
 	if call.Accepted != nil {
 		// Preserve the accept sequence after the handle is stripped so
@@ -346,28 +436,40 @@ func (d *dispatcher) enqueueCall(call SessionAgentCall) {
 	// The single stamp this measurement rests on — see queuedAt's own
 	// doc comment.
 	queued.queuedAt = time.Now()
-	existing = append(existing, queued)
-	d.messageQueue.Set(call.SessionID, existing)
+	s.messageQueue = append(s.messageQueue, queued)
+}
+
+// enqueueCall appends call to the session's message queue, acquiring the
+// session's dispatch mutex itself. Use this from anywhere that doesn't
+// already hold it (tests included); dispatchDecision's busy branch calls
+// enqueueLocked directly instead. Unlike drainQueueForStep and friends
+// below, this does not call notifyQueueChanged itself: its two callers
+// (this file's dispatchDecision-adjacent path is actually enqueueLocked;
+// this variant's own callers are external) are responsible for
+// notifying once they've dropped the lock.
+func (d *dispatcher) enqueueCall(call SessionAgentCall) {
+	s, release := d.session(call.SessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	enqueueLocked(s, call)
 }
 
 func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func()) {
-	mu := d.sessionMu(call.SessionID)
-	// Registered before the Unlock defer below so it runs after it (defers
-	// run LIFO): this always appends, so the queue always changes.
+	s, release := d.session(call.SessionID)
+	defer release()
+	// Registered before the lock below so it runs after the unlock
+	// (defers run LIFO): this always appends, so the queue always
+	// changes.
 	defer d.notifyQueueChanged(call.SessionID)
-	mu.Lock()
-	defer mu.Unlock()
-
-	existing, ok := d.messageQueue.Get(call.SessionID)
-	if !ok {
-		existing = []SessionAgentCall{}
-	}
-	d.messageQueue.Set(call.SessionID, append(existing, call))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messageQueue = append(s.messageQueue, call)
 	onQueued()
 }
 
 // drainQueueForStep partitions the session's queued calls for the current
-// streaming step under the per-session dispatch mutex so the filtering is
+// streaming step under the session's own mutex so the filtering is
 // atomic against a concurrent Cancel: canceledBySeq requires the caller to
 // hold that mutex, and evaluating it here (rather than after unlocking)
 // prevents a cancel recorded between the drain and the check from being
@@ -385,23 +487,24 @@ func (d *dispatcher) requeueContinuation(call SessionAgentCall, onQueued func())
 // absorbed into another turn. fold is processed by the caller without the
 // lock held.
 func (d *dispatcher) drainQueueForStep(sessionID string) (fold, canceledWithRunID []SessionAgentCall) {
-	dispatchLock := d.sessionMu(sessionID)
-	// Registered before the Unlock defer below so it runs after it (defers
-	// run LIFO), reading the named returns once they're final. Only
-	// notify when something actually left the queue - drainQueueForStep
-	// runs on every step of every turn, most of which find nothing
-	// queued.
+	s, release := d.session(sessionID)
+	defer release()
+	// Registered before the lock below so it runs after the unlock
+	// (defers run LIFO), reading the named returns once they're final.
+	// Only notify when something actually left the queue -
+	// drainQueueForStep runs on every step of every turn, most of which
+	// find nothing queued.
 	defer func() {
 		if len(fold) > 0 || len(canceledWithRunID) > 0 {
 			d.notifyQueueChanged(sessionID)
 		}
 	}()
-	dispatchLock.Lock()
-	defer dispatchLock.Unlock()
-	queuedCalls, _ := d.messageQueue.Get(sessionID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	var keep []SessionAgentCall
-	for _, queued := range queuedCalls {
-		if d.canceledBySeq(sessionID, queued.acceptSeq) {
+	for _, queued := range s.messageQueue {
+		if d.canceledBySeq(s, queued.acceptSeq) {
 			if queued.RunID != "" {
 				canceledWithRunID = append(canceledWithRunID, queued)
 			}
@@ -413,11 +516,7 @@ func (d *dispatcher) drainQueueForStep(sessionID string) (fold, canceledWithRunI
 		}
 		fold = append(fold, queued)
 	}
-	if len(keep) == 0 {
-		d.messageQueue.Del(sessionID)
-	} else {
-		d.messageQueue.Set(sessionID, keep)
-	}
+	s.messageQueue = keep
 	return fold, canceledWithRunID
 }
 
@@ -436,24 +535,30 @@ func (d *dispatcher) drainQueueForStep(sessionID string) (fold, canceledWithRunI
 // carried a RunID and need a terminal cancelled RunComplete published by
 // the caller.
 func (d *dispatcher) drainNext(sessionID string) (queued []SessionAgentCall, next *SessionAgentCall, canceledWithRunID []SessionAgentCall) {
-	mu := d.sessionMu(sessionID)
+	s, release := d.session(sessionID)
+	defer release()
 	// changed tracks whether the queue held anything to begin with:
 	// every branch below either drops entries (cancel-mark filtering) or
 	// pops one (the handoff), so a non-empty starting queue always ends
-	// up different. Registered before the Unlock defer so it runs after
-	// it (defers run LIFO).
+	// up different. Registered before the lock below so it runs after
+	// the unlock (defers run LIFO).
 	var changed bool
 	defer func() {
 		if changed {
 			d.notifyQueueChanged(sessionID)
 		}
 	}()
-	mu.Lock()
-	defer mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	queuedMessages, _ := d.messageQueue.Get(sessionID)
+	queuedMessages := s.messageQueue
 	changed = len(queuedMessages) > 0
-	if mark, ok := d.cancelMark.Get(sessionID); ok && mark > 0 && len(queuedMessages) > 0 {
+
+	d.acceptedMu.Lock()
+	mark := s.cancelMark
+	d.acceptedMu.Unlock()
+
+	if mark > 0 && len(queuedMessages) > 0 {
 		// A cancel was recorded for this session (e.g. it arrived while
 		// this run was active and follow-ups had been queued). Drop the
 		// queued prompts it covers (accept sequence at or below the
@@ -470,35 +575,38 @@ func (d *dispatcher) drainNext(sessionID string) (queued []SessionAgentCall, nex
 			kept = append(kept, q)
 		}
 		queuedMessages = kept
-		d.messageQueue.Set(sessionID, kept)
+		s.messageQueue = kept
 	}
 
 	if len(queuedMessages) == 0 {
 		// No queued work. Clear the cancel mark only when no accepted
 		// run remains in flight that it might still cover; otherwise a
 		// sibling prompt (sequence at or below the mark) waiting to
-		// enter Run would lose its cancellation. When accepted runs are
-		// gone, this also clears a stale mark so it can't catch a
-		// future run.
-		d.messageQueue.Del(sessionID)
+		// enter dispatchDecision would lose its cancellation. When
+		// accepted runs are gone, this also clears a stale mark so it
+		// can't catch a future run.
+		s.messageQueue = nil
 		d.acceptedMu.Lock()
-		inFlight, _ := d.acceptedRuns.Get(sessionID)
-		d.acceptedMu.Unlock()
-		if inFlight == 0 {
-			d.cancelMark.Del(sessionID)
+		if s.acceptedRuns == 0 {
+			s.cancelMark = 0
 		}
+		d.acceptedMu.Unlock()
 		return nil, nil, canceledWithRunID
 	}
 
 	// Reserve a fresh accept for the dequeued prompt before dropping the
 	// lock so acceptedRuns > 0 across the handoff into the recursive
 	// Run. This closes the window between this dequeue and the recursive
-	// Run registering its activeRequests entry: a cancel arriving in
-	// that window now records a pending cancel (acceptedRuns > 0) that
-	// the recursive Run's accepted path observes as cancel-on-entry.
+	// Run registering its active entry: a cancel arriving in that window
+	// now records a pending cancel (acceptedRuns > 0) that the recursive
+	// Run's accepted path observes as cancel-on-entry.
+	//
+	// BeginAccepted re-enters session() for this same id: safe, since it
+	// only takes statesMu and acceptedMu, never s.mu, so it cannot
+	// deadlock against the s.mu this goroutine already holds.
 	first := queuedMessages[0]
 	first.Accepted = d.BeginAccepted(sessionID)
-	d.messageQueue.Set(sessionID, queuedMessages[1:])
+	s.messageQueue = queuedMessages[1:]
 	return queuedMessages, &first, canceledWithRunID
 }
 
@@ -533,57 +641,29 @@ func (d *dispatcher) requeueDrained(sessionID string, remainder []SessionAgentCa
 	if len(remainder) == 0 {
 		return
 	}
-	mu := d.sessionMu(sessionID)
-	// Registered before the Unlock defer below so it runs after it
+	s, release := d.session(sessionID)
+	defer release()
+	// Registered before the lock below so it runs after the unlock
 	// (defers run LIFO): remainder is non-empty here (checked above), so
 	// this always changes the queue.
 	defer d.notifyQueueChanged(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	existing, _ := d.messageQueue.Get(sessionID)
-	merged := make([]SessionAgentCall, 0, len(remainder)+len(existing))
+	merged := make([]SessionAgentCall, 0, len(remainder)+len(s.messageQueue))
 	ri, ei := 0, 0
-	for ri < len(remainder) && ei < len(existing) {
-		if remainder[ri].acceptSeq <= existing[ei].acceptSeq {
+	for ri < len(remainder) && ei < len(s.messageQueue) {
+		if remainder[ri].acceptSeq <= s.messageQueue[ei].acceptSeq {
 			merged = append(merged, remainder[ri])
 			ri++
 		} else {
-			merged = append(merged, existing[ei])
+			merged = append(merged, s.messageQueue[ei])
 			ei++
 		}
 	}
 	merged = append(merged, remainder[ri:]...)
-	merged = append(merged, existing[ei:]...)
-	d.messageQueue.Set(sessionID, merged)
-}
-
-// clearPendingCancel removes any pending-cancel mark for sessionID. It
-// takes the per-session dispatch lock so it is ordered against Cancel
-// and the dispatch handoff.
-func (d *dispatcher) clearPendingCancel(sessionID string) {
-	mu := d.sessionMu(sessionID)
-	mu.Lock()
-	defer mu.Unlock()
-	d.cancelMark.Del(sessionID)
-}
-
-// canceledBySeq reports whether an accepted handle or queued call with
-// the given accept sequence is covered by a pending cancel for the
-// session. Callers must hold the session's dispatch mutex. A tracked
-// sequence (seq > 0) is covered only when it is at or below the cancel
-// high-water mark, so a prompt accepted after the cancel (higher seq) is
-// never poisoned. An untracked sequence (seq == 0, an in-process enqueue
-// with no accept reservation) is covered whenever any mark is present,
-// preserving the pre-sequence behavior. The mark is not consumed: it
-// stays so every sibling handle it covers observes the same cancel, and
-// a later handle (higher seq) ignores it regardless.
-func (d *dispatcher) canceledBySeq(sessionID string, seq uint64) bool {
-	mark, ok := d.cancelMark.Get(sessionID)
-	if !ok || mark == 0 {
-		return false
-	}
-	return seq == 0 || seq <= mark
+	merged = append(merged, s.messageQueue[ei:]...)
+	s.messageQueue = merged
 }
 
 // cancel cancels sessionID's active request (if any), records a pending
@@ -592,73 +672,75 @@ func (d *dispatcher) canceledBySeq(sessionID string, seq uint64) bool {
 // the caller can publish their terminal RunComplete - dispatcher itself
 // stays free of pubsub.
 func (d *dispatcher) cancel(sessionID string) []SessionAgentCall {
-	// Serialize against the dispatch handoff in Run so the accepted ->
-	// (cancel-on-entry | queued | active) transition is atomic against
-	// this cancel. Every cancel observes at least one of: an active
-	// request, an accepted run (recorded as a pending cancel), or a
-	// queue entry it then clears. If none of those hold, an idle Escape
-	// is a true no-op and must not poison the next prompt.
-	mu := d.sessionMu(sessionID)
+	s, release := d.session(sessionID)
+	defer release()
 	// changed is set only once the tail below actually clears a
-	// non-empty queue. Registered before the Unlock defer so it runs
-	// after it (defers run LIFO).
+	// non-empty queue. Registered before the lock below so it runs
+	// after the unlock (defers run LIFO).
 	var changed bool
 	defer func() {
 		if changed {
 			d.notifyQueueChanged(sessionID)
 		}
 	}()
-	mu.Lock()
-	defer mu.Unlock()
+
+	// Serialize against the dispatch handoff in dispatchDecision so the
+	// accepted -> (cancel-on-entry | queued | active) transition is
+	// atomic against this cancel. Every cancel observes at least one of:
+	// an active request, an accepted run (recorded as a pending cancel),
+	// or a queue entry it then clears. If none of those hold, an idle
+	// Escape is a true no-op and must not poison the next prompt.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Mark the session canceled unconditionally, before anything below
 	// can return early: this is what gates auto-waking a continuation
-	// from the completion inbox (see wakeEligible) - "the user canceled
-	// the parent session" is recorded by the fact
-	// this call happened at all, not by whether it found anything to
-	// actually cancel. run() clears it the next time this session's
+	// from the completion inbox (see wakeEligibleLocked) - "the user
+	// canceled the parent session" is recorded by the fact this call
+	// happened at all, not by whether it found anything to actually
+	// cancel. dispatchDecision clears it the next time this session's
 	// turn genuinely starts.
-	d.cancelledSessions.Set(sessionID, struct{}{})
+	s.cancelled = true
 
-	// Cancel regular requests. Don't use Take() here - we need the entry to
-	// remain in activeRequests so IsBusy() returns true until the goroutine
-	// fully completes (including error handling that may access the DB).
-	// The defer in processRequest will clean up the entry.
-	if ac, ok := d.activeRequests.Get(sessionID); ok && ac != nil {
+	// Cancel regular requests. active is left in place (not cleared)
+	// here - we need it to remain set so IsSessionBusy still reports
+	// true until the goroutine fully completes (including error handling
+	// that may access the DB). The deferred cleanup in runTurn/finishTurn
+	// clears it.
+	if s.active != nil {
 		slog.Debug("Request cancellation initiated", "session_id", sessionID)
-		ac.cancel()
+		s.active.cancel()
 	}
 
 	// Record a pending cancel only when a dispatched-but-not-yet-active
 	// run exists. This catches runs still in the goroutine scheduler or
-	// about to enter Run's busy-queue branch, while leaving an idle
-	// session untouched. Active and accepted are not mutually exclusive:
-	// when a run is active and a follow-up has been accepted, both the
-	// cancel above and this pending record fire.
+	// about to enter dispatchDecision's busy-queue branch, while leaving
+	// an idle session untouched. Active and accepted are not mutually
+	// exclusive: when a run is active and a follow-up has been accepted,
+	// both the cancel above and this pending record fire.
 	//
 	// Raise the session's cancel mark to the latest accept sequence
 	// assigned so far. Every prompt currently accepted-but-not-yet-
 	// active has a sequence at or below that value, so one cancel covers
 	// all of them; a prompt accepted after this cancel gets a strictly
-	// higher sequence and is never poisoned. Using max keeps repeated
-	// cancels idempotent while the same prompts are in flight and lets a
-	// later cancel extend coverage to prompts accepted since.
+	// higher sequence and is never poisoned. max keeps repeated cancels
+	// idempotent while the same prompts are in flight and lets a later
+	// cancel extend coverage to prompts accepted since.
 	d.acceptedMu.Lock()
-	count, ok := d.acceptedRuns.Get(sessionID)
+	count := s.acceptedRuns
 	mark := d.acceptSeqGen
-	d.acceptedMu.Unlock()
-	if ok && count > 0 {
+	if count > 0 {
 		slog.Debug("Recording cancel mark for accepted runs", "session_id", sessionID, "count", count, "mark", mark)
-		existing, _ := d.cancelMark.Get(sessionID)
-		d.cancelMark.Set(sessionID, max(existing, mark))
+		s.cancelMark = max(s.cancelMark, mark)
 	}
+	d.acceptedMu.Unlock()
 
-	queued, ok := d.messageQueue.Get(sessionID)
-	if !ok || len(queued) == 0 {
+	if len(s.messageQueue) == 0 {
 		return nil
 	}
 	slog.Debug("Clearing queued prompts", "session_id", sessionID)
-	d.messageQueue.Del(sessionID)
+	queued := s.messageQueue
+	s.messageQueue = nil
 	changed = true
 	return queued
 }
@@ -667,71 +749,283 @@ func (d *dispatcher) cancel(sessionID string) []SessionAgentCall {
 // the caller can publish a terminal cancelled RunComplete for any that
 // carried a RunID.
 func (d *dispatcher) clearQueue(sessionID string) []SessionAgentCall {
-	mu := d.sessionMu(sessionID)
+	s, release := d.session(sessionID)
+	defer release()
 	// changed is set only once the tail below actually clears a
-	// non-empty queue. Registered before the Unlock defer so it runs
-	// after it (defers run LIFO).
+	// non-empty queue. Registered before the lock below so it runs
+	// after the unlock (defers run LIFO).
 	var changed bool
 	defer func() {
 		if changed {
 			d.notifyQueueChanged(sessionID)
 		}
 	}()
-	mu.Lock()
-	defer mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	queued, ok := d.messageQueue.Get(sessionID)
-	if !ok || len(queued) == 0 {
+	if len(s.messageQueue) == 0 {
 		return nil
 	}
 	slog.Debug("Clearing queued prompts", "session_id", sessionID)
-	d.messageQueue.Del(sessionID)
+	queued := s.messageQueue
+	s.messageQueue = nil
 	changed = true
 	return queued
 }
 
-// activeSessionIDs returns the session IDs with a live activeRequests
-// entry, for callers (CancelAll) that need to cancel every busy session.
+// clearActiveIfMatch releases sessionID's active-run slot, but only if it
+// still holds ac. This is the compare-and-clear guard a finishing run's
+// deferred cleanup needs: it must only remove its own entry, never a
+// newer run's entry that was installed in the window between an earlier
+// explicit clear and this deferred one. It replaces what used to be a
+// csync.CompareAndDelete on a standalone activeRequests map, now
+// expressed under the session's own mutex instead of the map's.
+func (d *dispatcher) clearActiveIfMatch(sessionID string, ac *activeCancel) {
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	if s.active == ac {
+		s.active = nil
+	}
+	s.mu.Unlock()
+}
+
+// activeSessionIDs returns the session IDs with a live active run, for
+// callers (CancelAll) that need to cancel every busy session.
 func (d *dispatcher) activeSessionIDs() []string {
 	var ids []string
-	for key := range d.activeRequests.Seq2() {
-		ids = append(ids, key)
+	for id, s := range d.states.Seq2() {
+		s.mu.Lock()
+		busy := s.active != nil
+		s.mu.Unlock()
+		if busy {
+			ids = append(ids, id)
+		}
 	}
 	return ids
 }
 
 func (d *dispatcher) IsBusy() bool {
-	var busy bool
-	for ac := range d.activeRequests.Seq() {
-		if ac != nil {
-			busy = true
-			break
+	for _, s := range d.states.Seq2() {
+		s.mu.Lock()
+		busy := s.active != nil
+		s.mu.Unlock()
+		if busy {
+			return true
 		}
 	}
-	return busy
+	return false
 }
 
 func (d *dispatcher) IsSessionBusy(sessionID string) bool {
-	_, busy := d.activeRequests.Get(sessionID)
-	return busy
+	s, ok := d.states.Get(sessionID)
+	if !ok {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active != nil
 }
 
 func (d *dispatcher) QueuedPrompts(sessionID string) int {
-	l, ok := d.messageQueue.Get(sessionID)
+	s, ok := d.states.Get(sessionID)
 	if !ok {
 		return 0
 	}
-	return len(l)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.messageQueue)
 }
 
 func (d *dispatcher) QueuedPromptsList(sessionID string) []string {
-	l, ok := d.messageQueue.Get(sessionID)
+	s, ok := d.states.Get(sessionID)
 	if !ok {
 		return nil
 	}
-	prompts := make([]string, len(l))
-	for i, call := range l {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prompts := make([]string, len(s.messageQueue))
+	for i, call := range s.messageQueue {
 		prompts[i] = call.Prompt
 	}
 	return prompts
+}
+
+// --- the methods below carry real sessionAgent-level logic (persistence,
+// pubsub) that used to live in queue.go as thin pass-throughs onto the
+// methods above. They stay on *sessionAgent, not *dispatcher: dispatcher
+// itself must stay free of any dependency on pubsub or message
+// persistence (see its own doc comment). Every dispatcher method that is
+// a pure pass-through (BeginAccepted, IsBusy, IsSessionBusy,
+// QueuedPrompts, QueuedPromptsList, RegisterDelegationParent,
+// drainQueueForStep, requeueDrained, enqueueCall, and the completion-inbox
+// equivalents in completion_inbox.go) needs no such wrapper: sessionAgent
+// embeds *dispatcher (via the dispatch alias below) so those are promoted
+// straight onto SessionAgent's method set.
+
+// publishCanceledQueueDrops emits a terminal cancelled RunComplete for
+// every dropped queued call that carries a RunID. A queued prompt removed
+// from the queue without ever running — covered by a pending cancel, or
+// cleared by Cancel/ClearQueue — would otherwise leave a caller blocked on
+// that RunID: `sennit run` ignores live message events and exits only on a
+// RunComplete whose RunID matches. Calls without a RunID had no such waiter
+// and are dropped silently as before. A detached, bounded context keeps the
+// must-deliver publish alive even when the run context that triggered the
+// drop is already canceled.
+func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
+	var hasRunID bool
+	for _, d := range drops {
+		if d.RunID != "" {
+			hasRunID = true
+			break
+		}
+	}
+	if !hasRunID {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, d := range drops {
+		if d.RunID == "" {
+			continue
+		}
+		newCompletionReporter(a, d).publish(ctx, notify.RunComplete{
+			SessionID: d.SessionID,
+			RunID:     d.RunID,
+			Cancelled: true,
+		})
+	}
+}
+
+// DeliverTaskCompletion enqueues completion into sessionID's completion
+// inbox and, if that leaves the session eligible (idle, not left
+// canceled by the user), attempts a continuation turn for it. See
+// dispatcher.enqueueCompletion and startContinuation. The attempt does
+// not itself drain anything - the completion stays in the inbox until
+// whichever turn actually becomes active drains it via PrepareStep, so a
+// continuation call that loses its own busy-check race (see
+// dispatchDecision) drops cleanly without losing or duplicating
+// completion's content.
+func (a *sessionAgent) DeliverTaskCompletion(ctx context.Context, sessionID string, completion TaskCompletion) {
+	if !a.enqueueCompletion(sessionID, completion) {
+		return
+	}
+	a.startContinuation(ctx, sessionID, "completion arrived while session was idle")
+}
+
+// SendToParent delivers a mid-run ask from sessionID to its registered
+// parent, riding the exact same delivery path DeliverTaskCompletion
+// uses (enqueue, at-most-once, idle-wake) via the registered parent's
+// own Coordinator - never this sessionAgent's, since a thread's parent
+// may live in an entirely different Coordinator/App. Non-blocking: it
+// enqueues and returns without waiting for a reply, exactly like
+// DeliverTaskCompletion.
+func (a *sessionAgent) SendToParent(ctx context.Context, sessionID, msg string) error {
+	parent, ok := a.delegationParents.Get(sessionID)
+	if !ok {
+		return fmt.Errorf("agent: session %q has no registered parent to message", sessionID)
+	}
+	parent.Parent.DeliverTaskCompletion(ctx, parent.ParentSessionID, TaskCompletion{
+		DelegationID:   parent.DelegationID,
+		Kind:           parent.Kind,
+		Name:           parent.Name,
+		ChildSessionID: sessionID,
+		Depth:          parent.Depth,
+		TerminalAt:     time.Now(),
+		IsMessage:      true,
+		Message:        msg,
+	})
+	return nil
+}
+
+// publishQueueChanged is wired as dispatch.onQueueChanged (see
+// NewSessionAgent) so the dispatcher can signal a queue mutation without
+// importing pubsub itself. It publishes a lossy, best-effort
+// notify.TypeQueueChanged event; the UI's queued-prompt pill re-probes
+// the actual count off it instead of trusting a payload, and still falls
+// back to its TTL if this is ever dropped by the broker. Called by
+// dispatcher methods only after their per-session dispatch mutex has
+// been released, so this may itself take a session's dispatch mutex (a
+// subscriber callback could, in principle) without risk of deadlock.
+func (a *sessionAgent) publishQueueChanged(sessionID string) {
+	if a.notify == nil {
+		return
+	}
+	a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+		SessionID: sessionID,
+		Type:      notify.TypeQueueChanged,
+	})
+}
+
+// persistCanceledTurn writes the user/assistant records for a turn that
+// was canceled before (or just as) streaming would have produced them.
+// It creates the user message only when it was not already created by an
+// earlier createUserMessage call (userMsgCreated) and this is not a
+// continuation (whose Prompt is a placeholder, never persisted - see
+// SessionAgentCall.Continuation - so there is never a user message to
+// create here even on this fallback path), then writes an assistant
+// message with FinishReasonCanceled. Both writes use
+// context.WithoutCancel(ctx) so workspace shutdown (which cancels the run
+// context) can't drop them.
+func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgentCall, userMsgCreated bool) error {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if !userMsgCreated && !call.Continuation {
+		if _, err := a.createUserMessage(writeCtx, call); err != nil {
+			return err
+		}
+	}
+	model := a.model.Get()
+	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
+		Role:     message.Assistant,
+		Parts:    []message.ContentPart{},
+		Model:    model.ModelCfg.Model,
+		Provider: model.ModelCfg.Provider,
+	})
+	if err != nil {
+		return err
+	}
+	assistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+	return a.messages.Update(writeCtx, assistant)
+}
+
+// Cancel cancels sessionID's active run (if any) and any accepted or
+// queued follow-ups. See dispatcher.cancel.
+func (a *sessionAgent) Cancel(sessionID string) {
+	drops := a.cancel(sessionID)
+	a.publishCanceledQueueDrops(drops)
+}
+
+// ClearQueue drops sessionID's queued follow-ups without touching the
+// active run or any pending cancel mark. See dispatcher.clearQueue.
+func (a *sessionAgent) ClearQueue(sessionID string) {
+	drops := a.clearQueue(sessionID)
+	a.publishCanceledQueueDrops(drops)
+}
+
+func (a *sessionAgent) CancelAll() {
+	if !a.IsBusy() {
+		return
+	}
+	for _, sessionID := range a.activeSessionIDs() {
+		a.Cancel(sessionID)
+	}
+
+	// Poll IsBusy on a short tick until every canceled run's cleanup has
+	// run, bounded by the same 5s budget as before. There is no
+	// broadcast/wait primitive for "a run just finished" (adding one to
+	// dispatcher for this single caller would be a bigger change than
+	// this polling loop justifies). A 10ms tick keeps this from being a
+	// coarse 200ms busy-wait while staying a minimal, local change.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for a.IsBusy() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

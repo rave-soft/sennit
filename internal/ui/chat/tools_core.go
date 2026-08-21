@@ -79,14 +79,6 @@ func (s *SpinningState) HasResult() bool {
 // Returns true if the tool should show the spinning animation.
 type SpinningFunc func(state SpinningState) bool
 
-// DefaultToolRenderContext implements the default [ToolRenderer] interface.
-type DefaultToolRenderContext struct{}
-
-// RenderTool implements the [ToolRenderer] interface.
-func (d *DefaultToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	return "TODO: Implement Tool Renderer For: " + opts.ToolCall.Name
-}
-
 // ToolRenderOpts contains the data needed to render a tool call.
 type ToolRenderOpts struct {
 	ToolCall   message.ToolCall
@@ -130,14 +122,6 @@ func (o *ToolRenderOpts) HasEmptyResult() bool {
 // ToolRenderer represents an interface for rendering tool calls.
 type ToolRenderer interface {
 	RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string
-}
-
-// ToolRendererFunc is a function type that implements the [ToolRenderer] interface.
-type ToolRendererFunc func(sty *styles.Styles, width int, opts *ToolRenderOpts) string
-
-// RenderTool implements the ToolRenderer interface.
-func (f ToolRendererFunc) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	return f(sty, width, opts)
 }
 
 // baseToolMessageItem represents a tool call message that can be displayed in the UI.

@@ -270,17 +270,22 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return Thread{}, fmt.Errorf("thread: %q was removed during creation", name)
 	}
 
+	// rb unwinds the worktree/spawn steps below if Create returns before
+	// the thread reaches somewhere safe to rest — see [unwinder].
+	var rb unwinder
+	defer rb.unwind()
+
 	if err := git.WorktreeAdd(ctx, m.repoRoot, worktreePath, branch, base); err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
+	rb.push(func() { m.removeWorktree(worktreePath) })
 
 	handle, err := m.spawner.Spawn(m.ctx, worktreePath)
 	if err != nil {
-		_ = git.WorktreeRemove(ctx, m.repoRoot, worktreePath, true)
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
+	rb.push(func() { m.releaseHandle(handle) })
 	if err := m.ctx.Err(); err != nil {
-		m.abortSpawn(context.Background(), handle, worktreePath)
 		return Thread{}, err
 	}
 
@@ -291,13 +296,11 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		sess, err = handle.Workspace().Sessions().CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, args.Goal)
 	}
 	if err != nil {
-		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
 
 	st, err = m.store.SetSession(ctx, st.ID, sess.ID)
 	if err != nil {
-		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
 	// Register the parent on the thread's own coordinator - its
@@ -326,7 +329,6 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	if args.Goal == "" {
 		st, err = m.lc.setStatus(ctx, st.ID, StatusIdle, "", "", 0)
 		if err != nil {
-			m.abortSpawn(ctx, handle, worktreePath)
 			return Thread{}, err
 		}
 		// Keep the workspace live so attaching to the thread lands in a
@@ -334,29 +336,34 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		// unspawned threads. Shutdown and Remove release it like any
 		// other runtime.
 		m.lc.installRuntime(m.ctx, handle, m.spawner, st.ID)
+		rb.commit()
 		return st, nil
 	}
 
 	st, err = m.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 	if err != nil {
-		m.abortSpawn(ctx, handle, worktreePath)
 		return Thread{}, err
 	}
 	m.lc.startRun(WithAgentDispatch(m.ctx), handle, m.spawner, st.ID, st.SessionID, args.Goal)
-
+	rb.commit()
 	return st, nil
 }
 
-// abortSpawn tears a just-spawned workspace and worktree back down after a
-// failure partway through Create. Errors are logged, not returned: the
-// caller already has the error that triggered the rollback and that is
-// what gets surfaced.
-func (m *Manager) abortSpawn(ctx context.Context, handle Handle, worktreePath string) {
-	if err := m.spawner.Release(ctx, handle.ID()); err != nil {
-		slog.Error("Failed to release spawner handle during create rollback", "component", "thread", "error", err)
+// removeWorktree and releaseHandle are the two rollbacks Create/Activate
+// push onto an [unwinder]. Both always run against context.Background(),
+// not the failed operation's own context: cleanup must still complete when
+// that context is the very thing that's canceled (the ctx.Err() checks
+// below), and a half-finished removal would leave exactly the orphaned
+// worktree `sennit gc` exists to report.
+func (m *Manager) removeWorktree(worktreePath string) {
+	if err := git.WorktreeRemove(context.Background(), m.repoRoot, worktreePath, true); err != nil {
+		slog.Error("Failed to remove worktree during rollback", "component", "thread", "error", err)
 	}
-	if err := git.WorktreeRemove(ctx, m.repoRoot, worktreePath, true); err != nil {
-		slog.Error("Failed to remove worktree during create rollback", "component", "thread", "error", err)
+}
+
+func (m *Manager) releaseHandle(handle Handle) {
+	if err := m.spawner.Release(context.Background(), handle.ID()); err != nil {
+		slog.Error("Failed to release spawner handle during rollback", "component", "thread", "error", err)
 	}
 }
 
@@ -524,8 +531,12 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	if err != nil {
 		return Thread{}, fmt.Errorf("thread: respawn workspace: %w", err)
 	}
+	// See Create's identical rb: unwinds the just-spawned workspace if
+	// Activate returns before the thread is resting live again.
+	var rb unwinder
+	defer rb.unwind()
+	rb.push(func() { m.releaseHandle(handle) })
 	if err := m.ctx.Err(); err != nil {
-		_ = m.spawner.Release(context.Background(), handle.ID())
 		return Thread{}, err
 	}
 
@@ -543,7 +554,6 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	}
 	st, err = m.lc.setStatus(ctx, st.ID, activated, st.Error, st.ResultSummary, st.CompletedAt)
 	if err != nil {
-		_ = m.spawner.Release(ctx, handle.ID())
 		return Thread{}, err
 	}
 	m.lc.installRuntime(m.ctx, handle, m.spawner, st.ID)
@@ -563,6 +573,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 			Depth:           0, // Depth is not persisted (a pre-existing gap - see threadControl.depth, also in-memory-only); 0 is the safe default a resumed entity's cascade depth already silently falls back to today.
 		})
 	}
+	rb.commit()
 	return st, nil
 }
 

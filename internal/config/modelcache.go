@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -23,11 +24,54 @@ func modelCacheDBPath(globalDataPath string) string {
 	return filepath.Join(filepath.Dir(globalDataPath), "models.db")
 }
 
+// modelCacheSchemaDone tracks which database files have already had their
+// schema applied, so a long-lived process (or a test suite exercising many
+// stores) doesn't re-run the CREATE TABLE on every cache read/write. Keyed
+// by database path rather than a single process-wide flag: two ConfigStores
+// can point at different data dirs (NewTestStore gives every test its own
+// t.TempDir()), and a shared flag would wrongly skip schema creation for
+// the second path. A key is only recorded after a successful ExecContext,
+// so a transient failure (e.g. a briefly read-only disk) is retried on the
+// next call rather than silently wedging the cache forever.
+var modelCacheSchemaDone = struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}{seen: map[string]bool{}}
+
+// ensureModelCacheSchema runs the model-cache DDL against conn the first
+// time it is called for dbPath, and is a no-op on every call after that.
+func ensureModelCacheSchema(ctx context.Context, conn *sql.DB, dbPath string) error {
+	modelCacheSchemaDone.mu.Lock()
+	done := modelCacheSchemaDone.seen[dbPath]
+	modelCacheSchemaDone.mu.Unlock()
+	if done {
+		return nil
+	}
+
+	const schema = `
+CREATE TABLE IF NOT EXISTS provider_models (
+	provider_id TEXT PRIMARY KEY,
+	models_json TEXT NOT NULL,
+	fetched_at INTEGER NOT NULL
+);
+PRAGMA user_version = 1;
+`
+	if _, err := conn.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+
+	modelCacheSchemaDone.mu.Lock()
+	modelCacheSchemaDone.seen[dbPath] = true
+	modelCacheSchemaDone.mu.Unlock()
+	return nil
+}
+
 // withModelCache opens the model-discovery cache, ensures its schema
-// exists, runs fn, and closes the connection. Cache reads/writes are rare
-// (once per custom provider per config load, plus `sennit models refresh`),
-// so open-do-close per call is fine; there is no long-lived pool here, only
-// sennit.db (internal/db.Connect) needs one.
+// exists (once per database file; see ensureModelCacheSchema), runs fn,
+// and closes the connection. Cache reads/writes are rare (once per custom
+// provider per config load, plus `sennit models refresh`), so open-do-close
+// per call is fine; there is no long-lived pool here, only sennit.db
+// (internal/db.Connect) needs one.
 func withModelCache(dbPath string, fn func(*sql.DB) error) error {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
 		return err
@@ -40,15 +84,7 @@ func withModelCache(dbPath string, fn func(*sql.DB) error) error {
 	}
 	defer conn.Close()
 
-	const schema = `
-CREATE TABLE IF NOT EXISTS provider_models (
-	provider_id TEXT PRIMARY KEY,
-	models_json TEXT NOT NULL,
-	fetched_at INTEGER NOT NULL
-);
-PRAGMA user_version = 1;
-`
-	if _, err := conn.ExecContext(ctx, schema); err != nil {
+	if err := ensureModelCacheSchema(ctx, conn, dbPath); err != nil {
 		return err
 	}
 

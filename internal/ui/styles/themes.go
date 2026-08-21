@@ -3,6 +3,7 @@ package styles
 import (
 	"sync/atomic"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
 
@@ -121,6 +122,16 @@ func themeFromPalette(p Palette) Styles {
 		ansiBrightMagenta: charmtone.Blush,
 		ansiBrightCyan:    p.Secondary,
 		ansiBrightWhite:   p.NeutralBright,
+
+		// Diff line colors. Kept as literals here, on the theme layer,
+		// rather than in quickStyle: they are one theme's greens and reds,
+		// not semantic tokens the base builder should own.
+		diffInsertFg:    lipgloss.Color("#629657"),
+		diffInsertBgDim: lipgloss.Color("#2b322a"),
+		diffInsertBg:    lipgloss.Color("#323931"),
+		diffDeleteFg:    lipgloss.Color("#a45c59"),
+		diffDeleteBgDim: lipgloss.Color("#312929"),
+		diffDeleteBg:    lipgloss.Color("#383030"),
 
 		syntaxKeyword:   p.SyntaxKeyword,
 		syntaxType:      p.SyntaxType,

@@ -24,7 +24,7 @@ type ListAllLatencyEventsSinceRow struct {
 }
 
 func (q *Queries) ListAllLatencyEventsSince(ctx context.Context, createdAt int64) ([]ListAllLatencyEventsSinceRow, error) {
-	rows, err := q.query(ctx, q.listAllLatencyEventsSinceStmt, listAllLatencyEventsSince, createdAt)
+	rows, err := q.db.QueryContext(ctx, listAllLatencyEventsSince, createdAt)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ type ListLatencyEventsSinceRow struct {
 // produced it, and duplicating the path would let the two disagree after
 // a session moves.
 func (q *Queries) ListLatencyEventsSince(ctx context.Context, arg ListLatencyEventsSinceParams) ([]ListLatencyEventsSinceRow, error) {
-	rows, err := q.query(ctx, q.listLatencyEventsSinceStmt, listLatencyEventsSince, arg.CreatedAt, arg.ProjectPath)
+	rows, err := q.db.QueryContext(ctx, listLatencyEventsSince, arg.CreatedAt, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +122,6 @@ type RecordLatencyEventParams struct {
 // distribution (see internal/stats.ComputeLatency), and SQLite has no
 // percentile aggregate to lean on anyway.
 func (q *Queries) RecordLatencyEvent(ctx context.Context, arg RecordLatencyEventParams) error {
-	_, err := q.exec(ctx, q.recordLatencyEventStmt, recordLatencyEvent, arg.SessionID, arg.Kind, arg.WaitedMs)
+	_, err := q.db.ExecContext(ctx, recordLatencyEvent, arg.SessionID, arg.Kind, arg.WaitedMs)
 	return err
 }

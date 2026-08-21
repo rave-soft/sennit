@@ -53,14 +53,8 @@ nothing is found, the directories that were searched are listed.`,
 			return fmt.Errorf("nothing to import: pass --skills and/or --agents")
 		}
 
-		cwd, err := ResolveCwd(cmd)
-		if err != nil {
-			return err
-		}
-		dataDir, _ := cmd.Flags().GetString("data-dir")
 		debug, _ := cmd.Flags().GetBool("debug")
-
-		cfg, err := config.Init(cwd, dataDir, debug)
+		cwd, cfg, err := initConfig(cmd, debug)
 		if err != nil {
 			return err
 		}

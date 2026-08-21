@@ -76,8 +76,9 @@ func AttachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 // an unavailable thread store must not prevent the parent workspace starting.
 //
 // The caller provides the Spawner because it owns the lifetime policy for a
-// thread workspace: local mode creates in-process apps, while backend mode
-// keeps backend workspaces held for the thread's lifetime.
+// thread workspace: [LocalSpawner] bootstraps a fresh in-process app per
+// thread worktree, while [ParentAppSpawner] hands every spawned handle the
+// caller's own already-running workspace (used for worktree-less tasks).
 func Attach(ctx context.Context, a *app.App, path string, spawner thread.Spawner) {
 	attachWithDeps(ctx, a, path, spawner, productionAttachDeps)
 }

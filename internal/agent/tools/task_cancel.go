@@ -37,12 +37,12 @@ func NewTaskCancelTool(manager TaskManager, permissions permission.Service) fant
 		renderToolDescription(taskCancelDescriptionTpl),
 		func(ctx context.Context, params TaskCancelParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ID == "" {
-				return fantasy.NewTextErrorResponse("id is required"), nil
+				return invalidParam("id"), nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for task_cancel")
+				return fantasy.ToolResponse{}, missingSessionID("task_cancel")
 			}
 
 			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{

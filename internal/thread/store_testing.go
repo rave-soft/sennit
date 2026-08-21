@@ -1,0 +1,182 @@
+package thread
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/rave-soft/sennit/internal/db"
+	"github.com/stretchr/testify/require"
+)
+
+// ---------------------------------------------------------------------------
+// store scaffolding for tests, exported for the same reason
+// [NewTaskManagerForTest] is: it names sqlc's db.Querier/db.Thread and
+// builds a real Store around them, which only makes sense from within this
+// package, but every test that wants a real store — this package's own
+// (store_test.go) and every other package's (package thread_test, and
+// beyond) — needs it. It imports none of app/threadspawn, so it carries no
+// risk of the test import cycle the app-referencing fakes must avoid (see
+// fakes_test.go, package thread_test).
+// ---------------------------------------------------------------------------
+
+// NewStoreForTest builds a real (sqlite-backed) Store using the same sqlc
+// queries threadspawn.NewStore uses, scoped to a throwaway project path —
+// for tests that want a real store without threadspawn's global-DB-dir
+// dependency (threadspawn.NewStore cannot be imported here either way: it
+// would be the same test import cycle NewTaskManagerForTest's doc comment
+// describes).
+func NewStoreForTest(t testing.TB) Store {
+	t.Helper()
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	return &testStoreDB{q: db.New(conn), projectPath: dataDir}
+}
+
+// testStoreDB is a minimal Store over the sqlc queries, mirroring the
+// threadspawn implementation (which cannot be imported here).
+type testStoreDB struct {
+	q           db.Querier
+	projectPath string
+}
+
+var _ Store = (*testStoreDB)(nil)
+
+func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, error) {
+	kind := params.Kind
+	if kind == "" {
+		kind = KindThread
+	}
+	mergePolicy := params.MergePolicy
+	if mergePolicy == "" && kind == KindThread {
+		mergePolicy = MergeAuto
+	}
+	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
+		ID:              fmt.Sprintf("thread-%d", time.Now().UnixNano()),
+		Name:            params.Name,
+		ProjectPath:     s.projectPath,
+		Goal:            params.Goal,
+		BaseBranch:      params.BaseBranch,
+		Branch:          params.Branch,
+		WorktreePath:    params.WorktreePath,
+		SessionID:       params.SessionID,
+		Status:          string(StatusPending),
+		MergePolicy:     string(mergePolicy),
+		Kind:            string(kind),
+		ParentSessionID: params.ParentSessionID,
+	})
+	if err != nil {
+		return Thread{}, err
+	}
+	return testFromDBItem(dbThread), nil
+}
+
+func (s *testStoreDB) Get(ctx context.Context, id string) (Thread, error) {
+	dbThread, err := s.q.GetThread(ctx, id)
+	if err != nil {
+		return Thread{}, err
+	}
+	return testFromDBItem(dbThread), nil
+}
+
+func (s *testStoreDB) GetByName(ctx context.Context, name string) (Thread, error) {
+	dbThread, err := s.q.GetThreadByName(ctx, db.GetThreadByNameParams{
+		Name:        name,
+		ProjectPath: s.projectPath,
+	})
+	if err != nil {
+		return Thread{}, err
+	}
+	return testFromDBItem(dbThread), nil
+}
+
+func (s *testStoreDB) List(ctx context.Context) ([]Thread, error) {
+	rows, err := s.q.ListThreads(ctx, s.projectPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Thread, len(rows))
+	for i, r := range rows {
+		out[i] = testFromDBItem(r)
+	}
+	return out, nil
+}
+
+func (s *testStoreDB) ListAll(ctx context.Context) ([]Thread, error) {
+	rows, err := s.q.ListThreadsAll(ctx, s.projectPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Thread, len(rows))
+	for i, r := range rows {
+		out[i] = testFromDBItem(r)
+	}
+	return out, nil
+}
+
+func (s *testStoreDB) SetStatus(ctx context.Context, id string, params SetStatusParams) (Thread, error) {
+	dbThread, err := s.q.UpdateThreadStatus(ctx, db.UpdateThreadStatusParams{
+		ID:            id,
+		Status:        string(params.Status),
+		Error:         params.Error,
+		ResultSummary: params.ResultSummary,
+		CompletedAt:   sqlInt64(params.CompletedAt),
+	})
+	if err != nil {
+		return Thread{}, err
+	}
+	return testFromDBItem(dbThread), nil
+}
+
+func (s *testStoreDB) SetSession(ctx context.Context, id, sessionID string) (Thread, error) {
+	dbThread, err := s.q.UpdateThreadSession(ctx, db.UpdateThreadSessionParams{
+		ID:        id,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return Thread{}, err
+	}
+	return testFromDBItem(dbThread), nil
+}
+
+func (s *testStoreDB) Delete(ctx context.Context, id string) error {
+	return s.q.DeleteThread(ctx, id)
+}
+
+// sqlInt64 mirrors the threadspawn store's CompletedAt handling: zero leaves
+// the column NULL.
+func sqlInt64(v int64) sql.NullInt64 {
+	return sql.NullInt64{Int64: v, Valid: v != 0}
+}
+
+// testFromDBItem mirrors threadspawn.fromDBItem (which cannot be imported
+// here); the field mapping is identical.
+func testFromDBItem(item db.Thread) Thread {
+	return Thread{
+		Delegation: Delegation{
+			ID:              item.ID,
+			Name:            item.Name,
+			Goal:            item.Goal,
+			SessionID:       item.SessionID,
+			Status:          Status(item.Status),
+			Kind:            Kind(item.Kind),
+			ResultSummary:   item.ResultSummary,
+			Error:           item.Error,
+			CreatedAt:       item.CreatedAt,
+			UpdatedAt:       item.UpdatedAt,
+			CompletedAt:     item.CompletedAt.Int64,
+			ParentSessionID: item.ParentSessionID,
+		},
+		BaseBranch:   item.BaseBranch,
+		Branch:       item.Branch,
+		WorktreePath: item.WorktreePath,
+		MergePolicy:  MergePolicy(item.MergePolicy),
+	}
+}

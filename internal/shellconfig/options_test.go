@@ -271,6 +271,141 @@ func TestOption_IntInvalid(t *testing.T) {
 	require.Contains(t, err.Error(), "expects an integer")
 }
 
+// TestOption_UIBoolFields pins "option ui compact|transparent <bool>",
+// currently handled by handleOption's special-cased switch in optionUI.
+func TestOption_UIBoolFields(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option ui compact true
+option ui transparent true`)
+
+	ui := result["options"].(map[string]any)["tui"].(map[string]any)
+	require.Equal(t, true, ui["compact_mode"])
+	require.Equal(t, true, ui["transparent"])
+}
+
+// TestOption_UICompactRequiresValue pins that, unlike top-level bool
+// options, "option ui compact" has no bare-flag shorthand: a value is
+// mandatory.
+func TestOption_UICompactRequiresValue(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui compact`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "<value>")
+}
+
+// TestOption_UICompactEmptyValueRejected pins that an explicit empty value
+// is still validated as a boolean, not treated as the bare-flag shorthand.
+func TestOption_UICompactEmptyValueRejected(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui compact ""`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects true/false")
+}
+
+func TestOption_UIDiff(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option ui diff split`)
+	ui := result["options"].(map[string]any)["tui"].(map[string]any)
+	require.Equal(t, "split", ui["diff_mode"])
+}
+
+func TestOption_UIDiffInvalid(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui diff bogus`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects unified or split")
+}
+
+func TestOption_UIScrollbar(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option ui scrollbar always`)
+	ui := result["options"].(map[string]any)["tui"].(map[string]any)
+	require.Equal(t, "always", ui["scrollbar"])
+}
+
+func TestOption_UIScrollbarInvalid(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui scrollbar bogus`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects default, always, or never")
+}
+
+func TestOption_UICompletions(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option ui completions-max-depth 3
+option ui completions-max-items 10`)
+	completions := result["options"].(map[string]any)["tui"].(map[string]any)["completions"].(map[string]any)
+	require.Equal(t, float64(3), completions["max_depth"])
+	require.Equal(t, float64(10), completions["max_items"])
+}
+
+// TestOption_UICompletionsNegativeRejected pins that ui completions ints
+// reject negative values, unlike the generic top-level optInt fields
+// (e.g. history-retention-days) which do not.
+func TestOption_UICompletionsNegativeRejected(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option ui completions-max-depth -1`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-negative integer")
+}
+
+// TestOption_AttributionTrailerStyle pins that setting the trailer style
+// defaults attribution.generated_with to true when it hasn't already been
+// set.
+func TestOption_AttributionTrailerStyle(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option attribution-trailer-style assisted-by`)
+	attribution := result["options"].(map[string]any)["attribution"].(map[string]any)
+	require.Equal(t, "assisted-by", attribution["trailer_style"])
+	require.Equal(t, true, attribution["generated_with"])
+}
+
+// TestOption_AttributionTrailerStylePreservesExplicitGeneratedWith pins that
+// an earlier explicit "attribution-generated-with false" is not clobbered by
+// a later "attribution-trailer-style" default.
+func TestOption_AttributionTrailerStylePreservesExplicitGeneratedWith(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option attribution-generated-with false
+option attribution-trailer-style assisted-by`)
+	attribution := result["options"].(map[string]any)["attribution"].(map[string]any)
+	require.Equal(t, false, attribution["generated_with"])
+}
+
+func TestOption_AttributionTrailerStyleInvalid(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "sennitrc")
+	_, err := LoadShellConfig(t.Context(), path, []byte(`option attribution-trailer-style bogus`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "expects none or assisted-by")
+}
+
+// TestOption_AttributionGeneratedWithShorthand pins that, like other
+// top-level bool options, omitting the value defaults to true.
+func TestOption_AttributionGeneratedWithShorthand(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `option attribution-generated-with`)
+	attribution := result["options"].(map[string]any)["attribution"].(map[string]any)
+	require.Equal(t, true, attribution["generated_with"])
+}
+
 func TestOption_UnknownKey(t *testing.T) {
 	t.Parallel()
 

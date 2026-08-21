@@ -7,7 +7,7 @@ import (
 )
 
 // updateThreads handles the thread-tracking branches of UI.Update: the
-// thread pubsub event and the header badge's / dock's off-thread loads. It
+// thread pubsub event and the shared list's / dock's off-thread loads. It
 // is called from Update's message-type switch and shares that switch's
 // cmds accumulator.
 //
@@ -23,9 +23,12 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case pubsub.Event[proto.Thread]:
 		// Root fans this to both screens (see root.go); the main screen
-		// only cares about keeping the header badge's count current.
-		m.threadIndicator.applyEvent(msg)
-		m.threadsDock.applyThreadEvent(msg)
+		// only cares about keeping the shared list (and the header badge
+		// it feeds) current.
+		m.threadList.applyEvent(msg)
+		if msg.Type == pubsub.DeletedEvent {
+			m.threadsDock.dropActivity(msg.Payload.ID)
+		}
 		cmds = append(cmds, m.threadViewsRefreshCmds()...)
 		// A thread's edge transition into a terminal status (merged,
 		// failed, ...) gets a toast — see thread_completion.go for why a
@@ -38,13 +41,13 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case threadIndicatorLoadedMsg:
-		if cmd := m.threadIndicator.applyLoaded(m.com, msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case threadsDockLoadedMsg:
-		if cmd := m.threadsDock.applyThreadsDockLoaded(m.com, msg); cmd != nil {
-			cmds = append(cmds, cmd)
+	case threadsLoadedMsg:
+		loadCmds, applied := m.threadList.applyLoaded(m.com, msg)
+		cmds = append(cmds, loadCmds...)
+		if applied {
+			// The freshly listed threads may have added or retired
+			// per-thread activity; see threadsDockState.activityGen.
+			m.threadsDock.activityGen++
 		}
 		// The freshly listed threads may introduce (or retire) live work.
 		if cmd := m.syncPanelSpinner(); cmd != nil {

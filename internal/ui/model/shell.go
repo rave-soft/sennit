@@ -10,6 +10,28 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
+type openEditorMsg struct {
+	Text string
+}
+
+type shellResultMsg struct {
+	PendingID  string // ID of the pending ShellItem to update.
+	Command    string
+	Output     string
+	ExitCode   int
+	Err        error
+	Canceled   bool
+	sessionID  string
+	generation uint64
+}
+
+// shellStreamMsg carries incremental output from a streaming shell command.
+type shellStreamMsg struct {
+	PendingID string
+	Chunk     string
+	streamCh  <-chan string // unexported; used to continue draining
+}
+
 // updateShell handles the inline-editor and shell-command branches of
 // UI.Update: applying an externally edited draft, and streaming/completing
 // a bang (`!`) shell command's output. It is called from Update's
@@ -125,8 +147,9 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		m.editor.pendingSendGen++
 		generation := m.editor.pendingSendGen
 		workspace := m.com.Workspace
+		ctx := m.com.Context()
 		cmds = append(cmds, func() tea.Msg {
-			newSession, err := workspace.CreateSession(context.Background(), "New Session")
+			newSession, err := workspace.CreateSession(ctx, "New Session")
 			if err != nil {
 				return sendMessageErrorMsg{Err: err, generation: generation, creating: true}
 			}
@@ -171,7 +194,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		return shellStreamMsg{PendingID: pendingID, Chunk: chunk, streamCh: streamCh}
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(m.com.Context())
 	m.editor.bangCancel = cancel
 
 	workspace := m.com.Workspace

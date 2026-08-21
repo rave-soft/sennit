@@ -76,7 +76,7 @@ func TestCancel_ActiveAndAcceptedFiresBothBranches(t *testing.T) {
 
 	const sid = "sid"
 	var activeCanceled atomic.Bool
-	sa.dispatch.activeRequests.Set(sid, &activeCancel{cancel: func() { activeCanceled.Store(true) }})
+	sa.setActiveForTest(sid, &activeCancel{cancel: func() { activeCanceled.Store(true) }})
 
 	accept := sa.BeginAccepted(sid)
 	defer accept.Close()
@@ -100,7 +100,7 @@ func TestRun_BusyWithPendingCancelTakesCancelOnEntry(t *testing.T) {
 	require.NoError(t, err)
 
 	// Make the session look busy: an earlier prompt is active.
-	sa.dispatch.activeRequests.Set(sess.ID, &activeCancel{cancel: func() {}})
+	sa.setActiveForTest(sess.ID, &activeCancel{cancel: func() {}})
 
 	accept := sa.BeginAccepted(sess.ID)
 	// A cancel arrives while this follow-up is accepted-but-not-active.
@@ -143,7 +143,7 @@ func TestRun_PrepareStepDrainSkipsQueuedOnPendingCancel(t *testing.T) {
 	// A follow-up prompt sits queued for the session.
 	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "queued-followup"})
 	// A cancel was recorded for the session while it sat in the queue.
-	sa.dispatch.cancelMark.Set(sess.ID, 1)
+	sa.setCancelMarkForTest(sess.ID, 1)
 
 	result, err := sa.Run(t.Context(), SessionAgentCall{
 		SessionID: sess.ID,
@@ -181,7 +181,7 @@ func TestRun_NormalCompletionClearsStalePendingCancel(t *testing.T) {
 	require.NoError(t, err)
 
 	// A stale cancel mark lingers (no queued work, no accepted run).
-	sa.dispatch.cancelMark.Set(sess.ID, 1)
+	sa.setCancelMarkForTest(sess.ID, 1)
 
 	result, err := sa.Run(t.Context(), SessionAgentCall{
 		SessionID: sess.ID,

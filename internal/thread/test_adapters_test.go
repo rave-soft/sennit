@@ -1,7 +1,9 @@
-package thread
+package thread_test
 
 import (
 	"context"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/message"
@@ -10,23 +12,27 @@ import (
 )
 
 // The helpers in this file are the test-only stand-ins for the threadspawn
-// implementations of the same roles: an in-package test cannot import
-// threadspawn (threadspawn imports thread, so an internal test importing it
-// would be an import cycle), but it still needs a Spawner that wraps the
-// caller's own already-running App and the domain-view adapters over the
-// real session/message services. They return the real production wiring
-// (the real services, adapted to the domain view) so the in-package tests
-// exercise the same code paths the external ones do.
+// implementations of the same roles: this package's own tests cannot
+// import threadspawn (threadspawn imports thread, and this package's own
+// tests already import thread — see fakes_test.go's package doc — so
+// importing threadspawn too would just give the same adapters a second,
+// parallel implementation for no reason), but they still need a Spawner
+// that wraps the caller's own already-running App and the domain-view
+// adapters over the real session/message services. They return the real
+// production wiring (the real services, adapted to the domain view) so
+// these tests exercise the same code paths the production composition
+// seam does.
 //
-// They deliberately live in a _test.go file — not in testing.go — because
-// they name internal/app and internal/session/message, and those must not
-// leak into the production build of internal/thread (see the package's
-// dependency-boundary requirement).
+// NewTestSessionService/NewTestMessageService/NewTestParentAppSpawner are
+// exported (unlike the unexported adapter types around them) because
+// other packages' tests that want a real, working thread.Manager/
+// TaskManager without threadspawn's own dependencies use them too — see
+// NewTaskManagerForTest's doc comment for the same reasoning.
 
 // NewTestParentAppSpawner returns a Spawner whose every Spawn call returns
 // a Handle wrapping a, the caller's own already-running App — the
 // test-only counterpart of threadspawn.NewParentAppSpawner.
-func NewTestParentAppSpawner(a *app.App) Spawner {
+func NewTestParentAppSpawner(a *app.App) thread.Spawner {
 	return &parentAppTestSpawner{app: a}
 }
 
@@ -34,7 +40,7 @@ type parentAppTestSpawner struct {
 	app *app.App
 }
 
-func (s *parentAppTestSpawner) Spawn(ctx context.Context, path string) (Handle, error) {
+func (s *parentAppTestSpawner) Spawn(ctx context.Context, path string) (thread.Handle, error) {
 	return &parentAppTestHandle{app: s.app}, nil
 }
 
@@ -49,7 +55,7 @@ type parentAppTestHandle struct {
 }
 
 func (h *parentAppTestHandle) ID() string { return "" }
-func (h *parentAppTestHandle) Workspace() Workspace {
+func (h *parentAppTestHandle) Workspace() thread.Workspace {
 	return &parentAppTestWorkspace{app: h.app}
 }
 
@@ -58,18 +64,18 @@ type parentAppTestWorkspace struct {
 	app *app.App
 }
 
-func (w *parentAppTestWorkspace) Coordinator() Coordinator {
+func (w *parentAppTestWorkspace) Coordinator() thread.Coordinator {
 	return &testCoordinatorAdapter{inner: w.app.Coordinator()}
 }
 
-func (w *parentAppTestWorkspace) Sessions() SessionService {
+func (w *parentAppTestWorkspace) Sessions() thread.SessionService {
 	if w.app.Sessions() == nil {
 		return nil
 	}
 	return NewTestSessionService(w.app.Sessions())
 }
 
-func (w *parentAppTestWorkspace) Messages() MessageService {
+func (w *parentAppTestWorkspace) Messages() thread.MessageService {
 	if w.app.Messages() == nil {
 		return nil
 	}
@@ -80,7 +86,7 @@ func (w *parentAppTestWorkspace) Permissions() permission.Service {
 	return w.app.Permissions()
 }
 
-func (w *parentAppTestWorkspace) RunCompletions() RunCompletionBroker {
+func (w *parentAppTestWorkspace) RunCompletions() thread.RunCompletionBroker {
 	return &testRunCompletionBrokerAdapter{inner: w.app.RunCompletions()}
 }
 
@@ -91,7 +97,7 @@ func (w *parentAppTestWorkspace) SendEvent(msg any) {
 // NewTestMessageService adapts a real message service to the domain's
 // narrow [MessageService] view, as the composition seam does in
 // production (see threadspawn.NewMessageService).
-func NewTestMessageService(full message.Service) MessageService {
+func NewTestMessageService(full message.Service) thread.MessageService {
 	return &testMessageService{full: full}
 }
 
@@ -99,10 +105,10 @@ type testMessageService struct {
 	full message.Service
 }
 
-func (m *testMessageService) Create(ctx context.Context, sessionID string, role MessageRole, parts []ContentPart) error {
+func (m *testMessageService) Create(ctx context.Context, sessionID string, role thread.MessageRole, parts []thread.ContentPart) error {
 	converted := make([]message.ContentPart, 0, len(parts))
 	for _, p := range parts {
-		if t, ok := p.(TextContent); ok {
+		if t, ok := p.(thread.TextContent); ok {
 			converted = append(converted, message.TextContent{Text: t.Text})
 		}
 	}
@@ -110,14 +116,14 @@ func (m *testMessageService) Create(ctx context.Context, sessionID string, role 
 	return err
 }
 
-func (m *testMessageService) List(ctx context.Context, sessionID string) ([]Message, error) {
+func (m *testMessageService) List(ctx context.Context, sessionID string) ([]thread.Message, error) {
 	all, err := m.full.List(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Message, 0, len(all))
+	out := make([]thread.Message, 0, len(all))
 	for _, msg := range all {
-		out = append(out, Message{Role: MessageRole(msg.Role), Text: msg.Content().Text})
+		out = append(out, thread.Message{Role: thread.MessageRole(msg.Role), Text: msg.Content().Text})
 	}
 	return out, nil
 }
@@ -125,7 +131,7 @@ func (m *testMessageService) List(ctx context.Context, sessionID string) ([]Mess
 // NewTestSessionService adapts a real session service to the domain's
 // narrow [SessionService] view, as the composition seam does in
 // production (see threadspawn.NewSessionService).
-func NewTestSessionService(full session.Service) SessionService {
+func NewTestSessionService(full session.Service) thread.SessionService {
 	return &testSessionService{full: full}
 }
 
@@ -133,18 +139,18 @@ type testSessionService struct {
 	full session.Service
 }
 
-func (s *testSessionService) Create(ctx context.Context, title string) (Session, error) {
+func (s *testSessionService) Create(ctx context.Context, title string) (thread.Session, error) {
 	sess, err := s.full.Create(ctx, title)
 	if err != nil {
-		return Session{}, err
+		return thread.Session{}, err
 	}
-	return Session{ID: sess.ID, Title: sess.Title}, nil
+	return thread.Session{ID: sess.ID, Title: sess.Title}, nil
 }
 
-func (s *testSessionService) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error) {
+func (s *testSessionService) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (thread.Session, error) {
 	sess, err := s.full.CreateTaskSession(ctx, toolCallID, parentSessionID, title)
 	if err != nil {
-		return Session{}, err
+		return thread.Session{}, err
 	}
-	return Session{ID: sess.ID, Title: sess.Title}, nil
+	return thread.Session{ID: sess.ID, Title: sess.Title}, nil
 }

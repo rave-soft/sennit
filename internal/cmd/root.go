@@ -25,7 +25,6 @@ import (
 	"github.com/rave-soft/sennit/internal/event"
 	sennitlog "github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/projects"
-	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	ui "github.com/rave-soft/sennit/internal/ui/model"
@@ -102,7 +101,7 @@ sennit --continue
 		defer cleanup()
 
 		if sessionID != "" {
-			sess, err := resolveWorkspaceSessionID(cmd.Context(), ws, sessionID)
+			sess, err := resolveSessionID(cmd.Context(), workspaceSessionLookup{ws}, sessionID)
 			if err != nil {
 				return err
 			}
@@ -130,7 +129,7 @@ sennit --continue
 		if err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
-			return errors.New("Sennit crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at " + brand.RepoURL + "/issues/new?template=bug.yml") //nolint:staticcheck
+			return errors.New("Sennit crashed. Please copy the stacktrace above and open an issue at " + brand.RepoURL + "/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		return nil
 	},
@@ -290,50 +289,18 @@ func MaybePrependStdin(prompt string) (string, error) {
 	return string(bts) + "\n\n" + prompt, nil
 }
 
-// resolveWorkspaceSessionID resolves a session ID that may be a full
-// UUID, full hash, or hash prefix. Works against the Workspace
-// interface so it gets hash prefix support without depending on the
-// concrete implementation.
-func resolveWorkspaceSessionID(ctx context.Context, ws workspace.Workspace, id string) (session.Session, error) {
-	if sess, err := ws.GetSession(ctx, id); err == nil {
-		return sess, nil
-	}
-
-	sessions, err := ws.ListSessions(ctx)
-	if err != nil {
-		return session.Session{}, err
-	}
-
-	var matches []session.Session
-	for _, s := range sessions {
-		hash := session.HashID(s.ID)
-		if hash == id || strings.HasPrefix(hash, id) {
-			matches = append(matches, s)
-		}
-	}
-
-	switch len(matches) {
-	case 0:
-		return session.Session{}, fmt.Errorf("session not found: %s", id)
-	case 1:
-		return matches[0], nil
-	default:
-		return session.Session{}, fmt.Errorf("session ID %q is ambiguous (%d matches)", id, len(matches))
-	}
-}
-
 func ResolveCwd(cmd *cobra.Command) (string, error) {
 	cwd, _ := cmd.Flags().GetString("cwd")
 	if cwd != "" {
 		err := os.Chdir(cwd)
 		if err != nil {
-			return "", fmt.Errorf("failed to change directory: %v", err)
+			return "", fmt.Errorf("failed to change directory: %w", err)
 		}
 		return cwd, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("failed to get current working directory: %v", err)
+		return "", fmt.Errorf("failed to get current working directory: %w", err)
 	}
 	return cwd, nil
 }

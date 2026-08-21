@@ -30,7 +30,7 @@ func NewTaskResultTool(manager TaskManager) fantasy.AgentTool {
 		renderToolDescription(taskResultDescriptionTpl),
 		func(ctx context.Context, params TaskResultParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ID == "" {
-				return fantasy.NewTextErrorResponse("id is required"), nil
+				return invalidParam("id"), nil
 			}
 
 			ti, err := manager.Get(ctx, params.ID)

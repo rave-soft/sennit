@@ -83,6 +83,7 @@ func (tx *sqlFileVersionTransaction) CreateFile(ctx context.Context, params db.C
 
 type service struct {
 	*pubsub.Broker[File]
+	db       *sql.DB
 	q        *db.Queries
 	versions fileVersionStore
 }
@@ -90,6 +91,7 @@ type service struct {
 func NewService(q *db.Queries, sqlDB *sql.DB) Service {
 	return &service{
 		Broker:   pubsub.NewBroker[File](),
+		db:       sqlDB,
 		q:        q,
 		versions: sqlFileVersionStore{db: sqlDB, q: q},
 	}
@@ -205,16 +207,27 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteSessionFiles deletes every file version belonging to sessionID as
+// one transaction, so a failure partway through leaves none of them
+// removed rather than an arbitrary prefix. Deletion events are published
+// only after the transaction commits, once the rows are actually gone.
 func (s *service) DeleteSessionFiles(ctx context.Context, sessionID string) error {
 	files, err := s.ListBySession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	for _, file := range files {
-		err = s.Delete(ctx, file.ID)
-		if err != nil {
-			return err
+	if err := db.InTx(ctx, s.db, func(qtx *db.Queries) error {
+		for _, file := range files {
+			if err := qtx.DeleteFile(ctx, file.ID); err != nil {
+				return err
+			}
 		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, file := range files {
+		s.Publish(pubsub.DeletedEvent, file)
 	}
 	return nil
 }

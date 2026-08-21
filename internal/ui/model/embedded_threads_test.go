@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,7 @@ func TestEmbeddedThreadUI_ShowsNoThreadsInItsPanel(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadsDock.cache.value = mkDockThreads(2)
+	u.threadList.cache.value = mkDockThreads(2)
 	require.Positive(t, u.sessionPanelPlan(100).threadsActive,
 		"precondition: the main screen does show them")
 
@@ -35,7 +36,7 @@ func TestEmbeddedThreadUI_ShowsNoThreadBadge(t *testing.T) {
 	t.Parallel()
 
 	u := sessionUI()
-	u.threadIndicator.cache.set(3)
+	u.threadList.cache.set([]proto.Thread{{ID: "s1", Status: "running"}, {ID: "s2", Status: "pending"}, {ID: "s3", Status: "merging"}})
 	require.Equal(t, 3, u.activeThreadBadgeCount())
 
 	u.embedded = true
@@ -76,34 +77,36 @@ func TestRoot_MainScreenResultsArriveWhileAThreadIsOpen(t *testing.T) {
 	r.active = screenThread
 
 	// A refresh the main screen started before the user drilled in.
-	gen, started := r.main.threadsDock.cache.begin()
+	gen, started := r.main.threadList.cache.begin()
 	require.True(t, started)
 
-	r.Update(threadsDockLoadedMsg{gen: gen, threads: mkDockThreads(2)})
+	r.Update(threadsLoadedMsg{gen: gen, threads: mkDockThreads(2)})
 
-	require.False(t, r.main.threadsDock.cache.inFlight,
+	require.False(t, r.main.threadList.cache.inFlight,
 		"the result must reach the screen that asked, or its next refresh never starts")
-	require.Len(t, r.main.threadsDock.cache.value, 2)
-	require.Empty(t, threadUI.threadsDock.cache.value,
+	require.Len(t, r.main.threadList.cache.value, 2)
+	require.Empty(t, threadUI.threadList.cache.value,
 		"and it must not land in the thread's own state")
 }
 
 // TestRoot_MainScreenResultsSurviveTheDashboardToo: the dashboard screen
-// dropped unrecognized messages on the floor entirely, which wedges the
-// main screen's refresh in exactly the same way.
+// must not drop the shared cache's result on the floor either — it is
+// explicitly routed to r.main regardless of which screen is on top (see
+// root.go's threadsLoadedMsg case), the same guarantee
+// TestRoot_MainScreenResultsArriveWhileAThreadIsOpen pins for screenThread.
 func TestRoot_MainScreenResultsSurviveTheDashboardToo(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
 	r.active = screenDashboard
 
-	gen, started := r.main.threadIndicator.cache.begin()
+	gen, started := r.main.threadList.cache.begin()
 	require.True(t, started)
 
-	r.Update(threadIndicatorLoadedMsg{gen: gen, count: 4})
+	r.Update(threadsLoadedMsg{gen: gen, threads: mkDockThreads(4)})
 
-	require.False(t, r.main.threadIndicator.cache.inFlight)
-	require.Equal(t, 4, r.main.threadIndicator.cache.value)
+	require.False(t, r.main.threadList.cache.inFlight)
+	require.Len(t, r.main.threadList.cache.value, 4)
 }
 
 // TestRoot_ScreenBoundMessagesStillFollowTheActiveScreen: only results

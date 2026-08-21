@@ -1,29 +1,52 @@
 package model
 
-// Memoized thread list state.
+// Memoized thread list state, shared by every consumer that needs "all
+// threads": the threads dashboard (threads.go), the session panel's threads
+// dock (threads_dock.go), and the header's active-thread badge
+// (activeThreadBadgeCount in ui.go).
 //
 // Threads are parallel agent work streams the workspace runs in isolated
 // git worktrees (see internal/workspace/threads.go). Like the workspace
-// probes in workspace_cache.go, ListThreads is treated as IO, so the
-// dashboard (added in a later step) must never call it from Update or
-// View: it reads the memoized slice and this file refreshes it off-thread,
-// applying results back on the Update goroutine.
+// probes in workspace_cache.go, ListThreads is treated as IO, so nothing
+// here may call it from Update or View: readers use the memoized slice and
+// this file refreshes it off-thread, applying results back on the Update
+// goroutine.
 //
-// Follows the same idiom as workspace_cache.go:
-//   - threadsCacheState holds the memoized value plus ttlCache bookkeeping,
-//     an in-flight guard, and a generation counter.
-//   - dispatchThreadsRefresh fetches off-thread and returns a
-//     threadsLoadedMsg; it no-ops while a fetch is already in flight.
-//   - applyThreadsLoaded writes the result through on the Update goroutine,
-//     discarding and re-dispatching stale (gen-mismatched) results.
-//   - invalidateThreads and applyThreadEvent react to pubsub.Event[proto.Thread]
-//     edges: the latter also upserts/removes the event's row optimistically
-//     so the list updates before the next refresh lands.
-//   - staleThreadsRefreshCmd is the TTL backstop, only armed while the
-//     dashboard is active (passed in by the caller added in a later step).
+// This used to be three near-identical caches, one per consumer, each
+// dispatching its own ListThreads round trip on the same pubsub thread
+// event — three RPCs for one edge. They also disagreed in ways that were
+// bugs, not intentional divergence:
+//   - Only this cache's predecessor filtered a pubsub event by Kind before
+//     applying it; the dock's and indicator's applied (and invalidated on)
+//     every event, including task events that could never appear in a
+//     threads-only list. Kept: the Kind filter, since it is strictly more
+//     correct and avoids pointless re-fetches on task churn.
+//   - Only the dock's and indicator's predecessors called ttlCache.fail on
+//     an error, so a failing refresh backed off. This cache's predecessor
+//     did neither, which is exactly the spin threadsRefreshBackoff (see
+//     threads_dock.go) exists to prevent — on the dashboard, only sheer
+//     luck (Tick was never wired up; see threads.go) kept it from
+//     happening. Kept: fail-and-back-off.
+//   - Only the dock's and indicator's predecessors stopped polling once a
+//     refresh landed empty, until an event invalidated it. Kept: that
+//     optimization, folded into staleRefreshCmd below.
+//
+// Follows the ttlCache idiom used throughout this package (see
+// ttl_cache.go and workspace_cache.go):
+//   - threadListCache holds the memoized value plus ttlCache bookkeeping.
+//   - dispatchRefresh fetches off-thread and returns a threadsLoadedMsg; it
+//     no-ops while a fetch is already in flight.
+//   - applyLoaded writes the result through on the Update goroutine,
+//     discarding and re-dispatching stale (gen-mismatched) results, and
+//     backing off after a failure.
+//   - invalidate and applyEvent react to pubsub.Event[proto.Thread] edges:
+//     the latter also upserts/removes the event's row optimistically so
+//     every consumer's view updates before the next refresh lands.
+//   - staleRefreshCmd is the TTL backstop, called unconditionally whenever
+//     any consumer needs the list current (the header badge always does;
+//     see UI.threadViewsRefreshCmds).
 
 import (
-	"context"
 	"log/slog"
 	"time"
 
@@ -35,38 +58,32 @@ import (
 )
 
 // threadsCacheTTL bounds how long the memoized thread list may go without a
-// re-probe being scheduled while the dashboard is active. Package var so
-// tests can pin it.
+// re-probe being scheduled. Package var so tests can pin it.
 var threadsCacheTTL = 5 * time.Second
 
-// threadsCacheState holds the memoized thread list (see the package doc
+// threadListCache holds the memoized thread list (see the package doc
 // comment above) plus its TTL-cache and in-flight/generation bookkeeping.
-type threadsCacheState struct {
-	// threads mirrors the workspace's thread list. It is event-driven
-	// (applyThreadEvent upserts/removes rows optimistically) with a TTL
-	// backstop, fetched off-thread by dispatchThreadsRefresh.
+type threadListCache struct {
 	cache ttlCache[[]proto.Thread]
 }
 
-// fresh reports whether the cached thread list is within its TTL.
 // threadsLoadedMsg delivers the result of an off-thread thread list fetch.
 type threadsLoadedMsg struct {
 	// gen is the generation captured when the fetch was dispatched. A
-	// result whose generation no longer matches threadsCacheState.gen
-	// started before a newer state transition (invalidation, event edge)
-	// and is discarded, then re-fetched.
+	// result whose generation no longer matches threadListCache.cache's
+	// generation started before a newer state transition (invalidation,
+	// event edge) and is discarded, then re-fetched.
 	gen     uint64
 	threads []proto.Thread
 	err     error
 }
 
-// dispatchThreadsRefresh returns a command that lists threads off the
-// Update goroutine, delivering a threadsLoadedMsg. It returns nil while a
-// fetch is already in flight, or if the workspace doesn't support threads.
-// The closure captures only locals (never the cache or *common.Common) so
-// it is safe off-thread; state is applied by applyThreadsLoaded on the
-// Update goroutine.
-func (c *threadsCacheState) dispatchThreadsRefresh(com *common.Common) tea.Cmd {
+// dispatchRefresh returns a command that lists threads off the Update
+// goroutine, delivering a threadsLoadedMsg. It returns nil while a fetch is
+// already in flight, or if the workspace doesn't support threads. The
+// closure captures only locals (never the cache or *common.Common) so it is
+// safe off-thread; state is applied by applyLoaded on the Update goroutine.
+func (c *threadListCache) dispatchRefresh(com *common.Common) tea.Cmd {
 	if c.cache.inFlight || com == nil || com.Workspace == nil || !com.Workspace.SupportsThreads() {
 		return nil
 	}
@@ -75,14 +92,15 @@ func (c *threadsCacheState) dispatchThreadsRefresh(com *common.Common) tea.Cmd {
 		return nil
 	}
 	ws := com.Workspace
+	ctx := com.Context()
 	return func() tea.Msg {
 		// Threads only. Tasks share the Kind-discriminated table and this
 		// list used to merge them in as "live work", but a task is the
 		// `agent` tool's own delegation: it already renders inline in the
 		// chat that started it, it is never merged, and nothing ever
 		// removed a finished one — so they only accumulated here, burying
-		// the threads this screen is about.
-		threads, err := ws.ListThreads(context.Background())
+		// the threads this cache is about.
+		threads, err := ws.ListThreads(ctx)
 		if err != nil {
 			slog.Error("Failed to list threads", "error", err)
 		}
@@ -90,39 +108,51 @@ func (c *threadsCacheState) dispatchThreadsRefresh(com *common.Common) tea.Cmd {
 	}
 }
 
-// applyThreadsLoaded stores an off-thread fetch result. Runs on the Update
-// goroutine.
-func (c *threadsCacheState) applyThreadsLoaded(com *common.Common, msg threadsLoadedMsg) []tea.Cmd {
+// applyLoaded stores an off-thread fetch result. Runs on the Update
+// goroutine. applied reports whether msg was actually written through
+// (true) as opposed to discarded for a stale generation or a failure
+// (false) — callers that need to react only to a genuine change (bumping
+// the dock's activityGen, say) check it instead of re-deriving the same
+// generation logic themselves.
+func (c *threadListCache) applyLoaded(com *common.Common, msg threadsLoadedMsg) (cmds []tea.Cmd, applied bool) {
+	if msg.err != nil {
+		if !c.cache.fail(msg.gen) {
+			// Started before a newer state transition; discard and
+			// re-dispatch so the authoritative refresh isn't lost.
+			if cmd := c.dispatchRefresh(com); cmd != nil {
+				return []tea.Cmd{cmd}, false
+			}
+		}
+		return nil, false
+	}
 	if !c.cache.complete(msg.gen) {
 		// This fetch started before a newer state transition (invalidation,
 		// event edge). Discard its result and re-dispatch so the
 		// authoritative refresh is not lost merely because this older
 		// request was in flight.
-		if cmd := c.dispatchThreadsRefresh(com); cmd != nil {
-			return []tea.Cmd{cmd}
+		if cmd := c.dispatchRefresh(com); cmd != nil {
+			return []tea.Cmd{cmd}, false
 		}
-		return nil
+		return nil, false
 	}
-	if msg.err == nil {
-		c.cache.set(msg.threads)
-	}
-	return nil
+	c.cache.set(msg.threads)
+	return nil, true
 }
 
-// invalidateThreads marks the cached list stale and bumps the generation so
-// any in-flight fetch result is discarded when it lands. Called on thread
-// pubsub events (via applyThreadEvent) and by any other handler that
-// changes thread state out of band.
-func (c *threadsCacheState) invalidateThreads() {
+// invalidate marks the cached list stale and bumps the generation so any
+// in-flight fetch result is discarded when it lands. Called on thread
+// pubsub events (via applyEvent) and by any other handler that changes
+// thread state out of band.
+func (c *threadListCache) invalidate() {
 	c.cache.invalidate()
 }
 
-// applyThreadEvent reacts to a thread pubsub event: it upserts (Created,
-// Updated) or removes (Deleted) the event's row in the cached list so the
-// dashboard reflects the change immediately, without waiting for the next
+// applyEvent reacts to a thread pubsub event: it upserts (Created, Updated)
+// or removes (Deleted) the event's row in the cached list so every
+// consumer reflects the change immediately, without waiting for the next
 // refresh, then invalidates the TTL so a background refresh eventually
 // reconciles with the authoritative list.
-func (c *threadsCacheState) applyThreadEvent(evt pubsub.Event[proto.Thread]) {
+func (c *threadListCache) applyEvent(evt pubsub.Event[proto.Thread]) {
 	// Threads only, matching the list this cache is refreshed from. Tasks
 	// share the delegations table and the lifecycle that publishes these
 	// events, so without this a task's own create/status event wrote a row
@@ -161,17 +191,34 @@ func (c *threadsCacheState) applyThreadEvent(evt pubsub.Event[proto.Thread]) {
 			c.cache.value = append(c.cache.value, evt.Payload)
 		}
 	}
-	c.invalidateThreads()
+	c.invalidate()
 }
 
-// staleThreadsRefreshCmd is the TTL backstop: while active (the threads
-// dashboard is showing) and the memoized list has outlived its TTL, it
-// schedules an off-thread re-probe. It never does IO itself. A later step
-// calls this from the Update tail, mirroring
-// UI.staleWorkspaceRefreshCmds.
-func (c *threadsCacheState) staleThreadsRefreshCmd(com *common.Common, active bool) tea.Cmd {
-	if !active || c.cache.fresh(threadsCacheTTL) {
+// staleRefreshCmd is the TTL backstop: while active and the memoized list
+// has outlived its TTL, it schedules an off-thread re-probe. It never does
+// IO itself.
+func (c *threadListCache) staleRefreshCmd(com *common.Common, active bool) tea.Cmd {
+	if !active || c.cache.fresh(threadsCacheTTL) || c.cache.backingOff(threadsRefreshBackoff) {
 		return nil
 	}
-	return c.dispatchThreadsRefresh(com)
+	// A fetched-and-empty list stays empty until a thread event invalidates
+	// it (the timestamp is zeroed then) — don't re-poll ListThreads forever
+	// for projects that have no threads at all.
+	if len(c.cache.value) == 0 && !c.cache.timestamp.IsZero() {
+		return nil
+	}
+	return c.dispatchRefresh(com)
+}
+
+// activeThreadCount reports how many of threads are pending, running, or
+// merging — the states worth surfacing as "still working" in the header
+// badge (see UI.activeThreadBadgeCount).
+func activeThreadCount(threads []proto.Thread) int {
+	n := 0
+	for _, t := range threads {
+		if proto.ThreadStatus(t.Status).Active() {
+			n++
+		}
+	}
+	return n
 }

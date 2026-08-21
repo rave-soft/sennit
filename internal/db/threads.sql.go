@@ -68,7 +68,7 @@ type CreateThreadParams struct {
 // clear_thread_session_refs_on_session_delete, which drops the reference
 // rather than letting it point at a deleted session's project.
 func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thread, error) {
-	row := q.queryRow(ctx, q.createThreadStmt, createThread,
+	row := q.db.QueryRowContext(ctx, createThread,
 		arg.ID,
 		arg.Name,
 		arg.ProjectPath,
@@ -111,7 +111,7 @@ WHERE id = ?
 `
 
 func (q *Queries) DeleteThread(ctx context.Context, id string) error {
-	_, err := q.exec(ctx, q.deleteThreadStmt, deleteThread, id)
+	_, err := q.db.ExecContext(ctx, deleteThread, id)
 	return err
 }
 
@@ -126,7 +126,7 @@ WHERE id = ? LIMIT 1
 // RunComplete matching). A kind-scoped caller uses GetThreadByName or
 // ListThreads instead.
 func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
-	row := q.queryRow(ctx, q.getThreadStmt, getThread, id)
+	row := q.db.QueryRowContext(ctx, getThread, id)
 	var i Thread
 	err := row.Scan(
 		&i.ID,
@@ -162,7 +162,7 @@ type GetThreadByNameParams struct {
 }
 
 func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams) (Thread, error) {
-	row := q.queryRow(ctx, q.getThreadByNameStmt, getThreadByName, arg.Name, arg.ProjectPath)
+	row := q.db.QueryRowContext(ctx, getThreadByName, arg.Name, arg.ProjectPath)
 	var i Thread
 	err := row.Scan(
 		&i.ID,
@@ -199,7 +199,7 @@ ORDER BY created_at
 // table. The generic lifecycle recovery sweep must NOT use this query;
 // see ListThreadsAll.
 func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread, error) {
-	rows, err := q.query(ctx, q.listThreadsStmt, listThreads, projectPath)
+	rows, err := q.db.QueryContext(ctx, listThreads, projectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +254,7 @@ ORDER BY created_at
 // displayed as active forever. Not for thread-facing callers; see
 // ListThreads.
 func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thread, error) {
-	rows, err := q.query(ctx, q.listThreadsAllStmt, listThreadsAll, projectPath)
+	rows, err := q.db.QueryContext(ctx, listThreadsAll, projectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -295,15 +295,18 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 }
 
 const listThreadsForGC = `-- name: ListThreadsForGC :many
-SELECT id, project_path, status, updated_at
+SELECT id, project_path, status, updated_at, kind, worktree_path, branch
 FROM threads
 `
 
 type ListThreadsForGCRow struct {
-	ID          string `json:"id"`
-	ProjectPath string `json:"project_path"`
-	Status      string `json:"status"`
-	UpdatedAt   int64  `json:"updated_at"`
+	ID           string `json:"id"`
+	ProjectPath  string `json:"project_path"`
+	Status       string `json:"status"`
+	UpdatedAt    int64  `json:"updated_at"`
+	Kind         string `json:"kind"`
+	WorktreePath string `json:"worktree_path"`
+	Branch       string `json:"branch"`
 }
 
 // Every delegation across every project, trimmed to the columns `sennit
@@ -318,8 +321,12 @@ type ListThreadsForGCRow struct {
 // own. Scoping this to threads meant finished tasks accumulated for the
 // life of the database. A task carries no worktree, so reclaiming one is
 // the row and its retention alone, with nothing left orphaned on disk.
+//
+// kind, worktree_path and branch are selected so gc can report the
+// worktrees it strands: deleting a thread row leaves its worktree on disk
+// with nothing left to find it by, so gc names them before the row goes.
 func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, error) {
-	rows, err := q.query(ctx, q.listThreadsForGCStmt, listThreadsForGC)
+	rows, err := q.db.QueryContext(ctx, listThreadsForGC)
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +339,9 @@ func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, 
 			&i.ProjectPath,
 			&i.Status,
 			&i.UpdatedAt,
+			&i.Kind,
+			&i.WorktreePath,
+			&i.Branch,
 		); err != nil {
 			return nil, err
 		}
@@ -360,7 +370,7 @@ type UpdateThreadSessionParams struct {
 }
 
 func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessionParams) (Thread, error) {
-	row := q.queryRow(ctx, q.updateThreadSessionStmt, updateThreadSession, arg.SessionID, arg.ID)
+	row := q.db.QueryRowContext(ctx, updateThreadSession, arg.SessionID, arg.ID)
 	var i Thread
 	err := row.Scan(
 		&i.ID,
@@ -404,7 +414,7 @@ type UpdateThreadStatusParams struct {
 }
 
 func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatusParams) (Thread, error) {
-	row := q.queryRow(ctx, q.updateThreadStatusStmt, updateThreadStatus,
+	row := q.db.QueryRowContext(ctx, updateThreadStatus,
 		arg.Status,
 		arg.Error,
 		arg.ResultSummary,

@@ -76,17 +76,8 @@ func (s *ConfigStore) ConfigStaleness() StalenessResult {
 	return result
 }
 
-// RefreshStalenessSnapshot captures fresh snapshots of all tracked config files.
-// Call this after reloading config to clear dirty state.
-func (s *ConfigStore) RefreshStalenessSnapshot() error {
-	s.stalenessMu.Lock()
-	defer s.stalenessMu.Unlock()
-	s.refreshStalenessSnapshotLocked()
-	return nil
-}
-
-// refreshStalenessSnapshotLocked is the lock-free core of
-// RefreshStalenessSnapshot. Caller must hold stalenessMu.
+// refreshStalenessSnapshotLocked captures fresh snapshots of all tracked
+// config files. Caller must hold stalenessMu.
 func (s *ConfigStore) refreshStalenessSnapshotLocked() {
 	if s.snapshots == nil {
 		s.snapshots = make(map[string]fileSnapshot)
@@ -153,11 +144,6 @@ func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
 
 	// Capture initial snapshots
 	s.refreshStalenessSnapshotLocked()
-}
-
-// captureStalenessSnapshot is an alias for CaptureStalenessSnapshot for internal use.
-func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
-	s.CaptureStalenessSnapshot(paths)
 }
 
 // trackedConfigPathSet returns a copy of the currently tracked config paths

@@ -33,13 +33,10 @@ func threadEventPubsubType(t proto.ThreadEventType) pubsub.EventType {
 // -- AppWorkspace: Threads --
 
 // threadManager returns this workspace's *thread.Manager and whether one
-// is attached. app.ThreadManager() returns `any` because internal/app
-// (core, imported by internal/agent) cannot import internal/thread
-// directly — see internal/app/app.go's SetThreadManager/ThreadManager
-// doc comments for the layering reason.
+// is attached.
 func (w *AppWorkspace) threadManager() (*thread.Manager, bool) {
-	mgr, ok := w.app.ThreadManager().(*thread.Manager)
-	return mgr, ok && mgr != nil
+	mgr := w.app.ThreadManager()
+	return mgr, mgr != nil
 }
 
 func (w *AppWorkspace) SupportsThreads() bool {

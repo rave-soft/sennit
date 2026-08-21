@@ -295,6 +295,19 @@ type stubWorkspace struct {
 	importCopilotCalls int
 	getSessionCalls    int
 	batchRoots         []string
+	// calls counts invocations of the mutating methods instrumented with
+	// track, by name. Used to prove a refused call never reaches the
+	// underlying workspace at all (not just that readOnlyWorkspace
+	// returns a refusal on top of forwarding it) — see
+	// TestReadOnlyWorkspace_RefusesEveryMutatingMethod.
+	calls map[string]int
+}
+
+func (s *stubWorkspace) track(name string) {
+	if s.calls == nil {
+		s.calls = map[string]int{}
+	}
+	s.calls[name]++
 }
 
 // SessionStore
@@ -303,6 +316,7 @@ func (s *stubWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
 }
 
 func (s *stubWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
+	s.track("CreateSession")
 	s.sessionCreateCount++
 	return session.Session{ID: "s" + string(rune(title[0])), Title: title}, nil
 }
@@ -320,10 +334,12 @@ func (s *stubWorkspace) ListSessions(ctx context.Context) ([]session.Session, er
 }
 
 func (s *stubWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
+	s.track("SaveSession")
 	return sess, nil
 }
 
 func (s *stubWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
+	s.track("DeleteSession")
 	return nil
 }
 
@@ -364,50 +380,87 @@ func (s *stubWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Mess
 
 // Agent (query only for stub)
 func (s *stubWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
+	s.track("AgentRun")
 	return nil
 }
 
 func (s *stubWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error) {
+	s.track("AgentRunShellCommand")
 	return proto.ShellCommandResponse{}, nil
 }
-func (s *stubWorkspace) AgentCancel(sessionID string)                               {}
-func (s *stubWorkspace) AgentIsBusy() bool                                          { return false }
-func (s *stubWorkspace) AgentIsSessionBusy(sessionID string) bool                   { return false }
-func (s *stubWorkspace) AgentModel() AgentModel                                     { return AgentModel{} }
-func (s *stubWorkspace) AgentIsReady() bool                                         { return false }
-func (s *stubWorkspace) AgentReadyErr() error                                       { return ErrAgentNotInitialized }
-func (s *stubWorkspace) AgentQueuedPrompts(sessionID string) int                    { return 0 }
-func (s *stubWorkspace) AgentQueuedPromptsList(sessionID string) []string           { return nil }
-func (s *stubWorkspace) AgentClearQueue(sessionID string)                           {}
-func (s *stubWorkspace) AgentSummarize(ctx context.Context, sessionID string) error { return nil }
-func (s *stubWorkspace) UpdateAgentModel(ctx context.Context) error                 { return nil }
-func (s *stubWorkspace) ApplySessionModel(context.Context, string) (bool, error)    { return false, nil }
-func (s *stubWorkspace) InitCoderAgent(ctx context.Context) error                   { return nil }
-func (s *stubWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error     { return nil }
+func (s *stubWorkspace) AgentCancel(sessionID string)                     { s.track("AgentCancel") }
+func (s *stubWorkspace) AgentIsBusy() bool                                { return false }
+func (s *stubWorkspace) AgentIsSessionBusy(sessionID string) bool         { return false }
+func (s *stubWorkspace) AgentModel() AgentModel                           { return AgentModel{} }
+func (s *stubWorkspace) AgentIsReady() bool                               { return false }
+func (s *stubWorkspace) AgentReadyErr() error                             { return ErrAgentNotInitialized }
+func (s *stubWorkspace) AgentQueuedPrompts(sessionID string) int          { return 0 }
+func (s *stubWorkspace) AgentQueuedPromptsList(sessionID string) []string { return nil }
+func (s *stubWorkspace) AgentClearQueue(sessionID string)                 { s.track("AgentClearQueue") }
+
+func (s *stubWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
+	s.track("AgentSummarize")
+	return nil
+}
+
+func (s *stubWorkspace) UpdateAgentModel(ctx context.Context) error {
+	s.track("UpdateAgentModel")
+	return nil
+}
+
+func (s *stubWorkspace) ApplySessionModel(context.Context, string) (bool, error) {
+	s.track("ApplySessionModel")
+	return false, nil
+}
+
+func (s *stubWorkspace) InitCoderAgent(ctx context.Context) error {
+	s.track("InitCoderAgent")
+	return nil
+}
+
+func (s *stubWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
+	s.track("InitCoderAgentNonInteractive")
+	return nil
+}
+
 func (s *stubWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt string) (<-chan AgentRunEvent, error) {
+	s.track("AgentRunStream")
 	return nil, nil
 }
 
 // PermissionResolver
-func (s *stubWorkspace) PermissionGrant(perm permission.PermissionRequest) bool { return false }
-
-func (s *stubWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+func (s *stubWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
+	s.track("PermissionGrant")
 	return false
 }
-func (s *stubWorkspace) PermissionDeny(perm permission.PermissionRequest) bool { return false }
-func (s *stubWorkspace) PermissionSkipRequests() bool                          { return false }
-func (s *stubWorkspace) PermissionSetSkipRequests(skip bool)                   {}
+
+func (s *stubWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
+	s.track("PermissionGrantPersistent")
+	return false
+}
+
+func (s *stubWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
+	s.track("PermissionDeny")
+	return false
+}
+func (s *stubWorkspace) PermissionSkipRequests() bool        { return false }
+func (s *stubWorkspace) PermissionSetSkipRequests(skip bool) { s.track("PermissionSetSkipRequests") }
 
 // QuestionResponder
-func (s *stubWorkspace) QuestionAnswer(responses []question.Answer) bool { return false }
-func (s *stubWorkspace) QuestionCancel() bool                            { return false }
+func (s *stubWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	s.track("QuestionAnswer")
+	return false
+}
+func (s *stubWorkspace) QuestionCancel() bool { s.track("QuestionCancel"); return false }
 
 // FileServices
 func (s *stubWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
 	return nil, nil
 }
 
-func (s *stubWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {}
+func (s *stubWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
+	s.track("FileTrackerRecordRead")
+}
 
 func (s *stubWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time {
 	return time.Time{}
@@ -423,8 +476,8 @@ func (s *stubWorkspace) ListSessionHistory(ctx context.Context, sessionID string
 }
 
 // LSP
-func (s *stubWorkspace) LSPStart(ctx context.Context, path string) {}
-func (s *stubWorkspace) LSPStopAll(ctx context.Context)            {}
+func (s *stubWorkspace) LSPStart(ctx context.Context, path string) { s.track("LSPStart") }
+func (s *stubWorkspace) LSPStopAll(ctx context.Context)            { s.track("LSPStopAll") }
 func (s *stubWorkspace) LSPGetStates() map[string]LSPClientInfo    { return nil }
 func (s *stubWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
 	return lsp.DiagnosticCounts{}
@@ -437,26 +490,45 @@ func (s *stubWorkspace) Resolver() config.VariableResolver { return config.Ident
 
 // Config mutations (for stub, not blocked)
 func (s *stubWorkspace) UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error {
+	s.track("UpdatePreferredModel")
 	return nil
 }
-func (s *stubWorkspace) OverridePreferredModel(model config.SelectedModel) error { return nil }
-func (s *stubWorkspace) SetCompactMode(scope config.Scope, enabled bool) error   { return nil }
+
+func (s *stubWorkspace) OverridePreferredModel(model config.SelectedModel) error {
+	s.track("OverridePreferredModel")
+	return nil
+}
+
+func (s *stubWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
+	s.track("SetCompactMode")
+	return nil
+}
+
 func (s *stubWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+	s.track("SetProviderAPIKey")
 	return nil
 }
 
-func (s *stubWorkspace) SetConfigField(scope config.Scope, key string, value any) error { return nil }
+func (s *stubWorkspace) SetConfigField(scope config.Scope, key string, value any) error {
+	s.track("SetConfigField")
+	return nil
+}
 
-func (s *stubWorkspace) RemoveConfigField(scope config.Scope, key string) error { return nil }
+func (s *stubWorkspace) RemoveConfigField(scope config.Scope, key string) error {
+	s.track("RemoveConfigField")
+	return nil
+}
 
 func (s *stubWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
+	s.track("RefreshOAuthToken")
 	return nil
 }
 
 // ProjectLifecycle
 func (s *stubWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }
-func (s *stubWorkspace) MarkProjectInitialized() error             { return nil }
-func (s *stubWorkspace) InitializePrompt() (string, error)         { return "", nil }
+
+func (s *stubWorkspace) MarkProjectInitialized() error     { s.track("MarkProjectInitialized"); return nil }
+func (s *stubWorkspace) InitializePrompt() (string, error) { return "", nil }
 
 // Skills
 func (s *stubWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
@@ -474,10 +546,17 @@ func (s *stubWorkspace) MCPGetStates() map[string]MCPClientInfo   { return nil }
 func (s *stubWorkspace) Stats(context.Context, stats.Request) (stats.Snapshot, error) {
 	return stats.Snapshot{}, nil
 }
-func (s *stubWorkspace) MCPResources() []MCPResourceInfo                      { return nil }
-func (s *stubWorkspace) MCPRefreshPrompts(ctx context.Context, name string)   {}
-func (s *stubWorkspace) MCPRefreshResources(ctx context.Context, name string) {}
-func (s *stubWorkspace) RefreshMCPTools(ctx context.Context, name string)     {}
+func (s *stubWorkspace) MCPResources() []MCPResourceInfo { return nil }
+func (s *stubWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
+	s.track("MCPRefreshPrompts")
+}
+
+func (s *stubWorkspace) MCPRefreshResources(ctx context.Context, name string) {
+	s.track("MCPRefreshResources")
+}
+
+func (s *stubWorkspace) RefreshMCPTools(ctx context.Context, name string) { s.track("RefreshMCPTools") }
+
 func (s *stubWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
 	return nil, nil
 }
@@ -489,11 +568,18 @@ func (s *stubWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPromp
 func (s *stubWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
 	return "", nil
 }
-func (s *stubWorkspace) EnableDockerMCP(ctx context.Context) error              { return nil }
-func (s *stubWorkspace) DisableDockerMCP() error                                { return nil }
-func (s *stubWorkspace) MCPAuthenticate(ctx context.Context, name string) error { return nil }
-func (s *stubWorkspace) MCPPendingAuth() []MCPPendingAuthServer                 { return nil }
-func (s *stubWorkspace) MCPAuthURL(name string) string                          { return "" }
+
+func (s *stubWorkspace) EnableDockerMCP(ctx context.Context) error {
+	s.track("EnableDockerMCP")
+	return nil
+}
+func (s *stubWorkspace) DisableDockerMCP() error { s.track("DisableDockerMCP"); return nil }
+func (s *stubWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
+	s.track("MCPAuthenticate")
+	return nil
+}
+func (s *stubWorkspace) MCPPendingAuth() []MCPPendingAuthServer { return nil }
+func (s *stubWorkspace) MCPAuthURL(name string) string          { return "" }
 
 // ThreadController (query only for stub)
 func (s *stubWorkspace) SupportsThreads() bool                                   { return false }
@@ -503,37 +589,51 @@ func (s *stubWorkspace) GetThread(ctx context.Context, id string) (proto.Thread,
 }
 
 func (s *stubWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
+	s.track("CreateThread")
 	return proto.Thread{}, nil
 }
-func (s *stubWorkspace) SendThread(ctx context.Context, id, message string) error { return nil }
+
+func (s *stubWorkspace) SendThread(ctx context.Context, id, message string) error {
+	s.track("SendThread")
+	return nil
+}
+
 func (s *stubWorkspace) ActivateThread(ctx context.Context, id string) (proto.Thread, error) {
+	s.track("ActivateThread")
 	return proto.Thread{}, nil
 }
 
 func (s *stubWorkspace) MergeThread(ctx context.Context, id string) (proto.Thread, error) {
+	s.track("MergeThread")
 	return proto.Thread{}, nil
 }
 
 func (s *stubWorkspace) CancelThread(ctx context.Context, id, reason string) error {
+	s.track("CancelThread")
 	return nil
 }
 
 func (s *stubWorkspace) RemoveThread(ctx context.Context, id string, opts proto.RemoveThreadOptions) error {
+	s.track("RemoveThread")
 	return nil
 }
 
 func (s *stubWorkspace) AttachThread(ctx context.Context, id string) (Workspace, func(), error) {
+	s.track("AttachThread")
 	return nil, nil, nil
 }
 
 // TaskController (query only for stub)
 func (s *stubWorkspace) SupportsTasks() bool                               { return false }
 func (s *stubWorkspace) ListTasks(context.Context) ([]proto.Thread, error) { return nil, nil }
-func (s *stubWorkspace) CancelTask(context.Context, string, string) error  { return nil }
+func (s *stubWorkspace) CancelTask(context.Context, string, string) error {
+	s.track("CancelTask")
+	return nil
+}
 
 // EventSubscriber
-func (s *stubWorkspace) Subscribe(program *tea.Program) {}
-func (s *stubWorkspace) Shutdown()                      {}
+func (s *stubWorkspace) Subscribe(program *tea.Program) { s.track("Subscribe") }
+func (s *stubWorkspace) Shutdown()                      { s.track("Shutdown") }
 
 func (s *stubWorkspace) ListMessagesBySessionIDs(_ context.Context, rootSessionID string, _ uint64, sessionIDs []string) (map[string][]message.Message, error) {
 	s.batchRoots = append(s.batchRoots, rootSessionID)
@@ -546,6 +646,7 @@ func (s *stubWorkspace) ListMessagesBySessionIDs(_ context.Context, rootSessionI
 
 // ImportCopilot
 func (s *stubWorkspace) ImportCopilot() (*oauth.Token, bool) {
+	s.track("ImportCopilot")
 	s.importCopilotCalls++
 	return nil, false
 }

@@ -303,11 +303,6 @@ func DrawCenter(scr uv.Screen, area uv.Rectangle, view string) {
 	DrawCenterCursor(scr, area, view, nil)
 }
 
-// DrawOnboarding draws the given string view centered in the screen area.
-func DrawOnboarding(scr uv.Screen, area uv.Rectangle, view string) {
-	DrawOnboardingCursor(scr, area, view, nil)
-}
-
 // DrawOnboardingCursor draws the given string view positioned at the bottom
 // left area of the screen. Content larger than the area is clamped to fit.
 func DrawOnboardingCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cursor) {

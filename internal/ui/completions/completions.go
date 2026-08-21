@@ -208,7 +208,8 @@ func (c *Completions) SetMaxWidth(maxW int) {
 
 // Open opens the completions with file items from the filesystem and MCP
 // resources from loadResources, which the caller supplies bound to its
-// workspace.Workspace (this package has no backend dependency of its own).
+// workspace.Workspace (this package has no dependency of its own on
+// internal/app or internal/workspace).
 func (c *Completions) Open(depth, limit int, loadResources func() []ResourceCompletionValue) tea.Cmd {
 	return func() tea.Msg {
 		var msg CompletionItemsLoadedMsg
@@ -435,7 +436,7 @@ func (c *Completions) computeWidth(items []list.FilterableItem) int {
 		upperBound = min(upperBound, c.capWidth)
 	}
 	upperBound = max(upperBound, int(minWidth))
-	return ordered.Clamp(width+2, int(minWidth), int(upperBound))
+	return ordered.Clamp(width+2, int(minWidth), upperBound)
 }
 
 // HasItems returns whether there are visible items.

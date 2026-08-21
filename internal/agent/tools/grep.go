@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -124,7 +125,7 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 		grepDescription(),
 		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
-				return fantasy.NewTextErrorResponse("pattern is required"), nil
+				return invalidParam("pattern"), nil
 			}
 
 			searchPattern := params.Pattern
@@ -366,7 +367,7 @@ func isTextFile(filePath string) bool {
 	// Read first 512 bytes for MIME type detection.
 	buffer := make([]byte, 512)
 	n, err := file.Read(buffer)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return false
 	}
 

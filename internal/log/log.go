@@ -97,25 +97,31 @@ func panicLogPath(filename string) string {
 
 func RecoverPanic(name string, cleanup func()) {
 	if r := recover(); r != nil {
+		// Run cleanup unconditionally, even if the panic log file below
+		// can't be created or writing it panics itself.
+		if cleanup != nil {
+			defer cleanup()
+		}
+
 		event.Error(r, "panic", true, "name", name)
+
+		stack := debug.Stack()
+		slog.Error("Recovered from panic", "name", name, "panic", r, "stack", string(stack))
 
 		// Create a timestamped panic log file
 		timestamp := time.Now().Format("20060102-150405")
 		filename := fmt.Sprintf(brand.Slug+"-panic-%s-%s.log", name, timestamp)
 
 		file, err := os.Create(panicLogPath(filename))
-		if err == nil {
-			defer file.Close()
-
-			// Write panic information and stack trace
-			fmt.Fprintf(file, "Panic in %s: %v\n\n", name, r)
-			fmt.Fprintf(file, "Time: %s\n\n", time.Now().Format(time.RFC3339))
-			fmt.Fprintf(file, "Stack Trace:\n%s\n", debug.Stack())
-
-			// Execute cleanup function if provided
-			if cleanup != nil {
-				cleanup()
-			}
+		if err != nil {
+			slog.Error("Failed to create panic log file", "name", name, "error", err)
+			return
 		}
+		defer file.Close()
+
+		// Write panic information and stack trace
+		fmt.Fprintf(file, "Panic in %s: %v\n\n", name, r)
+		fmt.Fprintf(file, "Time: %s\n\n", time.Now().Format(time.RFC3339))
+		fmt.Fprintf(file, "Stack Trace:\n%s\n", stack)
 	}
 }

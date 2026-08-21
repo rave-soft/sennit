@@ -31,13 +31,13 @@ type CustomAgentParams struct {
 // buildTools — which keeps delegation one level deep and makes the build
 // terminate: building a role's tool list can never recurse into building
 // another role.
-func (c *coordinator) customAgentTools(ctx context.Context) ([]fantasy.AgentTool, error) {
-	cfg := c.cfg.Config()
+func (c *coordinator) customAgentTools(ctx context.Context, cfg agentConfig) ([]fantasy.AgentTool, error) {
+	agents := cfg.Agents()
 
 	// Deterministic order: the tool list feeds the model's prompt, and a map
 	// iteration would reshuffle it between runs and defeat prompt caching.
-	ids := make([]string, 0, len(cfg.Agents))
-	for id := range cfg.Agents {
+	ids := make([]string, 0, len(agents))
+	for id := range agents {
 		if id == config.AgentCoder || id == config.AgentTask {
 			continue
 		}
@@ -47,7 +47,7 @@ func (c *coordinator) customAgentTools(ctx context.Context) ([]fantasy.AgentTool
 
 	agentTools := make([]fantasy.AgentTool, 0, len(ids))
 	for _, id := range ids {
-		agentCfg := cfg.Agents[id]
+		agentCfg := agents[id]
 
 		tool, err := c.buildCustomAgentTool(ctx, id, agentCfg)
 		if err != nil {

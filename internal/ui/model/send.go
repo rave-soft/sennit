@@ -13,6 +13,29 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
+// sendMessageMsg is sent to send a message.
+// currently only used for mcp prompts.
+type sendMessageMsg struct {
+	Content     string
+	Attachments []message.Attachment
+}
+
+// sendPendingQueueMsg advances one pending send after a session load completes.
+type sendPendingQueueMsg struct{}
+
+type notificationSentMsg struct{}
+
+// sendQueueItem holds one pending-send entry with generation tracking.
+type sendQueueItem struct {
+	content        string
+	attachments    []message.Attachment
+	generation     uint64
+	sessionID      string
+	loadGeneration uint64
+	bang           bool
+	isFirstMessage bool
+}
+
 // sendMessage sends a message with the given content and attachments.
 // All I/O (AgentReadyErr, CreateSession, AgentRun) runs inside a tea.Cmd
 // so that the Update goroutine is never blocked.
@@ -59,7 +82,7 @@ func (m *UI) sendMessageNow(content string, attachments ...message.Attachment) t
 	ws := m.com.Workspace
 	styles := m.com.Styles
 	reads := append([]string(nil), m.sess.fileReads...)
-	ctx := context.Background()
+	ctx := m.com.Context()
 	sessionID := ""
 	generation := m.editor.pendingSendGen
 	loadGeneration := m.sess.loadGen
@@ -121,7 +144,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// Gate on the memoized ready state: esc is a hot key and AgentIsReady
 	// is treated as IO — see workspace_cache.go.
-	if !m.wsCache.agentReady {
+	if !m.wsCache.agentCache.value.ready {
 		return nil
 	}
 
@@ -150,15 +173,14 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// Queued prompts pending: esc clears the queue. Decide from the cached
 	// count (event-driven) instead of a synchronous workspace probe.
-	if m.wsCache.promptQueue > 0 {
+	if len(m.wsCache.promptQueueCache.value) > 0 {
 		m.com.Workspace.AgentClearQueue(m.sess.current.ID)
 		m.clearQueuedPrompts()
-		m.wsCache.promptQueue = 0
-		m.wsCache.promptQueueItems = nil
-		m.wsCache.promptQueueCheckedAt = time.Now()
 		// Bump the queue generation so a fetch started before this clear
-		// cannot land and repopulate the pill we just emptied.
+		// cannot land and repopulate the pill we just emptied, then write
+		// the now-authoritative empty queue through as fresh.
 		m.invalidatePromptQueue()
+		m.wsCache.promptQueueCache.set(nil)
 		m.updateLayoutAndSize()
 		return nil
 	}

@@ -50,15 +50,15 @@ func NewThreadCreateTool(manager ThreadManager, permissions permission.Service) 
 		renderToolDescription(threadCreateDescriptionTpl),
 		func(ctx context.Context, params ThreadCreateParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Name == "" {
-				return fantasy.NewTextErrorResponse("name is required"), nil
+				return invalidParam("name"), nil
 			}
 			if params.Goal == "" {
-				return fantasy.NewTextErrorResponse("goal is required"), nil
+				return invalidParam("goal"), nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for thread_create")
+				return fantasy.ToolResponse{}, missingSessionID("thread_create")
 			}
 
 			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{

@@ -59,9 +59,11 @@ func runBackgroundTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context
 }
 
 func TestBackgroundToolConstructorsRejectNilManager(t *testing.T) {
-	require.PanicsWithValue(t, "background shell manager is required", func() {
-		NewBashTool(&mockBashPermissionService{}, t.TempDir(), &config.Attribution{}, "test", nil)
-	})
+	// NewBashTool itself no longer guards against a nil manager: the
+	// coordinator's constructor (NewCoordinator) already rejects a nil
+	// BackgroundShells before any tool is built, so a nil bgManager here is
+	// unreachable in production. NewJobOutputTool/NewJobKillTool are
+	// unrelated constructors, out of scope for that change, and still panic.
 	require.PanicsWithValue(t, "background shell manager is required", func() { NewJobOutputTool(nil) })
 	require.PanicsWithValue(t, "background shell manager is required", func() { NewJobKillTool(nil) })
 }

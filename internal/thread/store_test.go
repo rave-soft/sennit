@@ -5,19 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/rave-soft/sennit/internal/db"
 	"github.com/stretchr/testify/require"
 )
 
 func newTestStore(t *testing.T) Store {
 	t.Helper()
-	dataDir := t.TempDir()
-	t.Cleanup(func() {
-		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
-	})
-
-	return newTestStoreDB(t)
+	return NewStoreForTest(t)
 }
 
 func testCreateParams(name string) CreateParams {

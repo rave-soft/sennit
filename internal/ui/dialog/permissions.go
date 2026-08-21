@@ -606,31 +606,45 @@ func prettyName(name string) string {
 	return stringext.Capitalize(name)
 }
 
-func (p *Permissions) renderContent(width int) string {
-	switch p.permission.ToolName {
-	case proto.BashToolName:
-		return p.renderBashContent(width)
-	case proto.EditToolName:
-		return p.renderEditContent(width)
-	case proto.WriteToolName:
-		return p.renderWriteContent(width)
-	case proto.MultiEditToolName:
-		return p.renderMultiEditContent(width)
-	case proto.ReplaceSymbolToolName:
-		return p.renderReplaceSymbolContent(width)
-	case proto.DownloadToolName:
-		return p.renderDownloadContent(width)
-	case proto.FetchToolName:
-		return p.renderFetchContent(width)
-	case proto.AgenticFetchToolName:
-		return p.renderAgenticFetchContent(width)
-	case proto.ReadToolName:
-		return p.renderViewContent(width)
-	case proto.LSToolName:
-		return p.renderLSContent(width)
-	default:
-		return p.renderDefaultContent(width)
+// contentRenderer draws one tool's permission body (registry idiom follows internal/ui/chat/tools_registry.go).
+type contentRenderer func(p *Permissions, width int) string
+
+// contentRenderers maps a tool name to its renderer; an unregistered name falls back to renderDefaultContent.
+var contentRenderers = map[string]contentRenderer{}
+
+func registerContentRenderer(toolName string, r contentRenderer) {
+	if _, exists := contentRenderers[toolName]; exists {
+		panic("dialog: duplicate content renderer registration for " + toolName)
 	}
+	contentRenderers[toolName] = r
+}
+
+func init() {
+	registerContentRenderer(proto.BashToolName, (*Permissions).renderBashContent)
+	registerContentRenderer(proto.EditToolName, diffContentRenderer(func(p proto.EditPermissionsParams) diffParams {
+		return diffParams{p.FilePath, p.OldContent, p.NewContent}
+	}))
+	registerContentRenderer(proto.WriteToolName, diffContentRenderer(func(p proto.WritePermissionsParams) diffParams {
+		return diffParams{p.FilePath, p.OldContent, p.NewContent}
+	}))
+	registerContentRenderer(proto.MultiEditToolName, diffContentRenderer(func(p proto.MultiEditPermissionsParams) diffParams {
+		return diffParams{p.FilePath, p.OldContent, p.NewContent}
+	}))
+	registerContentRenderer(proto.ReplaceSymbolToolName, diffContentRenderer(func(p proto.ReplaceSymbolPermissionsParams) diffParams {
+		return diffParams{p.FilePath, p.OldContent, p.NewContent}
+	}))
+	registerContentRenderer(proto.DownloadToolName, (*Permissions).renderDownloadContent)
+	registerContentRenderer(proto.FetchToolName, (*Permissions).renderFetchContent)
+	registerContentRenderer(proto.AgenticFetchToolName, (*Permissions).renderAgenticFetchContent)
+	registerContentRenderer(proto.ReadToolName, (*Permissions).renderViewContent)
+	registerContentRenderer(proto.LSToolName, (*Permissions).renderLSContent)
+}
+
+func (p *Permissions) renderContent(width int) string {
+	if r, ok := contentRenderers[p.permission.ToolName]; ok {
+		return r(p, width)
+	}
+	return p.renderDefaultContent(width)
 }
 
 func (p *Permissions) renderBashContent(width int) string {
@@ -642,36 +656,21 @@ func (p *Permissions) renderBashContent(width int) string {
 	return p.renderContentPanel(params.Command, width)
 }
 
-func (p *Permissions) renderEditContent(contentWidth int) string {
-	params, ok := p.permission.Params.(proto.EditPermissionsParams)
-	if !ok {
-		return ""
-	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
-}
+// diffParams is what renderDiff needs from a diff-view tool's params. The
+// four concrete tools.*PermissionsParams types stay distinct per AGENTS.md
+// (consumers assert on them after a JSON round trip); diffContentRenderer asserts each one before adapting it here.
+type diffParams struct{ filePath, oldContent, newContent string }
 
-func (p *Permissions) renderWriteContent(contentWidth int) string {
-	params, ok := p.permission.Params.(proto.WritePermissionsParams)
-	if !ok {
-		return ""
+// diffContentRenderer shares one contentRenderer across all four diff-view tools: assert Params to P, adapt via toDiff, else render nothing.
+func diffContentRenderer[P any](toDiff func(P) diffParams) contentRenderer {
+	return func(p *Permissions, width int) string {
+		params, ok := p.permission.Params.(P)
+		if !ok {
+			return ""
+		}
+		dp := toDiff(params)
+		return p.renderDiff(dp.filePath, dp.oldContent, dp.newContent, width)
 	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
-}
-
-func (p *Permissions) renderMultiEditContent(contentWidth int) string {
-	params, ok := p.permission.Params.(proto.MultiEditPermissionsParams)
-	if !ok {
-		return ""
-	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
-}
-
-func (p *Permissions) renderReplaceSymbolContent(contentWidth int) string {
-	params, ok := p.permission.Params.(proto.ReplaceSymbolPermissionsParams)
-	if !ok {
-		return ""
-	}
-	return p.renderDiff(params.FilePath, params.OldContent, params.NewContent, contentWidth)
 }
 
 func (p *Permissions) renderDiff(filePath, oldContent, newContent string, contentWidth int) string {

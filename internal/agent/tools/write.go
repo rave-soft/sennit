@@ -5,14 +5,11 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/rave-soft/sennit/internal/diff"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/filetracker"
-	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/history"
 
 	"github.com/rave-soft/sennit/internal/lsp"
@@ -53,12 +50,12 @@ func NewWriteTool(
 		writeDescription,
 		func(ctx context.Context, params WriteParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
-				return fantasy.NewTextErrorResponse("file_path is required"), nil
+				return invalidParam("file_path"), nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+				return fantasy.ToolResponse{}, missingSessionID("creating a new file")
 			}
 
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
@@ -67,15 +64,25 @@ func NewWriteTool(
 				return fantasy.NewTextErrorResponse(msg), nil
 			}
 
+			var oldContent string
 			fileInfo, err := os.Stat(filePath)
-			if err == nil {
+			switch {
+			case err == nil:
 				if fileInfo.IsDir() {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 				}
 
-				modTime := fileInfo.ModTime().Truncate(time.Second)
-				lastRead := filetracker.LastReadTime(ctx, sessionID, filePath)
-				if modTime.After(lastRead) {
+				switch state, lastRead := checkFileFreshness(ctx, filetracker, sessionID, filePath, fileInfo.ModTime()); state {
+				case fileNeverRead:
+					return fantasy.NewTextErrorResponse(fmt.Sprintf(
+						"cannot write %s: it has not been read in this session.\n\n"+
+							"Write replaces the whole file, so doing it now could discard "+
+							"whatever is currently there without your knowledge — content "+
+							"written by the user, a formatter, or another agent.\n\n"+
+							"Read %s, then write the version that keeps those changes.",
+						filePath, filePath,
+					)), nil
+				case fileStale:
 					return fantasy.NewTextErrorResponse(fmt.Sprintf(
 						"cannot write %s: it changed on disk after you last read it "+
 							"(modified %s, last read %s).\n\n"+
@@ -85,16 +92,19 @@ func NewWriteTool(
 							"Read %s to see the current content, then write the version that "+
 							"keeps those changes.",
 						filePath,
-						modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
+						fileInfo.ModTime().Truncate(time.Second).Format(time.RFC3339), lastRead.Format(time.RFC3339),
 						filePath,
 					)), nil
 				}
 
-				oldContent, readErr := os.ReadFile(filePath)
-				if readErr == nil && string(oldContent) == params.Content {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s already contains the exact content. No changes made.", filePath)), nil
+				oldBytes, readErr := os.ReadFile(filePath)
+				if readErr == nil {
+					oldContent = string(oldBytes)
+					if oldContent == params.Content {
+						return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s already contains the exact content. No changes made.", filePath)), nil
+					}
 				}
-			} else if !os.IsNotExist(err) {
+			case !os.IsNotExist(err):
 				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
 			}
 
@@ -102,62 +112,37 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, err
 			}
 
-			oldContent := ""
-			if fileInfo != nil && !fileInfo.IsDir() {
-				oldBytes, readErr := os.ReadFile(filePath)
-				if readErr == nil {
-					oldContent = string(oldBytes)
-				}
-			}
-
-			diff, additions, removals := diff.GenerateDiff(
-				oldContent,
-				params.Content,
-				strings.TrimPrefix(filePath, workingDir),
-			)
-
-			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
-				SessionID:   sessionID,
-				Path:        fsext.PathOrPrefix(filePath, workingDir),
-				ToolCallID:  call.ID,
-				ToolName:    WriteToolName,
-				Action:      "write",
-				Description: fmt.Sprintf("Create file %s", filePath),
-				Params: WritePermissionsParams{
+			resp, err := applyFileMutation(fileMutationRequest{
+				editContext:    editContext{ctx, permissions, files, filetracker, workingDir},
+				call:           call,
+				filePath:       filePath,
+				sessionID:      sessionID,
+				oldContent:     oldContent,
+				diffContent:    params.Content,
+				writeContent:   params.Content,
+				wholeFileRead:  true,
+				toolName:       WriteToolName,
+				description:    fmt.Sprintf("Create file %s", filePath),
+				successMessage: fmt.Sprintf("File successfully written: %s", filePath),
+				permParams: WritePermissionsParams{
 					FilePath:   filePath,
 					OldContent: oldContent,
 					NewContent: params.Content,
+				},
+				metadata: func(_, diffText string, additions, removals int) any {
+					return WriteResponseMetadata{Diff: diffText, Additions: additions, Removals: removals}
 				},
 			})
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
-			if denied {
-				return fantasy.WithResponseMetadata(resp, WriteResponseMetadata{
-					Diff:      diff,
-					Additions: additions,
-					Removals:  removals,
-				}), nil
+			if resp.IsError {
+				return resp, nil
 			}
-
-			if err := writeFileWithHistory(ctx, files, sessionID, filePath, oldContent, params.Content); err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-			recordWholeFileRead(ctx, filetracker, sessionID, filePath)
 
 			notifyLSPs(ctx, lspManager, params.FilePath)
-
-			result := fmt.Sprintf("File successfully written: %s", filePath)
-			result = fmt.Sprintf("<result>\n%s\n</result>", result)
-			result += getDiagnostics(filePath, lspManager)
-			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(result),
-				WriteResponseMetadata{
-					Diff:      diff,
-					Additions: additions,
-					Removals:  removals,
-				},
-			), nil
+			resp.Content = fmt.Sprintf("<result>\n%s\n</result>", resp.Content) + getDiagnostics(filePath, lspManager)
+			return resp, nil
 		},
 	)
 }

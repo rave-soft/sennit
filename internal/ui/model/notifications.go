@@ -22,6 +22,24 @@ import (
 	"github.com/rave-soft/sennit/internal/workspace"
 )
 
+// notifyState holds desktop-notification state: which backend is wired up,
+// whether the terminal window currently has focus (notifications are
+// suppressed while it does), and the per-thread last-seen status used to
+// detect the edge transition into a terminal state (see
+// notifyThreadCompletion in thread_completion.go).
+//
+// Embedded anonymously (by value) on UI so its fields keep promoting
+// unchanged (m.notifyBackend, ...); see widgets.go for why.
+type notifyState struct {
+	notifyBackend       notification.Backend
+	notifyWindowFocused bool
+
+	// threadLastStatus tracks each thread's last-seen status, so
+	// notifyThreadCompletion (thread_completion.go) can detect the exact
+	// edge transition into a terminal state and toast it exactly once.
+	threadLastStatus map[string]string
+}
+
 // sendNotification returns a command that sends a notification if allowed by policy.
 func (m *UI) sendNotification(n notification.Notification) tea.Cmd {
 	if !m.shouldSendNotification() {

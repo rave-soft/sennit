@@ -71,6 +71,30 @@ func TestModelCache_ConcurrentAccess(t *testing.T) {
 	require.Equal(t, "model", got[0].ID)
 }
 
+// TestModelCache_SchemaAppliedPerDatabaseFile pins ensureModelCacheSchema's
+// per-database-file guard: two caches at different data dirs, driven from
+// the same process, must each get their own CREATE TABLE. A guard that
+// fired only once process-wide (instead of once per dbPath) would make the
+// second cache's first read/write fail with "no such table" — exactly the
+// bug class that bit SENNIT_GLOBAL_DATA isolation before (see
+// projects_test.go), and exactly what NewTestStore's per-test t.TempDir()
+// now relies on not happening.
+func TestModelCache_SchemaAppliedPerDatabaseFile(t *testing.T) {
+	path1 := filepath.Join(t.TempDir(), "sennit.json")
+	path2 := filepath.Join(t.TempDir(), "sennit.json")
+
+	saveCachedModels(path1, "p", []catwalk.Model{{ID: "from-dir-1"}})
+	saveCachedModels(path2, "p", []catwalk.Model{{ID: "from-dir-2"}})
+
+	got1, ok := loadCachedModels(path1, "p")
+	require.True(t, ok)
+	require.Equal(t, "from-dir-1", got1[0].ID)
+
+	got2, ok := loadCachedModels(path2, "p")
+	require.True(t, ok)
+	require.Equal(t, "from-dir-2", got2[0].ID)
+}
+
 func TestModelCache_RefreshKeepsContextWindow(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

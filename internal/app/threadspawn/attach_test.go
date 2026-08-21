@@ -38,7 +38,7 @@ func TestAttachOnlyAtRepositoryRoot(t *testing.T) {
 	a := newAttachTestApp(t, repo)
 
 	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
-	require.IsType(t, (*thread.Manager)(nil), a.ThreadManager())
+	require.NotNil(t, a.ThreadManager())
 	require.NotNil(t, a.Threads)
 
 	subdir := filepath.Join(repo, "subdir")
@@ -69,7 +69,7 @@ func TestAttachRecoversBestEffortAndPublishes(t *testing.T) {
 
 	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
-	require.IsType(t, (*thread.Manager)(nil), a.ThreadManager())
+	require.NotNil(t, a.ThreadManager())
 	require.NotNil(t, a.Threads)
 }
 
@@ -140,7 +140,7 @@ func TestAttachCleanupShutsDownManagerBeforeReleasingDatabase(t *testing.T) {
 
 	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
-	require.IsType(t, (*thread.Manager)(nil), a.ThreadManager())
+	require.NotNil(t, a.ThreadManager())
 	require.NotNil(t, a.Threads)
 	require.NotNil(t, shutdownHook)
 	require.NotNil(t, criticalCleanup)
@@ -160,8 +160,8 @@ func TestAttachPublishesEventsAndReleasesStoreOnShutdown(t *testing.T) {
 	ch := a.Events(t.Context())
 
 	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
-	mgr, ok := a.ThreadManager().(*thread.Manager)
-	require.True(t, ok)
+	mgr := a.ThreadManager()
+	require.NotNil(t, mgr)
 
 	// Let ForwardEvents subscribe before publishing, as production event tests
 	// do for post-construction sources.
@@ -211,10 +211,10 @@ func TestAttach_TaskManagerReachableAndSharesRecoverySweep(t *testing.T) {
 
 	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
 
-	mgr, ok := a.ThreadManager().(*thread.Manager)
-	require.True(t, ok, "thread manager should be reachable off the app after attach")
-	tasks, ok := a.TaskManager().(*thread.TaskManager)
-	require.True(t, ok, "task manager should be reachable off the app after attach")
+	mgr := a.ThreadManager()
+	require.NotNil(t, mgr, "thread manager should be reachable off the app after attach")
+	tasks := a.TaskManager()
+	require.NotNil(t, tasks, "task manager should be reachable off the app after attach")
 
 	taskSt, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -265,10 +265,10 @@ func TestAttach_ShutdownJoinsBothKinds(t *testing.T) {
 	threadSpawner := newAttachTestSpawner(t)
 	Attach(t.Context(), a, repo, threadSpawner)
 
-	mgr, ok := a.ThreadManager().(*thread.Manager)
-	require.True(t, ok)
-	tasks, ok := a.TaskManager().(*thread.TaskManager)
-	require.True(t, ok)
+	mgr := a.ThreadManager()
+	require.NotNil(t, mgr)
+	tasks := a.TaskManager()
+	require.NotNil(t, tasks)
 
 	taskSt, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -361,4 +361,45 @@ func TestAttach_ClosesOutInterruptedTurnsInThreadWorktrees(t *testing.T) {
 	require.NotNil(t, closed.FinishPart(), "the interrupted turn must be closed out")
 	require.Equal(t, message.FinishReasonCanceled, closed.FinishReason())
 	require.True(t, answered, "the dangling tool call must be answered")
+}
+
+// TestAttach_SetPermissionsSkipReachesLiveThread pins the wiring
+// App.SetPermissionsSkip depends on: Attach must call SetThreadManager so
+// app.threadManager is non-nil by the time a toggle happens, or the
+// propagation App.SetPermissionsSkip performs (see its doc comment in
+// internal/app/app.go) silently does nothing and a running thread is left
+// on whatever bypass state it was spawned with. internal/thread's own
+// TestManager_SetPermissionsSkipReachesLiveThreads covers the propagation
+// itself; this covers that Attach actually wires the manager it propagates
+// through.
+func TestAttach_SetPermissionsSkipReachesLiveThread(t *testing.T) {
+	repo := initRepo(t)
+	a := newAttachTestApp(t, repo)
+	a.SetSessionsForTest(&attachFakeSessions{})
+	a.AgentCoordinator = &attachFakeCoordinator{}
+	spawner := newAttachTestSpawner(t)
+
+	Attach(t.Context(), a, repo, spawner)
+	mgr := a.ThreadManager()
+	require.NotNil(t, mgr)
+
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
+		Name:        "yolo-follower",
+		Goal:        "implement the thing",
+		MergePolicy: thread.MergeManual,
+	})
+	require.NoError(t, err)
+
+	handle := spawner.handleFor(st.WorktreePath)
+	require.NotNil(t, handle)
+	require.False(t, handle.App().Permissions().SkipRequests(),
+		"precondition: the spawned thread starts without bypass")
+
+	a.SetPermissionsSkip(true)
+	require.True(t, handle.App().Permissions().SkipRequests(),
+		"turning bypass on in the parent must reach a thread already running")
+
+	a.SetPermissionsSkip(false)
+	require.False(t, handle.App().Permissions().SkipRequests(),
+		"turning bypass off must reach it too")
 }

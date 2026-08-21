@@ -37,15 +37,15 @@ func NewReadMCPResourceTool(cfg mcpResourceConfig, reg *mcp.Registry, permission
 			params.MCPName = strings.TrimSpace(params.MCPName)
 			params.URI = strings.TrimSpace(params.URI)
 			if params.MCPName == "" {
-				return fantasy.NewTextErrorResponse("mcp_name parameter is required"), nil
+				return invalidParam("mcp_name"), nil
 			}
 			if params.URI == "" {
-				return fantasy.NewTextErrorResponse("uri parameter is required"), nil
+				return invalidParam("uri"), nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for reading MCP resources")
+				return fantasy.ToolResponse{}, missingSessionID("reading MCP resources")
 			}
 
 			relPath := filepathext.SmartJoin(cfg.WorkingDir(), cmp.Or(params.URI, "mcp-resource"))

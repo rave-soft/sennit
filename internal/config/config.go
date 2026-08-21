@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -520,6 +521,49 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 	return time.Duration(h.Timeout) * time.Second
 }
 
+// normalizeHookEvent maps user-provided event names to their canonical
+// form. Matching is case-insensitive and accepts snake_case variants
+// (e.g. "pre_tool_use" → "PreToolUse").
+func normalizeHookEvent(name string) string {
+	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
+	case "pretooluse":
+		return "PreToolUse"
+	default:
+		return name
+	}
+}
+
+// ValidateHooks normalizes event names and checks that every configured
+// hook has a command and a syntactically valid matcher regex. Matcher
+// compilation used for matching is owned by hooks.Runner; this function
+// only validates up front so the user sees config errors at load time
+// rather than on the first tool call.
+func (c *Config) ValidateHooks() error {
+	// Normalize event name keys.
+	for event, eventHooks := range c.Hooks {
+		canonical := normalizeHookEvent(event)
+		if canonical != event {
+			c.Hooks[canonical] = append(c.Hooks[canonical], eventHooks...)
+			delete(c.Hooks, event)
+		}
+	}
+
+	for event, eventHooks := range c.Hooks {
+		for i, h := range eventHooks {
+			if h.Command == "" {
+				return fmt.Errorf("hook %s[%d]: command is required", event, i)
+			}
+			if h.Matcher == "" {
+				continue
+			}
+			if _, err := regexp.Compile(h.Matcher); err != nil {
+				return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
+			}
+		}
+	}
+	return nil
+}
+
 // Config holds the configuration for sennit.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
@@ -590,8 +634,10 @@ type Config struct {
 // mutates the clone, and atomically swaps it in. The clone gives fresh
 // copies of every field a typed mutator touches in place — Model (a plain
 // value, copied by the struct copy above), RecentModels, MCP, and Options
-// (with its nested TUI pointer). Providers is a *csync.Map (internally
-// synchronized) and is shared by reference; the remaining fields are
+// (with its nested TUI pointer). Providers gets a new *csync.Map with each
+// entry's own mutable fields (headers, extra params, OAuth token) deep
+// copied too, so a mutator can rewrite one provider's credentials without
+// racing a reader iterating the old map; the remaining fields are
 // immutable after load from the mutators' standpoint and are likewise
 // shared.
 func (c *Config) cloneForWrite() *Config {

@@ -55,7 +55,7 @@ type SessionAgentCall struct {
 	// follow-up; see agent.WithPromptOrigin). Role is always
 	// message.User regardless of PromptOrigin — origin is authorship
 	// metadata only and has zero effect on what reaches the model (see
-	// Message.ToAIMessage).
+	// toAIMessage in message_convert.go).
 	PromptOrigin message.Origin
 	// PriorMessages is conversation history from *other* sessions that
 	// this call should see ahead of its own. Only a named sub-agent
@@ -284,8 +284,11 @@ type sessionAgent struct {
 	latency latency.Recorder
 
 	// dispatch owns the accept/queue/cancel protocol state shared by Run
-	// and Summarize's dispatch handoffs. See dispatch.go.
-	dispatch *dispatcher
+	// and Summarize's dispatch handoffs. Embedded (via the dispatch
+	// alias) so dispatcher's pure pass-through methods are promoted onto
+	// SessionAgent's method set without a forwarding wrapper for each -
+	// see dispatch.go.
+	*dispatch
 }
 
 type SessionAgentOptions struct {
@@ -330,13 +333,13 @@ func NewSessionAgent(
 	// Wired after construction since the hook closes over a: dispatch
 	// itself must stay free of any dependency on a or on pubsub (see
 	// dispatcher's doc comment).
-	a.dispatch.onQueueChanged = a.publishQueueChanged
+	a.onQueueChanged = a.publishQueueChanged
 	return a
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
 // BeginAccepted. It is the only carrier of accept-state across the
-// backend.runAgent / Coordinator.Run / sessionAgent.Run layers: a
+// AgentDispatcher.run / Coordinator.Run / sessionAgent.Run layers: a
 // counter > 0 means a dispatched prompt is in flight and has not yet
 // completed the dispatch handoff in Run. Close is the only way to
 // release the reservation and is idempotent.
@@ -378,7 +381,7 @@ func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgent
 // sessionAgent.Run requires before a call can be dispatched: a call must
 // carry either a non-empty prompt or a text attachment, and it must name a
 // session. It is exported so callers that accept a run before dispatching it
-// (e.g. backend.SendMessage) can apply the same checks and keep the error
+// (e.g. AgentDispatcher.Send) can apply the same checks and keep the error
 // contract consistent.
 func ValidateCall(call SessionAgentCall) error {
 	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
@@ -390,26 +393,47 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
-// run is the shared implementation behind the exported Run and Steer:
-// both dispatch through it so there is exactly one place that makes the
-// cancel-on-entry / enqueue / become-active decision and exactly one
-// per-session lock discipline guarding it. Run discards outcome; Steer
-// reports it. See SteerOutcome.
-func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome SteerOutcome, result *fantasy.AgentResult, retErr error) {
-	if err := ValidateCall(call); err != nil {
-		return SteerRan, nil, err
-	}
+// dispatchOutcome is what dispatchDecision decided for one call, under
+// call.SessionID's per-session dispatch mutex. active is true only for the
+// "idle: become the active run" branch, in which case genCtx/cancel/ac are
+// the run context, its cancel func, and the activeRequests entry this turn
+// must release on exit. For the other two branches (cancel-on-entry,
+// enqueued) the decision has already been fully realized — a canceled turn
+// persisted, or the call queued — and steer/result/err are runTurn's return
+// values as-is.
+type dispatchOutcome struct {
+	steer  SteerOutcome
+	active bool
+	genCtx context.Context
+	cancel context.CancelFunc
+	ac     *activeCancel
+	result *fantasy.AgentResult
+	err    error
+}
+
+// dispatchDecision makes the atomic cancel-on-entry / enqueue / become-active
+// decision for call, under call.SessionID's per-session dispatch mutex, and
+// carries out every side effect that decision implies (closing the accept
+// reservation, persisting a canceled turn, enqueueing, or registering the
+// active run) before releasing the lock. See sessionAgent.runTurn for how the
+// result is used.
+//
+// Serializing the decision against a concurrent Cancel this way — Cancel
+// takes the same per-session lock — guarantees every cancel observes at
+// least one of: a cancel mark, an activeRequests entry, or a messageQueue
+// entry it then clears. Holding the lock across the busy check and the
+// active registration also makes them atomic, so two concurrent in-process
+// callers — a burst of channel events, or a channel event racing a typed
+// prompt — cannot both pass the busy check and start two runs on the same
+// session.
+func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCall) dispatchOutcome {
 	if call.Accepted != nil {
 		call.acceptSeq = call.Accepted.seq
 	}
 
 	// dispatched reports the branch taken to call.OnDispatch, at most once
 	// and from under the per-session dispatch mutex that took it - see
-	// SessionAgentCall.OnDispatch for why the timing is the point. Only
-	// the paths below that actually reach a decision call it; a call
-	// rejected before any decision (ValidateCall above) leaves the hook
-	// unfired, so a caller waiting on it learns from the returned error
-	// instead that nothing was dispatched.
+	// SessionAgentCall.OnDispatch for why the timing is the point.
 	var dispatchOnce sync.Once
 	dispatched := func(outcome SteerOutcome) {
 		if call.OnDispatch == nil {
@@ -418,27 +442,11 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		dispatchOnce.Do(func() { call.OnDispatch(outcome) })
 	}
 
-	// genCtx/cancel are the run context and its cancel func, created under
-	// the per-session dispatch mutex below so a concurrent Cancel can observe
-	// the activeRequests entry before the assistant message exists.
-	var (
-		genCtx         context.Context
-		cancel         context.CancelFunc
-		userMsgCreated bool
-	)
+	s, release := a.session(call.SessionID)
+	defer release()
+	s.mu.Lock()
 
-	// Serialize the dispatch decision (cancel-on-entry | queued | active)
-	// against a concurrent Cancel. Cancel takes the same per-session lock, so
-	// every cancel observes at least one of: a cancel mark, an activeRequests
-	// entry, or a messageQueue entry it then clears. Holding the lock across
-	// the busy check and the active registration also makes them atomic, so
-	// two concurrent in-process callers — a burst of channel events, or a
-	// channel event racing a typed prompt — cannot both pass the busy check
-	// and start two runs on the same session.
-	sessMu := a.dispatch.sessionMu(call.SessionID)
-	sessMu.Lock()
-
-	if call.Accepted != nil && a.dispatch.canceledBySeq(call.SessionID, call.Accepted.seq) {
+	if call.Accepted != nil && a.canceledBySeq(s, call.Accepted.seq) {
 		// Cancel-on-entry: a cancel arrived while this accepted run was
 		// dispatched but not yet active, and this handle's accept sequence
 		// is at or below the session's cancel mark. The mark is left in
@@ -446,14 +454,14 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		// release the accept reservation, drop the lock, and persist a
 		// canceled turn without entering Stream.
 		//
-		// This path returns before the streaming defer that publishes
+		// This path returns before runTurn's streaming defer that publishes
 		// RunComplete is installed, so emit the terminal event explicitly.
 		// Without it, a caller waiting on RunComplete for this RunID (e.g.
 		// `sennit run`, which ignores message events and blocks on
 		// RunComplete) would hang on an immediately-canceled accepted run.
 		call.Accepted.Close()
 		dispatched(SteerCanceled)
-		sessMu.Unlock()
+		s.mu.Unlock()
 		reporter := newCompletionReporter(a, call)
 		complete := notify.RunComplete{
 			SessionID: call.SessionID,
@@ -463,13 +471,13 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		if err := a.persistCanceledTurn(ctx, call, false); err != nil {
 			complete.Error = err.Error()
 			reporter.publish(ctx, complete)
-			return SteerCanceled, nil, err
+			return dispatchOutcome{steer: SteerCanceled, err: err}
 		}
 		reporter.publish(ctx, complete)
-		return SteerCanceled, nil, nil
+		return dispatchOutcome{steer: SteerCanceled}
 	}
 
-	if a.IsSessionBusy(call.SessionID) {
+	if s.active != nil {
 		if call.Continuation {
 			// A continuation call carries no content of its own to fold
 			// in later (its Prompt is only a placeholder - see
@@ -485,20 +493,24 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 				call.Accepted.Close()
 			}
 			dispatched(SteerEnqueued)
-			sessMu.Unlock()
-			return SteerEnqueued, nil, nil
+			s.mu.Unlock()
+			return dispatchOutcome{steer: SteerEnqueued}
 		}
 		// Busy: an earlier prompt is active. Queue this call so it is
 		// folded into (or sequenced after) the active turn, and release any
 		// accept reservation. A Cancel arriving after this point sees the
 		// active entry and clears the queue.
 		//
-		// enqueueCall strips OnComplete: the caller that supplied the hook
-		// (typically coordinator.Run) has its own retry/coalesce scope that
-		// ends when it returns, so by the time the queue drains nobody is
-		// left to consume the buffered terminal event. The queued turn falls
-		// back to the default broker publish, which is what existing
-		// subscribers expect.
+		// enqueueLocked strips OnComplete: the caller that supplied the
+		// hook (typically coordinator.Run) has its own retry/coalesce
+		// scope that ends when it returns, so by the time the queue
+		// drains nobody is left to consume the buffered terminal event.
+		// The queued turn falls back to the default broker publish,
+		// which is what existing subscribers expect. It is called
+		// directly, not via the self-locking enqueueCall, because this
+		// goroutine already holds s.mu across the whole accept decision
+		// and a sync.Mutex is not reentrant.
+		//
 		// A steering follow-up asked to reach the turn already in flight
 		// rather than queue behind it, and the fold is keyed on the
 		// absence of a RunID (see drainQueueForStep), so drop it here -
@@ -510,22 +522,22 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		if call.Steering {
 			call.RunID = ""
 		}
-		a.enqueueCall(call)
+		enqueueLocked(s, call)
 		if call.Accepted != nil {
 			call.Accepted.Close()
 		}
 		dispatched(SteerEnqueued)
-		sessMu.Unlock()
-		// enqueueCall itself must not call notifyQueueChanged (it runs
-		// under sessMu, held by this caller, not by dispatch itself) - so
-		// this calls it explicitly, only now that the lock is released.
-		a.dispatch.notifyQueueChanged(call.SessionID)
+		s.mu.Unlock()
+		// enqueueLocked itself must not call notifyQueueChanged (it runs
+		// under s.mu, held by this caller) - so this calls it explicitly,
+		// only now that the lock is released.
+		a.notifyQueueChanged(call.SessionID)
 		// Release anything in the active turn that is only waiting (a
 		// thread_wait, say). The prompt stays queued either way; this
 		// just stops the turn from sitting idle on something else while
 		// the user has already moved on.
-		a.dispatch.signalUserInput(call.SessionID)
-		return SteerEnqueued, nil, nil
+		a.signalUserInput(call.SessionID)
+		return dispatchOutcome{steer: SteerEnqueued}
 	}
 
 	// Idle: become the active run. Register the cancel func before dropping
@@ -535,21 +547,216 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	// Tools that wait on something other than the user can use this to
 	// notice that the user has spoken and hand the turn back.
 	runCtx = tools.WithUserInput(runCtx, func() <-chan struct{} {
-		return a.dispatch.userInputChan(call.SessionID)
+		return a.userInputChan(call.SessionID)
 	})
-	genCtx, cancel = context.WithCancel(runCtx)
+	genCtx, cancel := context.WithCancel(runCtx)
 	ac := &activeCancel{cancel: cancel}
-	a.dispatch.activeRequests.Set(call.SessionID, ac)
+	s.active = ac
 	// A new turn is genuinely starting for this session - whether a real
 	// user Run/Steer or our own auto-continuation (see
 	// enqueueCompletionAndDrainForWake) - so any earlier "user canceled
 	// this session" marker is now stale.
-	a.dispatch.cancelledSessions.Del(call.SessionID)
+	s.cancelled = false
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}
 	dispatched(SteerRan)
-	sessMu.Unlock()
+	s.mu.Unlock()
+
+	return dispatchOutcome{steer: SteerRan, active: true, genCtx: genCtx, cancel: cancel, ac: ac}
+}
+
+// buildStreamAgent assembles this turn's snapshot of model, tools and
+// system prompt — from call.Runtime when a coordinator has pinned one, or
+// from the agent's own mutable fields otherwise — appends any connected MCP
+// server's instructions, and constructs the fantasy.Agent Stream runs on.
+//
+// Mutable fields are copied here, once, under their own locks (not the
+// dispatch mutex): model is read exactly once and used by value for the
+// rest of the turn, including queued continuations, so a concurrent
+// SetModel cannot change an in-flight run's identity.
+func (a *sessionAgent) buildStreamAgent(call SessionAgentCall) (streamAgent fantasy.Agent, model Model, agentTools []fantasy.AgentTool, promptPrefix string, disableAutoSummarize bool) {
+	agentTools = a.tools.Copy()
+	model = a.model.Get()
+	if call.Runtime != nil {
+		model = call.Runtime.model
+		agentTools = slices.Clone(call.Runtime.tools)
+	}
+	agentTools = withoutUnusableParentTool(agentTools, a.dispatch, call.SessionID)
+	systemPrompt := a.systemPrompt.Get()
+	promptPrefix = a.systemPromptPrefix.Get()
+	disableAutoSummarize = a.disableAutoSummarize
+	if call.Runtime != nil {
+		systemPrompt = call.Runtime.systemPrompt
+		promptPrefix = call.Runtime.systemPromptPrefix
+		disableAutoSummarize = call.Runtime.disableAutoSummarize
+	}
+	var instructions strings.Builder
+
+	// a.mcp is nil for session agents built outside app.New (a handful of
+	// tests construct one directly); treat that as "no MCP servers" rather
+	// than panicking.
+	if a.mcp != nil {
+		for _, server := range a.mcp.GetStates() {
+			if server.State != mcp.StateConnected {
+				continue
+			}
+			if s := server.Client.InitializeResult().Instructions; s != "" {
+				instructions.WriteString(s)
+				instructions.WriteString("\n\n")
+			}
+		}
+	}
+
+	if s := instructions.String(); s != "" {
+		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+	}
+
+	streamAgent = fantasy.NewAgent(
+		model.Model,
+		fantasy.WithSystemPrompt(systemPrompt),
+		fantasy.WithTools(agentTools...),
+		fantasy.WithUserAgent(userAgent),
+	)
+	return streamAgent, model, agentTools, promptPrefix, disableAutoSummarize
+}
+
+// finishTurn concludes a turn whose Stream call returned without error: it
+// runs auto-summarize if the turn tripped the context-window threshold,
+// releases this turn's active-request slot, fires the finished notification,
+// and hands off to the next queued call, if any.
+//
+// It is runTurn's only source of a non-nil next call, which is what lets
+// run's loop replace the old tail recursion: runTurn returns next unchanged
+// to its caller, which loops instead of calling itself.
+//
+// reporter is the single owner of this call's terminal RunComplete: every
+// return path here either lets runTurn's streaming defer publish naturally
+// (the common case, and the two error returns below), or explicitly spends
+// reporter's Once first — via publish (a different queued call is taking
+// over, so this call's own RunID is genuinely done) or suppress (this same
+// call, under the same RunID, is being re-queued to resume after a summary,
+// so a later turn owns the terminal event instead). Because reporter is
+// backed by sync.Once, at most one of those ever actually emits, regardless
+// of which path is taken - the invariant holds by construction, not by the
+// caller getting the branches right.
+func (a *sessionAgent) finishTurn(
+	ctx, genCtx context.Context,
+	call SessionAgentCall,
+	ac *activeCancel,
+	cancel context.CancelFunc,
+	t *runTurn,
+	reporter *completionReporter,
+	result *fantasy.AgentResult,
+	err error,
+) (*fantasy.AgentResult, *SessionAgentCall, error) {
+	if t.shouldSummarize {
+		// Conditional release: only clear our own entry, mirroring
+		// runTurn's own cleanup defer. An unconditional Del here would
+		// erase a newer run's entry if one raced in and won the session
+		// in the window this release opens up before Summarize does its
+		// own busy check.
+		a.clearActiveIfMatch(call.SessionID, ac)
+		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, t.model, t.promptPrefix, call.ActiveRuntime); summarizeErr != nil {
+			return nil, nil, summarizeErr
+		}
+		// If the agent wasn't done...
+		if len(t.currentAssistant.ToolCalls()) > 0 {
+			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
+			a.requeueContinuation(call, reporter.suppress)
+		}
+	}
+
+	// Release active request before publishing the notification.
+	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
+	// tea.Msg arrives, so the cleanup must precede the notify or
+	// subscribers see stale busy state at the moment of receipt.
+	//
+	// Conditional release, like the shouldSummarize one above: when that
+	// branch already cleared our own entry, this is a no-op against
+	// whatever newer run's entry (if any) is there now. Otherwise ac is
+	// still our own entry here (nothing else clears it first), so this
+	// behaves exactly like the unconditional Del it replaces. Either way,
+	// our own entry can't leak: we only ever remove it, never re-register
+	// it, after this point.
+	a.clearActiveIfMatch(call.SessionID, ac)
+	cancel()
+
+	// Send notification that agent has finished its turn (skip for
+	// nested/non-interactive sessions).
+	if !call.NonInteractive && a.notify != nil {
+		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			SessionID:    call.SessionID,
+			SessionTitle: t.currentSession.Title,
+			Type:         notify.TypeAgentFinished,
+		})
+	}
+
+	// Hand off to the next queued prompt (if any). drainNext filters the
+	// queue against the cancel mark and reserves a fresh accept for the
+	// survivor under the same per-session dispatch lock used throughout,
+	// keeping the session observable to Cancel for the entire transition
+	// and closing the dequeue -> re-register window.
+	queuedMessages, firstQueued, canceledRunIDDrops := a.drainNext(call.SessionID)
+	// A dropped prompt carrying a RunID must still publish its terminal
+	// cancelled RunComplete so a caller waiting on that RunID does not
+	// hang.
+	a.publishCanceledQueueDrops(canceledRunIDDrops)
+	if firstQueued == nil {
+		return result, nil, err
+	}
+
+	// Decide whether this turn still owes its own terminal RunComplete
+	// before handing off to firstQueued. Each submitted prompt with a
+	// RunID has its own lifecycle, so a turn that is finished and handing
+	// off to a *different* queued prompt must publish its own RunComplete
+	// here — leaving it to a later turn (which may carry a different
+	// RunID, or none) would hang a caller waiting on this turn's RunID.
+	// The exception is the summarize-continuation path just above, which
+	// re-queues this same call (same RunID) to resume after a summary:
+	// queuedMessages then still contains an entry for call.RunID (it need
+	// not be firstQueued itself - a genuinely different prompt queued
+	// ahead of the re-queued continuation takes that slot), so the loop
+	// below finds it and this turn suppresses instead of publishing; the
+	// eventual terminal turn for this RunID publishes on its own pass
+	// through here.
+	outerOwesRunComplete := call.RunID != ""
+	if outerOwesRunComplete {
+		for _, q := range queuedMessages {
+			if q.RunID == call.RunID {
+				outerOwesRunComplete = false
+				break
+			}
+		}
+	}
+	if outerOwesRunComplete {
+		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+		if t.currentAssistant != nil {
+			complete.MessageID = t.currentAssistant.ID
+			complete.Text = t.currentAssistant.Content().String()
+		}
+		if ctx.Err() != nil {
+			complete.Cancelled = true
+		}
+		reporter.publish(ctx, complete)
+	} else {
+		reporter.suppress()
+	}
+	return result, firstQueued, err
+}
+
+// runTurn runs exactly one turn attempt for call: the dispatch decision,
+// the stream (if this call became the active run), and — on success —
+// finishTurn's summarize/handoff tail. next is non-nil only when the turn
+// handed off to a queued call; run's loop takes that as the next call to
+// attempt instead of recursing, which is what keeps the loop's stack depth
+// flat no matter how long the queue behind a session gets.
+func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outcome SteerOutcome, result *fantasy.AgentResult, next *SessionAgentCall, retErr error) {
+	decision := a.dispatchDecision(ctx, call)
+	if !decision.active {
+		return decision.steer, decision.result, nil, decision.err
+	}
+	genCtx, cancel, ac := decision.genCtx, decision.cancel, decision.ac
 
 	// Record the model this turn is about to run on, so restoring the
 	// session later restores the model it was working with rather than
@@ -583,65 +790,20 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	// until some unrelated later call happened to touch this session —
 	// exactly the race the "wake an idle parent" contract calls out.
 	defer func() {
-		csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
+		a.clearActiveIfMatch(call.SessionID, ac)
 		a.wakeFromInboxIfIdle(context.WithoutCancel(ctx), call.SessionID)
 	}()
 
-	// Copy mutable fields under lock to avoid races with SetTools/SetModel.
-	// model is read exactly once here and used by value for the rest of the
-	// turn (including queued continuations), so a concurrent SetModel cannot
-	// change an in-flight run's identity.
-	agentTools := a.tools.Copy()
-	model := a.model.Get()
-	if call.Runtime != nil {
-		model = call.Runtime.model
-		agentTools = slices.Clone(call.Runtime.tools)
-	}
-	agentTools = withoutUnusableParentTool(agentTools, a.dispatch, call.SessionID)
-	systemPrompt := a.systemPrompt.Get()
-	promptPrefix := a.systemPromptPrefix.Get()
-	disableAutoSummarize := a.disableAutoSummarize
-	if call.Runtime != nil {
-		systemPrompt = call.Runtime.systemPrompt
-		promptPrefix = call.Runtime.systemPromptPrefix
-		disableAutoSummarize = call.Runtime.disableAutoSummarize
-	}
-	var instructions strings.Builder
-
-	// a.mcp is nil for session agents built outside app.New (a handful of
-	// tests construct one directly); treat that as "no MCP servers" rather
-	// than panicking.
-	if a.mcp != nil {
-		for _, server := range a.mcp.GetStates() {
-			if server.State != mcp.StateConnected {
-				continue
-			}
-			if s := server.Client.InitializeResult().Instructions; s != "" {
-				instructions.WriteString(s)
-				instructions.WriteString("\n\n")
-			}
-		}
-	}
-
-	if s := instructions.String(); s != "" {
-		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
-	}
-
-	agent := fantasy.NewAgent(
-		model.Model,
-		fantasy.WithSystemPrompt(systemPrompt),
-		fantasy.WithTools(agentTools...),
-		fantasy.WithUserAgent(userAgent),
-	)
+	streamAgent, model, agentTools, promptPrefix, disableAutoSummarize := a.buildStreamAgent(call)
 
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
-		return SteerRan, nil, fmt.Errorf("failed to get session: %w", err)
+		return SteerRan, nil, nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
 	msgs, err := a.getSessionMessages(ctx, currentSession)
 	if err != nil {
-		return SteerRan, nil, fmt.Errorf("failed to get session messages: %w", err)
+		return SteerRan, nil, nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 
 	if !call.Continuation && !hasUserTextMessage(msgs) {
@@ -649,10 +811,11 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		go a.generateTitle(titleCtx, call.SessionID, call.Prompt, model, promptPrefix)
 	}
 
+	var userMsgCreated bool
 	if !call.Continuation {
 		_, err = a.createUserMessage(ctx, call)
 		if err != nil {
-			return SteerRan, nil, err
+			return SteerRan, nil, nil, err
 		}
 		userMsgCreated = true
 	}
@@ -661,9 +824,10 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	reporter := newCompletionReporter(a, call)
 	t := newRunTurn(a, call, ctx, genCtx, model, agentTools, promptPrefix, disableAutoSummarize, currentSession, userMsgCreated)
 	// message.Service already flushes synchronously on terminal updates;
-	// the defer guarantees it at every Run exit without callers needing
-	// to know, and publishes the authoritative RunComplete for this
-	// turn after the flush.
+	// the defer guarantees it at every runTurn exit without callers
+	// needing to know, and publishes the authoritative RunComplete for
+	// this turn after the flush. reporter's Once makes this the fallback
+	// publisher: a no-op wherever finishTurn already spent it explicitly.
 	defer func() {
 		// Use a context detached from the run context: workspace
 		// shutdown cancels ctx before this goroutine returns, but the
@@ -685,15 +849,6 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 		} else if ctx.Err() != nil {
 			complete.Cancelled = true
 		}
-		// Prefer the per-call hook when supplied so the coordinator
-		// can coalesce retries (e.g. unauthorized → re-auth → retry)
-		// into a single user-visible terminal event. The fallback
-		// must-deliver publish applies bounded-blocking semantics to
-		// the authoritative terminal event so a momentarily-full
-		// subscriber channel can't silently drop it and hang
-		// non-interactive clients waiting on RunComplete. reporter
-		// ensures this is a no-op when the tail path below already
-		// published this turn's RunComplete before recursing.
 		reporter.publish(ctx, complete)
 	}()
 
@@ -716,7 +871,7 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
-	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
+	result, err = streamAgent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
@@ -753,116 +908,40 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (outcome 
 
 	if err != nil {
 		streamResult, streamErr := t.handleStreamError(err)
-		return SteerRan, streamResult, streamErr
+		return SteerRan, streamResult, nil, streamErr
 	}
 
-	if t.shouldSummarize {
-		// Conditional release: only clear our own entry, mirroring the
-		// defer above. An unconditional Del here would erase a newer
-		// run's entry if one raced in and won the session in the window
-		// this release opens up before Summarize does its own busy check.
-		csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
-		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, model, promptPrefix, call.ActiveRuntime); summarizeErr != nil {
-			return SteerRan, nil, summarizeErr
-		}
-		// If the agent wasn't done...
-		if len(t.currentAssistant.ToolCalls()) > 0 {
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			a.dispatch.requeueContinuation(call, reporter.suppress)
-		}
-	}
+	result, next, retErr = a.finishTurn(ctx, genCtx, call, ac, cancel, t, reporter, result, err)
+	return SteerRan, result, next, retErr
+}
 
-	// Release active request before publishing the notification.
-	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
-	// tea.Msg arrives, so the cleanup must precede the notify or
-	// subscribers see stale busy state at the moment of receipt.
-	//
-	// Conditional release, like the two cleanups above: when shouldSummarize
-	// already cleared our own entry (line ~1199), this is a no-op against
-	// whatever newer run's entry (if any) is there now. When shouldSummarize
-	// was false, ac is still our own entry here (nothing else clears it
-	// first), so this behaves exactly like the unconditional Del it
-	// replaces. Either way, our own entry can't leak: we only ever remove
-	// it, never re-register it, after this point.
-	csync.CompareAndDelete(a.dispatch.activeRequests, call.SessionID, ac)
-	cancel()
-
-	// Send notification that agent has finished its turn (skip for
-	// nested/non-interactive sessions).
-	if !call.NonInteractive && a.notify != nil {
-		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-			SessionID:    call.SessionID,
-			SessionTitle: t.currentSession.Title,
-			Type:         notify.TypeAgentFinished,
-		})
-	}
-
-	// Hand off to the next queued prompt (if any). drainNext filters the
-	// queue against the cancel mark and reserves a fresh accept for the
-	// survivor under the same per-session dispatch lock used throughout,
-	// keeping the session observable to Cancel for the entire transition
-	// and closing the dequeue -> re-register window.
-	queuedMessages, firstQueued, canceledRunIDDrops := a.dispatch.drainNext(call.SessionID)
-	// A dropped prompt carrying a RunID must still publish its terminal
-	// cancelled RunComplete so a caller waiting on that RunID does not
-	// hang.
-	a.publishCanceledQueueDrops(canceledRunIDDrops)
-	if firstQueued == nil {
-		return SteerRan, result, err
-	}
-	// There are queued messages, restart the loop. Publishing this
-	// turn's RunComplete explicitly below (when owed) fires reporter's
-	// Once first, so the outer defer's later emit — which would
-	// otherwise observe the recursive Run's retErr (named-return
-	// clobbering through the return below) against this turn's
-	// MessageID/Text — becomes a no-op instead of a mixed, racing
-	// event.
-	//
-	// Decide whether this turn still owes its own terminal RunComplete.
-	// Each submitted prompt with a RunID has its own lifecycle, so a turn
-	// that is finished and handing off to a *different* queued prompt must
-	// publish its own RunComplete here — leaving it to the recursive turn
-	// (which carries a different RunID) would hang a caller waiting on
-	// this turn's RunID. The exception is the summarize-continuation path,
-	// which re-queues this same call (same RunID) to resume after a
-	// summary; in that case the eventual terminal turn for this RunID
-	// publishes, so publishing now would double-emit.
-	outerOwesRunComplete := call.RunID != ""
-	if outerOwesRunComplete {
-		for _, q := range queuedMessages {
-			if q.RunID == call.RunID {
-				outerOwesRunComplete = false
-				break
-			}
+// run is the shared implementation behind the exported Run and Steer: both
+// dispatch through it so there is exactly one place that makes the
+// cancel-on-entry / enqueue / become-active decision and exactly one
+// per-session lock discipline guarding it. Run discards outcome; Steer
+// reports it. See SteerOutcome.
+//
+// The loop replaces what used to be tail recursion — runTurn's finishTurn
+// tail handing off to a queued call by calling run again. Literal recursion
+// here had two problems: the recursive call's return values landed in this
+// function's own named returns before the deferred publish ran (worked
+// around by completionReporter's Once, not by the return values being
+// right), and an arbitrarily long queue behind a busy session grew the
+// goroutine stack by one frame per hop. Looping removes both: each call to
+// runTurn is a self-contained function invocation with its own named
+// returns and its own defers, so there is nothing left for a later hop to
+// clobber, and the stack no longer grows with the queue's length.
+func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (SteerOutcome, *fantasy.AgentResult, error) {
+	for {
+		if err := ValidateCall(call); err != nil {
+			return SteerRan, nil, err
 		}
-	}
-	if outerOwesRunComplete {
-		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if t.currentAssistant != nil {
-			complete.MessageID = t.currentAssistant.ID
-			complete.Text = t.currentAssistant.Content().String()
+		outcome, result, next, err := a.runTurn(ctx, call)
+		if next == nil {
+			return outcome, result, err
 		}
-		if ctx.Err() != nil {
-			complete.Cancelled = true
-		}
-		reporter.publish(ctx, complete)
-	} else {
-		// Same-RunID re-queue: the recursive turn below owns this
-		// RunID's terminal event. Spend reporter's Once now so the
-		// streaming defer — which fires after the recursive Run
-		// returns and would otherwise observe its clobbered retErr —
-		// finds nothing left to publish.
-		reporter.suppress()
+		call = *next
 	}
-	// outcome is clobbered here exactly like result/retErr already are:
-	// this call did run (it produced the turn above), but its return
-	// value becomes whatever the recursively-dispatched *firstQueued
-	// call's own dispatch decision was. A Steer caller only ever
-	// observes this tail when its own call triggered an auto-summarize
-	// continuation or handed off to something else queued behind it —
-	// not on the plain busy/idle paths the busy- and idle-path tests
-	// cover.
-	return a.run(ctx, *firstQueued)
 }
 
 // Run dispatches call, atomically picking cancel-on-entry, enqueue

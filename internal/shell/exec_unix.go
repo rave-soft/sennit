@@ -4,6 +4,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -90,19 +91,20 @@ func exitStatusFromError(ctx context.Context, stderr io.Writer, err error) error
 	if err == nil {
 		return nil
 	}
-	switch err := err.(type) {
-	case *exec.ExitError:
-		if status, ok := err.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			return interp.ExitStatus(128 + uint8(status.Signal()))
 		}
-		return interp.ExitStatus(uint8(err.ExitCode()))
-	case *exec.Error:
-		fmt.Fprintf(stderr, "%v\n", err)
-		return interp.ExitStatus(127)
-	default:
-		return err
+		return interp.ExitStatus(uint8(exitErr.ExitCode()))
 	}
+	var execErr *exec.Error
+	if errors.As(err, &execErr) {
+		fmt.Fprintf(stderr, "%v\n", execErr)
+		return interp.ExitStatus(127)
+	}
+	return err
 }

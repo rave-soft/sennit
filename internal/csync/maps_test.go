@@ -37,6 +37,32 @@ func TestNewMapWithInitial(t *testing.T) {
 	require.Equal(t, 1, value)
 }
 
+// TestNewMapWithInitial_Copies verifies that NewMap copies the initial map
+// rather than aliasing it: later mutations to the caller's original map must
+// not be visible through Map, and Set on Map must not write through into the
+// original, since neither side takes the other's lock.
+func TestNewMapWithInitial_Copies(t *testing.T) {
+	t.Parallel()
+
+	original := map[string]int{
+		"key1": 1,
+	}
+
+	m := NewMap(original)
+
+	original["key1"] = 999
+	original["key2"] = 2
+	value, ok := m.Get("key1")
+	require.True(t, ok)
+	require.Equal(t, 1, value, "mutating the caller's original map must not change Map")
+	_, ok = m.Get("key2")
+	require.False(t, ok, "keys added to the original after NewMap must not appear in Map")
+
+	m.Set("key3", 3)
+	_, ok = original["key3"]
+	require.False(t, ok, "Set on Map must not write through into the original map")
+}
+
 func TestMap_Reset(t *testing.T) {
 	t.Parallel()
 

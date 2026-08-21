@@ -31,14 +31,6 @@ func readRecentModels(t *testing.T, path string) []any {
 	return rm
 }
 
-// testStoreWithPath creates a ConfigStore backed by a Config for recent model tests.
-func testStoreWithPath(cfg *Config, dir string) *ConfigStore {
-	return &ConfigStore{
-		config:         cfg,
-		globalDataPath: filepath.Join(dir, "config.json"),
-	}
-}
-
 // configWithRecents builds a Config seeded with the given recent models,
 // for exercising the pure nextRecentModels helper.
 func configWithRecents(recents ...SelectedModel) *Config {
@@ -112,7 +104,7 @@ func TestUpdatePreferredModel_PersistsModelAndRecents(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	store := testStoreWithPath(cfg, dir)
+	store := NewTestStore(t, cfg, WithGlobalDataPath(filepath.Join(dir, "config.json")))
 
 	sel := SelectedModel{Provider: "openai", Model: "gpt-4o"}
 	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, sel))
@@ -136,7 +128,7 @@ func TestUpdatePreferredModel_AddsToRecentsFront(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{}
 	cfg.setDefaults(dir, "")
-	store := testStoreWithPath(cfg, dir)
+	store := NewTestStore(t, cfg, WithGlobalDataPath(filepath.Join(dir, "config.json")))
 
 	first := SelectedModel{Provider: "openai", Model: "gpt-4o"}
 	require.NoError(t, store.UpdatePreferredModel(ScopeGlobal, first))

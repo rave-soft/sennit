@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
@@ -22,16 +21,6 @@ type TodosToolMessageItem struct {
 }
 
 var _ ToolMessageItem = (*TodosToolMessageItem)(nil)
-
-// NewTodosToolMessageItem creates a new [TodosToolMessageItem].
-func NewTodosToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &TodosToolRenderContext{}, canceled)
-}
 
 // TodosToolRenderContext renders todos tool messages.
 type TodosToolRenderContext struct{}

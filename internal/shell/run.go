@@ -104,7 +104,7 @@ type PersistFunc func(command, output string, exitCode int) error
 
 // RunAndPersist executes a shell command via PTY and optionally
 // persists the result through the provided callback. This unifies
-// the run-and-save pattern used by both AppWorkspace and Backend.
+// the run-and-save pattern used by AppWorkspace.
 func RunAndPersist(ctx context.Context, opts RunOptions, persist PersistFunc) (CaptureResult, error) {
 	result, err := RunAndCapturePTY(ctx, opts)
 	if err != nil {

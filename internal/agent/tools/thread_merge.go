@@ -35,12 +35,12 @@ func NewThreadMergeTool(manager ThreadManager, permissions permission.Service) f
 		renderToolDescription(threadMergeDescriptionTpl),
 		func(ctx context.Context, params ThreadMergeParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ID == "" {
-				return fantasy.NewTextErrorResponse("id is required"), nil
+				return invalidParam("id"), nil
 			}
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for thread_merge")
+				return fantasy.ToolResponse{}, missingSessionID("thread_merge")
 			}
 
 			resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{

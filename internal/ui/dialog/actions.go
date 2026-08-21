@@ -165,6 +165,17 @@ type (
 	ActionChangeAPIKeyState struct {
 		State APIKeyInputState
 	}
+	// ActionAPIKeySaved carries the outcome of the async
+	// SetProviderAPIKey call kicked off when the user confirms a verified
+	// API key. It is deliberately NOT handled by handleDialogMsg's own
+	// switch, so the generic "unhandled Action round-trips to the front
+	// dialog" mechanism (see ActionCustomProviderResult) delivers it
+	// straight back into the still-open APIKeyInput dialog's HandleMsg,
+	// which decides between ActionProviderConfigured and
+	// ActionSelectModel, or reports the error.
+	ActionAPIKeySaved struct {
+		Err error
+	}
 )
 
 // Messages for OAuth2 device flow dialog.

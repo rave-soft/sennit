@@ -11,6 +11,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -72,7 +73,7 @@ func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing
 			return failure
 		}
 		return saveCachedModelsWithError(globalDataPath, providerID, models)
-	}, atomicWriteFile)
+	}, fsext.AtomicWriteFile)
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -166,7 +167,7 @@ func TestMigrateDisableNotifications_DestinationWriteFailureRetriesWithoutLosing
 		if path == dataPath {
 			return errors.New("destination write failed")
 		}
-		return atomicWriteFile(path, data, perm)
+		return fsext.AtomicWriteFile(path, data, perm)
 	})
 	globalData, err := os.ReadFile(globalPath)
 	require.NoError(t, err)
@@ -200,7 +201,7 @@ func TestMigrateDisableNotifications_CleanupFailureRetriesWithExistingNotificati
 		if path == globalPath {
 			return errors.New("cleanup write failed")
 		}
-		return atomicWriteFile(path, data, perm)
+		return fsext.AtomicWriteFile(path, data, perm)
 	})
 	globalData, err := os.ReadFile(globalPath)
 	require.NoError(t, err)

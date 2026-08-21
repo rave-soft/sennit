@@ -75,8 +75,9 @@ func TestDoctorCmd_JSON(t *testing.T) {
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
 	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
-	doctorJSON = true
-	defer func() { doctorJSON = false }()
+	// doctorCmd.RunE reads --json off the invoked command's own flag set
+	// now (not a package-level var), so it must be registered here too.
+	testCmd.Flags().Bool("json", true, "")
 
 	err := doctorCmd.RunE(testCmd, nil)
 	require.NoError(t, err)

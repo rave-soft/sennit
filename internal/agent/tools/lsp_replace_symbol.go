@@ -54,10 +54,10 @@ func NewReplaceSymbolTool(
 		replaceSymbolDescription,
 		func(ctx context.Context, params ReplaceSymbolParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Symbol == "" {
-				return fantasy.NewTextErrorResponse("symbol is required"), nil
+				return invalidParam("symbol"), nil
 			}
 			if params.FilePath == "" {
-				return fantasy.NewTextErrorResponse("file_path is required"), nil
+				return invalidParam("file_path"), nil
 			}
 
 			action := params.Action

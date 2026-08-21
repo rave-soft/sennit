@@ -68,7 +68,7 @@ func TestAppWorkspace_AgentRun_ReturnsBeforeTurnCompletes(t *testing.T) {
 	release := make(chan struct{})
 	a.AgentCoordinator = &blockingAgentRunCoordinator{entered: entered, release: release}
 
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, t.TempDir()))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
 
 	done := make(chan error, 1)
 	go func() {
@@ -108,7 +108,7 @@ func TestAppWorkspace_AgentRun_ValidationErrorIsSynchronous(t *testing.T) {
 		release: make(chan struct{}),
 	}
 
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, t.TempDir()))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
 
 	err := aw.AgentRun(t.Context(), "S1", "")
 	require.ErrorIs(t, err, agent.ErrEmptyPrompt)
@@ -123,7 +123,7 @@ func TestAppWorkspace_AgentRun_UninitializedCoordinatorIsSynchronous(t *testing.
 	a := app.NewForTest(t.Context())
 	t.Cleanup(a.ShutdownForTest)
 
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, t.TempDir()))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
 
 	err := aw.AgentRun(t.Context(), "S1", "hello")
 	require.ErrorIs(t, err, app.ErrCoordinatorNotInitialized)
@@ -157,7 +157,7 @@ func TestAppWorkspace_Shutdown_JoinsRunDispatchedViaAgentRun(t *testing.T) {
 	release := make(chan struct{})
 	a.AgentCoordinator = &blockingAgentRunCoordinator{entered: entered, release: release}
 
-	aw := NewAppWorkspace(a, config.NewTestStore(&config.Config{}, t.TempDir()))
+	aw := NewAppWorkspace(a, config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(t.TempDir())))
 
 	runDone := make(chan error, 1)
 	go func() {

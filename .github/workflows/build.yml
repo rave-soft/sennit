@@ -15,7 +15,14 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Sennit carries platform-specific code (internal/lock, internal/fsext,
+    # internal/shell) that is otherwise never even compiled: exercise all
+    # three OSes so it doesn't silently bitrot.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -26,6 +33,16 @@ jobs:
       # The agent tests replay recorded provider traffic (see the VCR
       # helpers in internal/agent): no API key, no network.
       - run: go test -count=1 ./...
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race -failfast ./...
 
   lint:
     runs-on: ubuntu-latest

@@ -207,7 +207,7 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := config.Init(env.workingDir, "", false)
+	cfg, err := config.Load(env.workingDir, "", false)
 	if err != nil {
 		return nil, err
 	}

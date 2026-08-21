@@ -22,6 +22,9 @@ import (
 type rootTestWorkspace struct {
 	workspace.Workspace
 	supportsThreads bool
+	// listThreadsCalls counts ListThreads round trips, for
+	// TestThreadEventDispatchesOneListThreadsCall (threads_rpc_collapse_test.go).
+	listThreadsCalls int
 }
 
 func (w *rootTestWorkspace) Config() *config.Config {
@@ -43,6 +46,7 @@ func (w *rootTestWorkspace) WorkingDir() string                        { return 
 func (w *rootTestWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }
 
 func (w *rootTestWorkspace) ListThreads(context.Context) ([]proto.Thread, error) {
+	w.listThreadsCalls++
 	return nil, nil
 }
 
@@ -153,7 +157,7 @@ func TestWindowSizeBroadcastsToDashboard(t *testing.T) {
 	t.Parallel()
 
 	r := newTestRoot(t, true)
-	r.dashboard = newThreadsDashboard(r.com)
+	r.dashboard = newThreadsDashboard(r.com, &r.main.threadList)
 
 	model, _ := r.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	r = model.(*Root)

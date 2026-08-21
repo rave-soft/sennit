@@ -125,3 +125,30 @@ func TestIsLikelyPath(t *testing.T) {
 	require.False(t, IsLikelyPath("cat a.txt | grep x"))
 	require.False(t, IsLikelyPath(""))
 }
+
+// TestTruncate covers the plain (non-path-aware) ellipsis truncation used
+// by table cells: unchanged when it already fits, cut with an ellipsis
+// otherwise, and never widened by a negative width.
+func TestTruncate(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "hello", Truncate("hello", 80))
+	require.Equal(t, "hello", Truncate("hello", -1))
+	out := Truncate("hello world", 8)
+	require.LessOrEqual(t, ansi.StringWidth(out), 8)
+	require.True(t, strings.HasSuffix(out, "…"), "got %q", out)
+}
+
+// TestPadTo covers the table-column helper: padding a short value out to
+// width, truncating (with ellipsis) a value that overruns it, and the
+// n<=0 edge case a dropped column relies on to render as nothing.
+func TestPadTo(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "hi   ", PadTo("hi", 5))
+	require.Equal(t, "hi", PadTo("hi", 2), "exact fit needs no padding")
+	out := PadTo("a very long value", 8)
+	require.Equal(t, 8, ansi.StringWidth(out))
+	require.True(t, strings.HasSuffix(out, "…"), "got %q", out)
+	require.Equal(t, "", PadTo("anything", 0))
+}

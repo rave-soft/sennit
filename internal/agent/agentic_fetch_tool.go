@@ -132,17 +132,17 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), promptOpts...)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %w", err)
 			}
 
 			model, err := c.buildAgentModel(ctx, true)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %w", err)
 			}
 
 			systemPrompt, err := promptTemplate.Build(ctx, model.Model.Provider(), model.Model.Model(), c.cfg)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %w", err)
 			}
 
 			providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)

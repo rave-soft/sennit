@@ -2,7 +2,6 @@ package model
 
 import (
 	"cmp"
-	"context"
 	"errors"
 	"strings"
 
@@ -214,7 +213,7 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			break
 		}
 		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID)
+			err := m.com.Workspace.AgentSummarize(m.com.Context(), msg.SessionID)
 			if err != nil {
 				return util.ReportError(err)()
 			}
@@ -310,11 +309,7 @@ func (m *UI) applyProviderDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			// case, where no model has ever been selected) — fall back to
 			// this provider's own default rather than whatever
 			// defaultModelSelection would pick globally.
-			knownProviders, err := config.Providers(cfg)
-			if err != nil && len(knownProviders) == 0 {
-				cmds = append(cmds, util.ReportError(err))
-				break
-			}
+			knownProviders := config.Providers(cfg)
 			def, err := cfg.DefaultModelForProvider(msg.ProviderID, knownProviders)
 			if err != nil {
 				cmds = append(cmds, util.ReportError(err))

@@ -20,10 +20,13 @@ import (
 // imports thread's types), so *App satisfies this interface structurally
 // and is handed in as a thread.Workspace by whichever spawner produced it
 // (see internal/app/threadspawn). app deliberately keeps no import of
-// internal/thread: the structural satisfaction is the whole point, and
-// the thread managers this App carries (see the Threads/Tasks fields)
-// stay typed through the agent-tool seams and the untyped accessors for
-// the same reason.
+// internal/thread in its own production code, but internal/thread's own
+// tests import app for realistic *app.App-backed fakes (see
+// internal/thread/fakes_test.go) — so even a one-way production import
+// from app to thread would turn `go test ./internal/thread/...` into an
+// import cycle. That is why the thread managers this App carries (see the
+// Threads/Tasks fields) stay typed through the agent-tool seams and the
+// untyped accessors instead.
 
 // Coordinator returns this workspace's agent coordinator, or nil if it
 // has not been initialized yet (an unconfigured project).

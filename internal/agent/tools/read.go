@@ -80,8 +80,8 @@ const (
 	// loader both keep accepting it.
 	LegacyReadToolName = "view"
 	MaxReadSize        = 200 * 1024 // 200KB
-	// DefaultReadLimit matches Claude Code's Read default; 200 (inherited
-	// from Crush) made models page through files in tiny chunks, wasting
+	// DefaultReadLimit matches Claude Code's Read default; 200 (Sennit's
+	// old default) made models page through files in tiny chunks, wasting
 	// steps. MaxReadSize and MaxLineLength still bound the worst case.
 	DefaultReadLimit = 2000
 	MaxLineLength    = 2000
@@ -100,7 +100,7 @@ func NewReadTool(
 		readDescription(),
 		func(ctx context.Context, params ReadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
-				return fantasy.NewTextErrorResponse("file_path is required"), nil
+				return invalidParam("file_path"), nil
 			}
 
 			// Handle builtin skill files (sennit: prefix).
@@ -132,7 +132,7 @@ func NewReadTool(
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
+				return fantasy.ToolResponse{}, missingSessionID("accessing files outside working directory")
 			}
 
 			// Request permission for files outside working directory, unless it's a skill file.

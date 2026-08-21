@@ -20,16 +20,6 @@ type GlobToolMessageItem struct {
 
 var _ ToolMessageItem = (*GlobToolMessageItem)(nil)
 
-// NewGlobToolMessageItem creates a new [GlobToolMessageItem].
-func NewGlobToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &GlobToolRenderContext{}, canceled)
-}
-
 // registerSearchToolRenderers registers the glob, grep, ripgrep and ls
 // tool renderers.
 func registerSearchToolRenderers() {
@@ -87,16 +77,6 @@ type GrepToolMessageItem struct {
 }
 
 var _ ToolMessageItem = (*GrepToolMessageItem)(nil)
-
-// NewGrepToolMessageItem creates a new [GrepToolMessageItem].
-func NewGrepToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &GrepToolRenderContext{title: "Grep"}, canceled)
-}
 
 // GrepToolRenderContext renders grep and ripgrep tool messages.
 type GrepToolRenderContext struct {

@@ -17,7 +17,7 @@ import (
 )
 
 // writeTokenToDisk persists token as the copilot provider credential in the
-// fake config file at path, mimicking what another crush instance would
+// fake config file at path, mimicking what another Sennit instance would
 // leave behind after a successful refresh.
 func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 	t.Helper()
@@ -42,7 +42,7 @@ func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 // and on disk at configPath. Managers that share a configPath also share
 // the per-provider refresh lock (RefreshLockPath derives from lockDir,
 // shared across the fakeStores here), which lets a single test process
-// faithfully simulate two crush instances: lock.File opens a fresh
+// faithfully simulate two Sennit instances: lock.File opens a fresh
 // descriptor per call, so two managers block each other on the same lock
 // file exactly as two processes would.
 //

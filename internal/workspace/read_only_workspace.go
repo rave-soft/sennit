@@ -7,20 +7,14 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
-	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/shell"
-	"github.com/rave-soft/sennit/internal/skills"
-	"github.com/rave-soft/sennit/internal/stats"
 )
 
 // ErrReadOnlyOperation is returned by a read-only workspace when a
@@ -48,8 +42,22 @@ func (e *ErrReadOnlyOperation) Error() string {
 // mutating operations. It is used for completed/interrupted threads
 // so the TUI can inspect persisted session data without risking
 // accidental writes or tearing down the parent workspace.
+//
+// It embeds Workspace rather than hand-writing a stub for all ~93 methods:
+// everything not overridden below is the embedded workspace's own
+// behavior, unchanged. That inverts the old failure mode. Before, a
+// forgotten stub was a compile error the moment Workspace grew a method.
+// Now, a forgotten override compiles fine and silently forwards whatever
+// that method does to the underlying workspace - which is worse for a
+// mutation, since read-only is a safety property. What closes that gap is
+// TestReadOnlyWorkspace_MethodClassificationIsComplete: it reflects over
+// Workspace's method set and fails whenever a method is not accounted for
+// in either refusedMethods or readOnlySafeMethods (see
+// read_only_workspace_classification_test.go), so a new mutating method
+// must be classified - and, if refused, given an override here - before
+// that test passes again.
 type readOnlyWorkspace struct {
-	underlying Workspace
+	Workspace
 	workingDir string
 	sessionID  string
 	reason     string
@@ -66,7 +74,7 @@ func (w *readOnlyWorkspace) readOnlyError(op string) error {
 // workspace returns - see ErrReadOnlyOperation.Reason. Pass "" when there
 // is nothing to explain.
 func newReadOnlyWorkspace(ws Workspace, workingDir, sessionID, reason string) *readOnlyWorkspace {
-	return &readOnlyWorkspace{underlying: ws, workingDir: workingDir, sessionID: sessionID, reason: reason}
+	return &readOnlyWorkspace{Workspace: ws, workingDir: workingDir, sessionID: sessionID, reason: reason}
 }
 
 // allowsSession permits the thread's root session and genuine agent-tool
@@ -77,13 +85,13 @@ func (w *readOnlyWorkspace) allowsSession(ctx context.Context, id string) (bool,
 	if id == w.sessionID {
 		return true, nil
 	}
-	if _, _, ok := w.underlying.ParseAgentToolSessionID(id); !ok {
+	if _, _, ok := w.ParseAgentToolSessionID(id); !ok {
 		return false, nil
 	}
 
 	seen := map[string]struct{}{id: {}}
 	for id != w.sessionID {
-		sess, err := w.underlying.GetSession(ctx, id)
+		sess, err := w.Workspace.GetSession(ctx, id)
 		if err != nil {
 			return false, err
 		}
@@ -94,7 +102,7 @@ func (w *readOnlyWorkspace) allowsSession(ctx context.Context, id string) (bool,
 		if parentID == w.sessionID {
 			return true, nil
 		}
-		if _, _, ok := w.underlying.ParseAgentToolSessionID(parentID); !ok {
+		if _, _, ok := w.ParseAgentToolSessionID(parentID); !ok {
 			return false, nil
 		}
 		if _, alreadySeen := seen[parentID]; alreadySeen {
@@ -110,11 +118,7 @@ func (w *readOnlyWorkspace) scopeError(id string) error {
 	return fmt.Errorf("read-only workspace: session %q is outside thread scope", id)
 }
 
-// -- Sessions (reads only) --
-
-func (w *readOnlyWorkspace) BackgroundJobCounts() shell.BackgroundJobCounts {
-	return w.underlying.BackgroundJobCounts()
-}
+// -- Sessions --
 
 func (w *readOnlyWorkspace) CreateSession(ctx context.Context, title string) (session.Session, error) {
 	return session.Session{}, w.readOnlyError("CreateSession")
@@ -128,7 +132,7 @@ func (w *readOnlyWorkspace) GetSession(ctx context.Context, sessionID string) (s
 	if !allowed {
 		return session.Session{}, w.scopeError(sessionID)
 	}
-	return w.underlying.GetSession(ctx, sessionID)
+	return w.Workspace.GetSession(ctx, sessionID)
 }
 
 func (w *readOnlyWorkspace) ListSessions(ctx context.Context) ([]session.Session, error) {
@@ -145,14 +149,6 @@ func (w *readOnlyWorkspace) SaveSession(ctx context.Context, sess session.Sessio
 
 func (w *readOnlyWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
 	return w.readOnlyError("DeleteSession")
-}
-
-func (w *readOnlyWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return w.underlying.CreateAgentToolSessionID(messageID, toolCallID)
-}
-
-func (w *readOnlyWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	return w.underlying.ParseAgentToolSessionID(sessionID)
 }
 
 func (w *readOnlyWorkspace) SetCurrentSession(ctx context.Context, sessionID string) error {
@@ -173,7 +169,7 @@ func (w *readOnlyWorkspace) SetCurrentSessionGeneration(ctx context.Context, ses
 	return nil
 }
 
-// -- Messages (reads only) --
+// -- Messages --
 
 func (w *readOnlyWorkspace) ListMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
 	allowed, err := w.allowsSession(ctx, sessionID)
@@ -183,7 +179,7 @@ func (w *readOnlyWorkspace) ListMessages(ctx context.Context, sessionID string) 
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return w.underlying.ListMessages(ctx, sessionID)
+	return w.Workspace.ListMessages(ctx, sessionID)
 }
 
 func (w *readOnlyWorkspace) ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
@@ -194,21 +190,21 @@ func (w *readOnlyWorkspace) ListUserMessages(ctx context.Context, sessionID stri
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return w.underlying.ListUserMessages(ctx, sessionID)
+	return w.Workspace.ListUserMessages(ctx, sessionID)
 }
 
 func (w *readOnlyWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
-	return w.underlying.ListUserMessages(ctx, w.sessionID)
+	return w.Workspace.ListUserMessages(ctx, w.sessionID)
 }
 
 func (w *readOnlyWorkspace) ListMessagesBySessionIDs(ctx context.Context, rootSessionID string, generation uint64, sessionIDs []string) (map[string][]message.Message, error) {
 	if rootSessionID != w.sessionID {
 		return nil, w.scopeError(rootSessionID)
 	}
-	return w.underlying.ListMessagesBySessionIDs(ctx, w.sessionID, generation, sessionIDs)
+	return w.Workspace.ListMessagesBySessionIDs(ctx, w.sessionID, generation, sessionIDs)
 }
 
-// -- Agent (query only, no mutations) --
+// -- Agent --
 
 func (w *readOnlyWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
 	return w.readOnlyError("AgentRun")
@@ -220,34 +216,6 @@ func (w *readOnlyWorkspace) AgentRunShellCommand(ctx context.Context, sessionID,
 
 func (w *readOnlyWorkspace) AgentCancel(sessionID string) {
 	// No-op: cancelling a non-running thread is harmless.
-}
-
-func (w *readOnlyWorkspace) AgentIsBusy() bool {
-	return w.underlying.AgentIsBusy()
-}
-
-func (w *readOnlyWorkspace) AgentIsSessionBusy(sessionID string) bool {
-	return w.underlying.AgentIsSessionBusy(sessionID)
-}
-
-func (w *readOnlyWorkspace) AgentModel() AgentModel {
-	return w.underlying.AgentModel()
-}
-
-func (w *readOnlyWorkspace) AgentIsReady() bool {
-	return w.underlying.AgentIsReady()
-}
-
-func (w *readOnlyWorkspace) AgentReadyErr() error {
-	return w.underlying.AgentReadyErr()
-}
-
-func (w *readOnlyWorkspace) AgentQueuedPrompts(sessionID string) int {
-	return w.underlying.AgentQueuedPrompts(sessionID)
-}
-
-func (w *readOnlyWorkspace) AgentQueuedPromptsList(sessionID string) []string {
-	return w.underlying.AgentQueuedPromptsList(sessionID)
 }
 
 func (w *readOnlyWorkspace) AgentClearQueue(sessionID string) {
@@ -297,10 +265,6 @@ func (w *readOnlyWorkspace) PermissionDeny(perm permission.PermissionRequest) bo
 	return false
 }
 
-func (w *readOnlyWorkspace) PermissionSkipRequests() bool {
-	return w.underlying.PermissionSkipRequests()
-}
-
 func (w *readOnlyWorkspace) PermissionSetSkipRequests(skip bool) {
 	// No-op: setting skip on a read-only workspace is harmless.
 }
@@ -315,11 +279,7 @@ func (w *readOnlyWorkspace) QuestionCancel() bool {
 	return false
 }
 
-// -- FileTracker (reads only) --
-
-func (w *readOnlyWorkspace) UncommittedFiles(ctx context.Context) ([]git.FileChange, error) {
-	return w.underlying.UncommittedFiles(ctx)
-}
+// -- FileTracker --
 
 func (w *readOnlyWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
 	// No-op: recording reads is harmless.
@@ -330,7 +290,7 @@ func (w *readOnlyWorkspace) FileTrackerLastReadTime(ctx context.Context, session
 	if err != nil || !allowed {
 		return time.Time{}
 	}
-	return w.underlying.FileTrackerLastReadTime(ctx, sessionID, path)
+	return w.Workspace.FileTrackerLastReadTime(ctx, sessionID, path)
 }
 
 func (w *readOnlyWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
@@ -341,10 +301,10 @@ func (w *readOnlyWorkspace) FileTrackerListReadFiles(ctx context.Context, sessio
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return w.underlying.FileTrackerListReadFiles(ctx, sessionID)
+	return w.Workspace.FileTrackerListReadFiles(ctx, sessionID)
 }
 
-// -- History (reads only) --
+// -- History --
 
 func (w *readOnlyWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
 	allowed, err := w.allowsSession(ctx, sessionID)
@@ -354,10 +314,10 @@ func (w *readOnlyWorkspace) ListSessionHistory(ctx context.Context, sessionID st
 	if !allowed {
 		return nil, w.scopeError(sessionID)
 	}
-	return w.underlying.ListSessionHistory(ctx, sessionID)
+	return w.Workspace.ListSessionHistory(ctx, sessionID)
 }
 
-// -- LSP (query only) --
+// -- LSP (mutations only) --
 
 func (w *readOnlyWorkspace) LSPStart(ctx context.Context, path string) {
 	// No-op: starting LSP on a read-only workspace is harmless.
@@ -367,26 +327,10 @@ func (w *readOnlyWorkspace) LSPStopAll(ctx context.Context) {
 	// No-op: stopping LSP on a read-only workspace is harmless.
 }
 
-func (w *readOnlyWorkspace) LSPGetStates() map[string]LSPClientInfo {
-	return w.underlying.LSPGetStates()
-}
-
-func (w *readOnlyWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
-	return w.underlying.LSPGetDiagnosticCounts(name)
-}
-
-// -- Config (reads only) --
-
-func (w *readOnlyWorkspace) Config() *config.Config {
-	return w.underlying.Config()
-}
+// -- Config --
 
 func (w *readOnlyWorkspace) WorkingDir() string {
 	return w.workingDir
-}
-
-func (w *readOnlyWorkspace) Resolver() config.VariableResolver {
-	return w.underlying.Resolver()
 }
 
 func (w *readOnlyWorkspace) UpdatePreferredModel(scope config.Scope, model config.SelectedModel) error {
@@ -421,47 +365,13 @@ func (w *readOnlyWorkspace) RefreshOAuthToken(ctx context.Context, scope config.
 	return w.readOnlyError("RefreshOAuthToken")
 }
 
-// -- Project lifecycle (reads only) --
-
-func (w *readOnlyWorkspace) ProjectNeedsInitialization() (bool, error) {
-	return w.underlying.ProjectNeedsInitialization()
-}
+// -- Project lifecycle (mutations only) --
 
 func (w *readOnlyWorkspace) MarkProjectInitialized() error {
 	return w.readOnlyError("MarkProjectInitialized")
 }
 
-func (w *readOnlyWorkspace) InitializePrompt() (string, error) {
-	return w.underlying.InitializePrompt()
-}
-
-func (w *readOnlyWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry, error) {
-	return w.underlying.ListSkills(ctx)
-}
-
-func (w *readOnlyWorkspace) ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error) {
-	return w.underlying.ReadSkill(ctx, skillID)
-}
-
-// -- MCP (query only) --
-
-func (w *readOnlyWorkspace) WaitForMCPInit(ctx context.Context) error {
-	return w.underlying.WaitForMCPInit(ctx)
-}
-
-// Stats is a read, so it passes straight through: a read-only workspace
-// refuses mutations, not questions about what has already happened.
-func (w *readOnlyWorkspace) Stats(ctx context.Context, req stats.Request) (stats.Snapshot, error) {
-	return w.underlying.Stats(ctx, req)
-}
-
-func (w *readOnlyWorkspace) MCPGetStates() map[string]MCPClientInfo {
-	return w.underlying.MCPGetStates()
-}
-
-func (w *readOnlyWorkspace) MCPResources() []MCPResourceInfo {
-	return w.underlying.MCPResources()
-}
+// -- MCP (mutations only) --
 
 func (w *readOnlyWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
 	// No-op: refreshing prompts on a read-only workspace is harmless.
@@ -473,18 +383,6 @@ func (w *readOnlyWorkspace) MCPRefreshResources(ctx context.Context, name string
 
 func (w *readOnlyWorkspace) RefreshMCPTools(ctx context.Context, name string) {
 	// No-op: refreshing tools on a read-only workspace is harmless.
-}
-
-func (w *readOnlyWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
-	return w.underlying.ReadMCPResource(ctx, name, uri)
-}
-
-func (w *readOnlyWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error) {
-	return w.underlying.ListMCPPrompts(ctx)
-}
-
-func (w *readOnlyWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
-	return w.underlying.GetMCPPrompt(clientID, promptID, args)
 }
 
 func (w *readOnlyWorkspace) EnableDockerMCP(ctx context.Context) error {
@@ -499,27 +397,7 @@ func (w *readOnlyWorkspace) MCPAuthenticate(ctx context.Context, name string) er
 	return w.readOnlyError("MCPAuthenticate")
 }
 
-func (w *readOnlyWorkspace) MCPPendingAuth() []MCPPendingAuthServer {
-	return w.underlying.MCPPendingAuth()
-}
-
-func (w *readOnlyWorkspace) MCPAuthURL(name string) string {
-	return w.underlying.MCPAuthURL(name)
-}
-
-// -- ThreadController (query only) --
-
-func (w *readOnlyWorkspace) SupportsThreads() bool {
-	return w.underlying.SupportsThreads()
-}
-
-func (w *readOnlyWorkspace) ListThreads(ctx context.Context) ([]proto.Thread, error) {
-	return w.underlying.ListThreads(ctx)
-}
-
-func (w *readOnlyWorkspace) GetThread(ctx context.Context, id string) (proto.Thread, error) {
-	return w.underlying.GetThread(ctx, id)
-}
+// -- ThreadController (mutations only) --
 
 func (w *readOnlyWorkspace) CreateThread(ctx context.Context, req proto.CreateThreadRequest) (proto.Thread, error) {
 	return proto.Thread{}, w.readOnlyError("CreateThread")
@@ -577,15 +455,7 @@ func SupportsThreadAttach(ws Workspace) bool {
 	return !refuses
 }
 
-// -- TaskController (query only) --
-
-func (w *readOnlyWorkspace) SupportsTasks() bool {
-	return w.underlying.SupportsTasks()
-}
-
-func (w *readOnlyWorkspace) ListTasks(ctx context.Context) ([]proto.Thread, error) {
-	return w.underlying.ListTasks(ctx)
-}
+// -- TaskController (mutations only) --
 
 func (w *readOnlyWorkspace) CancelTask(ctx context.Context, id, reason string) error {
 	return w.readOnlyError("CancelTask")

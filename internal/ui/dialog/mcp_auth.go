@@ -182,7 +182,7 @@ func (m *MCPAuth) startAuth() Action {
 	// Create a cancellable context owned by the dialog. The UI will
 	// use this context for the auth call, and we cancel it if the
 	// user closes the dialog or moves on.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(m.com.Context())
 	m.cancelAuth = cancel
 
 	return ActionCmd{tea.Batch(

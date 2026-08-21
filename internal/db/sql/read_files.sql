@@ -26,6 +26,17 @@ ORDER BY read_at DESC;
 SELECT COUNT(*) FROM read_files
 WHERE session_id = ?;
 
+-- name: CountReadFilesForSessionIDs :one
+-- gc's dependent-row count for a batch of sessions it is about to delete;
+-- see CountMessagesForSessionIDs for why json_each replaces an IN-list.
+WITH input AS (
+    SELECT CAST(sqlc.arg(session_ids_json) AS TEXT) AS session_ids_json
+)
+SELECT COUNT(*) FROM read_files
+WHERE read_files.session_id IN (
+    SELECT value FROM input, json_each(CAST(input.session_ids_json AS TEXT))
+);
+
 -- name: DeleteSessionReadFiles :exec
 DELETE FROM read_files
 WHERE session_id = ?;

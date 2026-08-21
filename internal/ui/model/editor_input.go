@@ -173,7 +173,7 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 		if m.hasSession() {
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := m.com.Workspace.FileTrackerLastReadTime(context.Background(), m.sess.current.ID, absPath)
+			lastRead := m.com.Workspace.FileTrackerLastReadTime(m.com.Context(), m.sess.current.ID, absPath)
 			if !lastRead.IsZero() {
 				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
 					return nil
@@ -215,7 +215,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 
 	resourceCmd := func() tea.Msg {
 		contents, err := m.com.Workspace.ReadMCPResource(
-			context.Background(),
+			m.com.Context(),
 			item.MCPName,
 			item.URI,
 		)
@@ -281,8 +281,8 @@ var workingPlaceholders = [...]string{
 // randomizePlaceholders selects random placeholder text for the textarea's
 // ready and working states.
 func (m *UI) randomizePlaceholders() {
-	m.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
-	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
+	m.editor.workingPlaceholder = workingPlaceholders[rand.Intn(len(workingPlaceholders))]
+	m.editor.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
 // checkBangModeAfterPaste engages bang mode when pasted text starts with
@@ -531,7 +531,7 @@ func (m *UI) pasteRichFromClipboard() tea.Msg {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), richPasteTimeout)
+	ctx, cancel := context.WithTimeout(m.com.Context(), richPasteTimeout)
 	defer cancel()
 	images, skipped := richpaste.Resolve(ctx, srcs, richpaste.Options{
 		MaxBytes: common.MaxAttachmentSize,

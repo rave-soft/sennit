@@ -197,7 +197,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 		SessionID:        sessionID,
 		Role:             string(params.Role),
 		Parts:            string(partsJSON),
-		Model:            sql.NullString{String: string(params.Model), Valid: true},
+		Model:            sql.NullString{String: params.Model, Valid: true},
 		Provider:         sql.NullString{String: params.Provider, Valid: params.Provider != ""},
 		IsSummaryMessage: isSummary,
 		Origin:           string(origin),

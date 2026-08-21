@@ -1,7 +1,8 @@
 // Package workspace defines the Workspace interface used by all
 // frontends (TUI, CLI) to interact with a running workspace. Two
-// implementations exist: one wrapping a local app.App instance and one
-// wrapping the HTTP client SDK.
+// implementations exist: [AppWorkspace], which wraps an in-process
+// app.App instance, and [readOnlyWorkspace], which wraps another
+// Workspace to restrict it to read-only operations.
 package workspace
 
 import (

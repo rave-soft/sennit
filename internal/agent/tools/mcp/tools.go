@@ -40,7 +40,7 @@ func (r *Registry) Tools() iter.Seq2[string, []*Tool] {
 func (r *Registry) RunTool(ctx context.Context, cfg ConfigProvider, name, toolName string, input string) (ToolResult, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(input), &args); err != nil {
-		return ToolResult{}, fmt.Errorf("error parsing parameters: %s", err)
+		return ToolResult{}, fmt.Errorf("error parsing parameters: %w", err)
 	}
 
 	c, err := r.getOrRenewClient(ctx, cfg, name)
@@ -148,20 +148,6 @@ func (r *Registry) RefreshTools(ctx context.Context, cfg ConfigProvider, name st
 	r.updateStateLocked(name, StateConnected, nil, session, prev.Counts)
 }
 
-// registerSessionTools lists the tools a live session exposes and writes them
-// into the shared registry, returning the number registered after any
-// configured allow/deny filtering. It is the single seam through which a
-// (re)connected session's tools enter the registry, so both the initial
-// connect and a lazy renew repopulate the tool list the agent sends to the LLM
-// instead of leaving it empty.
-func (r *Registry) registerSessionTools(ctx context.Context, cfg ConfigProvider, name string, sess *ClientSession) (int, error) {
-	tools, err := getTools(ctx, sess)
-	if err != nil {
-		return 0, err
-	}
-	return r.updateTools(cfg, name, tools), nil
-}
-
 func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 	// Always call ListTools to get the actual available tools.
 	// The InitializeResult Capabilities.Tools field may be an empty object {},
@@ -171,23 +157,6 @@ func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {
 		return nil, err
 	}
 	return result.Tools, nil
-}
-
-func (r *Registry) updateTools(cfg ConfigProvider, name string, tools []*Tool) int {
-	r.catalogMu.Lock()
-	defer r.catalogMu.Unlock()
-	mcpCfg, ok := cfg.Config().MCP[name]
-	if ok {
-		tools = filterTools(mcpCfg, tools)
-	}
-	if len(tools) == 0 {
-		r.allTools.Del(name)
-		r.catalogChanged()
-		return 0
-	}
-	r.allTools.Set(name, tools)
-	r.catalogChanged()
-	return len(tools)
 }
 
 // filterTools filters tools based on enabled_tools (allow list) and

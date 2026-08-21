@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -23,6 +24,58 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
+
+// sessionState holds the active session and the bookkeeping around loading,
+// continuing, and navigating between sessions.
+type sessionState struct {
+	current *session.Session
+	files   []SessionFile
+
+	// keeps track of read files while we don't have a session id
+	fileReads []string
+
+	// initialSessionID is set when loading a specific session on startup.
+	initialSessionID string
+	// continueLastSession is set to continue the most recent session on startup.
+	continueLastSession bool
+
+	lastUserMessageTime int64
+
+	// modelUsed is the model the loaded session's own assistant messages
+	// were produced by — which is not the selected model for a sub-agent's
+	// session or one opened from history. See viewedModel.
+	modelUsed sessionModelRef
+
+	loadGen        uint64
+	loadExpectedID string
+
+	// dialogLoading / dialogGen track the off-thread
+	// ListSessions fetch dispatched by openSessionsDialog; see
+	// sessionsLoadedMsg.
+	dialogLoading bool
+	dialogGen     uint64
+
+	// navStack tracks sub-agent session navigation: each frame records
+	// where alt+up should return to and the sibling delegations
+	// alt+left/alt+right can cycle through, without re-scanning the
+	// (possibly no-longer-loaded) parent chat. See enterChildSession.
+	navStack []sessionNavFrame
+}
+
+// sessionFilesUpdatesMsg is sent when the files for this session have been updated
+type sessionFilesUpdatesMsg struct {
+	sessionFiles []SessionFile
+}
+
+// createSessionMsg carries a newly created session and the captured send
+// parameters so that Update can apply the session creation and then
+// dispatch the AgentRun cmd.
+type createSessionMsg struct {
+	session     session.Session
+	content     string
+	attachments []message.Attachment
+	generation  uint64
+}
 
 func (m *UI) requestSessionLoad(sessionID string) tea.Cmd {
 	return m.beginSessionLoad(sessionID)
@@ -207,8 +260,9 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	workspace := m.com.Workspace
 	generation := m.sess.loadGen
+	ctx := m.com.Context()
 	return func() tea.Msg {
-		if err := workspace.SetCurrentSessionGeneration(context.Background(), sessionID, generation); err != nil {
+		if err := workspace.SetCurrentSessionGeneration(ctx, sessionID, generation); err != nil {
 			slog.Debug("Failed to report current session", "session_id", sessionID, "error", err)
 		}
 		return nil
@@ -276,7 +330,7 @@ func loadModifiedFiles(ctx context.Context, ws workspace.Workspace, sessionID st
 }
 
 func (m *UI) loadModifiedFiles(sessionID string) ([]SessionFile, error) {
-	return loadModifiedFiles(context.Background(), m.com.Workspace, sessionID)
+	return loadModifiedFiles(m.com.Context(), m.com.Workspace, sessionID)
 }
 
 // handleFileEvent processes file change events and updates the session file
@@ -400,8 +454,8 @@ func (m *UI) startLSPs(paths []string) tea.Cmd {
 		return nil
 	}
 
+	ctx := m.com.Context()
 	return func() tea.Msg {
-		ctx := context.Background()
 		for _, path := range paths {
 			m.com.Workspace.LSPStart(ctx, path)
 		}

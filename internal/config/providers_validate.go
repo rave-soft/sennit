@@ -29,31 +29,21 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
-			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
-			c.addProblem(Problem{
-				Severity: SeverityWarn,
-				Area:     AreaProvider,
-				Subject:  id,
-				Message:  fmt.Sprintf("provider %s dropped: unsupported type %q", id, providerConfig.Type),
-			})
-			c.Providers.Del(id)
+			problem := providerDropProblem(id, fmt.Sprintf("unsupported type %q", providerConfig.Type), "")
+			c.dropProvider(id, slog.Warn, "Skipping custom provider due to unsupported provider type", []any{"provider", id}, &problem)
 			continue
 		}
 
 		if providerConfig.Disable {
-			slog.Debug("Skipping custom provider due to disable flag", "provider", id)
-			c.Providers.Del(id)
+			// Deliberately quiet: the user asked for this provider to be
+			// off, so unlike the drops below, this is not something
+			// `sennit doctor` should flag as a problem.
+			c.dropProvider(id, slog.Debug, "Skipping custom provider due to disable flag", []any{"provider", id}, nil)
 			continue
 		}
 		if providerConfig.BaseURL == "" {
-			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id)
-			c.addProblem(Problem{
-				Severity: SeverityWarn,
-				Area:     AreaProvider,
-				Subject:  id,
-				Message:  fmt.Sprintf("provider %s dropped: missing base_url", id),
-			})
-			c.Providers.Del(id)
+			problem := providerDropProblem(id, "missing base_url", "")
+			c.dropProvider(id, slog.Warn, "Skipping custom provider due to missing API endpoint", []any{"provider", id}, &problem)
 			continue
 		}
 
@@ -62,8 +52,12 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 			if result.err != nil {
 				slog.Warn("Model discovery failed", "provider", id, "error", result.err)
 				if len(providerConfig.Models) == 0 {
-					slog.Warn("Skipping provider with no models after failed discovery", "provider", id)
-					c.Providers.Del(id)
+					// No Problem recorded here, unlike the other drops in
+					// this function: this looks like accidental drift
+					// rather than a deliberate choice (see the "no models"
+					// drop a few lines down, which does record one for the
+					// same underlying condition), preserved as-is.
+					c.dropProvider(id, slog.Warn, "Skipping provider with no models after failed discovery", []any{"provider", id}, nil)
 					continue
 				}
 			} else if len(result.models) > 0 {
@@ -81,67 +75,31 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		}
 
 		if len(providerConfig.Models) == 0 {
-			slog.Warn("Skipping custom provider because the provider has no models", "provider", id)
-			c.addProblem(Problem{
-				Severity: SeverityWarn,
-				Area:     AreaProvider,
-				Subject:  id,
-				Message:  fmt.Sprintf("provider %s dropped: no models configured or discovered", id),
-			})
-			c.Providers.Del(id)
+			problem := providerDropProblem(id, "no models configured or discovered", "")
+			c.dropProvider(id, slog.Warn, "Skipping custom provider because the provider has no models", []any{"provider", id}, &problem)
 			continue
 		}
 
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
-			c.addProblem(Problem{
-				Severity: SeverityWarn,
-				Area:     AreaProvider,
-				Subject:  id,
-				Message:  fmt.Sprintf("provider %s has no api_key", id),
-				Hint:     "this is expected for local providers (Ollama, LM Studio, ...); ignore if intentional",
-			})
+			c.addProblem(providerProblem(id, fmt.Sprintf("provider %s has no api_key", id),
+				"this is expected for local providers (Ollama, LM Studio, ...); ignore if intentional"))
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {
-			slog.Warn("Skipping custom provider due to missing API endpoint", "provider", id, "error", err)
-			c.addProblem(Problem{
-				Severity: SeverityWarn,
-				Area:     AreaProvider,
-				Subject:  id,
-				Message:  fmt.Sprintf("provider %s dropped: missing base_url", id),
-			})
-			c.Providers.Del(id)
+			problem := providerDropProblem(id, "missing base_url", "")
+			c.dropProvider(id, slog.Warn, "Skipping custom provider due to missing API endpoint", []any{"provider", id, "error", err}, &problem)
 			continue
 		}
 
 		// Custom-provider headers share the MCP error contract; see
 		// mergeCatalogProviders' known-provider loop.
-		for k, v := range providerConfig.ExtraHeaders {
-			resolved, err := resolver.ResolveValue(v)
-			if err != nil {
-				return fmt.Errorf("resolving provider %s header %q: %w", id, k, err)
-			}
-			if resolved == "" {
-				delete(providerConfig.ExtraHeaders, k)
-				continue
-			}
-			providerConfig.ExtraHeaders[k] = resolved
+		if err := resolveProviderHeaders(providerConfig.ExtraHeaders, resolver, id); err != nil {
+			return err
 		}
 
-		// The proxy is optional and must never block provider loading the
-		// way a missing api_key/base_url does, so a resolution failure
-		// just clears the field and warns instead of skipping the provider.
-		if providerConfig.ProxyURL != "" {
-			resolvedProxy, err := resolver.ResolveValue(providerConfig.ProxyURL)
-			if err != nil || resolvedProxy == "" {
-				slog.Warn("Ignoring provider proxy_url due to resolution failure", "provider", id, "error", err)
-				providerConfig.ProxyURL = ""
-			} else {
-				providerConfig.ProxyURL = resolvedProxy
-			}
-		}
+		providerConfig.ProxyURL = resolveOptionalProxy(providerConfig.ProxyURL, resolver, id)
 
 		c.Providers.Set(id, providerConfig)
 	}

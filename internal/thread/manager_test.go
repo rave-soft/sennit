@@ -1,4 +1,4 @@
-package thread
+package thread_test
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/thread"
 
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/message"
@@ -27,13 +29,13 @@ func TestNewManager_WorktreeDirResolution(t *testing.T) {
 	// itself — which is what makes keeping them in-repo workable at all.
 	t.Run("empty defaults to threads inside the data directory", func(t *testing.T) {
 		dataDir := filepath.Join(repoRoot, ".sennit")
-		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, DataDir: dataDir})
-		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.worktreeDir)
+		mgr := thread.NewManager(thread.ManagerOptions{RepoRoot: repoRoot, DataDir: dataDir})
+		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.WorktreeDirForTest())
 	})
 
 	t.Run("empty with no data directory falls back to the repo's own .sennit", func(t *testing.T) {
-		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot})
-		require.Equal(t, filepath.Join(repoRoot, ".sennit", "threads"), mgr.worktreeDir)
+		mgr := thread.NewManager(thread.ManagerOptions{RepoRoot: repoRoot})
+		require.Equal(t, filepath.Join(repoRoot, ".sennit", "threads"), mgr.WorktreeDirForTest())
 	})
 
 	// A relocated data directory takes the worktrees with it: they are
@@ -41,19 +43,19 @@ func TestNewManager_WorktreeDirResolution(t *testing.T) {
 	// a checkout back inside a repo that has no .gitignore covering it.
 	t.Run("a relocated data directory takes the worktrees with it", func(t *testing.T) {
 		dataDir := filepath.Join(string(filepath.Separator), "var", "lib", "sennit", "myrepo")
-		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, DataDir: dataDir})
-		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.worktreeDir)
+		mgr := thread.NewManager(thread.ManagerOptions{RepoRoot: repoRoot, DataDir: dataDir})
+		require.Equal(t, filepath.Join(dataDir, "threads"), mgr.WorktreeDirForTest())
 	})
 
 	t.Run("relative resolves against repo root's parent", func(t *testing.T) {
-		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, WorktreeDir: "../thread-worktrees"})
-		require.Equal(t, filepath.Join(string(filepath.Separator), "home", "thread-worktrees"), mgr.worktreeDir)
+		mgr := thread.NewManager(thread.ManagerOptions{RepoRoot: repoRoot, WorktreeDir: "../thread-worktrees"})
+		require.Equal(t, filepath.Join(string(filepath.Separator), "home", "thread-worktrees"), mgr.WorktreeDirForTest())
 	})
 
 	t.Run("absolute is used as-is", func(t *testing.T) {
 		abs := filepath.Join(string(filepath.Separator), "var", "tmp", "sennit-threads")
-		mgr := NewManager(ManagerOptions{RepoRoot: repoRoot, WorktreeDir: abs})
-		require.Equal(t, abs, mgr.worktreeDir)
+		mgr := thread.NewManager(thread.ManagerOptions{RepoRoot: repoRoot, WorktreeDir: abs})
+		require.Equal(t, abs, mgr.WorktreeDirForTest())
 	})
 }
 
@@ -66,10 +68,10 @@ func TestManager_CreateDispatchesGoalWithAgentOrigin(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "origin-goal",
 		Goal:        "implement the thing",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 	})
 	require.NoError(t, err)
 
@@ -86,16 +88,16 @@ func TestManager_CreateHappyPath(t *testing.T) {
 
 	events := mgr.Subscribe(t.Context())
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "alpha",
 		Goal:        "implement the thing",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "alpha", st.Name)
 	require.Equal(t, "main", st.BaseBranch)
 	require.Equal(t, "thread/alpha", st.Branch)
-	require.Equal(t, StatusRunning, st.Status)
+	require.Equal(t, thread.StatusRunning, st.Status)
 	require.NotEmpty(t, st.SessionID)
 	require.DirExists(t, st.WorktreePath)
 
@@ -111,10 +113,10 @@ func TestManager_CreateHappyPath(t *testing.T) {
 		select {
 		case ev := <-events:
 			switch ev.Payload.Type {
-			case EventCreated:
+			case thread.EventCreated:
 				gotCreated = true
-			case EventStatusChanged:
-				if ev.Payload.Thread.Status == StatusRunning {
+			case thread.EventStatusChanged:
+				if ev.Payload.Thread.Status == thread.StatusRunning {
 					gotRunning = true
 				}
 			}
@@ -134,9 +136,9 @@ func TestManager_CreateWithoutGoalStaysIdle(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "solo", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "solo", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
-	require.Equal(t, StatusIdle, st.Status)
+	require.Equal(t, thread.StatusIdle, st.Status)
 	require.NotEmpty(t, st.SessionID)
 	require.DirExists(t, st.WorktreePath)
 	require.Contains(t, runGit(t, repo, "branch", "--list", "thread/solo"), "thread/solo")
@@ -151,7 +153,7 @@ func TestManager_CreateWithoutGoalStaysIdle(t *testing.T) {
 
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusIdle, got.Status)
+	require.Equal(t, thread.StatusIdle, got.Status)
 	require.Empty(t, got.Error)
 }
 
@@ -161,15 +163,15 @@ func TestManager_SendIntoIdleThread(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "solo-send", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "solo-send", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
-	require.Equal(t, StatusIdle, st.Status)
+	require.Equal(t, thread.StatusIdle, st.Status)
 
 	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "now do the thing")))
 
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusRunning, got.Status)
+	require.Equal(t, thread.StatusRunning, got.Status)
 
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
@@ -182,7 +184,7 @@ func TestManager_SendIntoIdleThread(t *testing.T) {
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 	got, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCompleted, got.Status)
+	require.Equal(t, thread.StatusCompleted, got.Status)
 }
 
 // Activate respawns a finished thread's workspace without dispatching a
@@ -191,7 +193,7 @@ func TestManager_ActivateFinishedThread(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "revive", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "revive", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
@@ -203,7 +205,7 @@ func TestManager_ActivateFinishedThread(t *testing.T) {
 
 	activated, err := mgr.Activate(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusIdle, activated.Status)
+	require.Equal(t, thread.StatusIdle, activated.Status)
 	require.Equal(t, "finished", activated.ResultSummary, "the earlier run's result must survive")
 	require.NotNil(t, mgr.Handle(st.ID))
 
@@ -214,7 +216,7 @@ func TestManager_ActivateFinishedThread(t *testing.T) {
 	// Activating a live thread is a no-op that reports its current state.
 	again, err := mgr.Activate(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusIdle, again.Status)
+	require.Equal(t, thread.StatusIdle, again.Status)
 }
 
 // A merge in flight, and a merge already landed, are the two states
@@ -223,22 +225,22 @@ func TestManager_ActivateFinishedThread(t *testing.T) {
 // its base and is on its way to being discarded, worktree included.
 func TestManager_ActivateRefusesMergeInFlightAndMerged(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
-	mgr := NewManager(ManagerOptions{
+	store := thread.NewStoreForTest(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
 
-	for _, status := range []Status{StatusMerging, StatusMerged} {
+	for _, status := range []thread.Status{thread.StatusMerging, thread.StatusMerged} {
 		t.Run(string(status), func(t *testing.T) {
-			st, err := store.Create(t.Context(), CreateParams{
+			st, err := store.Create(t.Context(), thread.CreateParams{
 				Name: "merge-" + string(status), Goal: "x", BaseBranch: "main",
 				Branch: "thread/merge-" + string(status), WorktreePath: t.TempDir(),
 			})
 			require.NoError(t, err)
-			_, err = store.SetStatus(t.Context(), st.ID, SetStatusParams{Status: status})
+			_, err = store.SetStatus(t.Context(), st.ID, thread.SetStatusParams{Status: status})
 			require.NoError(t, err)
 
 			_, err = mgr.Activate(t.Context(), st.ID)
@@ -265,22 +267,22 @@ func TestManager_ActivateRefusesMergeInFlightAndMerged(t *testing.T) {
 // because somebody looked at it.
 func TestManager_ActivateRestingMergeFlowKeepsStatus(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
-	mgr := NewManager(ManagerOptions{
+	store := thread.NewStoreForTest(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
 
-	for _, status := range []Status{StatusConflict, StatusMergeBlocked} {
+	for _, status := range []thread.Status{thread.StatusConflict, thread.StatusMergeBlocked} {
 		t.Run(string(status), func(t *testing.T) {
-			st, err := store.Create(t.Context(), CreateParams{
+			st, err := store.Create(t.Context(), thread.CreateParams{
 				Name: "rest-" + string(status), Goal: "x", BaseBranch: "main",
 				Branch: "thread/rest-" + string(status), WorktreePath: t.TempDir(),
 			})
 			require.NoError(t, err)
-			_, err = store.SetStatus(t.Context(), st.ID, SetStatusParams{
+			_, err = store.SetStatus(t.Context(), st.ID, thread.SetStatusParams{
 				Status: status, Error: "merge conflicts: a.go", ResultSummary: "did the work",
 			})
 			require.NoError(t, err)
@@ -309,7 +311,7 @@ func TestManager_CancelLeavesTerminalWithReasonAndKeepsWorktree(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "stoppable", Goal: "do the thing", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "stoppable", Goal: "do the thing", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
@@ -319,7 +321,7 @@ func TestManager_CancelLeavesTerminalWithReasonAndKeepsWorktree(t *testing.T) {
 
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCancelled, got.Status)
+	require.Equal(t, thread.StatusCancelled, got.Status)
 	require.Equal(t, "no longer needed", got.Error)
 	require.Nil(t, mgr.Handle(st.ID), "the runtime must be released")
 
@@ -340,7 +342,7 @@ func TestManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "unreasoned", Goal: "do the thing", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "unreasoned", Goal: "do the thing", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
@@ -349,7 +351,7 @@ func TestManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCancelled, got.Status)
+	require.Equal(t, thread.StatusCancelled, got.Status)
 	require.Equal(t, "cancelled", got.Error)
 }
 
@@ -366,22 +368,22 @@ func TestManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 // "is there a run in flight to stop", and for all four the answer is no.
 func TestManager_CancelRefusesMergeFlow(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
-	mgr := NewManager(ManagerOptions{
+	store := thread.NewStoreForTest(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
 
-	for _, status := range []Status{StatusMerging, StatusMerged, StatusConflict, StatusMergeBlocked} {
+	for _, status := range []thread.Status{thread.StatusMerging, thread.StatusMerged, thread.StatusConflict, thread.StatusMergeBlocked} {
 		t.Run(string(status), func(t *testing.T) {
-			st, err := store.Create(t.Context(), CreateParams{
+			st, err := store.Create(t.Context(), thread.CreateParams{
 				Name: "cancel-" + string(status), Goal: "x", BaseBranch: "main",
 				Branch: "thread/cancel-" + string(status), WorktreePath: t.TempDir(),
 			})
 			require.NoError(t, err)
-			_, err = store.SetStatus(t.Context(), st.ID, SetStatusParams{Status: status})
+			_, err = store.SetStatus(t.Context(), st.ID, thread.SetStatusParams{Status: status})
 			require.NoError(t, err)
 
 			err = mgr.Cancel(t.Context(), st.ID, "stop")
@@ -398,20 +400,20 @@ func TestManager_CancelRefusesMergeFlow(t *testing.T) {
 // a half-installed runtime behind.
 func TestManager_ActivateRejectsMissingWorktree(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
-	mgr := NewManager(ManagerOptions{
+	store := thread.NewStoreForTest(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
 
-	st, err := store.Create(t.Context(), CreateParams{
+	st, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "gone", Goal: "x", BaseBranch: "main",
 		Branch: "thread/gone", WorktreePath: filepath.Join(t.TempDir(), "missing"),
 	})
 	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), st.ID, SetStatusParams{Status: StatusCompleted})
+	_, err = store.SetStatus(t.Context(), st.ID, thread.SetStatusParams{Status: thread.StatusCompleted})
 	require.NoError(t, err)
 
 	_, err = mgr.Activate(t.Context(), st.ID)
@@ -423,37 +425,37 @@ func TestManager_ActivateRejectsMissingWorktree(t *testing.T) {
 // workspace is simply not spawned until something attaches.
 func TestManager_RecoverLeavesIdleThreads(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
-	mgr := NewManager(ManagerOptions{
+	store := thread.NewStoreForTest(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
 
-	idle, err := store.Create(t.Context(), CreateParams{
+	idle, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "idle-across-restart", Goal: "", BaseBranch: "main",
 		Branch: "thread/idle-across-restart", WorktreePath: t.TempDir(),
 	})
 	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), idle.ID, SetStatusParams{Status: StatusIdle})
+	_, err = store.SetStatus(t.Context(), idle.ID, thread.SetStatusParams{Status: thread.StatusIdle})
 	require.NoError(t, err)
 
 	require.NoError(t, mgr.Recover(t.Context()))
 
 	got, err := store.Get(t.Context(), idle.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusIdle, got.Status)
+	require.Equal(t, thread.StatusIdle, got.Status)
 }
 
 func TestManager_CreateMarksAgentThreadSessionAsChild(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:            "child-session",
 		Goal:            "implement the thing",
-		MergePolicy:     MergeManual,
+		MergePolicy:     thread.MergeManual,
 		ParentSessionID: "parent-session",
 	})
 	require.NoError(t, err)
@@ -470,10 +472,10 @@ func TestManager_CreateRejectsDuplicateName(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
 
-	_, err := mgr.Create(t.Context(), CreateArgs{Name: "dup", Goal: "x", MergePolicy: MergeManual})
+	_, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
-	_, err = mgr.Create(t.Context(), CreateArgs{Name: "dup", Goal: "x", MergePolicy: MergeManual})
+	_, err = mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x", MergePolicy: thread.MergeManual})
 	require.Error(t, err)
 }
 
@@ -481,7 +483,7 @@ func TestManager_CreateRejectsInvalidName(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
 
-	_, err := mgr.Create(t.Context(), CreateArgs{Name: "Not Valid!", Goal: "x"})
+	_, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "Not Valid!", Goal: "x"})
 	require.Error(t, err)
 }
 
@@ -489,7 +491,7 @@ func TestManager_ManualPolicyCompleted(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "beta", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "beta", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	writeFile(t, st.WorktreePath, "output.txt", "did the work\n")
@@ -504,7 +506,7 @@ func TestManager_ManualPolicyCompleted(t *testing.T) {
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusCompleted, st.Status)
+	require.Equal(t, thread.StatusCompleted, st.Status)
 	require.Equal(t, "finished", st.ResultSummary)
 	require.NotZero(t, st.CompletedAt)
 	require.NoFileExists(t, filepath.Join(repo, "output.txt"))
@@ -521,9 +523,9 @@ func TestManager_RunCompleteSuccessAutoMerge(t *testing.T) {
 	mgr, spawner := newTestManager(t, repo)
 
 	// Default MergePolicy is auto.
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "gamma", Goal: "do it"})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "gamma", Goal: "do it"})
 	require.NoError(t, err)
-	require.Equal(t, MergeAuto, st.MergePolicy)
+	require.Equal(t, thread.MergeAuto, st.MergePolicy)
 
 	writeFile(t, st.WorktreePath, "output.txt", "auto merged\n")
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
@@ -540,7 +542,7 @@ func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "delta", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "delta", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	// The base branch (main, checked out in repo itself) and the thread
@@ -557,7 +559,7 @@ func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
 	require.NoError(t, mergeErr)
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusConflict, st.Status)
+	require.Equal(t, thread.StatusConflict, st.Status)
 	require.Contains(t, st.Error, "README.md")
 
 	// Resolve: write the merged content and stage it, but don't commit —
@@ -567,7 +569,7 @@ func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
 
 	merged, mergeErr := mgr.Merge(t.Context(), st.ID)
 	require.NoError(t, mergeErr)
-	require.Equal(t, StatusMerged, merged.Status,
+	require.Equal(t, thread.StatusMerged, merged.Status,
 		"Merge must report the outcome itself; the row is gone by the time it returns")
 	requireDiscarded(t, mgr, repo, st)
 
@@ -583,7 +585,7 @@ func TestManager_MergeBlockedWhenBaseCheckedOutAndDirty(t *testing.T) {
 	// main is checked out in repo (the primary worktree) throughout, so
 	// the fast-forward step must fall back to the ff-only merge path —
 	// which this test then blocks by leaving repo dirty.
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "epsilon", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "epsilon", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	writeFile(t, st.WorktreePath, "output.txt", "content\n")
@@ -596,7 +598,7 @@ func TestManager_MergeBlockedWhenBaseCheckedOutAndDirty(t *testing.T) {
 	require.NoError(t, mergeErr)
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusMergeBlocked, st.Status)
+	require.Equal(t, thread.StatusMergeBlocked, st.Status)
 	require.NotEmpty(t, st.Error)
 }
 
@@ -609,11 +611,11 @@ func TestManager_FastForwardWhenBaseNotCheckedOut(t *testing.T) {
 
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{
 		Name:        "zeta",
 		Goal:        "do it",
 		BaseBranch:  "other-base",
-		MergePolicy: MergeManual,
+		MergePolicy: thread.MergeManual,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "other-base", st.BaseBranch)
@@ -634,7 +636,7 @@ func TestManager_WaitWakesOnCompletion(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "eta", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "eta", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	done := make(chan error, 1)
@@ -660,52 +662,52 @@ func TestManager_WaitWakesOnCompletion(t *testing.T) {
 
 func TestManager_Recover(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
-	mgr := NewManager(ManagerOptions{
+	store := thread.NewStoreForTest(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
 
-	running, err := store.Create(t.Context(), CreateParams{
+	running, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "running-gone", Goal: "x", BaseBranch: "main",
 		Branch: "thread/running-gone", WorktreePath: filepath.Join(t.TempDir(), "missing"),
 	})
 	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), running.ID, SetStatusParams{Status: StatusRunning})
+	_, err = store.SetStatus(t.Context(), running.ID, thread.SetStatusParams{Status: thread.StatusRunning})
 	require.NoError(t, err)
 
 	presentWorktree := t.TempDir()
-	stillRunning, err := store.Create(t.Context(), CreateParams{
+	stillRunning, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "running-present", Goal: "x", BaseBranch: "main",
 		Branch: "thread/running-present", WorktreePath: presentWorktree,
 	})
 	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), stillRunning.ID, SetStatusParams{Status: StatusRunning})
+	_, err = store.SetStatus(t.Context(), stillRunning.ID, thread.SetStatusParams{Status: thread.StatusRunning})
 	require.NoError(t, err)
 
-	merged, err := store.Create(t.Context(), CreateParams{
+	merged, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "already-merged", Goal: "x", BaseBranch: "main",
 		Branch: "thread/already-merged", WorktreePath: filepath.Join(t.TempDir(), "also-missing"),
 	})
 	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), merged.ID, SetStatusParams{Status: StatusMerged, CompletedAt: 1})
+	_, err = store.SetStatus(t.Context(), merged.ID, thread.SetStatusParams{Status: thread.StatusMerged, CompletedAt: 1})
 	require.NoError(t, err)
 
 	require.NoError(t, mgr.Recover(t.Context()))
 
 	got, err := store.Get(t.Context(), running.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusFailed, got.Status)
+	require.Equal(t, thread.StatusFailed, got.Status)
 
 	got, err = store.Get(t.Context(), stillRunning.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, got.Status)
+	require.Equal(t, thread.StatusInterrupted, got.Status)
 
 	got, err = store.Get(t.Context(), merged.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusMerged, got.Status)
+	require.Equal(t, thread.StatusMerged, got.Status)
 }
 
 // TestManager_RecoverReconcilesNonThreadKinds guards the generic recovery
@@ -725,20 +727,20 @@ func TestManager_Recover(t *testing.T) {
 // store will use.
 func TestManager_RecoverReconcilesNonThreadKinds(t *testing.T) {
 	repo := initRepo(t)
-	store := newTestStoreDB(t)
-	mgr := NewManager(ManagerOptions{
+	store := thread.NewStoreForTest(t)
+	mgr := thread.NewManager(thread.ManagerOptions{
 		Store:       store,
 		Spawner:     newFakeSpawner(t),
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
 
-	task, err := store.Create(t.Context(), CreateParams{
+	task, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "task-left-running", Goal: "x",
-		Kind: KindTask,
+		Kind: thread.KindTask,
 	})
 	require.NoError(t, err)
-	_, err = store.SetStatus(t.Context(), task.ID, SetStatusParams{Status: StatusRunning})
+	_, err = store.SetStatus(t.Context(), task.ID, thread.SetStatusParams{Status: thread.StatusRunning})
 	require.NoError(t, err)
 
 	// Confirm the setup actually exercises the gap this test guards:
@@ -753,14 +755,14 @@ func TestManager_RecoverReconcilesNonThreadKinds(t *testing.T) {
 
 	got, err := store.Get(t.Context(), task.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusInterrupted, got.Status, "recovery must reconcile every delegation kind, not just threads")
+	require.Equal(t, thread.StatusInterrupted, got.Status, "recovery must reconcile every delegation kind, not just threads")
 }
 
 func TestManager_RemoveRefusesActiveWithoutForce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "theta", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "theta", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	err = mgr.Remove(t.Context(), st.ID, false, false)
@@ -771,7 +773,7 @@ func TestManager_RemoveRefusesDirtyUnmergedWithoutForce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "iota", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "iota", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	writeFile(t, st.WorktreePath, "uncommitted.txt", "x\n")
@@ -786,7 +788,7 @@ func TestManager_RemoveForce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "kappa", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "kappa", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	worktreePath := st.WorktreePath
 
@@ -810,7 +812,7 @@ func TestManager_RemoveClearsARecordCleanedUpByHand(t *testing.T) {
 	repo := initRepo(t)
 	mgr, _ := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "lambda", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "lambda", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	runGit(t, repo, "worktree", "remove", "--force", st.WorktreePath)
@@ -826,7 +828,7 @@ func TestManager_SendRedispatches(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "lambda", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "lambda", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	writeFile(t, st.WorktreePath, "output.txt", "content\n")
@@ -837,7 +839,7 @@ func TestManager_SendRedispatches(t *testing.T) {
 
 	st, err = mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusRunning, st.Status)
+	require.Equal(t, thread.StatusRunning, st.Status)
 
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, 5*time.Millisecond)
@@ -852,7 +854,7 @@ func TestManager_SendReportsQueuedBehindRunningTurn(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "busy", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "busy", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	// The goal run is still in flight, with two follow-ups already waiting.
@@ -880,7 +882,7 @@ func TestManager_SendReportsResumeAsImmediate(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "resumed", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "resumed", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
@@ -900,7 +902,7 @@ func TestManager_HandleAndWorkspaceID(t *testing.T) {
 	require.Nil(t, mgr.Handle("no-such-id"))
 	require.Empty(t, mgr.WorkspaceID("no-such-id"))
 
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "mu", Goal: "do it", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "mu", Goal: "do it", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	// fakeHandle.ID() is the worktree path (see fakeSpawner.Spawn).
@@ -923,7 +925,7 @@ func TestManager_HandleAndWorkspaceID(t *testing.T) {
 func TestManager_SendOwnershipFollowsLatestRun(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "owner", Goal: "go", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "owner", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
@@ -955,21 +957,21 @@ func TestManager_SendOwnershipFollowsLatestRun(t *testing.T) {
 	require.Never(t, func() bool { return mgr.Handle(st.ID) == nil }, 100*time.Millisecond, 10*time.Millisecond)
 	got, err := mgr.Get(t.Context(), st.ID)
 	require.NoError(t, err)
-	require.Equal(t, StatusRunning, got.Status)
+	require.Equal(t, thread.StatusRunning, got.Status)
 
 	// The follow-up completing settles everything.
 	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: followUpRunID, Text: "second done"})
 	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, time.Second, time.Millisecond)
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
-		return err == nil && got.Status == StatusCompleted
+		return err == nil && got.Status == thread.StatusCompleted
 	}, time.Second, time.Millisecond)
 }
 
 func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "once", Goal: "go", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "once", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
@@ -1011,7 +1013,7 @@ func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
 func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "cancel-error", Goal: "go", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "cancel-error", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
@@ -1021,15 +1023,15 @@ func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {
 	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: runID, Error: "cancelled", Cancelled: true})
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
-		return err == nil && got.Status == StatusInterrupted
+		return err == nil && got.Status == thread.StatusInterrupted
 	}, time.Second, time.Millisecond)
 }
 
 func TestManager_RunAcceptedImmediateErrorCompletesAndReleases(t *testing.T) {
 	repo := initRepo(t)
 	spawner := newFakeSpawner(t)
-	mgr := NewManager(ManagerOptions{
-		Store:       newTestStoreDB(t),
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       thread.NewStoreForTest(t),
 		Spawner:     spawner,
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
@@ -1037,11 +1039,11 @@ func TestManager_RunAcceptedImmediateErrorCompletesAndReleases(t *testing.T) {
 	// Configure the coordinator created by Spawn before Create dispatches.
 	// Its RunAccepted returns this error and deliberately publishes no event.
 	spawner.runErr = errors.New("boom")
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "immediate-error", Goal: "go", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "immediate-error", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
-		return err == nil && got.Status == StatusFailed && strings.Contains(got.Error, "boom")
+		return err == nil && got.Status == thread.StatusFailed && strings.Contains(got.Error, "boom")
 	}, time.Second, time.Millisecond)
 	require.Nil(t, mgr.Handle(st.ID))
 	require.Equal(t, 1, spawner.releases(st.WorktreePath))
@@ -1056,19 +1058,19 @@ func TestManager_ConcurrentShutdownClosesMutations(t *testing.T) {
 		wg.Go(func() { require.NoError(t, mgr.Shutdown(t.Context())) })
 	}
 	wg.Wait()
-	_, err := mgr.Create(t.Context(), CreateArgs{Name: "closed", Goal: "go"})
-	require.ErrorIs(t, err, ErrManagerClosed)
-	require.ErrorIs(t, sendErr(mgr.Send(t.Context(), "missing", "go")), ErrManagerClosed)
+	_, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "closed", Goal: "go"})
+	require.ErrorIs(t, err, thread.ErrManagerClosed)
+	require.ErrorIs(t, sendErr(mgr.Send(t.Context(), "missing", "go")), thread.ErrManagerClosed)
 	_, mergeErr := mgr.Merge(t.Context(), "missing")
-	require.ErrorIs(t, mergeErr, ErrManagerClosed)
-	require.ErrorIs(t, mgr.Remove(t.Context(), "missing", true, false), ErrManagerClosed)
-	require.ErrorIs(t, mgr.Recover(t.Context()), ErrManagerClosed)
+	require.ErrorIs(t, mergeErr, thread.ErrManagerClosed)
+	require.ErrorIs(t, mgr.Remove(t.Context(), "missing", true, false), thread.ErrManagerClosed)
+	require.ErrorIs(t, mgr.Recover(t.Context()), thread.ErrManagerClosed)
 }
 
 func TestManager_ShutdownWaitsForCancelledSpawnRollback(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "blocked", Goal: "go", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "blocked", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	publishSuccess(t, spawner.appFor(st.WorktreePath), st.SessionID)
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, time.Second))
@@ -1081,9 +1083,9 @@ func TestManager_ShutdownWaitsForCancelledSpawnRollback(t *testing.T) {
 	<-spawner.spawnEntered
 	shutdownDone := make(chan error, 1)
 	go func() { shutdownDone <- mgr.Shutdown(context.Background()) }()
-	<-mgr.shutdownStarted
-	_, err = mgr.Create(t.Context(), CreateArgs{Name: "rejected", Goal: "go"})
-	require.ErrorIs(t, err, ErrManagerClosed)
+	<-mgr.ShutdownStartedForTest()
+	_, err = mgr.Create(t.Context(), thread.CreateArgs{Name: "rejected", Goal: "go"})
+	require.ErrorIs(t, err, thread.ErrManagerClosed)
 	select {
 	case err := <-shutdownDone:
 		t.Fatalf("Shutdown returned before Spawn resolved: %v", err)
@@ -1099,7 +1101,7 @@ func TestManager_ShutdownWaitsForCancelledSpawnRollback(t *testing.T) {
 func TestManager_RemoveAndCompletionReleaseOnce(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "race-remove", Goal: "go", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "race-remove", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
 	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
@@ -1122,7 +1124,7 @@ func TestManager_RemoveAndCompletionReleaseOnce(t *testing.T) {
 func TestManager_RemoveForceCancelsThreadOwnSession(t *testing.T) {
 	repo := initRepo(t)
 	mgr, spawner := newTestManager(t, repo)
-	st, err := mgr.Create(t.Context(), CreateArgs{Name: "force-cancel", Goal: "go", MergePolicy: MergeManual})
+	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "force-cancel", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
@@ -1156,16 +1158,16 @@ func TestManager_ShutdownBlocksAdmission(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Operations during shutdown should fail immediately.
-	_, err := mgr.Create(t.Context(), CreateArgs{Name: "blocked", Goal: "x"})
-	require.ErrorIs(t, err, ErrManagerClosed)
+	_, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "blocked", Goal: "x"})
+	require.ErrorIs(t, err, thread.ErrManagerClosed)
 	err = sendErr(mgr.Send(t.Context(), "missing", "x"))
-	require.ErrorIs(t, err, ErrManagerClosed)
+	require.ErrorIs(t, err, thread.ErrManagerClosed)
 	_, err = mgr.Merge(t.Context(), "missing")
-	require.ErrorIs(t, err, ErrManagerClosed)
+	require.ErrorIs(t, err, thread.ErrManagerClosed)
 	err = mgr.Remove(t.Context(), "missing", true, false)
-	require.ErrorIs(t, err, ErrManagerClosed)
+	require.ErrorIs(t, err, thread.ErrManagerClosed)
 	err = mgr.Recover(t.Context())
-	require.ErrorIs(t, err, ErrManagerClosed)
+	require.ErrorIs(t, err, thread.ErrManagerClosed)
 
 	<-barrier
 }

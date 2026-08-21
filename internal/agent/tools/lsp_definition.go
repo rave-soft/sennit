@@ -37,7 +37,7 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		definitionDescription,
 		func(ctx context.Context, params DefinitionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Symbol == "" {
-				return fantasy.NewTextErrorResponse("symbol is required"), nil
+				return invalidParam("symbol"), nil
 			}
 			workingDir := cmp.Or(params.Path, ".")
 			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, workingDir)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/lock"
 )
 
@@ -82,7 +83,7 @@ func saveLocked(list *ProjectList) error {
 		return err
 	}
 
-	return atomicWriteFile(path, data, 0o600)
+	return fsext.AtomicWriteFile(path, data, 0o600)
 }
 
 // Register adds or updates a project in the list. The read-modify-write
@@ -145,38 +146,6 @@ func Register(workingDir, dataDir string) error {
 	})
 
 	return saveLocked(list)
-}
-
-// atomicWriteFile writes data to a file atomically by writing to a unique
-// temporary file in the same directory and renaming it into place. This
-// prevents concurrent readers (or a crash mid-write) from observing a
-// partially-written projects.json.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		_ = os.Remove(tmp) // best-effort cleanup; the write error above is what matters
-		return err
-	}
-	if err := f.Chmod(perm); err != nil {
-		f.Close()
-		_ = os.Remove(tmp) // best-effort cleanup; the chmod error above is what matters
-		return err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp) // best-effort cleanup; the close error above is what matters
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp) // best-effort cleanup; the rename error above is what matters
-		return err
-	}
-	return nil
 }
 
 // List returns all tracked projects sorted by last accessed.

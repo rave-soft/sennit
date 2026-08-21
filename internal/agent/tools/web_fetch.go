@@ -36,13 +36,13 @@ func NewWebFetchTool(permissions permission.Service, workingDir string, client *
 		renderToolDescription(webFetchDescriptionTpl),
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
-				return fantasy.NewTextErrorResponse("url is required"), nil
+				return invalidParam("url"), nil
 			}
 
 			if permissions != nil {
 				sessionID := GetSessionFromContext(ctx)
 				if sessionID == "" {
-					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for web_fetch")
+					return fantasy.ToolResponse{}, missingSessionID("web_fetch")
 				}
 
 				permResp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{

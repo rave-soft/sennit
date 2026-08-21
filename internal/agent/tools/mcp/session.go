@@ -46,14 +46,7 @@ func (s *ClientSession) Close() error {
 // renewLock returns the per-server mutex used to serialize session renewals,
 // creating it on first use.
 func (r *Registry) renewLock(name string) *sync.Mutex {
-	r.renewMusMu.Lock()
-	defer r.renewMusMu.Unlock()
-	mu, ok := r.renewMus[name]
-	if !ok {
-		mu = &sync.Mutex{}
-		r.renewMus[name] = mu
-	}
-	return mu
+	return &r.serverLock(name).renew
 }
 
 func (r *Registry) sessionOwner(name string) (attemptID, *ClientSession, bool) {

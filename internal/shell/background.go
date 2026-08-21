@@ -236,6 +236,12 @@ func (bs *BackgroundShell) GetOutput() (stdout string, stderr string, done bool,
 	}
 }
 
+// Done returns a channel that is closed exactly once the shell's command has
+// finished (successfully, with an error, or via cancellation) and its exit
+// state (exitErr, completedAt) has been fully recorded. Callers can select on
+// it instead of polling GetOutput.
+func (bs *BackgroundShell) Done() <-chan struct{} { return bs.done }
+
 func (bs *BackgroundShell) IsDone() bool {
 	select {
 	case <-bs.done:

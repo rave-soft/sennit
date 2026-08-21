@@ -1,14 +1,73 @@
 package message
 
 import (
-	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
-	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 )
+
+// TestResponsesReasoningMetadataMarshalsWithLegacyEnvelope pins the wire
+// format ResponsesReasoningMetadata must keep: it used to be
+// fantasy/providers/openai.ResponsesReasoningMetadata, whose MarshalJSON
+// wrapped the payload in a {"type":...,"data":...} envelope. Sessions
+// written before this type moved into message carry that exact envelope
+// on disk, so the envelope shape (including its key names and the
+// "openai.responses.reasoning_metadata" type tag) must not change.
+func TestResponsesReasoningMetadataMarshalsWithLegacyEnvelope(t *testing.T) {
+	t.Parallel()
+
+	encrypted := "cipher"
+	data, err := json.Marshal(ResponsesReasoningMetadata{
+		ItemID:           "item_1",
+		EncryptedContent: &encrypted,
+		Summary:          []string{"line"},
+	})
+	require.NoError(t, err)
+
+	require.JSONEq(t,
+		`{"type":"openai.responses.reasoning_metadata","data":{"item_id":"item_1","encrypted_content":"cipher","summary":["line"]}}`,
+		string(data))
+}
+
+// TestReasoningContentResponsesDataMarshalPartsQuirk pins a pre-existing
+// quirk this move deliberately reproduces rather than fixes: going through
+// MarshalParts/UnmarshalParts double-wraps ResponsesData (the outer
+// ReasoningContent's own JSON tag, then the type's own MarshalJSON
+// envelope), so decoding lands the enveloped bytes on a struct expecting
+// unwrapped fields and every field comes back zero. This is inherited
+// unchanged from fantasy/providers/openai.ResponsesReasoningMetadata (see
+// [ResponsesReasoningMetadata]'s doc comment) - not introduced by moving
+// the type into message. Fixing it is a separate change.
+func TestReasoningContentResponsesDataMarshalPartsQuirk(t *testing.T) {
+	t.Parallel()
+
+	encrypted := "cipher"
+	parts := []ContentPart{
+		ReasoningContent{
+			Thinking: "thinking",
+			ResponsesData: &ResponsesReasoningMetadata{
+				ItemID:           "item_1",
+				EncryptedContent: &encrypted,
+				Summary:          []string{"line"},
+			},
+		},
+	}
+
+	blob, err := MarshalParts(parts)
+	require.NoError(t, err)
+
+	decoded, err := UnmarshalParts(blob, "msg-1")
+	require.NoError(t, err)
+	require.Len(t, decoded, 1)
+
+	reasoning, ok := decoded[0].(ReasoningContent)
+	require.True(t, ok)
+	require.NotNil(t, reasoning.ResponsesData)
+	require.Empty(t, reasoning.ResponsesData.ItemID, "pre-existing quirk: the envelope round trip zeroes this field")
+}
 
 func makeTestAttachments(n int, contentSize int) []Attachment {
 	attachments := make([]Attachment, n)
@@ -21,99 +80,6 @@ func makeTestAttachments(n int, contentSize int) []Attachment {
 		}
 	}
 	return attachments
-}
-
-func TestToAIMessage_CorruptedMediaData(t *testing.T) {
-	t.Parallel()
-
-	msg := &Message{
-		Role: Tool,
-		Parts: []ContentPart{
-			ToolResult{
-				ToolCallID: "call_123",
-				Name:       "screenshot",
-				Content:    "Loaded image/png content",
-				Data:       "abc\x80def",
-				MIMEType:   "image/png",
-			},
-		},
-	}
-
-	messages := msg.ToAIMessage()
-	require.Len(t, messages, 1)
-	require.Len(t, messages[0].Content, 1)
-
-	part, ok := messages[0].Content[0].(fantasy.ToolResultPart)
-	require.True(t, ok)
-
-	require.Equal(t, "call_123", part.ToolCallID)
-
-	textContent, ok := part.Output.(fantasy.ToolResultOutputContentText)
-	require.True(t, ok, "corrupted media should be downgraded to text")
-	require.Equal(t, mediaLoadFailedPlaceholder, textContent.Text)
-}
-
-func TestToAIMessage_ValidMediaData(t *testing.T) {
-	t.Parallel()
-
-	validBase64 := base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4E, 0x47})
-
-	msg := &Message{
-		Role: Tool,
-		Parts: []ContentPart{
-			ToolResult{
-				ToolCallID: "call_456",
-				Name:       "screenshot",
-				Content:    "Loaded image/png content",
-				Data:       validBase64,
-				MIMEType:   "image/png",
-			},
-		},
-	}
-
-	messages := msg.ToAIMessage()
-	require.Len(t, messages, 1)
-	require.Len(t, messages[0].Content, 1)
-
-	part, ok := messages[0].Content[0].(fantasy.ToolResultPart)
-	require.True(t, ok)
-
-	require.Equal(t, "call_456", part.ToolCallID)
-
-	mediaContent, ok := part.Output.(fantasy.ToolResultOutputContentMedia)
-	require.True(t, ok, "valid media should remain as media")
-	require.Equal(t, validBase64, mediaContent.Data)
-	require.Equal(t, "image/png", mediaContent.MediaType)
-}
-
-func TestToAIMessage_ASCIIButInvalidBase64(t *testing.T) {
-	t.Parallel()
-
-	msg := &Message{
-		Role: Tool,
-		Parts: []ContentPart{
-			ToolResult{
-				ToolCallID: "call_789",
-				Name:       "screenshot",
-				Content:    "Loaded image/png content",
-				Data:       "not-valid-base64!!!",
-				MIMEType:   "image/png",
-			},
-		},
-	}
-
-	messages := msg.ToAIMessage()
-	require.Len(t, messages, 1)
-	require.Len(t, messages[0].Content, 1)
-
-	part, ok := messages[0].Content[0].(fantasy.ToolResultPart)
-	require.True(t, ok)
-
-	require.Equal(t, "call_789", part.ToolCallID)
-
-	textContent, ok := part.Output.(fantasy.ToolResultOutputContentText)
-	require.True(t, ok, "ASCII but invalid base64 should be downgraded to text")
-	require.Equal(t, mediaLoadFailedPlaceholder, textContent.Text)
 }
 
 func BenchmarkPromptWithTextAttachments(b *testing.B) {
@@ -172,22 +138,6 @@ func TestResetStreamedContentEmpty(t *testing.T) {
 	msg := &Message{}
 	msg.ResetStreamedContent()
 	require.Empty(t, msg.Parts)
-}
-
-// TestToAIMessage_SystemRoleIsNotSentToTheModel pins the property the
-// thread-removal note in the chat history depends on: a system-role
-// message is a record for the person reading the transcript, and must
-// contribute nothing to the prompt. The model already learns that a
-// delegation finished through the completion inbox; a second telling, in
-// a different voice, would invite it to report the same event twice.
-func TestToAIMessage_SystemRoleIsNotSentToTheModel(t *testing.T) {
-	t.Parallel()
-
-	m := Message{
-		Role:  System,
-		Parts: []ContentPart{TextContent{Text: `Thread "tidy-up" merged into main and removed.`}},
-	}
-	require.Empty(t, m.ToAIMessage(), "a system-role message must not reach the provider")
 }
 
 // TestPromptWithTextAttachmentsLabelsPastesAsPastes covers the agent going

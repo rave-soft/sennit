@@ -60,11 +60,11 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 		downloadDescription(),
 		func(ctx context.Context, params DownloadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
-				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
+				return invalidParam("url"), nil
 			}
 
 			if params.FilePath == "" {
-				return fantasy.NewTextErrorResponse("file_path parameter is required"), nil
+				return invalidParam("file_path"), nil
 			}
 
 			if !strings.HasPrefix(params.URL, "http://") && !strings.HasPrefix(params.URL, "https://") {
@@ -77,7 +77,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for downloading files")
+				return fantasy.ToolResponse{}, missingSessionID("downloading files")
 			}
 
 			permResp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
@@ -107,16 +107,23 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 				defer cancel()
 			}
 
+			// A malformed URL or an unreachable target is information about
+			// what the model asked for, not about this process, so both
+			// come back as a normal tool result the model can react to
+			// (e.g. by trying a different URL) — matching fetch/web_fetch's
+			// handling of the same failure. Local filesystem failures below
+			// (creating directories, the output file, writing) stay Go
+			// errors: those are about this process, not the URL.
 			req, err := http.NewRequestWithContext(requestCtx, "GET", params.URL, nil)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create request: %s", err)), nil
 			}
 
 			req.Header.Set("User-Agent", brand.Slug+"/1.0")
 
 			resp, err := client.Do(req)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to download from URL: %w", err)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to download from URL: %s", err)), nil
 			}
 			defer resp.Body.Close()
 

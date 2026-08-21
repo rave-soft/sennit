@@ -194,16 +194,18 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
+// NewBashTool builds the bash tool. bgManager must be non-nil; the
+// coordinator's constructor already rejects a nil BackgroundShells before any
+// tool is built (see NewCoordinator's errBackgroundShellsRequired check), so
+// this path is unreachable in production and callers no longer need a panic
+// guard here.
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, bgManager *shell.BackgroundShellManager) fantasy.AgentTool {
-	if bgManager == nil {
-		panic("background shell manager is required")
-	}
 	return fantasy.NewAgentTool(
 		BashToolName,
-		string(bashDescription(attribution, modelID)),
+		bashDescription(attribution, modelID),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
-				return fantasy.NewTextErrorResponse("missing command"), nil
+				return invalidParam("command"), nil
 			}
 
 			// Determine working directory
@@ -225,7 +227,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
+				return fantasy.ToolResponse{}, missingSessionID("executing shell command")
 			}
 			if !isSafeReadOnly {
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
@@ -255,8 +257,13 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
 
-				// Wait a short time to detect fast failures (blocked commands, syntax errors, etc.)
-				time.Sleep(1 * time.Second)
+				// Wait a short time to detect fast failures (blocked commands, syntax errors, etc.),
+				// but return as soon as the shell reports completion instead of always paying
+				// the full second.
+				select {
+				case <-bgShell.Done():
+				case <-time.After(1 * time.Second):
+				}
 				stdout, stderr, done, execErr := bgShell.GetOutput()
 
 				if done {
@@ -309,10 +316,9 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				return fantasy.ToolResponse{}, fmt.Errorf("error starting shell: %w", err)
 			}
 
-			// Wait for either completion, auto-background threshold, or context cancellation
-			ticker := time.NewTicker(100 * time.Millisecond)
-			defer ticker.Stop()
-
+			// Wait for either completion, auto-background threshold, or context cancellation.
+			// bgShell.Done() is closed exactly once, after exitErr/completedAt are recorded,
+			// so there is no need to poll GetOutput on a ticker.
 			autoBackgroundAfter := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
 			autoBackgroundThreshold := time.Duration(autoBackgroundAfter) * time.Second
 			timeout := time.After(autoBackgroundThreshold)
@@ -321,23 +327,16 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			var done bool
 			var execErr error
 
-		waitLoop:
-			for {
-				select {
-				case <-ticker.C:
-					stdout, stderr, done, execErr = bgShell.GetOutput()
-					if done {
-						break waitLoop
-					}
-				case <-timeout:
-					stdout, stderr, done, execErr = bgShell.GetOutput()
-					break waitLoop
-				case <-ctx.Done():
-					// Incoming context was cancelled before we moved to background
-					// Kill the shell and return error
-					_ = bgManager.Kill(bgShell.ID) // best-effort; ctx.Err() below is what we report
-					return fantasy.ToolResponse{}, ctx.Err()
-				}
+			select {
+			case <-bgShell.Done():
+				stdout, stderr, done, execErr = bgShell.GetOutput()
+			case <-timeout:
+				stdout, stderr, done, execErr = bgShell.GetOutput()
+			case <-ctx.Done():
+				// Incoming context was cancelled before we moved to background
+				// Kill the shell and return error
+				_ = bgManager.Kill(bgShell.ID) // best-effort; ctx.Err() below is what we report
+				return fantasy.ToolResponse{}, ctx.Err()
 			}
 
 			if done {

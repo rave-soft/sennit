@@ -87,14 +87,3 @@ func (c *ttlCache[T]) fail(generation uint64) bool {
 	c.failedAt = time.Now()
 	return true
 }
-
-// apply clears the in-flight marker and accepts value only when generation
-// still matches the request's generation. A stale result therefore cannot
-// overwrite a newer optimistic value or invalidation.
-func (c *ttlCache[T]) apply(generation uint64, value T) bool {
-	if !c.complete(generation) {
-		return false
-	}
-	c.set(value)
-	return true
-}

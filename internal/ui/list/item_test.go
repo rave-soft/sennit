@@ -38,3 +38,41 @@ func TestBaseItemLifecycle(t *testing.T) {
 		t.Fatal("explicit invalidation must clear cache and bump version")
 	}
 }
+
+// TestNewSpacerItem covers the height-minus-one bookkeeping:
+// NewSpacerItem stores Height-1 (clamped at zero) since the list
+// itself supplies one implicit blank row via the item boundary, and
+// Render/Finished expose that stored height directly.
+func TestNewSpacerItem(t *testing.T) {
+	t.Parallel()
+
+	s := NewSpacerItem(3)
+	if s.Height != 2 {
+		t.Fatalf("NewSpacerItem(3).Height = %d, want 2", s.Height)
+	}
+	if got, want := s.Render(80), "\n\n"; got != want {
+		t.Fatalf("Render(80) = %q, want %q", got, want)
+	}
+	if !s.Finished() {
+		t.Fatal("SpacerItem must always report Finished")
+	}
+	if s.Version() != 0 {
+		t.Fatalf("fresh SpacerItem must start at version 0, got %d", s.Version())
+	}
+}
+
+// TestNewSpacerItem_ClampsAtZero covers the max(0, height-1) clamp:
+// a height of 0 or 1 must never produce a negative repeat count.
+func TestNewSpacerItem_ClampsAtZero(t *testing.T) {
+	t.Parallel()
+
+	for _, h := range []int{0, 1, -5} {
+		s := NewSpacerItem(h)
+		if s.Height != 0 {
+			t.Fatalf("NewSpacerItem(%d).Height = %d, want 0", h, s.Height)
+		}
+		if got := s.Render(80); got != "" {
+			t.Fatalf("NewSpacerItem(%d).Render(80) = %q, want empty", h, got)
+		}
+	}
+}

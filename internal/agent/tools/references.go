@@ -33,7 +33,7 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		referencesDescription,
 		func(ctx context.Context, params ReferencesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Symbol == "" {
-				return fantasy.NewTextErrorResponse("symbol is required"), nil
+				return invalidParam("symbol"), nil
 			}
 
 			workingDir := cmp.Or(params.Path, ".")

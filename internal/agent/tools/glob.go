@@ -6,6 +6,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -56,7 +57,7 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 		globDescription(),
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
-				return fantasy.NewTextErrorResponse("pattern is required"), nil
+				return invalidParam("pattern"), nil
 			}
 
 			searchPath := cmp.Or(params.Path, workingDir)
@@ -172,7 +173,8 @@ func runRipgrep(cmd *exec.Cmd, searchRoot string, limit int) ([]string, error) {
 	_ = stdout.Close()
 	waitErr := cmd.Wait()
 	if waitErr != nil && len(matches) == 0 {
-		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		var ee *exec.ExitError
+		if errors.As(waitErr, &ee) && ee.ExitCode() == 1 {
 			return nil, nil // No matches.
 		}
 		return nil, fmt.Errorf("ripgrep: %w\n%s", waitErr, stderr.String())

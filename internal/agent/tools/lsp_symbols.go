@@ -26,7 +26,7 @@ func NewSymbolsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		symbolsDescription,
 		func(ctx context.Context, params SymbolsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
-				return fantasy.NewTextErrorResponse("file_path is required"), nil
+				return invalidParam("file_path"), nil
 			}
 			lspManager.Start(ctx, params.FilePath)
 

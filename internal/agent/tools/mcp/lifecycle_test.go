@@ -248,7 +248,7 @@ func TestUpdateState_ErrorClearsPromptsAndResources(t *testing.T) {
 func TestGetOrRenewClient_StalePingCannotReplaceNewSession(t *testing.T) {
 	const name = "test-stale-ping"
 	r := NewRegistry()
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 	old, _ := liveSession(t, "old")
 	oldOwner, err := r.beginAttempt(name)
 	require.NoError(t, err)
@@ -301,7 +301,7 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 		defaultRegistry.states.Del(name)
 	})
 
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 
 	// Seed a dead session so the first ping fails and every worker attempts a
 	// renewal.
@@ -357,28 +357,6 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	}
 }
 
-// TestRegisterSessionTools_PopulatesRegistry pins that defaultRegistry.registerSessionTools —
-// the single seam through which a (re)connected session's tools enter the
-// registry — lists a live session's tools and writes them to defaultRegistry.allTools.
-func TestRegisterSessionTools_PopulatesRegistry(t *testing.T) {
-	const name = "test-register-tools"
-	t.Cleanup(func() { defaultRegistry.allTools.Del(name) })
-
-	sess, _ := liveSession(t, "send_message")
-	t.Cleanup(func() { _ = sess.Close() })
-
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
-
-	count, err := defaultRegistry.registerSessionTools(context.Background(), cfg, name, sess)
-	require.NoError(t, err)
-	require.Equal(t, 1, count)
-
-	got, ok := defaultRegistry.allTools.Get(name)
-	require.True(t, ok, "a live session's tools must be registered")
-	require.Len(t, got, 1)
-	require.Equal(t, "send_message", got[0].Name)
-}
-
 // TestSessionErrorThenRenew_RestoresTools is the end-to-end regression for the
 // reported bug: an MCP tool works, the stdio session drops mid-conversation,
 // and afterwards every call returned "tool not found" forever. It walks the
@@ -396,12 +374,14 @@ func TestSessionErrorThenRenew_RestoresTools(t *testing.T) {
 		defaultRegistry.states.Del(name)
 	})
 
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 
-	// 1. Initial connect registers the tool (mirrors defaultRegistry.initClient).
+	// 1. Initial connect registers the tool via the live publishSession seam
+	// (what defaultRegistry.initClient calls after establishing a session).
 	sess1, _ := liveSession(t, "send_message")
-	defaultRegistry.sessions.Set(name, sess1)
-	_, err := defaultRegistry.registerSessionTools(context.Background(), cfg, name, sess1)
+	owner1, err := defaultRegistry.beginAttempt(name)
+	require.NoError(t, err)
+	err = defaultRegistry.publishSession(context.Background(), name, cfg.Config().MCP[name], owner1, sess1)
 	require.NoError(t, err)
 	_, ok := defaultRegistry.allTools.Get(name)
 	require.True(t, ok, "tool should be registered after the initial connect")
@@ -418,10 +398,10 @@ func TestSessionErrorThenRenew_RestoresTools(t *testing.T) {
 	//    tools. The bug was that it never did: the LLM's tool list stayed empty
 	//    and every subsequent call returned "tool not found".
 	sess2, _ := liveSession(t, "send_message")
-	count, err := defaultRegistry.registerSessionTools(context.Background(), cfg, name, sess2)
+	owner2, err := defaultRegistry.beginAttempt(name)
 	require.NoError(t, err)
-	defaultRegistry.sessions.Set(name, sess2)
-	require.Equal(t, 1, count)
+	err = defaultRegistry.publishSession(context.Background(), name, cfg.Config().MCP[name], owner2, sess2)
+	require.NoError(t, err)
 
 	got, ok := defaultRegistry.allTools.Get(name)
 	require.True(t, ok, "tools must be restored after the session is renewed")
@@ -446,7 +426,7 @@ func TestGetOrRenewClient_RestoresPromptsAndResources(t *testing.T) {
 		defaultRegistry.states.Del(name)
 	})
 
-	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
+	cfg := config.NewTestStore(t, &config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 
 	// Seed a dead session so the renewal path runs.
 	dead, _ := liveSession(t, "send_message")

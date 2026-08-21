@@ -14,8 +14,13 @@ import (
 // AgentModel does not short-circuit) over a config selecting model.
 func modelTestWorkspace(t *testing.T, cfg *config.Config) *AppWorkspace {
 	t.Helper()
-	store := config.NewTestStore(cfg, t.TempDir())
-	return NewAppWorkspace(&app.App{AgentCoordinator: &modelStubCoordinator{}}, store)
+	store := config.NewTestStore(t, cfg, config.WithLoadedPaths(t.TempDir()))
+	// AgentCoordinator now lives on App's unexported appServices grouping,
+	// so it cannot be named in a composite literal from outside the
+	// package; SetAgentCoordinatorForTest is the supported seam.
+	a := &app.App{}
+	a.SetAgentCoordinatorForTest(&modelStubCoordinator{})
+	return NewAppWorkspace(a, store)
 }
 
 // modelStubCoordinator is an agent.Coordinator that only answers Model.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/projects"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +13,12 @@ import (
 func TestProjectsEmpty(t *testing.T) {
 	// Use a temp directory for projects.json
 	tmpDir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", tmpDir)
+	// The package's TestMain isolates the profile by setting
+	// SENNIT_GLOBAL_DATA process-wide, and GlobalConfigData checks that
+	// before XDG_DATA_HOME — so overriding XDG_DATA_HOME here would have no
+	// effect and both projects tests would share one projects.json,
+	// making them order-dependent under -count>1.
+	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", tmpDir)
 
 	var b bytes.Buffer
 	projectsCmd.SetOut(&b)
@@ -25,7 +31,12 @@ func TestProjectsEmpty(t *testing.T) {
 
 func TestProjectsJSON(t *testing.T) {
 	tmpDir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", tmpDir)
+	// The package's TestMain isolates the profile by setting
+	// SENNIT_GLOBAL_DATA process-wide, and GlobalConfigData checks that
+	// before XDG_DATA_HOME — so overriding XDG_DATA_HOME here would have no
+	// effect and both projects tests would share one projects.json,
+	// making them order-dependent under -count>1.
+	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", tmpDir)
 
 	// Register a project
 	err := projects.Register("/test/project", "/test/project/.sennit")

@@ -81,8 +81,8 @@ const (
 	// KindThread is the value every [Thread] writes: a delegation that
 	// lives in its own git worktree and branch, with a merge policy.
 	KindThread Kind = "thread"
-	// KindTask is reserved for the lightweight, worktree-less delegation
-	// kind planned on top of this same table. Nothing constructs it yet.
+	// KindTask is the lightweight, worktree-less delegation kind built on
+	// top of this same table; see [TaskManager.Create].
 	KindTask Kind = "task"
 )
 

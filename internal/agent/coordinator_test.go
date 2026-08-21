@@ -3,8 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/http"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -63,7 +61,7 @@ func (m *mockSessionAgent) SendToParent(ctx context.Context, sessionID, message 
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderConfig) *coordinator {
-	cfg, err := config.Init(env.workingDir, "", false)
+	cfg, err := config.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
 	return &coordinator{
@@ -395,7 +393,7 @@ func TestRunSubAgent(t *testing.T) {
 func TestUpdateParentSessionCost(t *testing.T) {
 	t.Run("accumulates cost correctly", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -420,7 +418,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("accumulates multiple child costs", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -451,7 +449,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("child session not found", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -465,7 +463,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("parent session not found", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -481,7 +479,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("zero cost handled correctly", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Init(env.workingDir, "", false)
+		cfg, err := config.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -534,32 +532,6 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 			assert.Equal(t, anthropic.Effort("max"), *parsed.Effort)
 		})
 	}
-}
-
-func TestIsUnauthorized(t *testing.T) {
-	t.Run("nil error", func(t *testing.T) {
-		assert.False(t, isUnauthorized(nil))
-	})
-
-	t.Run("non-provider error", func(t *testing.T) {
-		assert.False(t, isUnauthorized(errors.New("something broke")))
-	})
-
-	t.Run("provider error with 401", func(t *testing.T) {
-		err := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "unauthorized"}
-		assert.True(t, isUnauthorized(err))
-	})
-
-	t.Run("provider error with non-401", func(t *testing.T) {
-		err := &fantasy.ProviderError{StatusCode: http.StatusForbidden, Message: "forbidden"}
-		assert.False(t, isUnauthorized(err))
-	})
-
-	t.Run("wrapped provider error with 401", func(t *testing.T) {
-		inner := &fantasy.ProviderError{StatusCode: http.StatusUnauthorized, Message: "expired"}
-		err := fmt.Errorf("request failed: %w", inner)
-		assert.True(t, isUnauthorized(err))
-	})
 }
 
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {

@@ -42,6 +42,22 @@ func (n *recordingNotifier) count(sessionID string, typ notify.Type) int {
 	return c
 }
 
+// ofType returns a copy of every recorded notification matching typ, in
+// publish order, so a test can inspect fields beyond type/session (e.g.
+// AWSSOURL, Message, ProviderID) without racing the notifier's own
+// goroutine.
+func (n *recordingNotifier) ofType(typ notify.Type) []notify.Notification {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var out []notify.Notification
+	for _, got := range n.got {
+		if got.Type == typ {
+			out = append(out, got)
+		}
+	}
+	return out
+}
+
 // TestQueueChanged_PublishedOnEnqueue covers the enqueue entry point
 // (run's busy branch, agent.go): queuing a follow-up behind an active
 // turn must publish a TypeQueueChanged notification carrying the
@@ -61,7 +77,7 @@ func TestQueueChanged_PublishedOnEnqueue(t *testing.T) {
 	const sessionID = "busy-session"
 	// Mark the session busy so Run takes the enqueue branch without
 	// needing a real streaming model.
-	sa.dispatch.activeRequests.Set(sessionID, &activeCancel{cancel: func() {}})
+	sa.setActiveForTest(sessionID, &activeCancel{cancel: func() {}})
 
 	_, err := sa.Run(t.Context(), SessionAgentCall{SessionID: sessionID, Prompt: "follow-up"})
 	require.NoError(t, err)
@@ -124,7 +140,7 @@ type lockReentryNotifier struct {
 
 func (n *lockReentryNotifier) Publish(pubsub.EventType, notify.Notification) {
 	n.calls.Add(1)
-	mu := n.dispatch.sessionMu(n.sessionID)
+	mu := n.dispatch.sessionMuForTest(n.sessionID)
 	if mu.TryLock() {
 		mu.Unlock()
 	} else {
@@ -154,7 +170,7 @@ func TestQueueChanged_NotPublishedUnderDispatchLock(t *testing.T) {
 
 	// Seed a non-empty queue directly so cancel's tail actually clears
 	// something (and so takes the branch that calls notifyQueueChanged).
-	sa.dispatch.messageQueue.Set(sessionID, []SessionAgentCall{{SessionID: sessionID, Prompt: "queued"}})
+	sa.setMessageQueueForTest(sessionID, []SessionAgentCall{{SessionID: sessionID, Prompt: "queued"}})
 
 	sa.Cancel(sessionID)
 
