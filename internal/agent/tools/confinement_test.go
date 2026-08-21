@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,19 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
+
+// mustJSONInput marshals v the way the agent runtime encodes tool-call
+// arguments, so a path containing a Windows drive letter and backslashes
+// round-trips through the same decoder the tool uses. Hand-built JSON
+// strings that splice a path in with `+` break on Windows: `\U` in
+// `C:\Users\...` is not a legal JSON escape, so the input never reaches the
+// confinement check the test is trying to exercise.
+func mustJSONInput(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return string(b)
+}
 
 // confinedTestPermissions is a permission service that grants everything —
 // exactly like a workspace running under yolo, which is what a thread
@@ -67,7 +81,7 @@ func TestWriteTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside(t *testing.T) {
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
 		Name:  WriteToolName,
-		Input: `{"file_path":"` + outside + `","content":"overwritten\n"}`,
+		Input: mustJSONInput(t, WriteParams{FilePath: outside, Content: "overwritten\n"}),
 	})
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "the write must be refused, not performed")
@@ -89,7 +103,7 @@ func TestEditTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside(t *testing.T) {
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
 		Name:  EditToolName,
-		Input: `{"file_path":"` + outside + `","old_string":"original","new_string":"edited"}`,
+		Input: mustJSONInput(t, EditParams{FilePath: outside, OldString: "original", NewString: "edited"}),
 	})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
@@ -110,9 +124,12 @@ func TestMultiEditTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside(t *testing.
 	tool := NewMultiEditTool(nil, perms, &mockHistoryService{}, mockFileTrackerService{}, workdir)
 
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
-		ID:    "call-1",
-		Name:  MultiEditToolName,
-		Input: `{"file_path":"` + outside + `","edits":[{"old_string":"original","new_string":"edited"}]}`,
+		ID:   "call-1",
+		Name: MultiEditToolName,
+		Input: mustJSONInput(t, MultiEditParams{
+			FilePath: outside,
+			Edits:    []MultiEditOperation{{OldString: "original", NewString: "edited"}},
+		}),
 	})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
@@ -136,7 +153,7 @@ func TestConfinedWorkspaceStillWritesInsideItself(t *testing.T) {
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
 		Name:  WriteToolName,
-		Input: `{"file_path":"` + target + `","content":"package thing\n"}`,
+		Input: mustJSONInput(t, WriteParams{FilePath: target, Content: "package thing\n"}),
 	})
 	require.NoError(t, err)
 	require.False(t, resp.IsError, "writing inside the workspace must still work: %s", resp.Content)
@@ -156,7 +173,7 @@ func TestUnconfinedWorkspaceIsUnaffected(t *testing.T) {
 	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
 		ID:    "call-1",
 		Name:  WriteToolName,
-		Input: `{"file_path":"` + outside + `","content":"allowed\n"}`,
+		Input: mustJSONInput(t, WriteParams{FilePath: outside, Content: "allowed\n"}),
 	})
 	require.NoError(t, err)
 	require.False(t, resp.IsError, "an unconfined workspace may still write outside once permitted: %s", resp.Content)
@@ -179,4 +196,39 @@ func TestConfinementRefusal_NamesWhereItShouldHaveGone(t *testing.T) {
 	require.Contains(t, msg, outside, "the refused path")
 	require.Contains(t, msg, workdir, "and where the write belongs")
 	require.True(t, strings.Contains(msg, "isolated"))
+}
+
+// TestConfinedWorkspace_PathWithBackslashSurvivesJSONEncoding reproduces the
+// Windows JSON-escaping bug on Linux, deterministically: a path containing
+// `\U` — exactly what a Windows "C:\Users\..." path contributes — is not a
+// legal JSON escape when spliced into a hand-built `"file_path":"..."`
+// string. json.Marshal (via mustJSONInput/WriteParams) must escape the
+// backslash so the tool decodes the path byte-for-byte and still applies
+// the confinement check; naive string concatenation instead breaks
+// unmarshalling and never reaches that check at all.
+func TestConfinedWorkspace_PathWithBackslashSurvivesJSONEncoding(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workdir := filepath.Join(root, "worktree")
+	require.NoError(t, os.MkdirAll(workdir, 0o755))
+	elsewhere := filepath.Join(root, "main-checkout")
+	require.NoError(t, os.MkdirAll(elsewhere, 0o755))
+	// A literal backslash is a normal filename byte on Linux/macOS, but
+	// "\U" is exactly the invalid JSON escape a bare "C:\Users\..." path
+	// produces when concatenated into a JSON string by hand.
+	outside := filepath.Join(elsewhere, `leaked\Users.go`)
+	require.NoError(t, os.WriteFile(outside, []byte("original\n"), 0o644))
+	perms := &confinedTestPermissions{dir: workdir}
+
+	tool := NewWriteTool(nil, perms, &mockHistoryService{}, mockFileTrackerService{}, workdir)
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  WriteToolName,
+		Input: mustJSONInput(t, WriteParams{FilePath: outside, Content: "overwritten\n"}),
+	})
+	require.NoError(t, err, "a properly JSON-encoded path must parse, not fail before the confinement check runs")
+	require.True(t, resp.IsError, "the write must be refused, not performed")
+	require.Contains(t, resp.Content, "outside this workspace")
+	require.Contains(t, resp.Content, outside, "the backslash in the path must survive the JSON round trip intact")
 }

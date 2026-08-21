@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -149,7 +150,7 @@ func TestRelease_PastZeroIsReportedMisuse(t *testing.T) {
 }
 
 // TestConnect_NormalizesPathSpelling pins that Connect and Release both
-// resolve dataDir through filepath.Abs before indexing the pool, so two
+// resolve dataDir through fsext.Canonical before indexing the pool, so two
 // different spellings of the same directory share one entry instead of
 // opening a second connection.
 func TestConnect_NormalizesPathSpelling(t *testing.T) {
@@ -182,6 +183,32 @@ func TestConnect_NormalizesPathSpelling(t *testing.T) {
 	require.NoError(t, conn1.PingContext(context.Background()), "still usable after two of three releases")
 	require.NoError(t, Release(trailingDir))
 	require.Error(t, conn1.PingContext(context.Background()), "closed after the third, balanced release")
+}
+
+// TestConnect_NormalizesSymlinkedAlias simulates, with a symlink, the same
+// class of spelling mismatch Windows hits between an 8.3 short name (as
+// t.TempDir returns there) and the long form (as os.Getwd or `git
+// rev-parse` return): two paths that name the same directory but are not
+// equal as strings. Connect/Release must still treat them as one pool
+// entry.
+func TestConnect_NormalizesSymlinkedAlias(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	real := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(real, alias))
+
+	conn1, err := Connect(context.Background(), real)
+	require.NoError(t, err)
+
+	conn2, err := Connect(context.Background(), alias)
+	require.NoError(t, err)
+	require.Same(t, conn1, conn2, "a symlinked alias of the same dir should share one connection")
+
+	require.NoError(t, Release(real))
+	require.NoError(t, conn1.PingContext(context.Background()), "still usable after one of two releases")
+	require.NoError(t, Release(alias))
+	require.Error(t, conn1.PingContext(context.Background()), "closed after the second, balanced release")
 }
 
 // TestConnect_ConcurrentAccess hammers Connect/Release for the same and

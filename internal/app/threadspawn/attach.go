@@ -8,6 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -85,7 +86,13 @@ func Attach(ctx context.Context, a *app.App, path string, spawner thread.Spawner
 
 func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread.Spawner, deps attachDeps) {
 	top, err := deps.topLevel(ctx, path)
-	if err != nil || top != path {
+	// git and the caller can spell the same directory differently — git
+	// prints its own resolved form, while path may come from t.TempDir (an
+	// 8.3 short name on Windows) or an unresolved symlink. A raw string
+	// compare would then say "not the root" for a directory that is,
+	// which silently drops the thread manager for a workspace that should
+	// have one. Compare canonical spellings instead.
+	if err != nil || fsext.Canonical(top) != fsext.Canonical(path) {
 		return
 	}
 

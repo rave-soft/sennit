@@ -478,6 +478,33 @@ func TestLookupBounded(t *testing.T) {
 	})
 }
 
+// TestCanonical_SymlinkedAlias exercises the class of bug Windows hits
+// between an 8.3 short path and its long form spelling: two strings that
+// name the same directory but are not equal. A symlink reproduces the
+// same shape (two spellings, one inode) on any OS, including this one.
+func TestCanonical_SymlinkedAlias(t *testing.T) {
+	real := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(real, alias))
+
+	require.NotEqual(t, real, alias, "the two spellings must actually differ for this test to mean anything")
+	require.Equal(t, Canonical(real), Canonical(alias))
+}
+
+// TestCanonical_RelativeAndAbsolute pins that Canonical makes a relative
+// path absolute before resolving it, so a relative and an absolute
+// spelling of the same directory compare equal too.
+func TestCanonical_RelativeAndAbsolute(t *testing.T) {
+	dir := t.TempDir()
+
+	cwd, err := filepath.Abs(".")
+	require.NoError(t, err)
+	rel, err := filepath.Rel(cwd, dir)
+	require.NoError(t, err)
+
+	require.Equal(t, Canonical(dir), Canonical(rel))
+}
+
 func TestProbeEnt(t *testing.T) {
 	t.Run("existing file with correct owner", func(t *testing.T) {
 		tempDir := t.TempDir()

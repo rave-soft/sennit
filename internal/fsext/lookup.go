@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/rave-soft/sennit/internal/home"
 )
@@ -71,7 +73,7 @@ func LookupClosest(dir, target string) (string, bool) {
 			return fmt.Errorf("error probing file %s: %w", fpath, err)
 		}
 
-		if cwd == home.Dir() {
+		if Canonical(cwd) == Canonical(home.Dir()) {
 			return filepath.SkipAll
 		}
 
@@ -108,7 +110,7 @@ func LookupClosestBounded(dir, stopDir, target string) (string, bool) {
 			return fmt.Errorf("error probing file %s: %w", fpath, err)
 		}
 
-		if cwd == home.Dir() {
+		if Canonical(cwd) == Canonical(home.Dir()) {
 			return filepath.SkipAll
 		}
 
@@ -215,7 +217,7 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 			return fmt.Errorf("cannot convert stop dir to absolute path: %w", err)
 		}
 	}
-	canonStop := canonicalize(stop)
+	canonStop := Canonical(stop)
 
 	owner, err := Owner(dir)
 	if err != nil {
@@ -225,7 +227,7 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 	for {
 		err := walkFn(cwd, owner)
 		if err == nil || errors.Is(err, filepath.SkipDir) {
-			if canonicalize(cwd) == canonStop {
+			if Canonical(cwd) == canonStop {
 				return nil
 			}
 
@@ -246,14 +248,33 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 	}
 }
 
-// canonicalize resolves any symbolic links in path. If resolution fails
-// (typically because path does not exist yet) the original path is
-// returned cleaned, so callers can still perform stable equality checks.
-func canonicalize(path string) string {
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+// Canonical returns a path spelling that two logically identical paths
+// share, so callers can compare paths with == instead of a raw string
+// compare. It first makes path absolute — two relative spellings of the
+// same directory (e.g. from different working directories) must not stay
+// distinguishable — then resolves it with filepath.EvalSymlinks, which
+// does the rest of the real work: besides resolving symlinks (a macOS
+// /tmp vs /private/tmp, say), on Windows it also queries the filesystem
+// for each component's on-disk spelling, which collapses the two path
+// forms Windows APIs hand back inconsistently — an 8.3 short name (as
+// t.TempDir returns) and the long form (as os.Getwd or `git rev-parse`
+// return) — into one. If resolution fails (typically because the path
+// does not exist yet, so there is nothing on disk to query) the absolute
+// path is cleaned and, on Windows, case-folded, since Windows paths are
+// case-insensitive even before anything is created at them.
+func Canonical(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		return resolved
 	}
-	return filepath.Clean(path)
+	clean := filepath.Clean(abs)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(clean)
+	}
+	return clean
 }
 
 // probeEnt checks if entity at given path exists and belongs to given owner

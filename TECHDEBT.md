@@ -239,29 +239,43 @@ because "the fold is keyed on the absence of a RunID". If a real user prompt can
 reach either branch under the right interleaving, it is discarded with no terminal
 event and nothing persisted, which matches the observed `userCount == 0` exactly.
 
-## Windows CI fails on path semantics, not on the cassettes
+## Windows CI: three production path bugs fixed, one cluster still unexplained
 
-The three-OS `build` matrix (added 2026-08-21) turned up two *different*
-platform problems, and they should not be conflated:
+The three-OS `build` matrix (added 2026-08-21) turned up 98 Windows failures at
+`14ac9ec7`, against a green Linux. Root causes, addressed 2026-08-22:
 
-- **macOS** failed every `TestCoderAgent` subtest with a VCR cassette miss. Cause
-  found and fixed: the harness rooted its working directory at `os.TempDir()`,
-  which honors `$TMPDIR` — `/tmp` on Linux, `/var/folders/xx/yy/T` on macOS — and
-  that absolute path is echoed back verbatim inside `ls`/`edit`/`grep`/`glob` tool
-  results, which the matcher compares strictly (unlike the system prompt, which
-  `normalizeForMatch` strips). Pinned to a canonical root.
-- **Windows** fails for an unrelated reason and is still open:
-  `TestExpandPath/tilde_is_expanded_against_the_real_home_dir`, and the workspace
-  confinement tests `TestUnconfinedWorkspaceIsUnaffected`,
-  `TestConfinedWorkspaceStillWritesInsideItself` and
-  `TestEditTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside`
-  (`internal/agent/tools/confinement_test.go`). These are path-semantics failures —
-  drive letters, backslash separators, `~` expansion — not cassette misses.
-  `TestCoderAgent` skips on Windows outright, so it never reaches the VCR path.
+**Fixed -- production, path canonicalization.** On Windows the same directory
+arrives under two spellings: `t.TempDir()` yields the 8.3 short form
+(`C:\Users\RUNNER~1\...` -- visible in the CI log) while git and `filepath.Abs`
+yield the long one, so a raw `==` says they differ. Added `fsext.Canonical`
+(`Abs` -> `EvalSymlinks`, falling back to `Clean` plus a case fold on Windows for
+paths that do not exist yet) and used it at three sites:
+`threadspawn/attach.go`'s repo-root check -- which silently left a Windows user
+standing at their own repo root with **no thread manager** -- `db/connect.go`'s
+connection-pool key, and `fsext/lookup.go`'s stop-at-home checks. Each is pinned by
+a symlink-based test; symlinks are the same aliasing class and do run on Linux.
 
-Worth noting where these came from: the confinement checks were tightened on
-2026-08-20 (the `filepath.Rel` prefix fix in `internal/fsext`), and CI has never
-run on Windows before this week, so nobody could have seen it. Whether the
-production confinement logic is wrong on Windows or only the tests' fixtures are
-is the first thing to establish — that distinction decides whether this is a
-user-facing security-relevant bug or a test-only one.
+**Fixed -- production, separator mixing.** `home.Long` replaced `~` but left the
+literal `/` in the remainder, so `~/notes.md` became `C:\Users\x` + `/notes.md`,
+matching nothing built with `filepath.Join`. Now routed through `filepath.FromSlash`.
+
+**Fixed -- test fixture, and it was hiding a gap.** `confinement_test.go` built tool
+input by splicing a path into a JSON string; a Windows `C:\Users\...` produced the
+illegal escape `\U`, so the tool failed at *parameter parsing* and never reached the
+confinement check. The security boundary was not failing on Windows -- it was
+**never being exercised there**. Now built with `json.Marshal`, plus an
+OS-independent regression test. The confinement logic itself
+(`resolveWithinWorkdir` over `filepath.Abs`/`filepath.Rel`) was audited and is
+sound on Windows.
+
+**Still open -- nine `internal/config` failures**, including
+`TestApplyWorkspaceConfig`'s subtests. No path-comparison root cause was found by
+static analysis: `applyWorkspaceConfig` has no path comparison, and the inspected
+subtest turns on `os.PathError`'s shape when opening a path whose parent is not a
+directory -- an OS-error-shape difference, not a spelling one. Left unfixed rather
+than guessed at; it may be downstream of the JSON-escaping class, or it may need
+the real Windows log. Re-check after the next Windows run.
+
+**Latent, not touched:** `filetracker`'s `filepath.Rel(s.workingDir, path)` has the
+same spelling sensitivity, but it was not in the failure list and widening scope on
+suspicion was not worth it.

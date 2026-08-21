@@ -13,6 +13,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 var (
@@ -66,12 +67,16 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 
 	dbPath := filepath.Join(dataDir, brand.DBFile)
 
-	// Resolve to an absolute path so that different relative paths to
-	// the same file share a single connection.
-	absPath, err := filepath.Abs(dbPath)
-	if err != nil {
-		absPath = dbPath
-	}
+	// Canonicalize dataDir itself, not the joined dbPath: dataDir usually
+	// already exists (its caller has typically created it), but sennit.db
+	// inside it may not yet, on the very first Connect. Canonicalizing
+	// the file path would then fall back to a merely-cleaned spelling for
+	// that first call while later calls (once the file exists) resolve
+	// the real one, splitting one directory across two pool keys.
+	// Canonicalizing the existing directory instead keeps the key stable
+	// across a relative path, a trailing separator, or (on Windows) an
+	// 8.3 short name vs. the long form, regardless of call order.
+	absPath := filepath.Join(fsext.Canonical(dataDir), brand.DBFile)
 
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -170,11 +175,9 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 // visible at its own call site instead of one that silently corrupts the
 // pool.
 func Release(dataDir string) error {
-	dbPath := filepath.Join(dataDir, brand.DBFile)
-	absPath, err := filepath.Abs(dbPath)
-	if err != nil {
-		absPath = dbPath
-	}
+	// Must canonicalize the same way Connect does, or a Release spelled
+	// differently than its matching Connect would miss the pool entry.
+	absPath := filepath.Join(fsext.Canonical(dataDir), brand.DBFile)
 
 	poolMu.Lock()
 	defer poolMu.Unlock()

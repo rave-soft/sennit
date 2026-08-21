@@ -49,6 +49,25 @@ func TestAttachOnlyAtRepositoryRoot(t *testing.T) {
 	require.Nil(t, nested.Threads)
 }
 
+// TestAttachOnlyAtRepositoryRoot_SymlinkedAlias simulates, with a symlink,
+// the same class of problem Windows hits with an 8.3 short name: the path
+// passed to Attach and the path git reports for the same directory are
+// spelled differently. `git rev-parse --show-toplevel` resolves the real
+// path, so calling Attach with a symlinked alias of the repo root used to
+// fail the `top != path` string compare and silently drop the thread
+// manager for a directory that is, in fact, the repository root.
+func TestAttachOnlyAtRepositoryRoot_SymlinkedAlias(t *testing.T) {
+	repo := initRepo(t)
+
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(repo, alias))
+
+	a := newAttachTestApp(t, alias)
+	Attach(t.Context(), a, alias, newAttachTestSpawner(t))
+	require.NotNil(t, a.ThreadManager())
+	require.NotNil(t, a.Threads)
+}
+
 func TestAttachDoesNotPublishWhenConnectFails(t *testing.T) {
 	repo := initRepo(t)
 	a := newAttachTestApp(t, repo)

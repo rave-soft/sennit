@@ -43,5 +43,10 @@ func Long(p string) string {
 	if homedir == "" || !strings.HasPrefix(p, "~") {
 		return p
 	}
-	return strings.Replace(p, "~", homedir, 1)
+	// Callers write "~/foo" with a literal forward slash regardless of
+	// platform. homedir already uses the native separator (from
+	// os.UserHomeDir), so the suffix needs the same treatment or the
+	// result mixes "/" and "\" on Windows and no longer matches a path
+	// built with filepath.Join.
+	return homedir + filepath.FromSlash(strings.TrimPrefix(p, "~"))
 }

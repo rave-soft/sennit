@@ -3,6 +3,7 @@ package version
 import (
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -23,6 +24,9 @@ func TestLdflagsVersionSurvivesBuildInfo(t *testing.T) {
 	}
 
 	binary := filepath.Join(t.TempDir(), "sennit")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	build := exec.CommandContext(t.Context(), "go", "build",
 		"-ldflags", "-X github.com/rave-soft/sennit/internal/version.Version=v9.9.9",
 		"-o", binary, "github.com/rave-soft/sennit")
