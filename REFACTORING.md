@@ -933,8 +933,28 @@ Current coverage lowlights: `internal/cmd` 25.1%, `internal/db` 9.3%,
    workspace behind a read-only view) and `Subscribe` (promoting it would hand
    the caller's program the live parent's event stream, risking duplicate
    delivery into a screen that is not supposed to be live). Both refused.
-   Still open in this entry: splitting the 93-method interface into the
-   sub-interfaces consumers actually need, and deciding `proto`'s fate.
+   **Closed 2026-08-21, and the premise was stale.** There was no 93-method
+   monolith to split: `HEAD`'s `Workspace` is already composed of fourteen role
+   interfaces (`SessionStore`, `AgentController`, `ConfigAccessor`,
+   `ThreadController`, ...). Verified directly against `HEAD`. What remained was
+   the part that makes a split real — consumers declaring the whole union for a
+   handful of methods — and eight were narrowed: `cmdutil`'s session lookup and
+   `resolve_session.go` to `SessionStore`, `threads.go` to `ThreadController`,
+   `login`/`login_codex`/`logout` and both OAuth dialogs to `ConfigAccessor`.
+   `Common.Workspace` and `run.go`'s helpers stay on the union: no single role
+   fits them and no other caller needs that composition, so a new interface would
+   be indirection nobody uses.
+   **`proto`'s fate, answered with evidence and left for a separate decision:**
+   only `proto.Thread` is a live DTO. `proto.Message`, `AgentEvent`,
+   `PermissionRequest`, `PermissionNotification`, `ServerNotice`, `RunComplete`,
+   `ConfigProviderKeyRequest` and `LSPClientInfo` are never constructed in
+   production code. More importantly **AGENTS.md's stated rationale for the
+   exceptions no longer matches the code**: `tools.*PermissionsParams` is
+   documented as an alias because consumers assert the concrete type "after a
+   JSON round trip", but there is no round trip — the params travel in-process
+   through pubsub channels and the assertion works on Go type identity. There is
+   no server/client mode in the tree at all. Recommend dropping the dead types
+   and rewriting that AGENTS.md section; not done here.
 3. [x] **`sessionAgent.run`** (`agent/agent.go:398-871`, 476 lines): extract
    `dispatchDecision`, `buildStreamAgent`, `finishTurn`; replace the tail
    recursion over the queue with a `for` loop (fixes the documented
@@ -1047,7 +1067,7 @@ Current coverage lowlights: `internal/cmd` 25.1%, `internal/db` 9.3%,
    form before, not duplicated logic — but the stated bar was not met.
    `GetMCPTools`' per-server loop and the user-defined-agent loop stay outside
    the table: both are dynamic, not fixed rows.
-6. [~] **MCP `Registry`** (12 sync primitives in one struct, `Close` is 100
+6. [x] **MCP `Registry`** (12 sync primitives in one struct, `Close` is 100
    lines, core methods 0% covered): split into `Registry` (public API +
    catalog snapshot), `connectionManager` (per-server lifecycle), and
    `authCoordinator`; per-server mutex maps become fields on a per-server
@@ -1069,7 +1089,24 @@ Current coverage lowlights: `internal/cmd` 25.1%, `internal/db` 9.3%,
    guarded *different* per-server locks through *duplicated* infrastructure,
    which is what got merged. Lock nesting is consistently
    `publishMu` -> `catalogMu`, never reversed.
-   **Still open: the three-way split into `Registry`/`connectionManager`/
+   **Split completed 2026-08-21.** `connectionManager` (session create/renew/
+   reconnect, reconcile, `InitializeSingle`) and `authCoordinator` (`BeginAuth`,
+   `AuthenticateMCP`, `MCPAuthURL`, flow lifecycle, `oauthSetup`) are new types,
+   each holding a `reg *Registry` back-reference and embedded anonymously so
+   every existing call site keeps compiling by promotion.
+   The lock question was answered by *not moving the lock*: `publishMu` and every
+   owns-check-then-commit method (`owns`, `beginAttempt`, `publishOrClose`,
+   `teardown`, ...) stay on `Registry`. Verified structurally — neither new file
+   references `catalogMu` at all except in comments, so `publishMu -> catalogMu`
+   is entered only from `Registry`-receiver code and cannot be reversed from the
+   new types by construction rather than by convention.
+   **Caveat, recorded in TECHDEBT.md:** the first full-repo `-race` run after
+   this split failed `TestBeginAuth_CancelSettlesExactStartingOwner` with a nil
+   dereference. It has not reproduced (second full race run, `-count=6`,
+   `-cpu=1,2,8`, and isolated runs all clean) and no DATA RACE was reported, so
+   it is written up rather than diagnosed — but it is a failing test, not a
+   benign one.
+   Superseded note: the three-way split into `Registry`/`connectionManager`/
    `authCoordinator` was deliberately not attempted, and I accept the reason.**
    `publishMu` is genuinely cross-cutting: it protects `owners`,
    `sessionOwners`, `closing`, `tokenReservations` and `tokenWrites`, and every

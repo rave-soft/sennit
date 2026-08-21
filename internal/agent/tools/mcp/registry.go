@@ -75,6 +75,25 @@ type tokenWrite struct {
 	done chan struct{}
 }
 
+// Registry is split three ways, but publishMu — the lock that makes an
+// attempt's "do I still own this server" check indivisible from the
+// catalog/session/state write that follows it — stays a single field
+// on Registry itself, never duplicated or moved. connectionManager and
+// authCoordinator are separate types for per-server session lifecycle and
+// the OAuth flow respectively, but neither holds a lock of its own over
+// owners/sessionOwners/closing/tokenReservations/tokenWrites: every method
+// that needs to check or change ownership reaches back through the reg
+// field they each carry and calls a Registry method (owns, ownsLocked,
+// ownsSessionLocked, publishOrClose/publishSession, teardown, ...). Because
+// Registry embeds both sub-types anonymously, that reference is symmetric —
+// a connectionManager method can call a Registry method or an
+// authCoordinator method through the same `cm.reg.Foo(...)` spelling — so
+// there is exactly one lock and exactly one nesting order for it to
+// participate in: publishMu, and where catalogMu is also needed,
+// publishMu -> catalogMu, always taken by a Registry-owned method. Neither
+// connectionManager nor authCoordinator ever takes catalogMu itself without
+// first being inside a publishMu-holding Registry call, so the ordering
+// cannot be reversed by construction.
 type Registry struct {
 	sessions    *csync.Map[string, *ClientSession]
 	states      *csync.Map[string, ClientInfo]
@@ -111,13 +130,17 @@ type Registry struct {
 	// A generation check and the corresponding session, catalog, count and state
 	// update must be indivisible: otherwise teardown can observe and clear an old
 	// snapshot while its connector publishes it afterwards.
+	//
+	// This is the one lock every "does this attempt still own the server"
+	// check shares with the commit that follows it, so it lives here on
+	// Registry rather than on either of the two types below: both
+	// connectionManager and authCoordinator hold a *Registry back-reference
+	// and go through Registry's owns-check-then-commit methods instead of
+	// taking a lock of their own over this state.
 	publishMu     sync.Mutex
 	owners        map[string]attemptID
 	sessionOwners map[string]attemptID
 	closing       bool
-
-	authMu    sync.Mutex
-	authFlows map[string]*authFlow
 
 	tokenWrites        map[tokenWriteOwner]map[*tokenWrite]struct{}
 	tokenReservations  map[tokenWriteOwner]*config.MCPTokenMutation
@@ -125,16 +148,23 @@ type Registry struct {
 	tokenCommit        func(ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error
 	beforeTokenPersist func()
 
-	// newSession creates a client session. It is a seam so tests can exercise
-	// renewal concurrency without spawning a real transport.
-	newSession    func(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error)
-	runAuth       func(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID) error
-	ping          func(ctx context.Context, session *ClientSession, timeout time.Duration) error
-	listResources func(ctx context.Context, session *ClientSession) ([]*Resource, error)
-
 	allTools     *csync.Map[string, []*Tool]
 	allResources *csync.Map[string, []*Resource]
 	allPrompts   *csync.Map[string, []*Prompt]
+
+	// connectionManager owns per-server session lifecycle (connect, renew,
+	// reconcile, disable). authCoordinator owns the OAuth/auth flow (BeginAuth,
+	// AuthenticateMCP, auth flow bookkeeping). Both are embedded anonymously
+	// so their methods and seam fields (newSession, ping, listResources,
+	// runAuth, authMu, authFlows, ...) are promoted onto Registry exactly as
+	// they were before the split: every existing `r.Foo` call site — in this
+	// package's tests and in the rest of the codebase — keeps compiling
+	// unchanged. Each sub-type's own methods reach Registry's state through
+	// its `reg *Registry` field rather than by embedding Registry back,
+	// which is what keeps this a one-directional reference instead of a
+	// second, competing lock owner.
+	*connectionManager
+	*authCoordinator
 
 	// reinitMu guards reinitRunning and reinitDirty.
 	reinitMu      sync.Mutex
@@ -165,7 +195,6 @@ func NewRegistry() *Registry {
 		initDone:          make(chan struct{}),
 		locks:             csync.NewMap[string, *serverLocks](),
 		gens:              csync.NewMap[string, uint64](),
-		authFlows:         map[string]*authFlow{},
 		tokenWrites:       map[tokenWriteOwner]map[*tokenWrite]struct{}{},
 		tokenReservations: map[tokenWriteOwner]*config.MCPTokenMutation{},
 		owners:            map[string]attemptID{},
@@ -174,6 +203,8 @@ func NewRegistry() *Registry {
 		allResources:      csync.NewMap[string, []*Resource](),
 		allPrompts:        csync.NewMap[string, []*Prompt](),
 	}
+	r.connectionManager = &connectionManager{reg: r}
+	r.authCoordinator = &authCoordinator{reg: r, authFlows: map[string]*authFlow{}}
 	r.newSession = r.createSession
 	r.runAuth = r.runAuthFlow
 	r.ping = r.pingSession

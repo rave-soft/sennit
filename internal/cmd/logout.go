@@ -81,7 +81,7 @@ sennit logout codex
 	},
 }
 
-func logoutHyper(ws workspace.Workspace) error {
+func logoutHyper(ws workspace.ConfigAccessor) error {
 	if err := cmp.Or(
 		ws.RemoveConfigField(config.ScopeGlobal, "providers.hyper.api_key"),
 		ws.RemoveConfigField(config.ScopeGlobal, "providers.hyper.oauth"),
@@ -93,7 +93,7 @@ func logoutHyper(ws workspace.Workspace) error {
 	return nil
 }
 
-func logoutCopilot(ws workspace.Workspace) error {
+func logoutCopilot(ws workspace.ConfigAccessor) error {
 	if err := cmp.Or(
 		ws.RemoveConfigField(config.ScopeGlobal, "providers.copilot.api_key"),
 		ws.RemoveConfigField(config.ScopeGlobal, "providers.copilot.oauth"),
@@ -108,7 +108,7 @@ func logoutCopilot(ws workspace.Workspace) error {
 // logoutCodex drops the Codex credentials. The discovered model list goes
 // with them: it is per-account, so leaving it behind would advertise models
 // the next account may not have.
-func logoutCodex(ws workspace.Workspace) error {
+func logoutCodex(ws workspace.ConfigAccessor) error {
 	if err := cmp.Or(
 		ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.api_key"),
 		ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.oauth"),
@@ -121,7 +121,7 @@ func logoutCodex(ws workspace.Workspace) error {
 	return nil
 }
 
-func pickLoggedInProvider(ws workspace.Workspace) string {
+func pickLoggedInProvider(ws workspace.ConfigAccessor) string {
 	cfg := ws.Config()
 	if cfg == nil {
 		fmt.Println(logoutPromptStyle.Render("You are not logged in to any platform."))

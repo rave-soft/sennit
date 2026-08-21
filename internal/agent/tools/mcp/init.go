@@ -4,132 +4,19 @@ package mcp
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
-	"sync"
 
 	"github.com/rave-soft/sennit/internal/config"
-	mcpoauth "github.com/rave-soft/sennit/internal/oauth/mcp"
 )
 
-func (r *Registry) InitializeSingle(ctx context.Context, name string, cfg ConfigProvider) error {
-	m, exists := cfg.Config().MCP[name]
-	if !exists {
-		return fmt.Errorf("mcp '%s' not found in configuration", name)
-	}
-
-	if m.Disabled {
-		r.updateState(name, StateDisabled, nil, nil, Counts{})
-		slog.Debug("Skipping disabled MCP", "name", name)
-		return nil
-	}
-
-	owner, err := r.beginAttempt(name)
-	if err != nil {
-		return err
-	}
-	return r.initClient(ctx, cfg, name, m, owner, cfg.Resolver())
-}
-
-// AuthenticateMCP initiates the OAuth flow for an MCP server that is in
-// StateNeedsAuth. It creates the OAuth handler (which starts a local
-// callback server), connects to the server (which triggers the browser
-// auth flow on 401), and transitions to StateConnected on success.
-func (r *Registry) AuthenticateMCP(ctx context.Context, cfg ConfigProvider, name string) error {
-	m, exists := cfg.Config().MCP[name]
-	if !exists {
-		return fmt.Errorf("mcp '%s' not found in configuration", name)
-	}
-	if !usesOAuth(m) {
-		return fmt.Errorf("mcp '%s' does not use OAuth authentication", name)
-	}
-
-	lock := r.suppressLock(name)
-	if !lock.TryLock() {
-		return fmt.Errorf("mcp '%s' already has an authentication in progress", name)
-	}
-	defer lock.Unlock()
-	owner, err := r.beginAttempt(name)
-	if err != nil {
-		return err
-	}
-	defer r.detachAuth(name, owner, nil).Close()
-	r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
-	// This is user initiated; unlike startup it may open a browser.
-	ctx = mcpoauth.WithInteractive(ctx)
-	err = r.connectAndRegister(ctx, cfg, name, m, owner, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
-	r.setAuthTerminal(name, owner, err)
-	return err
-}
-
-// initClient initializes a single MCP client with the given configuration.
-// gen is the server generation captured when the attempt was launched; the
-// resulting session is only committed if the generation is still current, so
-// a config change that restarts the server mid-connect discards this attempt.
-func (r *Registry) initClient(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver) error {
-	defer r.detachAuth(name, owner, nil).Close()
-	if usesOAuth(m) && !r.reserveTokenMutation(cfg, name, m, owner) {
-		return context.Canceled
-	}
-	// OAuth MCPs without a usable cached token require user interaction
-	// (browser auth). If a cached token exists with an access token
-	// (even if expired), try connecting first so the SDK can attempt a
-	// silent refresh. Only defer to the UI if no token is available at
-	// all or the token is structurally invalid (empty access token).
-	if usesOAuth(m) && !hasUsableToken(m.OAuthToken) {
-		if m.OAuthToken != nil {
-			r.clearOAuthToken(cfg, name, owner, m.OAuthToken)
-		}
-		r.updateStateFor(name, owner, StateNeedsAuth, nil)
-		r.clearMCPDataFor(name, owner)
-		slog.Info("MCP server requires OAuth authentication", "name", name)
-		return nil
-	}
-
-	r.updateStateFor(name, owner, StateStarting, nil, withPending(m))
-	err := r.connectAndRegister(ctx, cfg, name, m, owner, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
-	if err != nil {
-		// If an OAuth MCP fails because the saved token is no longer
-		// valid (e.g. refresh token expired or revoked) or no token
-		// could be obtained, clear the stale token and prompt the user
-		// to re-authenticate instead of leaving the server stuck in
-		// StateError.
-		if usesOAuth(m) && isOAuthInitErr(err) {
-			if m.OAuthToken != nil {
-				r.clearOAuthToken(cfg, name, owner, m.OAuthToken)
-			}
-			r.updateStateFor(name, owner, StateNeedsAuth, nil)
-			slog.Info("MCP OAuth token is no longer valid, re-authentication required", "name", name, "error", err)
-			return nil
-		}
-		// Setup/listing errors must settle the current attempt; otherwise the UI
-		// remains permanently in StateStarting.
-		r.updateStateFor(name, owner, StateError, maybeTimeoutErr(err, mcpTimeout(m)))
-		return err
-	}
-	return nil
-}
-
-// connectAndRegister creates a session, lists tools and prompts,
-// registers them in global state, and transitions to StateConnected.
-//
-// gen is the generation captured when this attempt was launched. If the
-// server was torn down since (generation bumped), the freshly built session
-// is closed and discarded instead of being registered over whatever the
-// newer attempt is doing. This is what makes a config change that lands
-// mid-connect converge on the latest config rather than a stale one.
-func (r *Registry) connectAndRegister(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, owner attemptID, resolver config.VariableResolver, channelOptIn bool) error {
-	if usesOAuth(m) && !r.reserveTokenMutation(cfg, name, m, owner) {
-		return context.Canceled
-	}
-	session, err := r.createSession(ctx, cfg, name, m, owner, resolver, channelOptIn)
-	if err != nil {
-		return err
-	}
-	return r.publishOrClose(ctx, name, m, owner, session)
-}
-
+// publishOrClose is the owns-check-then-commit at the heart of the
+// publishMu design: the "do we still own this server" check and the
+// catalog/session/state write that follows it (publishSession) must be one
+// indivisible step, or a concurrent teardown could observe and clear an old
+// snapshot while this attempt is still in the middle of publishing a newer
+// one. That is exactly why this stays a Registry method — the type that
+// physically holds publishMu — rather than living on connectionManager
+// alongside the createSession call that produces the session it publishes.
 func (r *Registry) publishOrClose(ctx context.Context, name string, m config.MCPConfig, owner attemptID, session *ClientSession) error {
 	committed := false
 	defer func() {
@@ -208,60 +95,6 @@ func (r *Registry) publishSession(ctx context.Context, name string, m config.MCP
 	return nil
 }
 
-// persistOAuthToken saves the OAuth token from a session to the global
-// config so it survives restarts.
-
-// DisableSingle disables and closes a single MCP client by name.
-func (r *Registry) DisableSingle(cfg ConfigProvider, name string) error {
-	// teardown bumps the generation, invalidating any in-flight connect, and
-	// the StateDisabled transition clears the recorded config so a later
-	// re-enable (even with an unchanged config) is seen as new and restarts.
-	r.teardown(name)
-	r.updateState(name, StateDisabled, nil, nil, Counts{})
-	slog.Info("Disabled mcp client", "name", name)
-	return nil
-}
-
-// goInitClient launches initClient in a goroutine with panic recovery.
-// Shared by Initialize and Reinitialize so the panic-to-state policy
-// lives in one place. wg, if non-nil, is Done when the attempt finishes
-// (success or failure); Initialize uses it to await startup. The goroutine
-// captures the server's generation at launch so a concurrent teardown
-// invalidates its result rather than letting it register a stale session.
-func (r *Registry) goInitClient(ctx context.Context, cfg ConfigProvider, name string, m config.MCPConfig, wg *sync.WaitGroup) {
-	owner, err := r.beginAttempt(name)
-	if err != nil {
-		if wg != nil {
-			wg.Done()
-		}
-		return
-	}
-	go func() {
-		if wg != nil {
-			defer wg.Done()
-		}
-		defer func() {
-			r.detachAuth(name, owner, nil).Close()
-			if rec := recover(); rec != nil {
-				var err error
-				switch v := rec.(type) {
-				case error:
-					err = v
-				case string:
-					err = fmt.Errorf("panic: %s", v)
-				default:
-					err = fmt.Errorf("panic: %v", v)
-				}
-				r.updateStateFor(name, owner, StateError, err)
-				slog.Error("Panic in MCP client initialization", "error", err, "name", name)
-			}
-		}()
-		if err := r.initClient(ctx, cfg, name, m, owner, cfg.Resolver()); err != nil {
-			slog.Debug("Failed to initialize MCP client", "name", name, "error", err)
-		}
-	}()
-}
-
 func (r *Registry) clearMCPDataFor(name string, owner attemptID) {
 	r.publishMu.Lock()
 	if !r.ownsLocked(name, owner) {
@@ -276,73 +109,4 @@ func (r *Registry) clearMCPDataFor(name string, owner attemptID) {
 	r.catalogMu.Unlock()
 	r.publishMu.Unlock()
 	r.detachAuth(name, owner, nil).Close()
-}
-
-func (r *Registry) getOrRenewClient(ctx context.Context, cfg ConfigProvider, name string) (*ClientSession, error) {
-	m := cfg.Config().MCP[name]
-	timeout := mcpTimeout(m)
-
-	observedOwner, observedSession, observed := r.sessionOwner(name)
-	var pingErr error
-	if observed {
-		pingErr = r.ping(ctx, observedSession, timeout)
-		if pingErr == nil {
-			r.publishMu.Lock()
-			current := r.ownsSessionLocked(name, observedOwner, observedSession)
-			r.publishMu.Unlock()
-			if current {
-				return observedSession, nil
-			}
-		}
-	}
-
-	mu := r.renewLock(name)
-	mu.Lock()
-	defer mu.Unlock()
-
-	owner, session, ok := r.sessionOwner(name)
-	if !ok {
-		return nil, fmt.Errorf("mcp '%s' not available", name)
-	}
-	if !observed || owner != observedOwner || session != observedSession {
-		if err := r.ping(ctx, session, timeout); err != nil {
-			return nil, context.Canceled
-		}
-		r.publishMu.Lock()
-		current := r.ownsSessionLocked(name, owner, session)
-		r.publishMu.Unlock()
-		if current {
-			return session, nil
-		}
-		return nil, context.Canceled
-	}
-
-	renewal, ok := r.beginRenewal(name, observedOwner, observedSession, maybeTimeoutErr(pingErr, timeout))
-	if !ok {
-		return nil, context.Canceled
-	}
-	if usesOAuth(m) && !r.reserveTokenMutation(cfg, name, m, renewal) {
-		return nil, context.Canceled
-	}
-	newSess, err := r.newSession(ctx, cfg, name, m, renewal, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
-	if err != nil {
-		r.clearMCPDataFor(name, renewal)
-		if usesOAuth(m) && isOAuthInitErr(err) {
-			if m.OAuthToken != nil {
-				r.clearOAuthToken(cfg, name, renewal, m.OAuthToken)
-			}
-			r.updateStateFor(name, renewal, StateNeedsAuth, nil)
-			slog.Info("MCP OAuth session expired, re-authentication required", "name", name, "error", err)
-		} else {
-			r.updateStateFor(name, renewal, StateError, maybeTimeoutErr(err, timeout))
-		}
-		return nil, err
-	}
-	if err := r.publishOrClose(ctx, name, m, renewal, newSess); err != nil {
-		if !errors.Is(err, context.Canceled) {
-			r.updateStateFor(name, renewal, StateError, err)
-		}
-		return nil, err
-	}
-	return newSess, nil
 }

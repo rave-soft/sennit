@@ -16,12 +16,6 @@ type buildConfigOptions struct {
 	workingDir string
 	dataDir    string
 
-	// debug forces Options.Debug on. Only Load sets this; reloadFromDisk
-	// leaves it false, which is a pre-existing gap (Options.Debug is never
-	// persisted, so --debug's provider HTTP logging drops on first reload),
-	// not a deliberate choice — left as-is, see the refactor report.
-	debug bool
-
 	// migrateModelCache runs the one-time bloated-model-cache migration.
 	// Idempotent but pointless to repeat every reload, so only Load sets it.
 	migrateModelCache bool
@@ -73,7 +67,11 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 
 	cfg.setDefaults(opts.workingDir, opts.dataDir)
 
-	if opts.debug {
+	// Reapply the process's --debug flag on every build, not just the first
+	// one: it lives on the store (store.debugOverride), not in the config
+	// file, so a reload's fresh disk read would otherwise silently drop it
+	// back to false. See debugOverride's doc comment.
+	if store.debugOverride {
 		cfg.Options.Debug = true
 	}
 

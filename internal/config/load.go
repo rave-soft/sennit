@@ -34,13 +34,13 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		workingDir:                 workingDir,
 		globalDataPath:             GlobalConfigData(),
 		externalChangePollInterval: externalChangePollInterval,
+		debugOverride:              debug,
 	}
 
 	built, err := buildConfig(store, buildConfigOptions{
 		ctx:               context.Background(),
 		workingDir:        workingDir,
 		dataDir:           dataDir,
-		debug:             debug,
 		migrateModelCache: true,
 		persistFallback:   true,
 	})

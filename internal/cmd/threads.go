@@ -89,7 +89,7 @@ var acquireWorkspace = setupWorkspaceWithProgressBar
 // subcommand: initialize the workspace (with the progress bar), and bail
 // out with a uniform error if it doesn't support threads. errPrefix names
 // the caller so the error reads e.g. "threads: list: this workspace...".
-func requireThreads(cmd *cobra.Command, errMsg string) (context.Context, workspace.Workspace, func(), error) {
+func requireThreads(cmd *cobra.Command, errMsg string) (context.Context, workspace.ThreadController, func(), error) {
 	ws, cleanup, err := acquireWorkspace(cmd)
 	if err != nil {
 		return nil, nil, nil, err

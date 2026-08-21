@@ -50,10 +50,11 @@ func TestConnect_SeparateConnectionsForDifferentDataDirs(t *testing.T) {
 	require.NoError(t, Release(dir2))
 }
 
-func TestRelease_NoopForUnknownDataDir(t *testing.T) {
+func TestRelease_UnknownDataDirIsReportedMisuse(t *testing.T) {
 	t.Cleanup(ResetPool)
 
-	require.NoError(t, Release("/nonexistent/path"), "releasing unknown data dir should not error")
+	require.Error(t, Release("/nonexistent/path"),
+		"releasing a data dir with no Connect behind it is misuse, not a no-op")
 }
 
 // TestConnect_IgnoresContendedWorkspaceLock confirms Connect no longer
@@ -122,17 +123,20 @@ func TestRelease_ClosesHandleWhenRefcountHitsZeroEvenForNonReleasingHolder(t *te
 	require.NoError(t, Release(dataDir))
 	require.Error(t, conn1.PingContext(context.Background()), "handle closes at refcount zero regardless of which holder's Release drained it")
 
-	// An extra release past zero finds no entry and is a silent no-op —
-	// consistent with, and already covered on its own by,
-	// TestRelease_NoopPastZero.
-	require.NoError(t, Release(dataDir), "release past zero is a silent no-op")
+	// An extra release past zero finds no entry left to drain. It used to
+	// be a silent no-op — exactly the "nothing detects it" half of the
+	// TECHDEBT.md entry this whole file is pinning the fix for — and is
+	// now reported misuse instead; see TestRelease_PastZeroIsReportedMisuse.
+	require.Error(t, Release(dataDir), "release past zero is reported, not swallowed")
 }
 
-// TestRelease_NoopPastZero covers Release called again after the pool
-// entry has already been removed (as opposed to TestRelease_NoopForUnknownDataDir,
-// which covers a data dir that was never connected at all). It must
-// return nil rather than panic.
-func TestRelease_NoopPastZero(t *testing.T) {
+// TestRelease_PastZeroIsReportedMisuse covers Release called again after
+// the pool entry has already been removed (as opposed to
+// TestRelease_UnknownDataDirIsReportedMisuse, which covers a data dir that
+// was never connected at all). Both used to return nil silently; both now
+// surface as a reported (logged and returned) error instead of pretending
+// the call was fine.
+func TestRelease_PastZeroIsReportedMisuse(t *testing.T) {
 	t.Cleanup(ResetPool)
 
 	dataDir := t.TempDir()
@@ -141,7 +145,7 @@ func TestRelease_NoopPastZero(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, Release(dataDir), "balanced release removes the entry")
-	require.NoError(t, Release(dataDir), "release after the entry is already gone must not panic")
+	require.Error(t, Release(dataDir), "release after the entry is already gone must be reported, not silently accepted")
 }
 
 // TestConnect_NormalizesPathSpelling pins that Connect and Release both

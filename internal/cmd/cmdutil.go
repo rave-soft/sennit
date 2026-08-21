@@ -80,11 +80,11 @@ type sessionByIDLister interface {
 	List(ctx context.Context) ([]session.Session, error)
 }
 
-// workspaceSessionLookup adapts workspace.Workspace's GetSession/
+// workspaceSessionLookup adapts workspace.SessionStore's GetSession/
 // ListSessions to sessionByIDLister so resolveSessionID can resolve a
 // session ID against a Workspace the same way it does against a
 // session.Service.
-type workspaceSessionLookup struct{ ws workspace.Workspace }
+type workspaceSessionLookup struct{ ws workspace.SessionStore }
 
 func (w workspaceSessionLookup) Get(ctx context.Context, id string) (session.Session, error) {
 	return w.ws.GetSession(ctx, id)

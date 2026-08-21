@@ -1,11 +1,6 @@
 package mcp
 
 import (
-	"context"
-	"log/slog"
-	"maps"
-	"slices"
-
 	"github.com/rave-soft/sennit/internal/config"
 )
 
@@ -79,102 +74,4 @@ func reconcile(current config.MCPs, running map[string]ClientInfo) map[string]re
 	}
 
 	return actions
-}
-
-// Reinitialize reconciles running MCP servers against the current config.
-// Servers added since the last call are started, servers removed are torn
-// down, and servers whose config changed are restarted. Unchanged servers
-// keep their existing sessions.
-//
-// Reconciliation is single-flighted per Registry: at
-// most one runs at a time. A config write that arrives mid-run just sets a
-// dirty flag and returns; the running reconciliation loops once more to
-// pick up the newer state. This coalesces a burst of rapid writes into at
-// most two reconciles instead of queueing a redundant no-op pass per write,
-// while still guaranteeing the final state reflects the latest config.
-func (r *Registry) Reinitialize(ctx context.Context, cfg ConfigProvider) {
-	r.reinitMu.Lock()
-	if r.reinitRunning {
-		r.reinitDirty = true
-		r.reinitMu.Unlock()
-		return
-	}
-	r.reinitRunning = true
-	r.reinitMu.Unlock()
-
-	for {
-		r.reconcileOnce(ctx, cfg)
-
-		r.reinitMu.Lock()
-		if !r.reinitDirty {
-			r.reinitRunning = false
-			r.reinitMu.Unlock()
-			return
-		}
-		r.reinitDirty = false
-		r.reinitMu.Unlock()
-	}
-}
-
-// reconcileOnce applies one reconciliation pass against the current config.
-func (r *Registry) reconcileOnce(ctx context.Context, cfg ConfigProvider) {
-	current := cfg.Config().MCP
-	actions := reconcile(current, r.states.Copy())
-	for name, action := range actions {
-		switch action {
-		case reinitRemove:
-			slog.Info("Removing MCP server no longer in config", "name", name)
-			r.removeServer(name)
-		case reinitDisable:
-			slog.Info("Disabling MCP server", "name", name)
-			if err := r.DisableSingle(cfg, name); err != nil {
-				slog.Warn("Failed to disable MCP server", "name", name, "error", err)
-			}
-		case reinitStart:
-			m := current[name]
-			if _, exists := r.states.Get(name); exists {
-				slog.Info("Re-initializing MCP server after config change", "name", name)
-			} else {
-				slog.Info("Initializing new MCP server after config change", "name", name)
-			}
-			// teardown bumps the generation, invalidating any in-flight
-			// attempt for this server. The StateStarting transition records
-			// m as PendingConfig so a subsequent reconcile can tell whether
-			// the attempt now in flight matches the latest config.
-			r.teardown(name)
-			r.updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-			r.goInitClient(ctx, cfg, name, m, nil)
-		}
-	}
-}
-
-// removeServer fully tears down an MCP server and deletes its state
-// entry. Unlike DisableSingle (which keeps the entry as StateDisabled),
-// this is for servers that no longer exist in config at all.
-func (r *Registry) removeServer(name string) {
-	r.teardown(name)
-	r.states.Del(name)
-}
-
-// mcpConfigEqual reports whether two MCPConfig values are equal, ignoring
-// the internally-managed OAuthToken field. Field-by-field rather than
-// reflect.DeepEqual so the comparison is explicit about what matters.
-// TestMCPConfigEqualExhaustive guards against drift: it fails at test
-// time if a new field is added to MCPConfig without a decision about
-// whether it participates here.
-func mcpConfigEqual(a, b config.MCPConfig) bool {
-	return a.Command == b.Command &&
-		maps.Equal(a.Env, b.Env) &&
-		slices.Equal(a.Args, b.Args) &&
-		a.Type == b.Type &&
-		a.URL == b.URL &&
-		a.Disabled == b.Disabled &&
-		slices.Equal(a.DisabledTools, b.DisabledTools) &&
-		slices.Equal(a.EnabledTools, b.EnabledTools) &&
-		a.Timeout == b.Timeout &&
-		maps.Equal(a.Headers, b.Headers) &&
-		a.OAuth == b.OAuth &&
-		a.OAuthClientID == b.OAuthClientID &&
-		a.OAuthClientSecret == b.OAuthClientSecret &&
-		a.OAuthCallbackPort == b.OAuthCallbackPort
 }

@@ -151,6 +151,24 @@ func Connect(ctx context.Context, dataDir string) (*sql.DB, error) {
 // Release decrements the reference count for the database at the given
 // data directory. When the count reaches zero the underlying connection
 // is closed and removed from the pool.
+//
+// A call with nothing left to release — no entry for dataDir at all, or
+// one whose refCount has already been drained to zero by earlier calls —
+// is misuse: every caller is expected to pair its own Connect with exactly
+// one Release (see Connect's doc comment), so there is no legitimate
+// reason for a Release to arrive once the ledger already says zero. The
+// pool cannot always catch an over-release before it does damage — two
+// distinct holders each releasing their own Connect look identical to one
+// holder releasing twice, and either transition legitimately drains the
+// count to zero (see TECHDEBT.md) — but it can refuse to pretend a call
+// past that point was fine instead of silently doing nothing, which is
+// what used to happen here and is exactly how an over-release surfaced far
+// from its cause: as unrelated query errors in whatever component still
+// held the handle, with nothing pointing back at the extra Release that
+// caused it. Returning a reported error here — logged at Error level, not
+// merely handed back for a caller to notice or not — turns that into a bug
+// visible at its own call site instead of one that silently corrupts the
+// pool.
 func Release(dataDir string) error {
 	dbPath := filepath.Join(dataDir, brand.DBFile)
 	absPath, err := filepath.Abs(dbPath)
@@ -162,8 +180,10 @@ func Release(dataDir string) error {
 	defer poolMu.Unlock()
 
 	entry, ok := pool[absPath]
-	if !ok {
-		return nil
+	if !ok || entry.refCount <= 0 {
+		err := fmt.Errorf("db: Release(%q) called with nothing left to release (over-release, or never Connect-ed)", dataDir)
+		slog.Error("Database connection over-released", "dataDir", dataDir, "error", err)
+		return err
 	}
 
 	entry.refCount--

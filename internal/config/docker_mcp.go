@@ -15,12 +15,59 @@ var dockerMCPVersionRunner = func(ctx context.Context) error {
 
 const dockerMCPAvailabilityTTL = 10 * time.Second
 
-var dockerMCPAvailabilityCache struct {
+// dockerMCPCache holds Docker MCP availability behind an injectable clock,
+// rather than the bare package-level struct measured against time.Since it
+// used to be. See "Docker MCP availability is a process-global cache with a
+// wall-clock TTL" in TECHDEBT.md: a single package-global cache makes every
+// reader order-dependent across tests in the same process (whichever test
+// warms the cache first decides what later tests observe), and a TTL
+// measured against wall time lets a slow test run cross the 10s boundary
+// mid-suite. now is swapped out in tests instead of sleeping past the TTL,
+// and a test that needs isolation from others constructs its own instance
+// rather than reaching for the package-level default.
+type dockerMCPCache struct {
 	mu        sync.Mutex
 	available bool
 	checkedAt time.Time
 	known     bool
+
+	ttl time.Duration
+	now func() time.Time
 }
+
+func newDockerMCPCache() *dockerMCPCache {
+	return &dockerMCPCache{ttl: dockerMCPAvailabilityTTL, now: time.Now}
+}
+
+// cached returns the cached availability and whether it is still fresh.
+func (c *dockerMCPCache) cached() (available, known bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.known {
+		return false, false
+	}
+	if c.now().Sub(c.checkedAt) > c.ttl {
+		return c.available, false
+	}
+	return c.available, true
+}
+
+// set records a freshly checked availability, timestamped with c.now().
+func (c *dockerMCPCache) set(available bool) {
+	c.mu.Lock()
+	c.available = available
+	c.checkedAt = c.now()
+	c.known = true
+	c.mu.Unlock()
+}
+
+// defaultDockerMCPCache is the process-wide cache DockerMCPAvailabilityCached
+// and RefreshDockerMCPAvailability go through. Tests that need isolation
+// from other tests' cache state swap this out for a fresh instance rather
+// than relying on the TTL to expire it; see swapDockerMCPCacheForTest in
+// docker_mcp_test.go.
+var defaultDockerMCPCache = newDockerMCPCache()
 
 // DockerMCPName is the name of the Docker MCP configuration.
 const DockerMCPName = "docker"
@@ -38,26 +85,13 @@ func IsDockerMCPAvailable() bool {
 // DockerMCPAvailabilityCached returns the cached Docker MCP availability and
 // whether the cached value is still fresh.
 func DockerMCPAvailabilityCached() (available bool, known bool) {
-	dockerMCPAvailabilityCache.mu.Lock()
-	defer dockerMCPAvailabilityCache.mu.Unlock()
-
-	if !dockerMCPAvailabilityCache.known {
-		return false, false
-	}
-	if time.Since(dockerMCPAvailabilityCache.checkedAt) > dockerMCPAvailabilityTTL {
-		return dockerMCPAvailabilityCache.available, false
-	}
-	return dockerMCPAvailabilityCache.available, true
+	return defaultDockerMCPCache.cached()
 }
 
 // RefreshDockerMCPAvailability refreshes and caches Docker MCP availability.
 func RefreshDockerMCPAvailability() bool {
 	available := IsDockerMCPAvailable()
-	dockerMCPAvailabilityCache.mu.Lock()
-	dockerMCPAvailabilityCache.available = available
-	dockerMCPAvailabilityCache.checkedAt = time.Now()
-	dockerMCPAvailabilityCache.known = true
-	dockerMCPAvailabilityCache.mu.Unlock()
+	defaultDockerMCPCache.set(available)
 	return available
 }
 

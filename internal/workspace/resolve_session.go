@@ -16,8 +16,8 @@ import (
 // This is shared across Workspace implementations (via cmd/run.go) so
 // `sennit run` behaves identically regardless of which one is in use; it
 // is a free function rather than an interface method because it only
-// needs the operations Workspace already exposes.
-func ResolveSession(ctx context.Context, ws Workspace, continueSessionID string, useLast bool, title string) (session.Session, error) {
+// needs the operations SessionStore already exposes.
+func ResolveSession(ctx context.Context, ws SessionStore, continueSessionID string, useLast bool, title string) (session.Session, error) {
 	switch {
 	case continueSessionID != "":
 		if _, _, ok := ws.ParseAgentToolSessionID(continueSessionID); ok {

@@ -160,7 +160,7 @@ func (m *OAuthCodex) stopPolling() tea.Msg {
 // The proxy is written first and unconditionally: model requests have to go
 // the same way the sign-in did, and clearing an emptied field matters as
 // much as saving a new one.
-func (m *OAuthCodex) afterSave(ws workspace.Workspace, token *oauth.Token) error {
+func (m *OAuthCodex) afterSave(ws workspace.ConfigAccessor, token *oauth.Token) error {
 	proxyKey := "providers." + codex.ProviderID + ".proxy_url"
 	if m.proxy == "" {
 		if err := ws.RemoveConfigField(config.ScopeGlobal, proxyKey); err != nil {

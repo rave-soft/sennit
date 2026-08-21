@@ -660,7 +660,7 @@ func (m *OAuth) saveCredential() tea.Cmd {
 // oauthPostSaver is the optional half of [OAuthProvider], implemented by
 // providers that need to write more than the token once it is saved.
 type oauthPostSaver interface {
-	afterSave(ws workspace.Workspace, token *oauth.Token) error
+	afterSave(ws workspace.ConfigAccessor, token *oauth.Token) error
 }
 
 // confirmAndSelectModel is invoked when the user acknowledges the success

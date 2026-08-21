@@ -259,18 +259,32 @@ func getGitBranch(ctx context.Context, sh *shell.Shell) string {
 	return fmt.Sprintf("Current branch: %s\n", out)
 }
 
-// getGitStatusSummary is best-effort: git failures are silently ignored and
-// simply omit the status line from the prompt.
+// getGitStatusSummary reports the working tree's status, or says plainly
+// that it couldn't be determined rather than asserting "clean" by default.
+//
+// The truncation to 20 lines used to be a `| head -20` in the command
+// itself, which silently swallowed the failure this function exists to
+// report: piping into `head` replaces `git status`'s own exit status with
+// `head`'s, which is always 0, so a git failure (a corrupt or
+// partially-created repo, a permissions problem, a missing git binary —
+// anything that gets past isGitRepo's bare `.git`-directory stat) produced
+// an empty out with a nil err, indistinguishable from a genuinely clean
+// tree. Truncating in Go instead lets `err` stay git's own, so a real
+// failure is told apart from an empty, successful status.
 func getGitStatusSummary(ctx context.Context, sh *shell.Shell) string {
-	out, _, err := sh.Exec(ctx, "git status --short 2>/dev/null | head -20")
+	out, _, err := sh.Exec(ctx, "git status --short 2>/dev/null")
 	if err != nil {
-		return ""
+		return "Status: could not be determined (git failed)\n"
 	}
 	out = strings.TrimSpace(out)
 	if out == "" {
 		return "Status: clean\n"
 	}
-	return fmt.Sprintf("Status:\n%s\n", out)
+	lines := strings.Split(out, "\n")
+	if len(lines) > 20 {
+		lines = lines[:20]
+	}
+	return fmt.Sprintf("Status:\n%s\n", strings.Join(lines, "\n"))
 }
 
 // getGitRecentCommits is best-effort: git failures are silently ignored and

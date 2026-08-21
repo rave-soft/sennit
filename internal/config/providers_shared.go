@@ -50,20 +50,17 @@ func resolveOptionalProxy(proxyURL string, resolver VariableResolver, providerID
 // dropProvider removes a provider from the config, logging and (optionally)
 // recording a doctor Problem about why.
 //
-// The two callers disagree, sometimes deliberately, on how loudly to
-// report a drop, so both are left as explicit parameters instead of being
-// collapsed to one behavior:
-//   - log is the slog level to use (slog.Warn everywhere except the
-//     disable_flag case in validateCustomProviders, which intentionally
-//     logs at slog.Debug and passes a nil problem: the user asked for that
-//     provider to be off, so it is not something `sennit doctor` should
-//     flag as a problem).
+// Policy: every drop the user did not ask for records a Problem, and
+// Problems of the same class (e.g. "missing base_url", "no models") carry
+// the same Hint regardless of whether the drop came from
+// mergeCatalogProviders or validateCustomProviders — see hintMissingBaseURL
+// and hintNoModels in providers_validate.go. The one deliberate exception is
+// the disable_flag case in validateCustomProviders: it logs at slog.Debug
+// and passes a nil problem, because the user asked for that provider to be
+// off, so it is not something `sennit doctor` should flag as a problem.
+//   - log is the slog level to use.
 //   - problem, when non-nil, is recorded via c.addProblem so `sennit
-//     doctor` and the TUI's /doctor dialog surface the drop. A nil problem
-//     reproduces two known call sites that don't currently report one; see
-//     providers_validate.go's discovery-failure branch, which is flagged
-//     in the refactor notes as likely accidental drift rather than a
-//     deliberate choice like the disable-flag case.
+//     doctor` and the TUI's /doctor dialog surface the drop.
 func (c *Config) dropProvider(id string, log func(msg string, args ...any), logMsg string, logArgs []any, problem *Problem) {
 	log(logMsg, logArgs...)
 	if problem != nil {

@@ -75,7 +75,7 @@ func init() {
 	loginCmd.Flags().String("proxy", "", `Proxy for reaching the platform, e.g. http://host:port or socks5://host:port ("none" forces a direct connection). Codex only; saved with the provider so model requests use it too`)
 }
 
-func loginCopilot(ws workspace.Workspace, force bool) error {
+func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
 	loginCtx := getLoginContext()
 
 	if !force {

@@ -28,12 +28,21 @@ import (
 // dependency (threadspawn.NewStore cannot be imported here either way: it
 // would be the same test import cycle NewTaskManagerForTest's doc comment
 // describes).
+//
+// Cleanup releases only this call's own dataDir, deliberately not
+// db.ResetPool(): the pool is one process-wide map, and a test that builds
+// more than one store (or a real message/session service alongside one, as
+// several in this package do) has more than one live entry in it at once.
+// ResetPool nukes every entry regardless of owner, so calling it here would
+// yank connections a sibling helper's own, not-yet-run cleanup still
+// legitimately holds — the exact "release closes it out from under another
+// holder" hazard db.Release itself now refuses to do silently (see
+// TECHDEBT.md / internal/db).
 func NewStoreForTest(t testing.TB) Store {
 	t.Helper()
 	dataDir := t.TempDir()
 	t.Cleanup(func() {
 		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
 	})
 	conn, err := db.Connect(context.Background(), dataDir)
 	require.NoError(t, err)

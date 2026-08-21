@@ -1,8 +1,6 @@
 package mcp
 
 import (
-	"context"
-	"errors"
 	"log/slog"
 	"time"
 
@@ -121,17 +119,6 @@ func (r *Registry) updateStateForSession(name string, owner attemptID, session *
 	cleanup := r.updateStateLocked(name, state, err, nil, counts)
 	r.publishMu.Unlock()
 	r.runStateCleanup(name, cleanup)
-}
-
-func (r *Registry) setAuthTerminal(name string, owner attemptID, err error) {
-	if err == nil {
-		return
-	}
-	if errors.Is(err, context.Canceled) || isOAuthInitErr(err) {
-		r.updateStateFor(name, owner, StateNeedsAuth, nil)
-		return
-	}
-	r.updateStateFor(name, owner, StateError, err)
 }
 
 // stateOpt mutates the ClientInfo a transition is about to publish. Config

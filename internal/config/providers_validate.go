@@ -10,6 +10,15 @@ import (
 	"github.com/rave-soft/sennit/internal/discover"
 )
 
+// Hints shared by every drop of the same class in this file, so a custom
+// provider dropped for a reason catalog providers also get dropped for
+// (missing base_url/endpoint) reads the same guidance either way. See
+// providerDropProblem's callers in providers_merge.go for the catalog side.
+const (
+	hintMissingBaseURL = "static check only; set base_url and reload"
+	hintNoModels       = "static check only; configure at least one model and reload"
+)
+
 // validateCustomProviders validates every provider outside the known
 // catalog, applies any discovery results computed for it, and drops
 // providers that end up unusable (unsupported type, disabled, no models, no
@@ -42,7 +51,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 			continue
 		}
 		if providerConfig.BaseURL == "" {
-			problem := providerDropProblem(id, "missing base_url", "")
+			problem := providerDropProblem(id, "missing base_url", hintMissingBaseURL)
 			c.dropProvider(id, slog.Warn, "Skipping custom provider due to missing API endpoint", []any{"provider", id}, &problem)
 			continue
 		}
@@ -52,12 +61,12 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 			if result.err != nil {
 				slog.Warn("Model discovery failed", "provider", id, "error", result.err)
 				if len(providerConfig.Models) == 0 {
-					// No Problem recorded here, unlike the other drops in
-					// this function: this looks like accidental drift
-					// rather than a deliberate choice (see the "no models"
-					// drop a few lines down, which does record one for the
-					// same underlying condition), preserved as-is.
-					c.dropProvider(id, slog.Warn, "Skipping provider with no models after failed discovery", []any{"provider", id}, nil)
+					// Same underlying condition as the "no models configured
+					// or discovered" drop below, so it gets the same Problem
+					// treatment and Hint — previously this branch dropped
+					// silently while the other recorded a Problem.
+					problem := providerDropProblem(id, "no models after failed discovery", hintNoModels)
+					c.dropProvider(id, slog.Warn, "Skipping provider with no models after failed discovery", []any{"provider", id}, &problem)
 					continue
 				}
 			} else if len(result.models) > 0 {
@@ -75,7 +84,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		}
 
 		if len(providerConfig.Models) == 0 {
-			problem := providerDropProblem(id, "no models configured or discovered", "")
+			problem := providerDropProblem(id, "no models configured or discovered", hintNoModels)
 			c.dropProvider(id, slog.Warn, "Skipping custom provider because the provider has no models", []any{"provider", id}, &problem)
 			continue
 		}
@@ -88,7 +97,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {
-			problem := providerDropProblem(id, "missing base_url", "")
+			problem := providerDropProblem(id, "missing base_url", hintMissingBaseURL)
 			c.dropProvider(id, slog.Warn, "Skipping custom provider due to missing API endpoint", []any{"provider", id, "error", err}, &problem)
 			continue
 		}

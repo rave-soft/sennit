@@ -493,6 +493,16 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.Equal(t, 0, cfg.Providers.Len())
 		_, exists := cfg.Providers.Get("custom")
 		require.False(t, exists)
+
+		// Regression test for "Provider-drop reporting is inconsistent
+		// between merge and validate" (TECHDEBT.md): a discovery-triggered
+		// empty-models drop used to record no Problem at all, so `sennit
+		// doctor` never told the user this provider vanished. It must now
+		// record one, with the same Hint the sibling "no models configured
+		// or discovered" drop uses.
+		require.Len(t, cfg.Problems, 1)
+		require.Equal(t, "custom", cfg.Problems[0].Subject)
+		require.Equal(t, hintNoModels, cfg.Problems[0].Hint)
 	})
 
 	t.Run("custom provider with no models and discover_models:false is removed", func(t *testing.T) {
@@ -1345,4 +1355,58 @@ func TestConfig_configureProvidersUnresolvableProxy(t *testing.T) {
 	pc, ok := cfg.Providers.Get("openai")
 	require.True(t, ok)
 	require.Empty(t, pc.ProxyURL, "an unresolved proxy template must be cleared, not carried forward")
+}
+
+// TestConfig_configureProviders_DropHintParity pins the fix for
+// "Provider-drop reporting is inconsistent between merge and validate"
+// (TECHDEBT.md): a catalog provider dropped for a missing endpoint and a
+// custom provider dropped for the same reason (missing base_url) must carry
+// the same Hint, not just the same message shape. Before the fix, only the
+// catalog drop (mergeCatalogProviders, via applyProviderCredentials) got a
+// Hint; the custom-provider drop (validateCustomProviders) got an empty one.
+func TestConfig_configureProviders_DropHintParity(t *testing.T) {
+	knownProviders := []catwalk.Provider{
+		{
+			ID:          catwalk.InferenceProviderAzure,
+			APIEndpoint: "$AZURE_ENDPOINT_NOT_SET",
+			Models:      []catwalk.Model{{ID: "test-model"}},
+		},
+	}
+
+	cfg := &Config{
+		Providers: csync.NewMap(map[string]ProviderConfig{
+			// Configuring azure (a catalog provider) so the drop is reported
+			// rather than silently skipped (see applyProviderCredentials'
+			// configExists guard).
+			"azure": {APIKey: "test-key"},
+			// Custom provider dropped for the same underlying reason.
+			"custom": {
+				APIKey: "test-key",
+				Models: []catwalk.Model{{ID: "test-model"}},
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+
+	testEnv := testenv.New(map[string]string{})
+	resolver := NewShellVariableResolver(testEnv)
+	err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), testEnv, resolver, knownProviders)
+	require.NoError(t, err)
+
+	require.Equal(t, 0, cfg.Providers.Len())
+
+	var azureHint, customHint string
+	var azureFound, customFound bool
+	for _, p := range cfg.Problems {
+		switch p.Subject {
+		case "azure":
+			azureHint, azureFound = p.Hint, true
+		case "custom":
+			customHint, customFound = p.Hint, true
+		}
+	}
+	require.True(t, azureFound, "catalog drop must record a Problem")
+	require.True(t, customFound, "custom-provider drop must record a Problem")
+	require.NotEmpty(t, azureHint)
+	require.Equal(t, azureHint, customHint, "drops of the same class must carry the same Hint")
 }

@@ -76,11 +76,22 @@ type RuntimeOverrides struct {
 // another is already in flight skips instead of running redundant disk
 // I/O and HTTP calls concurrently with it.
 type ConfigStore struct {
-	config             *Config
-	workingDir         string
-	resolver           VariableResolver
-	globalDataPath     string   // ~/.local/share/sennit/sennit.json
-	workspacePath      string   // .sennit/sennit.json
+	config         *Config
+	workingDir     string
+	resolver       VariableResolver
+	globalDataPath string // ~/.local/share/sennit/sennit.json
+	workspacePath  string // .sennit/sennit.json
+
+	// debugOverride is the process's --debug flag, recorded once by Load so
+	// that buildConfig can reapply it on every reload. Options.Debug is
+	// otherwise sourced only from the "debug" key in a config file, which a
+	// reload's fresh disk read would otherwise silently drop back to false.
+	// See buildConfig's reapplication of it; formerly the "--debug is lost
+	// on the first config reload" entry in TECHDEBT.md. Read and written
+	// only from Load/reloadFromDisk, both of which already run
+	// single-threaded with respect to this field (Load before the store is
+	// published; reloadFromDisk under reloadMu), so no separate mutex.
+	debugOverride      bool
 	loadedPaths        []string // config files that were successfully loaded
 	knownProviders     []catwalk.Provider
 	overrides          RuntimeOverrides
@@ -95,6 +106,16 @@ type ConfigStore struct {
 	// loop in watch.go) — a separate mutex, rather than reusing writeMu,
 	// keeps that read cheap and avoids adding staleness bookkeeping to
 	// writeMu's contention.
+	//
+	// Undocumented coupling worth knowing before touching this: within its
+	// stalenessMu section, CaptureStalenessSnapshot also reads workspacePath
+	// and globalDataPath (to make sure both are always tracked), but those
+	// two fields are not guarded by stalenessMu — they are writeMu-guarded
+	// fields, so this read is only safe because every current caller of
+	// CaptureStalenessSnapshot (Load, reloadFromDisk, updateLocked) already
+	// holds writeMu for the duration of the call. A caller that took only
+	// stalenessMu would race a concurrent writeMu-held mutator of
+	// workspacePath/globalDataPath.
 	stalenessMu sync.Mutex
 
 	// configMu guards the config pointer field against concurrent

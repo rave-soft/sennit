@@ -21,7 +21,7 @@ import (
 // proxyURL is optional, and routes both halves of the sign-in as well as the
 // model requests that follow: for a user who can only reach OpenAI through a
 // proxy, a token exchange that ignored it would fail on its own.
-func loginCodex(ws workspace.Workspace, force bool, proxyURL string) error {
+func loginCodex(ws workspace.ConfigAccessor, force bool, proxyURL string) error {
 	loginCtx := getLoginContext()
 
 	if err := codex.ValidateProxy(proxyURL); err != nil {

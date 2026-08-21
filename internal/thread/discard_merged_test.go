@@ -55,7 +55,6 @@ func newTestManagerWithRealMessages(t *testing.T, repo string) (*thread.Manager,
 	dataDir := t.TempDir()
 	t.Cleanup(func() {
 		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
 	})
 	conn, err := db.Connect(context.Background(), dataDir)
 	require.NoError(t, err)

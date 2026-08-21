@@ -286,7 +286,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	}
 	rb.push(func() { m.releaseHandle(handle) })
 	if err := m.ctx.Err(); err != nil {
-		return Thread{}, err
+		return Thread{}, m.failCreate(ctx, st, err)
 	}
 
 	var sess Session
@@ -299,10 +299,11 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
 
-	st, err = m.store.SetSession(ctx, st.ID, sess.ID)
+	newSt, err := m.store.SetSession(ctx, st.ID, sess.ID)
 	if err != nil {
 		return Thread{}, m.failCreate(ctx, st, err)
 	}
+	st = newSt
 	// Register the parent on the thread's own coordinator - its
 	// dispatcher is what the thread's own turns run through, so that is
 	// where a mid-run ask must be looked up by session id - but with
@@ -327,10 +328,11 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	}
 
 	if args.Goal == "" {
-		st, err = m.lc.setStatus(ctx, st.ID, StatusIdle, "", "", 0)
+		idleSt, err := m.lc.setStatus(ctx, st.ID, StatusIdle, "", "", 0)
 		if err != nil {
-			return Thread{}, err
+			return Thread{}, m.failCreate(ctx, st, err)
 		}
+		st = idleSt
 		// Keep the workspace live so attaching to the thread lands in a
 		// writable session rather than the read-only view reserved for
 		// unspawned threads. Shutdown and Remove release it like any
@@ -340,10 +342,11 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		return st, nil
 	}
 
-	st, err = m.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
+	runningSt, err := m.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 	if err != nil {
-		return Thread{}, err
+		return Thread{}, m.failCreate(ctx, st, err)
 	}
+	st = runningSt
 	m.lc.startRun(WithAgentDispatch(m.ctx), handle, m.spawner, st.ID, st.SessionID, args.Goal)
 	rb.commit()
 	return st, nil
@@ -368,7 +371,26 @@ func (m *Manager) releaseHandle(handle Handle) {
 }
 
 // failCreate records cause as the thread's terminal failure and returns it
-// to Create's caller.
+// to Create's caller. st must be the row Create's own store.Create call
+// produced (or a later, successfully re-fetched copy of it) — never the
+// zero-value return of a failed store call — or the write below targets an
+// empty ID and marks nothing.
+//
+// Every early return in Create from the point its row exists calls this,
+// deliberately without exception: once store.Create has succeeded the row
+// is a real, resolvable thread, and by the time any of these paths return
+// its worktree and spawned handle have already been unwound by rb. Leaving
+// such a row at whatever transient status it last held (mid-create, or the
+// short-lived StatusIdle/StatusRunning setStatus itself failed to write)
+// would let it sit there — on disk unaffected by the sweep in
+// lifecycle.recover, which only reconciles the terminal/active statuses of
+// a running process's restart, not a still-live one — misrepresenting a
+// thread as pending or running when nothing is actually working on it. A
+// setStatus failure calling back into this method sends one further
+// best-effort write against the same store, which is a redundant attempt
+// at worst and a correctly-recorded failure at best; either way it can
+// never turn a successful write into a failure, since failCreate's own
+// error is only logged.
 func (m *Manager) failCreate(ctx context.Context, st Thread, cause error) error {
 	if _, err := m.lc.setStatus(ctx, st.ID, StatusFailed, cause.Error(), "", 0); err != nil {
 		slog.Error("Failed to record create failure", "component", "thread", "thread", st.ID, "error", err)

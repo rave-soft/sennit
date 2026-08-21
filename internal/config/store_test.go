@@ -515,6 +515,50 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	require.Equal(t, "gpt-4", store.config.Model.Model)
 }
 
+// TestReloadFromDisk_PreservesDebugFlag pins the fix for "--debug is lost on
+// the first config reload": the process-level --debug flag is recorded on
+// the store (debugOverride) and reapplied by buildConfig on every rebuild,
+// not just the one Load does. Before the fix, Options.Debug came only from
+// the config file during a reload, so a process started with --debug (and no
+// "debug" key on disk) silently lost it the first time anything triggered a
+// reload.
+func TestReloadFromDisk_PreservesDebugFlag(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sennit.json")
+
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	initialConfig := `{
+		"model": {"provider": "openai", "model": "gpt-4"},
+		"providers": {
+			"openai": {
+				"api_key": "test-key",
+				"models": [{"id": "gpt-4", "name": "GPT-4"}]
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
+
+	// Load with --debug on and no "debug" key in the file.
+	store, err := Load(dir, dir, true)
+	require.NoError(t, err)
+	require.True(t, store.config.Options.Debug, "Load must apply --debug")
+
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	// Touch the file (unrelated change) and reload, as a watcher tick or a
+	// sibling instance's write would.
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
+
+	ctx := context.Background()
+	require.NoError(t, store.ReloadFromDisk(ctx))
+
+	require.True(t, store.config.Options.Debug, "a reload must not drop --debug")
+}
+
 // TestSetConfigField_AutoReloads verifies that SetConfigField automatically
 // reloads config into memory after writing, so subsequent reads see the new value.
 func TestSetConfigField_AutoReloads(t *testing.T) {

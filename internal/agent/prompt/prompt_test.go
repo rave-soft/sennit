@@ -2,10 +2,12 @@ package prompt
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -385,20 +387,29 @@ func TestGetGitStatus(t *testing.T) {
 		require.Contains(t, got, "dirty.txt")
 	})
 
-	t.Run("outside a git repo, branch and commits are silent", func(t *testing.T) {
+	t.Run("outside a git repo, branch and commits are silent, and status says so rather than asserting clean", func(t *testing.T) {
 		requireGit(t)
 		t.Parallel()
 		dir := t.TempDir()
 		got := getGitStatus(t.Context(), dir)
 		// getGitBranch and getGitRecentCommits run "git ... 2>/dev/null"
 		// directly, so a non-zero git exit (not a repo) is observed and
-		// they contribute nothing. getGitStatusSummary instead pipes
-		// through "| head -20": head always exits 0, so a failing "git
-		// status" underneath it is masked and reads as empty output,
-		// which the function reports as "Status: clean" even though
-		// there is no repo here at all. Pinning that surprising quirk,
-		// not endorsing it.
-		require.Equal(t, "Status: clean\n", got)
+		// they contribute nothing. getGitStatusSummary now runs "git
+		// status" the same way — no more "| head -20" masking git's own
+		// exit status behind head's — so a failing "git status" here (no
+		// repo at all) is observed too, and reported as "could not be
+		// determined" rather than misread as an empty, clean status.
+		require.Equal(t, "Status: could not be determined (git failed)\n", got)
+	})
+
+	t.Run("status is truncated to 20 lines without losing git's own exit status", func(t *testing.T) {
+		t.Parallel()
+		dir := initGitRepo(t)
+		for i := range 25 {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, fmt.Sprintf("dirty-%02d.txt", i)), []byte("x"), 0o644))
+		}
+		got := getGitStatus(t.Context(), dir)
+		require.Equal(t, 20, strings.Count(got, "dirty-"), "status must be capped at 20 files, truncated in Go now that git's own exit status is what err reflects")
 	})
 }
 

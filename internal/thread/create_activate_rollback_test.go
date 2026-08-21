@@ -337,3 +337,98 @@ func TestManager_ActivateRollsBackOnlyWhatSucceeded(t *testing.T) {
 		})
 	}
 }
+
+// TestManager_CreateFailureMarksTheRightRow proves that every failure path
+// in Create reachable after store.Create has run — store.SetSession's own
+// failure (the original defect: `st, err = m.store.SetSession(...)`
+// clobbered st with a zero Thread before the error was checked, so
+// failCreate marked an empty ID and the real row's status never changed),
+// the ctx.Err() check after Spawn, and the two setStatus calls further
+// down — all leave the thread's own row at StatusFailed with cause recorded
+// as its Error, rather than stranded at whatever status Create left it in.
+//
+// Reverting the failCreate fix (restoring `st, err =
+// m.store.SetSession(...)`, or dropping the ctx.Err()/setStatus failCreate
+// calls) makes the "set_session_fails" case fail outright (status stays
+// StatusPending) and the other three fail on the Error-contains assertion
+// (status still flips via later cleanup? no -- it stays whatever Create
+// left it at, never StatusFailed, and Error stays empty).
+func TestManager_CreateFailureMarksTheRightRow(t *testing.T) {
+	cases := []struct {
+		name       string
+		args       func(a *thread.CreateArgs)
+		spawner    func(s *fakeSpawner, cancel context.CancelFunc)
+		store      func(real thread.Store) thread.Store
+		wantErrSub string
+	}{
+		{
+			name: "set_session_fails",
+			store: func(real thread.Store) thread.Store {
+				return &flakyStore{Store: real, failSetSession: true}
+			},
+			wantErrSub: "forced SetSession failure",
+		},
+		{
+			name: "context_canceled_after_spawn",
+			spawner: func(s *fakeSpawner, cancel context.CancelFunc) {
+				s.afterSpawn = func(string) { cancel() }
+			},
+			wantErrSub: context.Canceled.Error(),
+		},
+		{
+			name: "idle_set_status_fails",
+			args: func(a *thread.CreateArgs) { a.Goal = "" },
+			store: func(real thread.Store) thread.Store {
+				return &flakyStore{Store: real, failSetStatus: map[thread.Status]bool{thread.StatusIdle: true}}
+			},
+			wantErrSub: "forced SetStatus failure",
+		},
+		{
+			name: "running_set_status_fails",
+			store: func(real thread.Store) thread.Store {
+				return &flakyStore{Store: real, failSetStatus: map[thread.Status]bool{thread.StatusRunning: true}}
+			},
+			wantErrSub: "forced SetStatus failure",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := initRepo(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+
+			spawner := newFakeSpawner(t)
+			if tc.spawner != nil {
+				tc.spawner(spawner, cancel)
+			}
+			store := thread.NewStoreForTest(t)
+			if tc.store != nil {
+				store = tc.store(store)
+			}
+			mgr := thread.NewManager(thread.ManagerOptions{
+				Store:       store,
+				Spawner:     spawner,
+				RepoRoot:    repo,
+				WorktreeDir: t.TempDir(),
+				Context:     ctx,
+			})
+
+			args := thread.CreateArgs{Name: "fc-" + slug(tc.name), Goal: "go", MergePolicy: thread.MergeManual}
+			if tc.args != nil {
+				tc.args(&args)
+			}
+
+			_, err := mgr.Create(context.Background(), args)
+			require.Error(t, err)
+
+			// Look the row up by name, exactly as Get's own resolve does:
+			// on failure Create never hands the ID back, and this is the
+			// only handle a caller has left.
+			got, err := mgr.Get(context.Background(), args.Name)
+			require.NoError(t, err, "the row must still exist under its name")
+			require.Equal(t, thread.StatusFailed, got.Status, "row must be marked failed rather than left at its prior status")
+			require.Contains(t, got.Error, tc.wantErrSub)
+		})
+	}
+}
