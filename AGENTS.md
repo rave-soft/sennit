@@ -81,18 +81,41 @@ internal/
   `skills`). Types with behavior, runtime references, or transitive
   dependencies require explicit DTOs in `proto`, with narrowly scoped
   conversion at the boundary. Do not add a general conversion framework.
-  - The following pre-existing canonical wire contracts are deliberate,
-    narrow exceptions; do not extend them. `tools.*PermissionsParams` remains
-    aliased because permission consumers assert its concrete Go type after a
-    JSON round trip. `config.Scope` remains in `ConfigProviderKeyRequest`
-    because its local DTO replacement requires conversions at the
-    workspace boundary. `proto.LSPClientInfo` aliases `lsp.ClientInfo` to
-    preserve its established error encoding; `lsp.ClientInfo` is not a
-    leaf type because it carries a runtime `Client` reference excluded from
-    JSON; replacing it locally requires conversions across the LSP
-    and workspace boundary. New types from these packages must
-    use DTOs unless a reviewed boundary change establishes an equally
-    necessary wire contract.
+  - **There is no remote transport in this tree.** `proto` was shaped for a
+    client/server split that no longer exists: every `Workspace`
+    implementation is in-process, and events reach the TUI through
+    `internal/pubsub` channels, not over a wire. Read any "wire contract"
+    language below as historical. Audited 2026-08-21.
+  - `proto.Thread` is the one live DTO. It is a real struct, built in
+    `workspace/app_workspace.go` and named throughout `Workspace`'s thread
+    methods, and `internal/app/threadspawn/protoconv.go` converts
+    `thread.Thread` into it. Keep it.
+  - `tools.*PermissionsParams` **stays aliased, but not for the reason this
+    section used to give.** The old text said consumers assert the concrete
+    type "after a JSON round trip". They do not: the permission dialog holds a
+    `permission.PermissionRequest` built in-process and asserts on
+    `proto.*PermissionsParams`, which succeeds only because the alias makes it
+    the same Go type as the `tools.*` value the agent constructed. The alias
+    is load-bearing for **type identity**, and breaking it would break the
+    dialog's per-tool rendering (see `ui/dialog/permissions.go`'s registry and
+    `TestDiffContentRenderer_GuardStopsBeforeToDiff`). The JSON path that
+    rationale referred to — `proto.PermissionRequest.UnmarshalJSON` and
+    `unmarshalToolParams` in `proto/permission.go` — is real code but
+    unreachable: nothing constructs a `proto.PermissionRequest`.
+  - The following are **dead** and should be deleted rather than defended.
+    `proto.Message`, `proto.RunComplete`, `proto.AgentEvent`,
+    `proto.PermissionRequest` and `proto.PermissionNotification` are never
+    constructed anywhere in the tree, and no broker publishes them; their only
+    references are `case` arms in `internal/herdr/translate.go` that can never
+    match. `proto.ServerNotice` is likewise never constructed, though
+    `ui/model` still switches on it. `proto.ConfigProviderKeyRequest` — the
+    `config.Scope` exception — has zero references outside `proto` itself.
+    `proto.LSPClientInfo` is an alias whose only mention outside `proto` is a
+    swagger `@name` comment in `lsp/info.go`; `workspace.go` aliases
+    `lsp.ClientInfo` directly instead.
+  - So: add a DTO to `proto` only for something that genuinely crosses the
+    workspace/UI boundary as data, the way `proto.Thread` does. Do not add one
+    because a type "might be sent somewhere" — nothing is sent anywhere.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`
   with runtime data injected.
 - **Context files**: Sennit reads AGENTS.md, SENNIT.md, CLAUDE.md, GEMINI.md
