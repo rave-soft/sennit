@@ -553,7 +553,14 @@ func (a *AssistantMessageItem) cachedContent(width int) string {
 		return a.contentSec.out
 	}
 	out := a.renderMarkdown(a.message.Content().Text, width)
-	if bg := a.sty.Messages.MarkdownBlock.GetBackground(); bg != nil {
+	// GetBackground never returns nil: lipgloss.Style.GetBackground reports
+	// "no color set" as lipgloss.NoColor{}, a concrete non-nil color.Color
+	// (see charm.land/lipgloss/v2's Style.GetBackground doc). A `!= nil`
+	// check is therefore always true and would paint every message with
+	// NoColor{}'s opaque black RGBA whenever no theme background is
+	// configured, so the absence check has to compare against NoColor
+	// itself instead.
+	if bg := a.sty.Messages.MarkdownBlock.GetBackground(); bg != (lipgloss.NoColor{}) {
 		out = common.BlockBackground(out, width, bg)
 	}
 	a.contentSec.store(width, srcHash, extra, out, 0)

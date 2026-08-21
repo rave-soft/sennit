@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -60,9 +61,34 @@ func writeGlobalConfig(t *testing.T, cfgJSON string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(cfgJSON), 0o644))
 }
 
+// canonicalTestTempRoot replaces os.TempDir() as the root for the ephemeral
+// test working directory. os.TempDir() honors $TMPDIR, which is "/tmp" on
+// Linux CI runners but something like "/var/folders/xx/yy/T" on macOS
+// runners — and that root ends up baked verbatim into VCR cassettes: tool
+// results (ls, edit, grep, glob) echo back the absolute working directory,
+// and unlike the system prompt (stripped by normalizeForMatch) those
+// tool-role message bytes are matched strictly. A root that moves with the
+// OS/environment therefore makes every cassette recorded on Linux
+// unreplayable anywhere else. Pinning it keeps the harness's on-disk paths —
+// and so the request bodies built from them — identical across the OS
+// matrix. See vcr_determinism_test.go for the test that pins this down.
+const canonicalTestTempRoot = "/tmp"
+
+// testTempRoot is canonicalTestTempRoot everywhere the cassettes are
+// actually replayed, and os.TempDir() on Windows. TestCoderAgent — the only
+// cassette consumer — skips on Windows (agent_test.go), so pinning there
+// would buy no determinism while pointing 31 other tests at C:\tmp, which
+// is not a conventional writable location on a Windows runner.
+func testTempRoot() string {
+	if runtime.GOOS == "windows" {
+		return os.TempDir()
+	}
+	return canonicalTestTempRoot
+}
+
 func testEnv(t *testing.T) fakeEnv {
 	t.Helper()
-	return testEnvAt(t, filepath.Join(os.TempDir(), "sennit-test-", t.Name()))
+	return testEnvAt(t, filepath.Join(testTempRoot(), "sennit-test-", t.Name()))
 }
 
 func testEnvAt(t *testing.T, workingDir string) fakeEnv {

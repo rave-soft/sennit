@@ -453,10 +453,9 @@ func TestPromptData(t *testing.T) {
 			0o644,
 		))
 
-		// Unlike ContextPaths, SkillsPaths are never joined against the
-		// store's working dir (expandPath only handles ~ and $VAR) — a
-		// relative entry here resolves against the test binary's own
-		// cwd, not dir. Use an absolute path to sidestep that.
+		// An absolute entry must survive untouched: SmartJoin returns an
+		// absolute path unchanged. The relative case is covered by
+		// TestPromptData_RelativeSkillsPathResolvesAgainstWorkspace below.
 		cfg := &config.Config{
 			Providers: csync.NewMap[string, config.ProviderConfig](),
 			Options:   &config.Options{SkillsPaths: []string{filepath.Join(dir, "myskills")}},
@@ -468,4 +467,41 @@ func TestPromptData(t *testing.T) {
 		data := p.promptData(context.Background(), "anthropic", "claude", store)
 		require.Contains(t, data.AvailSkillXML, "overridden jq skill for this test.")
 	})
+}
+
+// TestPromptData_RelativeSkillsPathResolvesAgainstWorkspace pins the fix for
+// a relative options.skills_paths entry. It used to go through expandPath
+// alone, which handles ~ and $VAR but joins nothing, so the entry resolved
+// against whatever directory the process was started in -- a different answer
+// depending on how sennit was launched. Context paths never had this problem
+// because processContextPath SmartJoins them against the working dir; skills
+// paths now do the same.
+func TestPromptData_RelativeSkillsPathResolvesAgainstWorkspace(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "team-skills", "deploy")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(skillDir, "SKILL.md"),
+		[]byte("---\nname: deploy\ndescription: a workspace-relative skill.\n---\n\nbody\n"),
+		0o644,
+	))
+
+	cfg := &config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		// Relative on purpose: it only resolves if it is anchored to the
+		// store's working dir, which is dir and is never the test binary's
+		// cwd.
+		Options: &config.Options{SkillsPaths: []string{"team-skills"}},
+	}
+	store := config.NewTestStore(t, cfg, config.WithWorkingDir(dir))
+
+	p, err := NewPrompt("t", "")
+	require.NoError(t, err)
+
+	data := p.promptData(context.Background(), "anthropic", "claude", store)
+	require.Contains(t, data.AvailSkillXML, "a workspace-relative skill.",
+		"a relative skills_paths entry must resolve against the workspace, "+
+			"not the process's cwd")
 }

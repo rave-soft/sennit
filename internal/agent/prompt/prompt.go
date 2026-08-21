@@ -185,7 +185,14 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	if len(cfg.Options.SkillsPaths) > 0 {
 		expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
 		for _, pth := range cfg.Options.SkillsPaths {
-			expandedPaths = append(expandedPaths, expandPath(pth, store))
+			// Resolve against the workspace, not the process's cwd, the
+			// same way processContextPath does for context files.
+			// SmartJoin leaves an absolute path untouched, so only a
+			// relative entry is anchored. Without this a relative
+			// skills_paths entry means something different depending on
+			// where sennit happened to be launched from.
+			expandedPaths = append(expandedPaths, filepathext.SmartJoin(
+				store.WorkingDir(), expandPath(pth, store)))
 		}
 		for _, userSkill := range skills.Discover(expandedPaths) {
 			if builtinNames[userSkill.Name] {

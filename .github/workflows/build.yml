@@ -57,5 +57,18 @@ jobs:
       # release binary: golangci-lint refuses to run when the Go it was
       # built with is older than the version the module targets, and its
       # published binaries trail the toolchain by a release or two.
-      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+      #
+      # Pinned, not @latest: @latest silently swaps in whatever
+      # golangci-lint (and its bundled staticcheck) shipped that morning,
+      # so the same commit can pass one day and fail the next with no
+      # diff of ours to point at — which is exactly how the SA4023/SA1019
+      # findings fixed alongside this pin went unnoticed (see run
+      # 32388520476, 2026-08-20; the local toolchain was v2.12.2 and never
+      # ran the newer analyzer set that catches them). v2.13.1 was the
+      # newest published version at the time of that fix (`go list -m
+      # -versions github.com/golangci/golangci-lint/v2`) and the repo is
+      # verified clean against it; bump this deliberately, re-running
+      # `golangci-lint run` against the new version locally first, rather
+      # than letting it drift.
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
       - run: golangci-lint run --config=.golangci.yml --timeout=5m

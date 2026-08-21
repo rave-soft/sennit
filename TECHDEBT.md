@@ -204,3 +204,64 @@ already been cleared is the shape to look at first —
 
 A test that fails one run in N is still a failing test; it should not be assumed
 benign because a rerun was green.
+
+## The agent's continuation/dispatch tests are intermittently red under `-race` in CI
+
+The `race` CI job (`go test -race -failfast ./...`, added 2026-08-21) has failed on
+both runs since it was introduced, each time on a *different* test in the
+continuation/dispatch area:
+
+- run 32509070021: `TestSendToParent_AndCompletionBothSurviveSameDrain`
+- run 32512761082: `TestDeliverTaskCompletion_RaceWithUserPromptStartsOnlyOneTurn`,
+  at iteration 3, `continuation_test.go:465`:
+  `expected: 1, actual: 0 -- the user prompt must be delivered exactly once`
+
+**The failure mode is not a scheduling wobble in an assertion — it is a dropped user
+prompt.** The test's own `require.Eventually` had already passed (queue drained,
+session idle, completion delivered), and then zero user messages were found
+persisted. A prompt the user typed went nowhere.
+
+Not reproduced locally: ~26 runs of the named test under `-race` (plain,
+`-count=8 -cpu=2,4`, and twelve single-CPU runs) were all green. CI's runners are
+slower and differently loaded, which changes the interleaving.
+
+**Regression or newly exposed is unknown, and should not be assumed.** Both tests
+predate the dispatcher rewrite, and `continuation_test.go` was not modified by it
+(`git diff 378bd0c5 HEAD` touches only one line of `delegation_parent_test.go`). But
+the production code under them *was* rewritten that day (7 maps + 3 mutexes collapsed
+into one `sessionState`), and the `race` job is new — so there is no prior CI
+evidence that these ever passed under `-race`. Establishing which it is means running
+the pre-rewrite production code under `-race` in a loop.
+
+Where to look: `dispatchDecision` has two paths that deliberately **drop** a call
+rather than queue it — the `Continuation` branch, and the steering follow-up dropped
+because "the fold is keyed on the absence of a RunID". If a real user prompt can
+reach either branch under the right interleaving, it is discarded with no terminal
+event and nothing persisted, which matches the observed `userCount == 0` exactly.
+
+## Windows CI fails on path semantics, not on the cassettes
+
+The three-OS `build` matrix (added 2026-08-21) turned up two *different*
+platform problems, and they should not be conflated:
+
+- **macOS** failed every `TestCoderAgent` subtest with a VCR cassette miss. Cause
+  found and fixed: the harness rooted its working directory at `os.TempDir()`,
+  which honors `$TMPDIR` — `/tmp` on Linux, `/var/folders/xx/yy/T` on macOS — and
+  that absolute path is echoed back verbatim inside `ls`/`edit`/`grep`/`glob` tool
+  results, which the matcher compares strictly (unlike the system prompt, which
+  `normalizeForMatch` strips). Pinned to a canonical root.
+- **Windows** fails for an unrelated reason and is still open:
+  `TestExpandPath/tilde_is_expanded_against_the_real_home_dir`, and the workspace
+  confinement tests `TestUnconfinedWorkspaceIsUnaffected`,
+  `TestConfinedWorkspaceStillWritesInsideItself` and
+  `TestEditTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside`
+  (`internal/agent/tools/confinement_test.go`). These are path-semantics failures —
+  drive letters, backslash separators, `~` expansion — not cassette misses.
+  `TestCoderAgent` skips on Windows outright, so it never reaches the VCR path.
+
+Worth noting where these came from: the confinement checks were tightened on
+2026-08-20 (the `filepath.Rel` prefix fix in `internal/fsext`), and CI has never
+run on Windows before this week, so nobody could have seen it. Whether the
+production confinement logic is wrong on Windows or only the tests' fixtures are
+is the first thing to establish — that distinction decides whether this is a
+user-facing security-relevant bug or a test-only one.

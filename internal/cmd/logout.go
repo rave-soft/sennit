@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"cmp"
 	"fmt"
 
 	"charm.land/lipgloss/v2"
@@ -82,11 +81,22 @@ sennit logout codex
 }
 
 func logoutHyper(ws workspace.ConfigAccessor) error {
-	if err := cmp.Or(
-		ws.RemoveConfigField(config.ScopeGlobal, "providers.hyper.api_key"),
-		ws.RemoveConfigField(config.ScopeGlobal, "providers.hyper.oauth"),
-	); err != nil {
-		return err
+	// Both fields are removed unconditionally (not short-circuited on the
+	// first error) and the first failure, if any, is what gets returned.
+	// This used to be spelled with cmp.Or() over the two calls, but
+	// staticcheck's SA4023 (newer analyzer versions; see .golangci.yml
+	// note) misreads cmp.Or's generic instantiation over an interface
+	// return type and claims the resulting `err != nil` is always true —
+	// it is not, RemoveConfigField returns nil on the common success path,
+	// confirmed by a minimal cmp.Or repro outside this codebase. Spelling
+	// it out avoids the false positive without weakening the check.
+	errAPIKey := ws.RemoveConfigField(config.ScopeGlobal, "providers.hyper.api_key")
+	errOAuth := ws.RemoveConfigField(config.ScopeGlobal, "providers.hyper.oauth")
+	if errAPIKey != nil {
+		return errAPIKey
+	}
+	if errOAuth != nil {
+		return errOAuth
 	}
 
 	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of Hyper."))
@@ -94,11 +104,14 @@ func logoutHyper(ws workspace.ConfigAccessor) error {
 }
 
 func logoutCopilot(ws workspace.ConfigAccessor) error {
-	if err := cmp.Or(
-		ws.RemoveConfigField(config.ScopeGlobal, "providers.copilot.api_key"),
-		ws.RemoveConfigField(config.ScopeGlobal, "providers.copilot.oauth"),
-	); err != nil {
-		return err
+	// See logoutHyper for why this isn't cmp.Or(...).
+	errAPIKey := ws.RemoveConfigField(config.ScopeGlobal, "providers.copilot.api_key")
+	errOAuth := ws.RemoveConfigField(config.ScopeGlobal, "providers.copilot.oauth")
+	if errAPIKey != nil {
+		return errAPIKey
+	}
+	if errOAuth != nil {
+		return errOAuth
 	}
 
 	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of GitHub Copilot."))
@@ -108,13 +121,20 @@ func logoutCopilot(ws workspace.ConfigAccessor) error {
 // logoutCodex drops the Codex credentials. The discovered model list goes
 // with them: it is per-account, so leaving it behind would advertise models
 // the next account may not have.
+//
+// See logoutHyper for why this isn't cmp.Or(...).
 func logoutCodex(ws workspace.ConfigAccessor) error {
-	if err := cmp.Or(
-		ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.api_key"),
-		ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.oauth"),
-		ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.models"),
-	); err != nil {
-		return err
+	errAPIKey := ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.api_key")
+	errOAuth := ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.oauth")
+	errModels := ws.RemoveConfigField(config.ScopeGlobal, "providers.codex.models")
+	if errAPIKey != nil {
+		return errAPIKey
+	}
+	if errOAuth != nil {
+		return errOAuth
+	}
+	if errModels != nil {
+		return errModels
 	}
 
 	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of OpenAI Codex."))

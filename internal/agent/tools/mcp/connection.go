@@ -120,7 +120,15 @@ func (cm *connectionManager) createSession(ctx context.Context, cfg ConfigProvid
 					Name: name,
 				})
 			},
-			LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) {
+			// LoggingMessageHandler is deprecated as of MCP protocol
+			// 2026-07-28 (SEP-2577: modelcontextprotocol.io/seps/2577-
+			// deprecate-roots-sampling-and-logging) but the SDK guarantees
+			// it stays functional for at least a twelve-month deprecation
+			// window, and there is no replacement API in go-sdk v1.7.0 to
+			// migrate to yet. Dropping the handler now would just stop
+			// surfacing server-side log messages for no gain, so keep it
+			// and revisit when the SDK ships a successor.
+			LoggingMessageHandler: func(ctx context.Context, req *mcp.LoggingMessageRequest) { //nolint:staticcheck // SA1019: see comment above
 				level := parseLevel(string(req.Params.Level))
 				slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
 			},

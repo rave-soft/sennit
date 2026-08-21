@@ -12,6 +12,87 @@ import (
 	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 )
 
+// TestTestEnvWorkingDirIgnoresTMPDIR is the direct, fast check on the fix
+// itself: testEnv's working directory must stay rooted at
+// canonicalTestTempRoot no matter what $TMPDIR says. os.TempDir() honors
+// $TMPDIR, which is "/tmp" on Linux CI runners but a per-run path like
+// "/var/folders/xx/yy/T" on macOS runners — and that root ends up baked
+// verbatim into VCR cassette content (see TestCoderAgentWorkingDirIsOSIndependent
+// for the end-to-end replay). Swap canonicalTestTempRoot back for
+// os.TempDir() in testEnv and this test fails immediately, since the forced
+// $TMPDIR below no longer matches.
+func TestTestEnvWorkingDirIgnoresTMPDIR(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "var", "folders", "xx", "yy", "T"))
+	require.NotEqual(t, canonicalTestTempRoot, os.TempDir(), "test setup: TMPDIR override did not take effect")
+
+	env := testEnv(t)
+	// Exact match, not just a prefix check: the forced $TMPDIR above happens
+	// to nest under the real /tmp too (t.TempDir() defaults there on this
+	// box), so a bare HasPrefix(workingDir, "/tmp/") would pass even with
+	// the fix reverted to os.TempDir(). Pin the whole path instead.
+	require.Equal(t, filepath.Join(canonicalTestTempRoot, "sennit-test-", t.Name()), env.workingDir)
+}
+
+// TestCoderAgentWorkingDirIsOSIndependent is the closest thing to a real
+// macOS run available on this box: it replays the real committed "ls_tool"
+// cassette against a working directory built the same way testEnv now
+// builds one (rooted at canonicalTestTempRoot, not os.TempDir()) while
+// $TMPDIR is forced to a macOS-shaped value. The cassette bakes that working
+// directory verbatim into a tool-role message (the ls tool echoes back the
+// absolute directory it listed) — unlike the system prompt, tool-role
+// content is matched byte-strict, not normalized (see jsonBodyEqual and
+// normalizeForMatch) — so this only replays clean because the directory is
+// canonical. Point workingDir at an os.TempDir()-based path instead (what
+// testEnv built before this fix) and the replay fails with the same
+// "requested interaction not found" retry error CI reported.
+func TestCoderAgentWorkingDirIsOSIndependent(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "var", "folders", "xx", "yy", "T"))
+
+	// Reuse the real committed "ls tool" cassette (and the working directory
+	// it was recorded under) directly, rather than deriving them from
+	// t.Name() via cassetteName/setupAgent/testEnv — this test's own name
+	// isn't "TestCoderAgent/glm-5.1/ls_tool", so that derivation would look
+	// in the wrong places.
+	cfg, err := resolveTestVCRConfig("", "", "", "")
+	require.NoError(t, err)
+	wantWorkingDir := filepath.Join(canonicalTestTempRoot, "sennit-test-", "TestCoderAgent", defaultFixtureModel, "ls_tool")
+	agent, env := setupAgentWithVCR(t, cfg, filepath.Join("TestCoderAgent", defaultFixtureModel, "ls_tool"), wantWorkingDir, nil)
+	require.Equal(t, wantWorkingDir, env.workingDir)
+
+	session, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+	res, err := agent.Run(t.Context(), SessionAgentCall{
+		Prompt:          "use ls to list the files in the current directory",
+		SessionID:       session.ID,
+		MaxOutputTokens: 10000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	msgs, err := env.messages.List(t.Context(), session.ID)
+	require.NoError(t, err)
+	var lsTCID string
+	foundLS := false
+	for _, msg := range msgs {
+		if msg.Role == message.Assistant {
+			for _, tc := range msg.ToolCalls() {
+				if tc.Name == tools.LSToolName {
+					lsTCID = tc.ID
+				}
+			}
+		}
+		if msg.Role == message.Tool {
+			for _, tr := range msg.ToolResults() {
+				if tr.ToolCallID == lsTCID {
+					foundLS = true
+					require.Contains(t, tr.Content, "main.go")
+				}
+			}
+		}
+	}
+	require.True(t, foundLS, "expected an ls tool result")
+}
+
 // TestCoderAgentFixtureCassettesAreByteIdentical verifies a representative
 // agent flow produces exactly the same cassettes in isolated recording roots.
 // It records a normal reply followed by a fetch tool multi-turn, exercising the
