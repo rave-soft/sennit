@@ -280,15 +280,57 @@ platform is now an injectable field defaulting to `runtime.GOOS`; goldens pin
 registered right after `t.TempDir()` so LIFO runs it just before `RemoveAll`. It
 names the exact fd or cwd Windows would refuse -- on `internal/cmd` it named the
 same `\003` directory the Windows log did. Prefer extending it over reasoning about
-Windows semantics from a Linux box.
+Windows semantics from a Linux box. The same move was applied a second time to
+the watcher cluster below: `describeExternalChange` in `watch_test.go` now prints
+the staleness verdict, the tracked path set, and any untracked candidate whenever
+one of those tests fails, so the next Windows run reports the cause instead of
+costing another round of reasoning.
 
-**Still open -- the `internal/config` cluster.** `TestApplyWorkspaceConfig` and its
-subtests, plus `TestExternalChangeDetected_NewCandidateFile`. Static analysis found
-no path-comparison cause: `applyWorkspaceConfig` compares no paths, and the
-inspected subtest turns on `os.PathError`'s shape when opening a path whose parent
-is not a directory -- an OS-error-shape difference, not a spelling one. Left
-unfixed rather than guessed at, twice now. If it survives the next Windows run,
-wire `AssertRemovableOnWindows` into that package before theorising further.
+**Round three -- `TestApplyWorkspaceConfig`, fixed.** The round-two diagnosis was
+right: removing `workspaceDir` and writing a *file* there makes the subsequent
+open fail with ENOTDIR on Unix (not `os.IsNotExist`, so `applyWorkspaceConfig`
+correctly surfaces a real error) but with `ERROR_PATH_NOT_FOUND` on Windows, which
+Go's `syscall.Errno.Is` maps to `fs.ErrNotExist` -- indistinguishable there from
+"no config here", so the provocation never fires and `require.Error` aborts the
+subtest. Because the trailing `os.Remove(workspaceDir)` sat after that assertion,
+it never ran, and the leftover file broke every later subtest's
+`os.MkdirAll(workspaceDir, ...)` -- one platform gap fanning out to four failures.
+Fixed by moving cleanup into `t.Cleanup` (so it runs regardless of whether the
+assertions pass) and skipping the subtest on Windows with a comment naming the
+exact errno mapping; no portable provocation produces a genuine non-not-exist read
+error identically on both platforms. Unix coverage is unchanged.
+
+**Round three -- the external-change watcher, still open on Windows only.**
+`TestWatchForExternalChanges_IgnoresOwnWrites[_TightPoll]` and
+`TestExternalChangeDetected_NewCandidateFile`. The round-two `stalenessMu` fix
+(holding the write and the snapshot refresh under one lock) is confirmed still
+necessary and still correct -- reverting it reliably fails `_TightPoll` under
+`-race` on Linux -- but all three tests still fail on Windows CI, and this round
+could not find a further static cause. Ruled out, with reasoning: `os.Stat` on
+Windows (`GetFileAttributesEx`, see `stat_windows.go`) is not the
+`FindFirstFile`-directory-enumeration path that has the well-known lazy
+last-write-time cache, so the snapshot's own re-stat of the path it just wrote
+should be accurate; `os.Rename`/`MoveFileEx` does not reset a file's write time,
+so the atomic-rename identity change (old file replaced by the temp file's inode)
+should not perturb size or mtime either. Both leads the task brief asked to check
+came back "should be fine" rather than "found the bug" -- which is not the same as
+ruled out with certainty, since neither claim can actually be exercised on this
+Linux box. `TestExternalChangeDetected_NewCandidateFile` is the stranger of the
+three: it fails at the *first* assertion (`require.False(t,
+store.externalChangeDetected())`), before the test writes anything at all, so it
+cannot share the own-write race with the other two. Tracing every path both
+`Load` and `externalChangeDetected` touch (`lookupConfigs`, `globalConfigPaths`,
+`GlobalConfig`/`GlobalConfigData`, `worktreeRoot`/`projectBoundary`,
+`ConfigStaleness`, `agentFilesChanged`) found no GOOS-conditional branch reachable
+under this test's setup (env-var overrides for both global paths, no git repo at
+`t.TempDir()`) that would make two back-to-back calls with no intervening
+filesystem change disagree. All three tests pass reliably on Linux under `-race
+-count=10`, consistent with a genuinely Windows-only cause rather than a
+timing-sensitive test. Left unfixed rather than guessed at, three rounds running
+now -- this needs an actual Windows box: instrument `externalChangeDetected` (or
+temporarily log `ConfigStaleness().Changed/Missing/Errors` and the tracked-vs-
+candidate set diff) on a real Windows CI run rather than reasoning further from
+Linux.
 
 **Latent, not touched:** `filetracker`'s `filepath.Rel(s.workingDir, path)` has the
 same spelling sensitivity, but it was not in the failure list and widening scope on

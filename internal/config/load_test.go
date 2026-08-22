@@ -112,10 +112,33 @@ func TestApplyWorkspaceConfig(t *testing.T) {
 	})
 
 	t.Run("read error includes path and cause", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			// The provocation below removes workspaceDir and puts a plain
+			// file there instead, so opening workspaceDir/sennit.json fails
+			// because its parent isn't a directory. On Unix that's ENOTDIR,
+			// which os.IsNotExist rejects, so applyWorkspaceConfig correctly
+			// surfaces it as a real read error — the property this subtest
+			// exists to cover. On Windows the same setup reports
+			// ERROR_PATH_NOT_FOUND, which Go's syscall.Errno.Is maps to
+			// fs.ErrNotExist, so the read is indistinguishable from "no
+			// config here" and applyWorkspaceConfig (correctly) treats it as
+			// a no-op. There is no directory-vs-file trick that provokes a
+			// genuine non-not-exist read error identically on both
+			// platforms, so this subtest only runs on Unix.
+			t.Skip("parent-not-a-directory reads as ERROR_PATH_NOT_FOUND (fs.ErrNotExist) on Windows, not a real read error")
+		}
+
 		cfg := newConfig()
 		var loaded []string
 		require.NoError(t, os.RemoveAll(workspaceDir))
 		require.NoError(t, os.WriteFile(workspaceDir, nil, 0o644))
+		// Registered before the assertions below run, so a failed
+		// require.Error still restores workspaceDir to a directory for the
+		// subtests that follow — otherwise their os.MkdirAll(workspaceDir)
+		// fails against the leftover file forever.
+		t.Cleanup(func() {
+			_ = os.Remove(workspaceDir)
+		})
 
 		err := applyWorkspaceConfig(cfg, workingDir, &loaded)
 		require.Error(t, err)
@@ -126,7 +149,6 @@ func TestApplyWorkspaceConfig(t *testing.T) {
 		require.Equal(t, workspacePath, pathErr.Path)
 		require.Error(t, pathErr.Err)
 		require.Empty(t, loaded)
-		require.NoError(t, os.Remove(workspaceDir))
 	})
 
 	t.Run("valid config merges and retains data directory and agents marker", func(t *testing.T) {
@@ -174,7 +196,7 @@ func TestLoad_WorkspaceMergePreservesAgentsMarker(t *testing.T) {
 	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
-	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"agents":{},"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"agents":{},"options":{"data_directory":`+jsonPath(t, workspaceDir)+`}}`), 0o644))
 
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
@@ -191,7 +213,7 @@ func TestLoad_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *testing.T) {
 	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
-	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":`+jsonPath(t, workspaceDir)+`}}`), 0o644))
 
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))

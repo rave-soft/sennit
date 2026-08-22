@@ -392,7 +392,7 @@ func TestReloadFromDisk_WorkspaceMergeErrorKeepsPublishedConfig(t *testing.T) {
 	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
-	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":`+jsonPath(t, workspaceDir)+`}}`), 0o644))
 
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
@@ -425,7 +425,7 @@ func TestReloadFromDisk_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *tes
 	workspaceDir := filepath.Join(t.TempDir(), "custom-workspace-data")
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 	t.Setenv("SENNIT_GLOBAL_DATA", globalDir)
-	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":"`+workspaceDir+`"}}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, appName+".json"), []byte(`{"options":{"data_directory":`+jsonPath(t, workspaceDir)+`}}`), 0o644))
 
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))

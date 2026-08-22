@@ -2,8 +2,10 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -96,7 +98,8 @@ func TestWatchForExternalChanges_IgnoresOwnWrites_TightPoll(t *testing.T) {
 		select {
 		case <-notified:
 			cancel()
-			t.Fatal("WatchForExternalChanges fired for this process's own write")
+			t.Fatalf("WatchForExternalChanges fired for this process's own write:%s",
+				describeExternalChange(t, store))
 		case <-time.After(15 * store.externalChangePollInterval):
 		}
 		cancel()
@@ -136,10 +139,45 @@ func TestWatchForExternalChanges_IgnoresOwnWrites(t *testing.T) {
 	// Give the poll loop a few cycles to (not) fire.
 	select {
 	case <-notified:
-		t.Fatal("WatchForExternalChanges fired for this process's own write")
+		t.Fatalf("WatchForExternalChanges fired for this process's own write:%s",
+			describeExternalChange(t, store))
 	case <-time.After(3 * pollInterval):
 	}
 	require.Zero(t, notifications)
+}
+
+// describeExternalChange reports why externalChangeDetected() is true, so a
+// failure on a platform we cannot run locally arrives with the answer
+// attached instead of sending us back for another CI round. Three rounds of
+// reasoning about this from a Linux box have not found it; see the "still
+// open" entry in TECHDEBT.md.
+func describeExternalChange(t *testing.T, s *ConfigStore) string {
+	t.Helper()
+	staleness := s.ConfigStaleness()
+	tracked := s.trackedConfigPathSet()
+	trackedList := make([]string, 0, len(tracked))
+	for p := range tracked {
+		trackedList = append(trackedList, p)
+	}
+	sort.Strings(trackedList)
+
+	var untracked []string
+	for _, p := range lookupConfigs(s.workingDir) {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			untracked = append(untracked, fmt.Sprintf("%s (Abs failed: %v)", p, err))
+			continue
+		}
+		if _, ok := tracked[abs]; !ok {
+			untracked = append(untracked, abs)
+		}
+	}
+
+	return fmt.Sprintf(
+		"\n  staleness.Dirty=%v\n  workingDir=%q\n  workspacePath=%q\n  globalDataPath=%q"+
+			"\n  untracked candidates=%q\n  tracked=%q\n  agentFilesChanged=%v",
+		staleness.Dirty, s.workingDir, s.workspacePath, s.globalDataPath,
+		untracked, trackedList, s.agentFilesChanged())
 }
 
 // TestExternalChangeDetected_NewCandidateFile verifies the gap ConfigStaleness
@@ -153,7 +191,9 @@ func TestExternalChangeDetected_NewCandidateFile(t *testing.T) {
 
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)
-	require.False(t, store.externalChangeDetected())
+	require.False(t, store.externalChangeDetected(),
+		"a freshly loaded store reports an external change before anything changed:%s",
+		describeExternalChange(t, store))
 
 	sennitDir := filepath.Join(dir, ".sennit")
 	require.NoError(t, os.MkdirAll(sennitDir, 0o755))
