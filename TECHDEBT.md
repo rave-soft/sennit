@@ -144,39 +144,49 @@ afterwards in the logs.
   the import only.
 - Delegation is single-level: a role cannot call another role.
 
-## The agent's continuation/dispatch tests are intermittently red under `-race` in CI
+## The agent's continuation/dispatch tests were intermittently red under `-race` in CI — resolved, verdict below
 
-The `race` CI job (`go test -race -failfast ./...`, added 2026-08-21) has failed on
-both runs since it was introduced, each time on a *different* test in the
-continuation/dispatch area:
+Closed 2026-08-22. The two suspects the original entry named —
+`dispatchDecision`'s `Continuation` branch and the steering-follow-up RunID
+drop — are **ruled out** as the cause: `Continuation` is set true in exactly
+one place (`startContinuation`), on a call carrying only a fixed placeholder
+prompt, never a real user's; grep confirms no other constructor sets it. The
+steering branch does not discard content either — it clears the queued
+call's `RunID` and still enqueues the call itself, which `foldSteering`
+persists via `createUserMessage` like any other queued follow-up. Neither
+branch can lose a real user prompt.
 
-- run 32509070021: `TestSendToParent_AndCompletionBothSurviveSameDrain`
-- run 32512761082: `TestDeliverTaskCompletion_RaceWithUserPromptStartsOnlyOneTurn`,
-  at iteration 3, `continuation_test.go:465`:
-  `expected: 1, actual: 0 -- the user prompt must be delivered exactly once`
+Tracing every exit from `runTurn` (`internal/agent/agent.go`) turned up a
+different, real bug with the same silent-discard shape: `reporter :=
+newCompletionReporter(...)` and the deferred call that publishes
+`notify.RunComplete` through it used to be constructed *after*
+`a.sessions.Get`, `a.getSessionMessages`, and `a.createUserMessage` — so a
+failure in any of those three returned before any reporter existed at all.
+The prompt vanished with no persisted message and no terminal event, which
+is exactly the `userCount == 0` / no-RunComplete shape the CI failure
+showed. Fixed by constructing the reporter and registering its deferred
+publish immediately once a call becomes the active run, before that
+fallible setup runs, so every exit publishes a terminal event — a no-op via
+`completionReporter`'s own `sync.Once` wherever `finishTurn` already spent
+it explicitly. Proven with
+`TestRun_CreateUserMessageFailurePublishesTerminalEvent`
+(`internal/agent/run_early_failure_test.go`), which fails against the
+pre-fix code (times out waiting for a `RunComplete` that never arrives) and
+passes after it. `dispatchDecision`'s two drop branches were also given a
+`slog.Debug` line each, so a discard leaves a trace even in the cases this
+investigation could rule out.
 
-**The failure mode is not a scheduling wobble in an assertion — it is a dropped user
-prompt.** The test's own `require.Eventually` had already passed (queue drained,
-session idle, completion delivered), and then zero user messages were found
-persisted. A prompt the user typed went nowhere.
-
-Not reproduced locally: ~26 runs of the named test under `-race` (plain,
-`-count=8 -cpu=2,4`, and twelve single-CPU runs) were all green. CI's runners are
-slower and differently loaded, which changes the interleaving.
-
-**Regression or newly exposed is unknown, and should not be assumed.** Both tests
-predate the dispatcher rewrite, and `continuation_test.go` was not modified by it
-(`git diff 378bd0c5 HEAD` touches only one line of `delegation_parent_test.go`). But
-the production code under them *was* rewritten that day (7 maps + 3 mutexes collapsed
-into one `sessionState`), and the `race` job is new — so there is no prior CI
-evidence that these ever passed under `-race`. Establishing which it is means running
-the pre-rewrite production code under `-race` in a loop.
-
-Where to look: `dispatchDecision` has two paths that deliberately **drop** a call
-rather than queue it — the `Continuation` branch, and the steering follow-up dropped
-because "the fold is keyed on the absence of a RunID". If a real user prompt can
-reach either branch under the right interleaving, it is discarded with no terminal
-event and nothing persisted, which matches the observed `userCount == 0` exactly.
+Not settled: whether this specific gap is *the* cause of the two CI
+failures on record (`TestSendToParent_AndCompletionBothSurviveSameDrain`,
+`TestDeliverTaskCompletion_RaceWithUserPromptStartsOnlyOneTurn`). Neither
+failure's own model ever returns an error, so the natural trigger would be
+a transient SQLite failure under CI's slower/differently-loaded runners
+(`session.Get`/`createUserMessage` against a real DB) — plausible, not
+reproduced. If the `race` job flakes again on this same shape (queue
+drained, session idle, nothing persisted, no terminal event), re-open with
+the new run's log; if it flakes on a *different* shape, this entry's
+reasoning about the two original suspects still stands and does not need
+repeating.
 
 ## Windows and macOS CI: what the real logs turned out to be
 
@@ -318,17 +328,6 @@ semantics (reserved device names, degenerate UNC, `\\?\` paths), and uses a
 hand-rolled rule only when asked what the *other* platform would say.
 `TestIsAbsFor_WindowsRules` pins that rule from Linux -- it was added because a
 mutation disabling the UNC branch left the suite green.
-
-**Flagged, not fixed -- `git worktree prune` is repo-wide.** `pruneWorktrees`
-(`internal/git/git.go:294`) runs an unscoped `git worktree prune` after any
-`WorktreeRemove` succeeds. A worktree whose own removal partly failed can be left
-prunable (its `.git` pointer file deleted, its other files still on disk, since
-`os.RemoveAll` deletes entries in sorted order). If a later removal of a *different*
-worktree then runs prune, git deregisters the damaged one while its files remain --
-and `ownedLinkedWorktree` uses that registration to decide whether sennit may touch
-the path, so the files become unreclaimable. Exactly the leak `pruneWorktrees`'
-doc comment says it exists to prevent. Found while fixing the Windows tests; not
-fixed because it is unrelated to the CI failure and deserves its own change.
 
 **Latent, not touched:** `filetracker`'s `filepath.Rel(s.workingDir, path)` has the
 same spelling sensitivity, but it was not in the failure list and widening scope on

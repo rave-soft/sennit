@@ -264,8 +264,8 @@ func newTestThreadManager(t *testing.T, repo string) tools.ThreadManager {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	// Manager owns background goroutines (auto-merge, delivery, `git
-	// worktree prune`) that keep touching repo/WorktreeDir after the test
+	// Manager owns background goroutines (auto-merge, delivery, worktree
+	// removal) that keep touching repo/WorktreeDir after the test
 	// body returns; join them before t.TempDir() removes those
 	// directories, or RemoveAll can race a live writer. Registered after
 	// the WorktreeDir/repo TempDirs so it runs first (t.Cleanup is LIFO).

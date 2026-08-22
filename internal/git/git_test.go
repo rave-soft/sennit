@@ -318,6 +318,88 @@ func TestWorktreeRemoveAlreadyGone(t *testing.T) {
 	require.NotContains(t, list, wtPath)
 }
 
+// A repo-wide "git worktree prune" after removing one worktree must not
+// sweep up a different, unrelated worktree that a partial removal left
+// prunable-but-populated: its .git pointer file gone (os.RemoveAll deletes
+// entries in sorted order, and ".git" sorts first) while its other files
+// are still on disk. Deregistering it there would make those files
+// unreclaimable, since ownedLinkedWorktree relies on the registration to
+// decide what Sennit may touch. See TECHDEBT.md's former entry on this.
+//
+// All three of WorktreeRemove's exit paths are covered, because all three
+// used to end in the same unscoped prune call: a plain "git worktree
+// remove" success, the os.Lstat "already gone" branch, and the forced
+// self-RemoveAll branch. Each case also pins the positive half of the
+// contract -- the target itself must actually end up deregistered -- so a
+// deregisterMissingWorktree that silently did nothing would not pass either.
+func TestWorktreeRemoveDeregistersOnlyItsOwnTarget(t *testing.T) {
+	tests := []struct {
+		name string
+		// remove exercises one of WorktreeRemove's three success paths
+		// against targetPath, which is a freshly added, healthy worktree.
+		remove func(t *testing.T, ctx context.Context, repo, targetPath string)
+	}{
+		{
+			name: "plain git worktree remove",
+			remove: func(t *testing.T, ctx context.Context, repo, targetPath string) {
+				t.Helper()
+				require.NoError(t, WorktreeRemove(ctx, repo, targetPath, false))
+			},
+		},
+		{
+			name: "already gone by hand",
+			remove: func(t *testing.T, ctx context.Context, repo, targetPath string) {
+				t.Helper()
+				// Simulate a caller cleaning up after someone deleted the
+				// worktree by hand: nothing left on disk to Lstat.
+				require.NoError(t, os.RemoveAll(targetPath))
+				require.NoError(t, WorktreeRemove(ctx, repo, targetPath, false))
+			},
+		},
+		{
+			name: "forced self-RemoveAll",
+			remove: func(t *testing.T, ctx context.Context, repo, targetPath string) {
+				t.Helper()
+				require.NoError(t, WorktreeRemove(ctx, repo, targetPath, true))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := initRepo(t)
+			ctx := context.Background()
+
+			damagedPath := filepath.Join(t.TempDir(), "damaged")
+			require.NoError(t, WorktreeAdd(ctx, repo, damagedPath, "damaged-branch", "main"))
+			targetPath := filepath.Join(t.TempDir(), "target")
+			require.NoError(t, WorktreeAdd(ctx, repo, targetPath, "target-branch", "main"))
+
+			// Reproduce exactly what a partial os.RemoveAll leaves behind:
+			// the worktree's own .git pointer file gone, everything else
+			// untouched.
+			require.NoError(t, os.Remove(filepath.Join(damagedPath, ".git")))
+			require.FileExists(t, filepath.Join(damagedPath, "README.md"))
+
+			tt.remove(t, ctx, repo, targetPath)
+
+			// Positive: the target is actually deregistered, not just left
+			// alone -- a no-op deregisterMissingWorktree must not pass.
+			targetReg, err := worktreeRegistration(ctx, repo, targetPath)
+			require.NoError(t, err)
+			require.False(t, targetReg.registered, "target worktree must be deregistered")
+
+			// Negative: the unrelated, damaged worktree is untouched --
+			// its files are still on disk, and losing its registration is
+			// what makes them unreclaimable.
+			damagedReg, err := worktreeRegistration(ctx, repo, damagedPath)
+			require.NoError(t, err)
+			require.True(t, damagedReg.registered, "damaged worktree must stay registered while its files survive")
+			require.FileExists(t, filepath.Join(damagedPath, "README.md"))
+		})
+	}
+}
+
 // The invariant that keeps a worktree from leaking: while its files are
 // still on disk, its registration stays. A container that wrote into a
 // worktree owns directories this process cannot chmod, so the removal can

@@ -238,9 +238,9 @@ func WorktreeAdd(ctx context.Context, repo, path, newBranch, base string) error 
 	return nil
 }
 
-// WorktreeRemove removes the worktree at path and prunes stale worktree
-// metadata. If force is true, uncommitted changes and untracked files in
-// the worktree are discarded without complaint.
+// WorktreeRemove removes the worktree at path and deregisters it from
+// repo's worktree metadata. If force is true, uncommitted changes and
+// untracked files in the worktree are discarded without complaint.
 //
 // Removing something that is already gone succeeds: a caller cleaning up
 // after a worktree someone deleted by hand wants the registration pruned
@@ -268,7 +268,7 @@ func WorktreeAdd(ctx context.Context, repo, path, newBranch, base string) error 
 // whatever owns those directories has released them.
 func WorktreeRemove(ctx context.Context, repo, path string, force bool) error {
 	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
-		return pruneWorktrees(ctx, repo)
+		return deregisterMissingWorktree(ctx, repo, path)
 	}
 	// Only a forced remove is entitled to delete the directory itself, and
 	// only once the path has been positively identified as one of this
@@ -278,7 +278,7 @@ func WorktreeRemove(ctx context.Context, repo, path string, force bool) error {
 		if err := os.RemoveAll(path); err != nil {
 			return fmt.Errorf("git: worktree remove: %s: %w", path, err)
 		}
-		return pruneWorktrees(ctx, repo)
+		return deregisterMissingWorktree(ctx, repo, path)
 	}
 	args := []string{"worktree", "remove"}
 	if force {
@@ -288,12 +288,44 @@ func WorktreeRemove(ctx context.Context, repo, path string, force bool) error {
 	if _, err := run(ctx, repo, args...); err != nil {
 		return fmt.Errorf("git: worktree remove: %w", err)
 	}
-	return pruneWorktrees(ctx, repo)
+	// git's own "worktree remove" above already deregistered this one
+	// entry on success — no separate cleanup step is needed.
+	return nil
 }
 
-func pruneWorktrees(ctx context.Context, repo string) error {
-	if _, err := run(ctx, repo, "worktree", "prune"); err != nil {
-		return fmt.Errorf("git: worktree prune: %w", err)
+// deregisterMissingWorktree drops repo's registration for the worktree at
+// path once its files are confirmed gone from disk (path does not exist).
+//
+// This used to be a bare "git worktree prune", but prune has no flag to
+// scope itself to one worktree (checked: only -n/--dry-run, -v, and
+// --expire exist). Repo-wide, it deregisters every prunable worktree at
+// once — including one left in exactly the hazardous state a partially
+// failed removal elsewhere produces: its own .git pointer file deleted by
+// an interrupted os.RemoveAll (which removes entries in sorted order, and
+// ".git" sorts first) while its other files are still on disk. Once that
+// entry is swept up, ownedLinkedWorktree can no longer identify the path as
+// this repo's own, so Sennit refuses to touch it and the files become
+// unreclaimable — precisely what pruning after a removal was meant to
+// prevent.
+//
+// "git worktree remove <path>" targets exactly one registry entry and
+// succeeds even when path no longer exists on disk (verified: it removes a
+// registered-but-vanished worktree without --force), so it replaces prune
+// here without narrowing the window — nothing else in the repo is touched.
+// The registration is checked first so a path that was never registered,
+// or was already deregistered by an earlier run, is still a silent
+// success, matching what bare prune used to do for it; main and locked
+// worktrees are left alone for the same reason prune itself skips them.
+func deregisterMissingWorktree(ctx context.Context, repo, path string) error {
+	reg, err := worktreeRegistration(ctx, repo, path)
+	if err != nil {
+		return err
+	}
+	if !reg.registered || reg.main || reg.locked {
+		return nil
+	}
+	if _, err := run(ctx, repo, "worktree", "remove", path); err != nil {
+		return fmt.Errorf("git: worktree remove: %w", err)
 	}
 	return nil
 }

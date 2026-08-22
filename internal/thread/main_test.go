@@ -10,8 +10,8 @@ import (
 // whole test binary (both this file's package thread_test and
 // store_test.go's package thread share one binary, so this covers both).
 //
-// Manager owns background goroutines (auto-merge, delivery, `git worktree
-// prune`) that only stop once Manager.Shutdown has been called and has
+// Manager owns background goroutines (auto-merge, delivery, worktree
+// removal) that only stop once Manager.Shutdown has been called and has
 // returned - the exact class of bug that let a test's temp directory get
 // removed out from under a still-writing goroutine (see
 // shutdownManagerOnCleanup in fakes_test.go). goleak catches that class

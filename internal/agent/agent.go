@@ -489,6 +489,15 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 			// persisted later as if it were a real follow-up (see
 			// drainQueueForStep's fold, which calls createUserMessage on
 			// whatever it finds) - drop it instead.
+			//
+			// Loud on purpose: this is the one place a call is ever
+			// discarded outright rather than queued or run, and
+			// startContinuation is the only constructor of a Continuation
+			// call - if that ever stopped being true (a real prompt
+			// mislabelled as a continuation, say), this is where it would
+			// vanish with no persisted message and no terminal event. A
+			// log line at least leaves a trace.
+			slog.Debug("Dropping continuation call: another turn is already active", "session_id", call.SessionID)
 			if call.Accepted != nil {
 				call.Accepted.Close()
 			}
@@ -519,7 +528,8 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 		// caller its call was enqueued, precisely so it can settle its own
 		// bookkeeping without a terminal event of its own. See
 		// SessionAgentCall.Steering.
-		if call.Steering {
+		if call.Steering && call.RunID != "" {
+			slog.Debug("Dropping RunID from a steering call folding into the active turn", "session_id", call.SessionID, "run_id", call.RunID)
 			call.RunID = ""
 		}
 		enqueueLocked(s, call)
@@ -772,6 +782,20 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	// turn over its bookkeeping would be the worse trade.
 	a.recordSessionModel(ctx, call.SessionID)
 
+	// reporter is this turn's single owner of the terminal RunComplete
+	// event (see completionReporter's own doc comment). It is
+	// constructed here, the moment this call has genuinely become the
+	// active run, rather than after the fallible session/message setup
+	// below - a session.Get, getSessionMessages, or createUserMessage
+	// failure used to return before any reporter existed at all, which
+	// silently discarded the prompt: nothing persisted, and no terminal
+	// event for a caller waiting on one. See the fallback defer below.
+	reporter := newCompletionReporter(a, call)
+	// t stays nil until newRunTurn runs, after createUserMessage
+	// succeeds; the deferred publish below tolerates that - a failure
+	// before then never produced an assistant message to report.
+	var t *runTurn
+
 	defer cancel()
 	// Conditional cleanup: only remove our entry if it hasn't been replaced
 	// by a newer run. Without this guard, the deferred Del fires after a
@@ -792,6 +816,45 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	defer func() {
 		a.clearActiveIfMatch(call.SessionID, ac)
 		a.wakeFromInboxIfIdle(context.WithoutCancel(ctx), call.SessionID)
+	}()
+	// message.Service already flushes synchronously on terminal updates;
+	// the defer guarantees it at every runTurn exit without callers
+	// needing to know, and publishes the authoritative RunComplete for
+	// this turn after the flush. reporter's Once makes this the fallback
+	// publisher: a no-op wherever finishTurn already spent it explicitly
+	// (finishTurn only does so itself when handing off to a queued call
+	// under a different RunID - see its own "outerOwesRunComplete"
+	// comment - so for the common case of a turn with nothing queued
+	// behind it, this deferred call is the *only* publisher).
+	//
+	// Registered here, immediately once this call has genuinely become
+	// the active run, rather than after the fallible session/message
+	// setup below (session.Get, getSessionMessages, createUserMessage):
+	// a failure in any of those used to return before any such defer
+	// existed at all, silently discarding the prompt - nothing
+	// persisted, and no terminal event for a caller waiting on one.
+	defer func() {
+		// Use a context detached from the run context: workspace
+		// shutdown cancels ctx before this goroutine returns, but the
+		// buffered streaming deltas must still land before the DB is
+		// closed. A short timeout bounds the flush.
+		flushCtx, flushCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer flushCancel()
+		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
+			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
+		}
+		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+		if t != nil && t.currentAssistant != nil {
+			complete.MessageID = t.currentAssistant.ID
+			complete.Text = t.currentAssistant.Content().String()
+		}
+		if retErr != nil {
+			complete.Error = retErr.Error()
+			complete.Cancelled = errors.Is(retErr, context.Canceled)
+		} else if ctx.Err() != nil {
+			complete.Cancelled = true
+		}
+		reporter.publish(ctx, complete)
 	}()
 
 	streamAgent, model, agentTools, promptPrefix, disableAutoSummarize := a.buildStreamAgent(call)
@@ -821,36 +884,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	}
 
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	reporter := newCompletionReporter(a, call)
-	t := newRunTurn(a, call, ctx, genCtx, model, agentTools, promptPrefix, disableAutoSummarize, currentSession, userMsgCreated)
-	// message.Service already flushes synchronously on terminal updates;
-	// the defer guarantees it at every runTurn exit without callers
-	// needing to know, and publishes the authoritative RunComplete for
-	// this turn after the flush. reporter's Once makes this the fallback
-	// publisher: a no-op wherever finishTurn already spent it explicitly.
-	defer func() {
-		// Use a context detached from the run context: workspace
-		// shutdown cancels ctx before this goroutine returns, but the
-		// buffered streaming deltas must still land before the DB is
-		// closed. A short timeout bounds the flush.
-		flushCtx, flushCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer flushCancel()
-		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
-			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
-		}
-		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if t.currentAssistant != nil {
-			complete.MessageID = t.currentAssistant.ID
-			complete.Text = t.currentAssistant.Content().String()
-		}
-		if retErr != nil {
-			complete.Error = retErr.Error()
-			complete.Cancelled = errors.Is(retErr, context.Canceled)
-		} else if ctx.Err() != nil {
-			complete.Cancelled = true
-		}
-		reporter.publish(ctx, complete)
-	}()
+	t = newRunTurn(a, call, ctx, genCtx, model, agentTools, promptPrefix, disableAutoSummarize, currentSession, userMsgCreated)
 
 	// Carried-over history goes in front of this session's own
 	// messages.

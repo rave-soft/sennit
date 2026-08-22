@@ -215,8 +215,8 @@ func (s *fakeThreadSpawner) Release(ctx context.Context, id string) error {
 
 // shutdownManagerOnCleanup registers a t.Cleanup that shuts mgr down on a
 // bounded context and fails the test if Shutdown does not return cleanly.
-// A Manager owns background goroutines (auto-merge, delivery, `git
-// worktree prune`) that keep touching a thread's worktree - and the
+// A Manager owns background goroutines (auto-merge, delivery, worktree
+// removal) that keep touching a thread's worktree - and the
 // repo's own .git directory - after the test body returns; App.Shutdown/
 // ShutdownForTest does NOT join these, since SetThreadManager registers no
 // App-owned cleanup for the manager it is handed. Without this, a

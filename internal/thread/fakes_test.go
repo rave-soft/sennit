@@ -710,8 +710,8 @@ func newTestManager(t *testing.T, repo string) (*thread.Manager, *fakeSpawner) {
 
 // shutdownManagerOnCleanup registers a t.Cleanup that shuts mgr down on a
 // bounded context and fails the test if Shutdown does not return cleanly.
-// A Manager owns background goroutines (auto-merge, delivery, `git worktree
-// prune` from WorktreeRemove) that keep reading and writing a thread's
+// A Manager owns background goroutines (auto-merge, delivery, worktree
+// removal via WorktreeRemove) that keep reading and writing a thread's
 // worktree - and the repo's own .git directory - after the test body
 // returns. Without a join here, t.TempDir()'s RemoveAll can race one of
 // those goroutines and fail with "directory not empty"; Shutdown is the
