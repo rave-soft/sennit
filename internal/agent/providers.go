@@ -377,20 +377,15 @@ func (c *coordinator) buildProviderHTTPClient(proxyURL string) (*http.Client, er
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID, proxyURL string) (fantasy.Provider, error) {
 	var opts []anthropic.Option
+	authIsBearer := false
 
 	switch {
 	case strings.HasPrefix(apiKey, "Bearer "):
-		// NOTE: Prevent the SDK from picking up the API key from env.
-		if err := os.Setenv("ANTHROPIC_API_KEY", ""); err != nil {
-			slog.Error("Could not clear ANTHROPIC_API_KEY", "err", err)
-		}
 		headers["Authorization"] = apiKey
+		authIsBearer = true
 	case providerID == string(catwalk.InferenceProviderMiniMax) || providerID == string(catwalk.InferenceProviderMiniMaxChina):
-		// NOTE: Prevent the SDK from picking up the API key from env.
-		if err := os.Setenv("ANTHROPIC_API_KEY", ""); err != nil {
-			slog.Error("Could not clear ANTHROPIC_API_KEY", "err", err)
-		}
 		headers["Authorization"] = "Bearer " + apiKey
+		authIsBearer = true
 	case apiKey != "":
 		// X-Api-Key header
 		opts = append(opts, anthropic.WithAPIKey(apiKey))
@@ -404,12 +399,55 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	if httpClient, err := c.buildProviderHTTPClient(proxyURL); err != nil {
+	httpClient, err := c.buildProviderHTTPClient(proxyURL)
+	if err != nil {
 		return nil, err
-	} else if httpClient != nil {
+	}
+	if authIsBearer {
+		// Auth goes through Authorization above, so we never pass
+		// anthropic.WithAPIKey — which means the SDK's own
+		// DefaultClientOptions falls back to reading $ANTHROPIC_API_KEY and
+		// setting X-Api-Key from it, duplicating (or contradicting) the
+		// Bearer token. option.WithAPIKey("") is not a fix: WithHeader uses
+		// Header.Set, so it would send an empty X-Api-Key rather than omit
+		// it. This used to be worked around with
+		// os.Setenv("ANTHROPIC_API_KEY", ""), which corrupted the key for
+		// every other provider built afterwards and every subprocess
+		// Sennit spawns. Stripping the header at the transport, the same
+		// seam azureAPIVersionTransport uses below, is local and leaves
+		// the environment untouched.
+		if httpClient == nil {
+			httpClient = &http.Client{}
+		}
+		httpClient.Transport = &stripHeaderTransport{
+			base:   httpClient.Transport,
+			header: "X-Api-Key",
+		}
+	}
+	if httpClient != nil {
 		opts = append(opts, anthropic.WithHTTPClient(httpClient))
 	}
 	return anthropic.New(opts...)
+}
+
+// stripHeaderTransport deletes a header the SDK set from its own defaults
+// (see buildAnthropicProvider) before the request goes out, without
+// touching the process environment those defaults were read from.
+type stripHeaderTransport struct {
+	base   http.RoundTripper
+	header string
+}
+
+func (t *stripHeaderTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if req.Header.Get(t.header) != "" {
+		req = req.Clone(req.Context())
+		req.Header.Del(t.header)
+	}
+	return base.RoundTrip(req)
 }
 
 func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, providerID, proxyURL string) (fantasy.Provider, error) {

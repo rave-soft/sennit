@@ -64,12 +64,14 @@ func probe(t *testing.T, provider fantasy.Provider, modelID string) {
 // placements (plain X-Api-Key, Bearer-prefixed Authorization, MiniMax's
 // forced Bearer wrapping) plus header merge and proxy error propagation.
 //
-// The Bearer and MiniMax cases exercise a real production side effect:
-// os.Setenv("ANTHROPIC_API_KEY", "") to stop the SDK reading an ambient
-// key. t.Setenv is used to guarantee restoration regardless of what the
-// code under test does, and those subtests are not run with t.Parallel()
-// since the env var is process-global — which is also why this test
-// itself cannot be parallel: t.Setenv panics with a parallel ancestor.
+// The Bearer and MiniMax cases used to clear $ANTHROPIC_API_KEY globally
+// with os.Setenv to stop the SDK's own DefaultClientOptions from also
+// sending X-Api-Key from the ambient env — a fix that corrupted the key for
+// every other provider built afterwards and every subprocess Sennit spawns.
+// The fix now strips X-Api-Key at the transport (stripHeaderTransport in
+// providers.go) instead, so these subtests set ANTHROPIC_API_KEY with
+// t.Setenv and assert it is untouched after building the provider — that
+// is the regression this test pins.
 //
 //nolint:tparallel // subtests use t.Setenv, which forbids a parallel ancestor.
 func TestBuildAnthropicProvider(t *testing.T) {
@@ -84,27 +86,28 @@ func TestBuildAnthropicProvider(t *testing.T) {
 		require.Empty(t, captured.Header.Get("Authorization"))
 	})
 
-	t.Run("Bearer-prefixed key goes through Authorization and clears the env var", func(t *testing.T) {
+	t.Run("Bearer-prefixed key goes through Authorization without X-Api-Key, and does not touch the env", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "pre-existing")
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		provider, err := c.buildAnthropicProvider(server.URL, "Bearer akey", map[string]string{}, "some-provider", "")
 		require.NoError(t, err)
-		require.Empty(t, os.Getenv("ANTHROPIC_API_KEY"), "the SDK must not see the ambient env key")
+		require.Equal(t, "pre-existing", os.Getenv("ANTHROPIC_API_KEY"), "the fix must not mutate the process environment")
 		probe(t, provider, "claude-3")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
 		require.Empty(t, captured.Header.Get("X-Api-Key"))
 	})
 
-	t.Run("MiniMax wraps the key in Bearer and clears the env var", func(t *testing.T) {
+	t.Run("MiniMax wraps the key in Bearer, strips X-Api-Key, and does not touch the env", func(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "pre-existing")
 		c := newProxyTestCoordinator(t, false)
 		server, captured := newCaptureServer(t)
 		provider, err := c.buildAnthropicProvider(server.URL, "akey", map[string]string{}, string(catwalk.InferenceProviderMiniMax), "")
 		require.NoError(t, err)
-		require.Empty(t, os.Getenv("ANTHROPIC_API_KEY"))
+		require.Equal(t, "pre-existing", os.Getenv("ANTHROPIC_API_KEY"))
 		probe(t, provider, "abab6.5")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
+		require.Empty(t, captured.Header.Get("X-Api-Key"))
 	})
 
 	t.Run("MiniMax China also forces the Bearer wrapping", func(t *testing.T) {
@@ -115,6 +118,24 @@ func TestBuildAnthropicProvider(t *testing.T) {
 		require.NoError(t, err)
 		probe(t, provider, "abab6.5")
 		require.Equal(t, "Bearer akey", captured.Header.Get("Authorization"))
+	})
+
+	t.Run("a later Anthropic provider built in the same process still sees the ambient env key", func(t *testing.T) {
+		// This is the regression the env-clearing workaround caused: build
+		// a Bearer provider first (the case that used to os.Setenv the key
+		// away), then a plain provider that relies on $ANTHROPIC_API_KEY —
+		// it must still authenticate.
+		t.Setenv("ANTHROPIC_API_KEY", "ambient-key")
+		c := newProxyTestCoordinator(t, false)
+
+		_, err := c.buildAnthropicProvider("http://example.test", "Bearer akey", map[string]string{}, "some-provider", "")
+		require.NoError(t, err)
+
+		server, captured := newCaptureServer(t)
+		provider, err := c.buildAnthropicProvider(server.URL, "", map[string]string{}, "some-provider", "")
+		require.NoError(t, err)
+		probe(t, provider, "claude-3")
+		require.Equal(t, "ambient-key", captured.Header.Get("X-Api-Key"))
 	})
 
 	t.Run("extra headers merge into the request", func(t *testing.T) {

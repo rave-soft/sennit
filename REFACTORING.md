@@ -21,22 +21,30 @@ Effort key: S = hours, M = a day or two, L = multiple days.
 These are latent bugs found during the review, not refactorings.
 
 All 13 items are fixed, each with a regression test where one was possible.
-Two pieces were deliberately scoped down and remain open:
+One piece was deliberately scoped down and remains open:
 
 - **`sennit gc` worktree teardown.** gc now *reports* the worktrees it
   orphans (human and `--json` output, dry-run included, only paths that
   still exist on disk), so the information is no longer lost when the row
   is deleted. It still does not remove them — deleting a directory that may
   hold a user's work is left to the gc extraction in phase 4.
-- **`internal/agent/providers.go:384,390`** still calls
+- [x] **`internal/agent/providers.go:384,390`** used to call
   `os.Setenv("ANTHROPIC_API_KEY", "")` to stop the Anthropic SDK picking the
-  key up from the environment. `option.WithAPIKey("")` is *not* an
-  equivalent local fix: the SDK's `WithHeader` uses `Header.Set`, so that
-  sends an empty `X-Api-Key` header rather than omitting it, whereas
-  clearing the env makes `DefaultClientOptions` skip the option entirely.
-  A correct fix needs header deletion after `DefaultClientOptions` and a
-  live-credential check. The `internal/config` half of this item (mutex
-  serialization of `PushPopEnvOverrides` and `applyEnv`) is done.
+  key up from the environment for a Bearer-token or MiniMax provider — a
+  process-global write that corrupted the key for every other Anthropic
+  provider built afterwards and every subprocess Sennit spawns.
+  `option.WithAPIKey("")` was not an equivalent local fix, since the SDK's
+  `WithHeader` uses `Header.Set` and would send an empty `X-Api-Key` header
+  instead of omitting it. Fixed with header deletion after
+  `DefaultClientOptions`: `buildAnthropicProvider` now installs a small
+  `stripHeaderTransport` (same seam `azureAPIVersionTransport` uses) that
+  deletes `X-Api-Key` from the outgoing request when auth goes through
+  `Authorization` instead, leaving the process environment untouched. No
+  `os.Setenv` remains in `providers.go`. See `TestBuildAnthropicProvider` in
+  `internal/agent/providers_build_test.go`, including a regression test that
+  builds a Bearer provider and then confirms a later provider still sees
+  `$ANTHROPIC_API_KEY`. The `internal/config` half of this item (mutex
+  serialization of `PushPopEnvOverrides` and `applyEnv`) was already done.
 
 - [x] **`log.RecoverPanic` skips cleanup and swallows the panic when the log
   file can't be created** — `internal/log/log.go:98-121`: `cleanup()` runs
