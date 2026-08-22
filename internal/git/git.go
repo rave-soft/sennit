@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/rave-soft/sennit/internal/fsext"
 )
 
 // Sentinel errors returned by [FastForward]. Callers use errors.Is to
@@ -428,15 +430,13 @@ func worktreeRegistration(ctx context.Context, repo, path string) (worktreeReg, 
 // canonicalPath resolves path as far as it can for comparison against the
 // paths git reports, which are absolute and symlink-free. A path that
 // cannot be resolved — one that no longer exists, say — is still cleaned,
-// so two spellings of the same missing path compare equal.
+// so two spellings of the same missing path compare equal, including when
+// the missing path sits under an aliased ancestor (a symlinked parent
+// directory, or a Windows short name) — see [fsext.Canonical], which does
+// the actual work and is shared with the fsext package's own path
+// comparisons rather than kept as a near-copy here.
 func canonicalPath(path string) string {
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
-	}
-	return filepath.Clean(path)
+	return fsext.Canonical(path)
 }
 
 // linkedWorktreeAdminDir returns the administrative directory registering

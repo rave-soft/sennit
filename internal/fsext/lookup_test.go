@@ -491,6 +491,27 @@ func TestCanonical_SymlinkedAlias(t *testing.T) {
 	require.Equal(t, Canonical(real), Canonical(alias))
 }
 
+// TestCanonical_SymlinkedAliasMissingLeaf pins the case
+// TestCanonical_SymlinkedAlias does not cover: a leaf that does not exist
+// at all under an aliased parent. filepath.EvalSymlinks fails outright on
+// a path that is not on disk, so a naive "resolve, else just Clean"
+// implementation never resolves the parent either, and the two spellings
+// of the same (missing) path stop comparing equal -- exactly what broke
+// git.deregisterMissingWorktree on macOS (an aliased /var) and Windows (an
+// 8.3 short parent) once the worktree it targets is gone from disk.
+func TestCanonical_SymlinkedAliasMissingLeaf(t *testing.T) {
+	real := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(real, alias))
+
+	viaAlias := filepath.Join(alias, "gone")
+	viaReal := filepath.Join(real, "gone")
+	_, err := os.Lstat(viaAlias)
+	require.True(t, os.IsNotExist(err), "precondition: the leaf must not exist")
+
+	require.Equal(t, Canonical(viaReal), Canonical(viaAlias))
+}
+
 // TestCanonical_RelativeAndAbsolute pins that Canonical makes a relative
 // path absolute before resolving it, so a relative and an absolute
 // spelling of the same directory compare equal too.

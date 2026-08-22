@@ -258,10 +258,18 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 // for each component's on-disk spelling, which collapses the two path
 // forms Windows APIs hand back inconsistently — an 8.3 short name (as
 // t.TempDir returns) and the long form (as os.Getwd or `git rev-parse`
-// return) — into one. If resolution fails (typically because the path
-// does not exist yet, so there is nothing on disk to query) the absolute
-// path is cleaned and, on Windows, case-folded, since Windows paths are
-// case-insensitive even before anything is created at them.
+// return) — into one.
+//
+// If path itself does not exist — the common case is a worktree or file
+// that has just been deleted — EvalSymlinks cannot resolve it at all, even
+// though an aliased ancestor further up is exactly what needs resolving
+// (macOS's /var, or a Windows short name, are both properties of a
+// directory, not of the missing leaf). So on failure this walks up to the
+// nearest ancestor that does exist, resolves that, and rejoins the
+// non-existent tail onto it, before falling back to a plain Clean (and, on
+// Windows, case-folding, since Windows paths are case-insensitive even
+// before anything is created at them) if nothing above path resolves
+// either.
 func Canonical(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -270,11 +278,39 @@ func Canonical(path string) string {
 	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
 		return resolved
 	}
-	clean := filepath.Clean(abs)
+	clean := canonicalMissing(abs)
 	if runtime.GOOS == "windows" {
 		return strings.ToLower(clean)
 	}
 	return clean
+}
+
+// canonicalMissing resolves the nearest existing ancestor of abs (an
+// absolute, cleaned path) and rejoins the components below it that
+// EvalSymlinks could not reach because they do not exist on disk. abs
+// itself is included in the walk, so a directory that exists but whose
+// EvalSymlinks call failed for some other reason still gets a chance to
+// resolve one level up.
+//
+// filepath.Dir reaches the filesystem root (or, on Windows, a drive root)
+// in a bounded number of steps and then repeats it, which is the loop's
+// only termination check — so this always halts, even when no ancestor of
+// abs exists at all (a filesystem error, an unmounted drive) — it just
+// falls back to a clean of abs in that case.
+func canonicalMissing(abs string) string {
+	var tail []string
+	dir := abs
+	for {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(append([]string{resolved}, tail...)...)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return filepath.Clean(abs)
+		}
+		tail = append([]string{filepath.Base(dir)}, tail...)
+		dir = parent
+	}
 }
 
 // probeEnt checks if entity at given path exists and belongs to given owner

@@ -475,6 +475,59 @@ func TestWorktreeRemoveLeavesForeignDirectoriesAlone(t *testing.T) {
 	})
 }
 
+// TestCanonicalPath_SymlinkedAliasMissingLeaf pins the mechanism behind
+// the macOS/Windows regression in deregisterMissingWorktree: it runs only
+// once the worktree is already gone from disk, so filepath.EvalSymlinks
+// can never resolve the leaf, and canonicalPath must still resolve the
+// aliased parent (macOS's /var -> /private/var, a Windows 8.3 short name)
+// so two spellings of the same missing path compare equal.
+func TestCanonicalPath_SymlinkedAliasMissingLeaf(t *testing.T) {
+	real := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(real, alias))
+
+	viaAlias := filepath.Join(alias, "wt")
+	viaReal := filepath.Join(real, "wt")
+	_, err := os.Lstat(viaAlias)
+	require.True(t, os.IsNotExist(err), "precondition: the leaf must not exist")
+
+	require.Equal(t, canonicalPath(viaReal), canonicalPath(viaAlias))
+}
+
+// TestWorktreeRemoveDeregistersAliasedMissingWorktree reproduces the
+// regression from commit e78e6119: replacing a repo-wide "git worktree
+// prune" with deregisterMissingWorktree made deregistration depend on
+// worktreeRegistration recognizing the vanished path, which in turn
+// depends on canonicalPath resolving it the same way git itself does. Git
+// registers worktree paths resolved (worktree add itself calls realpath),
+// so a worktree added through a symlinked parent and then deleted by hand
+// exercises exactly the aliasing class that is invisible on a plain temp
+// dir: this is the same bug macOS's /var -> /private/var symlink and
+// Windows' 8.3 short names trigger on those platforms, reproduced here
+// with a symlink so it also fails on Linux.
+func TestWorktreeRemoveDeregistersAliasedMissingWorktree(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+
+	real := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(real, alias))
+
+	wtPath := filepath.Join(alias, "wt")
+	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
+	require.NoError(t, os.RemoveAll(wtPath))
+
+	require.NoError(t, WorktreeRemove(ctx, repo, wtPath, false))
+
+	reg, err := worktreeRegistration(ctx, repo, wtPath)
+	require.NoError(t, err)
+	require.False(t, reg.registered, "the aliased, now-missing worktree must be deregistered")
+
+	// Matches the user-visible symptom in the bug report: a stale
+	// registration keeps the branch pinned and DeleteBranch fails.
+	require.NoError(t, DeleteBranch(ctx, repo, "feature", true))
+}
+
 func TestDeleteBranch(t *testing.T) {
 	repo := initRepo(t)
 	ctx := context.Background()
