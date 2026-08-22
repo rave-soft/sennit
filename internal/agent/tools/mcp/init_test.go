@@ -961,12 +961,17 @@ func TestBeginAuth_CancelSettlesExactStartingOwner(t *testing.T) {
 	_, cancel, err := r.BeginAuth(cfg, name)
 	require.NoError(t, err)
 	<-started
-	cancel()
-
+	// Grab the flow before cancelling, not after: completeAuthFlow deletes
+	// it from authFlows as soon as the worker exits, so a cancel that the
+	// worker services promptly leaves nothing to read. The worker is parked
+	// on <-ctx.Done() at this point, so the flow is registered and stays
+	// registered until the cancel below.
 	r.authMu.Lock()
 	flow := r.authFlows[name]
 	r.authMu.Unlock()
 	require.NotNil(t, flow)
+
+	cancel()
 	<-exited
 	<-flow.workerDone
 	info, ok := r.states.Get(name)
@@ -1008,11 +1013,17 @@ func TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState(t *testing.T) {
 			} else {
 				r.updateState(name, tt.state, nil, nil, Counts{})
 			}
-			cancel()
-			close(release)
+			// Read the flow while the worker is still parked on <-release:
+			// completeAuthFlow removes it from authFlows on worker exit, so
+			// reading after cancel()/close(release) races that removal and
+			// yields a nil flow to dereference.
 			r.authMu.Lock()
 			flow := r.authFlows[name]
 			r.authMu.Unlock()
+			require.NotNil(t, flow)
+
+			cancel()
+			close(release)
 			<-flow.workerDone
 			info, ok := r.states.Get(name)
 			require.True(t, ok)

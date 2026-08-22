@@ -157,34 +157,6 @@ afterwards in the logs.
   the import only.
 - Delegation is single-level: a role cannot call another role.
 
-## `TestBeginAuth_*` failed once under a full-repo `-race` run and did not reproduce
-
-Observed 2026-08-21, immediately after `internal/agent/tools/mcp`'s `Registry`
-was split into `Registry` / `connectionManager` / `authCoordinator`. During
-`go test ./... -race`, two tests failed together:
-
-    --- FAIL: TestBeginAuth_CancelSettlesExactStartingOwner
-        init_test.go:969: Expected value not to be nil.
-    --- FAIL: TestBeginAuth_CancelDoesNotOverwriteNewerLifecycleState/connected
-    panic: runtime error: invalid memory address or nil pointer dereference
-
-It has not reproduced since, across: a second full `go test ./... -race` (clean),
-`-race -count=6` on the package (clean, 33s), `-race -count=2 -cpu=1,2,8` three
-times (clean), and five isolated `-run BeginAuth -race` runs (clean). No DATA
-RACE was reported in the failing run — the failure was a nil dereference, not a
-detected race.
-
-So this is recorded rather than diagnosed. What makes it worth keeping: the
-failing run was the *first* full-suite race run after the auth flow moved to a
-new type holding a back-reference to `Registry`, and the symptom is a nil where
-an auth flow was expected. The cancel path settling against a flow that has
-already been cleared is the shape to look at first —
-`authCoordinator`'s flow lifecycle and `Registry.publishMu`'s ownership of
-`authFlows`.
-
-A test that fails one run in N is still a failing test; it should not be assumed
-benign because a rerun was green.
-
 ## The agent's continuation/dispatch tests are intermittently red under `-race` in CI
 
 The `race` CI job (`go test -race -failfast ./...`, added 2026-08-21) has failed on
