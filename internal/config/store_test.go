@@ -415,7 +415,7 @@ func TestReloadFromDisk_WorkspaceMergeErrorKeepsPublishedConfig(t *testing.T) {
 	require.False(t, store.Config().Options.Debug)
 	require.NotContains(t, store.LoadedPaths(), workspacePath)
 	require.Equal(t, workspacePath, store.workspacePath)
-	require.Contains(t, logs.String(), workspacePath)
+	require.Contains(t, logs.String(), jsonPath(t, workspacePath))
 	require.Contains(t, logs.String(), "type mismatch")
 }
 

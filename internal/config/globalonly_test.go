@@ -57,7 +57,13 @@ func TestIsGlobalConfigPath(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
 	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
 
-	require.True(t, isGlobalConfigPath(systemConfigPath))
+	// systemConfigPath is "" on Windows (no system-wide config there); an
+	// empty path is never a global config path, see isGlobalConfigPath.
+	if systemConfigPath == "" {
+		require.False(t, isGlobalConfigPath(systemConfigPath))
+	} else {
+		require.True(t, isGlobalConfigPath(systemConfigPath))
+	}
 	require.True(t, isGlobalConfigPath(GlobalConfig()))
 	require.True(t, isGlobalConfigPath(GlobalConfigData()))
 	require.True(t, isGlobalConfigPath(filepath.Join(globalDir, "sennitrc")))

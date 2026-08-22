@@ -340,9 +340,16 @@ func TestWorktreeRemoveForcedKeepsRegistrationWhenFilesSurvive(t *testing.T) {
 
 	require.Error(t, WorktreeRemove(ctx, repo, wtPath, true))
 
-	list, err := run(ctx, repo, "worktree", "list", "--porcelain")
+	// A raw substring check against "worktree list --porcelain" output
+	// does not survive round-tripping wtPath through git: git reports
+	// paths with forward slashes regardless of OS, and on Windows
+	// t.TempDir() hands back an 8.3 short name while git resolves to the
+	// long form. worktreeRegistration is the same comparison production
+	// code already relies on (canonicalPath resolves both spellings to
+	// one), so use it here instead of re-deriving the normalization.
+	reg, err := worktreeRegistration(ctx, repo, wtPath)
 	require.NoError(t, err)
-	require.Contains(t, list, wtPath, "the worktree must still be git's to remove")
+	require.True(t, reg.registered, "the worktree must still be git's to remove")
 
 	// And once whatever held the files lets go, the retry goes through.
 	unblock()

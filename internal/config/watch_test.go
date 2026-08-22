@@ -203,6 +203,54 @@ func TestExternalChangeDetected_NewCandidateFile(t *testing.T) {
 		"a freshly-created .sennit/sennit.json should be detected even though it wasn't a tracked candidate before")
 }
 
+// TestHasUntrackedCandidate_EmptyPathIgnored pins a Windows-only production
+// bug from Linux: systemConfigPath is "" on Windows (config_windows.go —
+// there is no system-wide config there), so on that platform lookupConfigs
+// used to hand externalChangeDetected a candidate list containing "".
+// filepath.Abs("") silently resolves to the process's working directory
+// rather than erroring, and the cwd is never a tracked config path, so the
+// old code reported an external change on every single poll — a permanent
+// 2-second reload/MCP-reinit loop for every Windows user.
+//
+// systemConfigPath is a per-OS const, so this test cannot reproduce the bug
+// by loading a real store on Linux; instead it exercises the exact defect
+// shape directly, via hasUntrackedCandidate, which both lookupConfigs (by
+// filtering "" out of globalConfigPaths, see globalonly.go) and this
+// function's own empty check now guard against.
+func TestHasUntrackedCandidate_EmptyPathIgnored(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	store, err := Load(dir, "", false)
+	require.NoError(t, err)
+
+	require.False(t, store.hasUntrackedCandidate([]string{""}),
+		"an empty candidate path must never be treated as untracked; "+
+			"filepath.Abs(\"\") resolves to the cwd (%q), which is never a tracked config path",
+		mustGetwd(t))
+}
+
+// TestGlobalConfigPaths_NoEmptyCandidate is the general invariant that
+// would have caught the Windows bug at its source: an empty string is
+// never a config path and must never enter the candidate lists that feed
+// isGlobalConfigPath, lookupConfigs, and externalChangeDetected.
+func TestGlobalConfigPaths_NoEmptyCandidate(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NotContains(t, globalConfigPaths(), "")
+	require.NotContains(t, lookupConfigs(dir), "")
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	return wd
+}
+
 // TestWatchForExternalChanges_DetectsAgentFileChanges verifies that adding,
 // editing, and removing a markdown subagent file (e.g. an agent's Write tool
 // touching .sennit/agents/dev.md, or a human editing it directly) is picked

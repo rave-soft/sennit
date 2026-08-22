@@ -26,16 +26,52 @@ func SmartIsAbs(path string) bool {
 // separators for portability even when the process runs on Windows, where
 // plain filepath.IsAbs rejects such a path for lacking a drive letter or
 // UNC prefix. Splitting out the GOOS check lets that Windows branch be
-// regression-tested from any host, since filepath.IsAbs and filepath.ToSlash
-// otherwise only behave like Windows when actually built for it.
+// regression-tested from any host.
+//
+// It deliberately does not call filepath.IsAbs: that function's own
+// judgment follows the *build's* GOOS, not the goos argument, so on an
+// actual Windows run "smartIsAbs("linux", ...)" would still get Windows
+// rules for the base check. isAbsFor below reimplements the per-platform
+// rule so the goos argument, not the host, decides.
 func smartIsAbs(goos, path string) bool {
-	if filepath.IsAbs(path) {
+	if isAbsFor(goos, path) {
 		return true
 	}
 	if goos != "windows" {
 		return false
 	}
 	return strings.HasPrefix(strings.ReplaceAll(path, `\`, "/"), "/")
+}
+
+// isAbsFor is filepath.IsAbs's rule for goos, computed without relying on
+// the host actually being that OS.
+//
+// When goos is the host, defer to filepath.IsAbs itself rather than to the
+// approximation below: the standard library handles cases this does not
+// (reserved device names like NUL, degenerate UNC prefixes, \\?\ paths),
+// and production must keep exactly the stdlib's answer. The hand-rolled
+// rule exists only so a test can ask what the *other* platform would say.
+func isAbsFor(goos, path string) bool {
+	if goos == runtime.GOOS {
+		return filepath.IsAbs(path)
+	}
+	if goos != "windows" {
+		return strings.HasPrefix(path, "/")
+	}
+	// Drive-letter form ("C:\..." or "C:/...").
+	if len(path) >= 3 && isDriveLetter(path[0]) && path[1] == ':' && isWindowsSep(path[2]) {
+		return true
+	}
+	// UNC form ("\\server\share" or "//server/share").
+	return len(path) >= 2 && isWindowsSep(path[0]) && isWindowsSep(path[1])
+}
+
+func isDriveLetter(b byte) bool {
+	return 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z'
+}
+
+func isWindowsSep(b byte) bool {
+	return b == '/' || b == '\\'
 }
 
 // SplitGlobPrefix splits a glob pattern into the longest leading run of

@@ -34,19 +34,41 @@ var globalOnlyKeyArea = map[string]Area{
 // globalConfigPaths lists the config layers that are allowed to define the
 // global-only keys. It is also the prefix of the path list lookupConfigs
 // builds, which is what keeps the two definitions of "global" in sync.
+//
+// systemConfigPath is "" on Windows (config_windows.go: there is no
+// system-wide config there), so it is filtered out here rather than
+// appended unconditionally. An empty string is not a path: filepath.Abs("")
+// silently resolves to the process's working directory, which would make
+// every consumer of this list (isGlobalConfigPath, lookupConfigs, and in
+// turn externalChangeDetected in watch.go) treat the cwd as an untracked
+// global config candidate and misbehave on Windows.
 func globalConfigPaths() []string {
-	return []string{
+	paths := []string{
 		systemConfigPath,
 		GlobalConfig(),
 		shellConfigSibling(GlobalConfig()),
 		GlobalConfigData(),
 	}
+	out := paths[:0]
+	for _, p := range paths {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // isGlobalConfigPath reports whether path is one of the global config layers.
 // Anything else — a project sennit.json/sennitrc found by the upward walk, or
 // the workspace config in .sennit/ — is project-scoped.
 func isGlobalConfigPath(path string) bool {
+	// An empty path is never a real config file. Without this guard,
+	// filepath.Clean("") == "." would (on Windows, where systemConfigPath
+	// is "") make isGlobalConfigPath("") — and anything else that happens
+	// to clean to "." — misreport as a global config path.
+	if path == "" {
+		return false
+	}
 	clean := filepath.Clean(path)
 	for _, p := range globalConfigPaths() {
 		if filepath.Clean(p) == clean {

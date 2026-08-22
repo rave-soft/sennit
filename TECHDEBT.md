@@ -332,6 +332,45 @@ temporarily log `ConfigStaleness().Changed/Missing/Errors` and the tracked-vs-
 candidate set diff) on a real Windows CI run rather than reasoning further from
 Linux.
 
+**Round four -- production, the watcher fired forever on Windows.** `systemConfigPath`
+is `""` on Windows by design (no system-wide config), and `globalConfigPaths()`
+returned it as a list element regardless. `externalChangeDetected` then ran every
+candidate through `filepath.Abs`, and `filepath.Abs("")` returns the process's
+working directory with no error -- which is never a tracked config path, so the
+function returned true unconditionally. `WatchForExternalChanges` polls every 2s and
+fires `OnExternalChange` on true, so every Windows user got a permanent 2-second
+loop of disk reload, MCP re-init, and `ConfigChanged`. `CaptureStalenessSnapshot`
+skipped empty paths; the asymmetry between two consumers of one list was the bug.
+Fixed at the source (empties never enter the list) plus a guard in the extracted
+`hasUntrackedCandidate`, and `isGlobalConfigPath("")` no longer reports true via
+`filepath.Clean("") == "."`.
+
+This one is the payoff for the self-diagnosing failure output: three rounds of
+static reasoning missed it, and `describeExternalChange` named it in one run by
+printing `untracked candidates=["D:\a\sennit\sennit\internal\config"]` -- the
+test process's own cwd, which nothing in the test had created.
+
+**Round four -- the `smartIsAbs` seam did not actually work.** The GOOS-parameterised
+core still called `filepath.IsAbs`, whose own judgment follows the *build's* GOOS,
+so `smartIsAbs("linux", "/var/tmp")` on a real Windows run got Windows rules and the
+cross-platform test proved nothing. Now `isAbsFor(goos, path)` decides: it delegates
+to `filepath.IsAbs` when goos is the host, so production keeps exact stdlib
+semantics (reserved device names, degenerate UNC, `\\?\` paths), and uses a
+hand-rolled rule only when asked what the *other* platform would say.
+`TestIsAbsFor_WindowsRules` pins that rule from Linux -- it was added because a
+mutation disabling the UNC branch left the suite green.
+
+**Flagged, not fixed -- `git worktree prune` is repo-wide.** `pruneWorktrees`
+(`internal/git/git.go:294`) runs an unscoped `git worktree prune` after any
+`WorktreeRemove` succeeds. A worktree whose own removal partly failed can be left
+prunable (its `.git` pointer file deleted, its other files still on disk, since
+`os.RemoveAll` deletes entries in sorted order). If a later removal of a *different*
+worktree then runs prune, git deregisters the damaged one while its files remain --
+and `ownedLinkedWorktree` uses that registration to decide whether sennit may touch
+the path, so the files become unreclaimable. Exactly the leak `pruneWorktrees`'
+doc comment says it exists to prevent. Found while fixing the Windows tests; not
+fixed because it is unrelated to the CI failure and deserves its own change.
+
 **Latent, not touched:** `filetracker`'s `filepath.Rel(s.workingDir, path)` has the
 same spelling sensitivity, but it was not in the failure list and widening scope on
 suspicion was not worth it.

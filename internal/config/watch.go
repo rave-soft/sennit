@@ -103,15 +103,8 @@ func (s *ConfigStore) externalChangeDetected() bool {
 		return true
 	}
 
-	tracked := s.trackedConfigPathSet()
-	for _, p := range lookupConfigs(s.workingDir) {
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			continue
-		}
-		if _, ok := tracked[abs]; !ok {
-			return true
-		}
+	if s.hasUntrackedCandidate(lookupConfigs(s.workingDir)) {
+		return true
 	}
 
 	// Subagent markdown files (agentDirs, agents_markdown.go) live under
@@ -121,6 +114,33 @@ func (s *ConfigStore) externalChangeDetected() bool {
 		return true
 	}
 
+	return false
+}
+
+// hasUntrackedCandidate reports whether candidates contains a path that
+// resolves outside the tracked config set, i.e. a config layer created
+// since the last snapshot (see externalChangeDetected's doc comment).
+//
+// An empty string is skipped rather than resolved: filepath.Abs("")
+// silently returns the process's working directory, which is never a
+// tracked config path, so passing "" through would make this report an
+// untracked candidate forever. lookupConfigs already filters "" out (see
+// globalConfigPaths), but this guard is cheap insurance against the same
+// mistake reappearing here or in a future caller.
+func (s *ConfigStore) hasUntrackedCandidate(candidates []string) bool {
+	tracked := s.trackedConfigPathSet()
+	for _, p := range candidates {
+		if p == "" {
+			continue
+		}
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		if _, ok := tracked[abs]; !ok {
+			return true
+		}
+	}
 	return false
 }
 

@@ -10,10 +10,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testCallbackPort is what a flow binds during this package's tests. Fixed,
-// like the real one — the tests here are sequential, so they never race each
-// other for it — but not the real one, and outside the ephemeral range the
-// rest of the suite's httptest servers draw from.
+// testCallbackPort is a fixed port, used only by TestStartFlowPortIsExclusive,
+// which needs two flows genuinely contending for the same address. Every
+// other test in this package binds callbackPort 0 (an OS-assigned ephemeral
+// port, see TestMain) instead of sharing one fixed port across tests: a
+// listener that just closed does not always free its port for an immediate
+// rebind on Windows (closing a socket there can leave the port briefly
+// unavailable, unlike the POSIX SO_REUSEADDR-ish behavior Linux gives Go's
+// listener by default), which turned "the previous test's port is free
+// again" into a coin flip in CI. Giving each test its own ephemeral port
+// sidesteps that entirely instead of racing the OS to release one.
 const testCallbackPort = 14455
 
 // TestMain moves the sign-in callback port off the one real port for the
@@ -25,10 +31,12 @@ const testCallbackPort = 14455
 // package test binaries concurrently, a developer may have a real sign-in
 // (Sennit's or the Codex CLI's) open while running them, and any of that
 // turns "bind the callback port" into a coin flip. It failed exactly that
-// way in CI. Only the port moves — everything each test asserts about the
-// flow is unchanged.
+// way in CI. Defaulting to an ephemeral port here avoids fighting over any
+// fixed port at all; only TestStartFlowPortIsExclusive opts back into a
+// fixed one, since that is the one property it exists to check. Everything
+// each test asserts about the flow itself is unchanged.
 func TestMain(m *testing.M) {
-	callbackPort = testCallbackPort
+	callbackPort = 0
 	os.Exit(m.Run())
 }
 

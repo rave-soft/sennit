@@ -131,7 +131,17 @@ func TestStartFlowBuildsPKCEURL(t *testing.T) {
 // TestStartFlowPortIsExclusive: the redirect URI names one fixed port, so a
 // second concurrent sign-in has to fail loudly rather than bind elsewhere
 // and wait for a redirect that will never come.
+//
+// This is the one test that needs a real, shared, fixed port — the property
+// under test is two flows contending for the exact same address while the
+// first is still open, which an ephemeral port (what every other test in
+// this package uses, see TestMain) can't exercise. There's no rebind race
+// here: both binds happen back-to-back while the first listener is still
+// live, so nothing depends on the OS having released a port yet.
 func TestStartFlowPortIsExclusive(t *testing.T) {
+	callbackPort = testCallbackPort
+	t.Cleanup(func() { callbackPort = 0 })
+
 	startTestFlow(t, "")
 
 	_, err := StartFlow("")

@@ -240,12 +240,11 @@ func TestDiscardMerged_KeepsTheRowWhenTheWorktreeCannotGo(t *testing.T) {
 
 	// Stand in for the real thing: a thread that ran a container leaves
 	// behind directories this process does not own and cannot chmod, so the
-	// removal fails with the files still there. A parent directory that
-	// cannot be written to fails the same unlink from outside the worktree,
-	// where the removal's own chmod pass does not reach.
-	parent := filepath.Dir(st.WorktreePath)
-	require.NoError(t, os.Chmod(parent, 0o500))
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	// removal fails with the files still there. blockWorktreeRemoval
+	// provokes that failure the way each platform actually produces it —
+	// see its two (POSIX/Windows) implementations for why one mechanism
+	// does not serve both.
+	t.Cleanup(blockWorktreeRemoval(t, st.WorktreePath))
 
 	mgr.DiscardMergedForTest(t.Context(), st.ID)
 

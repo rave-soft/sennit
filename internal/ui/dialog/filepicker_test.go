@@ -143,6 +143,14 @@ func TestMetadataErrorsDoNotPopulateCache(t *testing.T) {
 	require.Empty(t, picker.preview)
 }
 
+// TestNanosecondMetadataChangesKey pins that PreviewKey's mtime field is
+// fine-grained enough to notice a rewrite that leaves size unchanged: two
+// otherwise-identical writes must still get different cache keys. The mtime
+// is moved with os.Chtimes rather than by writing twice and hoping the wall
+// clock advances between them, and by a millisecond rather than a single
+// nanosecond — NTFS (Windows) stores mtimes at 100ns granularity, and a 1ns
+// delta gets rounded away by the filesystem before Stat ever sees it. A
+// millisecond stays far above that floor on every filesystem this runs on.
 func TestNanosecondMetadataChangesKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.png")
 	require.NoError(t, os.WriteFile(path, png(), 0o600))
@@ -150,7 +158,7 @@ func TestNanosecondMetadataChangesKey(t *testing.T) {
 	picker.selectedPath = path
 	picker.generation = 1
 	first := prepare(t, picker, path)
-	require.NoError(t, os.Chtimes(path, time.Now(), time.Unix(0, first.Key.ModTimeUnixNano+1)))
+	require.NoError(t, os.Chtimes(path, time.Now(), time.Unix(0, first.Key.ModTimeUnixNano+int64(time.Millisecond))))
 	second := prepare(t, picker, path)
 	require.NotEqual(t, first.Key, second.Key)
 }
