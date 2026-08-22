@@ -524,22 +524,63 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
-	if httpClient, err := c.buildProviderHTTPClient(proxyURL); err != nil {
+	httpClient, err := c.buildProviderHTTPClient(proxyURL)
+	if err != nil {
 		return nil, err
-	} else if httpClient != nil {
-		opts = append(opts, azure.WithHTTPClient(httpClient))
 	}
 	if options == nil {
 		options = make(map[string]string)
 	}
-	if apiVersion, ok := options["apiVersion"]; ok {
-		opts = append(opts, azure.WithAPIVersion(apiVersion))
+	// fantasy's azure provider (charm.land/fantasy/providers/azure) stores
+	// WithAPIVersion but never reads it back out (confirmed against our
+	// pinned v0.40.0 and the newest published v0.41.2 alike) — azure.New
+	// never applies it to the request, so passing it straight through
+	// would silently do nothing. fantasy does let us supply the HTTP
+	// client every Azure request goes through (WithHTTPClient, same seam
+	// codex.NewUsageTransport above uses), so we honour the setting
+	// ourselves by adding the api-version query parameter at the
+	// transport level instead of dropping it.
+	if apiVersion := options["apiVersion"]; apiVersion != "" {
+		if httpClient == nil {
+			httpClient = &http.Client{}
+		}
+		httpClient.Transport = &azureAPIVersionTransport{
+			base:       httpClient.Transport,
+			apiVersion: apiVersion,
+		}
+	}
+	if httpClient != nil {
+		opts = append(opts, azure.WithHTTPClient(httpClient))
 	}
 	if len(headers) > 0 {
 		opts = append(opts, azure.WithHeaders(headers))
 	}
 
 	return azure.New(opts...)
+}
+
+// azureAPIVersionTransport adds Azure's required "api-version" query
+// parameter to every outgoing request, since fantasy's azure provider
+// accepts the option but never applies it (see buildAzureProvider). It
+// leaves an already-present api-version alone, in case a future fantasy
+// release starts setting one itself.
+type azureAPIVersionTransport struct {
+	base       http.RoundTripper
+	apiVersion string
+}
+
+func (t *azureAPIVersionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if req.URL != nil && req.URL.Query().Get("api-version") == "" {
+		req = req.Clone(req.Context())
+		q := req.URL.Query()
+		q.Set("api-version", t.apiVersion)
+		req.URL.RawQuery = q.Encode()
+	}
+	return base.RoundTrip(req)
 }
 
 func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID, proxyURL string) (fantasy.Provider, error) {

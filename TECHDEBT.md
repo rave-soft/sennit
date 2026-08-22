@@ -9,38 +9,60 @@ deleted, and the history stays in git.
 
 ## Open debt
 
-- **Azure `apiVersion` is silently ignored.** `buildAzureProvider`
-  (`internal/agent/providers.go:521`) reads `options["apiVersion"]` from the
-  provider config and passes it as `azure.WithAPIVersion(...)`, so a user who
-  pins an Azure API version reasonably expects it to be used. It is not:
-  in `charm.land/fantasy` v0.40.0 the `azure` provider stores `apiVersion`
-  (field at `providers/azure/azure.go:18`, default at `:44`, setter at
-  `:101`) and never reads it again, so the value never reaches a request and
-  Azure serves whatever fantasy's default resolves to. Found 2026-08-21 while
-  writing provider-construction tests; the test for this path pins that
-  construction succeeds and carries a comment explaining why it cannot assert
-  on the query string. This is an upstream bug, not ours. Next step: report it
-  to fantasy, and until it is fixed either document the limitation where
-  `apiVersion` is configured or drop the option rather than accepting a
-  setting we cannot honour.
-
 - **Gemini and two consecutive user contents.** Steering is delivered as its
   own `user` message after all tool results
   (`internal/agent/completion_inbox.go`, `prepareStep` in
   `internal/agent/turn.go`). Anthropic merges such a pair itself; for
   OpenAI-compatible providers this was verified with a live request (200, and
   the model acted on the steering specifically); in OpenAI Responses keeping
-  them separate is what the protocol expects. On Gemini the `fantasy` adapter
-  puts tool results into a `genai.Content{Role: user}` and then creates a
-  **second** `Content{Role: user}` right after it; nothing merges
-  same-role contents, not in the adapter and not here, and Gemini answers 400
-  to non-alternating roles in some cases. Whether it accepts this particular
-  shape is an empirical question, and there is no key to ask it with. Next
-  step: run one real `user → assistant(tool_calls) → tool → user(steering)`
-  request against Gemini once a key is available; if it 400s, merge
-  consecutive user contents, preferably in the adapter, otherwise by
-  normalizing before the call. Until then, mid-turn steering on Gemini is an
-  untested path.
+  them separate is what the protocol expects. On Gemini it is untested and,
+  per the investigation below, cannot be fixed from `internal/agent` — closing
+  requires either a live Gemini request settling whether it actually 400s, or
+  a fantasy-side fix.
+
+  Traced 2026-08-22 through `prepareStep`/`foldSteering`
+  (`internal/agent/turn.go:106,237`) and fantasy's Gemini adapter
+  (`charm.land/fantasy@v0.40.0/providers/google/google.go`,
+  `toGooglePrompt`). For a `user → assistant(tool_calls) → tool →
+  user(steering)` turn, the `fantasy.Message` list `prepareStep` hands to the
+  model is `[..., Message{Role: Assistant, ToolCallPart...}, Message{Role:
+  Tool, ToolResultPart...}, Message{Role: User, TextPart(steering)}]` — the
+  tool-result message and the steering message are two distinct
+  `fantasy.Message`s with different `Role`s (`Tool` vs `User`), appended by
+  two different stages (fold of the prior step's results, then
+  `foldSteering`). `toGooglePrompt` is a single `switch msg.Role` over that
+  list with one `case` per role and no merge step anywhere in the function:
+  `case fantasy.MessageRoleTool` reads only `ContentTypeToolResult` parts and
+  emits `&genai.Content{Role: genai.RoleUser, Parts: [FunctionResponse...]}`
+  (google.go:484-552); `case fantasy.MessageRoleUser` reads only
+  `ContentTypeText`/`ContentTypeFile` parts and emits its own
+  `&genai.Content{Role: genai.RoleUser, Parts: [...]}` (google.go:384-414).
+  So the concrete `genai.Content` sequence we send ends `..., {Role: "model",
+  Parts: [FunctionCall...]}, {Role: "user", Parts: [FunctionResponse...]},
+  {Role: "user", Parts: [Text: steering]}` — two adjacent `user`-role
+  entries, confirming the entry's original claim.
+
+  Merging cannot be done from our seam. The two source messages have
+  different `fantasy.Message.Role`s, and each of `toGooglePrompt`'s role
+  branches only reads its own part type: the `Tool` branch's part loop has no
+  case for `ContentTypeText` (silently ignored — no `default`), and the
+  `User` branch's loop has no case for `ContentTypeToolResult`. So combining
+  the tool results and the steering text into one `fantasy.Message` — under
+  either `Role: Tool` or `Role: User` — does not produce one merged
+  `genai.Content`; it silently drops whichever part type the branch does not
+  know about (either the tool results, which is a much worse failure than
+  today, or the steering text, which defeats the point). There is no third
+  seam here: `prepareStep` only supplies fantasy's `[]fantasy.Message`, and
+  the role-to-`genai.Content` mapping — including the merge that would need
+  to happen — lives entirely inside `toGooglePrompt`, below where
+  `internal/agent` can reach. A real fix is a fantasy change (either merging
+  adjacent same-mapped-role `genai.Content`s in `toGooglePrompt`, or fantasy
+  exposing a hook before the request is built).
+
+  Next step: run one real `user → assistant(tool_calls) → tool →
+  user(steering)` request against Gemini once a key is available. If it
+  400s, the fix has to land in fantasy (file it upstream); there is nothing
+  further to try from this side first.
 
 ## Decisions deferred pending confirmation
 

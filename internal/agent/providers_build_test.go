@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 
@@ -236,19 +237,25 @@ func TestBuildAzureProvider(t *testing.T) {
 		require.Equal(t, "v", captured.Header.Get("X-Custom"))
 	})
 
-	t.Run("a configured apiVersion does not break construction", func(t *testing.T) {
+	t.Run("a configured apiVersion reaches the request", func(t *testing.T) {
 		t.Parallel()
-		// NOTE: fantasy's azure.WithAPIVersion currently stores the value
-		// but never applies it to the request (see
+		// fantasy's azure.WithAPIVersion stores the value but never
+		// applies it to the request (see
 		// charm.land/fantasy/providers/azure.New, which never reads
-		// o.apiVersion) — an upstream gap, not ours to fix here. This
-		// pins that buildAzureProvider's passthrough at least does not
-		// error, without asserting on a query parameter fantasy drops.
+		// o.apiVersion back out — confirmed against both our pinned
+		// v0.40.0 and the newest published v0.41.2) — an upstream gap,
+		// not ours to fix here. buildAzureProvider works around it by
+		// adding the query parameter itself via azureAPIVersionTransport,
+		// so this asserts the value actually lands on the wire rather
+		// than merely that construction does not error.
 		c := newProxyTestCoordinator(t, false)
-		server, _ := newCaptureServer(t)
+		server, captured := newCaptureServer(t)
 		provider, err := c.buildAzureProvider(server.URL, "akey", map[string]string{}, map[string]string{"apiVersion": "2024-05-05"}, "")
 		require.NoError(t, err)
 		probe(t, provider, "gpt-4o")
+		values, err := url.ParseQuery(captured.Query)
+		require.NoError(t, err)
+		require.Equal(t, "2024-05-05", values.Get("api-version"))
 	})
 
 	t.Run("invalid proxy URL surfaces an error", func(t *testing.T) {
