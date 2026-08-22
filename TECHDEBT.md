@@ -9,19 +9,6 @@ deleted, and the history stays in git.
 
 ## Open debt
 
-- **`options.skills_paths` resolves relative paths against the process cwd,
-  not the workspace.** `promptData` (`internal/agent/prompt/prompt.go:185`)
-  passes each skills path through `expandPath`, which handles `~` and `$VAR`
-  but does **not** join against the store's working directory. The sibling
-  path for context files does: `processContextPath` (`prompt.go:111`) calls
-  `filepathext.SmartJoin(store.WorkingDir(), p)`. So a relative
-  `skills_paths` entry silently resolves against wherever the process was
-  started, which is the wrong answer whenever Sennit's working directory is
-  not the launch directory. Same class as the `isInsideWorktree` bug fixed in
-  2026-08-20. Next step: route skills paths through the same `SmartJoin` as
-  context paths, and add a test that a relative skills path resolves against
-  the workspace.
-
 - **Azure `apiVersion` is silently ignored.** `buildAzureProvider`
   (`internal/agent/providers.go:521`) reads `options["apiVersion"]` from the
   provider config and passes it as `azure.WithAPIVersion(...)`, so a user who

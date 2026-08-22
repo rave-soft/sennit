@@ -704,7 +704,32 @@ func newTestManager(t *testing.T, repo string) (*thread.Manager, *fakeSpawner) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 	return mgr, spawner
+}
+
+// shutdownManagerOnCleanup registers a t.Cleanup that shuts mgr down on a
+// bounded context and fails the test if Shutdown does not return cleanly.
+// A Manager owns background goroutines (auto-merge, delivery, `git worktree
+// prune` from WorktreeRemove) that keep reading and writing a thread's
+// worktree - and the repo's own .git directory - after the test body
+// returns. Without a join here, t.TempDir()'s RemoveAll can race one of
+// those goroutines and fail with "directory not empty"; Shutdown is the
+// only supported way to actually wait for them to stop.
+//
+// Callers must invoke this AFTER every t.TempDir() call mgr's worktrees
+// live under (repo, WorktreeDir, DataDir): t.Cleanup runs LIFO, so this
+// must be the most recently registered cleanup to run before any of those
+// directories are removed. Calling Shutdown a second time (e.g. a test
+// that already calls it explicitly) is a harmless no-op - see
+// TestManager_ConcurrentShutdownClosesMutations.
+func shutdownManagerOnCleanup(t *testing.T, mgr *thread.Manager) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		require.NoError(t, mgr.Shutdown(ctx))
+	})
 }
 
 // publishSuccess simulates a thread's agent run finishing successfully.

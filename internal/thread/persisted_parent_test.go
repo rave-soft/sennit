@@ -28,6 +28,7 @@ func TestManager_ResolveDeliveryTarget_SurvivesRestart(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
+	shutdownManagerOnCleanup(t, mgr1)
 	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:            "restart-thread",
 		Goal:            "do it",
@@ -43,6 +44,7 @@ func TestManager_ResolveDeliveryTarget_SurvivesRestart(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
+	shutdownManagerOnCleanup(t, mgr2)
 	fresh, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 
@@ -71,6 +73,7 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
+	shutdownManagerOnCleanup(t, mgr1)
 	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:            "resume-thread",
 		Goal:            "do it",
@@ -90,6 +93,7 @@ func TestManager_Send_ReregistersDelegationParentForResumedThread(t *testing.T) 
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
+	shutdownManagerOnCleanup(t, mgr2)
 
 	require.NoError(t, sendErr(mgr2.Send(t.Context(), st.ID, "resume message")))
 
@@ -115,6 +119,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	store := thread.NewStoreForTest(t)
 	parentApp1 := newTestParentApp(t)
 	mgr1 := thread.NewManager(thread.ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
+	shutdownManagerOnCleanup(t, mgr1)
 	tasks1 := thread.NewTaskManagerForTest(mgr1, NewTestParentAppSpawner(parentApp1), NewTestMessageService(parentApp1.Messages()))
 
 	st, err := tasks1.Create(t.Context(), thread.TaskCreateArgs{Goal: "do it", ParentSessionID: "parent-sess"})
@@ -125,6 +130,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	// registration are both gone.
 	parentApp2 := newTestParentApp(t)
 	mgr2 := thread.NewManager(thread.ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
+	shutdownManagerOnCleanup(t, mgr2)
 	tasks2 := thread.NewTaskManagerForTest(mgr2, NewTestParentAppSpawner(parentApp2), NewTestMessageService(parentApp2.Messages()))
 
 	require.NoError(t, sendErr(tasks2.Send(t.Context(), st.ID, "resume message")))
@@ -158,6 +164,7 @@ func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
+	shutdownManagerOnCleanup(t, mgr1)
 	st, err := mgr1.Create(t.Context(), thread.CreateArgs{
 		Name:        "restart-solo",
 		Goal:        "do it",
@@ -174,6 +181,7 @@ func TestManager_ParentlessThread_StaysParentlessAcrossRestart(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
+	shutdownManagerOnCleanup(t, mgr2)
 
 	fresh, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)

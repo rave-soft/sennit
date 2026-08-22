@@ -76,6 +76,7 @@ func newTestManagerWithRealMessages(t *testing.T, repo string) (*thread.Manager,
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
+	shutdownManagerOnCleanup(t, mgr)
 	return mgr, spawner, sessions, messages
 }
 
@@ -302,6 +303,7 @@ func TestThreadWorktreeLivesInsideTheDataDirectory(t *testing.T) {
 		RepoRoot: repo,
 		DataDir:  dataDir,
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "in-place", Goal: "do it"})
 	require.NoError(t, err)

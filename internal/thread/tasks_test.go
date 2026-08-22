@@ -49,6 +49,7 @@ func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app
 		Spawner:  newFakeSpawner(t),
 		RepoRoot: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	dataDir := t.TempDir()
 	t.Cleanup(func() {
@@ -83,6 +84,7 @@ func newTestTaskManager(t *testing.T, store thread.Store) (*thread.Manager, *thr
 		Spawner:  newFakeSpawner(t),
 		RepoRoot: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 	parentApp := newTestParentApp(t)
 	tasks := thread.NewTaskManagerForTest(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(parentApp.Messages()))
 	return mgr, tasks, parentApp

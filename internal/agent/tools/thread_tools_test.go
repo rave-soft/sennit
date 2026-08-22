@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent"
@@ -262,6 +263,16 @@ func newTestThreadManager(t *testing.T, repo string) tools.ThreadManager {
 		Spawner:     &fakeSpawner{t: t},
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
+	})
+	// Manager owns background goroutines (auto-merge, delivery, `git
+	// worktree prune`) that keep touching repo/WorktreeDir after the test
+	// body returns; join them before t.TempDir() removes those
+	// directories, or RemoveAll can race a live writer. Registered after
+	// the WorktreeDir/repo TempDirs so it runs first (t.Cleanup is LIFO).
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		require.NoError(t, mgr.Shutdown(ctx))
 	})
 	return threadspawn.AsAgentToolManager(mgr)
 }

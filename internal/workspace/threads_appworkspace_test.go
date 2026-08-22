@@ -213,6 +213,26 @@ func (s *fakeThreadSpawner) Release(ctx context.Context, id string) error {
 	return nil
 }
 
+// shutdownManagerOnCleanup registers a t.Cleanup that shuts mgr down on a
+// bounded context and fails the test if Shutdown does not return cleanly.
+// A Manager owns background goroutines (auto-merge, delivery, `git
+// worktree prune`) that keep touching a thread's worktree - and the
+// repo's own .git directory - after the test body returns; App.Shutdown/
+// ShutdownForTest does NOT join these, since SetThreadManager registers no
+// App-owned cleanup for the manager it is handed. Without this, a
+// t.TempDir() RemoveAll can race one of those goroutines and fail with
+// "directory not empty". Call this AFTER every t.TempDir() call the
+// manager's worktrees live under: t.Cleanup runs LIFO, so it must be the
+// most recently registered cleanup to run first.
+func shutdownManagerOnCleanup(t *testing.T, mgr *thread.Manager) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		require.NoError(t, mgr.Shutdown(ctx))
+	})
+}
+
 // newTestThreadAppWorkspace wires an AppWorkspace whose App has a real
 // *thread.Manager attached over a real git repo, a real store, and the
 // fakeThreadSpawner defined above.
@@ -230,6 +250,7 @@ func newTestThreadAppWorkspace(t *testing.T) (*AppWorkspace, *thread.Manager) {
 		WorktreeDir: t.TempDir(),
 	})
 	a.SetThreadManager(mgr)
+	shutdownManagerOnCleanup(t, mgr)
 
 	store := config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo))
 	return NewAppWorkspace(a, store), mgr
@@ -335,6 +356,7 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 	})
 	a.SetThreadManager(mgr)
+	shutdownManagerOnCleanup(t, mgr)
 
 	// Pre-populate the fake session store so the attached workspace
 	// can read the session through the main app.
@@ -400,6 +422,7 @@ func TestAppWorkspace_AttachThread_LiveThread(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 	})
 	a.SetThreadManager(mgr)
+	shutdownManagerOnCleanup(t, mgr)
 
 	// Create via manager to get a real handle.
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{
@@ -490,6 +513,7 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 	})
 	a.SetThreadManager(mgr)
+	shutdownManagerOnCleanup(t, mgr)
 
 	// Pre-populate the fake session store.
 	_, err := fs.Create(t.Context(), "read-msgs")
@@ -551,6 +575,7 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 		WorktreeDir: t.TempDir(),
 	})
 	a.SetThreadManager(mgr)
+	shutdownManagerOnCleanup(t, mgr)
 
 	_, err := fs.Create(t.Context(), "readonly-check")
 	require.NoError(t, err)
@@ -610,6 +635,7 @@ func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testin
 		WorktreeDir: t.TempDir(),
 	})
 	a.SetThreadManager(mgr)
+	shutdownManagerOnCleanup(t, mgr)
 
 	_, err := fs.Create(t.Context(), "reason-check")
 	require.NoError(t, err)

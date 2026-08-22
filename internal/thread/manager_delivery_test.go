@@ -26,6 +26,7 @@ func newTestManagerWithParentApp(t *testing.T, repo string) (*thread.Manager, *f
 		WorktreeDir: t.TempDir(),
 		ParentApp:   &testAppWorkspace{app: parentApp},
 	})
+	shutdownManagerOnCleanup(t, mgr)
 	return mgr, spawner, parentApp
 }
 

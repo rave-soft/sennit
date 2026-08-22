@@ -232,6 +232,7 @@ func TestManager_ActivateRefusesMergeInFlightAndMerged(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	for _, status := range []thread.Status{thread.StatusMerging, thread.StatusMerged} {
 		t.Run(string(status), func(t *testing.T) {
@@ -274,6 +275,7 @@ func TestManager_ActivateRestingMergeFlowKeepsStatus(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	for _, status := range []thread.Status{thread.StatusConflict, thread.StatusMergeBlocked} {
 		t.Run(string(status), func(t *testing.T) {
@@ -375,6 +377,7 @@ func TestManager_CancelRefusesMergeFlow(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	for _, status := range []thread.Status{thread.StatusMerging, thread.StatusMerged, thread.StatusConflict, thread.StatusMergeBlocked} {
 		t.Run(string(status), func(t *testing.T) {
@@ -407,6 +410,7 @@ func TestManager_ActivateRejectsMissingWorktree(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	st, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "gone", Goal: "x", BaseBranch: "main",
@@ -432,6 +436,7 @@ func TestManager_RecoverLeavesIdleThreads(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	idle, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "idle-across-restart", Goal: "", BaseBranch: "main",
@@ -676,6 +681,7 @@ func TestManager_Recover(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	running, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "running-gone", Goal: "x", BaseBranch: "main",
@@ -741,6 +747,7 @@ func TestManager_RecoverReconcilesNonThreadKinds(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	task, err := store.Create(t.Context(), thread.CreateParams{
 		Name: "task-left-running", Goal: "x",

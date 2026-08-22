@@ -204,6 +204,7 @@ func TestManager_CreateRollsBackOnlyWhatSucceeded(t *testing.T) {
 				WorktreeDir: t.TempDir(),
 				Context:     ctx,
 			})
+			shutdownManagerOnCleanup(t, mgr)
 
 			args := thread.CreateArgs{Name: "rb-" + slug(tc.name), Goal: "go", MergePolicy: thread.MergeManual}
 			if tc.args != nil {
@@ -239,6 +240,7 @@ func TestManager_CreateRollbackOrder_ReleasesBeforeRemovingWorktree(t *testing.T
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
+	shutdownManagerOnCleanup(t, mgr)
 
 	args := thread.CreateArgs{Name: "rollback-order", Goal: "go", MergePolicy: thread.MergeManual}
 	worktreePath := filepath.Join(mgr.WorktreeDirForTest(), args.Name)
@@ -308,6 +310,7 @@ func TestManager_ActivateRollsBackOnlyWhatSucceeded(t *testing.T) {
 				RepoRoot:    repo,
 				WorktreeDir: worktreeDir,
 			})
+			shutdownManagerOnCleanup(t, setupMgr)
 			st, err := setupMgr.Create(context.Background(), thread.CreateArgs{Name: "act-" + slug(tc.name), Goal: "go", MergePolicy: thread.MergeManual})
 			require.NoError(t, err)
 			publishSuccess(t, setupSpawner.appFor(st.WorktreePath), st.SessionID)
@@ -330,6 +333,7 @@ func TestManager_ActivateRollsBackOnlyWhatSucceeded(t *testing.T) {
 				WorktreeDir: worktreeDir,
 				Context:     ctx,
 			})
+			shutdownManagerOnCleanup(t, mgr)
 
 			_, err = mgr.Activate(context.Background(), st.ID)
 			require.Error(t, err)
@@ -413,6 +417,7 @@ func TestManager_CreateFailureMarksTheRightRow(t *testing.T) {
 				WorktreeDir: t.TempDir(),
 				Context:     ctx,
 			})
+			shutdownManagerOnCleanup(t, mgr)
 
 			args := thread.CreateArgs{Name: "fc-" + slug(tc.name), Goal: "go", MergePolicy: thread.MergeManual}
 			if tc.args != nil {
