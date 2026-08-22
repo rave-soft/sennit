@@ -130,6 +130,11 @@ type UI struct {
 
 	keyMap KeyMap
 
+	// goos is the platform configuredKeyMap renders bindings for
+	// (super+ on darwin, ctrl+ elsewhere). Empty means "use runtime.GOOS",
+	// which is always true outside tests — see withGOOS.
+	goos string
+
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
@@ -209,6 +214,14 @@ func WithBreadcrumbRoot(name string) Option {
 	return func(m *UI) { m.crumbRoot = name }
 }
 
+// withGOOS pins the platform configuredKeyMap renders bindings for,
+// overriding the runtime.GOOS default. Golden/keybinding-sensitive tests
+// use it so their expectations don't depend on the host they run on; there
+// is no production caller — a real UI always wants the host's own keys.
+func withGOOS(goos string) Option {
+	return func(m *UI) { m.goos = goos }
+}
+
 // surfacesThreads reports whether this UI shows other threads at all: the
 // panel's threads block, the header's active-thread badge, and the
 // refreshes that feed them.
@@ -264,13 +277,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	}
 	ch := NewChat(com, scrollbarMode)
 
-	cfg := com.Config()
-	var keybindings map[string][]string
-	if cfg.Options != nil && cfg.Options.TUI != nil {
-		keybindings = cfg.Options.TUI.Keybindings
-	}
-	keyMap := configuredKeyMap(runtime.GOOS, keybindings)
-
 	// Completions component
 	comp := completions.New(completions.PopupStyles{
 		Normal:         com.Styles.Completions.Normal,
@@ -287,33 +293,13 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
 	)
 
-	// Attachments component
-	attachments := attachments.New(
-		attachments.NewRenderer(
-			com.Styles.Attachments.Normal,
-			com.Styles.Attachments.Deleting,
-			com.Styles.Attachments.Image,
-			com.Styles.Attachments.Text,
-			com.Styles.Attachments.Skill,
-			com.Styles.Attachments.Remove,
-			com.Styles.Attachments.RemoveHover,
-		),
-		attachments.Keymap{
-			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
-			DeleteAll:  keyMap.Editor.DeleteAllAttachments,
-			Escape:     keyMap.Editor.Escape,
-		},
-	)
-
 	header := newHeader(com)
 
 	ui := &UI{
-		com:    com,
-		keyMap: keyMap,
+		com: com,
 		editor: editorState{
 			textarea:    ta,
 			completions: comp,
-			attachments: attachments,
 		},
 		widgets: widgets{
 			dialog: dialog.NewOverlay(),
@@ -343,6 +329,34 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 	for _, opt := range opts {
 		opt(ui)
 	}
+	// withGOOS may have set ui.goos above; resolve to the host platform
+	// otherwise. keyMap/attachments are built here, after opts, so a test
+	// pinning the platform actually controls what gets rendered.
+	if ui.goos == "" {
+		ui.goos = runtime.GOOS
+	}
+	cfg := com.Config()
+	var keybindings map[string][]string
+	if cfg.Options != nil && cfg.Options.TUI != nil {
+		keybindings = cfg.Options.TUI.Keybindings
+	}
+	ui.keyMap = configuredKeyMap(ui.goos, keybindings)
+	ui.editor.attachments = attachments.New(
+		attachments.NewRenderer(
+			com.Styles.Attachments.Normal,
+			com.Styles.Attachments.Deleting,
+			com.Styles.Attachments.Image,
+			com.Styles.Attachments.Text,
+			com.Styles.Attachments.Skill,
+			com.Styles.Attachments.Remove,
+			com.Styles.Attachments.RemoveHover,
+		),
+		attachments.Keymap{
+			DeleteMode: ui.keyMap.Editor.AttachmentDeleteMode,
+			DeleteAll:  ui.keyMap.Editor.DeleteAllAttachments,
+			Escape:     ui.keyMap.Editor.Escape,
+		},
+	)
 
 	status := NewStatus(com, ui)
 

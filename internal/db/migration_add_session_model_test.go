@@ -21,10 +21,9 @@ import (
 // with no messages at all, and one whose newest message is the one that
 // must win over an older, different model.
 func TestMigration_AddModelToSessions(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "sennit.db")
+	t.Cleanup(ResetPool)
 
 	conn, err := openDB(dbPath)
 	require.NoError(t, err)

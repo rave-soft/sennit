@@ -12,9 +12,8 @@ import (
 )
 
 func TestConnect_SharesConnectionForSameDataDir(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 
 	conn1, err := Connect(context.Background(), dataDir)
 	require.NoError(t, err)
@@ -34,10 +33,9 @@ func TestConnect_SharesConnectionForSameDataDir(t *testing.T) {
 }
 
 func TestConnect_SeparateConnectionsForDifferentDataDirs(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()
+	t.Cleanup(ResetPool)
 
 	conn1, err := Connect(context.Background(), dir1)
 	require.NoError(t, err)
@@ -65,9 +63,8 @@ func TestRelease_UnknownDataDirIsReportedMisuse(t *testing.T) {
 // AcquireWorkspaceLock, since a single shared database is opened by
 // many concurrent, legitimately-unrelated project workspaces.
 func TestConnect_IgnoresContendedWorkspaceLock(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 
 	lockObj, err := AcquireWorkspaceLock(dataDir)
 	require.NoError(t, err, "expected to take the workspace lock for the first time")
@@ -98,9 +95,8 @@ func TestConnect_IgnoresContendedWorkspaceLock(t *testing.T) {
 // consequence, not the unbalanced call itself, which leaves no trace to
 // pin.
 func TestRelease_ClosesHandleWhenRefcountHitsZeroEvenForNonReleasingHolder(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 
 	// Two Connects share one handle and bring refCount to 2. conn1 is the
 	// non-releasing holder in this scenario; conn2 is not queried again,
@@ -138,9 +134,8 @@ func TestRelease_ClosesHandleWhenRefcountHitsZeroEvenForNonReleasingHolder(t *te
 // surface as a reported (logged and returned) error instead of pretending
 // the call was fine.
 func TestRelease_PastZeroIsReportedMisuse(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 
 	_, err := Connect(context.Background(), dataDir)
 	require.NoError(t, err)
@@ -154,14 +149,16 @@ func TestRelease_PastZeroIsReportedMisuse(t *testing.T) {
 // different spellings of the same directory share one entry instead of
 // opening a second connection.
 func TestConnect_NormalizesPathSpelling(t *testing.T) {
+	// Derive the relative spelling from a child of the cwd rather than
+	// filepath.Rel-ing an unrelated t.TempDir() against this package's
+	// source directory: on CI those can land on different Windows drive
+	// letters, and filepath.Rel has no answer across drives.
+	parent := t.TempDir()
 	t.Cleanup(ResetPool)
-
-	dataDir := t.TempDir()
-
-	cwd, err := filepath.Abs(".")
-	require.NoError(t, err)
-	relDir, err := filepath.Rel(cwd, dataDir)
-	require.NoError(t, err)
+	dataDir := filepath.Join(parent, "data")
+	require.NoError(t, os.Mkdir(dataDir, 0o755))
+	t.Chdir(parent)
+	relDir := "data"
 
 	// A spelling with a trailing separator normalizes the same way.
 	trailingDir := dataDir + string(filepath.Separator)
@@ -192,10 +189,9 @@ func TestConnect_NormalizesPathSpelling(t *testing.T) {
 // equal as strings. Connect/Release must still treat them as one pool
 // entry.
 func TestConnect_NormalizesSymlinkedAlias(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	real := t.TempDir()
 	alias := filepath.Join(t.TempDir(), "alias")
+	t.Cleanup(ResetPool)
 	require.NoError(t, os.Symlink(real, alias))
 
 	conn1, err := Connect(context.Background(), real)
@@ -217,12 +213,11 @@ func TestConnect_NormalizesSymlinkedAlias(t *testing.T) {
 // prematurely closed connection when every Connect is paired with
 // exactly one Release.
 func TestConnect_ConcurrentAccess(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	const goroutinesPerDir = 5
 	const itersPerGoroutine = 3
 
 	dirs := []string{t.TempDir(), t.TempDir()}
+	t.Cleanup(ResetPool)
 
 	var wg sync.WaitGroup
 	for _, dir := range dirs {
@@ -263,9 +258,8 @@ func TestConnect_ConcurrentAccess(t *testing.T) {
 // pooled connection and empties the pool, and that a subsequent Connect
 // starts fresh rather than reusing a closed handle.
 func TestResetPool_ClosesAndClearsPool(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 
 	conn1, err := Connect(context.Background(), dataDir)
 	require.NoError(t, err)
@@ -278,4 +272,31 @@ func TestResetPool_ClosesAndClearsPool(t *testing.T) {
 	require.NotSame(t, conn1, conn2, "ResetPool should force a fresh connection on next Connect")
 	require.NoError(t, conn2.PingContext(context.Background()))
 	require.NoError(t, Release(dataDir))
+}
+
+// TestCleanupOrder_PoolIsEmptyBeforeTempDirRemoval proves the ordering
+// claim behind every "t.TempDir() first, t.Cleanup(ResetPool) second"
+// fix in this package, with a real assertion instead of code inspection.
+//
+// t.Cleanup runs LIFO. This test registers, in order: (1) t.TempDir(),
+// which files its own RemoveAll cleanup first, (2) an assertion cleanup
+// that checks the pool is empty, and (3) t.Cleanup(ResetPool) last. So
+// cleanups run ResetPool, then the assertion, then RemoveAll -- proving
+// the pool's connection is already closed by the time a TempDir removal
+// would run, which is exactly what keeps Windows from unlinking a file
+// SQLite still has open.
+func TestCleanupOrder_PoolIsEmptyBeforeTempDirRemoval(t *testing.T) {
+	dataDir := t.TempDir()
+
+	t.Cleanup(func() {
+		poolMu.Lock()
+		defer poolMu.Unlock()
+		require.Empty(t, pool, "pool must already be closed and cleared when TempDir's own cleanup is about to run")
+	})
+
+	t.Cleanup(ResetPool)
+
+	conn, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	require.NoError(t, conn.PingContext(context.Background()))
 }

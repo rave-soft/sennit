@@ -16,9 +16,8 @@ import (
 // Down migration actually drops the column rather than merely declaring
 // intent to.
 func TestMigration_AddKindToThreads(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 	dbPath := filepath.Join(dataDir, "sennit.db")
 
 	conn, err := openDB(dbPath)

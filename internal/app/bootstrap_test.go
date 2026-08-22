@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -153,8 +154,10 @@ func TestBootstrap_PostDataDirError(t *testing.T) {
 func TestBootstrap_WorkspaceLockOptionApplies(t *testing.T) {
 	setBootstrapTestEnv(t)
 
+	dataDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dataDir) })
 	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
-		DataDir:       t.TempDir(),
+		DataDir:       dataDir,
 		WorkspaceLock: true,
 	})
 	require.NoError(t, err)
@@ -169,6 +172,7 @@ func TestBootstrap_WorkspaceLockReleasedOnShutdown(t *testing.T) {
 	setBootstrapTestEnv(t)
 
 	dataDir := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dataDir) })
 	result, err := Bootstrap(context.Background(), t.TempDir(), BootstrapOptions{
 		DataDir:       dataDir,
 		WorkspaceLock: true,
@@ -195,6 +199,7 @@ func TestWorkspaceLock_RepositoryIdentityAcrossProcesses(t *testing.T) {
 	worktree := filepath.Join(t.TempDir(), "worktree")
 	runWorkspaceGit(t, repo, "worktree", "add", "-b", "thread", worktree, "main")
 
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, repo) })
 	result, err := Bootstrap(t.Context(), repo, BootstrapOptions{
 		DataDir:       t.TempDir(),
 		WorkspaceLock: true,
@@ -264,6 +269,8 @@ func TestBootstrap_ParentAndWorktreeShareLock(t *testing.T) {
 	repo := initWorkspaceRepo(t)
 	worktree := filepath.Join(t.TempDir(), "worktree")
 	runWorkspaceGit(t, repo, "worktree", "add", "-b", "thread", worktree, "main")
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, repo) })
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, worktree) })
 
 	parent, err := Bootstrap(t.Context(), repo, BootstrapOptions{
 		DataDir:       t.TempDir(),
@@ -418,18 +425,21 @@ func requireWorkspaceLockAcquired(t *testing.T, lockDir string) {
 func TestBootstrap_TwoProjectsConcurrentWrites(t *testing.T) {
 	setBootstrapTestEnv(t)
 
-	bootOne := func(cwd string) *App {
+	bootOne := func(cwd, dataDir string) *App {
 		result, err := Bootstrap(context.Background(), cwd, BootstrapOptions{
-			DataDir:       t.TempDir(),
+			DataDir:       dataDir,
 			WorkspaceLock: true,
 		})
 		require.NoError(t, err)
 		return result.App
 	}
 
-	appA := bootOne(t.TempDir())
+	dataDirA, dataDirB := t.TempDir(), t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dataDirA) })
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, dataDirB) })
+	appA := bootOne(t.TempDir(), dataDirA)
 	t.Cleanup(appA.Shutdown)
-	appB := bootOne(t.TempDir())
+	appB := bootOne(t.TempDir(), dataDirB)
 	t.Cleanup(appB.Shutdown)
 
 	const writesPerApp = 20

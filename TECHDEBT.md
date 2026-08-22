@@ -37,26 +37,6 @@ deleted, and the history stays in git.
   `apiVersion` is configured or drop the option rather than accepting a
   setting we cannot honour.
 
-- **The external-change watcher can misread this process's own write.**
-  `SetConfigFields` writes the config file, then runs the whole reload
-  pipeline (`autoReload` -> `reloadFromDisk`: disk read, JSON merge, provider
-  reconfiguration) and only refreshes the staleness snapshot at the very end,
-  under `writeMu`. A watcher poll landing inside that window sees the on-disk
-  mtime already changed while the snapshot still holds the old one, and
-  reports an own-write as external — firing the `OnExternalChange` callback
-  that re-inits MCP servers and publishes `ConfigChanged`. In production the
-  window is unreachable in practice: `externalChangePollInterval` is 2s and
-  the pipeline is orders of magnitude faster. It was found (2026-08-21) only
-  by driving the interval down to test speeds, where under `-race` it
-  reproduced below ~100ms. Recorded rather than fixed because the fix belongs
-  in the write path, not the watcher: refresh the staleness snapshot for a
-  path as part of the same critical section that writes it, so the on-disk
-  state and the snapshot can never disagree, instead of at the end of the
-  reload. Next step: move the snapshot refresh in `SetConfigFields` to
-  immediately after the atomic write, and confirm the four
-  `TestWatchForExternalChanges_*` tests stay green at a 10ms interval under
-  `-race` (they currently need 100ms for headroom).
-
 - **Gemini and two consecutive user contents.** Steering is delivered as its
   own `user` message after all tool results
   (`internal/agent/completion_inbox.go`, `prepareStep` in
@@ -239,42 +219,76 @@ because "the fold is keyed on the absence of a RunID". If a real user prompt can
 reach either branch under the right interleaving, it is discarded with no terminal
 event and nothing persisted, which matches the observed `userCount == 0` exactly.
 
-## Windows CI: three production path bugs fixed, one cluster still unexplained
+## Windows and macOS CI: what the real logs turned out to be
 
-The three-OS `build` matrix (added 2026-08-21) turned up 98 Windows failures at
-`14ac9ec7`, against a green Linux. Root causes, addressed 2026-08-22:
+The three-OS `build` matrix (added 2026-08-21) was red on two legs. Two rounds of
+work, 2026-08-22. Round one reasoned from static analysis, fixed real bugs, and
+still left 81 Windows failures; round two read the actual runner log and found the
+dominant causes had nothing to do with path spelling.
 
-**Fixed -- production, path canonicalization.** On Windows the same directory
+**Round one -- production, path canonicalization.** On Windows the same directory
 arrives under two spellings: `t.TempDir()` yields the 8.3 short form
-(`C:\Users\RUNNER~1\...` -- visible in the CI log) while git and `filepath.Abs`
-yield the long one, so a raw `==` says they differ. Added `fsext.Canonical`
-(`Abs` -> `EvalSymlinks`, falling back to `Clean` plus a case fold on Windows for
-paths that do not exist yet) and used it at three sites:
+(`C:\Users\RUNNER~1\...`) while git and `filepath.Abs` yield the long one, so a raw
+`==` says they differ. Added `fsext.Canonical` and used it at three sites:
 `threadspawn/attach.go`'s repo-root check -- which silently left a Windows user
 standing at their own repo root with **no thread manager** -- `db/connect.go`'s
-connection-pool key, and `fsext/lookup.go`'s stop-at-home checks. Each is pinned by
-a symlink-based test; symlinks are the same aliasing class and do run on Linux.
+pool key, and `fsext/lookup.go`'s stop-at-home checks. Pinned by symlink tests,
+which exercise the same aliasing class on Linux. `home.Long` separator mixing and
+the `confinement_test.go` hand-built JSON (which meant the confinement boundary was
+never exercised on Windows at all) were fixed in the same round.
 
-**Fixed -- production, separator mixing.** `home.Long` replaced `~` but left the
-literal `/` in the remainder, so `~/notes.md` became `C:\Users\x` + `/notes.md`,
-matching nothing built with `filepath.Join`. Now routed through `filepath.FromSlash`.
+**Round two -- the 56-failure cluster was never about paths.** Two distinct
+resource-lifetime bugs, both invisible on Linux because it happily unlinks open
+files and removes directories that are somebody's cwd:
 
-**Fixed -- test fixture, and it was hiding a gap.** `confinement_test.go` built tool
-input by splicing a path into a JSON string; a Windows `C:\Users\...` produced the
-illegal escape `\U`, so the tool failed at *parameter parsing* and never reached the
-confinement check. The security boundary was not failing on Windows -- it was
-**never being exercised there**. Now built with `json.Marshal`, plus an
-OS-independent regression test. The confinement logic itself
-(`resolveWithinWorkdir` over `filepath.Abs`/`filepath.Rel`) was audited and is
-sound on Windows.
+- `t.Cleanup` is LIFO, and several tests registered `t.Cleanup(ResetPool)` *before*
+  `t.TempDir()`, so the directory was removed while the SQLite handle was open.
+- `ResolveCwd` (`internal/cmd/root.go`) does a process-global `os.Chdir` into
+  `--cwd` and never returns -- correct for the CLI, but it left the test process
+  sitting inside a `t.TempDir()` that a later cleanup wanted to remove.
 
-**Still open -- nine `internal/config` failures**, including
-`TestApplyWorkspaceConfig`'s subtests. No path-comparison root cause was found by
-static analysis: `applyWorkspaceConfig` has no path comparison, and the inspected
-subtest turns on `os.PathError`'s shape when opening a path whose parent is not a
-directory -- an OS-error-shape difference, not a spelling one. Left unfixed rather
-than guessed at; it may be downstream of the JSON-escaping class, or it may need
-the real Windows log. Re-check after the next Windows run.
+**Round two -- production, a leaked workspace flock.** `Bootstrap` registered a
+final-cleanup closure calling `wsLock.Release()`, then set `wsLock = nil` on the
+next line to disarm an earlier failure-path defer. Closures capture by reference,
+so the cleanup released a **nil** lock -- a documented no-op -- and the OS flock on
+`sennit.lock` was never dropped. Masked on Linux by process exit; it mattered for a
+second `Bootstrap` of the same data directory inside one process.
+
+**Round two -- production, `NewManager` mis-anchored absolute worktree dirs.** It
+used `filepath.IsAbs`, not the codebase's `filepathext.SmartIsAbs`, so a config
+`WorktreeDir` written Unix-style (`/var/tmp/...`, legal and portable in a config
+file) was treated as relative on Windows and silently anchored under the repo.
+
+**Round two -- production, truncation dropped the file name.** `IsLikelyPath`
+excluded backslash as a shell metacharacter, so every Windows path failed the check
+and fell through to plain right-truncation instead of `TruncatePath`'s head elision
+-- cutting away the one part of a path that identifies it.
+
+**Round two -- production, config staleness race.** Closed by holding `stalenessMu`
+across the write *and* the snapshot refresh; the comment in `SetConfigFields`
+records the bounded-latency trade-off this accepts.
+
+**macOS -- production, keybindings leaked into golden files.** `keys.go` rewrites
+`ctrl+` to `super+` on darwin, and `ui.go` passed `runtime.GOOS` straight into
+`configuredKeyMap`, so every golden test rendered the host's key hints. The
+platform is now an injectable field defaulting to `runtime.GOOS`; goldens pin
+`"linux"`. No golden file content changed.
+
+**The tool that made all of this checkable.** `internal/testenv`'s
+`AssertRemovableOnWindows` reproduces the Windows constraint on Linux: it walks
+`/proc/self/fd` and checks `os.Getwd()` against the directory about to be removed,
+registered right after `t.TempDir()` so LIFO runs it just before `RemoveAll`. It
+names the exact fd or cwd Windows would refuse -- on `internal/cmd` it named the
+same `\003` directory the Windows log did. Prefer extending it over reasoning about
+Windows semantics from a Linux box.
+
+**Still open -- the `internal/config` cluster.** `TestApplyWorkspaceConfig` and its
+subtests, plus `TestExternalChangeDetected_NewCandidateFile`. Static analysis found
+no path-comparison cause: `applyWorkspaceConfig` compares no paths, and the
+inspected subtest turns on `os.PathError`'s shape when opening a path whose parent
+is not a directory -- an OS-error-shape difference, not a spelling one. Left
+unfixed rather than guessed at, twice now. If it survives the next Windows run,
+wire `AssertRemovableOnWindows` into that package before theorising further.
 
 **Latent, not touched:** `filetracker`'s `filepath.Rel(s.workingDir, path)` has the
 same spelling sensitivity, but it was not in the failure list and widening scope on

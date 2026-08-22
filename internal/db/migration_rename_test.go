@@ -14,9 +14,8 @@ import (
 // the row inserted under the old name reappears under "threads" with the
 // same data, and the old table is gone.
 func TestMigration_RenameStrandsToThreads(t *testing.T) {
-	t.Cleanup(ResetPool)
-
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 	dbPath := filepath.Join(dataDir, "sennit.db")
 
 	conn, err := openDB(dbPath)

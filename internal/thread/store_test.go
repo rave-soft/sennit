@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"testing/synctest"
 
 	"github.com/stretchr/testify/require"
 )
@@ -21,6 +22,32 @@ func testCreateParams(name string) CreateParams {
 		Branch:       "thread/" + name,
 		WorktreePath: "/tmp/threads/" + name,
 	}
+}
+
+// TestStore_CreateIDsSurviveASingleClockTick guards against a regression
+// where thread.id was derived from a wall-clock timestamp
+// (fmt.Sprintf("thread-%d", time.Now().UnixNano())): two Creates issued
+// within the same clock tick got identical IDs and the second write hit
+// the threads.id UNIQUE constraint — this is what actually happened in CI
+// on Windows, whose default wall-clock granularity (~15.6ms) makes
+// back-to-back calls landing in the same tick routine. A fast Linux clock
+// makes that collision only occasional, so this pins it deterministically
+// with synctest instead of hoping for bad luck: inside a synctest bubble,
+// time.Now() does not advance between two straight-line calls with no
+// blocking in between, which reproduces "same tick" on any platform. It
+// passes today because Create no longer reads the clock at all (see
+// store_testing.go), but it would fail again the moment ID generation
+// went back to being time-derived.
+func TestStore_CreateIDsSurviveASingleClockTick(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := newTestStore(t)
+
+		first, err := store.Create(t.Context(), testCreateParams("first"))
+		require.NoError(t, err)
+		second, err := store.Create(t.Context(), testCreateParams("second"))
+		require.NoError(t, err, "second Create must not collide with the first even when the clock has not ticked")
+		require.NotEqual(t, first.ID, second.ID)
+	})
 }
 
 func TestStore_CreateAndGet(t *testing.T) {

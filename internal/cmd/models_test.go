@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -78,7 +79,9 @@ func TestModelsRefreshCmd_SingleProvider(t *testing.T) {
 	dataConfigPath := setupHermeticConfigEnv(t, seed)
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	cwd := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, cwd) })
+	setCwdFlag(t, testCmd, cwd)
 
 	err := refreshCmd.RunE(testCmd, []string{"custom"})
 	require.NoError(t, err)
@@ -119,7 +122,7 @@ func TestModelsRefreshCmd_AllProviders(t *testing.T) {
 	dataConfigPath := setupHermeticConfigEnv(t, seed)
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err := refreshCmd.RunE(testCmd, nil)
 	require.NoError(t, err)
@@ -163,7 +166,7 @@ func TestModelsRefreshCmd_UnreachableEndpointLeavesDiskUntouched(t *testing.T) {
 	require.NoError(t, err)
 
 	testCmd, _, stderr := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err = refreshCmd.RunE(testCmd, []string{"custom"})
 	require.Error(t, err)
@@ -181,7 +184,7 @@ func TestModelsRefreshCmd_UnknownProviderID(t *testing.T) {
 	require.NoError(t, err)
 
 	testCmd, _, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err = refreshCmd.RunE(testCmd, []string{"does-not-exist"})
 	require.Error(t, err)
@@ -196,7 +199,7 @@ func TestModelsRefreshCmd_KnownCatalogProviderRejected(t *testing.T) {
 	setupHermeticConfigEnv(t, seed)
 
 	testCmd, _, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err := refreshCmd.RunE(testCmd, []string{"openai"})
 	require.Error(t, err)
@@ -219,7 +222,7 @@ func TestModelsRefreshCmd_ExplicitConfigModelsSkipped(t *testing.T) {
 	require.NoError(t, err)
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err = refreshCmd.RunE(testCmd, []string{"custom"})
 	require.NoError(t, err)
@@ -251,7 +254,7 @@ func TestModelsRefreshCmd_DiscoveryDisabledRejected(t *testing.T) {
 	setupHermeticConfigEnv(t, seed)
 
 	testCmd, _, stderr := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err := refreshCmd.RunE(testCmd, []string{"custom"})
 	require.Error(t, err)

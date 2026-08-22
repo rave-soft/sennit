@@ -177,6 +177,16 @@ const sessionPanelDrawBudget = 8 * time.Millisecond
 // generous frame budget. This is the check that would have caught the
 // RunningDelegations O(N)-per-call regression this file's fix addresses.
 func TestSessionPanelDrawFrameBudget(t *testing.T) {
+	if raceDetectorEnabled {
+		// The race detector instruments every memory access, adding a
+		// 2-20x slowdown that has nothing to do with Draw()'s own cost —
+		// asserting a wall-clock budget here would measure the detector,
+		// not a regression in this code. BenchmarkSessionPanelDraw still
+		// runs (and this same assertion still runs) in the normal,
+		// non-race test run, which is what actually catches an O(N)
+		// regression like the one this test's doc comment describes.
+		t.Skip("wall-clock frame budget is not meaningful under -race; see the normal (non-race) test run")
+	}
 	// Deliberately not t.Parallel(): this is a wall-clock timing
 	// assertion, and running alongside other parallel tests would add
 	// scheduling noise that has nothing to do with the code under test.

@@ -125,14 +125,22 @@ func RenderTodoRow(todo session.Todo, sty *styles.Styles, width int, opts TodoRo
 // Absolute paths qualify, as do relative ones containing a separator;
 // anything carrying shell-ish characters or whitespace does not, since a
 // command's meaning lives in its head.
+//
+// "\" is deliberately not in that shell-ish set: on Windows it is the path
+// separator, not an escape character, so excluding it made every Windows
+// path (e.g. "C:\Users\x\file.go") fail this check. That sent it through
+// plain right-truncation instead of TruncatePath, cutting the string
+// somewhere mid-path and dropping the file name — the one part of a path
+// that actually identifies it. Any escaped-space case is still excluded by
+// the space in this set regardless.
 func IsLikelyPath(s string) bool {
-	if s == "" || strings.ContainsAny(s, " \t\n¶'\"|&;<>$`*?(){}[]\\") {
+	if s == "" || strings.ContainsAny(s, " \t\n¶'\"|&;<>$`*?(){}[]") {
 		return false
 	}
 	if filepath.IsAbs(s) {
 		return true
 	}
-	return strings.Contains(s, "/")
+	return strings.ContainsAny(s, "/\\")
 }
 
 // TruncatePath fits a filesystem path into width, eliding the head rather

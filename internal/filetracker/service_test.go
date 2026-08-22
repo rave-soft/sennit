@@ -3,6 +3,7 @@ package filetracker
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -127,7 +128,7 @@ func TestService_RecordRead_DifferentPaths(t *testing.T) {
 // process cwd need not match the workspace being served, so the service
 // must use the injected workingDir for both writes and reads.
 func TestService_UsesInjectedWorkingDir_NotProcessCwd(t *testing.T) {
-	workspaceDir := "/workspace/project"
+	workspaceDir := filepath.Join(string(filepath.Separator), "workspace", "project")
 	env := setupTestWithWorkingDir(t, workspaceDir)
 
 	processCwd, err := os.Getwd()
@@ -137,7 +138,7 @@ func TestService_UsesInjectedWorkingDir_NotProcessCwd(t *testing.T) {
 	sessionID := "test-session-workdir"
 	env.createSession(t, sessionID)
 
-	path := workspaceDir + "/pkg/file.go"
+	path := filepath.Join(workspaceDir, "pkg", "file.go")
 	env.svc.RecordRead(env.ctx, sessionID, path)
 
 	files, err := env.svc.ListReadFiles(env.ctx, sessionID)

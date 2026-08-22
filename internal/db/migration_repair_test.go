@@ -18,10 +18,10 @@ const beforeRepair = 20260815120000
 // child rows the tests attach to them.
 func migrateToBeforeRepair(t *testing.T) *sql.DB {
 	t.Helper()
-	t.Cleanup(ResetPool)
 
 	conn, err := openDB(filepath.Join(t.TempDir(), "sennit.db"))
 	require.NoError(t, err)
+	t.Cleanup(ResetPool)
 	t.Cleanup(func() { conn.Close() })
 
 	require.NoError(t, initGoose())

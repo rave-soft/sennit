@@ -495,14 +495,16 @@ func TestCanonical_SymlinkedAlias(t *testing.T) {
 // path absolute before resolving it, so a relative and an absolute
 // spelling of the same directory compare equal too.
 func TestCanonical_RelativeAndAbsolute(t *testing.T) {
-	dir := t.TempDir()
+	// Build the relative spelling from a child of the cwd, not by
+	// filepath.Rel-ing an unrelated t.TempDir() against the package
+	// source directory: on CI those two can sit on different Windows
+	// drive letters, and filepath.Rel has no answer across drives.
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "child")
+	require.NoError(t, os.Mkdir(dir, 0o755))
+	t.Chdir(parent)
 
-	cwd, err := filepath.Abs(".")
-	require.NoError(t, err)
-	rel, err := filepath.Rel(cwd, dir)
-	require.NoError(t, err)
-
-	require.Equal(t, Canonical(dir), Canonical(rel))
+	require.Equal(t, Canonical(dir), Canonical("child"))
 }
 
 func TestProbeEnt(t *testing.T) {

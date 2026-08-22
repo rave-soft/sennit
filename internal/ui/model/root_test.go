@@ -57,7 +57,10 @@ func newTestRoot(t *testing.T, supportsThreads bool) *Root {
 	t.Helper()
 	ws := &rootTestWorkspace{supportsThreads: supportsThreads}
 	com := common.DefaultCommon(context.Background(), ws)
-	return NewRoot(com, "", false)
+	// Pin the platform so the ctrl+ key this test drives matches what
+	// configuredKeyMap actually binds, regardless of the host OS running
+	// the suite (see keys.go's darwin ctrl+ -> super+ rewrite).
+	return NewRoot(com, "", false, withGOOS("linux"))
 }
 
 func ctrlE() tea.KeyPressMsg {

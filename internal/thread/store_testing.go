@@ -3,10 +3,9 @@ package thread
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"testing"
-	"time"
 
+	"github.com/google/uuid"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/stretchr/testify/require"
 )
@@ -68,7 +67,14 @@ func (s *testStoreDB) Create(ctx context.Context, params CreateParams) (Thread, 
 		mergePolicy = MergeAuto
 	}
 	dbThread, err := s.q.CreateThread(ctx, db.CreateThreadParams{
-		ID:              fmt.Sprintf("thread-%d", time.Now().UnixNano()),
+		// A time-derived ID (fmt.Sprintf("thread-%d", time.Now().UnixNano()))
+		// used to sit here; on a coarse wall clock — Windows' default
+		// granularity is ~15.6ms — two Creates in the same test can land in
+		// the same tick and collide on the threads.id UNIQUE constraint
+		// (TestStore_List did, in CI). uuid.New() matches what the real
+		// store (threadspawn.store.Create) already uses and carries no
+		// clock dependency.
+		ID:              uuid.New().String(),
 		Name:            params.Name,
 		ProjectPath:     s.projectPath,
 		Goal:            params.Goal,

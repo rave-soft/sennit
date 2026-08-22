@@ -90,10 +90,10 @@ type Root struct {
 }
 
 // NewRoot creates the top-level router, wrapping the main session UI.
-func NewRoot(com *common.Common, initialSessionID string, continueLast bool) *Root {
+func NewRoot(com *common.Common, initialSessionID string, continueLast bool, opts ...Option) *Root {
 	return &Root{
 		com:             com,
-		main:            New(com, initialSessionID, continueLast),
+		main:            New(com, initialSessionID, continueLast, opts...),
 		dashboardDialog: dialog.NewOverlay(),
 		active:          screenMain,
 	}

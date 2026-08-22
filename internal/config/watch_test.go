@@ -53,6 +53,56 @@ func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 	require.True(t, ok, "expected the externally-added MCP server to be visible after reload")
 }
 
+// TestWatchForExternalChanges_IgnoresOwnWrites_TightPoll guards the race
+// TECHDEBT.md used to record under "The external-change watcher can
+// misread this process's own write": SetConfigFields used to write the
+// file, then run the whole (possibly slow) autoReload pipeline, and only
+// refresh the staleness snapshot at the very end of that pipeline. A poll
+// landing in that window saw the file's new on-disk mtime against the
+// still-old snapshot and read it as an external change — reproducible,
+// per TECHDEBT.md, once the poll interval was driven down below ~100ms
+// under -race (production's real interval, 2s, never gets close).
+// SetConfigFields now refreshes the snapshot for the written path
+// immediately after the atomic write, before autoReload runs, closing
+// the window the reload pipeline used to leave open.
+//
+// This is TestWatchForExternalChanges_IgnoresOwnWrites's own scenario at
+// the tighter interval TECHDEBT.md asked the fix to survive, repeated
+// several times; run with -race for the intended amplification.
+func TestWatchForExternalChanges_IgnoresOwnWrites_TightPoll(t *testing.T) {
+	for range 5 {
+		dir := t.TempDir()
+		t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+		t.Setenv("SENNIT_GLOBAL_DATA", dir)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{}`), 0o600))
+
+		store, err := Load(dir, "", false)
+		require.NoError(t, err)
+		store.externalChangePollInterval = 10 * time.Millisecond
+
+		notified := make(chan struct{}, 8)
+		store.OnExternalChange(func() {
+			select {
+			case notified <- struct{}{}:
+			default:
+			}
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go store.WatchForExternalChanges(ctx)
+
+		require.NoError(t, store.SetConfigField(ScopeGlobal, "options.debug", true))
+
+		select {
+		case <-notified:
+			cancel()
+			t.Fatal("WatchForExternalChanges fired for this process's own write")
+		case <-time.After(15 * store.externalChangePollInterval):
+		}
+		cancel()
+	}
+}
+
 // TestWatchForExternalChanges_IgnoresOwnWrites verifies that a write made
 // through SetConfigFields (which already reloads synchronously and
 // refreshes the staleness snapshot) does not also trigger a second,

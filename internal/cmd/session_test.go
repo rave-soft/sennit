@@ -16,6 +16,7 @@ import (
 	sennitdb "github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -276,11 +277,12 @@ func TestResolveSessionID_AmbiguousPrefixReportsMatches(t *testing.T) {
 func TestRunSessionList_JSON_ListsOnlyTopLevelSessions(t *testing.T) {
 	setupHermeticConfigEnv(t, `{}`)
 	cwd := t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, cwd) })
 	ids := sessionFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, stdout := newSessionTestCmd(t)
 	sessionSetJSON(t, testCmd)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionList(testCmd, nil))
 
 	var out []sessionJSON
@@ -302,7 +304,7 @@ func TestRunSessionList_EmptyDatabase(t *testing.T) {
 
 	testCmd, stdout := newSessionTestCmd(t)
 	sessionSetJSON(t, testCmd)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionList(testCmd, nil))
 
 	var out []sessionJSON
@@ -317,7 +319,7 @@ func TestRunSessionList_Human_ContainsTitles(t *testing.T) {
 
 	restore := captureStdout(t)
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionList(testCmd, nil))
 	out := restore()
 
@@ -334,7 +336,7 @@ func TestRunSessionShow_JSON_MapsFields(t *testing.T) {
 
 	testCmd, stdout := newSessionTestCmd(t)
 	sessionSetJSON(t, testCmd)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionShow(testCmd, []string{ids.Older}))
 
 	var out sessionShowOutput
@@ -356,7 +358,7 @@ func TestRunSessionShow_HashPrefixResolves(t *testing.T) {
 
 	testCmd, stdout := newSessionTestCmd(t)
 	sessionSetJSON(t, testCmd)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	prefix := session.HashID(ids.Older)[:8]
 	require.NoError(t, runSessionShow(testCmd, []string{prefix}))
 
@@ -371,7 +373,7 @@ func TestRunSessionShow_NotFound(t *testing.T) {
 	sessionFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	err := runSessionShow(testCmd, []string{"does-not-exist"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
@@ -384,7 +386,7 @@ func TestRunSessionShow_Human_ContainsTitleAndID(t *testing.T) {
 
 	restore := captureStdout(t)
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionShow(testCmd, []string{ids.Older}))
 	out := restore()
 
@@ -401,7 +403,7 @@ func TestRunSessionLast_JSON_ReturnsMostRecentlyUpdated(t *testing.T) {
 
 	testCmd, stdout := newSessionTestCmd(t)
 	sessionSetJSON(t, testCmd)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionLast(testCmd, nil))
 
 	var out sessionShowOutput
@@ -414,7 +416,7 @@ func TestRunSessionLast_EmptyDatabase_Errors(t *testing.T) {
 	cwd := t.TempDir()
 
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	err := runSessionLast(testCmd, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no sessions found")
@@ -429,7 +431,7 @@ func TestRunSessionDelete_RemovesOnlyTheNamedSession(t *testing.T) {
 	ids := sessionFixture(t, dataDir, cwd)
 
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionDelete(testCmd, []string{ids.Newer}))
 
 	require.False(t, sessionRowExists(t, dataDir, ids.Newer))
@@ -444,7 +446,7 @@ func TestRunSessionDelete_DeletingParentCascadesToChild(t *testing.T) {
 	ids := sessionFixture(t, dataDir, cwd)
 
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionDelete(testCmd, []string{ids.Older}))
 
 	require.False(t, sessionRowExists(t, dataDir, ids.Older))
@@ -460,7 +462,7 @@ func TestRunSessionDelete_JSON(t *testing.T) {
 
 	testCmd, stdout := newSessionTestCmd(t)
 	sessionSetJSON(t, testCmd)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionDelete(testCmd, []string{ids.Newer}))
 
 	var out sessionMutationResult
@@ -478,7 +480,7 @@ func TestRunSessionDelete_NotFound(t *testing.T) {
 	ids := sessionFixture(t, dataDir, cwd)
 
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	err := runSessionDelete(testCmd, []string{"does-not-exist"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
@@ -497,7 +499,7 @@ func TestRunSessionRename_RenamesOnlyTheNamedSession(t *testing.T) {
 	ids := sessionFixture(t, dataDir, cwd)
 
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionRename(testCmd, []string{ids.Older, "new", "title"}))
 
 	require.Equal(t, "new title", sessionTitle(t, dataDir, ids.Older))
@@ -512,7 +514,7 @@ func TestRunSessionRename_JSON(t *testing.T) {
 
 	testCmd, stdout := newSessionTestCmd(t)
 	sessionSetJSON(t, testCmd)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, runSessionRename(testCmd, []string{ids.Older, "renamed", "title"}))
 
 	var out sessionMutationResult
@@ -529,7 +531,7 @@ func TestRunSessionRename_NotFound(t *testing.T) {
 	sessionFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, _ := newSessionTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	err := runSessionRename(testCmd, []string{"does-not-exist", "title"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")

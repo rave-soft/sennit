@@ -124,6 +124,15 @@ func TestIsLikelyPath(t *testing.T) {
 	require.False(t, IsLikelyPath("ls -la /tmp"))
 	require.False(t, IsLikelyPath("cat a.txt | grep x"))
 	require.False(t, IsLikelyPath(""))
+
+	// "\" is the Windows path separator, not a shell escape — a Windows
+	// path with no other shell-ish character must still be recognized as
+	// a path so TruncatePath (via TruncatePathAware/shortenPathsToFit)
+	// elides its head and keeps the file name instead of falling through
+	// to plain right-truncation, which can cut the file name off entirely
+	// (see TestToolErrorKeepsReasonVisible, internal/ui/chat).
+	require.True(t, IsLikelyPath(`C:\Users\x\Projects\file.go`))
+	require.True(t, IsLikelyPath(`relative\path\file.go`))
 }
 
 // TestTruncate covers the plain (non-path-aware) ellipsis truncation used

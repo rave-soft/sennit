@@ -359,7 +359,39 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
-	if err := s.writeConfigFields(scope, kv); err != nil {
+	// The write and the staleness-snapshot refresh happen under one
+	// stalenessMu section so a concurrent ConfigStaleness() (the watcher
+	// poll loop, sennit_info) can never observe the new on-disk mtime
+	// against a snapshot that hasn't caught up yet — the only way to
+	// close that window, rather than just narrow it, since any gap
+	// between "write returns" and "snapshot refreshed" is itself a
+	// (smaller) instance of the same race. This used to be two separate
+	// steps: write, then run the whole (possibly slow, network-touching)
+	// autoReload pipeline, which only refreshed the snapshot at the very
+	// end — so a poll landing anywhere in that much wider window misread
+	// this process's own write as an external change (see the now-closed
+	// TECHDEBT.md entry, and TestWatchForExternalChanges_IgnoresOwnWrites
+	// / *_TightPoll). refreshStalenessSnapshotLocked (not
+	// CaptureStalenessSnapshot) is safe to call without writeMu here: it
+	// only restats s.trackedConfigPaths, which the write's own path is
+	// always already a member of — CaptureStalenessSnapshot always adds
+	// both scopes' paths (Load, reloadFromDisk, updateLocked) — and,
+	// unlike CaptureStalenessSnapshot, it never reads the writeMu-guarded
+	// workspacePath/globalDataPath fields.
+	//
+	// The cost of closing the window this way: ConfigStaleness() now
+	// waits behind a config write, including its cross-process flock.
+	// That wait is bounded by configLockDeadline (5s) and only occurs
+	// when another process is mid-write, so the worst case is a
+	// delayed watcher poll or a slow sennit_info -- deliberately
+	// preferred over reporting this process's own write as external.
+	s.stalenessMu.Lock()
+	err := s.writeConfigFields(scope, kv)
+	if err == nil {
+		s.refreshStalenessSnapshotLocked()
+	}
+	s.stalenessMu.Unlock()
+	if err != nil {
 		return err
 	}
 	// Auto-reload to keep in-memory state fresh after config edits.

@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -22,15 +23,24 @@ import (
 // os.TempDir() in testEnv and this test fails immediately, since the forced
 // $TMPDIR below no longer matches.
 func TestTestEnvWorkingDirIgnoresTMPDIR(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// testTempRoot() *is* os.TempDir() on Windows (see its doc comment
+		// in common_test.go: no cassette is ever replayed there, so there is
+		// nothing to pin). There is no "$TMPDIR is ignored" property to
+		// assert — os.TempDir() does not read $TMPDIR on Windows at all,
+		// so the setup guard below could never be satisfied.
+		t.Skip("testTempRoot() equals os.TempDir() on Windows; nothing to pin here")
+	}
+
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "var", "folders", "xx", "yy", "T"))
-	require.NotEqual(t, canonicalTestTempRoot, os.TempDir(), "test setup: TMPDIR override did not take effect")
+	require.NotEqual(t, testTempRoot(), os.TempDir(), "test setup: TMPDIR override did not take effect")
 
 	env := testEnv(t)
 	// Exact match, not just a prefix check: the forced $TMPDIR above happens
 	// to nest under the real /tmp too (t.TempDir() defaults there on this
 	// box), so a bare HasPrefix(workingDir, "/tmp/") would pass even with
 	// the fix reverted to os.TempDir(). Pin the whole path instead.
-	require.Equal(t, filepath.Join(canonicalTestTempRoot, "sennit-test-", t.Name()), env.workingDir)
+	require.Equal(t, filepath.Join(testTempRoot(), "sennit-test-", t.Name()), env.workingDir)
 }
 
 // TestCoderAgentWorkingDirIsOSIndependent is the closest thing to a real

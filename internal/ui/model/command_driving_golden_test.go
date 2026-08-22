@@ -19,7 +19,10 @@ import (
 )
 
 func newCmdDrivenGoldenUI(ws *cmdDrivingWorkspace) *UI {
-	m := New(common.DefaultCommon(context.Background(), ws), "", false)
+	// Pin the platform: goldens were recorded with ctrl+ bindings, and the
+	// footer/help text they capture would otherwise render super+ on a
+	// macOS CI runner (see keys.go's darwin rewrite in configuredKeyMap).
+	m := New(common.DefaultCommon(context.Background(), ws), "", false, withGOOS("linux"))
 	m.state = uiChat
 	m.focus = uiFocusEditor
 	m.lay.width = 140

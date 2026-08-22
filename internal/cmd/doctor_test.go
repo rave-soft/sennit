@@ -14,7 +14,7 @@ func TestDoctorCmd_CleanConfig(t *testing.T) {
 	setupHermeticConfigEnv(t, seed)
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err := doctorCmd.RunE(testCmd, nil)
 	require.NoError(t, err)
@@ -31,7 +31,7 @@ func TestDoctorCmd_ReportsIgnoredJSONAgentsBlock(t *testing.T) {
 	setupHermeticConfigEnv(t, seed)
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	// Only warnings (an ignored agents block does not block anything), so
 	// exit is still clean.
@@ -61,7 +61,7 @@ func TestDoctorCmd_MarkdownAgentClean(t *testing.T) {
 		[]byte("---\nname: reviewer\n---\nreview code"), 0o644))
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 
 	err := doctorCmd.RunE(testCmd, nil)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestDoctorCmd_JSON(t *testing.T) {
 	setupHermeticConfigEnv(t, seed)
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 	// doctorCmd.RunE reads --json off the invoked command's own flag set
 	// now (not a package-level var), so it must be registered here too.
 	testCmd.Flags().Bool("json", true, "")
@@ -91,7 +91,7 @@ func TestDoctorCmd_MainModelFallbackIsBlocking(t *testing.T) {
 	setupHermeticConfigEnv(t, seed)
 
 	testCmd, stdout, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err := doctorCmd.RunE(testCmd, nil)
 	require.Error(t, err, "an error-severity problem must fail the command")

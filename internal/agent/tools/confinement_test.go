@@ -217,6 +217,12 @@ func TestConfinedWorkspace_PathWithBackslashSurvivesJSONEncoding(t *testing.T) {
 	// A literal backslash is a normal filename byte on Linux/macOS, but
 	// "\U" is exactly the invalid JSON escape a bare "C:\Users\..." path
 	// produces when concatenated into a JSON string by hand.
+	//
+	// On Windows the backslash *is* the path separator, so this same
+	// literal names a file "Users.go" inside a "leaked" subdirectory —
+	// create that subdirectory too, or the seed write below fails before
+	// the JSON round trip this test exists to check is ever exercised.
+	require.NoError(t, os.MkdirAll(filepath.Join(elsewhere, "leaked"), 0o755))
 	outside := filepath.Join(elsewhere, `leaked\Users.go`)
 	require.NoError(t, os.WriteFile(outside, []byte("original\n"), 0o644))
 	perms := &confinedTestPermissions{dir: workdir}

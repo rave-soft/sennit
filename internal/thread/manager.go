@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
@@ -127,7 +128,12 @@ func NewManager(opts ManagerOptions) *Manager {
 			dataDir = filepath.Join(opts.RepoRoot, defaultDataDirName)
 		}
 		worktreeDir = filepath.Join(dataDir, "threads")
-	case !filepath.IsAbs(worktreeDir):
+	case !filepathext.SmartIsAbs(worktreeDir):
+		// Use SmartIsAbs, not filepath.IsAbs: a WorktreeDir may come from
+		// a config file written with Unix-style paths (portable across
+		// platforms), and filepath.IsAbs alone rejects those on Windows
+		// (no drive letter), silently anchoring an already-absolute path
+		// under the repo instead of using it as-is.
 		worktreeDir = filepath.Join(filepath.Dir(opts.RepoRoot), worktreeDir)
 	}
 	m := &Manager{

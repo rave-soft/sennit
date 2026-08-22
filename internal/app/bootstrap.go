@@ -209,8 +209,19 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 
 	// Keep the workspace lock through all repo-dependent teardown. In
 	// particular, it must outlive background shells and LSP clients.
+	//
+	// lockToRelease is captured into its own local rather than read from
+	// wsLock directly: the closure below runs much later, during
+	// Shutdown, and closures capture variables by reference — reading
+	// wsLock there would see whatever wsLock is set to at that later
+	// time, not what it held now. The very next line sets wsLock = nil
+	// (to disarm the early-return defer above once ownership has moved
+	// here), which used to leave this closure releasing a nil
+	// *WorkspaceLock: Release is a documented no-op on nil, so the OS
+	// lock was silently never released.
+	lockToRelease := wsLock
 	if err := appInstance.AddFinalCleanup(func(context.Context) error {
-		wsLock.Release()
+		lockToRelease.Release()
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("failed to register workspace lock cleanup: %w", err)

@@ -9,8 +9,8 @@ import (
 )
 
 func TestInTx_CommitsOnSuccess(t *testing.T) {
-	t.Cleanup(ResetPool)
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 	conn, err := Connect(context.Background(), dataDir)
 	require.NoError(t, err)
 
@@ -26,8 +26,8 @@ func TestInTx_CommitsOnSuccess(t *testing.T) {
 }
 
 func TestInTx_RollsBackOnError(t *testing.T) {
-	t.Cleanup(ResetPool)
 	dataDir := t.TempDir()
+	t.Cleanup(ResetPool)
 	conn, err := Connect(context.Background(), dataDir)
 	require.NoError(t, err)
 

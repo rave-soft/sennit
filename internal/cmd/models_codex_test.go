@@ -15,7 +15,7 @@ func TestModelsRefreshCmd_CodexRejectedWhenSignedOut(t *testing.T) {
 	setupHermeticConfigEnv(t, `{"providers": {}}`)
 
 	testCmd, _, _ := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	err := refreshCmd.RunE(testCmd, []string{"codex"})
 	require.ErrorContains(t, err, "not signed in to Codex")
@@ -28,7 +28,7 @@ func TestModelsRefreshCmd_CodexSkippedInTheSweepWhenSignedOut(t *testing.T) {
 	setupHermeticConfigEnv(t, `{"providers": {}}`)
 
 	testCmd, stdout, stderr := newRefreshTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", t.TempDir()))
+	setCwdFlag(t, testCmd, t.TempDir())
 
 	require.NoError(t, refreshCmd.RunE(testCmd, nil))
 	require.Contains(t, stdout.String(), "no custom providers to refresh")

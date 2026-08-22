@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/stretchr/testify/require"
 )
 
@@ -161,9 +162,17 @@ func TestUncommittedFiles(t *testing.T) {
 
 	files, err := UncommittedFiles(ctx, repo)
 	require.NoError(t, err)
+	require.Len(t, files, 2)
+
+	// t.TempDir() and the git subprocess can spell the same directory
+	// differently on Windows (an 8.3 short name vs. the long form), so
+	// canonicalize both sides before comparing paths byte-for-byte.
+	for i := range files {
+		files[i].Path = fsext.Canonical(files[i].Path)
+	}
 	require.Equal(t, []FileChange{
-		{Path: filepath.Join(repo, "README.md"), Additions: 1},
-		{Path: filepath.Join(repo, "untracked.txt"), Additions: 2},
+		{Path: fsext.Canonical(filepath.Join(repo, "README.md")), Additions: 1},
+		{Path: fsext.Canonical(filepath.Join(repo, "untracked.txt")), Additions: 2},
 	}, files)
 }
 
@@ -323,11 +332,11 @@ func TestWorktreeRemoveForcedKeepsRegistrationWhenFilesSurvive(t *testing.T) {
 	parent := t.TempDir()
 	wtPath := filepath.Join(parent, "wt")
 	require.NoError(t, WorktreeAdd(ctx, repo, wtPath, "feature", "main"))
-	// Stand in for the directories this process may not chmod: the walk
-	// inside WorktreeRemove only reaches into the worktree, so a parent it
-	// may not write to fails the final unlink of the worktree itself.
-	require.NoError(t, os.Chmod(parent, 0o500))
-	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+	// blockRemoval provokes removal failure the way each platform actually
+	// fails it — see its two (POSIX/Windows) implementations for why one
+	// mechanism does not serve both.
+	unblock := blockRemoval(t, parent, wtPath)
+	t.Cleanup(unblock)
 
 	require.Error(t, WorktreeRemove(ctx, repo, wtPath, true))
 
@@ -336,7 +345,7 @@ func TestWorktreeRemoveForcedKeepsRegistrationWhenFilesSurvive(t *testing.T) {
 	require.Contains(t, list, wtPath, "the worktree must still be git's to remove")
 
 	// And once whatever held the files lets go, the retry goes through.
-	require.NoError(t, os.Chmod(parent, 0o755))
+	unblock()
 	require.NoError(t, WorktreeRemove(ctx, repo, wtPath, true))
 	require.NoDirExists(t, wtPath)
 }

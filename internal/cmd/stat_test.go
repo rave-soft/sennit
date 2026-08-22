@@ -373,7 +373,7 @@ func TestStatCmd_JSONOutput(t *testing.T) {
 	dataDir := statFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, stdout := newStatTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, testCmd.Flags().Set("since", "7d"))
 	require.NoError(t, testCmd.Flags().Set("json", "true"))
@@ -403,7 +403,7 @@ func TestStatCmd_InvalidByIsUsageError(t *testing.T) {
 	dataDir := statFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, _ := newStatTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, testCmd.Flags().Set("by", "bogus"))
 
@@ -420,7 +420,7 @@ func TestStatCmd_InvalidSinceIsUsageError(t *testing.T) {
 	dataDir := statFixture(t, config.GlobalDBDir(), cwd)
 
 	testCmd, _ := newStatTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, testCmd.Flags().Set("since", "bogus"))
 
@@ -494,7 +494,7 @@ func TestRunStat_DefaultProjectsViewScopedToCurrentProject(t *testing.T) {
 	seedOtherProjectSession(t, config.GlobalDBDir())
 
 	testCmd, stdout := newStatTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, testCmd.Flags().Set("since", "7d"))
 	require.NoError(t, testCmd.Flags().Set("by", "projects"))
@@ -541,7 +541,7 @@ func TestStatCmd_LatencySectionIsOptIn(t *testing.T) {
 
 	// Default view: no latency, and none of its query's cost paid.
 	defaultCmd, _ := newStatTestCmd(t)
-	require.NoError(t, defaultCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, defaultCmd, cwd)
 	require.NoError(t, defaultCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, defaultCmd.Flags().Set("json", "true"))
 	require.NoError(t, runStat(defaultCmd, nil))
@@ -550,7 +550,7 @@ func TestStatCmd_LatencySectionIsOptIn(t *testing.T) {
 	require.Empty(t, defaultOut.Latency, "latency must not appear unless asked for")
 
 	testCmd, stdout := newStatTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", cwd))
+	setCwdFlag(t, testCmd, cwd)
 	require.NoError(t, testCmd.Flags().Set("data-dir", dataDir))
 	require.NoError(t, testCmd.Flags().Set("by", "latency"))
 	require.NoError(t, testCmd.Flags().Set("json", "true"))

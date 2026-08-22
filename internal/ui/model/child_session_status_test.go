@@ -53,6 +53,10 @@ func newChildSessionTestUI(t *testing.T) *UI {
 	com := common.DefaultCommon(context.Background(), agentSessionWorkspace{})
 	return &UI{
 		com: com,
+		// Pinned so exitChildSessionShortcut's runtime.GOOS fallback (this
+		// UI has no keyMap, so it always takes that path) renders ctrl+up
+		// regardless of the host running the suite.
+		goos: "linux",
 		widgets: widgets{
 			chat:   NewChat(com, config.ScrollbarDefault),
 			status: NewStatus(com, nil),

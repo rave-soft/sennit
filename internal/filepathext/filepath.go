@@ -18,12 +18,24 @@ func SmartJoin(one, two string) string {
 // SmartIsAbs checks if a path is absolute, considering both OS-specific and
 // Unix-style paths.
 func SmartIsAbs(path string) bool {
-	switch runtime.GOOS {
-	case "windows":
-		return filepath.IsAbs(path) || strings.HasPrefix(filepath.ToSlash(path), "/")
-	default:
-		return filepath.IsAbs(path)
+	return smartIsAbs(runtime.GOOS, path)
+}
+
+// smartIsAbs is the GOOS-parameterized core of SmartIsAbs. A config value
+// (WorktreeDir, a skills path, ...) may be written with Unix-style
+// separators for portability even when the process runs on Windows, where
+// plain filepath.IsAbs rejects such a path for lacking a drive letter or
+// UNC prefix. Splitting out the GOOS check lets that Windows branch be
+// regression-tested from any host, since filepath.IsAbs and filepath.ToSlash
+// otherwise only behave like Windows when actually built for it.
+func smartIsAbs(goos, path string) bool {
+	if filepath.IsAbs(path) {
+		return true
 	}
+	if goos != "windows" {
+		return false
+	}
+	return strings.HasPrefix(strings.ReplaceAll(path, `\`, "/"), "/")
 }
 
 // SplitGlobPrefix splits a glob pattern into the longest leading run of

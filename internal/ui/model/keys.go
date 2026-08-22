@@ -468,5 +468,9 @@ func (m *UI) exitChildSessionShortcut() string {
 	if shortcut != "" {
 		return shortcut
 	}
-	return bindingKey(configuredKeyMap(runtime.GOOS, nil).Chat.ExitChildSession)
+	goos := m.goos
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	return bindingKey(configuredKeyMap(goos, nil).Chat.ExitChildSession)
 }

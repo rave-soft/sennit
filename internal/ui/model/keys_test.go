@@ -1,8 +1,10 @@
 package model
 
 import (
+	"context"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,4 +54,23 @@ func TestConfiguredKeyMapIgnoresUnknownAndEmptyOverrides(t *testing.T) {
 		"commands": nil,
 	})
 	require.Equal(t, []string{"ctrl+p"}, km.Commands.Keys())
+}
+
+// TestNewRespectsWithGOOS pins the seam New() -> configuredKeyMap runs
+// through: withGOOS must control the keyMap New() builds (and the shortcut
+// baked into the attachments component from it), the same way passing
+// "darwin"/"linux" directly to configuredKeyMap does above. Golden and
+// keybinding-sensitive tests rely on this to stay host-independent — see
+// newCmdDrivenGoldenUI and newTestRoot.
+func TestNewRespectsWithGOOS(t *testing.T) {
+	t.Parallel()
+
+	ws := &rootTestWorkspace{}
+	com := common.DefaultCommon(context.Background(), ws)
+
+	darwinUI := New(com, "", false, withGOOS("darwin"))
+	require.Equal(t, []string{"super+p"}, darwinUI.keyMap.Commands.Keys())
+
+	linuxUI := New(com, "", false, withGOOS("linux"))
+	require.Equal(t, []string{"ctrl+p"}, linuxUI.keyMap.Commands.Keys())
 }

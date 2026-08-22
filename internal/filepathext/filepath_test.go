@@ -6,6 +6,47 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSmartIsAbs_WindowsAcceptsUnixStylePaths pins the Windows branch of
+// SmartIsAbs: a config value written with Unix-style separators (portable
+// across platforms) must still be recognized as absolute, even though
+// filepath.IsAbs on Windows requires a drive letter or UNC prefix and
+// would otherwise reject it. This regressed once already — NewManager
+// (internal/thread) called filepath.IsAbs directly instead of going
+// through this helper, so a WorktreeDir like "/var/tmp/sennit-threads"
+// was silently anchored under the repo root on Windows instead of being
+// used as-is. Exercised via the unexported core so it runs on any host.
+func TestSmartIsAbs_WindowsAcceptsUnixStylePaths(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"unix-style absolute, forward slashes", "/var/tmp/sennit-threads", true},
+		{"windows-style absolute, backslashes", `\var\tmp\sennit-threads`, true},
+		{"relative", "sennit-threads", false},
+		{"relative, nested", `sub\dir`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, smartIsAbs("windows", tc.path))
+		})
+	}
+}
+
+// TestSmartIsAbs_NonWindowsIgnoresUnixHeuristic guards the other side: on
+// a non-Windows GOOS, only filepath.IsAbs decides — a value that merely
+// starts with "\" (a plain filename character there) is not treated as
+// absolute.
+func TestSmartIsAbs_NonWindowsIgnoresUnixHeuristic(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, smartIsAbs("linux", `\var\tmp\sennit-threads`))
+	require.True(t, smartIsAbs("linux", "/var/tmp/sennit-threads"))
+}
+
 func TestSplitGlobPrefix(t *testing.T) {
 	t.Parallel()
 

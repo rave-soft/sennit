@@ -575,7 +575,14 @@ func TestManager_ConflictAndRetryAfterResolution(t *testing.T) {
 
 	content, err := os.ReadFile(filepath.Join(repo, "README.md"))
 	require.NoError(t, err)
-	require.Equal(t, "resolved version\n", string(content))
+	// git, not sennit, owns line-ending translation on checkout: with
+	// core.autocrlf=true — the default on a lot of Windows git installs —
+	// the working-tree copy comes back CRLF even though writeFile wrote
+	// LF and sennit never touches the content in between. Normalize
+	// before comparing; what this test cares about is that the resolved
+	// content made it through the merge, not which EOL convention the
+	// local git config happens to apply on checkout.
+	require.Equal(t, "resolved version\n", strings.ReplaceAll(string(content), "\r\n", "\n"))
 }
 
 func TestManager_MergeBlockedWhenBaseCheckedOutAndDirty(t *testing.T) {

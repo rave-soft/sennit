@@ -13,6 +13,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/config"
 	sennitdb "github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -255,10 +256,11 @@ func TestGC_AllProjects_DeletesOldAndCascades(t *testing.T) {
 	dataDir := config.GlobalDBDir()
 	cutoff := time.Now().AddDate(0, 0, -90).Unix()
 	projectA, projectB := t.TempDir(), t.TempDir()
+	t.Cleanup(func() { testenv.AssertRemovableOnWindows(t, projectA) })
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
 	testCmd, stdout := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, runGC(testCmd, nil))
 	require.NotEmpty(t, stdout.String())
 
@@ -300,7 +302,7 @@ func TestGC_ProjectScope_LeavesOtherProjectsAlone(t *testing.T) {
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
 	testCmd, _ := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, testCmd.Flags().Set("project", "true"))
 	require.NoError(t, runGC(testCmd, nil))
 
@@ -321,7 +323,7 @@ func TestGC_DryRun_ChangesNothing(t *testing.T) {
 	require.NoError(t, err)
 
 	testCmd, stdout := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, testCmd.Flags().Set("dry-run", "true"))
 	require.NoError(t, runGC(testCmd, nil))
 	require.Contains(t, stdout.String(), "Would delete")
@@ -348,7 +350,7 @@ func TestGC_RetentionZero_IsNoOp(t *testing.T) {
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
 	testCmd, stdout := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, runGC(testCmd, nil))
 	require.Contains(t, stdout.String(), "nothing to do")
 
@@ -369,7 +371,7 @@ func TestGC_DaysFlagOverridesConfig(t *testing.T) {
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
 	testCmd, _ := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, testCmd.Flags().Set("days", "90"))
 	require.NoError(t, runGC(testCmd, nil))
 
@@ -410,7 +412,7 @@ func TestGC_VacuumShrinksFile(t *testing.T) {
 	require.NoError(t, err)
 
 	testCmd, _ := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, runGC(testCmd, nil))
 
 	after, err := os.Stat(dbPath)
@@ -588,7 +590,7 @@ func TestGC_ReportOnly_OrphanedWorktree(t *testing.T) {
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
 	testCmd, stdout := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, testCmd.Flags().Set("json", "true"))
 	require.NoError(t, runGC(testCmd, nil))
 
@@ -617,7 +619,7 @@ func TestGC_ReportsOrphanedWorktree_HumanOutput(t *testing.T) {
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
 	testCmd, stdout := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, runGC(testCmd, nil))
 
 	require.Contains(t, stdout.String(), ids.WorktreeDir)
@@ -668,7 +670,7 @@ func TestGC_DryRun_ReportsWouldBeOrphaned(t *testing.T) {
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
 	testCmd, stdout := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, testCmd.Flags().Set("dry-run", "true"))
 	require.NoError(t, runGC(testCmd, nil))
 
@@ -691,7 +693,7 @@ func TestGC_NeverRemovesOrphanedWorktree(t *testing.T) {
 	ids := gcFixture(t, dataDir, cutoff, projectA, projectB)
 
 	testCmd, _ := newGCTestCmd(t)
-	require.NoError(t, testCmd.Flags().Set("cwd", projectA))
+	setCwdFlag(t, testCmd, projectA)
 	require.NoError(t, runGC(testCmd, nil))
 
 	require.False(t, threadExists(t, dataDir, ids.WorktreeExists))
