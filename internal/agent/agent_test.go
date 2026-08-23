@@ -712,6 +712,46 @@ func BenchmarkBuildSummaryPrompt(b *testing.B) {
 	}
 }
 
+// TestPreparePrompt_TodoReminderReflectsActualTodos proves preparePrompt's
+// system reminder never claims the todo list is empty when session.Todos
+// isn't - it must instead list the actual items.
+func TestPreparePrompt_TodoReminderReflectsActualTodos(t *testing.T) {
+	env := testEnv(t)
+	sa := testSessionAgent(env, nil, "test prompt")
+	agent := sa.(*sessionAgent)
+
+	ctx := t.Context()
+	sess, err := env.sessions.Create(ctx, "test")
+	require.NoError(t, err)
+
+	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: "hello"}},
+	})
+	require.NoError(t, err)
+	msgs, err := env.messages.List(ctx, sess.ID)
+	require.NoError(t, err)
+
+	todos := []session.Todo{
+		{Content: "Write tests", Status: session.TodoStatusCompleted, ActiveForm: "Writing tests"},
+		{Content: "Fix bug", Status: session.TodoStatusInProgress, ActiveForm: "Fixing bug"},
+	}
+	history, _ := agent.preparePrompt(msgs, true, todos)
+	require.NotEmpty(t, history)
+	reminder, ok := fantasy.AsMessagePart[fantasy.TextPart](history[0].Content[0])
+	require.True(t, ok)
+	require.NotContains(t, reminder.Text, "your todo list is currently empty",
+		"the reminder must not claim the list is empty when session.Todos holds items")
+	require.Contains(t, reminder.Text, "Write tests")
+	require.Contains(t, reminder.Text, "Fix bug")
+
+	// The empty case keeps the original nudge toward the "todos" tool.
+	emptyHistory, _ := agent.preparePrompt(msgs, true, nil)
+	emptyReminder, ok := fantasy.AsMessagePart[fantasy.TextPart](emptyHistory[0].Content[0])
+	require.True(t, ok)
+	require.Contains(t, emptyReminder.Text, "your todo list is currently empty")
+}
+
 func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 	env := testEnv(t)
 	sa := testSessionAgent(env, nil, "test prompt")
@@ -744,7 +784,7 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 
 	// When supportsImages is false, image attachments should be stripped
 	// from history AND from the files list.
-	history, files := agent.preparePrompt(msgs, false, imageAtt)
+	history, files := agent.preparePrompt(msgs, false, nil, imageAtt)
 	// First message is the system reminder, second is the user message.
 	require.Len(t, history, 2)
 	require.Len(t, history[1].Content, 1)
@@ -756,7 +796,7 @@ func TestPreparePrompt_FiltersImageAttachments(t *testing.T) {
 
 	// When supportsImages is true, image attachments should remain in
 	// history and be included in the files list.
-	history, files = agent.preparePrompt(msgs, true, imageAtt)
+	history, files = agent.preparePrompt(msgs, true, nil, imageAtt)
 	require.Len(t, history, 2)
 	require.Len(t, history[1].Content, 2)
 	text, ok = fantasy.AsMessagePart[fantasy.TextPart](history[1].Content[0])
@@ -853,7 +893,7 @@ func TestPreparePrompt_OrphanedToolUse(t *testing.T) {
 	msgs, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
-	history, _ := agent.preparePrompt(msgs, true)
+	history, _ := agent.preparePrompt(msgs, true, nil)
 
 	// The history must contain a synthetic tool result for the orphaned call.
 	found := false
@@ -927,7 +967,7 @@ func TestPreparePrompt_OrphanedToolUseMixed(t *testing.T) {
 	msgs, err := env.messages.List(ctx, sess.ID)
 	require.NoError(t, err)
 
-	history, _ := agent.preparePrompt(msgs, true)
+	history, _ := agent.preparePrompt(msgs, true, nil)
 
 	// Should have a synthetic result only for the orphaned call.
 	var syntheticCount int

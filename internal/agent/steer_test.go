@@ -156,6 +156,62 @@ func TestSteer_BusyFoldsIntoActiveTurn(t *testing.T) {
 		"the follow-up must be folded into the active turn's steps, not run as a separate turn")
 }
 
+// TestSteer_ContinuationDroppedWhenBusy proves the continuation-drop path:
+// while a turn is active, a Continuation call must be discarded outright
+// (SteerDropped) rather than enqueued behind the active turn - its
+// placeholder prompt has no content worth folding in later, and the
+// completions that triggered it are still safe in the inbox for the active
+// turn to pick up. See the drop site in dispatchDecision.
+func TestSteer_ContinuationDroppedWhenBusy(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+
+	toolEntered := make(chan struct{})
+	toolGate := make(chan struct{})
+	hold := fantasy.NewAgentTool("hold", "hold", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		close(toolEntered)
+		<-toolGate
+		return fantasy.NewTextResponse("ok"), nil
+	})
+
+	model := &toolStepModel{text: "done", toolID: "tool-1"}
+	sa := NewSessionAgent(SessionAgentOptions{
+		Model:    Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+		Sessions: env.sessions,
+		Messages: env.messages,
+		Tools:    []fantasy.AgentTool{hold},
+	}).(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	mainDone := make(chan error, 1)
+	go func() {
+		_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "main"})
+		mainDone <- runErr
+	}()
+
+	select {
+	case <-toolEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("main run never entered the tool call")
+	}
+	require.True(t, sa.IsSessionBusy(sess.ID), "the main turn must be active before Steer is called")
+
+	outcome, res, err := sa.Steer(t.Context(), SessionAgentCall{
+		SessionID:    sess.ID,
+		Prompt:       continuationPromptPlaceholder,
+		Continuation: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, SteerDropped, outcome, "a continuation call arriving while busy must be reported as dropped, not enqueued")
+	require.Nil(t, res, "a dropped continuation call must return (nil, nil)")
+	require.Equal(t, 0, sa.QueuedPrompts(sess.ID), "a dropped continuation call must never be queued")
+
+	close(toolGate)
+	require.NoError(t, <-mainDone)
+}
+
 // TestSteer_IdleRunsAsNewTurn proves the idle path: with no active turn,
 // Steer must run the call itself instead of queueing it.
 func TestSteer_IdleRunsAsNewTurn(t *testing.T) {

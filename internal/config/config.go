@@ -302,8 +302,13 @@ type TUIOptions struct {
 	// "/theme" command. The palettes themselves live in internal/ui/styles;
 	// config deliberately does not know their IDs, so an unknown or stale
 	// value here falls back to Sennit's default scheme rather than failing
-	// to load (see styles.PaletteByID).
-	Theme string `json:"theme,omitempty" jsonschema:"description=Color palette for the TUI\\, chosen with the /theme command. An unknown value falls back to the default theme,enum=steel-teal,enum=graphite-amber,enum=ink-sage,enum=mono-steel,default=steel-teal"`
+	// to load (see styles.PaletteByID). No "enum" here for the same reason:
+	// this package must not import internal/ui/styles to list its palette
+	// IDs, so — like ProviderConfig.Type's "type" field — the schema
+	// command overwrites this property's enum from the live registry after
+	// reflection instead (see internal/cmd/schema.go's setProviderTypeEnum
+	// for the existing pattern; a theme counterpart belongs there).
+	Theme string `json:"theme,omitempty" jsonschema:"description=Color palette for the TUI\\, chosen with the /theme command. An unknown value falls back to the default theme,default=steel-teal"`
 
 	Completions Completions         `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
 	Transparent *bool               `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
@@ -734,6 +739,37 @@ func (c *Config) GetModel(provider, model string) *catwalk.Model {
 		}
 	}
 	return nil
+}
+
+// ProviderName returns the configured display name for provider id, or
+// ok=false if the provider isn't configured. It exists so callers that only
+// need a provider's friendly name (e.g. the chat view's assistant info
+// footer) can depend on a narrow method instead of the Providers field
+// directly.
+func (c *Config) ProviderName(id string) (name string, ok bool) {
+	providerConfig, ok := c.Providers.Get(id)
+	if !ok {
+		return "", false
+	}
+	return providerConfig.Name, true
+}
+
+// AgentOverride returns the model/reasoning-effort override configured for
+// the user-defined agent tool named name, or ok=false if name isn't one.
+// The built-in "coder"/"task" agents never carry an override (see
+// setupAgents), so excluding them here is observably identical to a plain
+// c.Agents[name] lookup. It exists so callers that only need this
+// model/effort pair (e.g. the chat view's delegation renderer) can depend
+// on two strings instead of the Agents map and the Agent type.
+func (c *Config) AgentOverride(name string) (model, effort string, ok bool) {
+	if name == AgentCoder || name == AgentTask {
+		return "", "", false
+	}
+	a, ok := c.Agents[name]
+	if !ok {
+		return "", "", false
+	}
+	return a.Model, a.ReasoningEffort, true
 }
 
 // GetProviderForModel returns the provider configured for c.Model.

@@ -33,7 +33,7 @@ func newTestTaskManagerWiredLikeProduction(t *testing.T) (*thread.Manager, *thre
 		ParentApp: parent,
 	})
 	shutdownManagerOnCleanup(t, mgr)
-	tasks := thread.NewTaskManagerForTest(mgr, stableParentAppSpawner{ws: parent}, NewTestMessageService(parentApp.Messages()))
+	tasks := thread.NewTaskManagerFromManager(mgr, stableParentAppSpawner{ws: parent}, NewTestMessageService(parentApp.Messages()))
 	return mgr, tasks, parentApp
 }
 

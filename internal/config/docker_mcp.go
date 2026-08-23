@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/mcpid"
 )
 
 var dockerMCPVersionRunner = func(ctx context.Context) error {
@@ -69,8 +71,9 @@ func (c *dockerMCPCache) set(available bool) {
 // docker_mcp_test.go.
 var defaultDockerMCPCache = newDockerMCPCache()
 
-// DockerMCPName is the name of the Docker MCP configuration.
-const DockerMCPName = "docker"
+// DockerMCPName is the name of the Docker MCP configuration. It is defined
+// in internal/mcpid so the UI can reference it without importing config.
+const DockerMCPName = mcpid.DockerMCPName
 
 // IsDockerMCPAvailable checks if Docker MCP is available by running
 // 'docker mcp version'.

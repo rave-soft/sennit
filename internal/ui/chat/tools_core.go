@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/ui/anim"
@@ -217,6 +216,18 @@ func newRegisteredToolMessageItem(sty *styles.Styles, toolCall message.ToolCall,
 	return newBaseToolMessageItem(sty, toolCall, result, renderer, canceled)
 }
 
+// CustomAgentConfig is the narrow config capability tool renderers need to
+// recognize a user-defined agent tool and read its model/effort override —
+// nothing more, so this package never has to import internal/config or name
+// its Agent type. *config.Config already implements this via AgentOverride,
+// which excludes the built-in "coder"/"task" roles this package treats
+// specially.
+type CustomAgentConfig interface {
+	// AgentOverride reports whether name is a user-defined agent tool and,
+	// if so, its configured model/reasoning-effort override.
+	AgentOverride(name string) (model, effort string, ok bool)
+}
+
 // NewToolMessageItem creates a new [ToolMessageItem] based on the tool call name.
 //
 // It returns a specific tool message item type if implemented, otherwise it
@@ -231,7 +242,7 @@ func NewToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
-	cfg *config.Config,
+	cfg CustomAgentConfig,
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch {
@@ -262,12 +273,13 @@ func NewToolMessageItem(
 
 // isCustomAgentTool reports whether name is a user-defined agent tool.
 // domain/agent/custom_agent_tool.go registers one delegation tool per
-// entry in cfg.Agents, named after the agent's id — excluding "coder" and
-// "task", which are the built-in roles rather than tools a model can call.
-func isCustomAgentTool(cfg *config.Config, name string) bool {
-	if cfg == nil || name == config.AgentCoder || name == config.AgentTask {
+// entry in cfg.Agents, named after the agent's id — AgentOverride already
+// excludes "coder" and "task", the built-in roles rather than tools a
+// model can call.
+func isCustomAgentTool(cfg CustomAgentConfig, name string) bool {
+	if cfg == nil {
 		return false
 	}
-	_, ok := cfg.Agents[name]
+	_, _, ok := cfg.AgentOverride(name)
 	return ok
 }

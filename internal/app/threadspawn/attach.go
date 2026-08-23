@@ -144,7 +144,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	// wraps a, the App being attached, so a task runs inside it instead of
 	// spawning an isolated one; that Spawner's Release is a deliberate
 	// no-op, so nothing here needs its own teardown registration.
-	tasks := thread.NewTaskManagerForTest(mgr, NewParentAppSpawner(parentWorkspace), NewMessageService(a.Messages()))
+	tasks := thread.NewTaskManagerFromManager(mgr, NewParentAppSpawner(parentWorkspace), NewMessageService(a.Messages()))
 
 	// Publish only once shutdown and database cleanup are both registered:
 	// consumers must never observe a manager whose dependencies can leak.

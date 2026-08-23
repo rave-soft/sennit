@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/ui/anim"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
@@ -296,6 +295,17 @@ func AssistantInfoID(messageID string) string {
 	return fmt.Sprintf("%s:assistant-info", messageID)
 }
 
+// ModelConfig is the narrow slice of configuration AssistantInfoItem needs
+// to render its "via <provider> using <model>" footer: resolving a model's
+// catalog metadata and a provider's display name. *config.Config already
+// implements this, so callers keep passing it as-is; the interface just
+// keeps this package from having to import internal/config's full store
+// type into a renderer signature.
+type ModelConfig interface {
+	GetModel(provider, model string) *catwalk.Model
+	ProviderName(provider string) (name string, ok bool)
+}
+
 // AssistantInfoItem renders model info and response time after assistant completes.
 type AssistantInfoItem struct {
 	*list.Versioned
@@ -304,12 +314,12 @@ type AssistantInfoItem struct {
 	id                  string
 	message             *message.Message
 	sty                 *styles.Styles
-	cfg                 *config.Config
+	cfg                 ModelConfig
 	lastUserMessageTime time.Time
 }
 
 // NewAssistantInfoItem creates a new AssistantInfoItem.
-func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *config.Config, lastUserMessageTime time.Time) MessageItem {
+func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg ModelConfig, lastUserMessageTime time.Time) MessageItem {
 	return &AssistantInfoItem{
 		Versioned:           list.NewVersioned(),
 		cachedMessageItem:   &cachedMessageItem{},
@@ -378,8 +388,8 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	}
 	modelFormatted := a.sty.Messages.AssistantInfoModel.Render(model.Name)
 	providerName := a.message.Provider
-	if providerConfig, ok := a.cfg.Providers.Get(a.message.Provider); ok {
-		providerName = providerConfig.Name
+	if name, ok := a.cfg.ProviderName(a.message.Provider); ok {
+		providerName = name
 	}
 	provider := a.sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf("via %s", providerName))
 	assistant := fmt.Sprintf("%s %s %s %s", icon, modelFormatted, provider, infoMsg)
@@ -398,7 +408,7 @@ func cappedMessageWidth(availableWidth int) int {
 // Use BuildToolResultMap to create this map from all messages in a session.
 // cfg is forwarded to NewToolMessageItem to recognize user-defined agent
 // tools; it may be nil.
-func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, cfg *config.Config) []MessageItem {
+func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, cfg CustomAgentConfig) []MessageItem {
 	switch msg.Role {
 	case message.User:
 		// Reconstruct shell command items from ShellCommand parts.

@@ -68,7 +68,7 @@ func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app
 	parentApp.SetMessagesForTest(messages)
 	parentApp.AgentCoordinator = &fakeCoordinator{}
 
-	tasks := thread.NewTaskManagerForTest(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(messages))
+	tasks := thread.NewTaskManagerFromManager(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(messages))
 	return tasks, parentApp, sessions, messages
 }
 
@@ -87,7 +87,7 @@ func newTestTaskManager(t *testing.T, store thread.Store) (*thread.Manager, *thr
 	})
 	shutdownManagerOnCleanup(t, mgr)
 	parentApp := newTestParentApp(t)
-	tasks := thread.NewTaskManagerForTest(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(parentApp.Messages()))
+	tasks := thread.NewTaskManagerFromManager(mgr, NewTestParentAppSpawner(parentApp), NewTestMessageService(parentApp.Messages()))
 	return mgr, tasks, parentApp
 }
 

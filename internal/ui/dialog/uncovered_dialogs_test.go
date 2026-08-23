@@ -214,9 +214,10 @@ func TestQuestionForm_MouseTabsAndNarrowLayout(t *testing.T) {
 	}})
 	var submitted []question.Answer
 	submittedCount := 0
-	form.OnAnswer = func(responses []question.Answer) {
+	form.OnAnswer = func(responses []question.Answer) tea.Cmd {
 		submitted = append([]question.Answer(nil), responses...)
 		submittedCount++
+		return nil
 	}
 	form.SetFocused(true)
 	done, _ := form.HandleKey(keyPress("y"))
@@ -236,7 +237,7 @@ func TestQuestionForm_MouseTabsAndNarrowLayout(t *testing.T) {
 	wideArea := image.Rect(0, 0, 80, 12)
 	wideScreen := uv.NewScreenBuffer(wideArea.Dx(), wideArea.Dy())
 	form.Draw(wideScreen, wideArea)
-	_, handled := form.HandleMouseClick(30, 1)
+	_, handled, _ := form.HandleMouseClick(30, 1)
 	require.True(t, handled)
 	require.Equal(t, 1, form.activeIdx)
 

@@ -19,11 +19,24 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/charmbracelet/x/term"
+
+	// tools is imported only for ReadResponseMetadata/ReadResourceSkill, the
+	// leaf JSON shape a read-tool result's Metadata column already contains
+	// on disk. It carries no behavior, mirroring how internal/proto aliases
+	// other tool-owned leaf types instead of redeclaring them.
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
+
+	// ui/chat is imported so `session show` (human output) renders messages
+	// with the exact same MessageItem pipeline the interactive TUI uses —
+	// tool calls, diffs, and results should look identical whether you're
+	// reading them live or replaying a transcript. cmd is a presentation
+	// entry point in its own right (not agent/app core logic reaching into
+	// the UI), so this doesn't cross the "core must not import ui" boundary;
+	// forking the renderer instead would drift the two outputs apart.
 	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/spf13/cobra"

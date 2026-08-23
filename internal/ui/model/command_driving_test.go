@@ -88,6 +88,10 @@ type cmdDrivingWorkspace struct {
 	setCurrentSessionCalls  int
 	currentSessionIDs       []string
 
+	questionAnswerCalls    int
+	questionAnswerResponse []question.Answer
+	questionCancelCalls    int
+
 	sessionsBySessionID map[string]session.Session
 	messagesBySessionID map[string][]message.Message
 	historyBySessionID  map[string][]history.File
@@ -427,10 +431,19 @@ func (w *cmdDrivingWorkspace) ListSessionHistory(ctx context.Context, sessionID 
 	w.listSessionHistoryCalls++
 	return w.historyBySessionID[sessionID], nil
 }
-func (w *cmdDrivingWorkspace) QuestionAnswer(responses []question.Answer) bool { return false }
-func (w *cmdDrivingWorkspace) QuestionCancel() bool                            { return false }
-func (w *cmdDrivingWorkspace) Subscribe(*tea.Program)                          {}
-func (w *cmdDrivingWorkspace) Shutdown()                                       {}
+
+func (w *cmdDrivingWorkspace) QuestionAnswer(responses []question.Answer) bool {
+	w.questionAnswerCalls++
+	w.questionAnswerResponse = responses
+	return false
+}
+
+func (w *cmdDrivingWorkspace) QuestionCancel() bool {
+	w.questionCancelCalls++
+	return false
+}
+func (w *cmdDrivingWorkspace) Subscribe(*tea.Program) {}
+func (w *cmdDrivingWorkspace) Shutdown()              {}
 
 // ---------------------------------------------------------------------------
 // cmdDrivenUI builds a UI over cmdDrivingWorkspace with all caches warm.

@@ -12,7 +12,7 @@ import (
 
 // ---------------------------------------------------------------------------
 // store scaffolding for tests, exported for the same reason
-// [NewTaskManagerForTest] is: it names sqlc's db.Querier/db.Thread and
+// [NewTaskManagerFromManager] is: it names sqlc's db.Querier/db.Thread and
 // builds a real Store around them, which only makes sense from within this
 // package, but every test that wants a real store — this package's own
 // (store_test.go) and every other package's (package thread_test, and
@@ -25,7 +25,7 @@ import (
 // queries threadspawn.NewStore uses, scoped to a throwaway project path —
 // for tests that want a real store without threadspawn's global-DB-dir
 // dependency (threadspawn.NewStore cannot be imported here either way: it
-// would be the same test import cycle NewTaskManagerForTest's doc comment
+// would be the same test import cycle NewTaskManagerFromManager's doc comment
 // describes).
 //
 // Cleanup releases only this call's own dataDir, deliberately not

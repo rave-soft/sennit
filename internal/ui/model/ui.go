@@ -603,6 +603,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileCompletionMsg:
 		m.sess.fileReads = append(m.sess.fileReads, msg.absPath)
 		_ = m.editor.attachments.Update(msg.attachment)
+	case openEditorReadyMsg:
+		cmds = append(cmds, m.execEditorCmd(msg))
 	case DelayedClickMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
 		var done bool
 		if cmds, done = m.updateMouse(msg, cmds); done {

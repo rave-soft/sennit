@@ -63,7 +63,10 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// Route clicks to inline editors that support mouse interaction.
 		if m.activeInline != nil {
 			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
-				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
+				if done, handled, cmd := clickable.HandleMouseClick(msg.X, msg.Y); handled {
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 					if done {
 						m.activeInline = nil
 						m.editor.textarea.Focus()

@@ -120,7 +120,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	parentApp1 := newTestParentApp(t)
 	mgr1 := thread.NewManager(thread.ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
 	shutdownManagerOnCleanup(t, mgr1)
-	tasks1 := thread.NewTaskManagerForTest(mgr1, NewTestParentAppSpawner(parentApp1), NewTestMessageService(parentApp1.Messages()))
+	tasks1 := thread.NewTaskManagerFromManager(mgr1, NewTestParentAppSpawner(parentApp1), NewTestMessageService(parentApp1.Messages()))
 
 	st, err := tasks1.Create(t.Context(), thread.TaskCreateArgs{Goal: "do it", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
@@ -131,7 +131,7 @@ func TestTaskManager_Send_ReregistersDelegationParentForResumedTask(t *testing.T
 	parentApp2 := newTestParentApp(t)
 	mgr2 := thread.NewManager(thread.ManagerOptions{Store: store, Spawner: newFakeSpawner(t), RepoRoot: t.TempDir()})
 	shutdownManagerOnCleanup(t, mgr2)
-	tasks2 := thread.NewTaskManagerForTest(mgr2, NewTestParentAppSpawner(parentApp2), NewTestMessageService(parentApp2.Messages()))
+	tasks2 := thread.NewTaskManagerFromManager(mgr2, NewTestParentAppSpawner(parentApp2), NewTestMessageService(parentApp2.Messages()))
 
 	require.NoError(t, sendErr(tasks2.Send(t.Context(), st.ID, "resume message")))
 

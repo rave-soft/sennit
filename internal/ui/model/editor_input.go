@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -70,36 +71,57 @@ func (m *UI) updateTextareaWithPrevHeight(msg tea.Msg, prevHeight int) tea.Cmd {
 	return tea.Batch(cmd, m.handleTextareaHeightChange(prevHeight))
 }
 
+// openEditorReadyMsg carries the prepared $EDITOR invocation once
+// openEditor's off-loop closure has written the scratch file. Update
+// launches the process (see execEditorCmd) when this arrives.
+type openEditorReadyMsg struct {
+	cmd     *exec.Cmd
+	tmpPath string
+}
+
+// openEditor snapshots the cursor position it needs, then does the actual
+// scratch-file IO in the returned tea.Cmd's closure: os.CreateTemp and the
+// write both touch disk and must not run on the Update goroutine that a key
+// handler calls this from.
 func (m *UI) openEditor(value string) tea.Cmd {
-	tmpfile, err := os.CreateTemp("", "msg_*.md")
-	if err != nil {
-		return util.ReportError(err)
+	line := m.editor.textarea.Line() + 1
+	col := m.editor.textarea.Column() + 1
+	return func() tea.Msg {
+		tmpfile, err := os.CreateTemp("", "msg_*.md")
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		tmpPath := tmpfile.Name()
+		defer tmpfile.Close()
+		if _, err := tmpfile.WriteString(value); err != nil {
+			return util.NewErrorMsg(err)
+		}
+		cmd, err := editor.Command(
+			brand.Slug,
+			tmpPath,
+			editor.AtPosition(line, col),
+		)
+		if err != nil {
+			return util.NewErrorMsg(err)
+		}
+		return openEditorReadyMsg{cmd: cmd, tmpPath: tmpPath}
 	}
-	tmpPath := tmpfile.Name()
-	defer tmpfile.Close()
-	if _, err := tmpfile.WriteString(value); err != nil {
-		return util.ReportError(err)
-	}
-	cmd, err := editor.Command(
-		brand.Slug,
-		tmpPath,
-		editor.AtPosition(
-			m.editor.textarea.Line()+1,
-			m.editor.textarea.Column()+1,
-		),
-	)
-	if err != nil {
-		return util.ReportError(err)
-	}
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+}
+
+// execEditorCmd launches the prepared $EDITOR process. Kept separate from
+// openEditor's closure so the tea.ExecProcess call — which takes over the
+// terminal — happens from Update once the scratch file is ready, not from
+// the cmd goroutine that prepared it.
+func (m *UI) execEditorCmd(msg openEditorReadyMsg) tea.Cmd {
+	return tea.ExecProcess(msg.cmd, func(err error) tea.Msg {
 		defer func() {
-			_ = os.Remove(tmpPath)
+			_ = os.Remove(msg.tmpPath)
 		}()
 
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
-		content, err := os.ReadFile(tmpPath)
+		content, err := os.ReadFile(msg.tmpPath)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}

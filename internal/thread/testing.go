@@ -14,18 +14,19 @@ const (
 	MaxActiveTasksPerParentTurnForTest = maxActiveTasksPerParentTurn
 )
 
-// NewTaskManagerForTest constructs a TaskManager sharing mgr's own
+// NewTaskManagerFromManager constructs a TaskManager sharing mgr's own
 // lifecycle and context — exactly the wiring threadspawn.Attach performs
-// in production — for callers outside this package that need a real,
-// working TaskManager (threadspawn itself for the production wiring, and
-// tests in other packages that want one without Attach's global-DB-dir
-// and git-toplevel dependencies, which assume a real project checkout and
-// a shared process-wide database, both awkward in an isolated test).
+// in production. Despite living in this file, it is not test-only:
+// threadspawn.Attach calls it directly for the production TaskManager, and
+// tests in other packages use it too, for a real, working TaskManager
+// without Attach's global-DB-dir and git-toplevel dependencies, which
+// assume a real project checkout and a shared process-wide database, both
+// awkward in an isolated test.
 //
 // It exists because NewTaskManager itself requires mgr's unexported
 // lc/ctx fields and so can only be called from within this package; every
 // other caller — production and test alike — goes through here.
-func NewTaskManagerForTest(mgr *Manager, spawner Spawner, messages MessageService) *TaskManager {
+func NewTaskManagerFromManager(mgr *Manager, spawner Spawner, messages MessageService) *TaskManager {
 	return NewTaskManager(mgr.store, spawner, messages, mgr.lc, mgr.ctx)
 }
 

@@ -86,7 +86,7 @@ func TestQuestionFormEscBlursFocusedFreeTextInsteadOfCancelling(t *testing.T) {
 
 	var cancelled bool
 	f := NewQuestionForm(&s, batch)
-	f.OnCancel = func() { cancelled = true }
+	f.OnCancel = func() tea.Cmd { cancelled = true; return nil }
 
 	freeText, ok := f.questions[0].(*FreeText)
 	require.True(t, ok)

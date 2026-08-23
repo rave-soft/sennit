@@ -10,6 +10,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
 
@@ -116,4 +117,29 @@ func TestSchemaExamplesPointAtThePublishedURL(t *testing.T) {
 		require.Contains(t, text, `"$schema": "`+SchemaID+`"`,
 			"%s must show the address the schema is published at", path)
 	}
+}
+
+// TestSchemaThemeEnumMatchesPaletteRegistry pins the generated theme enum to
+// the live palette registry. The enum used to be a hand-written list of IDs
+// in a jsonschema struct tag inside internal/config — a package that, by
+// design, knows nothing about the UI's palettes — so it silently went stale
+// whenever a palette was added or renamed.
+func TestSchemaThemeEnumMatchesPaletteRegistry(t *testing.T) {
+	t.Parallel()
+
+	reflector := new(jsonschema.Reflector)
+	schema := reflector.Reflect(&config.Config{})
+	setThemeEnum(schema)
+
+	def, ok := schema.Definitions["TUIOptions"]
+	require.True(t, ok, "TUIOptions definition missing from the schema")
+	themeProp, ok := def.Properties.Get("theme")
+	require.True(t, ok, "theme property missing from TUIOptions")
+
+	var want []any
+	for _, p := range styles.Palettes() {
+		want = append(want, p.ID)
+	}
+	require.NotEmpty(t, want, "the palette registry must not be empty")
+	require.Equal(t, want, themeProp.Enum)
 }

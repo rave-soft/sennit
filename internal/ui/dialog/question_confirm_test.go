@@ -60,11 +60,12 @@ func TestConfirmComponentCompositorClearsWhenButtonsScrollOutOfView(t *testing.T
 	c.Draw(scr, area)
 
 	var confirmed bool
-	c.OnConfirm = func() { confirmed = true }
+	c.OnConfirm = func() tea.Cmd { confirmed = true; return nil }
 
-	done, handled := c.HandleMouseClick(clickX, clickY)
+	done, handled, cmd := c.HandleMouseClick(clickX, clickY)
 	require.False(t, handled, "a click where the button used to be must not hit anything once it has scrolled away")
 	require.False(t, done)
+	require.Nil(t, cmd)
 	require.False(t, confirmed, "the stale button position must not confirm the batch")
 }
 

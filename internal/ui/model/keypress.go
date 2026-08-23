@@ -32,6 +32,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// Route keys to active inline editor if one is showing.
 	if m.activeInline != nil && m.focus == uiFocusEditor {
 		if done, cmd := m.activeInline.HandleKey(msg); done {
+			// cmd may carry the submit/cancel side effect (e.g. the
+			// question form's workspace call) — it must still run even
+			// though the editor itself is going away.
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			m.activeInline = nil
 			m.editor.textarea.Focus()
 			m.updateLayoutAndSize()

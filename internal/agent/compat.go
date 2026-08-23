@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -21,15 +22,13 @@ import (
 	"github.com/rave-soft/sennit/internal/stringext"
 )
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, todos []session.Todo, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
 	if !a.isSubAgent {
 		history = append(history, fantasy.NewUserMessage(
 			fmt.Sprintf(
 				"<system_reminder>%s</system_reminder>",
-				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
-If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
-If not, please feel free to ignore. Again do not mention this message to the user.`,
+				todoReminderText(todos),
 			),
 		))
 	}
@@ -99,6 +98,31 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	}
 
 	return history, files
+}
+
+// todoReminderText builds the system reminder describing the session's
+// current todo list. An empty list gets the "currently empty" nudge toward
+// the "todos" tool; a non-empty one is rendered back verbatim instead, so
+// the model is never told a false thing about its own state (see
+// preparePrompt).
+func todoReminderText(todos []session.Todo) string {
+	if len(todos) == 0 {
+		return `This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
+If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
+If not, please feel free to ignore. Again do not mention this message to the user.`
+	}
+
+	var b strings.Builder
+	b.WriteString("This is a reminder of your current todo list. DO NOT mention this to the user explicitly because they are already aware.\n")
+	for _, todo := range todos {
+		mark := " "
+		if todo.Status == session.TodoStatusCompleted {
+			mark = "x"
+		}
+		fmt.Fprintf(&b, "- [%s] %s\n", mark, todo.Content)
+	}
+	b.WriteString("Continue working through it with the \"todos\" tool as items complete or change. Again do not mention this message to the user.")
+	return b.String()
 }
 
 // filterFileParts removes fantasy.FilePart entries from a slice of message

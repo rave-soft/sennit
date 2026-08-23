@@ -452,11 +452,23 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 	}
 
 	form := dialog.NewQuestionForm(m.com.Styles, batch)
-	form.OnAnswer = func(responses []question.Answer) {
-		m.com.Workspace.QuestionAnswer(responses)
+	// QuestionAnswer/QuestionCancel resolve the question service's
+	// pending channel; wiring them as commands (not direct calls here)
+	// keeps that off the Update goroutine, matching the rest of this
+	// dialog's IO. Snapshot the workspace by value so the closures don't
+	// race with Update reading m.com off the render loop.
+	ws := m.com.Workspace
+	form.OnAnswer = func(responses []question.Answer) tea.Cmd {
+		return func() tea.Msg {
+			ws.QuestionAnswer(responses)
+			return nil
+		}
 	}
-	form.OnCancel = func() {
-		m.com.Workspace.QuestionCancel()
+	form.OnCancel = func() tea.Cmd {
+		return func() tea.Msg {
+			ws.QuestionCancel()
+			return nil
+		}
 	}
 	m.activeInline = form
 	m.editor.textarea.Blur()

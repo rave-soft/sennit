@@ -204,6 +204,12 @@ const (
 	// handle, which Steer callers submitting fresh interactive
 	// follow-ups do not set.
 	SteerCanceled
+	// SteerDropped means the call was discarded outright rather than run,
+	// queued, or canceled: a continuation call found another turn already
+	// active and was dropped instead of enqueued, because its placeholder
+	// prompt would otherwise be persisted as if it were real content (see
+	// the drop site in dispatchDecision). result is always nil.
+	SteerDropped
 )
 
 type SessionAgent interface {
@@ -501,9 +507,9 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 			if call.Accepted != nil {
 				call.Accepted.Close()
 			}
-			dispatched(SteerEnqueued)
+			dispatched(SteerDropped)
 			s.mu.Unlock()
-			return dispatchOutcome{steer: SteerEnqueued}
+			return dispatchOutcome{steer: SteerDropped}
 		}
 		// Busy: an earlier prompt is active. Queue this call so it is
 		// folded into (or sequenced after) the active turn, and release any
@@ -898,13 +904,13 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 
 	// Carried-over history goes in front of this session's own
 	// messages.
-	history, files := a.preparePrompt(withPriorMessages(call.PriorMessages, msgs), model.CatalogCfg.SupportsImages, call.Attachments...)
+	history, files := a.preparePrompt(withPriorMessages(call.PriorMessages, msgs), model.CatalogCfg.SupportsImages, currentSession.Todos, call.Attachments...)
 
 	// Only this session's own messages, not the carried ones: a summary
 	// replaces exactly what msgs holds, which is what stopOnContextWindow
 	// needs to know to tell a summarizable context from an irreducible
 	// one.
-	ownHistory, _ := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages)
+	ownHistory, _ := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages, currentSession.Todos)
 	t.historyTokens = estimateMessageTokens(ownHistory)
 
 	startTime := time.Now()

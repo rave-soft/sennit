@@ -1,4 +1,4 @@
-package shell
+package workspace
 
 import (
 	"context"
@@ -8,10 +8,14 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 )
 
-// PersistOutput stores a bang-mode shell command result as a user message.
-// If the target session no longer exists (deleted before or during the
-// command), persistence is skipped without surfacing an error.
-func PersistOutput(
+// persistShellOutput stores a bang-mode shell command result as a user
+// message. If the target session no longer exists (deleted before or
+// during the command), persistence is skipped without surfacing an error.
+//
+// This is domain logic for bang-mode command persistence, not a shell
+// utility, so it lives here with its only caller (AgentRunShellCommand)
+// rather than in internal/shell.
+func persistShellOutput(
 	ctx context.Context,
 	messages message.Service,
 	sessionID, command, output string,

@@ -413,39 +413,77 @@ TECHDEBT.md.
 
 ## Фаза 3 — Границы контекстов / design
 
-- [ ] **UI → config напрямую:** `common/common.go:12` (`Common.Config()`),
+**СДЕЛАНО (2026-08-23).** Проверка на итоговом дереве: `go build ./...`,
+`go vet ./...`, `go test ./...`, `go test -race` по затронутым пакетам,
+`golangci-lint run` — чисто. Голден-файлы не изменились ни в одном пакете,
+что и было условием: это перекладка зависимостей, а не редизайн.
+
+Решения и отклонения:
+
+- `DockerMCPName` переехал не в `proto` (он не листовой: сам импортирует
+  `config` и `agent/tools`, ссылка из config замыкала цикл), а в новый
+  листовой пакет `internal/mcpid`.
+- `ui/chat` больше не импортирует `internal/config` ни в одном
+  продакшн-файле. Вьюхи получают узкие интерфейсы (`ModelConfig`,
+  `CustomAgentConfig`), которые `*config.Config` удовлетворяет структурно —
+  поэтому вызовы в `ui/model` и `ui/dialog` править не пришлось. В config
+  добавлены два чистых аксессора: `ProviderName` и `AgentOverride`.
+- `Common.Config()` оставлен как есть: им пользуются `ui/model` и
+  `ui/dialog` для действительно всеконфиговых нужд (список провайдеров,
+  MCP, options). Сузить его — отдельная работа по этим двум пакетам,
+  кандидат в фазу 4/5, а не побочный эффект этой.
+- `cmd → ui/chat` оставлен с явным комментарием-исключением: `session show`
+  обязан рендерить те же `MessageItem`, что и TUI, иначе вывод разойдётся;
+  `cmd` сам является презентационной точкой входа.
+- `herdr`: `Translate`/`BridgeLocal` не переносились в `internal/app`;
+  вместо этого шапка `client.go` переписана под реальность — `Client`/`Event`
+  изолированы, `translate.go` — задокументированное исключение с указанием,
+  куда его двигать.
+- `shell/expand.go`: block funcs намеренно не подключены. Вход `ExpandValue`
+  пишет автор конфига, который через `hooks`/`mcp`/`lsp` в том же файле уже
+  запускает произвольные команды; deny-list для LLM-инструментов здесь был бы
+  театром. Граница доверия описана в доккоменте.
+- Enum тем: `internal/config` больше не хранит список палитр, генерация
+  добавлена в `internal/cmd/schema.go` (`setThemeEnum` по образцу
+  `setProviderTypeEnum`) с тестом, прибивающим enum к `styles.Palettes()`.
+- Побочно исправлен настоящий баг в `model/keypress.go`: при `done=true`
+  от инлайн-редактора его `cmd` молча терялся, то есть submit/cancel формы
+  вопроса мог не выполниться вовсе.
+
+
+- [x] **UI → config напрямую:** `common/common.go:12` (`Common.Config()`),
   `chat/messages.go:375`, `chat/agent.go:113`, `chat/tools_core.go:267` —
   view-код опрашивает `internal/config` и таскает `*config.Config` в
   сигнатурах рендереров; инжектировать резолв при конструировании (есть
   `workspace.ConfigAccessor`). `chat/docker_mcp.go:11` — импорт config ради
   константы `DockerMCPName` (место — в `proto`). **M**
-- [ ] **UI → oauth/codex напрямую:** `model/sidebar.go:12,113` —
+- [x] **UI → oauth/codex напрямую:** `model/sidebar.go:12,113` —
   `codex.LatestUsage()` на render-пути мимо workspace-фасада. **S**
-- [ ] **cmd → ui/chat + agent/tools:** `cmd/session.go:22,27` —
+- [x] **cmd → ui/chat + agent/tools:** `cmd/session.go:22,27` —
   `session show/export` тянет TUI-рендерер и тип из agent/tools мимо app;
   вынести форматирование транскрипта в нейтральный пакет или зафиксировать
   исключение комментарием. **M**
-- [ ] **shell → message:** `shell/persist_message.go` — доменная логика
+- [x] **shell → message:** `shell/persist_message.go` — доменная логика
   bang-режима (плюс матчинг текста ошибки FK) в утилитарном пакете;
   перенести к вызывающему (workspace). **S**
-- [ ] **herdr:** шапка `client.go` обещает «decoupled from proto and domain
+- [x] **herdr:** шапка `client.go` обещает «decoupled from proto and domain
   layers», а `translate.go` импортирует proto, message, permission, pubsub,
   notify. Перенести Translate/BridgeLocal в app или переписать
   контракт. **S/M**
-- [ ] `config/config.go:306` — jsonschema-enum тем зашивает в config знание
+- [x] `config/config.go:306` — jsonschema-enum тем зашивает в config знание
   палитр UI (комментарий рядом утверждает обратное); генерировать из
   реестра, как discover-типы. **S**
-- [ ] `agent/compat.go:25` — безусловное «your todo list is currently
+- [x] `agent/compat.go:25` — безусловное «your todo list is currently
   empty» даже при непустом `session.Todos` — ложное утверждение модели о
   своём состоянии. **S**
-- [ ] `app/threadspawn/attach.go:147` — production-путь строит TaskManager
+- [x] `app/threadspawn/attach.go:147` — production-путь строит TaskManager
   через `NewTaskManagerForTest`; переименовать конструктор. **S**
-- [ ] `shell/expand.go:90` — комментарий обещает block funcs внутри
+- [x] `shell/expand.go:90` — комментарий обещает block funcs внутри
   `$(...)`, но они не подключены: команды из config-значений идут без
   deny-list. Либо подключить, либо задокументировать доверие явно. **S**
-- [ ] `agent/agent.go:500` — дроп continuation репортится как
+- [x] `agent/agent.go:500` — дроп continuation репортится как
   `SteerEnqueued`: контракт enum нарушен. **S**
-- [ ] IO/запись в Update-петле UI: `model/editor_input.go:73`
+- [x] IO/запись в Update-петле UI: `model/editor_input.go:73`
   (`os.CreateTemp` в обработчике клавиши), `dialog/oauth.go:135`
   (чтение диска в конструкторе), `model/dialogs.go:454`
   (`QuestionAnswer` — channel send из `HandleKey`). **S–M**

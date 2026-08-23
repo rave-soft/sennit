@@ -54,14 +54,17 @@ type QuestionForm struct {
 	// Hover position for highlighting interactive elements.
 	hoverX, hoverY int
 
-	// OnAnswer is called when the form is submitted. The UI sets
-	// this to wire up workspace submission.
-	OnAnswer func(responses []question.Answer)
+	// OnAnswer is called when the form is submitted. The UI sets this
+	// to wire up workspace submission. It returns the tea.Cmd that
+	// performs the workspace call — QuestionAnswer sends on a
+	// channel the question service is blocked reading from, so this
+	// must run as a command, not inline from HandleKey/HandleMouseClick.
+	OnAnswer func(responses []question.Answer) tea.Cmd
 
 	// OnCancel is called when the user presses escape to cancel
 	// the entire question batch. The UI sets this to wire up
-	// workspace cancellation.
-	OnCancel func()
+	// workspace cancellation. Same tea.Cmd contract as OnAnswer.
+	OnCancel func() tea.Cmd
 }
 
 // NewQuestionForm creates a tabbed multi-question form from a
@@ -247,8 +250,7 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 				return false, nil
 			}
 		}
-		f.cancel()
-		return true, nil
+		return true, f.cancel()
 	}
 
 	// Route to active question.
@@ -261,8 +263,7 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			if f.activeIdx < len(f.labels)-1 {
 				f.switchTab(f.activeIdx + 1)
 			} else if !f.hasConfirm {
-				f.submit()
-				return true, cmd
+				return true, tea.Batch(cmd, f.submit())
 			}
 			return false, cmd
 		}
@@ -329,8 +330,10 @@ func (f *QuestionForm) syncConfirmAnswers() {
 	}
 }
 
-// submit collects stored responses and calls OnAnswer.
-func (f *QuestionForm) submit() {
+// submit collects stored responses and calls OnAnswer, returning the
+// tea.Cmd it produces so the caller (HandleKey/HandleMouseClick) can
+// hand it back to Update instead of it running here.
+func (f *QuestionForm) submit() tea.Cmd {
 	responses := make([]question.Answer, f.numQuestions)
 	for i, ans := range f.answers {
 		if ans != nil {
@@ -342,16 +345,18 @@ func (f *QuestionForm) submit() {
 		}
 	}
 	if f.OnAnswer != nil {
-		f.OnAnswer(responses)
+		return f.OnAnswer(responses)
 	}
+	return nil
 }
 
 // cancel calls OnCancel to signal that the user dismissed the
-// question batch without answering.
-func (f *QuestionForm) cancel() {
+// question batch without answering, returning its tea.Cmd.
+func (f *QuestionForm) cancel() tea.Cmd {
 	if f.OnCancel != nil {
-		f.OnCancel()
+		return f.OnCancel()
 	}
+	return nil
 }
 
 // ShortHelp returns key bindings for the status bar.
@@ -768,7 +773,7 @@ func (f *QuestionForm) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 // HandleMouseClick implements MouseClickableEditor. It checks if
 // the click landed on a tab and switches to it, or delegates to
 // the active component for content-area clicks.
-func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool) {
+func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool, tea.Cmd) {
 	// Check tabs first.
 	if f.showTabs && f.compositor != nil {
 		hit := f.compositor.Hit(x, y)
@@ -778,7 +783,7 @@ func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool) {
 				if idx >= 0 && idx < len(f.labels) && idx != f.activeIdx {
 					f.switchTab(idx)
 				}
-				return false, true
+				return false, true, nil
 			}
 		}
 	}
@@ -796,14 +801,13 @@ func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool) {
 			if done {
 				if f.activeIdx < len(f.labels)-1 {
 					f.switchTab(f.activeIdx + 1)
-					return false, true
+					return false, true, nil
 				} else if !f.hasConfirm {
-					f.submit()
-					return true, true
+					return true, true, f.submit()
 				}
 			}
-			return false, true
+			return false, true, nil
 		}
 	}
-	return false, false
+	return false, false, nil
 }

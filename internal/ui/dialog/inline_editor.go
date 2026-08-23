@@ -45,9 +45,11 @@ type MouseClickableEditor interface {
 	InlineEditor
 	// HandleMouseClick processes a mouse click at the given screen
 	// coordinates. Returns done=true when the editor has completed
-	// (answer submitted or dismissed), and handled=true if the click
-	// was consumed (even if not done).
-	HandleMouseClick(x, y int) (done bool, handled bool)
+	// (answer submitted or dismissed), handled=true if the click was
+	// consumed (even if not done), and an optional tea.Cmd for a side
+	// effect the click triggered (e.g. submitting an answer) — the
+	// caller must run it, not the editor itself.
+	HandleMouseClick(x, y int) (done bool, handled bool, cmd tea.Cmd)
 	// SetHover updates the current mouse position for hover
 	// highlighting. Called on every MouseMotionMsg while the
 	// editor is active.

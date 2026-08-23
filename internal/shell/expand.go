@@ -42,6 +42,17 @@ var NoUnset atomic.Bool
 //   - $(command) with full quoting and nesting.
 //   - escaped and quoted strings ("...", '...').
 //
+// Trust boundary: $(...) here runs with no BlockFunc deny-list. That
+// deny-list (internal/agent/tools.blockFuncs) exists to stop an LLM's
+// bash tool calls from running commands the user didn't ask for; it has
+// no bearing on ExpandValue, whose input is the config author's own
+// sennitrc/sennit.json — the same person who can already run arbitrary
+// commands via hooks, mcp, and lsp entries in that same file. Denying a
+// subset of commands inside $(...) here would be inconsistent (every
+// other config mechanism stays unrestricted) without closing any real
+// gap, so ExpandValue intentionally runs $(...) unrestricted rather
+// than threading a deny-list through.
+//
 // Contract:
 //
 //   - Returns exactly one string. No field splitting, no globbing, no
@@ -77,7 +88,8 @@ func ExpandValue(ctx context.Context, value string, env []string) (string, error
 	}
 
 	// Build a minimal Shell value purely to reuse its handler chain
-	// (builtins, block funcs, optional Go coreutils) inside $(...).
+	// (builtins, optional Go coreutils) inside $(...). blockFuncs is
+	// left nil — see the trust-boundary note on ExpandValue above.
 	// We deliberately skip NewShell so the passed-in env is used
 	// verbatim, with no SENNIT/AGENT/AI_AGENT injection: callers of
 	// ExpandValue control the env, and nounset must treat any name

@@ -44,8 +44,11 @@ type ConfirmComponent struct {
 	hoverX       int
 	hoverY       int
 
-	// OnConfirm is called when the user confirms.
-	OnConfirm func()
+	// OnConfirm is called when the user confirms. It returns the
+	// tea.Cmd that performs the workspace submission (see
+	// QuestionForm.OnAnswer) so HandleKey/HandleMouseClick can hand
+	// it back to Update instead of running it inline.
+	OnConfirm func() tea.Cmd
 	// OnReject is called when the user says "not yet".
 	OnReject func()
 }
@@ -98,10 +101,11 @@ func (c *ConfirmComponent) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, nil
 	case key.Matches(msg, c.keyEnter):
 		if c.confirmYes {
+			var cmd tea.Cmd
 			if c.OnConfirm != nil {
-				c.OnConfirm()
+				cmd = c.OnConfirm()
 			}
-			return true, nil
+			return true, cmd
 		}
 		if c.OnReject != nil {
 			c.OnReject()
@@ -322,23 +326,25 @@ func (c *ConfirmComponent) SetHover(x, y int) { c.hoverX = x; c.hoverY = y }
 
 // HandleMouseClick checks if the click landed on a button and
 // triggers the corresponding action. Returns done=true for Yup!,
-// done=false for Not yet (goes back to editing).
-func (c *ConfirmComponent) HandleMouseClick(x, y int) (bool, bool) {
+// done=false for Not yet (goes back to editing), plus the tea.Cmd (if
+// any) that OnConfirm produced.
+func (c *ConfirmComponent) HandleMouseClick(x, y int) (bool, bool, tea.Cmd) {
 	switch common.HitButtonIndex(c.compositor, x, y) {
 	case 0: // Yup!
 		c.confirmYes = true
+		var cmd tea.Cmd
 		if c.OnConfirm != nil {
-			c.OnConfirm()
+			cmd = c.OnConfirm()
 		}
-		return true, true
+		return true, true, cmd
 	case 1: // Not yet
 		c.confirmYes = false
 		if c.OnReject != nil {
 			c.OnReject()
 		}
-		return false, true
+		return false, true, nil
 	}
-	return false, false
+	return false, false, nil
 }
 
 // UpdateAnswers replaces the answer slice. Called by QuestionForm

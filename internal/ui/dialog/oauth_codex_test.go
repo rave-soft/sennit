@@ -33,7 +33,15 @@ func newCodexDialog(t *testing.T) *OAuth {
 	s := styles.SennitDark()
 	com := &common.Common{Styles: &s}
 	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
-	dlg, _ := NewOAuthCodex(com, false, provider, nil)
+	dlg, cmd := NewOAuthCodex(com, false, provider, nil)
+	// The proxy step prefills asynchronously (see oauthProxyPrefillMsg) so
+	// the constructor never touches disk itself; run that cmd here to
+	// reach the same state the real event loop would.
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			dlg.HandleMsg(msg)
+		}
+	}
 	return dlg
 }
 
@@ -134,6 +142,38 @@ func TestOAuthCodexPrefillsProxyFromCodexCLI(t *testing.T) {
 
 	dlg := newCodexDialog(t)
 	require.Equal(t, "http://127.0.0.1:8080", dlg.proxyInput.Value())
+}
+
+// TestNewOAuthCodex_DoesNotReadDiskInConstructor is the regression test for
+// the proxy step's prefill: newOAuth used to call configurer.proxyURL()
+// (codex.ProxyFromDisk, a CLI config file read) directly in the
+// constructor, before it ever returned a tea.Cmd. It must instead defer
+// that read to the returned cmd, landing as oauthProxyPrefillMsg once it
+// completes, so opening the dialog never blocks Update on disk IO.
+func TestNewOAuthCodex_DoesNotReadDiskInConstructor(t *testing.T) {
+	// No t.Parallel: t.Setenv pins CODEX_HOME for this test.
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
+		[]byte("[network]\nproxy_url = \"http://127.0.0.1:9090\"\n"), 0o600))
+
+	s := styles.SennitDark()
+	com := &common.Common{Styles: &s}
+	provider := catwalk.Provider{ID: catwalk.InferenceProvider(codex.ProviderID), Name: codex.ProviderName}
+
+	dlg, cmd := NewOAuthCodex(com, false, provider, nil)
+	require.NotNil(t, cmd, "the disk read must be deferred to a tea.Cmd")
+	require.Equal(t, OAuthStateProxy, dlg.State)
+	require.Empty(t, dlg.proxyInput.Value(),
+		"the constructor must not have read the CLI config before returning")
+
+	msg := cmd()
+	prefill, ok := msg.(oauthProxyPrefillMsg)
+	require.True(t, ok, "expected oauthProxyPrefillMsg, got %T", msg)
+	require.Equal(t, "http://127.0.0.1:9090", prefill.value)
+
+	dlg.HandleMsg(prefill)
+	require.Equal(t, "http://127.0.0.1:9090", dlg.proxyInput.Value())
 }
 
 // TestOAuthCodexCursorSitsOnProxyField draws the step and checks the cursor

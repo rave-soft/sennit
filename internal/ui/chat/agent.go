@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/session"
@@ -108,13 +107,17 @@ func NewAgentToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
-	cfg *config.Config,
+	cfg CustomAgentConfig,
 ) *AgentToolMessageItem {
 	t := &AgentToolMessageItem{startTime: time.Now(), displayName: agentDisplayName(toolCall.Name)}
 	if cfg != nil {
-		if a, ok := cfg.Agents[t.displayName]; ok {
-			t.model = a.Model
-			t.effort = a.ReasoningEffort
+		// The built-in "task"/"coder" roles never carry a model/effort
+		// override (see setupAgents in internal/config/agents.go), so
+		// looking them up here would always miss anyway — AgentOverride
+		// excluding them changes nothing observable.
+		if model, effort, ok := cfg.AgentOverride(t.displayName); ok {
+			t.model = model
+			t.effort = effort
 		}
 	}
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgentToolRenderContext{agent: t}, canceled)
@@ -125,6 +128,12 @@ func NewAgentToolMessageItem(
 	return t
 }
 
+// builtinTaskAgentName is the display name for the built-in agent tool's
+// delegation target. It must equal config.AgentTask ("task"); duplicated
+// here as a literal, rather than imported, so this package doesn't need
+// internal/config for one constant.
+const builtinTaskAgentName = "task"
+
 // agentDisplayName resolves a delegation block's title from its tool name.
 // The built-in agent tool (tools.AgentToolName) always dispatches to the
 // fixed config.AgentTask sub-agent — AgentParams carries no field
@@ -134,7 +143,7 @@ func NewAgentToolMessageItem(
 // toolCall.Name is already the right display name (e.g. "developer").
 func agentDisplayName(toolName string) string {
 	if toolName == tools.AgentToolName {
-		return config.AgentTask
+		return builtinTaskAgentName
 	}
 	return toolName
 }

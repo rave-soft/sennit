@@ -1,4 +1,4 @@
-package shell
+package workspace
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPersistOutput_SkipsMissingSession(t *testing.T) {
+func TestPersistShellOutput_SkipsMissingSession(t *testing.T) {
 	t.Parallel()
 
 	conn, err := db.Connect(t.Context(), t.TempDir())
@@ -20,7 +20,7 @@ func TestPersistOutput_SkipsMissingSession(t *testing.T) {
 	messages := message.NewService(db.New(conn))
 
 	missingID := uuid.New().String()
-	err = PersistOutput(t.Context(), messages, missingID, "cat file.txt", "hello", 0)
+	err = persistShellOutput(t.Context(), messages, missingID, "cat file.txt", "hello", 0)
 	require.NoError(t, err)
 
 	stored, err := messages.List(t.Context(), missingID)
@@ -28,7 +28,7 @@ func TestPersistOutput_SkipsMissingSession(t *testing.T) {
 	require.Empty(t, stored)
 }
 
-func TestPersistOutput_NoOpForEmptySessionID(t *testing.T) {
+func TestPersistShellOutput_NoOpForEmptySessionID(t *testing.T) {
 	t.Parallel()
 
 	conn, err := db.Connect(t.Context(), t.TempDir())
@@ -37,10 +37,10 @@ func TestPersistOutput_NoOpForEmptySessionID(t *testing.T) {
 
 	messages := message.NewService(db.New(conn))
 
-	require.NoError(t, PersistOutput(t.Context(), messages, "", "echo hi", "hi", 0))
+	require.NoError(t, persistShellOutput(t.Context(), messages, "", "echo hi", "hi", 0))
 }
 
-func TestPersistOutput_PersistsForExistingSession(t *testing.T) {
+func TestPersistShellOutput_PersistsForExistingSession(t *testing.T) {
 	t.Parallel()
 
 	conn, err := db.Connect(t.Context(), t.TempDir())
@@ -54,7 +54,7 @@ func TestPersistOutput_PersistsForExistingSession(t *testing.T) {
 	sess, err := sessions.Create(t.Context(), "shell test")
 	require.NoError(t, err)
 
-	err = PersistOutput(t.Context(), messages, sess.ID, "cat file.txt", "hello", 0)
+	err = persistShellOutput(t.Context(), messages, sess.ID, "cat file.txt", "hello", 0)
 	require.NoError(t, err)
 
 	stored, err := messages.List(t.Context(), sess.ID)

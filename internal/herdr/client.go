@@ -4,10 +4,16 @@
 // herdr's Unix socket API so herdr can display accurate status without
 // screen scraping.
 //
-// The client consumes a small, herdr-specific event vocabulary rather
-// than accepting raw proto or domain types. Callers translate their
-// events into herdr.Event before forwarding. This keeps the client
-// decoupled from both the proto and internal domain layers.
+// Client and Event (this file) speak only the small, herdr-specific
+// event vocabulary — no proto or domain types appear in their
+// signatures. translate.go is the one place that trades that isolation
+// for convenience: Translate and BridgeLocal know about pubsub, proto,
+// and domain event types so callers (internal/app) can hand them raw
+// broker events instead of adapting each event themselves. If that
+// dependency ever needs to be shed, moving translate.go's contents to
+// the call site in internal/app is the way to do it; until then, this
+// package as a whole depends on proto and domain, even though Client
+// itself does not.
 package herdr
 
 import (

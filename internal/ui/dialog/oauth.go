@@ -130,11 +130,16 @@ func newOAuth(
 		input.SetVirtualCursor(false)
 		input.Placeholder = "http://host:port (leave empty for none)"
 		input.SetStyles(t.TextInput)
-		input.SetValue(configurer.proxyURL())
 		input.Focus()
 		m.proxyInput = &input
 		m.State = OAuthStateProxy
-		return &m, nil
+		// proxyURL() may read config off disk (codex.ProxyFromDisk falls
+		// back to the CLI's own config file), so the prefill happens off
+		// the Update loop and lands as a message instead of blocking the
+		// constructor. See oauthProxyPrefillMsg.
+		return &m, func() tea.Msg {
+			return oauthProxyPrefillMsg{value: configurer.proxyURL()}
+		}
 	}
 
 	return &m, tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)
@@ -214,6 +219,14 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 			if cmd != nil {
 				return ActionCmd{cmd}
 			}
+		}
+
+	case oauthProxyPrefillMsg:
+		// Only prefill an untouched field: the read runs concurrently with
+		// the user, and typing before it lands must win over the stale
+		// disk/config value arriving late.
+		if m.State == OAuthStateProxy && m.proxyInput != nil && m.proxyInput.Value() == "" {
+			m.proxyInput.SetValue(msg.value)
 		}
 
 	case ActionInitiateOAuth:
@@ -302,6 +315,13 @@ type oauthProxyConfigurer interface {
 	// setProxyURL applies the value the user entered, rejecting one that
 	// cannot work. An empty value means no proxy.
 	setProxyURL(string) error
+}
+
+// oauthProxyPrefillMsg carries the proxy value read off the Update loop
+// (config and, for Codex, a CLI config file on disk) so the proxy step's
+// field can be prefilled without the constructor blocking on that read.
+type oauthProxyPrefillMsg struct {
+	value string
 }
 
 // oauthSaveDoneMsg is emitted by the background save command once the

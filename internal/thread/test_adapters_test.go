@@ -27,7 +27,7 @@ import (
 // exported (unlike the unexported adapter types around them) because
 // other packages' tests that want a real, working thread.Manager/
 // TaskManager without threadspawn's own dependencies use them too — see
-// NewTaskManagerForTest's doc comment for the same reasoning.
+// NewTaskManagerFromManager's doc comment for the same reasoning.
 
 // NewTestParentAppSpawner returns a Spawner whose every Spawn call returns
 // a Handle wrapping a, the caller's own already-running App — the

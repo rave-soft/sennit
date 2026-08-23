@@ -125,7 +125,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages, currentSession.Todos)
 
 	defer func() {
 		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {

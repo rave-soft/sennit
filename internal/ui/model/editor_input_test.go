@@ -1,11 +1,14 @@
 package model
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/question"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,4 +77,85 @@ func TestPasteImageFromClipboardCmd_DoesNotReadModelOffGoroutine(t *testing.T) {
 	_ = u.com.Context()
 
 	<-done
+}
+
+// TestOpenEditor_DoesNotTouchDiskUntilCmdRuns is the regression test for the
+// $EDITOR scratch file: openEditor used to call os.CreateTemp and write the
+// message body directly, on the Update goroutine, before ever returning a
+// tea.Cmd. It must instead defer both to the closure it returns, so the key
+// handler that calls it never touches the filesystem itself.
+func TestOpenEditor_DoesNotTouchDiskUntilCmdRuns(t *testing.T) {
+	t.Parallel()
+
+	u := newSlashTestUI(t)
+
+	before, err := filepath.Glob(filepath.Join(os.TempDir(), "msg_*.md"))
+	require.NoError(t, err)
+
+	cmd := u.openEditor("hello from the editor")
+	require.NotNil(t, cmd)
+
+	after, err := filepath.Glob(filepath.Join(os.TempDir(), "msg_*.md"))
+	require.NoError(t, err)
+	require.Equal(t, before, after, "openEditor must not create the scratch file before its cmd runs")
+
+	msg := cmd()
+	ready, ok := msg.(openEditorReadyMsg)
+	require.True(t, ok, "expected openEditorReadyMsg, got %T", msg)
+	t.Cleanup(func() { _ = os.Remove(ready.tmpPath) })
+
+	content, err := os.ReadFile(ready.tmpPath)
+	require.NoError(t, err)
+	require.Equal(t, "hello from the editor", string(content),
+		"the scratch file must carry the message body once the cmd has run")
+	require.NotNil(t, ready.cmd, "a prepared exec.Cmd must be returned so Update can launch it")
+}
+
+// TestQuestionForm_OnAnswerAndOnCancelDeferToCmd is the regression test for
+// the question form's submit/cancel path: openBatchFormDialog used to wire
+// OnAnswer/OnCancel to call ws.QuestionAnswer/ws.QuestionCancel directly,
+// which HandleKey then invoked inline on the Update goroutine — a channel
+// send into the question service. Both must now return a tea.Cmd instead,
+// so HandleKey only builds the command and Update runs it, and the answer
+// still reaches the workspace once that cmd runs.
+func TestQuestionForm_OnAnswerAndOnCancelDeferToCmd(t *testing.T) {
+	t.Parallel()
+
+	ws := &cmdDrivingWorkspace{agentReady: true}
+	u := newCmdDrivenUI(ws)
+	u.openBatchFormDialog(question.Request{
+		Questions: []question.Question{{
+			ID:   "q1",
+			Type: question.TypeYesNo,
+			Text: "Ready?",
+		}},
+	})
+
+	done, cmd := u.activeInline.HandleKey(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	require.True(t, done, "answering the only question in a single-question form must submit")
+	require.NotNil(t, cmd, "submit must hand back a cmd instead of calling the workspace inline")
+	require.Zero(t, ws.questionAnswerCalls, "OnAnswer must not call the workspace before its cmd runs")
+
+	cmd()
+	require.Equal(t, 1, ws.questionAnswerCalls, "the answer must still reach the workspace once the cmd runs")
+	require.Len(t, ws.questionAnswerResponse, 1)
+	require.Equal(t, "q1", ws.questionAnswerResponse[0].QuestionID)
+	require.NotNil(t, ws.questionAnswerResponse[0].Yes)
+	require.True(t, *ws.questionAnswerResponse[0].Yes)
+
+	// Cancelling a fresh form follows the same contract.
+	u.openBatchFormDialog(question.Request{
+		Questions: []question.Question{{
+			ID:   "q1",
+			Type: question.TypeYesNo,
+			Text: "Ready?",
+		}},
+	})
+	done, cancelCmd := u.activeInline.HandleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.True(t, done)
+	require.NotNil(t, cancelCmd, "cancel must hand back a cmd instead of calling the workspace inline")
+	require.Zero(t, ws.questionCancelCalls, "OnCancel must not call the workspace before its cmd runs")
+
+	cancelCmd()
+	require.Equal(t, 1, ws.questionCancelCalls)
 }
