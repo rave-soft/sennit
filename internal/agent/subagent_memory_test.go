@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
@@ -271,8 +273,32 @@ func TestApplyCarryOverBudget(t *testing.T) {
 		}, 10)
 		assert.Equal(t, 1, dropped)
 		require.Len(t, kept, 1)
-		assert.Equal(t, strings.Repeat("x", 500), kept[0].Parts[0].(message.TextContent).Text,
-			"dropping the most recent exchange would lose exactly the context the next delegation follows on from")
+		assert.Equal(t, strings.Repeat("x", 10), kept[0].Parts[0].(message.TextContent).Text,
+			"the carried history must respect the budget even for the newest session")
+	})
+
+	t.Run("an oversized exchange is replaced by its compact placeholder, not kept whole", func(t *testing.T) {
+		t.Parallel()
+		// A single delegation whose tool result alone exceeds the budget.
+		// Keeping the exchange whole would blow the budget, so it is
+		// excluded and replaced by a compact, deterministic placeholder;
+		// the result must fit the budget for any sensible budget.
+		big := strings.Repeat("x", 5_000)
+		huge := []message.Message{
+			assistantText("earlier work"),
+			toolCallMsg("huge", "read"),
+			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "huge", Name: "read", Content: big}}},
+		}
+		kept, dropped := applyCarryOverBudget([][]message.Message{huge}, 100)
+		assert.Equal(t, 0, dropped)
+		assert.False(t, hasResult(kept, "huge"),
+			"the oversized result is dropped, not replayed")
+		assert.False(t, hasOrphanToolResult(kept),
+			"the placeholder must not leave an orphaned result")
+		assert.LessOrEqual(t, messagesTextLen(kept), 100,
+			"the placeholder keeps the carried history within budget")
+		assert.Contains(t, flattenedText(kept), "tool exchange",
+			"the placeholder names that a tool exchange was omitted")
 	})
 
 	t.Run("the newest session is trimmed to its tail, not carried whole", func(t *testing.T) {
@@ -298,8 +324,8 @@ func TestApplyCarryOverBudget(t *testing.T) {
 		}
 		kept, dropped := applyCarryOverBudget([][]message.Message{huge}, 10)
 		assert.Equal(t, 0, dropped)
-		require.Len(t, kept, 1, "carrying nothing is worse than carrying one oversized message")
-		assert.Equal(t, strings.Repeat("z", 5_000), kept[0].Parts[0].(message.TextContent).Text)
+		require.Len(t, kept, 1, "the newest plain-text tail remains available")
+		assert.Equal(t, strings.Repeat("z", 10), kept[0].Parts[0].(message.TextContent).Text)
 	})
 
 	t.Run("nothing to carry", func(t *testing.T) {
@@ -336,6 +362,443 @@ func TestRunSubAgent_CarryOverStaysWithinBudget(t *testing.T) {
 		"the oldest delegations must be shed once the budget is exceeded")
 	assert.Contains(t, agent.priorText(), "task 3:",
 		"the most recent delegations must survive")
+}
+
+// trimOrphanChecker reports whether a message slice has a tool result whose
+// matching tool call is absent (an orphan that preparePrompt would have to
+// repair). It is the acceptance criterion for T1: trimming must not produce
+// one.
+func hasOrphanToolResult(msgs []message.Message) bool {
+	knownCalls := make(map[string]struct{})
+	for _, m := range msgs {
+		if m.Role == message.Assistant {
+			for _, tc := range m.ToolCalls() {
+				knownCalls[tc.ID] = struct{}{}
+			}
+		}
+	}
+	for _, m := range msgs {
+		if m.Role != message.Tool {
+			continue
+		}
+		for _, tr := range m.ToolResults() {
+			if _, ok := knownCalls[tr.ToolCallID]; !ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// textMsg, assistantText and toolCallMsg are builders for the trimmed
+// histories the T1 tests assert on.
+func textMsg(role message.MessageRole, text string) message.Message {
+	return message.Message{Role: role, Parts: []message.ContentPart{message.TextContent{Text: text}}}
+}
+
+func assistantText(text string) message.Message {
+	return textMsg(message.Assistant, text)
+}
+
+func toolCallMsg(id, name string) message.Message {
+	return message.Message{
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.ToolCall{ID: id, Name: name, Input: "{}", Finished: true}},
+	}
+}
+
+func toolResultMsg(id string) message.Message {
+	return message.Message{
+		Role:  message.Tool,
+		Parts: []message.ContentPart{message.ToolResult{ToolCallID: id, Name: "tool", Content: "ok"}},
+	}
+}
+
+// TestTrimToBudgetKeepsExchangesWhole is the central T1 test: trimming a
+// history whose budget lands inside a tool exchange must keep every kept
+// result together with its call, even across interleaved assistant
+// text/reasoning and multiple exchanges, and must never leave an orphaned
+// result. An exchange that alone exceeds the budget is excluded and
+// replaced by a compact placeholder that keeps the result within budget.
+func TestTrimToBudgetKeepsExchangesWhole(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parallel calls kept together", func(t *testing.T) {
+		t.Parallel()
+		// One assistant turn issues two parallel tool calls (a single
+		// assistant message carries both ToolCall parts, as the model
+		// persists them); the two results are separate tool messages. A
+		// naive cut between the two results would orphan the one kept with
+		// its call dropped.
+		parallel := message.Message{
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.ToolCall{ID: "call-a", Name: "grep", Input: "{}", Finished: true},
+				message.ToolCall{ID: "call-b", Name: "glob", Input: "{}", Finished: true},
+			},
+		}
+		msgs := []message.Message{
+			assistantText("thinking"),
+			parallel,
+			toolResultMsg("call-a"),
+			toolResultMsg("call-b"),
+			assistantText("done"),
+		}
+		// Budget small enough that the raw cut lands inside the exchange.
+		kept := trimToBudget(msgs, 8)
+		assert.False(t, hasOrphanToolResult(kept),
+			"trimming must not leave a result whose call was dropped")
+		// The parallel batch moves as a unit: call-a and call-b are kept
+		// together with both results, or both are dropped with "done".
+		if hasResult(kept, "call-a") {
+			assert.True(t, hasCall(kept, "call-a"), "call-a kept with its result")
+			assert.True(t, hasResult(kept, "call-b"), "the parallel batch is kept whole")
+			assert.True(t, hasCall(kept, "call-b"), "call-b kept with its result")
+		}
+	})
+
+	t.Run("interleaved assistant text between call and result", func(t *testing.T) {
+		t.Parallel()
+		// The budget cut lands on an assistant *text* message that sits
+		// between a tool call and its result. The old code looked only at
+		// the Role of the first kept message; that message is assistant, so
+		// it would not have moved the cut back to the call, orphaning the
+		// result. The ID-based scan must pull the cut back to the call.
+		msgs := []message.Message{
+			toolCallMsg("c1", "grep"),
+			toolResultMsg("c1"),
+			assistantText("some reasoning in between"),
+			toolCallMsg("c2", "read"),
+			toolResultMsg("c2"),
+			assistantText("done"),
+		}
+		for budget := range 60 {
+			kept := trimToBudget(msgs, budget)
+			assert.False(t, hasOrphanToolResult(kept),
+				"budget %d: an interleaved assistant text must not orphan a result", budget)
+		}
+	})
+
+	t.Run("multiple exchanges, cut inside the second", func(t *testing.T) {
+		t.Parallel()
+		// Two complete exchanges. The budget is tuned so the raw cut lands
+		// between the second exchange's call and its result. The cut must
+		// move back to the second exchange's call, keeping that exchange
+		// whole, while the first exchange is dropped.
+		msgs := []message.Message{
+			toolCallMsg("e1", "grep"),
+			toolResultMsg("e1"),
+			assistantText("in between"),
+			toolCallMsg("e2", "read"),
+			toolResultMsg("e2"),
+			assistantText("done"),
+		}
+		for budget := range 60 {
+			kept := trimToBudget(msgs, budget)
+			assert.False(t, hasOrphanToolResult(kept),
+				"budget %d: trimming must not leave a result whose call was dropped", budget)
+			// e2's result, if kept, must be kept with e2's call.
+			if hasResult(kept, "e2") {
+				assert.True(t, hasCall(kept, "e2"),
+					"budget %d: e2's result must be kept with its call", budget)
+			}
+		}
+	})
+
+	t.Run("cut on an exchange boundary keeps the exchange whole", func(t *testing.T) {
+		t.Parallel()
+		// Two exchanges; the budget is tuned so the raw cut falls exactly
+		// at the boundary between them. The newer exchange must be kept in
+		// full (call + result), not chopped.
+		msgs := []message.Message{
+			toolCallMsg("old", "grep"),
+			toolResultMsg("old"),
+			toolCallMsg("new", "read"),
+			toolResultMsg("new"),
+		}
+		kept := trimToBudget(msgs, 24)
+		assert.True(t, hasCall(kept, "new"), "the newer exchange's call survives")
+		assert.True(t, hasResult(kept, "new"), "the newer exchange's result survives")
+		assert.False(t, hasOrphanToolResult(kept))
+	})
+
+	t.Run("partial results: an interrupted call batch is repaired, not split", func(t *testing.T) {
+		t.Parallel()
+		// A parallel batch where one result never arrived (interrupted
+		// stream). The call is kept; its missing result is an upstream
+		// orphan that preparePrompt synthesises - trimming must not create
+		// a new one by dropping the call while keeping the other result.
+		msgs := []message.Message{
+			toolCallMsg("call-a", "grep"),
+			toolCallMsg("call-b", "glob"),
+			toolResultMsg("call-b"), // call-a's result never came back
+			assistantText("done"),
+		}
+		for budget := range 20 {
+			kept := trimToBudget(msgs, budget)
+			// call-b's result must never be orphaned by trimming.
+			if hasResult(kept, "call-b") {
+				assert.True(t, hasCall(kept, "call-b"),
+					"budget %d: call-b's result must be kept with its call", budget)
+			}
+		}
+	})
+
+	t.Run("an oversized exchange is excluded and stubbed, and the result fits the budget", func(t *testing.T) {
+		t.Parallel()
+		// A single exchange whose result alone exceeds the budget. The
+		// exchange is excluded in full and replaced by a compact,
+		// deterministic placeholder (two text messages: a user note and an
+		// assistant acknowledgement). The kept result must fit the budget
+		// for any sensible budget and must not leave an orphan.
+		big := strings.Repeat("x", 5_000)
+		msgs := []message.Message{
+			assistantText("earlier work"),
+			toolCallMsg("huge", "read"),
+			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "huge", Name: "read", Content: big}}},
+		}
+		const budget = 100
+		kept := trimToBudget(msgs, budget)
+		assert.False(t, hasResult(kept, "huge"),
+			"the oversized result is dropped, not replayed")
+		assert.False(t, hasOrphanToolResult(kept), "the stub must not leave an orphan")
+		assert.LessOrEqual(t, messagesTextLen(kept), budget,
+			"the placeholder keeps the carried history within budget")
+		assert.Contains(t, flattenedText(kept), "tool exchange",
+			"the placeholder names that a tool exchange was omitted")
+		// The placeholder is one budget-aware plain-text message.
+		require.Len(t, kept, 1, "the placeholder is one text note")
+		assert.Equal(t, message.User, kept[0].Role, "the placeholder is a user text note")
+		for _, part := range kept[0].Parts {
+			_, isToolCall := part.(message.ToolCall)
+			assert.False(t, isToolCall, "the placeholder must not contain synthetic tool calls")
+		}
+	})
+}
+
+// flattenedText joins the TextContent of every message, for containment
+// assertions on the placeholder and carried history.
+func flattenedText(msgs []message.Message) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		for _, part := range m.Parts {
+			if tc, ok := part.(message.TextContent); ok {
+				b.WriteString(tc.Text)
+				b.WriteString("\n")
+			}
+		}
+	}
+	return b.String()
+}
+
+// hasCall / hasResult check a message slice for a tool call or result by id.
+func hasCall(msgs []message.Message, id string) bool {
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls() {
+			if tc.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasResult(msgs []message.Message, id string) bool {
+	for _, m := range msgs {
+		for _, tr := range m.ToolResults() {
+			if tr.ToolCallID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestTrimToBudgetNoRegressionOnPlainText pins that the exchange-aware cut
+// behaves like the old message-granular cut for histories with no tool
+// calls: it keeps the newest messages that fit, drops the rest, and a tail
+// that alone exceeds the budget is still kept (never an empty result).
+func TestTrimToBudgetExchangeBoundariesAndPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	t.Run("membership follows IDs across assistant text", func(t *testing.T) {
+		calls := message.Message{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "a", Name: "read", Input: "{}", Finished: true},
+			message.ToolCall{ID: "b", Name: "glob", Input: "{}", Finished: true},
+		}}
+		msgs := []message.Message{
+			calls,
+			assistantText("reasoning between calls and results"),
+			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "a", Content: strings.Repeat("a", 100)}}},
+			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "b", Content: strings.Repeat("b", 100)}}},
+			assistantText("final plain text tail"),
+		}
+		kept := trimToBudget(msgs, len("final plain text tail"))
+		require.Len(t, kept, 1)
+		assert.Equal(t, "final plain text tail\n", flattenedText(kept))
+		assert.False(t, hasOrphanToolResult(kept))
+	})
+
+	t.Run("placeholder is budget-aware text only", func(t *testing.T) {
+		calls := make([]message.ContentPart, 0, 20)
+		for i := range 20 {
+			calls = append(calls, message.ToolCall{ID: fmt.Sprintf("id-%d", i), Name: "very-long-tool-name", Input: "{}", Finished: true})
+		}
+		msgs := []message.Message{
+			{Role: message.Assistant, Parts: calls},
+			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "id-0", Content: strings.Repeat("x", 100)}}},
+		}
+		for _, budget := range []int{0, 1, 10} {
+			kept := trimToBudget(msgs, budget)
+			assert.LessOrEqual(t, messagesTextLen(kept), budget)
+			for _, m := range kept {
+				for _, part := range m.Parts {
+					_, isCall := part.(message.ToolCall)
+					assert.False(t, isCall)
+				}
+			}
+		}
+	})
+}
+
+func TestHasOrphanResultMatchesPreparePromptRoles(t *testing.T) {
+	t.Parallel()
+
+	t.Run("call outside assistant role cannot satisfy tool result", func(t *testing.T) {
+		msgs := []message.Message{
+			{Role: message.User, Parts: []message.ContentPart{message.ToolCall{ID: "shared", Name: "read"}}},
+			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "shared", Content: "result"}}},
+		}
+		assert.True(t, hasOrphanResult(msgs))
+	})
+
+	t.Run("result outside tool role cannot satisfy assistant call", func(t *testing.T) {
+		msgs := []message.Message{
+			{Role: message.Assistant, Parts: []message.ContentPart{message.ToolCall{ID: "shared", Name: "read"}}},
+			{Role: message.User, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "shared", Content: "result"}}},
+		}
+		assert.False(t, hasOrphanResult(msgs), "only tool-role results can be orphaned")
+	})
+}
+
+func TestTrimToBudgetLogsActualCounts(t *testing.T) {
+	// captureLogs serializes access to the process logger.
+	logs := captureLogs(t)
+
+	tests := []struct {
+		name                           string
+		msgs                           []message.Message
+		budget                         int
+		dropped, kept, truncated, stub int
+	}{
+		{
+			name:    "short placeholder before a tail",
+			msgs:    []message.Message{toolCallMsg("call", "read"), {Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "call", Content: strings.Repeat("x", 100)}}}, assistantText("tail")},
+			budget:  len("tail") + 5,
+			dropped: 2, kept: 1, stub: 1,
+		},
+		{
+			name:    "placeholder replaces final exchange",
+			msgs:    []message.Message{toolCallMsg("call", "read"), {Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "call", Content: strings.Repeat("x", 100)}}}},
+			budget:  10,
+			dropped: 2, stub: 1,
+		},
+		{
+			name:    "truncated plain text",
+			msgs:    []message.Message{assistantText("old"), assistantText(strings.Repeat("z", 100))},
+			budget:  10,
+			dropped: 1, truncated: 1,
+		},
+		{
+			name:    "ordinary user text with placeholder prefix",
+			msgs:    []message.Message{assistantText("old"), {Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "Earlier tool exchange omitted: user note"}}}},
+			budget:  len("Earlier tool exchange omitted: user note"),
+			dropped: 1, kept: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			before := len(logs.String())
+			kept := trimToBudget(test.msgs, test.budget)
+			record := logs.String()[before:]
+			assert.LessOrEqual(t, messagesTextLen(kept), test.budget)
+			assert.Contains(t, record, fmt.Sprintf("dropped_messages=%d", test.dropped))
+			assert.Contains(t, record, fmt.Sprintf("kept_messages=%d", test.kept))
+			assert.Contains(t, record, fmt.Sprintf("truncated_messages=%d", test.truncated))
+			assert.Contains(t, record, fmt.Sprintf("placeholder_messages=%d", test.stub))
+		})
+	}
+}
+
+func TestTrimToBudgetUTF8Boundaries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("oversized plain text keeps the maximum valid suffix", func(t *testing.T) {
+		const budget = 10
+		text := "префикс🙂конец"
+		kept := trimToBudget([]message.Message{{Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: text}}}}, budget)
+		require.Len(t, kept, 1)
+		got := kept[0].Parts[0].(message.TextContent).Text
+		assert.Equal(t, "конец", got, "the suffix is the longest valid UTF-8 suffix within ten bytes")
+		assert.LessOrEqual(t, len(got), budget)
+		assert.True(t, utf8.ValidString(got))
+	})
+
+	t.Run("oversized placeholder is valid UTF-8 and serializable", func(t *testing.T) {
+		msgs := []message.Message{
+			{Role: message.Assistant, Parts: []message.ContentPart{message.ToolCall{ID: "id", Name: "инструмент🙂", Input: "{}"}}},
+			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "id", Content: strings.Repeat("результат🙂", 20)}}},
+		}
+		for _, budget := range []int{1, 2, 3, 7, 10} {
+			kept := trimToBudget(msgs, budget)
+			assert.LessOrEqual(t, messagesTextLen(kept), budget)
+			for _, m := range kept {
+				for _, part := range m.Parts {
+					text, ok := part.(message.TextContent)
+					require.True(t, ok, "placeholder is text only")
+					assert.True(t, utf8.ValidString(text.Text))
+				}
+			}
+			_, err := json.Marshal(kept)
+			require.NoError(t, err, "the placeholder remains safe for message serialization")
+		}
+	})
+}
+
+func TestTrimToBudgetNoRegressionOnPlainText(t *testing.T) {
+	t.Parallel()
+
+	t.Run("keeps every consecutive tail message that fits", func(t *testing.T) {
+		t.Parallel()
+		long := []message.Message{
+			{Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("a", 100)}}},
+			{Parts: []message.ContentPart{message.TextContent{Text: "first"}}},
+			{Parts: []message.ContentPart{message.TextContent{Text: "second"}}},
+			{Parts: []message.ContentPart{message.TextContent{Text: "third"}}},
+		}
+		kept := trimToBudget(long, len("firstsecondthird"))
+		require.Len(t, kept, 3)
+		assert.Equal(t, "first\nsecond\nthird\n", flattenedText(kept))
+	})
+
+	t.Run("a plain-text tail that alone exceeds the budget is bounded, never empty", func(t *testing.T) {
+		t.Parallel()
+		// A single oversized text message. trimToBudget cannot stub plain
+		// text (there is no tool exchange to exclude), so it keeps the
+		// newest message rather than returning nothing - the same contract
+		// applyCarryOverBudget has for the newest session. The result may
+		// exceed the budget, but it is the most recent context and
+		// dropping it would lose exactly what the next delegation follows
+		// on from.
+		huge := []message.Message{
+			{Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("a", 100)}}},
+			{Parts: []message.ContentPart{message.TextContent{Text: strings.Repeat("z", 5_000)}}},
+		}
+		kept := trimToBudget(huge, 10)
+		require.Len(t, kept, 1, "dropping the tail entirely would lose the most recent context")
+		assert.Equal(t, strings.Repeat("z", 10), kept[0].Parts[0].(message.TextContent).Text)
+	})
 }
 
 // TestPriorMessagesReachTheModelAndAreNotPersisted is the other half of
@@ -383,4 +846,52 @@ func TestPriorMessagesReachTheModelAndAreNotPersisted(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("carried history suppressed title generation for a session that had none of its own")
 	}
+}
+
+// TestTrimToBudgetPreparePromptProducesNoOrphanRepairs is the T1
+// acceptance test, run through the real trim → preparePrompt path. The
+// budget is tuned so the raw cut lands inside a tool exchange; after
+// trimToBudget the kept history must be self-consistent, so preparePrompt
+// neither drops an orphaned result nor injects a synthetic one. (The
+// general repair counter in compat.go is not expected to reach zero -
+// interrupted streams and manual cancels still produce orphans - but the
+// specific orphans that trimming used to create must not appear here.)
+func TestTrimToBudgetPreparePromptProducesNoOrphanRepairs(t *testing.T) {
+	// No t.Parallel(): captureLogs serializes against every other log
+	// capture in the package through logCaptureMu.
+	logs := captureLogs(t)
+
+	env := testEnv(t)
+	model := newPromptCapturingModel("fake", "fake-model")
+	sa := testSessionAgent(env, model, "system")
+	agent, ok := sa.(*sessionAgent)
+	require.True(t, ok, "testSessionAgent must return a *sessionAgent")
+
+	// A prior session whose history, trimmed to a small budget, would land
+	// the cut between an assistant tool call and one of its results.
+	// assistant(call-a, call-b) + result(a) + result(b) + "done".
+	session := []message.Message{
+		assistantText("thinking"),
+		{Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "call-a", Name: "grep", Input: "{}", Finished: true},
+			message.ToolCall{ID: "call-b", Name: "glob", Input: "{}", Finished: true},
+		}},
+		toolResultMsg("call-a"),
+		toolResultMsg("call-b"),
+		assistantText("done"),
+	}
+
+	for _, budget := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 40} {
+		kept := trimToBudget(session, budget)
+		assert.False(t, hasOrphanToolResult(kept),
+			"budget %d: trimming must not leave a result whose call was dropped", budget)
+
+		_, _ = agent.preparePrompt(kept, true, nil)
+	}
+	// The trimming orphans that the old code produced are repaired by
+	// preparePrompt with a warning; T1 must not create any of them.
+	assert.NotContains(t, logs.String(), "Dropping orphaned tool result",
+		"trimToBudget must not leave a result whose call was dropped for preparePrompt to repair")
+	assert.NotContains(t, logs.String(), "Injecting synthetic tool result",
+		"trimToBudget must not leave a call whose result was dropped for preparePrompt to repair")
 }

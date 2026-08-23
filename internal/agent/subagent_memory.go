@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/rave-soft/sennit/internal/message"
 )
@@ -123,40 +126,254 @@ func applyCarryOverBudget(perSession [][]message.Message, budget int) ([]message
 	return carried, first
 }
 
-// trimToBudget drops whole messages from the front of a single session's
-// history until what is left fits in budget, keeping its tail: the end of
-// a delegation - what was decided, what was handed back - is what the next
-// one builds on, while the start is the exploration that got there.
+// trimToBudget keeps the largest suffix that fits budget without separating an
+// assistant tool call from any result carrying its ID. Exchange membership is
+// determined by IDs, rather than adjacent roles: assistant text and reasoning
+// may appear between a call and its result.
 //
-// The last message is always kept, however big it is, for the same reason
-// the newest session is: something of the previous exchange has to
-// survive. Cutting mid-session can leave a tool result whose call is gone,
-// or a call whose result is; preparePrompt already drops the one and
-// answers the other (see compat.go), so the cut does not have to fall on
-// an exchange boundary.
+// If an exchange itself cannot fit, it is omitted and represented by a single,
+// budget-aware text placeholder. The placeholder has no tool parts, so it
+// cannot create protocol repairs when the carried history reaches preparePrompt.
 func trimToBudget(msgs []message.Message, budget int) []message.Message {
-	if len(msgs) == 0 || messagesTextLen(msgs) <= budget {
-		return msgs
+	result := trimToBudgetResult(msgs, budget)
+	if result.trimmed {
+		logTrim(result, budget)
+	}
+	return result.messages
+}
+
+type trimResult struct {
+	messages                               []message.Message
+	kept, dropped, truncated, placeholders int
+	trimmed                                bool
+}
+
+func trimToBudgetResult(msgs []message.Message, budget int) trimResult {
+	if budget <= 0 || len(msgs) == 0 {
+		return trimResult{trimmed: len(msgs) > 0, dropped: len(msgs)}
+	}
+	if messagesTextLen(msgs) <= budget {
+		return trimResult{messages: msgs, kept: len(msgs)}
 	}
 
-	first := len(msgs) - 1
-	total := messagesTextLen(msgs[first:])
-	for i := len(msgs) - 2; i >= 0; i-- {
-		size := messagesTextLen(msgs[i : i+1])
-		if total+size > budget {
-			break
+	exchanges := findToolExchanges(msgs)
+	choice := bestSuffixCut(msgs, exchanges, 0, budget)
+	if choice >= 0 {
+		result := trimResult{
+			messages: msgs[choice:],
+			kept:     len(msgs) - choice,
+			dropped:  choice,
+			trimmed:  true,
 		}
-		total += size
-		first = i
+		// If the immediately preceding complete exchange was too large, leave
+		// a compact record of it while preserving the newest tail first.
+		if exchange, ok := exchangeEndingAt(exchanges, choice); ok && messagesTextLen(msgs[exchange.start:exchange.end]) > budget {
+			if stub := oversizedExchangePlaceholder(exchange.calls, budget-messagesTextLen(result.messages)); len(stub) > 0 {
+				result.messages = append(stub, result.messages...)
+				result.placeholders = len(stub)
+			}
+		}
+		return result
 	}
-	slog.Info(
-		"Trimmed the carried sub-agent session to the budget",
-		"dropped_messages", first,
-		"kept_messages", len(msgs)-first,
-		"kept_chars", total,
+
+	// No whole-message suffix fits. A textual tail is still useful context;
+	// retain as much of its final plain-text message as the budget permits.
+	if tail := truncatedPlainTextTail(msgs[len(msgs)-1], budget); len(tail) > 0 {
+		return trimResult{
+			messages:  tail,
+			dropped:   len(msgs) - 1,
+			truncated: 1,
+			trimmed:   true,
+		}
+	}
+
+	// An oversized final exchange has no following message boundary. Replace it
+	// with the deterministic text stub, which is itself clipped to budget.
+	if exchange, ok := exchangeContaining(exchanges, len(msgs)-1); ok && exchange.end == len(msgs) {
+		result := oversizedExchangePlaceholder(exchange.calls, budget)
+		return trimResult{
+			messages:     result,
+			dropped:      len(msgs),
+			placeholders: len(result),
+			trimmed:      true,
+		}
+	}
+	return trimResult{dropped: len(msgs), trimmed: true}
+}
+
+type toolExchange struct {
+	start, end int // end is exclusive
+	calls      []message.ToolCall
+}
+
+// findToolExchanges associates results with calls by ToolCallID. It does not
+// assume that tool messages are adjacent to the declaring assistant message.
+func findToolExchanges(msgs []message.Message) []toolExchange {
+	callAt := make(map[string]int)
+	callsAt := make(map[int][]message.ToolCall)
+	for i, m := range msgs {
+		if m.Role != message.Assistant {
+			continue
+		}
+		for _, call := range m.ToolCalls() {
+			if call.ID == "" {
+				continue
+			}
+			callAt[call.ID] = i
+			callsAt[i] = append(callsAt[i], call)
+		}
+	}
+	ends := make(map[int]int)
+	for start := range callsAt {
+		ends[start] = start + 1
+	}
+	for i, m := range msgs {
+		if m.Role != message.Tool {
+			continue
+		}
+		for _, result := range m.ToolResults() {
+			if start, ok := callAt[result.ToolCallID]; ok && i+1 > ends[start] {
+				ends[start] = i + 1
+			}
+		}
+	}
+	exchanges := make([]toolExchange, 0, len(callsAt))
+	for start, calls := range callsAt {
+		exchanges = append(exchanges, toolExchange{start: start, end: ends[start], calls: calls})
+	}
+	slices.SortFunc(exchanges, func(a, b toolExchange) int { return a.start - b.start })
+	return exchanges
+}
+
+// bestSuffixCut considers every message boundary. A boundary is rejected only
+// when its suffix contains an orphaned result.
+func bestSuffixCut(msgs []message.Message, _ []toolExchange, minimum, budget int) int {
+	for cut := minimum; cut < len(msgs); cut++ {
+		if messagesTextLen(msgs[cut:]) > budget || hasOrphanResult(msgs[cut:]) {
+			continue
+		}
+		return cut
+	}
+	return -1
+}
+
+func exchangeEndingAt(exchanges []toolExchange, end int) (toolExchange, bool) {
+	for _, exchange := range exchanges {
+		if exchange.end == end {
+			return exchange, true
+		}
+	}
+	return toolExchange{}, false
+}
+
+func exchangeContaining(exchanges []toolExchange, index int) (toolExchange, bool) {
+	for _, exchange := range exchanges {
+		if exchange.start <= index && index < exchange.end {
+			return exchange, true
+		}
+	}
+	return toolExchange{}, false
+}
+
+func hasOrphanResult(msgs []message.Message) bool {
+	known := make(map[string]struct{})
+	for _, m := range msgs {
+		if m.Role != message.Assistant {
+			continue
+		}
+		for _, call := range m.ToolCalls() {
+			known[call.ID] = struct{}{}
+		}
+	}
+	for _, m := range msgs {
+		if m.Role != message.Tool {
+			continue
+		}
+		for _, result := range m.ToolResults() {
+			if _, ok := known[result.ToolCallID]; !ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// oversizedExchangePlaceholder returns at most one plain text message. Keeping
+// it as text only is important: conversion and persistence must never see a
+// synthetic ToolCall for an omitted exchange.
+func oversizedExchangePlaceholder(calls []message.ToolCall, budget int) []message.Message {
+	if budget <= 0 {
+		return nil
+	}
+	const prefix = "Earlier tool exchange omitted: "
+	var names []string
+	for _, call := range calls {
+		name := call.Name
+		if name == "" {
+			name = "tool"
+		}
+		names = append(names, name)
+	}
+	text := prefix + strings.Join(names, ", ")
+	text = truncateUTF8(text, budget)
+	return []message.Message{{Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: text}}}}
+}
+
+func truncatedPlainTextTail(m message.Message, budget int) []message.Message {
+	if budget <= 0 || len(m.Parts) != 1 {
+		return nil
+	}
+	text, ok := m.Parts[0].(message.TextContent)
+	if !ok || text.Text == "" {
+		return nil
+	}
+	text.Text = suffixUTF8(text.Text, budget)
+	return []message.Message{{Role: m.Role, Parts: []message.ContentPart{text}}}
+}
+
+// logTrim reports source-message accounting: dropped_messages counts original
+// messages excluded completely; kept_messages counts original messages retained
+// unchanged. Replacements are reported separately as truncated_messages and
+// placeholder_messages.
+func logTrim(result trimResult, budget int) {
+	slog.Info("Trimmed the carried sub-agent session to the budget",
+		"dropped_messages", result.dropped,
+		"kept_messages", result.kept,
+		"truncated_messages", result.truncated,
+		"placeholder_messages", result.placeholders,
+		"kept_chars", messagesTextLen(result.messages),
 		"budget", budget,
 	)
-	return msgs[first:]
+}
+
+// truncateUTF8 returns the longest valid UTF-8 prefix within the byte budget.
+func truncateUTF8(text string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	if len(text) <= budget {
+		return text
+	}
+	end := budget
+	for end > 0 && !utf8.RuneStart(text[end]) {
+		end--
+	}
+	return text[:end]
+}
+
+// suffixUTF8 returns the longest valid UTF-8 suffix within the byte budget.
+func suffixUTF8(text string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	if len(text) <= budget {
+		return text
+	}
+	start := len(text) - budget
+	for start < len(text) && !utf8.RuneStart(text[start]) {
+		start++
+	}
+	return text[start:]
 }
 
 // messagesTextLen sizes a session by the text its messages carry.
