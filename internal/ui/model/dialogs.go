@@ -370,9 +370,11 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 	gen := m.sess.dialogGen
 	ws := m.com.Workspace
 	ctx := m.com.Context()
+	owner := m
 	return func() tea.Msg {
 		sessions, err := ws.ListSessions(ctx)
 		return sessionsLoadedMsg{
+			uiOwned:           uiOwned{owner: owner},
 			gen:               gen,
 			sessions:          sessions,
 			selectedSessionID: selectedSessionID,

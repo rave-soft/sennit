@@ -46,6 +46,8 @@ var lspStatesTTL = 5 * time.Second
 // lspStatesMsg delivers LSP states and per-server diagnostic counts fetched
 // off-thread.
 type lspStatesMsg struct {
+	uiOwned
+
 	states      map[string]workspace.LSPClientInfo
 	diagnostics map[string]lsp.DiagnosticCounts
 }
@@ -81,13 +83,14 @@ func (m *UI) dispatchLSPRefresh() tea.Cmd {
 	// keep re-requesting while this fetch is in flight.
 	m.lsp.checkedAt = time.Now()
 	ws := m.com.Workspace
+	owner := m
 	return func() tea.Msg {
 		states := ws.LSPGetStates()
 		diagnostics := make(map[string]lsp.DiagnosticCounts, len(states))
 		for name := range states {
 			diagnostics[name] = ws.LSPGetDiagnosticCounts(name)
 		}
-		return lspStatesMsg{states: states, diagnostics: diagnostics}
+		return lspStatesMsg{uiOwned: uiOwned{owner: owner}, states: states, diagnostics: diagnostics}
 	}
 }
 

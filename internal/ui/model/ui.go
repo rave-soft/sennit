@@ -1106,6 +1106,8 @@ type bangSessionCreatedMsg struct {
 // (superseded by a later open request) opening the dialog after the fact;
 // see applySessionsLoaded.
 type sessionsLoadedMsg struct {
+	uiOwned
+
 	gen               uint64
 	sessions          []session.Session
 	selectedSessionID string

@@ -77,6 +77,8 @@ type workspaceCacheState struct {
 
 // busyStateMsg delivers the result of an off-thread busy/permission probe.
 type busyStateMsg struct {
+	uiOwned
+
 	// gen is the busy generation captured when the probe was dispatched.
 	// A result whose generation no longer matches m.wsCache.busyFetchGen
 	// started before a newer state transition (optimistic send,
@@ -95,6 +97,8 @@ type busyStateMsg struct {
 
 // promptQueueMsg delivers the queued prompts fetched off-thread.
 type promptQueueMsg struct {
+	uiOwned
+
 	// forSession is the session the fetch was scoped to; a result that
 	// raced a session switch is discarded and re-fetched.
 	forSession string
@@ -163,8 +167,11 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	m.wsCache.busyFetchInFlight = true
 	ws := m.com.Workspace
 	gen := m.wsCache.busyFetchGen
+	// owner is a local, like ws and gen: the closure carries the pointer
+	// back so Root can address the reply, and never dereferences it.
+	owner := m
 	return func() tea.Msg {
-		st := busyStateMsg{gen: gen}
+		st := busyStateMsg{uiOwned: uiOwned{owner: owner}, gen: gen}
 		if ws.AgentIsReady() {
 			st.ready = true
 			st.agentBusy = ws.AgentIsBusy()
@@ -245,8 +252,9 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	if !started {
 		return nil
 	}
+	owner := m
 	return func() tea.Msg {
-		msg := promptQueueMsg{forSession: sessionID, gen: gen}
+		msg := promptQueueMsg{uiOwned: uiOwned{owner: owner}, forSession: sessionID, gen: gen}
 		if ws.AgentIsReady() {
 			msg.prompts = ws.AgentQueuedPromptsList(sessionID)
 		}

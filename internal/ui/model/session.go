@@ -101,6 +101,7 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 	// before asking for the load, so this is already the depth the load is
 	// for. See sessionLoadResolver.resumable.
 	resumable := !m.viewingChildSession()
+	owner := m
 	return func() tea.Msg {
 		loader := sessionLoadResolver{
 			ctx:       ctx,
@@ -108,6 +109,7 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 			styles:    styles,
 			config:    workspace.Config(),
 			resumable: resumable,
+			owner:     owner,
 		}
 		return loader.resolve(sessionID, generation)
 	}
@@ -116,6 +118,8 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 // loadSessionMsg is a message indicating that a session and its files have
 // been loaded.
 type loadSessionMsg struct {
+	uiOwned
+
 	gen                 uint64
 	sessionID           string
 	session             *session.Session
@@ -196,12 +200,17 @@ type sessionLoadResolver struct {
 	// load restores the session's pinned model, because only such a load
 	// is followed by a turn that would run on it — see resolve.
 	resumable bool
+	// owner is the UI this load was started for, carried onto every
+	// loadSessionMsg below so Root can deliver the result to it whatever
+	// screen is on top by then. Never dereferenced off the Update
+	// goroutine — see uiOwnedMsg.
+	owner *UI
 }
 
 func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 	s, err := r.workspace.GetSession(r.ctx, sessionID)
 	if err != nil {
-		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
+		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}
 	// Put the session back on the model it was working with before any of
 	// it is rendered, so the model shown and the model the next turn runs
@@ -228,7 +237,7 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 	}
 	sessionFiles, err := loadModifiedFiles(r.ctx, r.workspace, sessionID)
 	if err != nil {
-		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
+		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}
 	readFiles, err := r.workspace.FileTrackerListReadFiles(r.ctx, sessionID)
 	if err != nil {
@@ -236,14 +245,15 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 	}
 	msgs, err := r.workspace.ListMessages(r.ctx, sessionID)
 	if err != nil {
-		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
+		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}
 	items, lastUserMessageTime := sessionMessageItems(r.styles, r.config, msgs)
 	if err := loadNestedToolCalls(r.ctx, r.workspace, r.styles, r.config, sessionID, gen, items); err != nil {
-		return loadSessionMsg{gen: gen, sessionID: sessionID, err: err}
+		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}
 
 	return loadSessionMsg{
+		uiOwned:             uiOwned{owner: r.owner},
 		gen:                 gen,
 		sessionID:           sessionID,
 		session:             &s,

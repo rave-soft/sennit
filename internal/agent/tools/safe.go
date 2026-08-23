@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// safeCommands lists commands whose invocation is read-only enough to run
+// without a permission prompt. Membership is decided by prefix match (see
+// bash.go), which is why nothing here may be a *wrapper*: `env`, `nice`,
+// `nohup`, `time` and `timeout` all take another command as their
+// arguments, so listing them made `timeout 5 rm -rf ~` match as read-only
+// and skip the prompt entirely — an outright permission bypass, since
+// bannedCommands does not carry `rm`. `kill`/`killall` are not read-only
+// in the first place. Anything added here must be a command that is
+// harmless *including every argument it accepts*.
 var safeCommands = []string{
 	// Bash builtins and core utils
 	"cal",
@@ -13,22 +22,15 @@ var safeCommands = []string{
 	"df",
 	"du",
 	"echo",
-	"env",
 	"free",
 	"groups",
 	"hostname",
 	"id",
-	"kill",
-	"killall",
 	"ls",
-	"nice",
-	"nohup",
 	"printenv",
 	"ps",
 	"pwd",
 	"set",
-	"time",
-	"timeout",
 	"top",
 	"type",
 	"uname",

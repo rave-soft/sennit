@@ -631,8 +631,14 @@ func TestCmdDriving_StaleResultGuard_DiscardedAndRedispatched(t *testing.T) {
 
 	// Now drive the separately returned current-generation probe.
 	messages := runCmdTree(m, freshCmd, nil)
-	require.Contains(t, messages, busyStateMsg{gen: m.wsCache.busyFetchGen, ready: true, agentBusy: true},
-		"the replacement command must execute and deliver its result")
+	// The owner tag rides along on every dispatched probe (see uiOwnedMsg),
+	// so the expected value carries it too.
+	require.Contains(t, messages, busyStateMsg{
+		uiOwned:   uiOwned{owner: m},
+		gen:       m.wsCache.busyFetchGen,
+		ready:     true,
+		agentBusy: true,
+	}, "the replacement command must execute and deliver its result")
 }
 
 // ---------------------------------------------------------------------------

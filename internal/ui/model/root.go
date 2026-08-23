@@ -316,6 +316,16 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_, cmd := r.main.Update(msg)
 			return r, cmd
 		}
+		// A result addressed to the UI that asked for it. Reading the
+		// pointer here is on the Update goroutine, the only place a *UI
+		// may be touched — the dispatching closure only ever carried it,
+		// never dereferenced it.
+		if owned, ok := msg.(uiOwnedMsg); ok {
+			if owner := owned.ownerUI(); owner != nil {
+				_, cmd := owner.Update(msg)
+				return r, cmd
+			}
+		}
 		switch msg.(type) {
 		case spinner.TickMsg, anim.StepMsg, chatWarmMsg, scrollbarHideMsg, sidebarScrollbarHideMsg:
 			// Animation ticks keep themselves alive: the handler that
@@ -718,6 +728,26 @@ func (r *Root) Cleanup() {
 	r.thread = nil
 }
 
+// uiOwnedMsg marks the result of work a specific *UI started, so Root can
+// hand it back to that UI rather than to whichever screen happens to be on
+// top when it lands. Every one of these clears an in-flight or loading
+// flag, and each *UI (the main screen's and an attached thread's) keeps
+// its own: routed by active screen instead, a probe still in flight when
+// the user opened the dashboard or drilled into a thread had its result
+// dropped — the dashboard's own handler forwards nothing but mouse events
+// — and the flag it would have cleared stayed set for the rest of the
+// session, so that refresh never ran again. That is a permanently stale
+// busy state, prompt queue, LSP panel, sessions dialog that will not open,
+// or a session that never finishes loading.
+//
+// Embed uiOwned and set owner at dispatch to claim this.
+type uiOwnedMsg interface{ ownerUI() *UI }
+
+// uiOwned is the embeddable implementation of uiOwnedMsg.
+type uiOwned struct{ owner *UI }
+
+func (o uiOwned) ownerUI() *UI { return o.owner }
+
 // mainScreenMsg marks a message that belongs to the main session screen no
 // matter which screen is currently on top — the result of a refresh only
 // the main screen ever starts. Root delivers these to r.main directly
@@ -737,4 +767,10 @@ func (mainScreenOwned) isMainScreenMsg() {}
 // look present and do nothing.
 var (
 	_ mainScreenMsg = threadDockActivityLoadedMsg{}
+
+	_ uiOwnedMsg = busyStateMsg{}
+	_ uiOwnedMsg = promptQueueMsg{}
+	_ uiOwnedMsg = lspStatesMsg{}
+	_ uiOwnedMsg = sessionsLoadedMsg{}
+	_ uiOwnedMsg = loadSessionMsg{}
 )
