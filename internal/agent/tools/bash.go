@@ -221,6 +221,12 @@ func blockFuncs() []shell.BlockFunc {
 //   - The command name itself (argv[0] of each simple command) is not
 //     checked: `/usr/bin/env python3` names a binary to run, not a target
 //     being written to.
+//   - Arguments to a command known to only read them (readOnlyCommands,
+//     and git's inspecting subcommands) are not checked either: the
+//     boundary keeps changes in, not the thread from looking out — the
+//     view/grep tools already read anywhere — and refusing `cat /etc/hosts`
+//     only sent the model looking for a way around. Redirects on those
+//     commands are still checked. /dev/null is never outside.
 //
 // None of that is a gap in this function so much as the reason it exists
 // instead of a sandbox — see the bash entry in TECHDEBT.md.
@@ -249,6 +255,14 @@ func bashConfinementRefusal(permissions permission.Service, command string) (mes
 			if len(n.Args) < 2 {
 				return true
 			}
+			// A command that only ever reads its arguments cannot carry a
+			// change out of the workspace through them, so its arguments
+			// are not checked — its redirects still are (a separate
+			// *syntax.Redirect node), since `cat f > /outside/g` writes
+			// through the redirect, not through cat.
+			if readsOnlyFromArgs(n.Args) {
+				return true
+			}
 			for _, w := range n.Args[1:] {
 				if p, found := literalAbsPathOutside(w, boundary); found {
 					outsidePath = p
@@ -268,9 +282,78 @@ func bashConfinementRefusal(permissions permission.Service, command string) (mes
 	}
 	return fmt.Sprintf(
 		"refusing to run: %s is outside this workspace. "+
-			"This workspace is isolated to %s.",
+			"This workspace is isolated to %s: bash refuses any command that names "+
+			"an absolute path outside it (as an argument or a redirect target), "+
+			"except arguments to read-only commands such as cat, diff, ls, grep "+
+			"and git diff/log/show, and /dev/null anywhere. "+
+			"To show a whole file as a diff use `git diff --no-index /dev/null <file>`; "+
+			"to read a file outside the workspace use the view tool.",
 		outsidePath, boundary,
 	), true
+}
+
+// readOnlyCommands are commands whose arguments are only ever read —
+// never created, written, moved or removed — so an absolute path outside
+// the boundary among them cannot carry a change out of the workspace. The
+// list is deliberately conservative: a command with any writing mode at
+// all (sed -i, sort -o, find -delete, xxd with an output file, tee) is
+// left out, even though its common use is read-only. What a command does
+// with a redirect is not its concern — redirects are checked separately.
+var readOnlyCommands = map[string]bool{
+	"cat": true, "head": true, "tail": true, "less": true, "more": true,
+	"wc": true, "diff": true, "cmp": true, "comm": true, "file": true, "stat": true,
+	"ls": true, "tree": true, "du": true, "df": true,
+	"md5sum": true, "sha1sum": true, "sha256sum": true, "sha512sum": true, "cksum": true,
+	"grep": true, "egrep": true, "fgrep": true, "rg": true, "ag": true,
+	"cut": true, "tr": true, "strings": true, "jq": true, "yq": true,
+	"nl": true, "tac": true, "rev": true, "column": true, "fold": true, "expand": true,
+	"od": true, "hexdump": true, "realpath": true, "readlink": true,
+	"basename": true, "dirname": true, "test": true, "[": true,
+	"which": true, "type": true, "pwd": true, "true": true, "false": true, "echo": true, "printf": true,
+}
+
+// readOnlyGitSubcommands are the git subcommands that only inspect the
+// repository: none of them writes the working tree, the index, or refs,
+// whatever path arguments they are given (`git diff --no-index /dev/null
+// f` is the model's usual way of showing a new file whole).
+var readOnlyGitSubcommands = map[string]bool{
+	"diff": true, "log": true, "show": true, "status": true, "blame": true,
+	"grep": true, "ls-files": true, "ls-tree": true, "cat-file": true,
+	"rev-parse": true, "rev-list": true, "shortlog": true, "describe": true,
+	// Not here: branch, tag, stash, worktree — each lists, but each also
+	// creates or deletes.
+}
+
+// readsOnlyFromArgs reports whether the simple command args (argv, as
+// syntax.Words) is one whose arguments are known to be only read — see
+// readOnlyCommands. The command name must itself be literal (`$CMD ...`
+// is opaque). For git, the first argument must directly be a read-only
+// subcommand, optionally after --no-pager: a global option such as -C,
+// --git-dir or --work-tree repoints the command at another repository,
+// so any of those disqualifies.
+func readsOnlyFromArgs(args []*syntax.Word) bool {
+	name, ok := literalWordValue(args[0])
+	if !ok {
+		return false
+	}
+	name = filepath.Base(name)
+	if readOnlyCommands[name] {
+		return true
+	}
+	if name != "git" {
+		return false
+	}
+	for _, w := range args[1:] {
+		arg, ok := literalWordValue(w)
+		if !ok {
+			return false
+		}
+		if arg == "--no-pager" {
+			continue
+		}
+		return readOnlyGitSubcommands[arg]
+	}
+	return false
 }
 
 // literalAbsPathOutside reports the absolute path w statically evaluates
@@ -285,6 +368,14 @@ func literalAbsPathOutside(w *syntax.Word, boundary string) (path string, found 
 		return "", false
 	}
 	if !filepathext.SmartIsAbs(lit) {
+		return "", false
+	}
+	// /dev/null is the one path outside every boundary that nothing can
+	// be carried out through: reading it yields nothing, writing to it
+	// keeps nothing. `diff /dev/null f` and `git diff --no-index /dev/null
+	// f` are the standard way to show a file whole, and `cmd > /dev/null`
+	// appears constantly.
+	if lit == "/dev/null" {
 		return "", false
 	}
 	_, outside, err := resolveWithinWorkdir(boundary, lit)

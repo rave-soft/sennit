@@ -377,3 +377,73 @@ func TestBashTool_ConfinedWorkspaceDoesNotCatchDynamicPaths(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "overwritten\n", string(onDisk), "the write went through — this is the documented gap, not a sandbox")
 }
+
+// TestBashTool_ConfinedWorkspaceAllowsReadOnlyCommandsToReadOutside: the
+// boundary keeps changes in, it does not keep the thread from looking out
+// — view/grep already read anywhere, and bash refusing `cat /etc/hosts` or
+// `git diff --no-index /tmp/x f` (the model's way of showing a new file
+// whole) only made the thread route around the refusal. Arguments to a
+// known read-only command are not checked; /dev/null is never outside.
+func TestBashTool_ConfinedWorkspaceAllowsReadOnlyCommandsToReadOutside(t *testing.T) {
+	t.Parallel()
+
+	workdir, outside, perms := writeOutsideAttempt(t)
+	inside := filepath.Join(workdir, "f.txt")
+	require.NoError(t, os.WriteFile(inside, []byte("inside\n"), 0o644))
+	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+
+	for _, command := range []string{
+		"cat " + outside,
+		"diff " + outside + " " + inside + " || true",
+		"git --no-pager diff --no-index -- " + outside + " " + inside + " || true",
+		"git diff --no-index /dev/null " + inside + " || true",
+		"diff /dev/null " + inside + " || true",
+		"cat " + inside + " > /dev/null",
+		"/usr/bin/wc -l " + outside,
+	} {
+		resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+			ID:    "call-1",
+			Name:  BashToolName,
+			Input: mustJSONInput(t, BashParams{Command: command}),
+		})
+		require.NoError(t, err)
+		require.False(t, resp.IsError, "%q only reads and must not be refused: %s", command, resp.Content)
+	}
+
+	onDisk, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	require.Equal(t, "original\n", string(onDisk))
+}
+
+// TestBashTool_ConfinedWorkspaceReadOnlyAllowanceIsNarrow pins the edges of
+// that allowance: a redirect out of a read-only command still writes and
+// is still refused; a git invocation repointed at another repository (-C)
+// or a writing subcommand gets no allowance; and the refusal now says what
+// is refused and what to do instead.
+func TestBashTool_ConfinedWorkspaceReadOnlyAllowanceIsNarrow(t *testing.T) {
+	t.Parallel()
+
+	workdir, outside, perms := writeOutsideAttempt(t)
+	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+
+	for _, command := range []string{
+		"cat x > " + outside,
+		"git -C " + filepath.Dir(outside) + " diff",
+		"git worktree add " + outside,
+		"cp x " + outside,
+	} {
+		resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+			ID:    "call-1",
+			Name:  BashToolName,
+			Input: mustJSONInput(t, BashParams{Command: command}),
+		})
+		require.NoError(t, err)
+		require.True(t, resp.IsError, "%q can write outside and must be refused", command)
+		require.Contains(t, resp.Content, "outside this workspace")
+		require.Contains(t, resp.Content, "git diff --no-index /dev/null", "the refusal must say what to do instead")
+	}
+
+	onDisk, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	require.Equal(t, "original\n", string(onDisk))
+}
