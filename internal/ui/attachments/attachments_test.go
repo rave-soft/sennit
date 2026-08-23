@@ -1,10 +1,12 @@
 package attachments
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/ui/styles"
@@ -411,4 +413,89 @@ func TestHandleClick_EmptyListIgnored(t *testing.T) {
 
 	handled := m.HandleClick(5)
 	require.False(t, handled)
+}
+
+// TestRender_NoMoreChipWhenEverythingFits is a regression test for an
+// off-by-one in the "N more…" summary chip: the loop appended it as
+// soon as i == fits, guarded only by len(attachments) > i — which is
+// true even at i == len(attachments)-1, the last attachment, already
+// fully rendered on its own. That showed a bogus "1 more…" chip when
+// nothing was actually hidden. Sizing the width so fits lands exactly
+// on the last index must not produce a summary chip.
+func TestRender_NoMoreChipWhenEverythingFits(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRenderer()
+	atts := []message.Attachment{
+		{FileName: "a.txt"},
+		{FileName: "b.txt"},
+		{FileName: "c.txt"},
+	}
+
+	// Mirrors Render's own maxItemWidth formula so a width can be chosen
+	// that drives `fits` to exactly len(atts)-1 — the boundary where the
+	// bug fired.
+	removeReserve := r.removeStyle.String()
+	maxItemWidth := lipgloss.Width(r.imageStyle.String() + r.normalStyle.Render(strings.Repeat("x", maxFilename)) + removeReserve)
+	width := maxItemWidth * len(atts)
+
+	out := r.Render(atts, false, true, width)
+	require.NotContains(t, out, "more…", "every attachment fit; no summary chip should appear")
+	for _, a := range atts {
+		require.Contains(t, out, a.FileName)
+	}
+}
+
+// TestUpdate_DeleteMode_TwoDigitIndex is a regression test for delete
+// mode only ever consuming a single digit: with more than 10
+// attachments, the first keystroke used to commit (and exit delete
+// mode) immediately, making any index past 9 unreachable. A second
+// digit must extend the buffered index instead of being dropped.
+func TestUpdate_DeleteMode_TwoDigitIndex(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRenderer()
+	m := New(r, Keymap{})
+	for i := range 15 {
+		m.list = append(m.list, message.Attachment{FileName: fmt.Sprintf("file%d.txt", i)})
+	}
+	m.deleting = true
+
+	// First digit ('1'): with 15 attachments (max index 14, two digits),
+	// this must NOT commit yet — it could still be extended into "12".
+	handled := m.Update(tea.KeyPressMsg{Code: '1'})
+	require.True(t, handled)
+	require.True(t, m.deleting, "a single digit must not exit delete mode when a second digit could still refine the index")
+	require.Len(t, m.list, 15, "nothing should be deleted until the index is unambiguous")
+
+	// Second digit ('2') completes "12".
+	handled = m.Update(tea.KeyPressMsg{Code: '2'})
+	require.True(t, handled)
+	require.False(t, m.deleting, "delete mode must exit once the index is complete")
+	require.Len(t, m.list, 14)
+	for _, a := range m.list {
+		require.NotEqual(t, "file12.txt", a.FileName)
+	}
+}
+
+// TestUpdate_DeleteMode_SingleDigitStillCommitsImmediately covers the
+// common case (10 or fewer attachments): every valid index is a single
+// digit, so there is nothing a second digit could refine, and the
+// original one-keystroke behavior must be preserved.
+func TestUpdate_DeleteMode_SingleDigitStillCommitsImmediately(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRenderer()
+	m := New(r, Keymap{})
+	for i := range 3 {
+		m.list = append(m.list, message.Attachment{FileName: fmt.Sprintf("file%d.txt", i)})
+	}
+	m.deleting = true
+
+	handled := m.Update(tea.KeyPressMsg{Code: '1'})
+	require.True(t, handled)
+	require.False(t, m.deleting, "a single digit must commit immediately when no further digit could be valid")
+	require.Len(t, m.list, 2)
+	require.Equal(t, "file0.txt", m.list[0].FileName)
+	require.Equal(t, "file2.txt", m.list[1].FileName)
 }

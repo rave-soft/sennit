@@ -62,8 +62,12 @@ type sessionState struct {
 	navStack []sessionNavFrame
 }
 
-// sessionFilesUpdatesMsg is sent when the files for this session have been updated
+// sessionFilesUpdatesMsg is sent when the files for this session have been
+// updated. sessionID identifies which session the load was for, so a stale
+// reply arriving after the user switched sessions can be dropped instead of
+// clobbering m.sess.files with another session's file list.
 type sessionFilesUpdatesMsg struct {
+	sessionID    string
 	sessionFiles []SessionFile
 }
 
@@ -348,6 +352,7 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 			return util.NewErrorMsg(err)
 		}
 		return sessionFilesUpdatesMsg{
+			sessionID:    sessionID,
 			sessionFiles: sessionFiles,
 		}
 	}
@@ -363,7 +368,7 @@ func (m *UI) refreshModifiedFiles() tea.Cmd {
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
-		return sessionFilesUpdatesMsg{sessionFiles: files}
+		return sessionFilesUpdatesMsg{sessionID: sessionID, sessionFiles: files}
 	}
 }
 
@@ -379,7 +384,7 @@ func (m *UI) filesInfo(cwd string, width, maxItems int, isSection bool) string {
 	list := t.Files.EmptyMessage.Render("None")
 	var filesWithChanges []SessionFile
 	for _, f := range m.sess.files {
-		if !f.Uncommitted && f.Additions == 0 && f.Deletions == 0 {
+		if !hasFileChanges(f) {
 			continue
 		}
 		filesWithChanges = append(filesWithChanges, f)

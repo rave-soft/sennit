@@ -264,8 +264,12 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			if m.chat.HandleScrollbarMouseUp() {
 				// Scrollbar drag ended; nothing else to do.
 			} else if m.chat.HandleMouseUp(x, y) && m.chat.HasHighlight() {
+				// Snapshot lastClickTime up front: the tea.Tick closure
+				// runs on the cmd goroutine and must not read m off the
+				// Update loop.
+				clickTime := m.lastClickTime
 				cmds = append(cmds, tea.Tick(doubleClickThreshold, func(t time.Time) tea.Msg {
-					if time.Since(m.lastClickTime) >= doubleClickThreshold {
+					if time.Since(clickTime) >= doubleClickThreshold {
 						return copyChatHighlightMsg{}
 					}
 					return nil

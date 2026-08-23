@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/log/v2"
@@ -63,7 +64,7 @@ sennit run --continue "Follow up on your last response"
 		)
 
 		// Cancel on SIGINT or SIGTERM.
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
+		ctx, cancel := runSignalContext(context.Background())
 		defer cancel()
 
 		prompt := strings.Join(args, " ")
@@ -113,6 +114,14 @@ sennit run --continue "Follow up on your last response"
 
 		return runAgent(ctx, ws, prompt, model, quiet || verbose, sessionID, useLast)
 	},
+}
+
+// runSignalContext derives a context that cancels on SIGINT or SIGTERM, so
+// a plain `kill <pid>` (which sends SIGTERM, not SIGKILL) gets the same
+// graceful cancellation Ctrl-C does — SIGKILL cannot be caught by
+// signal.Notify at all, so listening for os.Kill here was a silent no-op.
+func runSignalContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 }
 
 func init() {

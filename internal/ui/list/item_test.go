@@ -19,8 +19,12 @@ func TestBaseItemLifecycle(t *testing.T) {
 	}
 
 	item.SetFocused(true)
-	if !item.Focused() || item.Version() != 1 || item.Cache() != nil {
-		t.Fatal("a focus change must clear cache and bump version")
+	// The cache must be emptied, not nilled out: nilling it permanently
+	// disables renderItem's per-width memo, because its nil-guard only
+	// ever populates a throwaway local map when handed nil (see
+	// completions/item.go's renderItem for the same pattern).
+	if !item.Focused() || item.Version() != 1 || item.Cache() == nil || len(item.Cache()) != 0 {
+		t.Fatal("a focus change must clear cache (without nilling it) and bump version")
 	}
 
 	match := fuzzy.Match{Str: "item", MatchedIndexes: []int{0, 2}}
@@ -34,8 +38,28 @@ func TestBaseItemLifecycle(t *testing.T) {
 	}
 
 	item.Invalidate()
-	if item.Version() != 3 || item.Cache() != nil {
-		t.Fatal("explicit invalidation must clear cache and bump version")
+	if item.Version() != 3 || item.Cache() == nil || len(item.Cache()) != 0 {
+		t.Fatal("explicit invalidation must clear cache (without nilling it) and bump version")
+	}
+}
+
+// TestBaseItemCache_SurvivesRepeatedInvalidation is a regression test
+// for a dead per-width cache: invalidate() used to set the cache field
+// to nil outright. Because nothing ever re-creates that map on the
+// BaseItem itself, and renderItem's own nil-guard (in the dialog
+// package) only populates a *local* map when handed nil, every write
+// after the first invalidation was silently discarded — the cache
+// never held anything again for the lifetime of the item. Writing
+// through Cache() after an invalidation must actually stick.
+func TestBaseItemCache_SurvivesRepeatedInvalidation(t *testing.T) {
+	item := NewBaseItem()
+
+	item.Cache()[40] = "first"
+	item.Invalidate()
+	item.Cache()[40] = "second"
+
+	if got := item.Cache()[40]; got != "second" {
+		t.Fatalf("cache write after invalidation must persist, got %q", got)
 	}
 }
 

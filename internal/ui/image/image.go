@@ -68,7 +68,7 @@ func Prepare(key PreviewKey, img image.Image) (string, string, error) {
 	img = fitImage(img, key.CellSize, key.Columns, key.Rows)
 	switch key.Encoding {
 	case EncodingBlocks:
-		return paint(img, key.Columns, key.Rows), "", nil
+		return paint(img, key.Columns, key.Rows, key.CellSize), "", nil
 	case EncodingKitty:
 		var output bytes.Buffer
 		bounds := img.Bounds()
@@ -106,15 +106,53 @@ func fitImage(img image.Image, cellSize CellSize, columns, rows int) image.Image
 	return imaging.Fit(img, columns*cellSize.Width, rows*cellSize.Height, imaging.Lanczos)
 }
 
-func paint(img image.Image, columns, rows int) string {
+// defaultCellSize approximates a monospace terminal cell's pixel
+// aspect ratio when the real one isn't known (e.g., no TIOCGWINSZ pixel
+// geometry available). Most terminal fonts render characters roughly
+// twice as tall as they are wide.
+var defaultCellSize = CellSize{Width: 1, Height: 2}
+
+// paint renders img as a grid of background-colored cells, at most
+// columns wide and rows tall.
+//
+// img already comes out of fitImage aspect-fit to (at most)
+// columns*cellSize.Width x rows*cellSize.Height pixels, but that fit is
+// in pixel space. Scaling it straight onto a columns x rows cell canvas
+// — one image pixel per cell — throws that away on two counts: it
+// stretches the (generally letterboxed) fitted image back out to fill
+// the full box, and it ignores that a terminal cell isn't square, so
+// even a perfectly square source image would render visually stretched.
+// Both are corrected here by sizing the canvas in cells using the
+// image's actual pixel bounds divided by the cell's pixel size, then
+// centering that within the requested columns x rows box.
+func paint(img image.Image, columns, rows int, cellSize CellSize) string {
+	if cellSize.Width <= 0 || cellSize.Height <= 0 {
+		cellSize = defaultCellSize
+	}
+
 	bounds := img.Bounds()
-	canvas := image.NewRGBA(image.Rect(0, 0, columns, rows))
+	outCols := max(1, min(columns, ceilDiv(bounds.Dx(), cellSize.Width)))
+	outRows := max(1, min(rows, ceilDiv(bounds.Dy(), cellSize.Height)))
+
+	canvas := image.NewRGBA(image.Rect(0, 0, outCols, outRows))
 	draw.ApproxBiLinear.Scale(canvas, canvas.Bounds(), img, bounds, draw.Over, nil)
+
+	// Center the (generally smaller) scaled image within the full
+	// columns x rows box, leaving the letterboxed/pillarboxed margin
+	// blank instead of stretching content into it.
+	offX := (columns - outCols) / 2
+	offY := (rows - outRows) / 2
+
 	var output bytes.Buffer
 	for y := range rows {
 		for x := range columns {
-			red, green, blue, _ := canvas.At(x, y).RGBA()
-			fmt.Fprintf(&output, "\x1b[48;2;%d;%d;%dm ", red>>8, green>>8, blue>>8)
+			cx, cy := x-offX, y-offY
+			if cx >= 0 && cx < outCols && cy >= 0 && cy < outRows {
+				red, green, blue, _ := canvas.At(cx, cy).RGBA()
+				fmt.Fprintf(&output, "\x1b[48;2;%d;%d;%dm ", red>>8, green>>8, blue>>8)
+			} else {
+				output.WriteString("\x1b[0m ")
+			}
 		}
 		output.WriteString("\x1b[0m")
 		if y < rows-1 {
@@ -122,6 +160,15 @@ func paint(img image.Image, columns, rows int) string {
 		}
 	}
 	return output.String()
+}
+
+// ceilDiv divides a by b, rounding up. b <= 0 is treated as "no scaling"
+// (returns a unchanged) rather than dividing by zero.
+func ceilDiv(a, b int) int {
+	if b <= 0 {
+		return a
+	}
+	return (a + b - 1) / b
 }
 
 func kittyPlaceholder(key PreviewKey) string {

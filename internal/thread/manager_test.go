@@ -2,6 +2,7 @@ package thread_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -482,6 +483,49 @@ func TestManager_CreateRejectsDuplicateName(t *testing.T) {
 
 	_, err = mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x", MergePolicy: thread.MergeManual})
 	require.Error(t, err)
+}
+
+// racingGetByNameStore wraps a real Store and always reports "not found"
+// from GetByName, simulating the window in Create's check-then-act race:
+// a concurrent Create for the same name can win between this Manager's
+// own GetByName check and its store.Create call, so the check alone
+// cannot be trusted to catch a duplicate.
+type racingGetByNameStore struct {
+	thread.Store
+}
+
+func (s *racingGetByNameStore) GetByName(ctx context.Context, name string) (thread.Thread, error) {
+	return thread.Thread{}, sql.ErrNoRows
+}
+
+// TestManager_CreateMapsRaceLostUniqueConstraintToFriendlyMessage is the
+// regression test for the store's UNIQUE(project_path, kind, name)
+// violation surfacing as raw driver text instead of the same "name ...
+// is already in use" message the check-then-act GetByName guard gives.
+// GetByName is stubbed to always report not-found (simulating a
+// concurrent Create winning the race), so the only thing standing
+// between this Create and a duplicate row is the store's own insert.
+func TestManager_CreateMapsRaceLostUniqueConstraintToFriendlyMessage(t *testing.T) {
+	repo := initRepo(t)
+	real := thread.NewStoreForTest(t)
+	_, err := real.Create(t.Context(), thread.CreateParams{
+		Name: "dup", Branch: "thread/dup", WorktreePath: t.TempDir(),
+	})
+	require.NoError(t, err)
+
+	mgr := thread.NewManager(thread.ManagerOptions{
+		Store:       &racingGetByNameStore{Store: real},
+		Spawner:     newFakeSpawner(t),
+		RepoRoot:    repo,
+		WorktreeDir: t.TempDir(),
+	})
+	shutdownManagerOnCleanup(t, mgr)
+
+	_, err = mgr.Create(t.Context(), thread.CreateArgs{Name: "dup", Goal: "x", MergePolicy: thread.MergeManual})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `name "dup" is already in use`)
+	require.NotContains(t, err.Error(), "UNIQUE constraint",
+		"the raw driver error text must not leak past Create")
 }
 
 func TestManager_CreateRejectsInvalidName(t *testing.T) {

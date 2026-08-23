@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
@@ -475,6 +477,52 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		err = coord.updateParentSessionCost(t.Context(), child.ID, "non-existent")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "get parent session")
+	})
+
+	t.Run("concurrent updates from several sub-agents do not lose a delta", func(t *testing.T) {
+		// Regression test for the read-modify-write race: several
+		// sub-agents of the same parent can finish at roughly the same
+		// time (e.g. concurrent "agent" tool calls in one turn's tool
+		// batch), each calling updateParentSessionCost for its own child.
+		// Without serialization, two concurrent Get/Save pairs can both
+		// read the same starting cost and each save their own delta on
+		// top of it, silently dropping one of the two deltas.
+		env := testEnv(t)
+		cfg, err := config.Load(env.workingDir, "", false)
+		require.NoError(t, err)
+		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+
+		parent, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		const n = 20
+		childIDs := make([]string, n)
+		for i := range n {
+			child, err := env.sessions.CreateTaskSession(t.Context(), fmt.Sprintf("tool-%d", i), parent.ID, fmt.Sprintf("Child%d", i))
+			require.NoError(t, err)
+			child.Cost = 0.01
+			_, err = env.sessions.Save(t.Context(), child)
+			require.NoError(t, err)
+			childIDs[i] = child.ID
+		}
+
+		var wg sync.WaitGroup
+		errs := make([]error, n)
+		for i := range n {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				errs[i] = coord.updateParentSessionCost(t.Context(), childIDs[i], parent.ID)
+			}(i)
+		}
+		wg.Wait()
+		for _, err := range errs {
+			require.NoError(t, err)
+		}
+
+		updated, err := env.sessions.Get(t.Context(), parent.ID)
+		require.NoError(t, err)
+		assert.InDelta(t, 0.01*n, updated.Cost, 1e-9, "every child's cost must land on the parent, none lost to the race")
 	})
 
 	t.Run("zero cost handled correctly", func(t *testing.T) {

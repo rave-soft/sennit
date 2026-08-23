@@ -185,6 +185,63 @@ func TestDiffViewTabs(t *testing.T) {
 	}
 }
 
+// TestDiffViewTabWidthAppliesAfterFirstRender is a regression test:
+// TabWidth (and ContextLines, see below) used to have no effect once
+// String() had already run once. computeDiff() caches its result behind
+// an isComputed flag that only Before/After/ChromaStyle cleared, and
+// replaceTabs mutates the file content in place — so by the second
+// String() call the tabs a new TabWidth should act on had already been
+// expanded away on the first call, leaving nothing left to re-expand.
+func TestDiffViewTabWidthAppliesAfterFirstRender(t *testing.T) {
+	t.Parallel()
+
+	dv := diffview.New().
+		Before("main.go", TestTabsBefore).
+		After("main.go", TestTabsAfter).
+		ChromaStyle(nil).
+		TabWidth(8)
+	_ = dv.String() // force computeDiff/replaceTabs to run once under width 8
+
+	got := dv.TabWidth(2).String()
+
+	want := diffview.New().
+		Before("main.go", TestTabsBefore).
+		After("main.go", TestTabsAfter).
+		ChromaStyle(nil).
+		TabWidth(2).
+		String()
+
+	require.Equal(t, want, got,
+		"TabWidth set after an earlier String() call must still take effect")
+}
+
+// TestDiffViewContextLinesAppliesAfterFirstRender is ContextLines' half
+// of the same regression as above: computeDiff's isComputed cache must
+// be dropped so a later ContextLines() change actually recomputes the
+// diff instead of reusing the stale one.
+func TestDiffViewContextLinesAppliesAfterFirstRender(t *testing.T) {
+	t.Parallel()
+
+	dv := diffview.New().
+		Before("main.go", TestMultipleHunksBefore).
+		After("main.go", TestMultipleHunksAfter).
+		ChromaStyle(nil).
+		ContextLines(4)
+	_ = dv.String() // force computeDiff to run once under 4 context lines
+
+	got := dv.ContextLines(1).String()
+
+	want := diffview.New().
+		Before("main.go", TestMultipleHunksBefore).
+		After("main.go", TestMultipleHunksAfter).
+		ChromaStyle(nil).
+		ContextLines(1).
+		String()
+
+	require.Equal(t, want, got,
+		"ContextLines set after an earlier String() call must still take effect")
+}
+
 func TestDiffViewLineBreakIssue(t *testing.T) {
 	t.Parallel()
 

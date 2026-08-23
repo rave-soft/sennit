@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 var errDockerUnavailable = errors.New("docker unavailable")
@@ -186,6 +188,57 @@ func TestDisableDockerMCP(t *testing.T) {
 
 		err := store.DisableDockerMCP()
 		require.NoError(t, err)
+	})
+
+	// TestDisableDockerMCP/does_not_leak_project-scoped_servers_into_global_config
+	// guards against writing the whole in-memory c.MCP map (the merge of
+	// every config layer) back to the global file: c.MCP can hold a
+	// project-scoped server -- with its oauth_token -- that the global
+	// file never declared, and DisableDockerMCP must only ever touch the
+	// single "mcp.docker" field, never copy that server (or its token)
+	// into the global file.
+	t.Run("does not leak project-scoped servers into global config", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "sennit.json")
+		globalContent := `{"mcp":{"docker":{"type":"stdio","command":"docker","args":["mcp","gateway","run"]}}}`
+		require.NoError(t, os.WriteFile(configPath, []byte(globalContent), 0o600))
+
+		// c.MCP is the already-merged map: it also carries a
+		// project-scoped server, declared only in some project's own
+		// config, complete with a secret oauth_token that must never end
+		// up in the global file.
+		cfg := &Config{
+			MCP: map[string]MCPConfig{
+				DockerMCPName: {
+					Type:    MCPStdio,
+					Command: "docker",
+					Args:    []string{"mcp", "gateway", "run"},
+				},
+				"project-server": {
+					Type:       MCPStdio,
+					Command:    "project-tool",
+					OAuthToken: &oauth.Token{AccessToken: "super-secret"},
+				},
+			},
+		}
+		store := &ConfigStore{
+			config:         cfg,
+			globalDataPath: configPath,
+			resolver:       NewShellVariableResolver(env.New()),
+		}
+
+		err := store.DisableDockerMCP()
+		require.NoError(t, err)
+
+		data, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		require.False(t, gjson.GetBytes(data, "mcp.docker").Exists(), "mcp.docker should be removed")
+		require.False(t, gjson.GetBytes(data, "mcp.project-server").Exists(),
+			"a project-scoped server must never be written into the global config")
+		require.NotContains(t, string(data), "super-secret",
+			"a project-scoped server's oauth_token must never leak into the global config")
 	})
 }
 

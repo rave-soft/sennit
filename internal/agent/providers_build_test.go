@@ -604,6 +604,27 @@ func TestBuildProvider(t *testing.T) {
 		require.Equal(t, true, body["tool_stream"])
 	})
 
+	t.Run("openaicompat type with ZAI ID does not mutate the shared providerCfg.ExtraBody map", func(t *testing.T) {
+		t.Parallel()
+		c := newProxyTestCoordinator(t, false)
+		server, _ := newCaptureServer(t)
+		// providerCfg.ExtraBody is the same map instance a *config.Config
+		// hands out to every buildProvider call for this provider, and
+		// possibly to concurrent callers too. Mutating it in place (the
+		// old bug) both races those callers and leaks tool_stream into
+		// every later provider built from the same config generation.
+		sharedExtraBody := map[string]any{"other": "value"}
+		providerCfg := config.ProviderConfig{
+			Type: "openai-compat", ID: string(catwalk.InferenceProviderZAI),
+			APIKey: "akey", BaseURL: server.URL, ExtraBody: sharedExtraBody,
+		}
+		provider, err := c.buildProvider(providerCfg, config.SelectedModel{Model: "glm-5"}, false)
+		require.NoError(t, err)
+		probe(t, provider, "glm-5")
+		require.NotContains(t, sharedExtraBody, "tool_stream", "buildProvider must not write into the caller's ExtraBody map")
+		require.Equal(t, map[string]any{"other": "value"}, sharedExtraBody)
+	})
+
 	t.Run("openaicompat type without a special vendor ID leaves extra_body untouched", func(t *testing.T) {
 		t.Parallel()
 		c := newProxyTestCoordinator(t, false)

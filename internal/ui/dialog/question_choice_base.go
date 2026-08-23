@@ -408,15 +408,16 @@ type choiceItemRenderer func(index int, choice question.Choice, active bool, inn
 // height returns the total visual height at the given width. It is
 // len(buildLines), the single source of truth for layout, and a
 // pure function of the width passed in so it always agrees with
-// the width drawContent will use this frame.
-func (c *choiceList) height(width int) int {
+// the width drawContent will use this frame. itemFn must be the
+// same renderer Draw uses (see SingleChoice/MultiChoice's
+// choiceItemContent) — a placeholder that ignores wrapping
+// understates the height of any dialog with long labels.
+func (c *choiceList) height(width int, itemFn choiceItemRenderer) int {
 	if width <= 0 {
 		width = c.lastWidth
 	}
 	innerWidth := min(width-4, choiceListMaxWidth)
-	return len(c.buildLines(innerWidth, "> ", func(int, question.Choice, bool, int) string {
-		return "x" // single-line placeholder; only count matters
-	}))
+	return len(c.buildLines(innerWidth, "> ", itemFn))
 }
 
 func (c *choiceList) heightChanged() bool {
@@ -546,6 +547,11 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 // row so that mouse clicks can select choices directly. Each choice
 // gets a single layer spanning all its visible rows.
 func (c *choiceList) buildChoiceCompositor(lines []contentLine, area uv.Rectangle, contentWidth int) {
+	// A zero-width draw area (or the overflow scrollbar column eating the
+	// last column of an already-1-wide area) can drive contentWidth
+	// negative; strings.Repeat panics on a negative count, so clamp.
+	contentWidth = max(contentWidth, 0)
+
 	// Collect the screen-row range for each choice index.
 	type rowRange struct{ min, max int }
 	ranges := make(map[int]*rowRange)

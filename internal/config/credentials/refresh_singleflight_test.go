@@ -52,6 +52,15 @@ func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 // always persists the credential fields regardless of catalog membership.
 func newRefreshTestManager(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) *Manager {
 	t.Helper()
+	m, _ := newRefreshTestManagerWithStore(t, configPath, exchange)
+	return m
+}
+
+// newRefreshTestManagerWithStore is newRefreshTestManager, but also returns
+// the backing *fakeStore so a test can reach into it (e.g. to force
+// PersistRefreshedToken to fail via persistFailures).
+func newRefreshTestManagerWithStore(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) (*Manager, *fakeStore) {
+	t.Helper()
 
 	expired := &oauth.Token{
 		AccessToken:  "at0",
@@ -72,7 +81,7 @@ func newRefreshTestManager(t *testing.T, configPath string, exchange func(ctx co
 	store := newFakeStore(&config.Config{Providers: providers}, configPath, filepath.Join(filepath.Dir(configPath), "locks"))
 	m := New(store)
 	m.exchangeToken = exchange
-	return m
+	return m, store
 }
 
 // TestRefreshOAuthToken_InProcessSingleFlight verifies that a storm of
@@ -291,6 +300,54 @@ func TestRefreshOAuthToken_IgnoresOlderDiskToken(t *testing.T) {
 	require.Equal(t, int64(1), exchanges.Load())
 	require.Equal(t, int64(0), reuse.Load())
 
+	pc, ok := mgr.store.Config().Providers.Get("copilot")
+	require.True(t, ok)
+	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)
+}
+
+// TestRefreshOAuthToken_RetriesPersistBeforeGivingUp verifies that a
+// transient PersistRefreshedToken failure is retried (refreshPersistAttempts
+// times) rather than giving up on the first error.
+func TestRefreshOAuthToken_RetriesPersistBeforeGivingUp(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "sennit.json")
+	exchange, exchanges, _ := rotatingExchange("rt0", 1)
+	mgr, store := newRefreshTestManagerWithStore(t, configPath, exchange)
+
+	// Fail every persist attempt but the last, so the call only succeeds
+	// because of the retry loop.
+	store.persistFailures = refreshPersistAttempts - 1
+
+	require.NoError(t, mgr.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "copilot"))
+	require.Equal(t, int64(1), exchanges.Load(), "a persist failure must not trigger a second exchange")
+	require.Equal(t, refreshPersistAttempts, store.persistCallCount)
+
+	pc, ok := mgr.store.Config().Providers.Get("copilot")
+	require.True(t, ok)
+	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken, "the refreshed token must still be published once persist eventually succeeds")
+}
+
+// TestRefreshOAuthToken_PublishesTokenEvenIfPersistNeverSucceeds verifies
+// that, after retries are exhausted, refreshOAuthTokenLocked still
+// publishes the refreshed token in memory (there is no way to undo an
+// already-spent refresh token) and surfaces the persist failure to the
+// caller rather than swallowing it.
+func TestRefreshOAuthToken_PublishesTokenEvenIfPersistNeverSucceeds(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "sennit.json")
+	exchange, exchanges, _ := rotatingExchange("rt0", 1)
+	mgr, store := newRefreshTestManagerWithStore(t, configPath, exchange)
+
+	// Every attempt fails; retries alone cannot save this refresh.
+	store.persistFailures = refreshPersistAttempts + 10
+
+	err := mgr.RefreshOAuthToken(context.Background(), config.ScopeGlobal, "copilot")
+	require.ErrorIs(t, err, errPersistFailed)
+	require.Equal(t, int64(1), exchanges.Load())
+	require.Equal(t, refreshPersistAttempts, store.persistCallCount, "must not retry forever")
+
+	// The exchange already spent the old refresh token, so the refreshed
+	// one must still be published in memory even though disk was never
+	// updated -- silently discarding it here would leave the process
+	// unable to refresh again with the (now stale) token still on disk.
 	pc, ok := mgr.store.Config().Providers.Get("copilot")
 	require.True(t, ok)
 	require.Equal(t, "rt1", pc.OAuthToken.RefreshToken)

@@ -55,16 +55,11 @@ func questionSummary(params tools.QuestionParams) string {
 		return ""
 	}
 	if n == 1 {
-		text := params.Questions[0].Question
-		if len(text) > 60 {
-			text = text[:59] + "…"
-		}
-		return text
+		// Width-aware: byte slicing splits multi-byte runes (e.g.
+		// Cyrillic) and corrupts the header.
+		return ansi.Truncate(params.Questions[0].Question, 60, "…")
 	}
-	first := params.Questions[0].Question
-	if len(first) > 40 {
-		first = first[:39] + "…"
-	}
+	first := ansi.Truncate(params.Questions[0].Question, 40, "…")
 	return fmt.Sprintf("%s (+%d more)", first, n-1)
 }
 

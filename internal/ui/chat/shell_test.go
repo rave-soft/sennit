@@ -118,6 +118,53 @@ func TestCompletedShellItemShowsHeadAndAccurateCount(t *testing.T) {
 	require.Equal(t, "… 2 more lines", lines[11])
 }
 
+// TestShellItemHorizontalScrollDoesNotWidenLine pins that once a line is
+// horizontally scrolled, the leading "…" marker is carved out of the
+// truncation width rather than glued on afterward. Gluing it on after
+// ansi.Truncate already filled cappedWidth pushes every scrolled line one
+// column past the render area.
+func TestShellItemHorizontalScrollDoesNotWidenLine(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewPendingShellItem(&sty, "cat wide.txt")
+	item.Complete(strings.Repeat("x", 200)+"\n", 0)
+
+	const width = 80
+	cappedWidth := cappedMessageWidth(width)
+
+	item.ScrollHorizontal(10)
+	out := item.RawRender(width)
+
+	for _, line := range strings.Split(out, "\n") {
+		require.LessOrEqualf(t, ansi.StringWidth(ansi.Strip(line)), cappedWidth,
+			"scrolled line must not exceed the capped width %d: %q", cappedWidth, line)
+	}
+}
+
+// TestShellItemHoverableAtMatchesRawRenderLineCount pins that HoverableAt
+// and RawRender agree on how many lines the trimmed output has. They used
+// to trim differently (strings.TrimSpace vs. a trailing-only whitespace/
+// ANSI-reset trim), so an output block could be reported clickable by
+// HoverableAt while RawRender's own count disagreed about whether it was
+// over the collapse threshold — or vice versa.
+func TestShellItemHoverableAtMatchesRawRenderLineCount(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewPendingShellItem(&sty, "seq 11")
+	// A leading blank line: TrimSpace strips it (making the block look
+	// one line shorter than shellMaxCollapsedLines), while the
+	// trailing-only trim used by RawRender does not.
+	item.Complete("\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", 0)
+
+	rendered := ansi.Strip(item.RawRender(80))
+	rawIsExpandable := strings.Contains(rendered, "more lines")
+
+	require.Equal(t, rawIsExpandable, item.HoverableAt(0, 1, 0),
+		"HoverableAt must agree with RawRender about whether the block can expand")
+}
+
 func TestShellOutputWindows(t *testing.T) {
 	t.Parallel()
 

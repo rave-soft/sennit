@@ -198,184 +198,217 @@ TECHDEBT.md.
 
 ## Фаза 2 — Корректность, bug-low (по пакетам)
 
+**СДЕЛАНО (2026-08-23).** Все пункты фазы закрыты; каждый фикс покрыт
+регрессионным тестом, падающим на старом коде. Проверка на итоговом дереве:
+`go build ./...`, `go vet ./...`, `go test ./...`, `go test -race` по всем
+затронутым пакетам и `golangci-lint run` — чисто.
+
+Отклонения и уточнения к плану:
+
+- Пункт `store.go:274` (`Overrides()` отдаёт указатель) закрыт ещё в фазе 1.
+- Пути `internal/config/discover/*` в плане указаны неверно: пакет лежит на
+  верхнем уровне — `internal/discover/`.
+- Утечка рукописных моделей в кэш: сигнатуру `DiscoverModels` не меняли (её
+  зовут из `workspace` и `cmd`). Вместо этого `validateCustomProviders`
+  вычитает по ID список моделей, известный до discovery, и кэширует только
+  свежеобнаруженное.
+- `lmstudio.SupportsImages` гейтится по членству ID в `ExistingModels`: у
+  поля нет сентинела «не задано», в отличие от `ContextWindow`/`Name`.
+- MCP-токены и `DisableDockerMCP`: см. фазу 1 — здесь только удаление ровно
+  `mcp.docker` вместо перезаписи смёрженного блока.
+- `LocalSpawner.Spawn` самостоятельной утечки не имеет: подпроцессы копились
+  через `Bootstrap` → `New`, чинится откатом в `New`. Попутно закрыта утечка
+  горутин herdr-моста, висевших на контексте `New` бессрочно.
+- `common/elements.go` по указанным строкам уже корректен (`lipgloss.Width`,
+  `ansi.Truncate`) — изменений нет.
+- Ветка «`NewTermRenderer` вернул ошибку» в `common/markdown.go` исправлена,
+  но тестом не покрыта: при текущих опциях `glamour` ошибку вернуть не может.
+- `simulateCarriageReturns`: `\r` теперь сохраняет SGR-состояние и хвост
+  строки, а CSI K протаскивается до этого прохода сентинелом; `0K`/`1K`/`2K`
+  не различаются — все три трактуются как «стереть до конца строки».
+- `updateLSPState(err)` остаётся с `//nolint:unparam`: значение никем не
+  передаётся, но поле рендерится в `ui/model/lsp.go` — кандидат в фазу 5
+  (либо прокинуть реальную ошибку, либо убрать плумбинг целиком).
+
+
 ### internal/agent + tools
 
-- [ ] `providers.go:741` — `ExtraBody["tool_stream"]=true` для ZAI мутирует
+- [x] `providers.go:741` — `ExtraBody["tool_stream"]=true` для ZAI мутирует
   map, разделяемую с хранимым Config (гонка + протечка флага в будущие
   поколения конфига); клонировать, как соседний `headers`. **S**
-- [ ] `usage.go:114,178` — cleanup-пути summarize используют отменяемый ctx:
+- [x] `usage.go:114,178` — cleanup-пути summarize используют отменяемый ctx:
   при отмене остаётся «вечное» пустое summary-сообщение; перевести на
   `context.WithoutCancel` + таймаут, как в `handleStreamError`. **S**
-- [ ] `agent.go:669` — окно idle между `clearActiveIfMatch` и `summarize`:
+- [x] `agent.go:669` — окно idle между `clearActiveIfMatch` и `summarize`:
   continuation успевает занять сессию → успешный ход завершается
   `ErrSessionBusy`. **M**
-- [ ] `turn.go:710` — «model is not enabled» жёстко классифицируется как
+- [x] `turn.go:710` — «model is not enabled» жёстко классифицируется как
   Copilot-квота с ссылкой на настройки Copilot для любого провайдера;
   гейтить по `t.model.ModelCfg.Provider`. **S**
-- [ ] `tools/tools.go:143` — `resolveWithinWorkdir` считает `..foo` внешним
+- [x] `tools/tools.go:143` — `resolveWithinWorkdir` считает `..foo` внешним
   путём (`HasPrefix(relPath, "..")`); тот же дефект чинили в
   `fsext.HasPrefix` — использовать его. **S**
-- [ ] `subagents.go:120` — lost update стоимости родительской сессии:
+- [x] `subagents.go:120` — lost update стоимости родительской сессии:
   read-modify-write без сериализации при параллельных суб-агентах. **S/M**
-- [ ] `tools/fetch.go:176` — обрезка `content[:MaxFetchSize]` по байтам
+- [x] `tools/fetch.go:176` — обрезка `content[:MaxFetchSize]` по байтам
   рубит UTF-8-руну после валидации всего контента. **S**
-- [ ] `providers.go:216` — google-ветка не гейтит thinking по `CanReason`:
+- [x] `providers.go:216` — google-ветка не гейтит thinking по `CanReason`:
   не-reasoning google-модели получают пустой `thinking_level` — кандидат на
   400. **S**
 
 ### internal/config / discover / credentials / home / csync
 
-- [ ] `providers_merge.go:251` + `store.go:311` — удаление устаревшего
+- [x] `providers_merge.go:251` + `store.go:311` — удаление устаревшего
   Anthropic-OAuth целится в data-файл, а провайдер живёт в пользовательском
   конфиге: вечный no-op + безусловная перезапись файла → reload-пинг-понг
   между двумя инстансами с периодом ~2с. **S**
-- [ ] `store.go:274` — `Overrides()` отдаёт незащищённый указатель;
+- [x] `store.go:274` — `Overrides()` отдаёт незащищённый указатель;
   читатели/писатели работают мимо writeMu — data race с
   `pinPreferredModelLocked` и reload. **S/M**
-- [ ] `store.go:526` — `RemoveConfigField` не обновляет staleness-снапшот
+- [x] `store.go:526` — `RemoveConfigField` не обновляет staleness-снапшот
   атомарно с записью (в отличие от `SetConfigFields`): watcher принимает
   свою запись за внешнюю → лишний полный reload. **S**
-- [ ] `docker_mcp.go:158` — `DisableDockerMCP` переписывает весь смёрженный
+- [x] `docker_mcp.go:158` — `DisableDockerMCP` переписывает весь смёрженный
   `mcp`-блок в глобальный файл: project-scoped серверы (с oauth_token)
   копируются во все проекты. Использовать
   `RemoveConfigField(ScopeGlobal, "mcp.docker")`. **S**
-- [ ] `credentials/credentials.go:228` — токен публикуется в память до
+- [x] `credentials/credentials.go:228` — токен публикуется в память до
   persist на диск: упавшая запись оставляет на диске потраченный
   refresh-токен → reuse detection → отзыв token family. Логировать как
   критическое + ретраить persist. **S/M**
-- [ ] `discover/lmstudio.go:102` — `SupportsImages` перетирается безусловно,
+- [x] `discover/lmstudio.go:102` — `SupportsImages` перетирается безусловно,
   вопреки контракту Enricher «пользовательские переопределения
   побеждают». **S**
-- [ ] `providers_validate.go:73` + `discover/discover.go:190` — рукописные
+- [x] `providers_validate.go:73` + `discover/discover.go:190` — рукописные
   модели утекают в discovery-кэш и воскресают после удаления из конфига;
   `ModelsSource` дрейфует Config→Cache. **M**
-- [ ] `home/home.go:35` — `Short` матчит префикс без границы разделителя:
+- [x] `home/home.go:35` — `Short` матчит префикс без границы разделителя:
   `/home/bobby` у пользователя `bob` показывается как `~by`. **S**
-- [ ] `discover/discover.go:85` — `doRequest` глотает ошибки резолвера
+- [x] `discover/discover.go:85` — `doRequest` глотает ошибки резолвера
   base_url/api_key: упавшая `$(cmd)`-подстановка маскируется как 401. **S**
-- [ ] `csync/maps.go:33` — `Map.Reset` алиасит карту вызывающего (в
+- [x] `csync/maps.go:33` — `Map.Reset` алиасит карту вызывающего (в
   `NewMap` этот класс чинили в фазе 0); клонировать. **S**
 
 ### app / cmd / thread / workspace / message
 
-- [ ] `thread/tasks.go:229` — ошибка `setStatus(StatusRunning)` возвращается
+- [x] `thread/tasks.go:229` — ошибка `setStatus(StatusRunning)` возвращается
   без `failCreate`, в отличие от всех соседних путей: висящий mid-create
   ряд. **S**
-- [ ] `thread/tasks.go:416` — реактивация задачи через `task_send`
+- [x] `thread/tasks.go:416` — реактивация задачи через `task_send`
   регистрирует `DelegationParent` с `Depth: 0` вместо сохранённой глубины —
   ослабляет `maxTaskCascadeDepth`. **S**
-- [ ] `thread/lifecycle.go:808` — ошибка `store.Get` в `handleRunComplete`
+- [x] `thread/lifecycle.go:808` — ошибка `store.Get` в `handleRunComplete`
   после снятия runtime → молчаливый return, ряд «вечно Running» до
   рестарта; нужен retry/лог. **S**
-- [ ] `cmd/run.go:66` — подписка на `os.Kill` вместо `syscall.SIGTERM`:
+- [x] `cmd/run.go:66` — подписка на `os.Kill` вместо `syscall.SIGTERM`:
   `kill <pid>` не даёт graceful cancel. **S**
-- [ ] `workspace/app_workspace.go:433` — чтение из `messageEvents` без
+- [x] `workspace/app_workspace.go:433` — чтение из `messageEvents` без
   проверки `ok`: закрытый брокером канал → busy-spin 100% CPU до
   `done`. **S**
-- [ ] `app/app.go:145` — ошибка `InitCoderAgent` в `New` не откатывает уже
+- [x] `app/app.go:145` — ошибка `InitCoderAgent` в `New` не откатывает уже
   запущенные MCP/watchers/herdr-bridge; в `LocalSpawner.Spawn` каждый
   неудачный spawn копит подпроцессы. **M**
-- [ ] `app/lsp_events.go:95` — неатомарный get-modify-set на `csync.Map` в
+- [x] `app/lsp_events.go:95` — неатомарный get-modify-set на `csync.Map` в
   `updateLSPDiagnostics` конкурентно с `updateLSPState` — lost update
   счётчика диагностик. **S**
-- [ ] `cmd/threads.go:140` — обрезка goal по байтам (`goal[:59]`) режет
+- [x] `cmd/threads.go:140` — обрезка goal по байтам (`goal[:59]`) режет
   кириллицу посреди руны; рядом `cmdutil.go:139` уже использует
   `ansi.Truncate`. **S**
-- [ ] `thread/manager.go:218` — гонка check-then-act по имени треда: сырое
+- [x] `thread/manager.go:218` — гонка check-then-act по имени треда: сырое
   UNIQUE-constraint сообщение вместо «name is already in use»; маппить
   ошибку. **S**
 
 ### shell / hooks / herdr / git / richpaste / lsp
 
-- [ ] `shell/run.go` + `stream.go:49` — вывод фоновых (`cmd &`) джобов
+- [x] `shell/run.go` + `stream.go:49` — вывод фоновых (`cmd &`) джобов
   пишется в голые `bytes.Buffer` после возврата `Run` (interp не ждёт
   bgProcs) — data race; `BackgroundShell` уже использует мьютексный
   `syncBuffer`, выровнять. **M**
-- [ ] `hooks/input.go:54` — `BuildEnv` не вычищает `HERDR_*`, которые
+- [x] `hooks/input.go:54` — `BuildEnv` не вычищает `HERDR_*`, которые
   bash-tool снимает намеренно: хук со вложенным sennit аттачится к
   родительской pane. **S**
-- [ ] `herdr/client.go:175` — `releaseAgent` уходит в сокет мимо очереди
+- [x] `herdr/client.go:175` — `releaseAgent` уходит в сокет мимо очереди
   writeLoop: буферизованный отчёт `working` может уйти после release. **S**
-- [ ] `lsp/client.go:232` — offset encoding для `workspace/applyEdit`
+- [x] `lsp/client.go:232` — offset encoding для `workspace/applyEdit`
   захватывается до `initialize`: не-дефолтная кодировка (clangd) даёт правки
   по неверным смещениям. **S**
-- [ ] `lsp/client.go:450,606` — `fileInfo.Version++` на разделяемом
+- [x] `lsp/client.go:450,606` — `fileInfo.Version++` на разделяемом
   указателе без синхронизации. **S**
-- [ ] `lsp/manager.go:110` — сравнение путей без `fsext.Canonical`: при
+- [x] `lsp/manager.go:110` — сравнение путей без `fsext.Canonical`: при
   symlinked cwd / Windows-спеллинге LSP молча не стартует. **S**
-- [ ] `lsp/handlers.go:15` — `HandleWorkspaceConfiguration` игнорирует
+- [x] `lsp/handlers.go:15` — `HandleWorkspaceConfiguration` игнорирует
   `params.items`: сервер с 2+ секциями получает рассинхронизированный
   массив. **S**
-- [ ] `git/git.go:187` — `UncommittedFiles` падает при unborn HEAD (репо без
+- [x] `git/git.go:187` — `UncommittedFiles` падает при unborn HEAD (репо без
   коммитов). **S**
-- [ ] `richpaste/resolve.go:95,158` — `MaxBytes` не применяется к
+- [x] `richpaste/resolve.go:95,158` — `MaxBytes` не применяется к
   data:-URI: base64-картинка обходит `MaxAttachmentSize`. **S**
 
 ### internal/ui (bug-low, сгруппировано)
 
-- [ ] Ещё четыре cmd-замыкания с чтением состояния модели:
+- [x] Ещё четыре cmd-замыкания с чтением состояния модели:
   `model/history.go:20`, `model/mouse.go:262`,
   `model/editor_input.go:330,444,543`, `dialog/api_key_input.go:295`
   (method value). Закрывать вместе с фазой 1/UI. **S**
-- [ ] `model/chat.go:467` — `SetMessages` не сбрасывает mouse-состояние:
+- [x] `model/chat.go:467` — `SetMessages` не сбрасывает mouse-состояние:
   отложенный `DelayedClickMsg` кликает случайный item новой сессии. **S**
-- [ ] `model/update_session.go:156` — `sessionFilesUpdatesMsg` без
+- [x] `model/update_session.go:156` — `sessionFilesUpdatesMsg` без
   sessionID-guard'а: sidebar показывает файлы чужой сессии. **S**
-- [ ] `model/lsp.go:228`, `model/mcp.go:104` — off-by-one в «and N more»
+- [x] `model/lsp.go:228`, `model/mcp.go:104` — off-by-one в «and N more»
   (в `skills.go:150` посчитано верно; вынести общий helper). **S**
-- [ ] `model/layout.go:707,413,186` — три разных ширины одного редактора
+- [x] `model/layout.go:707,413,186` — три разных ширины одного редактора
   (w-31/-32/-34): обрезка QuestionForm. **M**
-- [ ] `model/session.go:380` + `sidebar.go:1282` — `filesInfo` и
+- [x] `model/session.go:380` + `sidebar.go:1282` — `filesInfo` и
   `fileChangeCount` считают Uncommitted по-разному. **S**
-- [ ] `model/thread_completion.go:2254` — `threadLastStatus` никогда не
+- [x] `model/thread_completion.go:2254` — `threadLastStatus` никогда не
   чистится: неограниченный рост map. **S**
-- [ ] `dialog/question_form.go:222` — esc съедается формой до компонента:
+- [x] `dialog/question_form.go:222` — esc съедается формой до компонента:
   отмена батча с потерей набранного вместо blur. **S**
-- [ ] `dialog/question_choice_base.go:478` — `strings.Repeat(" ", -1)` →
+- [x] `dialog/question_choice_base.go:478` — `strings.Repeat(" ", -1)` →
   panic при нулевой ширине области. **S**
-- [ ] `dialog/question_choice_base.go:412` — высота не учитывает wrap
+- [x] `dialog/question_choice_base.go:412` — высота не учитывает wrap
   длинных label. **S/M**
-- [ ] `dialog/question_confirm.go:279` — stale-compositor кнопок после
+- [x] `dialog/question_confirm.go:279` — stale-compositor кнопок после
   прокрутки: клик по старым координатам жмёт невидимую кнопку. **S**
-- [ ] `dialog/select_dialog.go:144` + `commands.go:112` — асинхронный msg
+- [x] `dialog/select_dialog.go:144` + `commands.go:112` — асинхронный msg
   или ресайз молча стирает набранный фильтр палитры. **S**
-- [ ] `chat/assistant.go:481` — хэш thinking по 64-байтовому сэмплу:
+- [x] `chat/assistant.go:481` — хэш thinking по 64-байтовому сэмплу:
   stale-рендер при перезаписи той же длины. **S**
-- [ ] `chat/replace_symbol.go:43` — приоритет `&&`/`||`: diff строится по
+- [x] `chat/replace_symbol.go:43` — приоритет `&&`/`||`: diff строится по
   битым данным при ошибке Unmarshal. **S**
-- [ ] `chat/question.go:59` — байтовый срез заголовка: `�` на
+- [x] `chat/question.go:59` — байтовый срез заголовка: `�` на
   кириллице. **S**
-- [ ] `chat/shell.go:332` — «…»-индикатор дописывается после
+- [x] `chat/shell.go:332` — «…»-индикатор дописывается после
   `ansi.Truncate`: строка шире области. **S**
-- [ ] `chat/shell.go:184 vs 272` — `HoverableAt` и `RawRender` считают
+- [x] `chat/shell.go:184 vs 272` — `HoverableAt` и `RawRender` считают
   строки по-разному: кликабельный, но неразворачиваемый item. **S**
-- [ ] `chat/streaming_markdown.go:404` — CRLF отключает префикс-кэш:
+- [x] `chat/streaming_markdown.go:404` — CRLF отключает префикс-кэш:
   полный ре-рендер каждый flush. **S**
-- [ ] `chat/tools_copy.go:56,177` — heredoc уплощается `\n→' '` при
+- [x] `chat/tools_copy.go:56,177` — heredoc уплощается `\n→' '` при
   копировании; итерация map без сортировки — недетерминированная
   копия. **S**
-- [ ] `list/list.go:691` — `SetItems([])` залипает `offsetIdx=-1`: пустой
+- [x] `list/list.go:691` — `SetItems([])` залипает `offsetIdx=-1`: пустой
   рендер непустого списка. **S**
-- [ ] `list/list.go:522` — скролл через межэлементный gap прыгает. **S**
-- [ ] `completions/completions.go:606` — тумб скроллбара инвертирован при
+- [x] `list/list.go:522` — скролл через межэлементный gap прыгает. **S**
+- [x] `completions/completions.go:606` — тумб скроллбара инвертирован при
   `SetReverse(true)`. **S**
-- [ ] `completions/item.go:52` и `list/item.go:86` — оба per-width кэша
+- [x] `completions/item.go:52` и `list/item.go:86` — оба per-width кэша
   не работают (nil-guard пишет в локальную переменную / `invalidate`
   обнуляет навсегда). **S**
-- [ ] `common/markdown.go:69,89,104` — ошибка `NewTermRenderer` кэширует
+- [x] `common/markdown.go:69,89,104` — ошибка `NewTermRenderer` кэширует
   nil навсегда (nil-deref на этой ширине); `rendererLocks` не чистится на
   смене темы. **S**
-- [ ] `common/ansi16.go:199` — `simulateCarriageReturns` теряет SGR и хвост
+- [x] `common/ansi16.go:199` — `simulateCarriageReturns` теряет SGR и хвост
   прежней строки. **M**
-- [ ] `common/button.go:43`, `common/elements.go:146,240,275` — байтовые
+- [x] `common/button.go:43`, `common/elements.go:146,240,275` — байтовые
   индексы/ширины: подчёркивание и обрезка едут на не-ASCII. **S**
-- [ ] `anim/anim.go:85,425` — `settingsHash` без `NoScramble`; неатомарный
+- [x] `anim/anim.go:85,425` — `settingsHash` без `NoScramble`; неатомарный
   wrap шага (латентный index out of range). **S**
-- [ ] `diffview/diffview.go:463,125` — «…» на пробельной SGR-строке;
+- [x] `diffview/diffview.go:463,125` — «…» на пробельной SGR-строке;
   `ContextLines`/`TabWidth` игнорируются после первого `String()`. **S**
-- [ ] `attachments/attachments.go:177,62` — off-by-one чипов («1 more…» при
+- [x] `attachments/attachments.go:177,62` — off-by-one чипов («1 more…» при
   нуле скрытых); delete-режим не принимает двузначные номера. **S**
-- [ ] `image/image.go:109` — `paint` растягивает на канвас, убивая
+- [x] `image/image.go:109` — `paint` растягивает на канвас, убивая
   пропорции; аспект клетки не учтён в blocks-режиме. **M**
 
 ## Фаза 3 — Границы контекстов / design

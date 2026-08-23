@@ -80,6 +80,15 @@ func TestResolveWithinWorkdir(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, outside)
 	require.True(t, filepath.IsAbs(absPath))
+
+	// A sibling name that merely starts with ".." (e.g. "..foo") must not
+	// be mistaken for an escape via "..": a bare
+	// strings.HasPrefix(relPath, "..") check (the old bug) flags it as
+	// outside workingDir even though it resolves to a file inside it.
+	absPath, outside, err = resolveWithinWorkdir(workingDir, filepath.Join(workingDir, "..foo"))
+	require.NoError(t, err)
+	require.False(t, outside, "..foo is a sibling name inside workingDir, not an escape")
+	require.True(t, filepath.IsAbs(absPath))
 }
 
 func TestEnsureParentDir(t *testing.T) {

@@ -108,6 +108,35 @@ func TestRenderShowsScrollbarWhenOverflowing(t *testing.T) {
 	require.Equal(t, c.width+1+borderFrameWidth, w, "scrollbar column must be included in the reported size")
 }
 
+// TestRenderScrollbarThumbTracksVisualPosition covers a regression
+// where the scrollbar thumb was drawn at the wrong end of the track.
+// c.list is always built with SetReverse(true) (see New), so the
+// first item — selected and scrolled into view by OpenCommands — ends
+// up rendered at the visual *bottom* of the popup, not the top. The
+// thumb must track that: with the first item in view, it belongs at
+// the bottom of the scrollbar's track, on the last content row.
+func TestRenderScrollbarThumbTracksVisualPosition(t *testing.T) {
+	t.Parallel()
+
+	c := New(framedStyles())
+
+	values := make([]CommandCompletionValue, 0, maxHeight+5)
+	for i := range maxHeight + 5 {
+		values = append(values, CommandCompletionValue{ID: string(rune('a' + i)), Title: string(rune('a' + i))})
+	}
+	c.OpenCommands(values)
+	require.True(t, c.hasScrollbar())
+
+	rendered := c.Render()
+	lines := strings.Split(rendered, "\n")
+	content := lines[1 : len(lines)-1] // strip the border's top/bottom rows
+
+	first := ansi.Strip(content[0])
+	last := ansi.Strip(content[len(content)-1])
+	require.Contains(t, last, scrollbarThumbGlyph, "the thumb must sit on the last content row when the first (bottom-most, in reverse mode) item is in view")
+	require.NotContains(t, first, scrollbarThumbGlyph, "the top content row must show track, not thumb, in this state")
+}
+
 // TestRenderNoScrollbarWhenEverythingFits is the negative case: a handful
 // of items that all fit inside the popup's height need no scrollbar, and
 // Size() must not reserve a column for one.

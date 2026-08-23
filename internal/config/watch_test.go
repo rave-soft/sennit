@@ -146,6 +146,91 @@ func TestWatchForExternalChanges_IgnoresOwnWrites(t *testing.T) {
 	require.Zero(t, notifications)
 }
 
+// TestWatchForExternalChanges_IgnoresOwnRemoveConfigField_TightPoll is
+// TestWatchForExternalChanges_IgnoresOwnRemoveConfigField's own scenario at
+// the tighter poll interval TestWatchForExternalChanges_IgnoresOwnWrites_TightPoll
+// uses to reliably land a poll inside the write/reload window; run with
+// -race for the intended amplification.
+func TestWatchForExternalChanges_IgnoresOwnRemoveConfigField_TightPoll(t *testing.T) {
+	for range 5 {
+		dir := t.TempDir()
+		t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+		t.Setenv("SENNIT_GLOBAL_DATA", dir)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{"options": {"debug": true}}`), 0o600))
+
+		store, err := Load(dir, "", false)
+		require.NoError(t, err)
+		store.externalChangePollInterval = 10 * time.Millisecond
+
+		notified := make(chan struct{}, 8)
+		store.OnExternalChange(func() {
+			select {
+			case notified <- struct{}{}:
+			default:
+			}
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go store.WatchForExternalChanges(ctx)
+
+		require.NoError(t, store.RemoveConfigField(ScopeGlobal, "options.debug"))
+
+		select {
+		case <-notified:
+			cancel()
+			t.Fatalf("WatchForExternalChanges fired for this process's own RemoveConfigField write:%s",
+				describeExternalChange(t, store))
+		case <-time.After(15 * store.externalChangePollInterval):
+		}
+		cancel()
+	}
+}
+
+// TestWatchForExternalChanges_IgnoresOwnRemoveConfigField verifies that
+// RemoveConfigField, like SetConfigFields, refreshes the staleness snapshot
+// atomically with its write. Before this, RemoveConfigField wrote the file
+// and reloaded without ever touching the snapshot itself (relying on the
+// reload pipeline to eventually do it, same gap
+// TestWatchForExternalChanges_IgnoresOwnWrites_TightPoll documents for the
+// old SetConfigFields), so a poll landing in that window read this
+// process's own deletion as an external change and fired a redundant
+// reload/notification.
+func TestWatchForExternalChanges_IgnoresOwnRemoveConfigField(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	configPath := filepath.Join(dir, "sennit.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"options": {"debug": true}}`), 0o600))
+
+	store, err := Load(dir, "", false)
+	require.NoError(t, err)
+	const pollInterval = 100 * time.Millisecond
+	store.externalChangePollInterval = pollInterval
+
+	var notifications int
+	notified := make(chan struct{}, 8)
+	store.OnExternalChange(func() {
+		notifications++
+		notified <- struct{}{}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go store.WatchForExternalChanges(ctx)
+
+	require.NoError(t, store.RemoveConfigField(ScopeGlobal, "options.debug"))
+
+	// Give the poll loop a few cycles to (not) fire.
+	select {
+	case <-notified:
+		t.Fatalf("WatchForExternalChanges fired for this process's own write:%s",
+			describeExternalChange(t, store))
+	case <-time.After(3 * pollInterval):
+	}
+	require.Zero(t, notifications)
+}
+
 // describeExternalChange reports why externalChangeDetected() is true, so a
 // failure on a platform we cannot run locally arrives with the answer
 // attached instead of sending us back for another CI round. Three rounds of

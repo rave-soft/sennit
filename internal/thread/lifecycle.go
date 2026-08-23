@@ -807,7 +807,18 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	}
 	st, err := l.store.Get(ctx, id)
 	if err != nil {
-		return
+		// The runtime is already torn down at this point, so nothing else
+		// will retry this terminal transition — a store hiccup here would
+		// otherwise strand the row in StatusRunning until a restart. Give
+		// a couple of short retries before giving up loudly.
+		for attempt := 0; attempt < 2 && err != nil; attempt++ {
+			time.Sleep(50 * time.Millisecond)
+			st, err = l.store.Get(ctx, id)
+		}
+		if err != nil {
+			slog.Error("Failed to load thread after run completion; status left stale", "component", "thread", "thread", id, "error", err)
+			return
+		}
 	}
 	// Only react to the session this entity currently owns, and only
 	// while a run is actually in flight: Remove or a completed merge can

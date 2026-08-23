@@ -543,7 +543,14 @@ func (s *ConfigStore) pinPreferredModelLocked(model SelectedModel) {
 // state fresh.
 //
 // The write is protected by an in-process mutex and a cross-process flock.
+//
+// Like SetConfigFields, the write and the staleness-snapshot refresh happen
+// under one stalenessMu section so a concurrent ConfigStaleness() can never
+// observe the new on-disk mtime against a stale snapshot and mistake this
+// process's own write for an external change. See SetConfigFields for the
+// full rationale.
 func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
+	s.stalenessMu.Lock()
 	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
 		v, sErr := sjson.Delete(string(data), key)
 		if sErr != nil {
@@ -551,6 +558,10 @@ func (s *ConfigStore) RemoveConfigField(scope Scope, key string) error {
 		}
 		return []byte(v), nil
 	})
+	if err == nil {
+		s.refreshStalenessSnapshotLocked(nil)
+	}
+	s.stalenessMu.Unlock()
 	if err != nil {
 		return err
 	}

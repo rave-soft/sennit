@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -128,7 +127,12 @@ func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) 
 		opts.Env = os.Environ()
 	}
 
-	var stdout, stderr bytes.Buffer
+	// interp does not wait for background jobs (`cmd &`) started inside
+	// Command before Run returns, so those goroutines can still be
+	// writing after this function reads the buffers below. Use the
+	// mutex-protected syncBuffer (shared with [BackgroundShell]) instead
+	// of a plain bytes.Buffer to avoid a data race.
+	var stdout, stderr syncBuffer
 	opts.Stdout = &stdout
 	opts.Stderr = &stderr
 
@@ -266,10 +270,12 @@ var herdrEnvVars = []string{
 	"HERDR_PANE_ID",
 }
 
-// withoutHerdrEnv returns env with all HERDR_* variables removed.
-// The returned slice is a new allocation safe to use concurrently
-// with the input.
-func withoutHerdrEnv(env []string) []string {
+// WithoutHerdrEnv returns env with all HERDR_* variables removed. The
+// returned slice is a new allocation safe to use concurrently with the
+// input. Exported so other packages that build their own subprocess
+// environment (e.g. the hook runner) can apply the same stripping the bash
+// tool does.
+func WithoutHerdrEnv(env []string) []string {
 	strip := make(map[string]bool, len(herdrEnvVars))
 	for _, k := range herdrEnvVars {
 		strip[k] = true

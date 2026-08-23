@@ -603,7 +603,18 @@ func (c *Completions) Render() string {
 // renderScrollbar draws a thin vertical scroll indicator height rows tall,
 // or "" if the current filtered set fits without scrolling.
 func (c *Completions) renderScrollbar(height int) string {
-	thumbPos, thumbSize, ok := scrollbarThumbBounds(height, len(c.filtered), height, c.list.Offset())
+	// c.list is always built with SetReverse(true) (see New): the
+	// underlying items render bottom-to-top, so an offset measured from
+	// the top of the (unreversed) items slice actually corresponds to
+	// the *bottom* of what's on screen. Mirror it before handing it to
+	// scrollbarThumbBounds, which assumes offset 0 means "scrolled to
+	// the visual top" — without this the thumb tracks the wrong end of
+	// the popup as the user scrolls.
+	offset := c.list.Offset()
+	if maxOffset := len(c.filtered) - height; maxOffset > 0 {
+		offset = maxOffset - offset
+	}
+	thumbPos, thumbSize, ok := scrollbarThumbBounds(height, len(c.filtered), height, offset)
 	if !ok {
 		return ""
 	}

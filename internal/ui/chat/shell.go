@@ -182,7 +182,28 @@ func (s *ShellItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 
 // HoverableAt reports whether the output block can visibly expand or collapse.
 func (s *ShellItem) HoverableAt(_ int, y, _ int) bool {
-	return s.output.Len() > 0 && strings.Count(strings.TrimSpace(s.output.String()), "\n")+1 > shellMaxCollapsedLines && y > 0
+	raw := trimShellOutput(s.output.String())
+	return raw != "" && strings.Count(raw, "\n")+1 > shellMaxCollapsedLines && y > 0
+}
+
+// trimShellOutput strips trailing whitespace and bare ANSI resets that
+// programs like `task` emit after their last line of output. Shared by
+// RawRender and HoverableAt so the line count that decides whether a
+// block is expandable matches the one that decides whether it's
+// clickable — using two different trims (e.g. TrimSpace vs. this) can
+// disagree on how many lines the output has and leave a block
+// clickable but unable to actually expand, or vice versa.
+func trimShellOutput(output string) string {
+	raw := output
+	for {
+		trimmed := strings.TrimRight(raw, " \t\r\n")
+		trimmed = strings.TrimSuffix(trimmed, "\x1b[0m")
+		if trimmed == raw {
+			break
+		}
+		raw = trimmed
+	}
+	return raw
 }
 
 // SetHovered updates shell-output hover feedback.
@@ -267,16 +288,7 @@ func (s *ShellItem) RawRender(width int) string {
 	// Programs like `task` emit "\x1b[0m\n" after their last line of
 	// output; trimming only "\n" misses these because the reset bytes
 	// sit between the content and the newline.
-	fullOutput := s.output.String()
-	raw := fullOutput
-	for {
-		trimmed := strings.TrimRight(raw, " \t\r\n")
-		trimmed = strings.TrimSuffix(trimmed, "\x1b[0m")
-		if trimmed == raw {
-			break
-		}
-		raw = trimmed
-	}
+	raw := trimShellOutput(s.output.String())
 	if raw == "" {
 		return header
 	}
@@ -329,8 +341,18 @@ func (s *ShellItem) RawRender(width int) string {
 
 	for _, ln := range lines {
 		scrolled := ansi.GraphemeWidth.Cut(ln, s.xOffset, len(ln))
-		truncated := ansi.Truncate(scrolled, cappedWidth, "…")
-		if s.xOffset > 0 && strings.TrimSpace(truncated) != "" {
+		// The leading "…" marking a horizontally-scrolled line must be
+		// carved out of cappedWidth *before* truncating, not prepended
+		// after — otherwise the line ends up a column wider than the
+		// area once both the leading and ansi.Truncate's own trailing
+		// "…" are in play.
+		truncWidth := cappedWidth
+		leading := s.xOffset > 0 && strings.TrimSpace(scrolled) != ""
+		if leading {
+			truncWidth = max(0, cappedWidth-ansi.StringWidth("…"))
+		}
+		truncated := ansi.Truncate(scrolled, truncWidth, "…")
+		if leading {
 			truncated = "…" + truncated
 		}
 		if s.hovered {

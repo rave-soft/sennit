@@ -47,6 +47,13 @@ import (
 // revoking the whole token family.
 const refreshLockDeadline = 45 * time.Second
 
+// refreshPersistAttempts bounds how many times refreshOAuthTokenLocked
+// retries writing a freshly exchanged token to disk before giving up. The
+// refresh token it exchanged is already spent at the provider by the time
+// persistence runs, so a transient disk/lock failure should not cost the
+// whole session over one missed write; see refreshOAuthTokenLocked.
+const refreshPersistAttempts = 3
+
 // Store is the narrow view of config.ConfigStore that Manager needs. It
 // exists so credentials never has to import the concrete ConfigStore
 // type, which would round-trip back into config and reintroduce the
@@ -226,12 +233,31 @@ func (m *Manager) refreshOAuthTokenLocked(ctx context.Context, scope config.Scop
 	}
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
-	m.applyToken(providerConfig, refreshedToken, providerID)
 
-	if err := m.store.PersistRefreshedToken(scope, providerID, providerConfig, refreshedToken); err != nil {
-		return err
+	// Persist before publishing to memory. The exchange above already spent
+	// entryToken's refresh token at the provider, so if the write below
+	// fails, disk is left holding that now-invalid refresh token; a later
+	// restart or a peer process would then replay it and trip the
+	// provider's reuse detection, revoking the whole token family. Retry a
+	// few times first, since a transient disk/lock failure is exactly the
+	// kind of thing that shouldn't cost the user their session.
+	var persistErr error
+	for attempt := 1; attempt <= refreshPersistAttempts; attempt++ {
+		if persistErr = m.store.PersistRefreshedToken(scope, providerID, providerConfig, refreshedToken); persistErr == nil {
+			break
+		}
+		slog.Warn("Failed to persist refreshed OAuth token, retrying", "provider", providerID, "attempt", attempt, "error", persistErr)
 	}
-	return nil
+	if persistErr != nil {
+		// There is no safe way to undo the exchange at this point, so the
+		// refreshed token is still published in memory below to keep this
+		// session working -- but at Error, not Warn, so the resulting
+		// memory/disk mismatch (and the reuse-detection risk it carries
+		// for the next restart or peer process) cannot be missed.
+		slog.Error("Failed to persist refreshed OAuth token after retries; continuing with the token in memory only, but disk still has the spent refresh token", "provider", providerID, "error", persistErr)
+	}
+	m.applyToken(providerConfig, refreshedToken, providerID)
+	return persistErr
 }
 
 // WaitForTokenChange blocks until SignalAuthComplete is called for the

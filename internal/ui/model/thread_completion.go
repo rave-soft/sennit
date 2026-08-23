@@ -60,6 +60,13 @@ func (m *UI) notifyThreadCompletion(t proto.Thread) tea.Cmd {
 	if !known || prev == t.Status || !isTerminalThreadStatus(t.Status) {
 		return nil
 	}
+	// The transition has been reported; nothing further needs prev's
+	// status. Pruning here (rather than only on pubsub.DeletedEvent, see
+	// updateThreads) keeps the map from growing unbounded over a long
+	// session full of threads that finish but are never deleted — a
+	// repeat event for the same terminal status is still a no-op, since
+	// it now reads as an unseen thread and !known short-circuits above.
+	delete(m.threadLastStatus, t.ID)
 	return threadCompletionToast(t)
 }
 

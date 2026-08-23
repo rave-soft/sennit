@@ -65,3 +65,49 @@ func TestQuestionFormBracketKeySwitchesTabsOutsideFreeText(t *testing.T) {
 
 	require.Equal(t, 1, f.activeIdx, "the bracket key must still navigate tabs outside FreeText")
 }
+
+// TestQuestionFormEscBlursFocusedFreeTextInsteadOfCancelling is the
+// regression test for esc being consumed by the form's global close
+// handler before it reaches the focused component: pressing esc while
+// typing an answer used to cancel the entire batch, discarding whatever
+// the user had typed (here and on any other tab). It should instead just
+// blur the field, the same way it stops editing rather than throwing work
+// away.
+func TestQuestionFormEscBlursFocusedFreeTextInsteadOfCancelling(t *testing.T) {
+	t.Parallel()
+
+	s := styles.SennitDark()
+	batch := question.Request{
+		ID: "batch1",
+		Questions: []question.Question{
+			{ID: "q1", Type: question.TypeFreeText, Text: "Describe the bug"},
+		},
+	}
+
+	var cancelled bool
+	f := NewQuestionForm(&s, batch)
+	f.OnCancel = func() { cancelled = true }
+
+	freeText, ok := f.questions[0].(*FreeText)
+	require.True(t, ok)
+	freeText.editor.Focus()
+
+	for _, r := range "unsaved thoughts" {
+		done, _ := f.HandleKey(keyMsg(r))
+		require.False(t, done)
+	}
+	require.Equal(t, "unsaved thoughts", freeText.editor.Value())
+
+	done, cmd := f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.False(t, done, "esc on a focused field must not submit or cancel the batch")
+	require.Nil(t, cmd)
+	require.False(t, cancelled, "the typed answer must not be discarded by a blur")
+	require.False(t, freeText.editor.Focused(), "esc should blur the field")
+	require.Equal(t, "unsaved thoughts", freeText.editor.Value(), "typed text must survive the blur")
+
+	// With the field already blurred, esc now falls through to the usual
+	// cancel behavior.
+	done, _ = f.HandleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.True(t, done)
+	require.True(t, cancelled)
+}

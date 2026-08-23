@@ -3,8 +3,10 @@ package common
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
@@ -39,18 +41,49 @@ func Button(t *styles.Styles, opts ButtonOpts) string {
 		opts.Padding = 2
 	}
 
-	// the index is out of bound
-	if opts.UnderlineIndex > -1 && opts.UnderlineIndex > len(text)-1 {
+	// UnderlineIndex counts characters, not bytes: len(text) counts UTF-8
+	// bytes, so this bound check let a multi-byte-prefixed label pass a
+	// character index that was actually past the end of the text (or
+	// rejected valid ones), and the Range built below is in cell-width
+	// units, which only equal byte offsets for single-byte ASCII.
+	runeCount := utf8.RuneCountInString(text)
+	if opts.UnderlineIndex > -1 && opts.UnderlineIndex > runeCount-1 {
 		opts.UnderlineIndex = -1
+	}
+
+	// Resolve the underlined rune's cell-width column against the plain
+	// label — the Range StyleRanges applies below is measured in cell
+	// widths, so this has to happen before Render wraps the text in
+	// style codes that would shift byte offsets without shifting
+	// columns.
+	var underlineStart, underlineEnd int
+	if opts.UnderlineIndex != -1 {
+		underlineStart, underlineEnd = underlineColumnRange(text, opts.UnderlineIndex)
 	}
 
 	text = style.Padding(0, opts.Padding).Render(text)
 
 	if opts.UnderlineIndex != -1 {
-		text = lipgloss.StyleRanges(text, lipgloss.NewRange(opts.Padding+opts.UnderlineIndex, opts.Padding+opts.UnderlineIndex+1, style.Underline(true)))
+		text = lipgloss.StyleRanges(text, lipgloss.NewRange(opts.Padding+underlineStart, opts.Padding+underlineEnd, style.Underline(true)))
 	}
 
 	return text
+}
+
+// underlineColumnRange returns the cell-width [start, end) column range of
+// the idx-th rune (0-based) in text, suitable for [lipgloss.NewRange]. Using
+// a byte offset here would misplace the underline on any label whose
+// underlined character sits after a multi-byte rune.
+func underlineColumnRange(text string, idx int) (start, end int) {
+	for i, r := range text {
+		if idx == 0 {
+			s := text[i : i+utf8.RuneLen(r)]
+			start = ansi.StringWidth(text[:i])
+			return start, start + ansi.StringWidth(s)
+		}
+		idx--
+	}
+	return 0, 0
 }
 
 // ButtonGroup creates a row of selectable buttons

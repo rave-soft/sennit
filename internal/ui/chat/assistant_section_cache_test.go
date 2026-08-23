@@ -138,6 +138,43 @@ func TestAssistantSectionCache_ThinkingChangeDoesNotInvalidateContent(t *testing
 		"thinking text changed; thinking section must have re-rendered")
 }
 
+// TestAssistantSectionCache_ThinkingRewriteSameLengthInvalidatesCache
+// covers a retry that produces new thinking text of the *same* length
+// as the previous turn, differing only past the 64-byte sample that
+// thinkingHashIncremental uses to detect divergence. Before the fix,
+// the incremental hash loop starts at thinkingHashLen (== len(thinking)
+// for a same-length rewrite) and never executes, so the stale hash
+// from the previous turn is reused and the cached (stale) render is
+// served instead of the new content.
+func TestAssistantSectionCache_ThinkingRewriteSameLengthInvalidatesCache(t *testing.T) {
+	sty := styles.SennitDark()
+	prefix := strings.Repeat("x", 64)
+	first := prefix + " original tail content"
+	second := prefix + " replaced tail content"
+	require.Equal(t, len(first), len(second), "fixture rewrite must keep the same length")
+
+	msg := thinkingMessage("a9", first, "")
+	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
+
+	const width = 71
+
+	_ = item.RawRender(width)
+	firstOut := snapshot(item).thinking
+	require.Contains(t, firstOut, "original")
+
+	// Same length, same 64-byte sample, different tail — simulates a
+	// retried turn producing an equally long thinking block.
+	updated := thinkingMessage("a9", second, "")
+	item.SetMessage(updated)
+	_ = item.RawRender(width)
+	secondOut := snapshot(item).thinking
+
+	require.Contains(t, secondOut, "replaced",
+		"same-length thinking rewrite must invalidate the cached render")
+	require.NotContains(t, secondOut, "original",
+		"stale thinking content must not survive a same-length rewrite")
+}
+
 // TestAssistantSectionCache_HashKeyDiscrimination asserts that two
 // messages with different source text hash to different per-section
 // keys, and that messages with identical source text hit the cache.

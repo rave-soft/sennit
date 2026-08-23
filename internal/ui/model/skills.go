@@ -150,7 +150,7 @@ func skillsList(t *styles.Styles, items []skillStatusItem, width, maxItems int) 
 
 	if len(items) > maxItems {
 		visibleItems := items[:maxItems-1]
-		remaining := len(items) - (maxItems - 1)
+		remaining := truncatedMoreCount(len(items), maxItems)
 		items = append(visibleItems, skillStatusItem{
 			name:  "more",
 			title: t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)),

@@ -85,3 +85,36 @@ func TestUpdate_ThreadEvent_TogglesThreadCompletionToast(t *testing.T) {
 	_, cmd := u.Update(pubsub.Event[proto.Thread]{Type: pubsub.UpdatedEvent, Payload: proto.Thread{ID: "t1", Name: "fix-auth", Status: "merged"}})
 	require.NotNil(t, cmd)
 }
+
+// TestNotifyThreadCompletion_PrunesEntryOnTerminalTransition covers §7:
+// threadLastStatus must not grow unbounded over a long session. Once a
+// thread's terminal transition has been reported, its entry is no longer
+// needed to detect a future transition (see the !known short-circuit
+// above), so it must be dropped rather than kept around forever.
+func TestNotifyThreadCompletion_PrunesEntryOnTerminalTransition(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+
+	require.Nil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "running"}))
+	require.NotNil(t, u.notifyThreadCompletion(proto.Thread{ID: "t1", Name: "fix-auth", Status: "merged"}))
+
+	_, stillTracked := u.threadLastStatus["t1"]
+	require.False(t, stillTracked, "threadLastStatus must prune a thread's entry once its terminal transition has been reported")
+}
+
+// TestUpdateThreads_DeletedEventPrunesThreadLastStatus covers the other
+// pruning path required by §7: a thread removed via pubsub.DeletedEvent
+// must have its threadLastStatus entry dropped too, mirroring the existing
+// threadsDock.dropActivity(id) cleanup for the same event.
+func TestUpdateThreads_DeletedEventPrunesThreadLastStatus(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.threadLastStatus = map[string]string{"t1": "running"}
+
+	u.updateThreads(pubsub.Event[proto.Thread]{Type: pubsub.DeletedEvent, Payload: proto.Thread{ID: "t1"}}, nil)
+
+	_, stillTracked := u.threadLastStatus["t1"]
+	require.False(t, stillTracked, "a deleted thread's threadLastStatus entry must be dropped")
+}

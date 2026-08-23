@@ -110,6 +110,17 @@ func remapSGR(params ansi.Params, palette [16]color.Color, buf *strings.Builder)
 	buf.WriteByte('m')
 }
 
+// eraseLineSentinel marks where a CSI K (erase-in-line) sequence occurred,
+// so the \r-collapsing pass (which runs after this scan is done and the
+// escape codes are gone) can still see it and react. It's a Unicode
+// Private Use Area code point, which real programs never emit as visible
+// text, so it can't collide with genuine content. Any sentinel left over
+// once both passes are done (bare CSI K with no \r on the same line) is
+// stripped at the very end of StripCursorControl — that's the same
+// "no visible effect" outcome K always had here, just routed through the
+// sentinel instead of being dropped inline.
+const eraseLineSentinel = '\uE000'
+
 // StripCursorControl removes ANSI escape sequences that move the cursor,
 // erase regions of the screen, or change terminal modes. These sequences
 // are emitted by programs like git push, cargo build, and npm install to
@@ -117,12 +128,20 @@ func remapSGR(params ansi.Params, palette [16]color.Color, buf *strings.Builder)
 // replayed inside Sennit's TUI viewport they corrupt the render state.
 //
 // Preserved: SGR (color/style) sequences, OSC hyperlinks, printable text.
-// Stripped: CSI cursor movement (A-H, f), erase (J, K), scroll (S, T),
-// save/restore cursor (s, u), DEC private modes (?h, ?l), and the ESC
-// save/restore cursor sequences (ESC 7, ESC 8). Bare carriage returns
-// (\r) are also handled by simulating line-overwrite behavior: within
-// each line, text after the last \r wins, matching what a real terminal
-// would display.
+// Stripped: CSI cursor movement (A-H, f), erase display (J), scroll
+// (S, T), save/restore cursor (s, u), DEC private modes (?h, ?l), and the
+// ESC save/restore cursor sequences (ESC 7, ESC 8). Bare carriage returns
+// (\r) are handled by simulating line-overwrite behavior: within each
+// line, text after the last \r wins, matching what a real terminal would
+// display, and any SGR state or uncovered tail from before the \r
+// survives if nothing erases it (see collapseCarriageReturns).
+//
+// CSI K (erase-in-line) is not simply dropped: combined with \r —
+// "...\r\x1b[K<replacement>", the standard way progress bars clear a
+// line before redrawing it — the erase changes what \r-collapsing
+// should keep. K is replaced with [eraseLineSentinel] here so the later
+// pass can act on it; see collapseCarriageReturns for what the sentinel
+// means once there.
 func StripCursorControl(s string) string {
 	if !strings.ContainsRune(s, 0x1b) && !strings.ContainsRune(s, '\r') {
 		return s
@@ -152,12 +171,25 @@ func StripCursorControl(s string) string {
 				// DEC private mode set/reset (?h, ?l): strip.
 				// Regular h/l without ? prefix are also non-rendering.
 				_ = prefix
+			case 'K':
+				// Erase-in-line: leave a sentinel instead of dropping
+				// it outright — see eraseLineSentinel and
+				// collapseCarriageReturns. We don't distinguish
+				// 0K/1K/2K (erase right/left/whole); all three land on
+				// the same sentinel, which collapseCarriageReturns
+				// treats as "erase to end of line". That's exact for
+				// the overwhelmingly common 0K-after-\r case and a
+				// deliberately conservative approximation for 1K/2K —
+				// it only ever discards more of the stale previous
+				// line than a real terminal would, never less, so it
+				// can't leak leftover text the way dropping K outright
+				// did.
+				buf.WriteRune(eraseLineSentinel)
 			case 'A', 'B', 'C', 'D', // cursor up/down/forward/back
 				'E', 'F', // cursor next/prev line
 				'G',      // cursor horizontal absolute
 				'H', 'f', // cursor position
 				'J',      // erase display
-				'K',      // erase line
 				'S', 'T', // scroll up/down
 				's', 'u': // save/restore cursor
 				// Strip all cursor/screen control.
@@ -189,21 +221,71 @@ func StripCursorControl(s string) string {
 		result = simulateCarriageReturns(result)
 	}
 
+	// Any sentinel collapseCarriageReturns didn't consume — a CSI K with
+	// no \r on the same line to pair it with — never had a visible
+	// effect here to begin with (K alone, without first returning the
+	// cursor somewhere, erases nothing that isn't about to be
+	// overwritten by the very next characters). Drop it rather than
+	// leak the marker into the rendered output.
+	if strings.ContainsRune(result, eraseLineSentinel) {
+		result = strings.ReplaceAll(result, string(eraseLineSentinel), "")
+	}
+
 	return result
 }
 
 // simulateCarriageReturns processes bare \r characters within each line,
-// keeping only the text after the last \r. This matches terminal behavior
-// where \r moves the cursor to column 0 and subsequent text overwrites
-// what was there before. Progress bars use this pattern extensively.
+// simulating terminal overwrite behavior. Progress bars use this pattern
+// extensively.
 func simulateCarriageReturns(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
-		if idx := strings.LastIndex(line, "\r"); idx >= 0 {
-			lines[i] = line[idx+1:]
+		if strings.ContainsRune(line, '\r') {
+			lines[i] = collapseCarriageReturns(line)
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// collapseCarriageReturns resolves the \r's within a single line into the
+// text a real terminal would show. \r only moves the cursor back to
+// column 0 — it neither resets SGR state nor erases the rest of the line —
+// so the text after it overwrites just the columns it covers, and
+// whatever color/style was active before the \r keeps applying to
+// anything beyond that.
+//
+// A naive "keep only the text after the last \r" (the previous behavior
+// here) gets both of those wrong: it drops any SGR codes set earlier on
+// the line, and it drops the tail of the line past the end of the
+// overwriting text instead of leaving it visible.
+func collapseCarriageReturns(line string) string {
+	idx := strings.LastIndex(line, "\r")
+	if idx < 0 {
+		return line
+	}
+	after := line[idx+1:]
+
+	if strings.ContainsRune(after, eraseLineSentinel) {
+		// The overwhelmingly common progress-bar pattern is
+		// "...\r\x1b[K<replacement>": return to column 0, erase
+		// whatever was on the line, then draw the replacement. An
+		// erase sentinel anywhere in `after` means the terminal
+		// explicitly cleared the line before continuing, so — unlike
+		// the plain-\r case below — nothing from `before` survives
+		// here regardless of width. `before` is never even resolved:
+		// it would only be thrown away.
+		return strings.ReplaceAll(after, string(eraseLineSentinel), "")
+	}
+
+	// Resolve any earlier \r's on this line first, left to right.
+	before := collapseCarriageReturns(line[:idx])
+
+	// TruncateLeft drops the leading cells `after` overwrites, but (being
+	// ANSI-aware) still copies forward every escape sequence it passes
+	// over on the way — which is exactly the SGR state that was active
+	// at that column, plus the surviving tail of `before` beyond what
+	// `after` covers.
+	return after + ansi.TruncateLeft(before, ansi.StringWidth(after), "")
 }
 
 // writeTruecolor appends "introducer;2;r;g;b" to buf. Nil color emits

@@ -28,13 +28,19 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.threadList.applyEvent(msg)
 		if msg.Type == pubsub.DeletedEvent {
 			m.threadsDock.dropActivity(msg.Payload.ID)
+			delete(m.threadLastStatus, msg.Payload.ID)
 		}
 		cmds = append(cmds, m.threadViewsRefreshCmds()...)
 		// A thread's edge transition into a terminal status (merged,
 		// failed, ...) gets a toast — see thread_completion.go for why a
-		// toast rather than a persisted chat entry.
-		if cmd := m.notifyThreadCompletion(msg.Payload); cmd != nil {
-			cmds = append(cmds, cmd)
+		// toast rather than a persisted chat entry. Skipped for a deleted
+		// thread: there is no meaningful "transition" left to report, and
+		// calling it here would just re-insert the threadLastStatus entry
+		// dropped above.
+		if msg.Type != pubsub.DeletedEvent {
+			if cmd := m.notifyThreadCompletion(msg.Payload); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		// A thread starting or finishing changes whether the panel has
 		// live work to animate.

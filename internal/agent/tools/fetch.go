@@ -175,13 +175,27 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 			}
 			// truncate content if it exceeds max read size
 			if int64(len(content)) >= MaxFetchSize {
-				content = content[:MaxFetchSize]
+				content = truncateToRuneBoundary(content, MaxFetchSize)
 				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxFetchSize)
 			}
 
 			return fantasy.NewTextResponse(content), nil
 		},
 	)
+}
+
+// truncateToRuneBoundary truncates s to at most n bytes, backing off to the
+// nearest earlier rune boundary so a multi-byte UTF-8 rune straddling the
+// cut point is dropped whole rather than split into an invalid trailing
+// fragment.
+func truncateToRuneBoundary(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func extractTextFromHTML(html string) (string, error) {

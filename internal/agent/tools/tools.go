@@ -16,6 +16,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/filetracker"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/permission"
 )
@@ -139,8 +140,10 @@ func resolveWithinWorkdir(workingDir, path string) (absPath string, outside bool
 	if err != nil {
 		return "", false, fmt.Errorf("resolving path: %w", err)
 	}
-	relPath, err := filepath.Rel(absWorkingDir, absPath)
-	outside = err != nil || strings.HasPrefix(relPath, "..")
+	// fsext.HasPrefix treats a sibling like "..foo" as inside workingDir,
+	// unlike a bare strings.HasPrefix(relPath, "..") check, which would
+	// mistake it for an escape via "..".
+	outside = !fsext.HasPrefix(absPath, absWorkingDir)
 	return absPath, outside, nil
 }
 

@@ -105,9 +105,13 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	app.mcpInitCancel = mcpInitCancel
 	app.mcpInitWG.Go(func() { app.MCP.Initialize(mcpInitCtx, app.Permissions(), store) })
 
-	// Start herdr integration when running inside a herdr pane.
+	// Start herdr integration when running inside a herdr pane. Bound to a
+	// context derived from ctx (not ctx itself), stopped via app.herdrCancel
+	// (see its doc) rather than left to outlive ctx unconditionally.
+	var herdrCtx context.Context
+	herdrCtx, app.herdrCancel = context.WithCancel(ctx)
 	app.herdrClient = herdr.Init()
-	herdr.BridgeLocal(ctx, app.herdrClient, herdr.BridgeSources{
+	herdr.BridgeLocal(herdrCtx, app.herdrClient, herdr.BridgeSources{
 		PermRequests:      app.Permissions(),
 		PermNotifications: app.Permissions(),
 		RunCompletions:    app.runCompletions,
@@ -143,6 +147,23 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		return app, nil
 	}
 	if err := app.InitCoderAgent(ctx); err != nil {
+		// Roll back everything started above before failing New: MCP
+		// initialization, the config/skills watchers, the setupEvents
+		// fan-in, and the herdr bridge are all live goroutines at this
+		// point, and the caller only gets an error back, not an *App it
+		// could Shutdown itself. app.Shutdown() already knows how to tear
+		// all of that down (the watchers registered their own
+		// pre-cleanup hook, mcpClose is already wired, and it cancels
+		// app.herdrCancel itself), so reuse it instead of re-deriving the
+		// same teardown here.
+		//
+		// mainDBRelease is deliberately cleared first: the main DB
+		// connection is owned by New's caller (see Bootstrap's own
+		// dbConnected release), not by this constructor, and
+		// app.Shutdown() would otherwise release it out from under that
+		// caller.
+		app.mainDBRelease = nil
+		app.Shutdown()
 		return nil, fmt.Errorf("failed to initialize coder agent: %w", err)
 	}
 

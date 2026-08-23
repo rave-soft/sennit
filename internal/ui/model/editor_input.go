@@ -341,6 +341,9 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	}
 
 	if hasPasteExceededThreshold(msg) {
+		// Snapshot pasteIdx up front: the closure below runs on the cmd
+		// goroutine and must not read m.editor off the Update loop.
+		pasteIdx := m.pasteIdx()
 		return func() tea.Msg {
 			content := []byte(msg.Content)
 			if int64(len(content)) > common.MaxAttachmentSize {
@@ -348,7 +351,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 				// dropped: this command's return value is the message.
 				return util.NewWarnMsg("Paste is too big (>5mb)")
 			}
-			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
+			name := fmt.Sprintf("paste_%d.txt", pasteIdx)
 			return common.AttachmentFromBytes(name, name, content)
 		}
 	}
@@ -446,12 +449,23 @@ type richPasteMsg struct {
 	skipped     int
 }
 
+// pasteImageFromClipboardCmd snapshots the state pasteImageFromClipboard
+// needs before returning a tea.Cmd: the closure it wraps runs on the cmd
+// goroutine and must not read m off the Update loop.
+func (m *UI) pasteImageFromClipboardCmd() tea.Cmd {
+	ctx := m.com.Context()
+	pasteIdx := m.pasteIdx()
+	return func() tea.Msg {
+		return pasteImageFromClipboard(ctx, pasteIdx)
+	}
+}
+
 // pasteImageFromClipboard reads image data from the system clipboard and
 // creates an attachment. A rich payload — markup carrying several images,
 // as a browser selection does — is handled first. Failing that, a lone
 // clipboard image, then clipboard text read as a file path.
-func (m *UI) pasteImageFromClipboard() tea.Msg {
-	if msg := m.pasteRichFromClipboard(); msg != nil {
+func pasteImageFromClipboard(ctx context.Context, pasteIdx int) tea.Msg {
+	if msg := pasteRichFromClipboard(ctx, pasteIdx); msg != nil {
 		return msg
 	}
 
@@ -462,7 +476,7 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 			Msg:  "File too large, max 5MB",
 		}
 	}
-	name := fmt.Sprintf("paste_%d.png", m.pasteIdx())
+	name := fmt.Sprintf("paste_%d.png", pasteIdx)
 	if err == nil {
 		return message.Attachment{
 			FilePath: name,
@@ -531,7 +545,7 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 // the images it references into attachments, pairing them with the plain
 // text of the same selection. It returns nil when the clipboard holds no
 // rich payload, leaving the plain image and file-path paths to run.
-func (m *UI) pasteRichFromClipboard() tea.Msg {
+func pasteRichFromClipboard(parentCtx context.Context, pasteIdx int) tea.Msg {
 	markup, err := clipboard.Read(clipboard.FormatHTML)
 	if err != nil || len(markup) == 0 {
 		return nil
@@ -552,7 +566,7 @@ func (m *UI) pasteRichFromClipboard() tea.Msg {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(m.com.Context(), richPasteTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, richPasteTimeout)
 	defer cancel()
 	images, skipped := richpaste.Resolve(ctx, srcs, richpaste.Options{
 		MaxBytes: common.MaxAttachmentSize,
@@ -561,7 +575,7 @@ func (m *UI) pasteRichFromClipboard() tea.Msg {
 		return nil
 	}
 
-	idx := m.pasteIdx()
+	idx := pasteIdx
 	attachments := make([]message.Attachment, 0, len(images))
 	for i, img := range images {
 		name := fmt.Sprintf("paste_%d%s", idx+i, extensionFor(img.MimeType))

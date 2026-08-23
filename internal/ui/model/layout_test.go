@@ -344,3 +344,23 @@ func TestAutoExpandTodosIfReasonable(t *testing.T) {
 		}
 	})
 }
+
+// TestEditorContentWidthMatchesGeneratedLayout guards item 5: generateLayout
+// (which sizes the real editor rect and the textarea via SetWidth), the
+// draw-time width used for renderEditorView, and editorContentWidth (which
+// sizes inline editors like QuestionForm via Height()) used to disagree by
+// a column or two (w-34 / w-31 / w-32) because each recomputed the sidebar
+// column width independently. All three must now agree, or content sized
+// via editorContentWidth (an inline QuestionForm in particular) gets
+// clipped against the narrower rect it's actually drawn into.
+func TestEditorContentWidthMatchesGeneratedLayout(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.editor.attachments = attachments.New(nil, attachments.Keymap{})
+	u.updateLayoutAndSize()
+
+	require.False(t, u.lay.isCompact, "test assumes the non-compact sidebar layout")
+	require.Equal(t, u.lay.layout.editor.Dx(), u.editorContentWidth(),
+		"editorContentWidth must match the editor rect generateLayout actually produced")
+}

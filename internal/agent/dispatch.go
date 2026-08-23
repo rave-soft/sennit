@@ -790,6 +790,28 @@ func (d *dispatcher) clearActiveIfMatch(sessionID string, ac *activeCancel) {
 	s.mu.Unlock()
 }
 
+// swapActive replaces sessionID's active-run slot from old to new in a
+// single locked step, reporting whether the swap happened. It exists so a
+// turn handing its slot off to its own summarize call (finishTurn's
+// shouldSummarize path) never leaves a window where the session looks
+// idle: clearing the old entry and letting summarize claim a fresh one
+// as two separate locked steps lets a queued continuation claim the
+// session in between, so a turn that should have flowed straight into
+// summarize instead fails with ErrSessionBusy. The swap only fails when
+// old is no longer installed, which does not happen on the call site
+// that uses it today (the caller still owns the slot).
+func (d *dispatcher) swapActive(sessionID string, old, newAC *activeCancel) bool {
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active != old {
+		return false
+	}
+	s.active = newAC
+	return true
+}
+
 // activeSessionIDs returns the session IDs with a live active run, for
 // callers (CancelAll) that need to cancel every busy session.
 func (d *dispatcher) activeSessionIDs() []string {

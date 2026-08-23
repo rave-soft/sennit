@@ -24,6 +24,12 @@ const (
 type file struct {
 	path    string
 	content string
+	// raw is the untouched content passed to Before/After. content gets
+	// overwritten in place by normalizeLineEndings/replaceTabs on every
+	// String() call; raw lets that reset from the original text each
+	// time instead of re-processing already-processed content (see the
+	// String() reset and replaceTabs' doc comment).
+	raw string
 }
 
 type layout int
@@ -100,7 +106,7 @@ func (dv *DiffView) Split() *DiffView {
 
 // Before sets the "before" file for the DiffView.
 func (dv *DiffView) Before(path, content string) *DiffView {
-	dv.before = file{path: path, content: content}
+	dv.before = file{path: path, content: content, raw: content}
 	// Clear caches when content changes
 	dv.clearCaches()
 	return dv
@@ -108,7 +114,7 @@ func (dv *DiffView) Before(path, content string) *DiffView {
 
 // After sets the "after" file for the DiffView.
 func (dv *DiffView) After(path, content string) *DiffView {
-	dv.after = file{path: path, content: content}
+	dv.after = file{path: path, content: content, raw: content}
 	// Clear caches when content changes
 	dv.clearCaches()
 	return dv
@@ -124,6 +130,10 @@ func (dv *DiffView) clearCaches() {
 // ContextLines sets the number of context lines for the DiffView.
 func (dv *DiffView) ContextLines(contextLines int) *DiffView {
 	dv.contextLines = contextLines
+	// computeDiff caches its result behind isComputed; without dropping
+	// that here, a ContextLines() call after the first String() would
+	// silently keep the diff computed under the old value.
+	dv.clearCaches()
 	return dv
 }
 
@@ -185,6 +195,11 @@ func (dv *DiffView) InfiniteYScroll(infiniteYScroll bool) *DiffView {
 // Go code.
 func (dv *DiffView) TabWidth(tabWidth int) *DiffView {
 	dv.tabWidth = tabWidth
+	// See ContextLines: without this, a String() call already having run
+	// once means replaceTabs re-runs against content whose tabs were
+	// already expanded (and are therefore gone), so a later TabWidth
+	// change would have nothing left to expand.
+	dv.clearCaches()
 	return dv
 }
 
@@ -209,6 +224,14 @@ func (dv *DiffView) clearSyntaxCache() {
 
 // String returns the string representation of the DiffView.
 func (dv *DiffView) String() string {
+	// Reset from the untouched raw content before normalizing/expanding
+	// again: normalizeLineEndings and replaceTabs both mutate
+	// dv.before/after.content in place, so without this a second
+	// String() call (e.g. after a TabWidth() change) would run against
+	// content whose tabs and CRLFs were already processed away on the
+	// first call.
+	dv.before.content = dv.before.raw
+	dv.after.content = dv.after.raw
 	dv.normalizeLineEndings()
 	dv.replaceTabs()
 	if err := dv.computeDiff(); err != nil {
@@ -465,7 +488,7 @@ func (dv *DiffView) renderUnified() string {
 		content = strings.TrimSuffix(in, "\n")
 		content = dv.hightlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
-		content = ansi.Truncate(content, dv.codeWidth, "…")
+		content = truncateCode(content, dv.codeWidth, ls)
 		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
 		return content, leadingEllipsis
 	}
@@ -574,6 +597,30 @@ outer:
 	}
 
 	return b.String()
+}
+
+// truncateCode truncates syntax-highlighted content to width, appending an
+// ellipsis when it doesn't fit.
+//
+// This can't just be ansi.Truncate(content, width, "…"): that pastes the
+// ellipsis in using whatever SGR state happens to be active right at the
+// cut point, and xchroma.Formatter emits some tokens — notably runs of
+// whitespace with no chroma style entry — as completely bare, unstyled
+// text. Landing the cut inside or right after one of those runs leaves the
+// ellipsis with no color at all instead of matching the line. Cutting the
+// body separately and rendering the ellipsis with the line's own style
+// sidesteps whatever token it would have landed on.
+func truncateCode(content string, width int, ls LineStyle) string {
+	if ansi.StringWidth(content) <= width {
+		return content
+	}
+	if width < 1 {
+		// No room even for the ellipsis alone (mirrors ansi.Truncate,
+		// which drops the tail entirely once its own width exceeds
+		// the budget).
+		return ""
+	}
+	return ansi.Truncate(content, width-1, "") + ls.Code.Render("…")
 }
 
 func (dv *DiffView) wrapCode(content string, width int) []string {
@@ -758,7 +805,7 @@ func (dv *DiffView) renderSplit() string {
 		content = strings.TrimSuffix(in, "\n")
 		content = dv.hightlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
-		content = ansi.Truncate(content, dv.codeWidth, "…")
+		content = truncateCode(content, dv.codeWidth, ls)
 		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
 		return content, leadingEllipsis
 	}

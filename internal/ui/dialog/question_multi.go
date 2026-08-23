@@ -158,7 +158,7 @@ func (d *MultiChoice) ShortHelp() []key.Binding {
 	return []key.Binding{d.keyUp, d.keyDown, d.keyToggle, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyDone, d.keyClose}
 }
 
-func (d *MultiChoice) Height(width int) int { return d.height(width) }
+func (d *MultiChoice) Height(width int) int { return d.height(width, d.choiceItemContent) }
 func (d *MultiChoice) HeightChanged() bool  { return d.heightChanged() }
 func (d *MultiChoice) SetFocused(f bool)    { d.setFocused(f) }
 func (d *MultiChoice) SetHover(x, y int)    { d.setHover(x, y) }
@@ -203,6 +203,26 @@ func (d *MultiChoice) HandleMouseClick(x, y int) (bool, bool) {
 	return false, false
 }
 
+// choiceItemContent renders a choice's checkbox and label. Shared
+// by Draw and Height so the two never disagree on how many lines a
+// wrapped label takes — Height used to count a fixed single line
+// per choice regardless of width, understating the dialog's height
+// for long labels that wrap.
+func (d *MultiChoice) choiceItemContent(i int, ch question.Choice, active bool, innerWidth int) string {
+	style := d.Styles.Editor.QuestionUnselected
+	if active {
+		style = d.Styles.Editor.QuestionSelected
+	}
+	check := d.Styles.Editor.QuestionCheckOff.Render() + " "
+	if d.selected[i] {
+		check = d.Styles.Editor.QuestionCheckOn.Render() + " "
+	}
+	checkWidth := lipgloss.Width(check)
+	barWidth := 2 // "┃ " or "  ", applied by buildLines
+	labelIndent := strings.Repeat(" ", checkWidth)
+	return check + style.Render(wrapIndent(ch.Label, innerWidth-barWidth-checkWidth, labelIndent))
+}
+
 // Draw renders the multi-choice question directly to screen.
 // Returns the cursor position relative to area, or nil.
 func (d *MultiChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
@@ -211,21 +231,5 @@ func (d *MultiChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		fillPrefix = d.Styles.Editor.QuestionSelected.Render("> ")
 	}
 
-	unselectedHeader := d.Styles.Editor.QuestionUnselected
-	selectedStyle := d.Styles.Editor.QuestionSelected
-
-	return d.drawContent(scr, area, fillPrefix, func(i int, ch question.Choice, active bool, innerWidth int) string {
-		style := unselectedHeader
-		if active {
-			style = selectedStyle
-		}
-		check := d.Styles.Editor.QuestionCheckOff.Render() + " "
-		if d.selected[i] {
-			check = d.Styles.Editor.QuestionCheckOn.Render() + " "
-		}
-		checkWidth := lipgloss.Width(check)
-		barWidth := 2 // "┃ " or "  ", applied by buildLines
-		labelIndent := strings.Repeat(" ", checkWidth)
-		return check + style.Render(wrapIndent(ch.Label, innerWidth-barWidth-checkWidth, labelIndent))
-	})
+	return d.drawContent(scr, area, fillPrefix, d.choiceItemContent)
 }

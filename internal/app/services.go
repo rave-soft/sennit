@@ -138,6 +138,12 @@ type appServices struct {
 	// herdrClient reports agent state to herdr when running inside
 	// a herdr-managed pane. Nil when not in a herdr environment.
 	herdrClient *herdr.Client
+	// herdrCancel stops herdr.BridgeLocal's forwarding goroutines, which
+	// are bound to a context New derives for exactly this purpose rather
+	// than to ctx directly: herdrClient.Close() (Shutdown's phase 6, and
+	// InitCoderAgent's failure path) only releases the pane and closes
+	// the socket, it does not stop those goroutines on its own.
+	herdrCancel context.CancelFunc
 }
 
 // newAppServices builds the appServices grouping for New: the session/

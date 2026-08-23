@@ -98,7 +98,7 @@ func NewShell(opts *Options) *Shell {
 	// Strip herdr pane-ownership vars so subprocesses (including test
 	// binaries and nested sennit instances) can't attach to or release
 	// the parent pane's agent authority.
-	env = withoutHerdrEnv(env)
+	env = WithoutHerdrEnv(env)
 
 	// Allow tools to detect execution by Sennit.
 	env = append(env, SennitEnvMarkers()...)

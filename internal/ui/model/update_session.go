@@ -154,6 +154,12 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		cmds = append(cmds, m.beginSessionLoad(msg.sessionID))
 
 	case sessionFilesUpdatesMsg:
+		// Drop a stale reply from a session the user has since switched
+		// away from — otherwise it clobbers the sidebar's file list with
+		// another session's files.
+		if m.sess.current == nil || msg.sessionID != m.sess.current.ID {
+			break
+		}
 		m.sess.files = msg.sessionFiles
 		var paths []string
 		for _, f := range msg.sessionFiles {

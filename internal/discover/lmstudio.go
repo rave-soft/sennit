@@ -77,6 +77,18 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 		metaByKey[m.Key] = m
 	}
 
+	// IDs the user already listed (by hand, or from an earlier discovery
+	// merged into config). SupportsImages is a plain bool with no "unset"
+	// sentinel to gate on the way ContextWindow (0) and Name (== ID) do
+	// below, so it needs this explicit membership check instead: without
+	// it, enrichment would unconditionally overwrite an existing model's
+	// SupportsImages on every call, clobbering a user override with
+	// whatever this LM Studio instance currently reports.
+	existing := make(map[string]struct{}, len(cfg.ExistingModels))
+	for _, m := range cfg.ExistingModels {
+		existing[m.ID] = struct{}{}
+	}
+
 	for i := range models {
 		meta, ok := metaByKey[models[i].ID]
 		if !ok {
@@ -98,8 +110,12 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 			models[i].Name = meta.DisplayName
 		}
 
-		// Vision support from capabilities.
-		models[i].SupportsImages = meta.Capabilities.Vision
+		// Vision support from capabilities -- only for models the user
+		// didn't already specify; see the Enricher contract note on
+		// existing above.
+		if _, userSpecified := existing[models[i].ID]; !userSpecified {
+			models[i].SupportsImages = meta.Capabilities.Vision
+		}
 	}
 
 	return models, nil

@@ -194,4 +194,46 @@ func TestLmstudioEnricher(t *testing.T) {
 		require.False(t, result[1].SupportsImages, "text-only model should have SupportsImages=false")
 		require.False(t, result[2].SupportsImages, "model without capabilities should default to false")
 	})
+
+	// TestLmstudioEnricher/does_not_overwrite_a_user-specified_SupportsImages
+	// guards the Enricher contract ("user overrides take precedence"):
+	// SupportsImages is a plain bool with no zero-value sentinel the way
+	// ContextWindow (0) and Name (== ID) have, so the enricher must instead
+	// leave it alone for any model already present in cfg.ExistingModels,
+	// regardless of what this LM Studio instance currently reports.
+	t.Run("does not overwrite a user-specified SupportsImages", func(t *testing.T) {
+		t.Parallel()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"models": [
+					{"key": "user-said-true", "capabilities": {"vision": false}},
+					{"key": "user-said-false", "capabilities": {"vision": true}},
+					{"key": "not-user-specified", "capabilities": {"vision": true}}
+				]
+			}`))
+		}))
+		defer srv.Close()
+
+		cfg := Config{
+			ID:      "test-lmstudio",
+			BaseURL: srv.URL,
+			ExistingModels: []catwalk.Model{
+				{ID: "user-said-true", SupportsImages: true},
+				{ID: "user-said-false", SupportsImages: false},
+			},
+		}
+		models := []catwalk.Model{
+			{ID: "user-said-true", SupportsImages: true},
+			{ID: "user-said-false", SupportsImages: false},
+			{ID: "not-user-specified"},
+		}
+
+		e := &lmstudioEnricher{}
+		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
+		require.NoError(t, err)
+		require.True(t, result[0].SupportsImages, "user-specified true must survive a server that reports vision=false")
+		require.False(t, result[1].SupportsImages, "user-specified false must survive a server that reports vision=true")
+		require.True(t, result[2].SupportsImages, "a model the user never specified should still be enriched from the server")
+	})
 }

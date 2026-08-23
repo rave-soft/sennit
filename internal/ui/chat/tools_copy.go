@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,8 +54,15 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 	case tools.BashToolName:
 		var params tools.BashParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
-			cmd := strings.ReplaceAll(params.Command, "\n", " ")
-			cmd = strings.ReplaceAll(cmd, "\t", "    ")
+			cmd := strings.ReplaceAll(params.Command, "\t", "    ")
+			// Newlines must survive the copy: flattening them to
+			// spaces (as the single-line shell header display does)
+			// breaks heredocs and multi-line scripts when pasted
+			// back. Fence multi-line commands so they still read as
+			// a command, not prose.
+			if strings.Contains(cmd, "\n") {
+				return fmt.Sprintf("**Command:**\n```\n%s\n```", cmd)
+			}
 			return fmt.Sprintf("**Command:** %s", cmd)
 		}
 	case tools.ReadToolName, tools.LegacyReadToolName:
@@ -175,13 +183,21 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 
 	var params map[string]any
 	if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
+		// Map iteration order is randomized by Go; sort keys so the
+		// copied text is deterministic instead of shuffling on every
+		// copy.
+		keys := make([]string, 0, len(params))
+		for key := range params {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
 		var parts []string
-		for key, value := range params {
+		for _, key := range keys {
 			displayKey := strings.ReplaceAll(key, "_", " ")
 			if len(displayKey) > 0 {
 				displayKey = strings.ToUpper(displayKey[:1]) + displayKey[1:]
 			}
-			parts = append(parts, fmt.Sprintf("**%s:** %v", displayKey, value))
+			parts = append(parts, fmt.Sprintf("**%s:** %v", displayKey, params[key]))
 		}
 		return strings.Join(parts, "\n")
 	}

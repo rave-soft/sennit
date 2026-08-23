@@ -1084,3 +1084,46 @@ func TestList_SetItems_EmptySlice(t *testing.T) {
 	require.Equal(t, 0, l.Len())
 	require.Equal(t, -1, l.Selected(), "clamping selection against an empty list yields -1")
 }
+
+// TestList_SetItems_EmptyThenRepopulated covers a regression where
+// SetItems([]) clamped offsetIdx to -1 (via a bare min(offsetIdx,
+// len-1) with len==0) and left it there permanently: min(-1, n-1) is
+// always -1 for any later non-empty item set, so the list rendered as
+// empty forever after being cleared once. offsetIdx must clamp to 0,
+// not -1, when the list is emptied.
+func TestList_SetItems_EmptyThenRepopulated(t *testing.T) {
+	t.Parallel()
+
+	l := NewList(newMultiLineItem("a", 1))
+	l.SetSize(20, 5)
+
+	l.SetItems()
+	require.Equal(t, 0, l.Len())
+
+	l.SetItems(newMultiLineItem("x", 1), newMultiLineItem("y", 1))
+	require.Equal(t, 0, l.offsetIdx, "offsetIdx must not stay stuck at -1 after repopulating")
+	require.NotEmpty(t, l.Render(), "a repopulated list must render its items, not stay blank")
+}
+
+// TestList_ScrollBy_StopsWithinGapInsteadOfJumping covers scrolling
+// down by an amount that lands inside the gap after an item, but
+// doesn't consume the whole gap. The list must stop mid-gap
+// (offsetIdx stays on the preceding item, offsetLine inside its
+// trailing gap) rather than jumping straight to the top of the next
+// item, which discarded the unconsumed gap remainder and moved the
+// viewport further than the requested number of lines.
+func TestList_ScrollBy_StopsWithinGapInsteadOfJumping(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 4)
+	b := newMultiLineItem("b", 10)
+	l := NewList(a, b)
+	l.SetGap(3)
+	l.SetSize(20, 5)
+
+	// a's 4 content lines plus 1 line into its trailing 3-line gap: 5
+	// lines total, with 2 gap lines still unconsumed before b begins.
+	l.ScrollBy(5)
+	require.Equal(t, 0, l.offsetIdx, "must remain anchored to a while still inside its trailing gap")
+	require.Equal(t, 5, l.offsetLine, "must stop exactly 5 lines down, not skip ahead to b")
+}

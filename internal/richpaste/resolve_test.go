@@ -102,6 +102,23 @@ func TestResolveReEncodesFormatsModelsDoNotTake(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestResolveSkipsOversizedDataURI guards MaxAttachmentSize against a
+// base64 data: URI, not just http(s) downloads. download enforces MaxBytes
+// with a LimitReader while streaming, but a data: URI is already fully in
+// memory as one string with no equivalent check, so an oversized inline
+// image used to sail straight through.
+func TestResolveSkipsOversizedDataURI(t *testing.T) {
+	t.Parallel()
+
+	content := pngBytes(t)
+	src := "data:image/png;base64," + base64.StdEncoding.EncodeToString(content)
+
+	images, skipped := Resolve(t.Context(), []string{src}, Options{MaxBytes: int64(len(content) - 1)})
+
+	require.Empty(t, images)
+	require.Equal(t, 1, skipped)
+}
+
 func TestResolveSkipsOversizedAndUnusableSources(t *testing.T) {
 	t.Parallel()
 

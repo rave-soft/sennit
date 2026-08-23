@@ -517,11 +517,18 @@ func (l *List) ScrollBy(lines int) {
 		// Scroll down
 		l.offsetLine += lines
 		currentItem := l.getItem(l.offsetIdx)
-		for l.offsetLine >= currentItem.height {
-			l.offsetLine -= currentItem.height
-			if g := l.gapAt(l.offsetIdx); g > 0 {
-				l.offsetLine = max(0, l.offsetLine-g)
-			}
+		gap := l.gapAt(l.offsetIdx)
+		// The gap after an item belongs to that item for this purpose:
+		// Render treats an offsetLine that lands inside the gap as
+		// still anchored to offsetIdx (see the "offsetLine starts
+		// inside the gap" branch there), so offsetIdx must not advance
+		// until offsetLine has consumed the item AND its trailing gap.
+		// Advancing early — and discarding the unconsumed gap
+		// remainder, as this used to do — scrolled past a variable
+		// number of extra lines depending on gap size, producing a
+		// visible jump whenever the scroll crossed a gap.
+		for l.offsetLine >= currentItem.height+gap {
+			l.offsetLine -= currentItem.height + gap
 
 			// Move to next item
 			l.offsetIdx++
@@ -531,6 +538,7 @@ func (l *List) ScrollBy(lines int) {
 				return
 			}
 			currentItem = l.getItem(l.offsetIdx)
+			gap = l.gapAt(l.offsetIdx)
 		}
 
 		lastOffsetIdx, lastOffsetLine := l.lastOffsetItem()
@@ -689,7 +697,11 @@ func (l *List) PrependItems(items ...Item) {
 func (l *List) SetItems(items ...Item) {
 	l.items = items
 	l.selectedIdx = min(l.selectedIdx, len(l.items)-1)
-	l.offsetIdx = min(l.offsetIdx, len(l.items)-1)
+	// offsetIdx must stay >= 0: an empty items slice would otherwise
+	// clamp it to -1 via the bare min() below, and it would then stay
+	// stuck at -1 forever (min(-1, n-1) is always -1) once items are
+	// set again, rendering the list as empty.
+	l.offsetIdx = max(0, min(l.offsetIdx, len(l.items)-1))
 	l.offsetLine = 0
 	l.retainCacheFor(items)
 	l.totalHeightValid = false

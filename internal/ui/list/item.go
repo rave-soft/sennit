@@ -120,7 +120,12 @@ func (b *BaseItem) Cache() map[int]string { return b.cache }
 func (b *BaseItem) Invalidate() { b.invalidate() }
 
 func (b *BaseItem) invalidate() {
-	b.cache = nil
+	// Clear in place rather than assigning nil: renderItem's nil-guard
+	// (in the dialog package) only ever populates a throwaway local map
+	// when the field it's handed is nil, so setting it to nil here would
+	// silently disable the per-width cache for the rest of the item's
+	// life instead of just dropping the stale entries.
+	clear(b.cache)
 	if b.Versioned == nil {
 		b.Versioned = NewVersioned()
 	}

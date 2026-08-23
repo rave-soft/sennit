@@ -435,11 +435,15 @@ func blankLineBefore(content string, until int) int {
 	return -1
 }
 
-// isBlankOrSpaces reports whether s consists entirely of spaces
-// and tabs (or is empty).
+// isBlankOrSpaces reports whether s consists entirely of spaces,
+// tabs, and carriage returns (or is empty). '\r' must count as blank
+// here so CRLF line endings still form a recognizable blank-line
+// separator ("\r\n\r\n") — otherwise blankLineBefore never finds a
+// boundary in CRLF content, findSafeMarkdownBoundary always returns
+// -1, and the streaming prefix cache never gets seeded.
 func isBlankOrSpaces(s string) bool {
 	for i := range len(s) {
-		if s[i] != ' ' && s[i] != '\t' {
+		if s[i] != ' ' && s[i] != '\t' && s[i] != '\r' {
 			return false
 		}
 	}

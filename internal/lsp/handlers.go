@@ -10,9 +10,24 @@ import (
 	"github.com/rave-soft/sennit/internal/lsp/util"
 )
 
-// HandleWorkspaceConfiguration handles workspace configuration requests
+// HandleWorkspaceConfiguration handles workspace configuration requests.
+// The response array must have exactly one entry per requested item, in
+// the same order (LSP spec: "the order of the returned configuration
+// settings correspond to the order of the passed ConfigurationItems").
+// Sennit does not track per-scope settings, so every entry is an empty
+// object, but a server that asks for 2+ sections (e.g. gopls asking for
+// both "gopls" and "build") would otherwise get a misaligned response —
+// its N-th setting read would land on the wrong item.
 func HandleWorkspaceConfiguration(_ context.Context, _ string, params json.RawMessage) (any, error) {
-	return []map[string]any{{}}, nil
+	var configParams protocol.ConfigurationParams
+	if err := json.Unmarshal(params, &configParams); err != nil {
+		return []map[string]any{{}}, nil
+	}
+	result := make([]map[string]any, len(configParams.Items))
+	for i := range result {
+		result[i] = map[string]any{}
+	}
+	return result, nil
 }
 
 // HandleWorkDoneProgressCreate handles server-initiated window/workDoneProgress/create
@@ -54,15 +69,20 @@ func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessag
 	return nil, nil
 }
 
-// HandleApplyEdit handles workspace edit requests
-func HandleApplyEdit(encoding powernap.OffsetEncoding) func(_ context.Context, _ string, params json.RawMessage) (any, error) {
+// HandleApplyEdit handles workspace edit requests. encoding is called at
+// request time, not registration time: registerHandlers wires this up
+// before Initialize completes (servers like typescript-language-server can
+// send requests during the handshake itself), so a value captured up front
+// would always be the pre-negotiation default instead of what the server
+// actually negotiated (e.g. clangd's utf-8).
+func HandleApplyEdit(encoding func() powernap.OffsetEncoding) func(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	return func(_ context.Context, _ string, params json.RawMessage) (any, error) {
 		var edit protocol.ApplyWorkspaceEditParams
 		if err := json.Unmarshal(params, &edit); err != nil {
 			return nil, err
 		}
 
-		err := util.ApplyWorkspaceEdit(edit.Edit, encoding)
+		err := util.ApplyWorkspaceEdit(edit.Edit, encoding())
 		if err != nil {
 			slog.Error("Error applying workspace edit", "error", err)
 			return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: err.Error()}, nil

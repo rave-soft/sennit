@@ -1,10 +1,13 @@
 package model
 
 import (
+	"context"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/message"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/attachments"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -25,6 +28,57 @@ func (historyWorkspace) PermissionSkipRequests() bool {
 
 func (historyWorkspace) SupportsThreads() bool {
 	return false
+}
+
+// historyLoadRecordingWorkspace records which of ListUserMessages /
+// ListAllUserMessages loadPromptHistory's returned tea.Cmd actually calls,
+// and with what session ID, so a test can tell which session's history it
+// loaded.
+type historyLoadRecordingWorkspace struct {
+	historyWorkspace
+	calls []string
+}
+
+func (w *historyLoadRecordingWorkspace) ListUserMessages(_ context.Context, sessionID string) ([]message.Message, error) {
+	w.calls = append(w.calls, "user:"+sessionID)
+	return nil, nil
+}
+
+func (w *historyLoadRecordingWorkspace) ListAllUserMessages(context.Context) ([]message.Message, error) {
+	w.calls = append(w.calls, "all")
+	return nil, nil
+}
+
+func (w *historyLoadRecordingWorkspace) InitializePrompt() (string, error) {
+	return "", nil
+}
+
+// TestLoadPromptHistorySnapshotsSessionAtCallTime covers the off-goroutine
+// access bug: loadPromptHistory's returned tea.Cmd runs on the cmd
+// goroutine, concurrently with further Update calls that can reassign
+// m.sess.current. The cmd must decide which session to load from the
+// state snapshotted when loadPromptHistory was called, not from m.sess
+// read again when the cmd actually executes.
+func TestLoadPromptHistorySnapshotsSessionAtCallTime(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	ws := &historyLoadRecordingWorkspace{}
+	u.com.Workspace = ws
+	u.sess.current = &session.Session{ID: "sess-a"}
+
+	cmd := u.loadPromptHistory()
+	require.NotNil(t, cmd)
+
+	// Simulate the session changing (e.g. the user switches sessions)
+	// between loadPromptHistory building the cmd and Bubble Tea actually
+	// running it.
+	u.sess.current = nil
+
+	cmd()
+
+	require.Equal(t, []string{"user:sess-a"}, ws.calls,
+		"cmd must load the session active when loadPromptHistory was called, not m.sess.current at execution time")
 }
 
 func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {

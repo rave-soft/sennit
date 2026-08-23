@@ -250,6 +250,15 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 		ParentSessionID: args.ParentSessionID,
 	})
 	if err != nil {
+		// The GetByName check above is check-then-act: two concurrent
+		// Creates for the same name can both pass it and race into this
+		// insert, so the store's UNIQUE(project_path, kind, name)
+		// constraint is the real guard. Map that violation to the same
+		// message the check above gives instead of surfacing the raw
+		// driver text (e.g. "UNIQUE constraint failed: threads.name").
+		if isUniqueConstraintViolation(err) {
+			return Thread{}, fmt.Errorf("thread: name %q is already in use", name)
+		}
 		return Thread{}, fmt.Errorf("thread: create record: %w", err)
 	}
 	m.lc.publish(EventCreated, st)
@@ -1356,6 +1365,15 @@ func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, erro
 		threads = append(threads, st)
 	}
 	return threads, nil
+}
+
+// isUniqueConstraintViolation reports whether err came from a UNIQUE
+// constraint failure. This package deliberately has no import on the SQL
+// driver (see the Store seam in internal/app/threadspawn), so it matches
+// on the message text every SQLite driver uses for this failure rather
+// than a driver-specific error type.
+func isUniqueConstraintViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }
 
 func validateName(name string) (string, error) {

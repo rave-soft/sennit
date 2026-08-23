@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rave-soft/sennit/internal/csync"
@@ -39,6 +40,14 @@ type LSPClientInfo = lsp.ClientInfo
 type lspEvents struct {
 	states *csync.Map[string, LSPClientInfo]
 	broker *pubsub.Broker[LSPEvent]
+	// writeMu serializes the get-modify-set sequences in updateLSPState and
+	// updateLSPDiagnostics. csync.Map's own Get/Set are each atomic, but
+	// the pair is not: an LSP state change and a diagnostics callback can
+	// land concurrently for the same client, and without this a
+	// diagnostics update read stale before a state update's Set can be
+	// clobbered by that state update's own Set — silently losing the
+	// diagnostics count.
+	writeMu sync.Mutex
 }
 
 func newLSPEvents() *lspEvents {
@@ -65,7 +74,14 @@ func (l *lspEvents) GetLSPState(name string) (LSPClientInfo, bool) {
 }
 
 // updateLSPState updates the state of an LSP client and publishes an event.
+// err is nil at every call site today, but the parameter stays: the field
+// it fills is rendered by the LSP block in internal/ui/model/lsp.go, so a
+// failing start ought to be reported through here rather than the plumbing
+// being torn out.
+//
+//nolint:unparam // see above; the sink for this value already exists in the UI
 func (l *lspEvents) updateLSPState(name string, state lsp.ServerState, err error, client *lsp.Client, diagnosticCount int) {
+	l.writeMu.Lock()
 	info := LSPClientInfo{
 		Name:            name,
 		State:           state,
@@ -79,6 +95,7 @@ func (l *lspEvents) updateLSPState(name string, state lsp.ServerState, err error
 		info.ConnectedAt = existing.ConnectedAt
 	}
 	l.states.Set(name, info)
+	l.writeMu.Unlock()
 
 	// Publish state change event
 	l.broker.Publish(pubsub.UpdatedEvent, LSPEvent{
@@ -93,10 +110,15 @@ func (l *lspEvents) updateLSPState(name string, state lsp.ServerState, err error
 // updateLSPDiagnostics updates the diagnostic count for an LSP client and
 // publishes an event.
 func (l *lspEvents) updateLSPDiagnostics(name string, diagnosticCount int) {
-	if info, exists := l.states.Get(name); exists {
+	l.writeMu.Lock()
+	info, exists := l.states.Get(name)
+	if exists {
 		info.DiagnosticCount = diagnosticCount
 		l.states.Set(name, info)
+	}
+	l.writeMu.Unlock()
 
+	if exists {
 		// Publish diagnostics change event
 		l.broker.Publish(pubsub.UpdatedEvent, LSPEvent{
 			Type:            LSPEventDiagnosticsChanged,

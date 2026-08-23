@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/dustin/go-humanize"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -137,10 +138,7 @@ func renderThreadsTable(out io.Writer, threads []proto.Thread) error {
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSTATUS\tBRANCH\tBASE\tUPDATED\tGOAL")
 	for _, t := range threads {
-		goal := t.Goal
-		if len(goal) > 60 {
-			goal = goal[:59] + "…"
-		}
+		goal := ansi.Truncate(t.Goal, 60, "…")
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			t.Name, t.Status, t.Branch, t.BaseBranch,
 			humanize.Time(time.Unix(t.UpdatedAt, 0)), goal)

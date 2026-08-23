@@ -430,7 +430,15 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 				out <- AgentRunEvent{Done: true}
 				return
 
-			case ev := <-messageEvents:
+			case ev, ok := <-messageEvents:
+				if !ok {
+					// The broker closed the channel (ctx was already
+					// canceled). Stop selecting on it so the loop doesn't
+					// spin on a permanently-ready closed channel; ctx.Done
+					// below will fire and end the goroutine.
+					messageEvents = nil
+					continue
+				}
 				msg := ev.Payload
 				if msg.SessionID != sessionID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
 					continue

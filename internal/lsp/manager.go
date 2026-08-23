@@ -109,10 +109,12 @@ func (s *Manager) TrackConfigured(ctx context.Context) {
 // Start starts an LSP server that can handle the given file path.
 // If an appropriate LSP is already running, this is a no-op.
 func (s *Manager) Start(ctx context.Context, path string) {
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	if !fsext.HasPrefix(path, s.cfg.WorkingDir()) {
+	// Canonical, not just Abs: a symlinked cwd (or a differently-spelled
+	// Windows path) makes a textual HasPrefix comparison fail even though
+	// path is genuinely inside the working directory, silently skipping
+	// LSP start.
+	path = fsext.Canonical(path)
+	if !fsext.HasPrefix(path, fsext.Canonical(s.cfg.WorkingDir())) {
 		return
 	}
 

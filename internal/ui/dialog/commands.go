@@ -112,7 +112,9 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	case dockerMCPAvailabilityCheckedMsg:
 		c.dockerMCPAvailable, c.dockerMCPCheckInFlight = &msg.available, false
 		if c.selected == SystemCommands {
-			_ = c.replaceItems(c.commandItems)
+			// The item source changed out from under the user, not
+			// anything they asked for — keep whatever they've typed.
+			_ = c.replaceItems(c.commandItems, true)
 		}
 		return nil
 	case spinner.TickMsg:
@@ -125,11 +127,14 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		switch {
 		case key.Matches(msg, c.tab) && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0):
 			c.selected = c.nextCommandType()
-			_ = c.replaceItems(c.commandItems)
+			// Switching category changes what's being listed, so an old
+			// filter from the previous category could hide everything
+			// here — clear it instead of carrying it forward.
+			_ = c.replaceItems(c.commandItems, false)
 			return nil
 		case key.Matches(msg, c.shiftTab) && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0):
 			c.selected = c.previousCommandType()
-			_ = c.replaceItems(c.commandItems)
+			_ = c.replaceItems(c.commandItems, false)
 			return nil
 		}
 		selectAction := func(item ListItem) Action { return item.(*CommandItem).Action() }
@@ -183,7 +188,9 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds, ha
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
-		_ = c.replaceItems(c.commandItems)
+		// A resize re-runs buildItems but the user didn't ask to change
+		// what's listed — keep their filter.
+		_ = c.replaceItems(c.commandItems, true)
 	}
 	t := c.com.Styles
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
@@ -251,7 +258,10 @@ func (c *Commands) previousCommandType() CommandType {
 
 func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
-	_ = c.replaceItems(c.commandItems)
+	// setCommandItems switches (or re-selects) a category explicitly, so
+	// clear the filter rather than carrying one that may not match
+	// anything in the new list.
+	_ = c.replaceItems(c.commandItems, false)
 }
 
 // customCommandItem builds a CommandItem for a user-defined (file-backed)

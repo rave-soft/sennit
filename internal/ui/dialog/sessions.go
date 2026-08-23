@@ -68,7 +68,11 @@ func (s *Session) ID() string { return SessionsID }
 func (s *Session) sessionItems() ([]list.FilterableItem, int, error) {
 	return sessionItems(s.com.Styles, s.sessionsMode, s.sessions...), 0, nil
 }
-func (s *Session) rebuild() { _ = s.replaceItems(s.sessionItems) }
+
+// rebuild re-runs sessionItems after the underlying session list changed
+// (rename, delete, pin) — not something the user typed a filter to
+// trigger, so keep it.
+func (s *Session) rebuild() { _ = s.replaceItems(s.sessionItems, true) }
 
 func (s *Session) HandleMsg(msg tea.Msg) Action {
 	keyMsg, ok := msg.(tea.KeyPressMsg)

@@ -5,6 +5,7 @@ import (
 	"math"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -34,6 +35,11 @@ type Attachments struct {
 	keyMap   Keymap
 	list     []message.Attachment
 	deleting bool
+	// deleteDigits accumulates the digits typed so far while deleting,
+	// so an attachment list of 10 or more can be addressed by a
+	// multi-digit index instead of committing (and exiting delete
+	// mode) on the very first digit.
+	deleteDigits string
 }
 
 func (m *Attachments) List() []message.Attachment { return m.list }
@@ -49,24 +55,37 @@ func (m *Attachments) Update(msg tea.Msg) bool {
 		case key.Matches(msg, m.keyMap.DeleteMode):
 			if len(m.list) > 0 {
 				m.deleting = true
+				m.deleteDigits = ""
 			}
 			return true
 		case m.deleting && key.Matches(msg, m.keyMap.Escape):
 			m.deleting = false
+			m.deleteDigits = ""
 			return true
 		case m.deleting && key.Matches(msg, m.keyMap.DeleteAll):
 			m.deleting = false
+			m.deleteDigits = ""
 			m.list = nil
 			return true
 		case m.deleting:
 			// Handle digit keys for individual attachment deletion.
+			// Attachments beyond index 9 need a second digit, so a
+			// single keystroke can't commit immediately: buffer digits
+			// and only delete once no further digit could still refine
+			// a valid index (or once the buffer is already as long as
+			// the largest possible index).
 			r := msg.Code
 			if r >= '0' && r <= '9' {
-				num := int(r - '0')
-				if num < len(m.list) {
-					m.list = slices.Delete(m.list, num, num+1)
+				m.deleteDigits += string(r)
+				num, _ := strconv.Atoi(m.deleteDigits)
+				maxDigits := len(strconv.Itoa(max(len(m.list)-1, 0)))
+				if len(m.deleteDigits) >= maxDigits || num*10 > len(m.list)-1 {
+					if num < len(m.list) {
+						m.list = slices.Delete(m.list, num, num+1)
+					}
+					m.deleting = false
+					m.deleteDigits = ""
 				}
-				m.deleting = false
 			}
 			return true
 		}
@@ -228,7 +247,12 @@ func (r *Renderer) Render(attachments []message.Attachment, deleting, showRemove
 			offset += chipW
 		}
 
-		if i == fits && len(attachments) > i {
+		// Only show the "N more…" summary when there is at least one
+		// attachment after i that it's actually hiding. len(attachments)
+		// > i was true even for i == len(attachments)-1 — the last
+		// attachment, fully rendered above — which showed a bogus
+		// "1 more…" chip when nothing was in fact hidden.
+		if i == fits && i < len(attachments)-1 {
 			chips = append(chips, lipgloss.NewStyle().Width(maxItemWidth).Render(fmt.Sprintf("%d more…", len(attachments)-fits)))
 			break
 		}

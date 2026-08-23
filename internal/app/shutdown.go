@@ -374,6 +374,9 @@ func (p *shutdownPhases) Shutdown() {
 	if app.herdrClient != nil {
 		app.herdrClient.Close()
 	}
+	if app.herdrCancel != nil {
+		app.herdrCancel()
+	}
 
 	wg.Go(func() {
 		stop := p.stopLSP

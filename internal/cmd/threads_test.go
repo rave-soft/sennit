@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -384,4 +385,19 @@ func TestRenderThreadsTable_GoalTruncation_OverBoundary(t *testing.T) {
 	out := buf.String()
 	require.Contains(t, out, strings.Repeat("g", 59)+"…")
 	require.NotContains(t, out, goal61, "the untruncated 61-character goal must not appear verbatim")
+}
+
+// TestRenderThreadsTable_GoalTruncation_MultiByteRune is the regression
+// test for a byte-slicing truncation (goal[:59]) that cut a multi-byte
+// UTF-8 rune in half, producing invalid UTF-8 in the rendered table. "é"
+// is a single, single-width rune but 2 bytes in UTF-8, so byte offset 59
+// lands mid-rune for a string built entirely from it.
+func TestRenderThreadsTable_GoalTruncation_MultiByteRune(t *testing.T) {
+	goal := strings.Repeat("é", 61) // over the truncation threshold in rune count
+	var buf bytes.Buffer
+	require.NoError(t, renderThreadsTable(&buf, []proto.Thread{{Name: "a", Goal: goal}}))
+
+	out := buf.String()
+	require.True(t, utf8.ValidString(out), "a truncated multi-byte goal must still be valid UTF-8")
+	require.Contains(t, out, strings.Repeat("é", 59)+"…")
 }

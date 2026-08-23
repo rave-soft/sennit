@@ -35,6 +35,8 @@ type apiKeyTestWorkspace struct {
 
 func (w *apiKeyTestWorkspace) SupportsThreads() bool { return false }
 
+func (w *apiKeyTestWorkspace) Resolver() config.VariableResolver { return config.IdentityResolver() }
+
 func (w *apiKeyTestWorkspace) SetProviderAPIKey(_ config.Scope, providerID string, apiKey any) error {
 	w.setCalls++
 	if w.saveErr != nil {
@@ -165,4 +167,54 @@ func TestAPIKeyInput_SaveErrorReportsAndKeepsDialogOpen(t *testing.T) {
 	reportAction, ok := action.(ActionCmd)
 	require.True(t, ok, "expected the error to be reported via ActionCmd, got %#v", action)
 	require.NotNil(t, reportAction.Cmd)
+}
+
+// TestAPIKeyInput_VerifySnapshotsInputBeforeAsyncCheck is a regression test
+// for verifyAPIKeyCmd reading model state off the Update goroutine. The old
+// code (m.verifyAPIKey used directly as a tea.Cmd) called m.input.Value()
+// lazily, when bubbletea invoked the returned func on its own goroutine —
+// so any HandleMsg call reached before that goroutine ran (a paste, say)
+// raced with it and could change which key got verified. The fix snapshots
+// the key inside HandleMsg, before the cmd is returned.
+//
+// The Alibaba-Singapore provider is used because TestConnection checks that
+// provider's key with a plain prefix check and returns before doing any
+// network I/O (see (*config.ProviderConfig).TestConnection), which keeps
+// this test hermetic while still exercising the real snapshot/lazy-read
+// difference.
+func TestAPIKeyInput_VerifySnapshotsInputBeforeAsyncCheck(t *testing.T) {
+	com, _ := newAPIKeyTestCommon(t)
+	provider := catwalk.Provider{ID: catwalk.InferenceProviderAlibabaSingapore, Name: "Alibaba"}
+	dlg, _ := NewAPIKeyInput(com, false, provider, nil)
+
+	for _, r := range "sk-original" {
+		dlg.HandleMsg(keyMsg(r))
+	}
+	dlg.input.CursorStart()
+
+	action := dlg.HandleMsg(ActionChangeAPIKeyState{State: APIKeyInputStateVerifying})
+	cmdAction, ok := action.(ActionCmd)
+	require.True(t, ok, "expected ActionCmd carrying the batched verify, got %#v", action)
+
+	// Simulate a message reaching HandleMsg after the Verifying transition
+	// but before the async cmd runs — the window the old lazy read raced
+	// against. Pasting at the (rewound) start of the field breaks the
+	// "sk-" prefix check, so this only passes if the cmd already captured
+	// "sk-original" rather than reading m.input lazily when it runs.
+	dlg.HandleMsg(tea.PasteMsg{Content: "nope"})
+
+	batch, ok := cmdAction.Cmd().(tea.BatchMsg)
+	require.True(t, ok, "expected a batched command (spinner tick + verify)")
+
+	var gotResult bool
+	for _, sub := range batch {
+		msg := sub()
+		if verify, ok := msg.(ActionChangeAPIKeyState); ok {
+			gotResult = true
+			// The snapshotted key ("sk-original") passes the prefix
+			// check; the pasted one ("nope") would not.
+			require.Equal(t, APIKeyInputStateVerified, verify.State)
+		}
+	}
+	require.True(t, gotResult, "expected the verify cmd to produce ActionChangeAPIKeyState")
 }

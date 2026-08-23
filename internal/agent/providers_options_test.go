@@ -343,6 +343,18 @@ func TestGetProviderOptionsGoogle(t *testing.T) {
 		require.NotNil(t, po.ThinkingConfig)
 	})
 
+	t.Run("a non-reasoning model gets no thinking_config at all", func(t *testing.T) {
+		t.Parallel()
+		// A gemini-2 model that CanReason=false must not get
+		// thinking_config populated: the API rejects thinking_level (or a
+		// thinking budget) on a model that cannot reason, and the old
+		// code only gated on the gemini-2 name prefix, not CanReason.
+		model := Model{CatalogCfg: reasoningCatalog("gemini-2.5-flash-lite", false, nil, "")}
+		got := getProviderOptions(model, config.ProviderConfig{Type: google.Name})
+		po := mustGoogleOptions(t, got[google.Name])
+		require.Nil(t, po.ThinkingConfig)
+	})
+
 	t.Run("an explicit thinking_config in options is not overwritten", func(t *testing.T) {
 		t.Parallel()
 		model := Model{CatalogCfg: reasoningCatalog("gemini-2.5-pro", true, nil, "")}

@@ -271,17 +271,34 @@ func (m *UI) drawSidebar(scr uv.Screen, area uv.Rectangle) {
 	}
 }
 
-// fileChangeCount returns the number of session files with non-zero additions
-// or deletions.
+// hasFileChanges reports whether a session file counts as "changed" for the
+// sidebar count and the "Modified Files" list: it has a non-zero diff, or
+// it's uncommitted (a new/staged file can be uncommitted with no diff yet
+// computed). Shared so the two surfaces never disagree on which files
+// count.
+func hasFileChanges(f SessionFile) bool {
+	return f.Uncommitted || f.Additions != 0 || f.Deletions != 0
+}
+
+// fileChangeCount returns the number of session files that count as changed
+// per hasFileChanges.
 func fileChangeCount(files []SessionFile) int {
 	count := 0
 	for _, f := range files {
-		if f.Additions == 0 && f.Deletions == 0 {
-			continue
+		if hasFileChanges(f) {
+			count++
 		}
-		count++
 	}
 	return count
+}
+
+// truncatedMoreCount returns how many items are hidden when a list of
+// `total` items is truncated to maxItems entries by showing maxItems-1 real
+// items followed by one "…and N more" summary line — so N must cover
+// everything past those maxItems-1, not past maxItems. Shared by the
+// lsp/mcp/skills sidebar sections so their summary lines agree.
+func truncatedMoreCount(total, maxItems int) int {
+	return total - (maxItems - 1)
 }
 
 // mcpCount returns the number of MCP servers that have a state entry.

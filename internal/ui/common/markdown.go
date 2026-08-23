@@ -45,8 +45,30 @@ func resetMDCachesForRev(sty *styles.Styles) {
 		return
 	}
 	mdCacheRev = rev
+
+	// The renderers we're about to drop are also keyed into
+	// rendererLocks by pointer (see LockMarkdownRenderer). A map key
+	// holds a strong reference, so leaving those entries behind would
+	// keep every renderer built under every past theme alive for the
+	// life of the process. Collect them before clearing the caches and
+	// evict them from rendererLocks too.
+	stale := make([]*glamour.TermRenderer, 0, len(mdCache)+len(quietMDCache))
+	for _, r := range mdCache {
+		stale = append(stale, r)
+	}
+	for _, r := range quietMDCache {
+		stale = append(stale, r)
+	}
 	clear(mdCache)
 	clear(quietMDCache)
+
+	if len(stale) > 0 {
+		rendererLocksMu.Lock()
+		for _, r := range stale {
+			delete(rendererLocks, r)
+		}
+		rendererLocksMu.Unlock()
+	}
 }
 
 // MarkdownRenderer returns a glamour [glamour.TermRenderer] configured with
@@ -66,11 +88,18 @@ func MarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 	if r, ok := mdCache[width]; ok {
 		return r
 	}
-	r, _ := glamour.NewTermRenderer(
+	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(sty.Markdown),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatterName),
 	)
+	if err != nil {
+		// Don't cache a failed build: caching nil here would make
+		// every later call at this width return nil forever (a
+		// guaranteed nil-deref for callers), instead of retrying on
+		// the next call the way an uncached miss does.
+		return nil
+	}
 	mdCache[width] = r
 	return r
 }
@@ -86,11 +115,17 @@ func QuietMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer 
 	if r, ok := quietMDCache[width]; ok {
 		return r
 	}
-	r, _ := glamour.NewTermRenderer(
+	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(sty.QuietMarkdown),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatterName),
 	)
+	if err != nil {
+		// See the matching comment in MarkdownRenderer: don't cache a
+		// failed build under this width, or every later call would
+		// return the cached nil forever instead of retrying.
+		return nil
+	}
 	quietMDCache[width] = r
 	return r
 }

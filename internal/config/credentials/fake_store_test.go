@@ -23,7 +23,16 @@ type fakeStore struct {
 	cfg        *config.Config
 	configPath string
 	lockDir    string
+
+	// persistFailures, when non-zero, makes the next N calls to
+	// PersistRefreshedToken fail with errPersistFailed instead of
+	// writing, then lets subsequent calls succeed normally. Used to
+	// exercise refreshOAuthTokenLocked's persist-retry path.
+	persistFailures  int
+	persistCallCount int
 }
+
+var errPersistFailed = fmt.Errorf("simulated persist failure")
 
 // newFakeStore builds a fakeStore backed by a real (but hand-written)
 // config file on disk at configPath, so loadTokenFromDisk / gjson reads
@@ -91,6 +100,13 @@ func (f *fakeStore) SetProviderAPIKey(_ config.Scope, providerID string, apiKey 
 }
 
 func (f *fakeStore) PersistRefreshedToken(_ config.Scope, providerID string, _ config.ProviderConfig, token *oauth.Token) error {
+	f.mu.Lock()
+	f.persistCallCount++
+	fail := f.persistCallCount <= f.persistFailures
+	f.mu.Unlock()
+	if fail {
+		return errPersistFailed
+	}
 	return f.writeFields(providerID, config.ProviderConfig{APIKey: token.AccessToken, OAuthToken: token})
 }
 

@@ -82,8 +82,13 @@ var animCacheMap = csync.NewMap[string, *animCache]()
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()
-	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v",
-		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor)
+	// NoScramble changes which frames New() builds (no cycling chars,
+	// no birth animation — see the cyclingCharWidth branch below), so
+	// it must be part of the cache key. Without it, two Anims that
+	// differ only in NoScramble could hash to the same key and one
+	// would be handed the other's prerendered frames.
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v-%t",
+		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor, opts.NoScramble)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -422,9 +427,21 @@ func (a *Anim) Animate(msg StepMsg) tea.Cmd {
 		return nil
 	}
 
-	step := a.step.Add(1)
-	if int(step) >= len(a.cyclingFrames) {
-		a.step.Store(0)
+	// Advance and wrap atomically. Add()-then-Store(0) leaves a window
+	// where a.step visibly holds len(a.cyclingFrames) — one past the
+	// last valid index — to any concurrent Render() reading it in
+	// between, which indexes a.cyclingFrames[step] and would panic. A
+	// CAS loop never exposes an out-of-range value: every successful
+	// swap lands step back in [0, len).
+	for {
+		old := a.step.Load()
+		next := old + 1
+		if int(next) >= len(a.cyclingFrames) {
+			next = 0
+		}
+		if a.step.CompareAndSwap(old, next) {
+			break
+		}
 	}
 
 	frames := a.framesSinceStart.Add(1)

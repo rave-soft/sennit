@@ -323,11 +323,30 @@ func TestUpdateSession_SessionFilesUpdatesMsg(t *testing.T) {
 	m := newBusyUI(&countingWorkspace{ready: true})
 	files := []SessionFile{{FirstVersion: history.File{Path: "main.go"}}}
 
-	cmds, done := m.updateSession(sessionFilesUpdatesMsg{sessionFiles: files}, nil)
+	cmds, done := m.updateSession(sessionFilesUpdatesMsg{sessionID: "s1", sessionFiles: files}, nil)
 
 	require.False(t, done)
 	require.Equal(t, files, m.sess.files)
 	require.Len(t, cmds, 1)
+}
+
+// TestUpdateSession_SessionFilesUpdatesMsg_StaleSession verifies that a
+// sessionFilesUpdatesMsg for a session the user has since switched away
+// from is dropped instead of overwriting the current session's file list
+// with another session's files.
+func TestUpdateSession_SessionFilesUpdatesMsg_StaleSession(t *testing.T) {
+	t.Parallel()
+
+	m := newBusyUI(&countingWorkspace{ready: true})
+	existing := []SessionFile{{FirstVersion: history.File{Path: "current.go"}}}
+	m.sess.files = existing
+	staleFiles := []SessionFile{{FirstVersion: history.File{Path: "other-session.go"}}}
+
+	cmds, done := m.updateSession(sessionFilesUpdatesMsg{sessionID: "some-other-session", sessionFiles: staleFiles}, nil)
+
+	require.False(t, done)
+	require.Equal(t, existing, m.sess.files, "stale session's files must not replace the current session's files")
+	require.Empty(t, cmds)
 }
 
 func TestUpdateSession_SessionEvent(t *testing.T) {

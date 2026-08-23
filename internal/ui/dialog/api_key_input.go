@@ -118,7 +118,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 		m.state = msg.State
 		switch m.state {
 		case APIKeyInputStateVerifying:
-			cmd := tea.Batch(m.spinner.Tick, m.verifyAPIKey)
+			cmd := tea.Batch(m.spinner.Tick, m.verifyAPIKeyCmd())
 			return ActionCmd{cmd}
 		}
 	case spinner.TickMsg:
@@ -292,9 +292,12 @@ func (m *APIKeyInput) ShortHelp() []key.Binding {
 	}
 }
 
-func (m *APIKeyInput) verifyAPIKey() tea.Msg {
-	start := time.Now()
-
+// verifyAPIKeyCmd snapshots the current provider/key state in Update and
+// does the actual network check off the Update goroutine, the same pattern
+// as saveAPIKeyCmd below and OAuthCodex.startPolling: the returned closure
+// touches only its captured copies, never m, so it's safe to run
+// concurrently with future Update calls that mutate m.input.
+func (m *APIKeyInput) verifyAPIKeyCmd() tea.Cmd {
 	providerConfig := config.ProviderConfig{
 		ID:      string(m.provider.ID),
 		Name:    m.provider.Name,
@@ -302,19 +305,24 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 		Type:    m.provider.Type,
 		BaseURL: m.provider.APIEndpoint,
 	}
-	err := providerConfig.TestConnection(m.com.Workspace.Resolver())
+	resolver := m.com.Workspace.Resolver()
+	return func() tea.Msg {
+		start := time.Now()
 
-	// intentionally wait for at least 750ms to make sure the user sees the spinner
-	elapsed := time.Since(start)
-	minimum := 750 * time.Millisecond
-	if elapsed < minimum {
-		time.Sleep(minimum - elapsed)
-	}
+		err := providerConfig.TestConnection(resolver)
 
-	if err == nil {
-		return ActionChangeAPIKeyState{APIKeyInputStateVerified}
+		// intentionally wait for at least 750ms to make sure the user sees the spinner
+		elapsed := time.Since(start)
+		minimum := 750 * time.Millisecond
+		if elapsed < minimum {
+			time.Sleep(minimum - elapsed)
+		}
+
+		if err == nil {
+			return ActionChangeAPIKeyState{APIKeyInputStateVerified}
+		}
+		return ActionChangeAPIKeyState{APIKeyInputStateError}
 	}
-	return ActionChangeAPIKeyState{APIKeyInputStateError}
 }
 
 // saveAPIKeyCmd persists the entered key off the Update goroutine and

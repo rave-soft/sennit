@@ -153,15 +153,24 @@ func (s *ConfigStore) EnableDockerMCP() error {
 	return nil
 }
 
-// DisableDockerMCP removes Docker MCP configuration and persists the change.
+// DisableDockerMCP removes Docker MCP configuration and persists the
+// change.
+//
+// This must only delete the single "mcp.docker" field, not rewrite the
+// whole (already-merged) c.MCP map back to disk: c.MCP is the merge of
+// every config layer, so writing it whole into the global file would copy
+// project-scoped servers -- including their oauth_token -- into the global
+// config and leak them into every other project.
+//
+// The in-memory removal is applied directly rather than left to
+// RemoveConfigField's autoReload, so the change is visible immediately even
+// when workingDir isn't set up for a full disk reload (e.g. in tests that
+// construct a bare ConfigStore).
 func (s *ConfigStore) DisableDockerMCP() error {
-	return s.update(ScopeGlobal, func(c *Config) map[string]any {
-		if c.MCP == nil {
-			return nil
-		}
+	s.mutateInMemory(func(c *Config) {
 		delete(c.MCP, DockerMCPName)
-		return map[string]any{"mcp": c.MCP}
 	})
+	return s.RemoveConfigField(ScopeGlobal, "mcp."+DockerMCPName)
 }
 
 // RemoveDockerMCPInMemory removes the Docker MCP entry from the in-memory

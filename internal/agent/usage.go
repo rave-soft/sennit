@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
@@ -64,21 +65,37 @@ func summarizeBuffer(contextWindow, maxOut int64) int64 {
 var summaryPrompt []byte
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
-	return a.summarize(ctx, sessionID, opts, onAuthRefresh, a.model.Get(), a.systemPromptPrefix.Get(), nil)
+	return a.summarize(ctx, sessionID, opts, onAuthRefresh, a.model.Get(), a.systemPromptPrefix.Get(), nil, nil)
 }
 
-func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, model Model, systemPromptPrefix string, active *activeRuntime) (retErr error) {
+// claim, when non-nil, is the caller's own still-installed active-run slot
+// (e.g. finishTurn's shouldSummarize path): summarize takes it over with a
+// single atomic swap instead of releasing it and re-claiming from scratch,
+// closing the window in which a queued continuation could claim the
+// session first and turn a successful turn's summarize into ErrSessionBusy.
+// A nil claim falls back to the normal claim-if-idle check, used by callers
+// (Summarize, and coordinator's explicit trigger) that never held the slot
+// themselves.
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, model Model, systemPromptPrefix string, active *activeRuntime, claim *activeCancel) (retErr error) {
 	s, release := a.session(sessionID)
 	defer release()
-	s.mu.Lock()
-	if s.active != nil {
-		s.mu.Unlock()
-		return ErrSessionBusy
-	}
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
-	s.active = ac
-	s.mu.Unlock()
+	if claim != nil {
+		if !a.swapActive(sessionID, claim, ac) {
+			cancel()
+			return ErrSessionBusy
+		}
+	} else {
+		s.mu.Lock()
+		if s.active != nil {
+			s.mu.Unlock()
+			cancel()
+			return ErrSessionBusy
+		}
+		s.active = ac
+		s.mu.Unlock()
+	}
 
 	defer func() {
 		a.clearActiveIfMatch(sessionID, ac)
@@ -175,15 +192,22 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	})
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
+		// ctx is canceled on this path (that's exactly what got us here),
+		// so cleanup writes need a context detached from it the same way
+		// handleStreamError detaches cleanupCtx from t.ctx: otherwise the
+		// delete/update below fails immediately, leaving an empty summary
+		// message behind forever.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cleanupCancel()
 		if isCancelErr {
 			// User cancelled summarize we need to remove the summary message.
-			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
+			deleteErr := a.messages.Delete(cleanupCtx, summaryMessage.ID)
 			return deleteErr
 		}
 		// Mark the summary message as finished with an error so the UI
 		// stops spinning.
 		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
-		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
+		if updateErr := a.messages.Update(cleanupCtx, summaryMessage); updateErr != nil {
 			return updateErr
 		}
 		return err

@@ -176,6 +176,33 @@ func TestUncommittedFiles(t *testing.T) {
 	}, files)
 }
 
+// TestUncommittedFiles_UnbornHEAD guards a repo with no commits yet: HEAD
+// doesn't resolve to anything, so `git diff HEAD` fails outright and used
+// to make the whole call error out instead of just reporting every file as
+// new (which, on an unborn HEAD, all of them necessarily are).
+func TestUncommittedFiles_UnbornHEAD(t *testing.T) {
+	requireGit(t)
+	repo := t.TempDir()
+	ctx := context.Background()
+
+	_, err := run(ctx, repo, "init", "-b", "main")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "config", "user.email", "test@example.com")
+	require.NoError(t, err)
+	_, err = run(ctx, repo, "config", "user.name", "Test")
+	require.NoError(t, err)
+
+	writeFile(t, repo, "README.md", "hello\nworld\n")
+	_, err = run(ctx, repo, "add", "-A")
+	require.NoError(t, err)
+
+	files, err := UncommittedFiles(ctx, repo)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, fsext.Canonical(filepath.Join(repo, "README.md")), fsext.Canonical(files[0].Path))
+	require.Equal(t, 2, files[0].Additions)
+}
+
 func TestUncommittedFilesOutsideRepo(t *testing.T) {
 	files, err := UncommittedFiles(t.Context(), t.TempDir())
 	require.NoError(t, err)

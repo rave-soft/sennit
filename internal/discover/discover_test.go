@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -133,6 +134,79 @@ func TestDiscoverModels_HTTPError(t *testing.T) {
 	models, err := DiscoverModels(context.Background(), cfg, &mockResolver{})
 	require.Error(t, err)
 	require.Nil(t, models)
+}
+
+// failingResolver fails ResolveValue for one specific value (simulating a
+// failing $(cmd) substitution) and passes everything else through
+// unchanged, so a test can target either base_url or api_key resolution in
+// isolation.
+type failingResolver struct {
+	failFor string
+	err     error
+}
+
+func (f *failingResolver) ResolveValue(val string) (string, error) {
+	if val == f.failFor {
+		return "", f.err
+	}
+	return val, nil
+}
+
+// TestDiscoverModels_BaseURLResolveErrorSurfaces guards against doRequest
+// swallowing a base_url resolution failure: previously it discarded the
+// error and built a request against the literal, unresolved template,
+// which the server then answered (with whatever status an obviously
+// malformed URL/host produces) instead of the real, actionable resolver
+// error ever reaching the user.
+func TestDiscoverModels_BaseURLResolveErrorSurfaces(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	resolveErr := errors.New("command substitution failed: exit status 1")
+	cfg := Config{
+		ID:      "test",
+		BaseURL: "$(broken-cmd)",
+		APIKey:  "test-key",
+	}
+	resolver := &failingResolver{failFor: "$(broken-cmd)", err: resolveErr}
+
+	models, err := DiscoverModels(context.Background(), cfg, resolver)
+	require.Error(t, err)
+	require.ErrorIs(t, err, resolveErr)
+	require.Nil(t, models)
+	require.Zero(t, requests, "a failed base_url resolution must not fall through to an HTTP request")
+}
+
+// TestDiscoverModels_APIKeyResolveErrorSurfaces is
+// TestDiscoverModels_BaseURLResolveErrorSurfaces's counterpart for
+// api_key: a failing $(cmd) substitution there used to surface to the
+// user as a plain 401 from the (unauthenticated) request that went out
+// anyway, hiding the real cause.
+func TestDiscoverModels_APIKeyResolveErrorSurfaces(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	resolveErr := errors.New("command substitution failed: exit status 1")
+	cfg := Config{
+		ID:      "test",
+		BaseURL: server.URL + "/v1",
+		APIKey:  "$(broken-cmd)",
+	}
+	resolver := &failingResolver{failFor: "$(broken-cmd)", err: resolveErr}
+
+	models, err := DiscoverModels(context.Background(), cfg, resolver)
+	require.Error(t, err)
+	require.ErrorIs(t, err, resolveErr)
+	require.Nil(t, models)
+	require.Zero(t, requests, "a failed api_key resolution must not fall through to an HTTP request that surfaces as a 401")
 }
 
 func TestDiscoverModels_ExtraHeaders(t *testing.T) {

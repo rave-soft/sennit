@@ -120,8 +120,15 @@ func subAgentOutput(result *fantasy.AgentResult) string {
 	return result.Response.Content.Text()
 }
 
-// updateParentSessionCost accumulates the cost from a child session to its parent session.
+// updateParentSessionCost accumulates the cost from a child session to its
+// parent session. Serialized by parentCostMu: several sub-agents of the
+// same parent can finish concurrently, and an unserialized
+// Get-modify-Save here would let two updates race on the same read,
+// silently losing one of the two deltas.
 func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionID, parentSessionID string) error {
+	c.parentCostMu.Lock()
+	defer c.parentCostMu.Unlock()
+
 	childSession, err := c.sessions.Get(ctx, childSessionID)
 	if err != nil {
 		return fmt.Errorf("get child session: %w", err)

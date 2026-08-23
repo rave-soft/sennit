@@ -82,6 +82,12 @@ const (
 // Session details panel max height.
 const sessionDetailsMaxHeight = 20
 
+// sidebarColumnWidth is the sidebar's column width in the non-compact chat
+// layout, including its one-column left padding. generateLayout, drawView,
+// and editorContentWidth must all agree on this figure — they used to drift
+// (32 / 31 / 30), which clipped the inline QuestionForm by a column or two.
+const sidebarColumnWidth = 32
+
 // editorAttachmentsRowHeight is the extra row the editor reserves above the
 // textarea for the attachments strip. It only counts when there's something
 // to show there — see (*UI).editorAttachmentsRowOffset.
@@ -183,11 +189,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
 			}
 		} else {
-			editorWidth := scr.Bounds().Dx()
-			if !m.lay.isCompact {
-				editorWidth -= layout.sidebar.Dx()
-			}
-			editor := uv.NewStyledString(m.renderEditorView(editorWidth))
+			editor := uv.NewStyledString(m.renderEditorView(m.editorContentWidth()))
 			editor.Draw(scr, layout.editor)
 			m.drawGhostText(scr)
 			m.inlineCursor = nil
@@ -410,7 +412,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		editorHeight = childSessionPanelHeight
 	}
 	// The sidebar width
-	sidebarWidth := 32
+	sidebarWidth := sidebarColumnWidth
 	// The header height
 	const landingHeaderHeight = 4
 
@@ -707,7 +709,7 @@ func (m *UI) cacheSidebarLogo(width int) {
 func (m *UI) editorContentWidth() int {
 	width := m.lay.width - 2 // appRect horizontal margins
 	if m.state == uiChat && !m.lay.isCompact {
-		width -= 30 // sidebar column
+		width -= sidebarColumnWidth
 	}
 	return width
 }

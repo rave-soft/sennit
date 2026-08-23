@@ -220,7 +220,7 @@ func (m *UI) handleEditorBindingKeyPress(msg tea.KeyPressMsg, cmds []tea.Cmd) ([
 		if !m.currentModelSupportsImages() {
 			break
 		}
-		cmds = append(cmds, m.pasteImageFromClipboard)
+		cmds = append(cmds, m.pasteImageFromClipboardCmd())
 
 	case key.Matches(msg, m.keyMap.Editor.SendMessage):
 		prevHeight := m.editor.textarea.Height()

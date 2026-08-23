@@ -1,6 +1,7 @@
 package anim
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -235,4 +236,70 @@ func TestAnimateWithoutStart(t *testing.T) {
 	msg := StepMsg{ID: "test", Gen: 0}
 	next := a.Animate(msg)
 	require.NotNil(t, next, "matching gen-0 tick must advance a fresh Anim")
+}
+
+// TestAnimate_StepWrapAtomic is a regression test for a latent
+// index-out-of-range panic: the step counter used to wrap via
+// `step := a.step.Add(1); if int(step) >= len(a.cyclingFrames) {
+// a.step.Store(0) }`, which briefly leaves a.step holding
+// len(a.cyclingFrames) — one past the last valid frame index — between
+// the Add and the Store. A concurrent Render() reads a.step.Load() and
+// indexes straight into a.cyclingFrames[step], so any Render landing in
+// that window panics. Hammering Animate and Render concurrently across
+// many wraps (prerenderedFrames is small, so wraps are frequent) must
+// never panic and a.step must always stay in bounds.
+func TestAnimate_StepWrapAtomic(t *testing.T) {
+	t.Parallel()
+
+	a := New(Settings{ID: "test", Size: 5})
+	msg := StepMsg{ID: "test", Gen: a.gen.Load()}
+
+	var wg sync.WaitGroup
+	const workers = 8
+	const iterations = 5000
+
+	wg.Add(workers * 2)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for range iterations {
+				a.Animate(msg)
+				if step := int(a.step.Load()); step < 0 || step >= len(a.cyclingFrames) {
+					t.Errorf("step observed out of bounds: %d (want [0, %d))", step, len(a.cyclingFrames))
+					return
+				}
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Render panicked: %v", r)
+				}
+			}()
+			for range iterations {
+				a.Render()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestSettingsHash_DistinguishesNoScramble is a regression test for the
+// animation cache key: settingsHash used to omit NoScramble, so a
+// NoScramble Settings and its scrambled counterpart (otherwise
+// identical) hashed to the same cache key. New() would then hand back
+// whichever variant happened to populate the cache first — e.g. a
+// NoScramble spinner reusing cyclingFrames it should never have built.
+func TestSettingsHash_DistinguishesNoScramble(t *testing.T) {
+	t.Parallel()
+
+	base := Settings{Size: 5, Label: "loading"}
+	scrambled := base
+	scrambled.NoScramble = false
+	plain := base
+	plain.NoScramble = true
+
+	require.NotEqual(t, settingsHash(scrambled), settingsHash(plain),
+		"NoScramble must be part of the cache key")
 }

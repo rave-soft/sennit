@@ -29,11 +29,18 @@ func NewMap[K comparable, V any](initial ...map[K]V) *Map[K, V] {
 	return &Map[K, V]{inner: inner}
 }
 
-// Reset replaces the inner map with the new one.
+// Reset replaces the inner map with a copy of input. Like NewMap, input is
+// cloned so the caller keeps ownership of it: later reads or writes to the
+// original don't bypass the lock, and mutations via Map don't leak back
+// into it.
 func (m *Map[K, V]) Reset(input map[K]V) {
+	inner := maps.Clone(input)
+	if inner == nil {
+		inner = make(map[K]V)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.inner = input
+	m.inner = inner
 }
 
 // Set sets the value for the specified key in the map.

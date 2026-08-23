@@ -74,6 +74,7 @@ func NewCompletionItem(text string, value any, normalStyle, focusedStyle, matchS
 		normalStyle:  normalStyle,
 		focusedStyle: focusedStyle,
 		matchStyle:   matchStyle,
+		cache:        make(map[int]string),
 	}
 }
 
@@ -128,7 +129,7 @@ func (c *CompletionItem) SetMatch(m fuzzy.Match) {
 	if sameFuzzyMatch(c.match, m) {
 		return
 	}
-	c.cache = nil
+	clear(c.cache)
 	c.match = m
 	c.Bump()
 }
@@ -150,7 +151,7 @@ func (c *CompletionItem) SetFocused(focused bool) {
 	if c.focused == focused {
 		return
 	}
-	c.cache = nil
+	clear(c.cache)
 	c.focused = focused
 	c.Bump()
 }
@@ -162,7 +163,7 @@ func (c *CompletionItem) SetTitleColumn(col int) {
 	if c.titleColumn == col {
 		return
 	}
-	c.cache = nil
+	clear(c.cache)
 	c.titleColumn = col
 	c.Bump()
 }
@@ -176,7 +177,7 @@ func (c *CompletionItem) SetStyles(normal, focused, match, muted lipgloss.Style)
 	c.focusedStyle = focused
 	c.matchStyle = match
 	c.mutedStyle = muted
-	c.cache = nil
+	clear(c.cache)
 	c.Bump()
 }
 

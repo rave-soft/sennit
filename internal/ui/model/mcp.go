@@ -102,7 +102,7 @@ func mcpList(t *styles.Styles, mcps []mcp.MCPClientInfo, width, maxItems int) st
 
 	if len(renderedMcps) > maxItems {
 		visibleItems := renderedMcps[:maxItems-1]
-		remaining := len(renderedMcps) - maxItems
+		remaining := truncatedMoreCount(len(renderedMcps), maxItems)
 		visibleItems = append(visibleItems, t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
 		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
 	}

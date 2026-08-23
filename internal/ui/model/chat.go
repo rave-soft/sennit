@@ -469,6 +469,11 @@ func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	m.pausedAnimations = make(map[string]struct{})
 	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
 
+	// A DelayedClickMsg scheduled against the previous session's items
+	// must not resolve against the newly loaded ones: invalidate it (and
+	// any other pending mouse state) up front.
+	m.ClearMouse()
+
 	items := make([]list.Item, len(msgs))
 	for i, msg := range msgs {
 		m.idInxMap[msg.ID()] = i

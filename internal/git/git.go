@@ -184,22 +184,28 @@ func UncommittedFiles(ctx context.Context, dir string) ([]FileChange, error) {
 		}
 	}
 
-	numstat, err := run(ctx, repo, "diff", "--numstat", "HEAD", "--")
-	if err != nil {
-		return nil, fmt.Errorf("git: diff stats: %w", err)
-	}
-	for line := range strings.Lines(numstat) {
-		parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "\t", 3)
-		if len(parts) != 3 {
-			continue
+	// A brand-new repo has no commits yet, so HEAD doesn't resolve to
+	// anything and `git diff HEAD` fails outright. Skip the numstat step in
+	// that case: every file is new, so the by-hand line count below (which
+	// already fires for anything with no diff stats) covers it.
+	if _, err := run(ctx, repo, "rev-parse", "--verify", "-q", "HEAD"); err == nil {
+		numstat, err := run(ctx, repo, "diff", "--numstat", "HEAD", "--")
+		if err != nil {
+			return nil, fmt.Errorf("git: diff stats: %w", err)
 		}
-		change, ok := changes[parts[2]]
-		if !ok {
-			continue
+		for line := range strings.Lines(numstat) {
+			parts := strings.SplitN(strings.TrimSuffix(line, "\n"), "\t", 3)
+			if len(parts) != 3 {
+				continue
+			}
+			change, ok := changes[parts[2]]
+			if !ok {
+				continue
+			}
+			change.Additions, _ = strconv.Atoi(parts[0])
+			change.Deletions, _ = strconv.Atoi(parts[1])
+			changes[parts[2]] = change
 		}
-		change.Additions, _ = strconv.Atoi(parts[0])
-		change.Deletions, _ = strconv.Atoi(parts[1])
-		changes[parts[2]] = change
 	}
 
 	result := make([]FileChange, 0, len(changes))

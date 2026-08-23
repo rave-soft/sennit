@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/google"
@@ -707,7 +708,12 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 	if isCancelErr {
 		t.currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
 	} else if errors.As(err, &providerErr) {
-		if classifyStreamError(providerErr) == classModelNotEnabled {
+		// classModelNotEnabled is a generic "model not enabled" signal
+		// from classifyStreamError; only Copilot's rejection actually
+		// means what the message below says, so gate on the provider
+		// before treating every provider's not-enabled error as a
+		// Copilot quota problem with a link to Copilot's own settings.
+		if t.model.ModelCfg.Provider == string(catwalk.InferenceProviderCopilot) && classifyStreamError(providerErr) == classModelNotEnabled {
 			// The TUI owns the display copy: return a typed error so
 			// callers can render their own styled hyperlink instead of
 			// agent baking terminal escape codes into persisted

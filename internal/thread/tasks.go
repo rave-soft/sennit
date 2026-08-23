@@ -227,10 +227,14 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		Depth:           args.Depth,
 	})
 
-	st, err = t.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
+	// Into runningSt, not st: setStatus returns the zero Thread on error,
+	// and failCreate below needs st's real ID (see SetSession's identical
+	// newSt pattern above - the same clobber-on-error class of bug).
+	runningSt, err := t.lc.setStatus(ctx, st.ID, StatusRunning, "", "", 0)
 	if err != nil {
-		return Thread{}, err
+		return Thread{}, t.failCreate(ctx, st, err)
 	}
+	st = runningSt
 	// A task's tool calls hit the parent App's permission.Service — the
 	// same one the visible turn uses — so without this, a prompt raised
 	// by the task's run would be indistinguishable from one raised by
@@ -411,6 +415,7 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 		if c := t.lc.existingControl(st.ID); c != nil {
 			c.mu.Lock()
 			rt := c.runtime
+			depth := c.depth
 			c.mu.Unlock()
 			if rt != nil {
 				coord := rt.handle.Workspace().Coordinator()
@@ -420,7 +425,7 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 					DelegationID:    st.ID,
 					Kind:            string(KindTask),
 					Name:            st.Name,
-					Depth:           0,
+					Depth:           depth,
 				})
 			}
 		}

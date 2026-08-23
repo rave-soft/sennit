@@ -167,6 +167,64 @@ func TestCommands_Draw(t *testing.T) {
 	require.Contains(t, ansi.Strip(scr.String()), "Generating Prompt...")
 }
 
+// TestCommands_DrawResizePreservesFilterText is the regression test for
+// replaceItems unconditionally clearing the filter: Draw calls replaceItems
+// whenever the dialog's width changes (see its area.Dx() != c.windowWidth
+// check), which used to reset the filter text to "" — so simply resizing
+// the terminal while typing a filter silently erased it.
+func TestCommands_DrawResizePreservesFilterText(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCommands(t, nil, nil)
+	area := image.Rect(0, 0, 60, 20)
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	c.Draw(scr, area) // establishes c.windowWidth for the check below
+
+	c.input.SetValue("git")
+	c.list.SetFilter("git")
+
+	area2 := image.Rect(0, 0, 70, 20) // different width triggers replaceItems
+	scr2 := uv.NewScreenBuffer(area2.Dx(), area2.Dy())
+	require.NotPanics(t, func() { c.Draw(scr2, area2) })
+
+	require.Equal(t, "git", c.input.Value(), "a resize must not clear the typed filter")
+}
+
+// TestCommands_DockerAvailabilityMsgPreservesFilterText is the regression
+// test for the same replaceItems bug reached through
+// dockerMCPAvailabilityCheckedMsg: the async Docker MCP check landing
+// while the user is filtering used to wipe out whatever they had typed.
+func TestCommands_DockerAvailabilityMsgPreservesFilterText(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCommands(t, nil, nil)
+	c.input.SetValue("bash")
+	c.list.SetFilter("bash")
+
+	c.HandleMsg(dockerMCPAvailabilityCheckedMsg{available: true})
+
+	require.Equal(t, "bash", c.input.Value(), "an async availability update must not clear the typed filter")
+}
+
+// TestCommands_TabSwitchClearsFilterText covers the other side of
+// replaceItems' preserveFilter choice: a category switch (tab/shift+tab)
+// changes what's being listed, so carrying an old filter forward could
+// silently show an empty list in the new category. Unlike a resize or an
+// async data refresh, this is a deliberate switch, so the filter should be
+// cleared.
+func TestCommands_TabSwitchClearsFilterText(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCommands(t, []commands.CustomCommand{{ID: "c1", Name: "custom"}}, nil)
+	c.input.SetValue("bash")
+	c.list.SetFilter("bash")
+
+	c.HandleMsg(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	require.Equal(t, UserCommands, c.selected, "sanity: the tab press must have switched category")
+	require.Equal(t, "", c.input.Value(), "switching category must clear the previous category's filter")
+}
+
 // ---- Commands.ShortHelp / FullHelp ----
 
 func TestCommands_ShortHelp(t *testing.T) {

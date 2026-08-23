@@ -134,6 +134,15 @@ type coordinator struct {
 	localVersion atomic.Uint64
 	runtime      *runtimeCache
 
+	// parentCostMu serializes updateParentSessionCost's read-modify-write
+	// of a parent session's cost. Sub-agents of the same parent can
+	// finish concurrently (e.g. several "agent" tool calls from the same
+	// turn's tool batch, or nested delegations), and without this lock
+	// their Get/Save pairs interleave: two updates that both read the
+	// pre-update cost and each add their own delta drop one of the two
+	// deltas on the floor.
+	parentCostMu sync.Mutex
+
 	// threadsMu guards threads, which SetThreads may set after
 	// construction (thread managers are wired in post-bootstrap; see
 	// internal/app/app.go and internal/app/threadspawn/attach.go) and
@@ -1145,7 +1154,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	active := newActiveRuntime(runtime)
 
 	if agent, ok := c.currentAgent.(*sessionAgent); ok {
-		return agent.summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active), runtime.model, runtime.systemPromptPrefix, active)
+		return agent.summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active), runtime.model, runtime.systemPromptPrefix, active, nil)
 	}
 	return c.currentAgent.Summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active))
 }

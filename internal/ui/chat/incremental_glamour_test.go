@@ -291,6 +291,17 @@ func TestFindSafeMarkdownBoundary_TableDriven(t *testing.T) {
 			// Latest accepted is the first.
 			want: len("Para.\n\n"),
 		},
+		{
+			name:    "CRLF blank line separator",
+			content: "First.\r\n\r\nSecond.",
+			// A CRLF blank-line separator ("\r\n\r\n") must be
+			// recognized just like an LF one ("\n\n") — the gap
+			// between the two '\n's is "\r", which is blank.
+			// Missing this means CRLF input never finds a safe
+			// boundary at all, disabling the streaming prefix
+			// cache entirely.
+			want: len("First.\r\n\r\n"),
+		},
 	}
 
 	for _, c := range cases {

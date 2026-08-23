@@ -26,6 +26,15 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// String returns the accumulated output. Locked because interp does not
+// wait for background jobs (`cmd &`) before Run returns, so a bgProc
+// goroutine may still be calling Write concurrently with this read.
+func (w *progressWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
 // RunAndCaptureStream executes a shell command and streams output chunks
 // to onProgress as they arrive. Returns the complete output and exit code.
 func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(string)) (CaptureResult, error) {
@@ -46,7 +55,7 @@ func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(s
 	}
 
 	return CaptureResult{
-		Output:   buf.buf.String(),
+		Output:   buf.String(),
 		ExitCode: exitCode,
 	}, nil
 }

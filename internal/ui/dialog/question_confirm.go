@@ -268,7 +268,9 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		contentWidth--
 	}
 
-	// Blit visible window.
+	// Blit visible window. buttonRowVisible tracks whether the button row
+	// was actually redrawn this frame — see below.
+	buttonRowVisible := false
 	for screenRow := range viewport {
 		idx := c.scrollOffset + screenRow
 		if idx >= totalLines {
@@ -277,6 +279,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		ln := lines[idx]
 		y := area.Min.Y + screenRow
 		if ln.buttons {
+			buttonRowVisible = true
 			// Build compositor for button hit detection.
 			c.compositor = common.ButtonHitCompositor(c.Styles, confirmButtonOpts, " ", area.Min.X, y)
 			hoveredBtn := common.HitButtonIndex(c.compositor, c.hoverX, c.hoverY)
@@ -287,6 +290,13 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		} else if ln.text != "" {
 			drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), ln.text)
 		}
+	}
+	// If the button row scrolled out of view, drop the compositor rather
+	// than leaving it pointing at last frame's (now stale) coordinates —
+	// otherwise a click at that old position would activate an invisible
+	// button.
+	if !buttonRowVisible {
+		c.compositor = nil
 	}
 
 	// Scrollbar.

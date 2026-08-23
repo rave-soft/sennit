@@ -38,6 +38,12 @@ func (sb *syncBuffer) String() string {
 	return sb.buf.String()
 }
 
+func (sb *syncBuffer) Len() int {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+	return sb.buf.Len()
+}
+
 type BackgroundShell struct {
 	ID          string
 	Command     string

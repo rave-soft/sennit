@@ -79,6 +79,34 @@ func TestMap_Reset(t *testing.T) {
 	require.Equal(t, 1, m.Len())
 }
 
+// TestMap_Reset_Copies verifies that Reset copies the map it is given
+// rather than aliasing it, the same guarantee NewMap makes. Aliasing would
+// let a mutation to the caller's map (after Reset) bypass Map's lock and
+// show up as a data race under -race, and would let a later Set on Map
+// write through into a map the caller still holds a reference to.
+func TestMap_Reset_Copies(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]int{
+		"key1": 1,
+	}
+
+	m := NewMap[string, int]()
+	m.Reset(input)
+
+	input["key1"] = 999
+	input["key2"] = 2
+	value, ok := m.Get("key1")
+	require.True(t, ok)
+	require.Equal(t, 1, value, "mutating the caller's map after Reset must not change Map")
+	_, ok = m.Get("key2")
+	require.False(t, ok, "keys added to the caller's map after Reset must not appear in Map")
+
+	m.Set("key3", 3)
+	_, ok = input["key3"]
+	require.False(t, ok, "Set on Map must not write through into the map passed to Reset")
+}
+
 func TestMap_Set(t *testing.T) {
 	t.Parallel()
 

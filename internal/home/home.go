@@ -35,7 +35,16 @@ func Short(p string) string {
 	if homedir == "" || !strings.HasPrefix(p, homedir) {
 		return p
 	}
-	return filepath.Join("~", strings.TrimPrefix(p, homedir))
+	// A bare prefix match also fires for an unrelated sibling directory
+	// that happens to start with the same characters (homedir
+	// "/home/bob" matching "/home/bobby"), so the byte right after the
+	// prefix must be a separator (or the prefix must be the whole
+	// string) before this counts as "inside home".
+	rest := p[len(homedir):]
+	if rest != "" && !os.IsPathSeparator(rest[0]) {
+		return p
+	}
+	return filepath.Join("~", rest)
 }
 
 // Long replaces the `~` with actual home path from [Dir].

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,6 +153,52 @@ func TestClient_Restart_ReopensPreviouslyOpenFiles(t *testing.T) {
 
 	require.NoError(t, client.Restart())
 	require.True(t, client.IsFileOpen(filePath), "file should be reopened after restart")
+}
+
+// TestClient_ConcurrentVersionBumpsDoNotRace exercises NotifyChange and
+// RefreshOpenFiles bumping the same open file's version concurrently (e.g.
+// a debounced edit notification racing a workspace-wide refresh). Both read
+// then write *OpenFileInfo.Version through the same shared pointer, so a
+// plain int32 field is a data race; run with -race.
+func TestClient_ConcurrentVersionBumpsDoNotRace(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(filePath, []byte("package main\n"), 0o644))
+
+	cfg := config.LSPConfig{
+		Command:   exe,
+		FileTypes: []string{"go"},
+		Env:       map[string]string{fakeLSPServerEnv: "1"},
+	}
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
+
+	client, err := New("test-version-race", cfg, resolver, dir, false)
+	require.NoError(t, err)
+	t.Cleanup(client.Kill)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	_, err = client.Initialize(ctx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(ctx))
+	require.NoError(t, client.OpenFile(ctx, filePath))
+
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			require.NoError(t, client.NotifyChange(ctx, filePath))
+		})
+		wg.Go(func() {
+			client.RefreshOpenFiles(ctx)
+		})
+	}
+	wg.Wait()
 }
 
 // TestClient_HandlesFile_RejectsURIAcceptsPath documents the contract

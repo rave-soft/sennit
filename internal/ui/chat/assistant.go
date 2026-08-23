@@ -481,9 +481,15 @@ func (a *AssistantMessageItem) thinkingKey() (uint64, uint64) {
 func (a *AssistantMessageItem) thinkingHashIncremental(thinking string) uint64 {
 	// Detect divergence: if the saved sample no longer matches the
 	// start of the current text, the content was rewritten (retry)
-	// and we must re-hash from scratch.
+	// and we must re-hash from scratch. The length check must be
+	// strict (>): a same-length rewrite (e.g. a retry that happens to
+	// produce equally long thinking text) only differs past the
+	// 64-byte sample, and the incremental loop below never runs when
+	// thinkingHashLen already equals len(thinking) — so a same-length
+	// rewrite must fall through to the full re-hash below, or the
+	// stale hash from before the retry would be reused.
 	sampleLen := min(len(thinking), 64)
-	if a.thinkingHashLen > 0 && len(thinking) >= a.thinkingHashLen &&
+	if a.thinkingHashLen > 0 && len(thinking) > a.thinkingHashLen &&
 		thinking[:sampleLen] == a.thinkingHashSample {
 		// Fast path: continue hashing from saved state.
 		h := a.thinkingHash

@@ -227,7 +227,7 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 
 	if len(renderedLsps) > maxItems {
 		visibleItems := renderedLsps[:maxItems-1]
-		remaining := len(renderedLsps) - maxItems
+		remaining := truncatedMoreCount(len(renderedLsps), maxItems)
 		visibleItems = append(visibleItems, t.Resource.AdditionalText.Render(fmt.Sprintf("…and %d more", remaining)))
 		return lipgloss.JoinVertical(lipgloss.Left, visibleItems...)
 	}

@@ -40,7 +40,7 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 	// Summarize from diff metadata when available; always one line — no
 	// diff preview in chat.
 	var meta tools.ReplaceSymbolResponseMetadata
-	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.OldContent != "" || meta.NewContent != "" {
+	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && (meta.OldContent != "" || meta.NewContent != "") {
 		_, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, file)
 		header = appendResultSummary(sty, header, diffSummary(additions, removals))
 	} else {

@@ -129,21 +129,39 @@ func (d *selectDialog) Restyle() {
 }
 
 // reloadItems re-runs cfg.buildItems and resets the list to its result.
+// There's no filter yet at construction time, so which way this resets
+// doesn't matter in practice — false reads as the more honest "fresh
+// build" intent.
 func (d *selectDialog) reloadItems() error {
-	return d.replaceItems(d.cfg.buildItems)
+	return d.replaceItems(d.cfg.buildItems, false)
 }
 
-// replaceItems rebuilds the shared list and preserves selection by stable ID
-// when the caller changes its source items asynchronously or on resize.
-func (d *selectDialog) replaceItems(build func() ([]list.FilterableItem, int, error)) error {
+// replaceItems rebuilds the shared list and preserves selection by stable
+// ID. preserveFilter controls what happens to the user's typed filter text:
+//
+//   - true for a rebuild the user didn't ask for — the item source changed
+//     out from under them (an async update landing, or a resize re-running
+//     buildItems) — see commands.go's dockerMCPAvailabilityCheckedMsg
+//     handler, its Draw resize check, and sessions.go's rebuild. Clearing
+//     the filter here would erase what they typed for no reason connected
+//     to their input.
+//   - false for a rebuild that changes what's being listed — e.g.
+//     commands.go's category switch (System/User/MCP) — where carrying the
+//     old filter forward can silently show an empty list in the new
+//     category instead of the deliberate switch the user asked for.
+func (d *selectDialog) replaceItems(build func() ([]list.FilterableItem, int, error), preserveFilter bool) error {
 	selectedID := d.selectedID()
+	filter := ""
+	if preserveFilter {
+		filter = d.input.Value()
+	}
 	items, selectedIndex, err := build()
 	if err != nil {
 		return err
 	}
 	d.list.SetItems(items...)
-	d.list.SetFilter("")
-	d.input.SetValue("")
+	d.list.SetFilter(filter)
+	d.input.SetValue(filter)
 	if selectedID != "" {
 		for i, item := range d.list.FilteredItems() {
 			if selectable, ok := item.(ListItem); ok && selectable.ID() == selectedID {

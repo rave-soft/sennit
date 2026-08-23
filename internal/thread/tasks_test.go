@@ -3,6 +3,7 @@ package thread_test
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -723,6 +724,34 @@ func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
 }
 
+// TestTaskManager_SendReactivationPreservesCascadeDepth is the regression
+// test for Send's re-registration of DelegationParent on reactivation: it
+// used to hardcode Depth: 0 regardless of the depth stamped at Create,
+// which weakens maxTaskCascadeDepth's guard against runaway background
+// task chains once a task is reactivated through task_send.
+func TestTaskManager_SendReactivationPreservesCascadeDepth(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
+
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess", Depth: 2})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	publishSuccess(t, parentApp, st.SessionID)
+	require.Eventually(t, func() bool {
+		got, err := store.Get(t.Context(), st.ID)
+		return err == nil && got.Status == thread.StatusCompleted
+	}, time.Second, time.Millisecond)
+
+	require.NoError(t, sendErr(tasks.Send(t.Context(), st.ID, "one more thing")))
+
+	registered := coord.registeredDelegationParents()
+	require.Len(t, registered, 2, "Create and the reactivating Send must each register a DelegationParent")
+	last := registered[len(registered)-1]
+	require.Equal(t, 2, last.parent.Depth,
+		"Send must re-register the task's own stored cascade depth, not reset it to 0")
+}
+
 // TestTaskManager_SendRefusesCancelledTask is the constraint the
 // coordinator called out explicitly: a task task_cancel stopped must not
 // be silently resumed by task_send, because cancelling was a decision,
@@ -869,4 +898,89 @@ func TestTaskManager_CreateFailsWithRealIDWhenSetSessionErrors(t *testing.T) {
 	require.Equal(t, thread.StatusFailed, got.Status,
 		"the real task row must be marked failed, not left stuck pending forever")
 	require.Contains(t, got.Error, setSessionErr.Error())
+}
+
+// setStatusRunningErrStore wraps a real Store and fails only the
+// SetStatus(StatusRunning) call Create makes right before startRun,
+// leaving every other SetStatus call (notably failCreate's own
+// SetStatus(StatusFailed)) to hit the real store.
+type setStatusRunningErrStore struct {
+	thread.Store
+	err error
+}
+
+func (s *setStatusRunningErrStore) SetStatus(ctx context.Context, id string, params thread.SetStatusParams) (thread.Thread, error) {
+	if params.Status == thread.StatusRunning {
+		return thread.Thread{}, s.err
+	}
+	return s.Store.SetStatus(ctx, id, params)
+}
+
+// TestTaskManager_CreateFailsThroughFailCreateWhenSetStatusRunningErrors is
+// the regression test for tasks.go's Create: the setStatus(StatusRunning)
+// error used to be returned directly, unlike every neighbouring failure
+// path in Create, so the task row was left at its pre-failure status
+// (still occupying a checkActiveCaps slot) forever instead of being
+// recorded as failed via failCreate.
+func TestTaskManager_CreateFailsThroughFailCreateWhenSetStatusRunningErrors(t *testing.T) {
+	setStatusErr := fmt.Errorf("set-status-running boom")
+	store := &setStatusRunningErrStore{Store: thread.NewStoreForTest(t), err: setStatusErr}
+	_, tasks, _ := newTestTaskManager(t, store)
+
+	_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, setStatusErr)
+
+	all, listErr := store.ListAll(t.Context())
+	require.NoError(t, listErr)
+	require.Len(t, all, 1)
+
+	got := all[0]
+	require.Equal(t, thread.StatusFailed, got.Status,
+		"a setStatus(Running) failure must go through failCreate, not strand the row at its prior status")
+	require.Contains(t, got.Error, setStatusErr.Error())
+}
+
+// flakyGetStore wraps a real Store and fails the first failsLeft calls to
+// Get(id) before letting the real store answer, for driving
+// handleRunComplete's post-teardown store.Get retry.
+type flakyGetStore struct {
+	thread.Store
+	id        string
+	failsLeft int32
+}
+
+func (s *flakyGetStore) Get(ctx context.Context, id string) (thread.Thread, error) {
+	if id == s.id && atomic.AddInt32(&s.failsLeft, -1) >= 0 {
+		return thread.Thread{}, fmt.Errorf("transient get boom")
+	}
+	return s.Store.Get(ctx, id)
+}
+
+// TestTaskManager_RunCompleteSurvivesTransientStoreGetFailure is the
+// regression test for handleRunComplete's post-teardown store.Get: the
+// runtime is already released by the time it runs, so nothing else would
+// ever retry this terminal transition. A bare `if err != nil { return }`
+// used to strand the row in StatusRunning until a restart on any transient
+// store hiccup; it must now retry and still land the terminal status.
+func TestTaskManager_RunCompleteSurvivesTransientStoreGetFailure(t *testing.T) {
+	flaky := &flakyGetStore{Store: thread.NewStoreForTest(t)}
+	_, tasks, parentApp := newTestTaskManager(t, flaky)
+
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.NoError(t, err)
+
+	// Only start failing Get(st.ID) now: handleRunComplete's own Get,
+	// right after run completion, is the one under test, not any of the
+	// Gets Create itself may have made.
+	flaky.id = st.ID
+	atomic.StoreInt32(&flaky.failsLeft, 2)
+
+	publishSuccessForSession(t, parentApp, st.SessionID)
+
+	require.Eventually(t, func() bool {
+		got, err := flaky.Store.Get(t.Context(), st.ID)
+		return err == nil && got.Status == thread.StatusCompleted
+	}, 2*time.Second, 10*time.Millisecond,
+		"a transient store.Get failure right after run completion must not strand the task in StatusRunning")
 }

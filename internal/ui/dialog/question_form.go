@@ -234,8 +234,19 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, cmd
 	}
 
-	// Global keys for question tabs.
+	// Global keys for question tabs. A focused FreeText editor absorbs esc
+	// as "stop editing" rather than letting it cancel the whole batch —
+	// otherwise whatever the user typed (and any answers already given on
+	// other tabs) is thrown away by a keystroke meant to just leave the
+	// field. Mirrors bracketsAreLiteral above: only an unambiguous second
+	// esc, with nothing focused to blur, actually cancels.
 	if key.Matches(msg, f.keyClose) {
+		if f.activeIdx < f.numQuestions {
+			if ft, ok := f.questions[f.activeIdx].(*FreeText); ok && ft.editor.Focused() {
+				ft.editor.Blur()
+				return false, nil
+			}
+		}
 		f.cancel()
 		return true, nil
 	}

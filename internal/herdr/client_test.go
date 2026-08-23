@@ -1,6 +1,7 @@
 package herdr
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,11 +10,13 @@ import (
 // recordingSender captures state transitions without connecting to a
 // real Unix socket.
 type recordingSender struct {
-	states []string
+	states  []string
+	methods []string
 }
 
 func (r *recordingSender) send(req reportRequest) error {
 	r.states = append(r.states, req.Params.State)
+	r.methods = append(r.methods, req.Method)
 	return nil
 }
 
@@ -142,6 +145,56 @@ func TestRegisterInitial(t *testing.T) {
 	assert.Equal(t, []string{stateIdle}, rec.states)
 	// seq must strictly increase so herdr accepts the report.
 	assert.Equal(t, uint64(101), c.seq)
+}
+
+// TestCloseReleaseGoesThroughSender guards against releaseAgent sending
+// directly on the socket instead of through c.snd (the same queue every
+// other report uses). If release bypasses the queue, a buffered report
+// still sitting there can be delivered after the release reaches herdr,
+// so herdr sees a stale "working" state after the pane was released.
+// This is checked here by injecting a plain in-memory sender: unlike a
+// real Unix socket, it has no transport of its own, so a release that
+// bypasses it (as the old dialSend call did, targeting an empty
+// socketPath) would silently vanish instead of being recorded.
+func TestCloseReleaseGoesThroughSender(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	c.HandleEvent(AssistantMessage{SessionID: "s1"})
+	c.Close()
+
+	rec := c.snd.(*recordingSender)
+	assert.Equal(t, []string{stateWorking, ""}, rec.states)
+	assert.Equal(t, []string{"pane.report_agent", "pane.release_agent"}, rec.methods)
+}
+
+// TestUnixSender_SendDuringClose hammers send concurrently with close: the
+// forward goroutines in translate.go keep calling HandleEvent (and so
+// send) until their own context is cancelled, with nothing guaranteeing
+// that happens before Close() runs. A send racing a close that has
+// already closed the channel must not panic.
+func TestUnixSender_SendDuringClose(t *testing.T) {
+	t.Parallel()
+	s := newUnixSender("/nonexistent/herdr-test.sock")
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for range 4 {
+		wg.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = s.send(reportRequest{})
+				}
+			}
+		})
+	}
+
+	s.close()
+	close(stop)
+	wg.Wait()
 }
 
 // TestInitDisabledUnderTest guards the critical safety property that

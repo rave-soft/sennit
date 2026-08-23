@@ -215,7 +215,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
-		if !hasReasoning {
+		if !hasReasoning && model.CatalogCfg.CanReason {
 			if strings.HasPrefix(model.CatalogCfg.ID, "gemini-2") {
 				mergedOptions["thinking_config"] = map[string]any{
 					"thinking_budget":  2000,
@@ -740,10 +740,15 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case openaicompat.Name:
 		switch providerCfg.ID {
 		case string(catwalk.InferenceProviderZAI):
-			if providerCfg.ExtraBody == nil {
-				providerCfg.ExtraBody = map[string]any{}
+			// Clone before writing: providerCfg.ExtraBody is shared with
+			// the stored *config.Config, and mutating it in place would
+			// race other readers and leak the flag into later generations.
+			extraBody := maps.Clone(providerCfg.ExtraBody)
+			if extraBody == nil {
+				extraBody = map[string]any{}
 			}
-			providerCfg.ExtraBody["tool_stream"] = true
+			extraBody["tool_stream"] = true
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, extraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL)
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.ProxyURL)
 	default:

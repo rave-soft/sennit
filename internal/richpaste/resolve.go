@@ -85,7 +85,7 @@ func resolveOne(ctx context.Context, src string, opts Options) (*Image, error) {
 	)
 	switch {
 	case strings.HasPrefix(src, "data:"):
-		content, err = decodeDataURI(src)
+		content, err = decodeDataURI(src, opts.MaxBytes)
 	default:
 		content, err = download(ctx, src, opts)
 	}
@@ -96,26 +96,37 @@ func resolveOne(ctx context.Context, src string, opts Options) (*Image, error) {
 }
 
 // decodeDataURI reads the payload of a data: URI, base64-encoded or percent-
-// encoded.
-func decodeDataURI(src string) ([]byte, error) {
+// encoded, refusing anything past maxBytes once decoded — a data: URI is
+// already fully in memory as one string, unlike download's streamed fetch,
+// but it must be held to the same MaxAttachmentSize ceiling.
+func decodeDataURI(src string, maxBytes int64) ([]byte, error) {
 	header, payload, found := strings.Cut(src, ",")
 	if !found {
 		return nil, fmt.Errorf("malformed data URI")
 	}
+	var (
+		decoded []byte
+		err     error
+	)
 	if strings.Contains(header, ";base64") {
 		// Markup wraps long payloads across lines; the decoder will not.
 		payload = whitespace.Replace(payload)
-		decoded, err := base64.StdEncoding.DecodeString(payload)
+		decoded, err = base64.StdEncoding.DecodeString(payload)
 		if err != nil {
-			return base64.RawStdEncoding.DecodeString(payload)
+			decoded, err = base64.RawStdEncoding.DecodeString(payload)
 		}
-		return decoded, nil
+	} else {
+		var s string
+		s, err = url.PathUnescape(payload)
+		decoded = []byte(s)
 	}
-	decoded, err := url.PathUnescape(payload)
 	if err != nil {
 		return nil, err
 	}
-	return []byte(decoded), nil
+	if int64(len(decoded)) > maxBytes {
+		return nil, fmt.Errorf("data URI image is too big")
+	}
+	return decoded, nil
 }
 
 // download fetches an http(s) source, refusing anything past MaxBytes rather
@@ -162,6 +173,12 @@ func normalize(content []byte, maxBytes int64) (*Image, error) {
 
 	mimeType := http.DetectContentType(content[:min(512, len(content))])
 	if mimeType == "image/png" || mimeType == "image/jpeg" {
+		// download already enforces maxBytes while streaming, but a data:
+		// URI is decoded whole up front with no size check of its own, so
+		// this is the only place a too-big PNG/JPEG payload gets caught.
+		if int64(len(content)) > maxBytes {
+			return nil, fmt.Errorf("image is too big")
+		}
 		return &Image{Content: content, MimeType: mimeType}, nil
 	}
 

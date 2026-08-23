@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/env"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -67,6 +69,51 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	return nil
 }
 
+// removeStaleGlobalKey deletes a global-only key (e.g. a stale Claude Code
+// OAuth provider entry) from whichever global config layer actually
+// declares it. ConfigPath(ScopeGlobal) only ever resolves to the
+// machine-owned data file, but a key like this can just as easily have
+// been written -- by hand, or by an older version of Sennit that supported
+// writing it there -- into the user's own global sennit.json/sennitrc
+// instead. Trying every global layer in globalConfigPaths(), and skipping
+// any file that does not actually contain the key, is what keeps this a
+// real fix rather than a permanent no-op on the data file plus an
+// unconditional rewrite of it on every load: that rewrite bumped the data
+// file's mtime on every reload, which made every other running instance
+// mistake this process's own no-op write for an external change and
+// reload, ping-ponging between instances.
+//
+// Skipping a file that was never created (os.Stat) matters too: atomicWrite
+// creates the parent directory unconditionally, so trying every layer
+// without this check would create directories (and, for a system-wide
+// path, possibly fail on permissions) for config files that don't exist and
+// have no reason to.
+func removeStaleGlobalKey(store *ConfigStore, key string) {
+	for _, path := range globalConfigPaths() {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		err := store.file.atomicWrite(path, func(data []byte) ([]byte, error) {
+			// errAtomicWriteNoop is the belt to the os.Stat suspenders'
+			// braces: it is what actually prevents the rewrite (and the
+			// mtime bump that comes with it) when the key isn't present,
+			// closing the race where the file is created or edited between
+			// the Stat above and this callback running under the lock.
+			if !gjson.GetBytes(data, key).Exists() {
+				return nil, errAtomicWriteNoop
+			}
+			v, sErr := sjson.Delete(string(data), key)
+			if sErr != nil {
+				return nil, fmt.Errorf("failed to delete config field %s: %w", key, sErr)
+			}
+			return []byte(v), nil
+		})
+		if err != nil {
+			slog.Warn("Failed to remove stale config field", "key", key, "path", path, "error", err)
+		}
+	}
+}
+
 // pendingDiskAction records a best-effort config-file mutation discovered
 // while merging or validating providers, to be applied by the caller after
 // that phase completes. See configureProviders for why this is not just a
@@ -88,6 +135,14 @@ type pendingDiskAction struct {
 func applyPendingDiskActions(store *ConfigStore, actions []pendingDiskAction) {
 	for _, action := range actions {
 		if action.fields == nil {
+			if action.scope == ScopeGlobal {
+				// A global-only key like "providers.anthropic" may live in
+				// any of the global config layers, not just the one
+				// ConfigPath(ScopeGlobal) resolves to (the machine-owned
+				// data file). See removeStaleGlobalKey.
+				removeStaleGlobalKey(store, action.key)
+				continue
+			}
 			err := store.atomicWrite(action.scope, func(data []byte) ([]byte, error) {
 				v, sErr := sjson.Delete(string(data), action.key)
 				if sErr != nil {

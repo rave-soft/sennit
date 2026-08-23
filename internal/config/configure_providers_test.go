@@ -741,6 +741,66 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 	})
 }
 
+// TestConfig_configureProvidersCustomProviderValidation_HandWrittenModelsDoNotLeakIntoCache
+// guards against a custom provider's hand-written models being written to
+// the discovery cache and resurfacing after being deleted from config.
+// DiscoverModels (internal/discover) always starts its result from
+// cfg.ExistingModels, so a provider with both hand-written models and
+// discover_models: true gets those same models back merged with anything
+// newly discovered — the cache write must persist only the genuinely new
+// (freshly discovered) entries, never the echoed-back hand-written ones,
+// or a later load with the hand-written models removed from config would
+// still find them via the cache.
+func TestConfig_configureProvidersCustomProviderValidation_HandWrittenModelsDoNotLeakIntoCache(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "discovered-model", "object": "model"}]}`))
+	}))
+	defer server.Close()
+
+	discoverTrue := true
+	cfg := &Config{
+		Providers: csync.NewMap(map[string]ProviderConfig{
+			"custom": {
+				APIKey:  "test-key",
+				BaseURL: server.URL + "/v1",
+				Models: []catwalk.Model{
+					{ID: "handwritten-model"},
+				},
+				AutoDiscoverModels: &discoverTrue,
+			},
+		}),
+	}
+	cfg.setDefaults("/tmp", "")
+
+	store := NewTestStore(t, cfg)
+	env := testenv.New(map[string]string{})
+	resolver := NewShellVariableResolver(env)
+	err := cfg.configureProviders(context.Background(), store, env, resolver, []catwalk.Provider{})
+	require.NoError(t, err)
+
+	p, exists := cfg.Providers.Get("custom")
+	require.True(t, exists)
+	require.Len(t, p.Models, 2, "in-memory Models should still merge hand-written and discovered models")
+
+	// The provider already had hand-written models, so this stays
+	// attributed to Config, not Cache -- ModelsSource must not drift just
+	// because discover_models: true also ran discovery.
+	require.Equal(t, ModelsSourceConfig, p.ModelsSource)
+
+	// The cache must hold only the freshly discovered model, never the
+	// hand-written one -- otherwise deleting "handwritten-model" from
+	// config would still find it resurrected from the cache on a later
+	// load.
+	cached, ok := loadCachedModels(store.globalDataPath, "custom")
+	require.True(t, ok, "the freshly discovered model should still populate the cache")
+	require.Len(t, cached, 1)
+	require.Equal(t, "discovered-model", cached[0].ID)
+	for _, m := range cached {
+		require.NotEqual(t, "handwritten-model", m.ID, "a hand-written model must never be written to the discovery cache")
+	}
+}
+
 func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	t.Run("VertexAI provider removed when credentials missing with existing config", func(t *testing.T) {
 		knownProviders := []catwalk.Provider{

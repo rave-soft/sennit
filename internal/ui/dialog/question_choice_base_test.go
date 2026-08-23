@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"image"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -243,5 +244,61 @@ func TestFillInBarFollowsSelection(t *testing.T) {
 		d.hoveredChoice = 0 // mouse over the first choice
 		require.NotContains(t, fillInRowText(t, d, "> "), bar,
 			"in hover mode the bar belongs to the hovered choice")
+	})
+}
+
+// TestChoiceHeightAccountsForWrappedLabels is the regression test for
+// height() using a single-line placeholder regardless of width: it must
+// agree with the line count Draw actually produces once a long label
+// wraps at a narrow width, or the dialog gets sized too short and clips
+// the wrapped lines.
+func TestChoiceHeightAccountsForWrappedLabels(t *testing.T) {
+	t.Parallel()
+
+	s := styles.SennitDark()
+	req := question.Question{
+		ID:   "q1",
+		Type: question.TypeSingleChoice,
+		Text: "Pick one",
+		Choices: []question.Choice{
+			{ID: "a", Label: strings.Repeat("word ", 30)}, // wraps at a narrow width
+		},
+	}
+	d := NewSingleChoice(&s, req)
+
+	width := 30
+	area := image.Rect(0, 0, width, 40) // tall enough that nothing clips
+	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())
+	d.Draw(scr, area)
+
+	require.Equal(t, len(d.lastLines), d.Height(width),
+		"Height must match the line count Draw actually renders, including wrapped label lines")
+}
+
+// TestChoiceCompositorHandlesZeroWidthArea is the regression test for
+// buildChoiceCompositor panicking via strings.Repeat(" ", -1): a
+// zero-width draw area (contentWidth 0) combined with an overflowing
+// line count drives contentWidth negative once the scrollbar column is
+// reserved.
+func TestChoiceCompositorHandlesZeroWidthArea(t *testing.T) {
+	t.Parallel()
+
+	s := styles.SennitDark()
+	req := question.Question{
+		ID:   "q1",
+		Type: question.TypeSingleChoice,
+		Text: "Pick one",
+		Choices: []question.Choice{
+			{ID: "a", Label: "Alpha"},
+			{ID: "b", Label: "Beta"},
+			{ID: "c", Label: "Gamma"},
+		},
+	}
+	d := NewSingleChoice(&s, req)
+
+	area := image.Rect(0, 0, 0, 3) // zero-width, so lines overflow the viewport
+	scr := uv.NewScreenBuffer(1, area.Dy())
+	require.NotPanics(t, func() {
+		d.Draw(scr, area)
 	})
 }

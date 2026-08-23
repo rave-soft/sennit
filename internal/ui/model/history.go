@@ -17,14 +17,24 @@ type promptHistoryLoadedMsg struct {
 // loadPromptHistory loads user messages for history navigation.
 func (m *UI) loadPromptHistory() tea.Cmd {
 	ctx := m.com.Context()
+	ws := m.com.Workspace
+
+	// Snapshot session state up front: the closure below runs on the cmd
+	// goroutine and must not read m.sess off the Update loop.
+	hasSession := m.sess.current != nil
+	var sessionID string
+	if hasSession {
+		sessionID = m.sess.current.ID
+	}
+
 	return func() tea.Msg {
 		var messages []message.Message
 		var err error
 
-		if m.sess.current != nil {
-			messages, err = m.com.Workspace.ListUserMessages(ctx, m.sess.current.ID)
+		if hasSession {
+			messages, err = ws.ListUserMessages(ctx, sessionID)
 		} else {
-			messages, err = m.com.Workspace.ListAllUserMessages(ctx)
+			messages, err = ws.ListAllUserMessages(ctx)
 		}
 		if err != nil {
 			slog.Error("Failed to load prompt history", "error", err)
@@ -36,7 +46,7 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 		// in a top-level session as role=user, so it is filtered here by
 		// its template prefix.
 		initPrefix := ""
-		if tpl, tplErr := m.com.Workspace.InitializePrompt(); tplErr == nil {
+		if tpl, tplErr := ws.InitializePrompt(); tplErr == nil {
 			initPrefix = firstTemplateLine(tpl)
 		}
 

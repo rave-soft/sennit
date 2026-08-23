@@ -318,7 +318,7 @@ func TestWithoutHerdrEnv_StripsAllVars(t *testing.T) {
 		"PATH=/usr/bin",
 		"HOME=/home/user",
 	}
-	result := withoutHerdrEnv(env)
+	result := WithoutHerdrEnv(env)
 	for _, e := range result {
 		if strings.HasPrefix(e, "HERDR_") {
 			t.Errorf("herdr var not stripped: %s", e)
@@ -334,7 +334,7 @@ func TestWithoutHerdrEnv_StripsAllVars(t *testing.T) {
 
 func TestWithoutHerdrEnv_EmptyInput(t *testing.T) {
 	t.Parallel()
-	result := withoutHerdrEnv(nil)
+	result := WithoutHerdrEnv(nil)
 	if len(result) != 0 {
 		t.Errorf("expected empty result for nil input, got %v", result)
 	}
@@ -343,13 +343,36 @@ func TestWithoutHerdrEnv_EmptyInput(t *testing.T) {
 func TestWithoutHerdrEnv_SliceIndependence(t *testing.T) {
 	t.Parallel()
 	env := []string{"HERDR_ENV=1", "FOO=bar"}
-	result := withoutHerdrEnv(env)
+	result := WithoutHerdrEnv(env)
 	env[1] = "FOO=baz"
 	for _, e := range result {
 		if e == "FOO=baz" {
 			t.Error("result shares backing array with input")
 		}
 	}
+}
+
+// TestRunAndCapture_BackgroundJobRace exercises a `cmd &` background job:
+// interp does not wait for bgProcs before Run returns, so the spawned
+// goroutine can still be writing to the output buffer after RunAndCapture
+// has already read it. Run with -race; it fails against a plain
+// bytes.Buffer and passes once stdout/stderr use the mutex-protected
+// syncBuffer.
+func TestRunAndCapture_BackgroundJobRace(t *testing.T) {
+	result, err := RunAndCapture(t.Context(), RunOptions{
+		Command: "(sleep 0.05; echo bg) & echo fg",
+		Cwd:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("RunAndCapture returned error: %v", err)
+	}
+	if !strings.Contains(result.Output, "fg") {
+		t.Fatalf("output = %q, want it to contain %q", result.Output, "fg")
+	}
+	// Give the background subshell time to write after RunAndCapture has
+	// already returned and read the buffer, so a race detector sees the
+	// unsynchronized write.
+	time.Sleep(150 * time.Millisecond)
 }
 
 func TestRun_DiscardsNilWriters(t *testing.T) {

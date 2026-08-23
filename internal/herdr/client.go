@@ -178,13 +178,16 @@ func (c *Client) Close() {
 
 // releaseAgent sends a pane.release_agent request to herdr so the
 // pane is freed for a new agent to claim authority. This is the
-// clean-shutdown protocol per herdr's socket API. Sends directly
-// on the socket to ensure delivery even if the write loop is busy.
+// clean-shutdown protocol per herdr's socket API. Goes through the
+// same writeLoop queue as every other report so it cannot overtake
+// (or be overtaken by) a report still sitting in the queue — sending
+// it directly on the socket let a buffered "working" report race the
+// release and land after it.
 func (c *Client) releaseAgent() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	req := c.newRequestLocked("pane.release_agent", "release", "")
-	if err := dialSend(c.socketPath, req); err != nil {
+	if err := c.snd.send(req); err != nil {
 		slog.Debug("Herdr release_agent failed", "error", err)
 	}
 }
@@ -328,24 +331,40 @@ type reportParams struct {
 // a single background writer goroutine and a buffered channel. This
 // serializes writes and avoids spawning unbounded goroutines under
 // high event throughput. Each report opens a short-lived connection.
+//
+// send and close can race: translate.go's forward goroutines call
+// HandleEvent (and so send) until their own context is cancelled, and
+// nothing guarantees that happens before Close() runs. mu + closed guard
+// against send writing to s.ch after close has closed it, which would
+// otherwise panic instead of just dropping the report.
 type unixSender struct {
 	socketPath string
 	ch         chan reportRequest
-	cancel     context.CancelFunc
+	done       chan struct{}
+
+	mu     sync.Mutex
+	closed bool
 }
 
 func newUnixSender(socketPath string) *unixSender {
-	ctx, cancel := context.WithCancel(context.Background())
 	s := &unixSender{
 		socketPath: socketPath,
 		ch:         make(chan reportRequest, 16),
-		cancel:     cancel,
+		done:       make(chan struct{}),
 	}
-	go s.writeLoop(ctx)
+	go s.writeLoop()
 	return s
 }
 
 func (s *unixSender) send(req reportRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		// close has already closed the channel; treat this the same as
+		// the full-buffer case below rather than writing to a closed
+		// channel, which panics.
+		return nil
+	}
 	select {
 	case s.ch <- req:
 	default:
@@ -356,22 +375,35 @@ func (s *unixSender) send(req reportRequest) error {
 	return nil
 }
 
+// close stops accepting new requests and waits for writeLoop to drain
+// everything already queued (including a just-enqueued release_agent
+// request) before returning, so shutdown never truncates the queue. The
+// mutex is released before waiting on done: holding it there would
+// deadlock against a concurrent send blocked on the same mutex while
+// writeLoop is trying to drain the very request it's queuing.
 func (s *unixSender) close() {
-	s.cancel()
+	s.mu.Lock()
+	s.closed = true
+	close(s.ch)
+	s.mu.Unlock()
+	// Bounded: dialSend allows 500ms to dial and 500ms more for the
+	// exchange, so a full queue against an unresponsive socket would
+	// otherwise hold up shutdown for many seconds. Past the deadline the
+	// remaining reports are worth less than a prompt exit.
+	select {
+	case <-s.done:
+	case <-time.After(closeDrainTimeout):
+	}
 }
 
-func (s *unixSender) writeLoop(ctx context.Context) {
-	for {
-		select {
-		case req, ok := <-s.ch:
-			if !ok {
-				return
-			}
-			if err := dialSend(s.socketPath, req); err != nil {
-				slog.Debug("Herdr report failed", "error", err)
-			}
-		case <-ctx.Done():
-			return
+// closeDrainTimeout caps how long close waits for queued reports to drain.
+const closeDrainTimeout = 2 * time.Second
+
+func (s *unixSender) writeLoop() {
+	defer close(s.done)
+	for req := range s.ch {
+		if err := dialSend(s.socketPath, req); err != nil {
+			slog.Debug("Herdr report failed", "error", err)
 		}
 	}
 }

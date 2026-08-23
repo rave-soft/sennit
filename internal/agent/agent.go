@@ -661,13 +661,13 @@ func (a *sessionAgent) finishTurn(
 	err error,
 ) (*fantasy.AgentResult, *SessionAgentCall, error) {
 	if t.shouldSummarize {
-		// Conditional release: only clear our own entry, mirroring
-		// runTurn's own cleanup defer. An unconditional Del here would
-		// erase a newer run's entry if one raced in and won the session
-		// in the window this release opens up before Summarize does its
-		// own busy check.
-		a.clearActiveIfMatch(call.SessionID, ac)
-		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, t.model, t.promptPrefix, call.ActiveRuntime); summarizeErr != nil {
+		// Hand our still-installed active-run slot straight to summarize
+		// via claim, rather than releasing it first: releasing here and
+		// letting summarize claim its own afterward left a window where a
+		// queued continuation could claim the session first, turning this
+		// successful turn's summarize into an ErrSessionBusy. summarize
+		// swaps the slot atomically instead.
+		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, t.model, t.promptPrefix, call.ActiveRuntime, ac); summarizeErr != nil {
 			return nil, nil, summarizeErr
 		}
 		// If the agent wasn't done...

@@ -14,6 +14,63 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestStart_ResolvesSymlinkedWorkingDir guards against comparing paths
+// textually instead of canonically. Start rejects any file outside the
+// working directory before ever looking at registered servers; if the
+// working directory is reached through a symlink (or, on Windows, spelled
+// differently than the caller's path), a plain fsext.HasPrefix comparison
+// never matches even though the file genuinely is inside it, so the LSP
+// silently never starts.
+func TestStart_ResolvesSymlinkedWorkingDir(t *testing.T) {
+	realDir := t.TempDir()
+	filePath := filepath.Join(realDir, "main.go")
+	require.NoError(t, os.WriteFile(filePath, []byte("package main\n"), 0o644))
+
+	symDir := filepath.Join(t.TempDir(), "link")
+	require.NoError(t, os.Symlink(realDir, symDir))
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	autoLSPOff := false
+	cfg := config.NewTestStore(t, &config.Config{
+		Options: &config.Options{AutoLSP: &autoLSPOff},
+		LSP: map[string]config.LSPConfig{
+			"fake": {
+				Command:   exe,
+				FileTypes: []string{"go"},
+				Env:       map[string]string{fakeLSPServerEnv: "1"},
+			},
+		},
+	}, config.WithWorkingDir(symDir))
+
+	manager := NewManager(cfg)
+	started := make(chan string, 1)
+	manager.SetCallback(func(name string, client *Client) {
+		select {
+		case started <- name:
+		default:
+		}
+	})
+	t.Cleanup(func() {
+		for _, c := range manager.Clients().Seq2() {
+			c.Kill()
+		}
+	})
+
+	// The working directory is the symlink; the file path is resolved
+	// through the real directory, exactly the mismatch a symlinked
+	// project root produces in practice.
+	manager.Start(t.Context(), filePath)
+
+	select {
+	case name := <-started:
+		require.Equal(t, "fake", name)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start never attempted to start the user-configured LSP for a file inside a symlinked working directory")
+	}
+}
+
 func TestUnavailableBackoff(t *testing.T) {
 	t.Parallel()
 

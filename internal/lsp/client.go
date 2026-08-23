@@ -229,7 +229,7 @@ func (c *Client) createPowernapClient() error {
 
 // registerHandlers registers the standard LSP notification and request handlers.
 func (c *Client) registerHandlers() {
-	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.client.GetOffsetEncoding()))
+	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.client.GetOffsetEncoding))
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
 	c.RegisterServerRequestHandler("window/workDoneProgress/create", HandleWorkDoneProgressCreate)
@@ -388,9 +388,13 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	}
 }
 
-// OpenFileInfo contains information about an open file
+// OpenFileInfo contains information about an open file. Version is an
+// atomic.Int32, not a plain int32: the *OpenFileInfo pointer returned by
+// openFiles.Get is shared, and NotifyChange and RefreshOpenFiles can both
+// bump it for the same file from different goroutines (e.g. a debounced
+// edit notification racing a workspace-wide refresh).
 type OpenFileInfo struct {
-	Version int32
+	Version atomic.Int32
 	URI     protocol.DocumentURI
 }
 
@@ -430,10 +434,9 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 		return err
 	}
 
-	c.openFiles.Set(uri, &OpenFileInfo{
-		Version: 1,
-		URI:     protocol.DocumentURI(uri),
-	})
+	info := &OpenFileInfo{URI: protocol.DocumentURI(uri)}
+	info.Version.Store(1)
+	c.openFiles.Set(uri, info)
 
 	return nil
 }
@@ -455,8 +458,10 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		return fmt.Errorf("cannot notify change for unopened file: %s", filepath)
 	}
 
-	// Increment version
-	fileInfo.Version++
+	// Increment version. Atomic because the *OpenFileInfo pointer is
+	// shared and RefreshOpenFiles can bump the same file's version
+	// concurrently.
+	newVersion := fileInfo.Version.Add(1)
 
 	// Create change event
 	changes := []protocol.TextDocumentContentChangeEvent{
@@ -467,7 +472,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		},
 	}
 
-	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
+	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(newVersion), changes)
 }
 
 // IsFileOpen checks if a file is currently open.
@@ -612,7 +617,7 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 			slog.Warn("Failed to read file for refresh", "path", path, "error", err)
 			continue
 		}
-		info.Version++
+		newVersion := info.Version.Add(1)
 		changes := []protocol.TextDocumentContentChangeEvent{
 			{
 				Value: protocol.TextDocumentContentChangeWholeDocument{
@@ -620,7 +625,7 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 				},
 			},
 		}
-		if err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes); err != nil {
+		if err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(newVersion), changes); err != nil {
 			slog.Warn("Failed to notify file change", "uri", uri, "error", err)
 		}
 	}

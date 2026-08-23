@@ -82,8 +82,19 @@ func stripV1Suffix(baseURL string) string {
 // headers via the provided Resolver. The path is joined to the base URL
 // with proper slash handling.
 func doRequest(ctx context.Context, client *http.Client, method, baseURL, path, apiKey string, extraHeaders map[string]string, resolver Resolver, body any) (*http.Response, error) {
-	resolvedBase, _ := resolver.ResolveValue(baseURL)
-	resolvedKey, _ := resolver.ResolveValue(apiKey)
+	// A failed base_url/api_key resolution (e.g. a $(cmd) substitution
+	// that errors) must not be swallowed here: doing so used to send the
+	// request with the literal, unresolved template as the URL or an
+	// empty Authorization header, which the server then answered with a
+	// generic 401/connection error that hid the real cause from the user.
+	resolvedBase, err := resolver.ResolveValue(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("resolve base_url: %w", err)
+	}
+	resolvedKey, err := resolver.ResolveValue(apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolve api_key: %w", err)
+	}
 
 	url := strings.TrimRight(resolvedBase, "/") + "/" + strings.TrimLeft(path, "/")
 
@@ -97,7 +108,6 @@ func doRequest(ctx context.Context, client *http.Client, method, baseURL, path, 
 	}
 
 	var req *http.Request
-	var err error
 	if reqBody != nil {
 		req, err = http.NewRequestWithContext(ctx, method, url, reqBody)
 	} else {
