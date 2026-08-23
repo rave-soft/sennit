@@ -22,34 +22,9 @@ func Lookup(dir string, targets ...string) ([]string, error) {
 	if len(targets) == 0 {
 		return nil, nil
 	}
-
-	var found []string
-
-	err := traverseUp(dir, func(cwd string, owner int) error {
-		for _, target := range targets {
-			fpath := filepath.Join(cwd, target)
-			err := probeEnt(fpath, owner)
-
-			// skip to the next file on permission denied
-			if errors.Is(err, os.ErrNotExist) ||
-				errors.Is(err, os.ErrPermission) {
-				continue
-			}
-
-			if err != nil {
-				return fmt.Errorf("error probing file %s: %w", fpath, err)
-			}
-
-			found = append(found, fpath)
-		}
-
-		return nil
+	return lookupAll(targets, func(walkFn func(cwd string, owner int) error) error {
+		return traverseUp(dir, walkFn)
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return found, nil
 }
 
 // LookupClosest searches for a target file or directory starting from dir
@@ -59,29 +34,9 @@ func Lookup(dir string, targets ...string) ([]string, error) {
 // Returns the full path to the target if found, empty string and false otherwise.
 // The search includes the starting directory itself.
 func LookupClosest(dir, target string) (string, bool) {
-	var found string
-
-	err := traverseUp(dir, func(cwd string, owner int) error {
-		fpath := filepath.Join(cwd, target)
-
-		err := probeEnt(fpath, owner)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-
-		if err != nil {
-			return fmt.Errorf("error probing file %s: %w", fpath, err)
-		}
-
-		if Canonical(cwd) == Canonical(home.Dir()) {
-			return filepath.SkipAll
-		}
-
-		found = fpath
-		return filepath.SkipAll
+	return lookupClosest(target, func(walkFn func(cwd string, owner int) error) error {
+		return traverseUp(dir, walkFn)
 	})
-
-	return found, err == nil && found != ""
 }
 
 // LookupClosestBounded behaves like LookupClosest but constrains the
@@ -96,9 +51,19 @@ func LookupClosest(dir, target string) (string, bool) {
 // The $HOME and ownership safeguards from LookupClosest are preserved
 // as outer bounds.
 func LookupClosestBounded(dir, stopDir, target string) (string, bool) {
+	return lookupClosest(target, func(walkFn func(cwd string, owner int) error) error {
+		return traverseUpBounded(dir, stopDir, walkFn)
+	})
+}
+
+// lookupClosest is the shared body of [LookupClosest] and
+// [LookupClosestBounded]: walk drives the upward traversal (unbounded or
+// stopDir-bounded), and this looks for target at each step, stopping at
+// the first match or at $HOME, whichever comes first.
+func lookupClosest(target string, walk func(walkFn func(cwd string, owner int) error) error) (string, bool) {
 	var found string
 
-	err := traverseUpBounded(dir, stopDir, func(cwd string, owner int) error {
+	err := walk(func(cwd string, owner int) error {
 		fpath := filepath.Join(cwd, target)
 
 		err := probeEnt(fpath, owner)
@@ -129,10 +94,19 @@ func LookupBounded(dir, stopDir string, targets ...string) ([]string, error) {
 	if len(targets) == 0 {
 		return nil, nil
 	}
+	return lookupAll(targets, func(walkFn func(cwd string, owner int) error) error {
+		return traverseUpBounded(dir, stopDir, walkFn)
+	})
+}
 
+// lookupAll is the shared body of [Lookup] and [LookupBounded]: walk
+// drives the upward traversal (unbounded or stopDir-bounded), and this
+// probes every target at each step, collecting every hit rather than
+// stopping at the first (unlike [lookupClosest]).
+func lookupAll(targets []string, walk func(walkFn func(cwd string, owner int) error) error) ([]string, error) {
 	var found []string
 
-	err := traverseUpBounded(dir, stopDir, func(cwd string, owner int) error {
+	err := walk(func(cwd string, owner int) error {
 		for _, target := range targets {
 			fpath := filepath.Join(cwd, target)
 			err := probeEnt(fpath, owner)

@@ -252,6 +252,42 @@ func sectionHeight(text string, width int) int {
 	return strings.Count(ansi.Wrap(text, width, ""), "\n") + 1
 }
 
+// renderQuestionMarkdownRaw renders a question's markdown text (a
+// question description) at width using the shared cached renderer.
+// ok is false when the renderer failed to build; out is unspecified
+// in that case.
+func renderQuestionMarkdownRaw(sty *styles.Styles, width int, text string) (out string, ok bool) {
+	r := common.MarkdownRenderer(sty, width)
+	mu := common.LockMarkdownRenderer(r)
+	mu.Lock()
+	out, err := r.Render(text)
+	mu.Unlock()
+	return out, err == nil
+}
+
+// renderQuestionMarkdown renders a question's markdown text at width,
+// trimming glamour's trailing newline. On a render error it falls
+// back to the raw text unmodified.
+func renderQuestionMarkdown(sty *styles.Styles, width int, text string) string {
+	out, ok := renderQuestionMarkdownRaw(sty, width, text)
+	if !ok {
+		return text
+	}
+	return strings.TrimSuffix(out, "\n")
+}
+
+// questionMarkdownHeight returns the rendered line count of a
+// question's markdown text at width. On a render error it falls back
+// to a wrap-based estimate, since the raw text wasn't given glamour's
+// line breaks.
+func questionMarkdownHeight(sty *styles.Styles, width int, text string) int {
+	out, ok := renderQuestionMarkdownRaw(sty, width, text)
+	if !ok {
+		return sectionHeight(text, width)
+	}
+	return strings.Count(strings.TrimSuffix(out, "\n"), "\n") + 1
+}
+
 // wrapIndent wraps text at width and prefixes every continuation
 // line with indent so multi-line content aligns under the first
 // line's content rather than flush left.
@@ -387,15 +423,7 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 
 // renderDescription renders the markdown description at width.
 func (c *choiceList) renderDescription(width int) string {
-	r := common.MarkdownRenderer(c.Styles, width)
-	mu := common.LockMarkdownRenderer(r)
-	mu.Lock()
-	out, err := r.Render(c.Request.Description)
-	mu.Unlock()
-	if err != nil {
-		return c.Request.Description
-	}
-	return strings.TrimSuffix(out, "\n")
+	return renderQuestionMarkdown(c.Styles, width, c.Request.Description)
 }
 
 // choiceItemRenderer renders a choice's label content as a string.
@@ -490,11 +518,8 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 
 	// Blit the visible window.
 	var cur *tea.Cursor
-	for screenRow := range viewport {
-		idx := c.scrollOffset + screenRow
-		if idx >= len(lines) {
-			break
-		}
+	lv := lineViewport{Offset: c.scrollOffset}
+	lv.Blit(len(lines), viewport, func(idx, screenRow int) {
 		ln := lines[idx]
 		y := area.Min.Y + screenRow
 		if ln.text != "" {
@@ -512,7 +537,7 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 				cur = tc
 			}
 		}
-	}
+	})
 
 	// Clamp cursor to visible area to prevent overflow.
 	if cur != nil {
@@ -529,13 +554,7 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 	}
 
 	// Scrollbar.
-	if overflow {
-		sb := common.Scrollbar(c.Styles, viewport, len(lines), viewport, c.scrollOffset)
-		if sb != "" {
-			x := area.Max.X - 1
-			uv.NewStyledString(sb).Draw(scr, image.Rect(x, area.Min.Y, x+1, area.Min.Y+viewport))
-		}
-	}
+	lv.DrawScrollbar(scr, c.Styles, area, len(lines), viewport)
 
 	// Build hit layers for choice rows.
 	c.buildChoiceCompositor(lines, area, contentWidth)

@@ -57,9 +57,7 @@ func ConfigureCustomProvider(ctx context.Context, ws ConfigAccessor, scope confi
 	models, discErr := discover.DiscoverModels(ctx, dcfg, ws.Resolver())
 	if discErr == nil && len(models) > 0 {
 		if enricher := discover.GetEnricher(params.Type); enricher != nil {
-			if enriched, enrichErr := enricher.EnrichModels(ctx, dcfg, ws.Resolver(), models); enrichErr == nil {
-				models = enriched
-			}
+			models = enricher.EnrichModels(ctx, dcfg, ws.Resolver(), models)
 		}
 	}
 

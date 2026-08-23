@@ -108,7 +108,7 @@ func discoverCustomProviderModels(ctx context.Context, providers *csync.Map[stri
 			models, err := discover.DiscoverModels(discoverCtx, cfg, resolver)
 			if err == nil && len(models) > 0 {
 				if enricher := discover.GetEnricher(string(providerType)); enricher != nil {
-					models, _ = enricher.EnrichModels(discoverCtx, cfg, resolver, models)
+					models = enricher.EnrichModels(discoverCtx, cfg, resolver, models)
 				}
 			}
 			mu.Lock()

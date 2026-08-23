@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -23,6 +24,50 @@ type FileInfo struct {
 	ModTime time.Time
 }
 
+// commonIgnoredDirNames is the single source of truth for directory names
+// fsext skips by plain exact match, independent of gitignore pattern
+// semantics — [SkipHidden]'s path-segment scan below and ls.go's
+// fastIgnoreDirs O(1) short-circuit before it falls through to full
+// gitignore matching. It is the union of what those two lists had
+// independently drifted to include, minus a few names that turned out
+// to be wrong for either list to carry:
+//
+//   - "generated" and "logs" are deliberately left out. Both are ordinary
+//     things a user or the agent looks in on purpose (generated code is
+//     still code to read and grep; "check the logs" is a routine ask), so
+//     silently vanishing them from ListDirectory/glob results — with no
+//     way to tell why — was a bug in the old commonIgnoredDirs, not a
+//     feature. Do not add them back.
+//   - "OrbStack", ".local", and ".share" are also left out. They only make
+//     sense as ignores relative to a user's home directory, but this list
+//     is matched against every segment of a workspace-relative path — a
+//     project directory literally named "share" (or a vendored one) would
+//     be hidden for a reason that has nothing to do with why it was
+//     probably added (someone browsing $HOME with the same walk). Nothing
+//     in this codebase points a search at $HOME routinely enough to
+//     justify that collateral risk.
+var commonIgnoredDirNames = []string{
+	brand.DataDir,
+	".git", ".svn", ".hg", ".bzr",
+	".vscode", ".idea",
+	"node_modules", "__pycache__", ".pytest_cache",
+	".cache", ".tmp", ".Trash", ".Spotlight-V100", ".fseventsd",
+	"vendor", "dist", "build", "target", "bin", "obj", "out",
+	"coverage",
+	"bower_components", "jspm_packages",
+}
+
+// commonIgnoredDirSet is commonIgnoredDirNames as a lookup set. Computed
+// once (not on every SkipHidden call, which glob's walk drives once per
+// candidate path) and reused by ls.go's fastIgnoreDirs as well.
+var commonIgnoredDirSet = sync.OnceValue(func() map[string]bool {
+	m := make(map[string]bool, len(commonIgnoredDirNames))
+	for _, name := range commonIgnoredDirNames {
+		m[name] = true
+	}
+	return m
+})
+
 func SkipHidden(path string) bool {
 	// Check for hidden files (starting with a dot)
 	base := filepath.Base(path)
@@ -30,30 +75,10 @@ func SkipHidden(path string) bool {
 		return true
 	}
 
-	commonIgnoredDirs := map[string]bool{
-		brand.DataDir:      true,
-		"node_modules":     true,
-		"vendor":           true,
-		"dist":             true,
-		"build":            true,
-		"target":           true,
-		".git":             true,
-		".idea":            true,
-		".vscode":          true,
-		"__pycache__":      true,
-		"bin":              true,
-		"obj":              true,
-		"out":              true,
-		"coverage":         true,
-		"logs":             true,
-		"generated":        true,
-		"bower_components": true,
-		"jspm_packages":    true,
-	}
-
+	ignored := commonIgnoredDirSet()
 	parts := strings.SplitSeq(path, string(os.PathSeparator))
 	for part := range parts {
-		if commonIgnoredDirs[part] {
+		if ignored[part] {
 			return true
 		}
 	}

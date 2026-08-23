@@ -1,9 +1,10 @@
 package common
 
 import (
-	"fmt"
 	"sync"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/ui/presentation"
 )
 
 // turnTimer tracks the elapsed time for the current agent turn.
@@ -36,17 +37,5 @@ func Elapsed() string {
 	if !turnTimer.active {
 		return ""
 	}
-	elapsed := time.Since(turnTimer.startTime)
-	totalSeconds := int(elapsed.Seconds())
-	minutes := int(elapsed.Minutes())
-	hours := int(elapsed.Hours())
-
-	switch {
-	case hours >= 1:
-		return fmt.Sprintf("%dh %dm", hours, minutes%60)
-	case minutes >= 1:
-		return fmt.Sprintf("%dm %ds", minutes, totalSeconds%60)
-	default:
-		return fmt.Sprintf("%ds", totalSeconds)
-	}
+	return presentation.FormatElapsed(time.Since(turnTimer.startTime))
 }

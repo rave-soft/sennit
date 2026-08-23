@@ -403,3 +403,55 @@ func TestLineEndingsRoundTrip(t *testing.T) {
 	require.Equal(t, "line1\r\nline2\r\nline3\r\nline4", backMixed)
 	require.NotContains(t, backMixed, "\n\n") // no stray bare LF left over
 }
+
+func TestSkipHidden(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dot-prefixed base is always skipped", func(t *testing.T) {
+		t.Parallel()
+		require.True(t, SkipHidden(filepath.Join("proj", ".env")))
+	})
+
+	t.Run("ordinary path is not skipped", func(t *testing.T) {
+		t.Parallel()
+		require.False(t, SkipHidden(filepath.Join("proj", "src", "main.go")))
+	})
+
+	// commonIgnoredDirNames is the union of what used to be two
+	// independently-maintained lists (SkipHidden's own commonIgnoredDirs
+	// and ls.go's fastIgnoreDirs). Every name from both originals must
+	// still be caught here, including the ones SkipHidden alone did not
+	// carry before the merge — except the names the merge deliberately
+	// dropped (see the "not skipped" case below).
+	t.Run("skips every name from both merged lists", func(t *testing.T) {
+		t.Parallel()
+		names := []string{
+			// Present in SkipHidden's own list before the merge.
+			"node_modules", "vendor", "dist", "build", "target",
+			".git", ".idea", ".vscode", "__pycache__", "bin", "obj",
+			"out", "coverage", "bower_components", "jspm_packages",
+			// Gained from ls.go's fastIgnoreDirs by the merge.
+			".svn", ".hg", ".bzr", ".pytest_cache", ".cache", ".tmp",
+			".Trash", ".Spotlight-V100", ".fseventsd",
+		}
+		for _, name := range names {
+			p := filepath.Join("proj", name, "file.txt")
+			require.True(t, SkipHidden(p), "expected %q to be skipped", p)
+		}
+	})
+
+	// "generated" and "logs" are ordinary things to read and grep, and
+	// "OrbStack"/".local"/".share" only make sense as ignores relative to
+	// $HOME, not to every workspace path segment — see
+	// commonIgnoredDirNames' own doc comment. All five were dropped from
+	// the merged list rather than carried over; pin that they stay
+	// visible.
+	t.Run("does not skip names deliberately dropped from the merge", func(t *testing.T) {
+		t.Parallel()
+		names := []string{"generated", "logs", "OrbStack", ".local", ".share"}
+		for _, name := range names {
+			p := filepath.Join("proj", name, "file.txt")
+			require.False(t, SkipHidden(p), "expected %q not to be skipped", p)
+		}
+	})
+}

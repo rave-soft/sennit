@@ -101,10 +101,7 @@ func newOAuth(
 	m.oAuthProvider = oAuthProvider
 	m.State = OAuthStateInitializing
 
-	m.spinner = spinner.New(
-		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Dialog.OAuth.Spinner),
-	)
+	m.spinner = newOAuthSpinner(t)
 
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
@@ -369,28 +366,17 @@ func (m *OAuth) dialogContent() string {
 
 	default:
 		innerWidth := m.InnerWidth()
-		elements := []string{
-			m.headerContent(),
-			m.innerContent(),
-			renderDialogHelp(t, &m.help, m, innerWidth),
-		}
-		return strings.Join(elements, "\n")
+		return oauthDialogContent(t, &m.help, m, m.headerContent(), m.innerContent(), innerWidth)
 	}
 }
 
 func (m *OAuth) headerContent() string {
-	var (
-		t            = m.com.Styles
-		titleStyle   = t.Dialog.Title
-		textStyle    = t.Dialog.PrimaryText
-		dialogStyle  = t.Dialog.View.Width(m.Width())
-		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
-	)
+	t := m.com.Styles
+	dialogTitle := fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
 	if m.isOnboarding {
-		return textStyle.Render(dialogTitle)
+		return t.Dialog.PrimaryText.Render(dialogTitle)
 	}
-	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.Width()-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+	return oauthDialogHeader(t, m.Width(), dialogTitle)
 }
 
 func (m *OAuth) innerContent() string {

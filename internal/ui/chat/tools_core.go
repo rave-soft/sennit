@@ -135,8 +135,11 @@ type baseToolMessageItem struct {
 	result       *message.ToolResult
 	messageID    string
 	status       ToolStatus
-	// we use this so we can efficiently cache
-	// tools that have a capped width (e.x bash.. and others)
+	// hasCappedWidth controls whether RawRender caps this tool's content
+	// width at maxTextWidth for readability (bash, read, etc.) or gives
+	// it the full available width (Edit/MultiEdit, which need it for
+	// diffs). See RawRender in tools_item.go — this is the only place
+	// the cap is applied.
 	hasCappedWidth bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool

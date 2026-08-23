@@ -331,15 +331,10 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	// ManagerOptions.ParentApp) must not panic. Placed here so both the
 	// idle (empty-Goal) and dispatched-Goal paths below register it - an
 	// idle thread activated by hand later must still be able to ask.
-	if args.ParentSessionID != "" && m.parentApp != nil {
-		handle.Workspace().Coordinator().RegisterDelegationParent(sess.ID, DelegationParent{
-			Parent:          m.parentApp.Coordinator(),
-			ParentSessionID: args.ParentSessionID,
-			DelegationID:    st.ID,
-			Kind:            string(KindThread),
-			Name:            st.Name,
-			Depth:           0, // deliverCompletion is always called with depth 0 for a thread; see its onAutoMerge call above.
-		})
+	if m.parentApp != nil {
+		// deliverCompletion is always called with depth 0 for a thread; see
+		// its onAutoMerge call above.
+		registerParent(handle.Workspace().Coordinator(), m.parentApp.Coordinator(), sess.ID, args.ParentSessionID, st.ID, st.Name, KindThread, 0)
 	}
 
 	if args.Goal == "" {
@@ -600,15 +595,12 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 	// reads from). Re-register here, on the freshly-installed handle, so a
 	// thread resumed after a restart can still ask its parent mid-run — not
 	// just report its eventual completion.
-	if st.ParentSessionID != "" && m.parentApp != nil {
-		handle.Workspace().Coordinator().RegisterDelegationParent(st.SessionID, DelegationParent{
-			Parent:          m.parentApp.Coordinator(),
-			ParentSessionID: st.ParentSessionID,
-			DelegationID:    st.ID,
-			Kind:            string(KindThread),
-			Name:            st.Name,
-			Depth:           0, // Depth is not persisted (a pre-existing gap - see threadControl.depth, also in-memory-only); 0 is the safe default a resumed entity's cascade depth already silently falls back to today.
-		})
+	if m.parentApp != nil {
+		// Depth is not persisted (a pre-existing gap - see
+		// threadControl.depth, also in-memory-only); 0 is the safe default a
+		// resumed entity's cascade depth already silently falls back to
+		// today.
+		registerParent(handle.Workspace().Coordinator(), m.parentApp.Coordinator(), st.SessionID, st.ParentSessionID, st.ID, st.Name, KindThread, 0)
 	}
 	rb.commit()
 	return st, nil
@@ -732,20 +724,13 @@ func (m *Manager) send(ctx context.Context, idOrName, message string, from Sende
 	// not just at Create. Runs on every Send, including when the workspace
 	// was already live (never actually restarted): that is fine, it is an
 	// idempotent Set, not a spawn.
-	if st.ParentSessionID != "" && m.parentApp != nil {
+	if m.parentApp != nil {
 		if c := m.lc.existingControl(st.ID); c != nil {
 			c.mu.Lock()
 			rt := c.runtime
 			c.mu.Unlock()
 			if rt != nil {
-				rt.handle.Workspace().Coordinator().RegisterDelegationParent(st.SessionID, DelegationParent{
-					Parent:          m.parentApp.Coordinator(),
-					ParentSessionID: st.ParentSessionID,
-					DelegationID:    st.ID,
-					Kind:            string(KindThread),
-					Name:            st.Name,
-					Depth:           0,
-				})
+				registerParent(rt.handle.Workspace().Coordinator(), m.parentApp.Coordinator(), st.SessionID, st.ParentSessionID, st.ID, st.Name, KindThread, 0)
 			}
 		}
 	}
@@ -1372,6 +1357,29 @@ func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, erro
 // driver (see the Store seam in internal/app/threadspawn), so it matches
 // on the message text every SQLite driver uses for this failure rather
 // than a driver-specific error type.
+// registerParent installs delegationID's parent link on registerOn — the
+// coordinator that will actually dispatch its turns — so a mid-run ask or
+// its eventual completion reaches parentSessionID through parentCoord. It
+// is a no-op when there is nothing to route to yet: registerOn nil (no
+// runtime installed), parentCoord nil (no delivery target — for a thread,
+// see ManagerOptions.ParentApp; a task always has one, its own coordinator),
+// or parentSessionID empty (a thread with no parent — see
+// CreateArgs.ParentSessionID; a task's is always non-empty, enforced at
+// TaskManager.Create).
+func registerParent(registerOn, parentCoord Coordinator, sessionID, parentSessionID, delegationID, name string, kind Kind, depth int) {
+	if registerOn == nil || parentCoord == nil || parentSessionID == "" {
+		return
+	}
+	registerOn.RegisterDelegationParent(sessionID, DelegationParent{
+		Parent:          parentCoord,
+		ParentSessionID: parentSessionID,
+		DelegationID:    delegationID,
+		Kind:            string(kind),
+		Name:            name,
+		Depth:           depth,
+	})
+}
+
 func isUniqueConstraintViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

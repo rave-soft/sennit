@@ -16,23 +16,22 @@ type QuestionToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Question", opts)
 	}
 
 	var params tools.QuestionParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	headerText := questionSummary(params)
-	header := toolHeader(sty, opts.Status, "Question", cappedWidth, opts, headerText)
+	header := toolHeader(sty, opts.Status, "Question", width, opts, headerText)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -40,7 +39,7 @@ func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return header
 	}
 
-	body := formatQuestionAnswers(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal)
+	body := formatQuestionAnswers(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal)
 	if body == "" {
 		return header
 	}

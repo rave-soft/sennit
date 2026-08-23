@@ -58,14 +58,13 @@ type ReadToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (v *ReadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Read", opts)
 	}
 
 	var params tools.ReadParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
@@ -77,12 +76,12 @@ func (v *ReadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "offset", fmt.Sprintf("%d", params.Offset))
 	}
 
-	header := toolHeader(sty, opts.Status, "Read", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, "Read", width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -154,24 +153,23 @@ type WriteToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Write", opts)
 	}
 
 	var params tools.WriteParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, "Write", cappedWidth, opts, file)
+	header := toolHeader(sty, opts.Status, "Write", width, opts, file)
 	if opts.Compact {
 		return header
 	}
 
 	if !opts.HasResult() {
-		if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+		if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 			return joinToolParts(header, earlyState)
 		}
 		return header
@@ -181,7 +179,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// exception to "no body" — it's a short, non-click-driven summary of
 	// what went wrong, not a content preview.
 	if opts.Result.IsError {
-		errLine := toolErrorContent(sty, opts.Result, cappedWidth)
+		errLine := toolErrorContent(sty, opts.Result, width)
 		return strings.Join([]string{header, "", errLine}, "\n")
 	}
 
@@ -190,7 +188,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// expandableBodyContent).
 	if params.Content != "" {
 		header = appendResultSummary(sty, header, lineCountSummary(params.Content))
-		return header + "\n" + expandableBodyContent(sty, params.Content, cappedWidth, opts.Expanded, opts.Hovered)
+		return header + "\n" + expandableBodyContent(sty, params.Content, width, opts.Expanded, opts.Hovered)
 	}
 
 	return header
@@ -379,14 +377,13 @@ type DownloadToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Download", opts)
 	}
 
 	var params tools.DownloadParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	toolParams := []string{params.URL}
@@ -397,12 +394,12 @@ func (d *DownloadToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		toolParams = append(toolParams, "timeout", formatTimeout(params.Timeout))
 	}
 
-	header := toolHeader(sty, opts.Status, "Download", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, "Download", width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 

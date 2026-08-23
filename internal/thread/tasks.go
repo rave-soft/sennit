@@ -218,14 +218,8 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	// task's turns through. Placing it before setStatus/startRun means
 	// no later error path in this function can leave a half-registered
 	// parent pointing at a session that never actually runs.
-	handle.Workspace().Coordinator().RegisterDelegationParent(sess.ID, DelegationParent{
-		Parent:          handle.Workspace().Coordinator(),
-		ParentSessionID: args.ParentSessionID,
-		DelegationID:    st.ID,
-		Kind:            string(KindTask),
-		Name:            st.Name,
-		Depth:           args.Depth,
-	})
+	coord := handle.Workspace().Coordinator()
+	registerParent(coord, coord, sess.ID, args.ParentSessionID, st.ID, st.Name, KindTask, args.Depth)
 
 	// Into runningSt, not st: setStatus returns the zero Thread on error,
 	// and failCreate below needs st's real ID (see SetSession's identical
@@ -411,23 +405,14 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 	// coordinator (it shares its parent's App via threadspawn's
 	// ParentAppSpawner, unlike a thread's wholly isolated one), so no
 	// ParentApp guard is needed here, only a persisted parent to re-register.
-	if st.ParentSessionID != "" {
-		if c := t.lc.existingControl(st.ID); c != nil {
-			c.mu.Lock()
-			rt := c.runtime
-			depth := c.depth
-			c.mu.Unlock()
-			if rt != nil {
-				coord := rt.handle.Workspace().Coordinator()
-				coord.RegisterDelegationParent(st.SessionID, DelegationParent{
-					Parent:          coord,
-					ParentSessionID: st.ParentSessionID,
-					DelegationID:    st.ID,
-					Kind:            string(KindTask),
-					Name:            st.Name,
-					Depth:           depth,
-				})
-			}
+	if c := t.lc.existingControl(st.ID); c != nil {
+		c.mu.Lock()
+		rt := c.runtime
+		depth := c.depth
+		c.mu.Unlock()
+		if rt != nil {
+			coord := rt.handle.Workspace().Coordinator()
+			registerParent(coord, coord, st.SessionID, st.ParentSessionID, st.ID, st.Name, KindTask, depth)
 		}
 	}
 	return disp, nil

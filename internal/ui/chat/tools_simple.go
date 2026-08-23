@@ -36,17 +36,16 @@ type simpleToolRenderer struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *simpleToolRenderer) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, r.title, opts)
 	}
 
-	header := toolHeader(sty, opts.Status, r.title, cappedWidth, opts, r.params(opts.ToolCall.Input)...)
+	header := toolHeader(sty, opts.Status, r.title, width, opts, r.params(opts.ToolCall.Input)...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 

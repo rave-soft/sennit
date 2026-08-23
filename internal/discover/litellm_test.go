@@ -55,8 +55,7 @@ func TestLitellmEnricher(t *testing.T) {
 		}
 
 		e := &litellmEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Len(t, result, 3)
 
 		// gpt-4o should have all fields populated.
@@ -98,8 +97,7 @@ func TestLitellmEnricher(t *testing.T) {
 		}
 
 		e := &litellmEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 
 		// User overrides should be preserved.
 		require.Equal(t, int64(200000), result[0].ContextWindow)
@@ -121,8 +119,7 @@ func TestLitellmEnricher(t *testing.T) {
 		models := []catwalk.Model{{ID: "m1"}}
 
 		e := &litellmEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Len(t, result, 1)
 		require.Equal(t, "m1", result[0].ID)
 	})
@@ -147,8 +144,7 @@ func TestLitellmEnricher(t *testing.T) {
 		}
 
 		e := &litellmEnricher{}
-		_, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, nil)
-		require.NoError(t, err)
+		_ = e.EnrichModels(context.Background(), cfg, &mockResolver{}, nil)
 	})
 }
 

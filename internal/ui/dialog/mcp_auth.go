@@ -3,7 +3,6 @@ package dialog
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -65,10 +64,7 @@ func NewMCPAuth(com *common.Common, pending []mcptools.MCPPendingAuthServer, aut
 		authURLFn: authURLFn,
 	}
 
-	m.spinner = spinner.New(
-		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Dialog.OAuth.Spinner),
-	)
+	m.spinner = newOAuthSpinner(t)
 
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
@@ -240,22 +236,12 @@ func (m *MCPAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *MCPAuth) dialogContent() string {
 	t := m.com.Styles
 	innerWidth := m.InnerWidth()
-	elements := []string{
-		m.headerContent(),
-		m.innerContent(),
-		renderDialogHelp(t, &m.help, m, innerWidth),
-	}
-	return strings.Join(elements, "\n")
+	return oauthDialogContent(t, &m.help, m, m.headerContent(), m.innerContent(), innerWidth)
 }
 
 func (m *MCPAuth) headerContent() string {
-	t := m.com.Styles
-	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View.Width(m.Width())
-	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-
 	title := fmt.Sprintf("Authenticate with %s", m.currentServer().Name)
-	return common.DialogTitle(t, titleStyle.Render(title), m.Width()-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+	return oauthDialogHeader(m.com.Styles, m.Width(), title)
 }
 
 func (m *MCPAuth) innerContent() string {

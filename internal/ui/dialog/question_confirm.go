@@ -155,17 +155,7 @@ func (c *ConfirmComponent) Height(width int) int {
 	h := sectionHeight(c.Title, w-lipgloss.Width(iconPrompt)) // title
 	h++                                                       // blank
 	if c.Description != "" {
-		r := common.MarkdownRenderer(c.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(c.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(c.Description, w)
-		}
+		h += questionMarkdownHeight(c.Styles, w, c.Description)
 		h++ // blank
 	}
 	h += len(c.QuestionLabels) // one bullet per question
@@ -203,20 +193,9 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Description.
 	if c.Description != "" {
-		r := common.MarkdownRenderer(c.Styles, area.Dx())
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		desc, err := r.Render(c.Description)
-		mu.Unlock()
-		if err == nil {
-			desc = strings.TrimSuffix(desc, "\n")
-			for _, l := range strings.Split(desc, "\n") {
-				lines = append(lines, line{text: l})
-			}
-		} else {
-			for _, l := range strings.Split(c.Description, "\n") {
-				lines = append(lines, line{text: l})
-			}
+		desc := renderQuestionMarkdown(c.Styles, area.Dx(), c.Description)
+		for _, l := range strings.Split(desc, "\n") {
+			lines = append(lines, line{text: l})
 		}
 		lines = append(lines, line{}) // blank
 	}
@@ -252,19 +231,10 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		{Text: "Yup!", Selected: c.confirmYes, Padding: 3, UnderlineIndex: 0},
 		{Text: "Not yet", Selected: !c.confirmYes, Padding: 3, UnderlineIndex: 0},
 	}
-	overflow := viewport > 0 && totalLines > viewport
-
 	// Clamp scroll offset.
-	maxScroll := totalLines - viewport
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if c.scrollOffset > maxScroll {
-		c.scrollOffset = maxScroll
-	}
-	if c.scrollOffset < 0 {
-		c.scrollOffset = 0
-	}
+	lv := lineViewport{Offset: c.scrollOffset}
+	overflow := lv.Clamp(totalLines, viewport)
+	c.scrollOffset = lv.Offset
 
 	// Determine content width (shrink by 1 for scrollbar if overflowing).
 	contentWidth := area.Dx()
@@ -273,13 +243,11 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	// Blit visible window. buttonRowVisible tracks whether the button row
-	// was actually redrawn this frame — see below.
+	// was actually redrawn this frame — see below. lineViewport.Blit only
+	// calls draw for rows inside the current window, so this flips true
+	// only when the button row is actually visible this frame.
 	buttonRowVisible := false
-	for screenRow := range viewport {
-		idx := c.scrollOffset + screenRow
-		if idx >= totalLines {
-			break
-		}
+	lv.Blit(totalLines, viewport, func(idx, screenRow int) {
 		ln := lines[idx]
 		y := area.Min.Y + screenRow
 		if ln.buttons {
@@ -294,7 +262,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		} else if ln.text != "" {
 			drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), ln.text)
 		}
-	}
+	})
 	// If the button row scrolled out of view, drop the compositor rather
 	// than leaving it pointing at last frame's (now stale) coordinates —
 	// otherwise a click at that old position would activate an invisible
@@ -304,13 +272,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	// Scrollbar.
-	if overflow {
-		sb := common.Scrollbar(c.Styles, viewport, totalLines, viewport, c.scrollOffset)
-		if sb != "" {
-			x := area.Max.X - 1
-			uv.NewStyledString(sb).Draw(scr, image.Rect(x, area.Min.Y, x+1, area.Min.Y+viewport))
-		}
-	}
+	lv.DrawScrollbar(scr, c.Styles, area, totalLines, viewport)
 
 	return nil
 }

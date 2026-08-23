@@ -275,7 +275,7 @@ sennit models refresh codex`,
 			models, discErr := discover.DiscoverModels(discoverCtx, dcfg, cfg.Resolver())
 			if discErr == nil && len(models) > 0 {
 				if enricher := discover.GetEnricher(string(providerType)); enricher != nil {
-					models, _ = enricher.EnrichModels(discoverCtx, dcfg, cfg.Resolver(), models)
+					models = enricher.EnrichModels(discoverCtx, dcfg, cfg.Resolver(), models)
 				}
 			}
 			cancel()

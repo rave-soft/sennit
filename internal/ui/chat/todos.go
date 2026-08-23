@@ -27,7 +27,6 @@ type TodosToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "To-Do", opts)
 	}
@@ -70,7 +69,7 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 					} else {
 						headerText = fmt.Sprintf("created %d todos", meta.Total)
 					}
-					body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
+					body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, width)
 				} else {
 					// Build header based on what changed.
 					hasCompleted := len(meta.JustCompleted) > 0
@@ -100,19 +99,19 @@ func (t *TodosToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 					// newly-started items) left updates with neither —
 					// e.g. the model just adding pending items, or a
 					// reorder — rendering as a bare header with no list.
-					body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, cappedWidth)
+					body = FormatTodosList(sty, meta.Todos, styles.ArrowRightIcon, width)
 				}
 			}
 		}
 	}
 
 	toolParams := []string{headerText}
-	header := toolHeader(sty, opts.Status, "To-Do", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, "To-Do", width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 

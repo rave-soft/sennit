@@ -2,8 +2,6 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 
 	"charm.land/catwalk/pkg/catwalk"
 )
@@ -51,26 +49,17 @@ type lmstudioInstanceConfig struct {
 // and vision support on discovered models.
 type lmstudioEnricher struct{}
 
-func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
-	client, err := cfg.httpClient()
-	if err != nil {
-		return models, nil
+func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) []catwalk.Model {
+	modelsResp, ok := fetchJSON[lmstudioModelsResponse](ctx, cfg, resolver, stripV1Suffix(cfg.BaseURL), "/api/v1/models")
+	if !ok {
+		return models
 	}
-	resp, err := doRequest(ctx, client, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/api/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
-	if err != nil {
-		return models, nil
-	}
-	defer resp.Body.Close()
+	return applyLmstudioMeta(cfg, models, modelsResp)
+}
 
-	if resp.StatusCode != http.StatusOK {
-		return models, nil
-	}
-
-	var modelsResp lmstudioModelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
-		return models, nil
-	}
-
+// applyLmstudioMeta maps a decoded /api/v1/models response onto models,
+// preserving existing non-zero fields (user overrides take precedence).
+func applyLmstudioMeta(cfg Config, models []catwalk.Model, modelsResp lmstudioModelsResponse) []catwalk.Model {
 	// Index by key for O(1) lookup.
 	metaByKey := make(map[string]lmstudioModelEntry, len(modelsResp.Models))
 	for _, m := range modelsResp.Models {
@@ -118,5 +107,5 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 		}
 	}
 
-	return models, nil
+	return models
 }

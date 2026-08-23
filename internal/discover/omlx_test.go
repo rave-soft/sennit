@@ -38,8 +38,7 @@ func TestOmlxEnricher(t *testing.T) {
 		}
 
 		e := &omlxEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Len(t, result, 3)
 		require.Equal(t, int64(32768), result[0].ContextWindow)
 		require.Equal(t, int64(16384), result[0].DefaultMaxTokens)
@@ -66,8 +65,7 @@ func TestOmlxEnricher(t *testing.T) {
 		}
 
 		e := &omlxEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Equal(t, int64(65536), result[0].ContextWindow)
 		require.Equal(t, int64(8192), result[0].DefaultMaxTokens)
 	})
@@ -83,8 +81,7 @@ func TestOmlxEnricher(t *testing.T) {
 		models := []catwalk.Model{{ID: "m1"}}
 
 		e := &omlxEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Len(t, result, 1)
 	})
 }

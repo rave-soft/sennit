@@ -42,8 +42,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		}
 
 		e := &llamacppEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Len(t, result, 3)
 		require.Equal(t, int64(8192), result[0].ContextWindow)
 		require.Equal(t, int64(4096), result[1].ContextWindow)
@@ -69,8 +68,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		models := []catwalk.Model{{ID: "m1"}}
 
 		e := &llamacppEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Equal(t, int64(131072), result[0].ContextWindow)
 	})
 
@@ -93,8 +91,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		models := []catwalk.Model{{ID: "m1", ContextWindow: 65536}}
 
 		e := &llamacppEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Equal(t, int64(65536), result[0].ContextWindow)
 	})
 
@@ -109,8 +106,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		models := []catwalk.Model{{ID: "m1"}}
 
 		e := &llamacppEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Len(t, result, 1)
 		require.Equal(t, int64(0), result[0].ContextWindow)
 	})
@@ -127,8 +123,7 @@ func TestLlamacppEnricher(t *testing.T) {
 		models := []catwalk.Model{{ID: "m1"}}
 
 		e := &llamacppEnricher{}
-		result, err := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
-		require.NoError(t, err)
+		result := e.EnrichModels(context.Background(), cfg, &mockResolver{}, models)
 		require.Len(t, result, 1)
 		require.Equal(t, int64(0), result[0].ContextWindow)
 	})

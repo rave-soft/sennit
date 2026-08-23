@@ -283,41 +283,12 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				if done {
 					// Command failed or completed very quickly
 					_ = bgManager.Remove(bgShell.ID) // shell already finished; nothing to clean up on failure
-
-					interrupted := shell.IsInterrupt(execErr)
-					exitCode := shell.ExitCode(execErr)
-					if exitCode == 0 && !interrupted && execErr != nil {
-						return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
-					}
-
-					stdout = formatOutput(stdout, stderr, execErr)
-
-					metadata := BashResponseMetadata{
-						StartTime:        startTime.UnixMilli(),
-						EndTime:          time.Now().UnixMilli(),
-						Output:           stdout,
-						Description:      params.Description,
-						Background:       params.RunInBackground,
-						WorkingDirectory: bgShell.WorkingDir,
-					}
-					if stdout == "" {
-						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
-					}
-					stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
-					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
+					return finishBashRun(bgShell, params, startTime, stdout, stderr, execErr)
 				}
 
 				// Still running after fast-failure check - return as background job
-				metadata := BashResponseMetadata{
-					StartTime:        startTime.UnixMilli(),
-					EndTime:          time.Now().UnixMilli(),
-					Description:      params.Description,
-					WorkingDirectory: bgShell.WorkingDir,
-					Background:       true,
-					ShellID:          bgShell.ID,
-				}
-				response := fmt.Sprintf("Background shell started with ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
-				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
+				return stillRunningBashResponse(bgShell, params, startTime,
+					"Background shell started with ID: %s\n\nUse job_output tool to view output or job_kill to terminate."), nil
 			}
 
 			// Start synchronous execution with auto-background support
@@ -358,43 +329,60 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				// Remove from background manager since we're returning directly
 				// Don't call Kill() as it cancels the context and corrupts the exit code
 				_ = bgManager.Remove(bgShell.ID) // shell already finished; nothing to clean up
-
-				interrupted := shell.IsInterrupt(execErr)
-				exitCode := shell.ExitCode(execErr)
-				if exitCode == 0 && !interrupted && execErr != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
-				}
-
-				stdout = formatOutput(stdout, stderr, execErr)
-
-				metadata := BashResponseMetadata{
-					StartTime:        startTime.UnixMilli(),
-					EndTime:          time.Now().UnixMilli(),
-					Output:           stdout,
-					Description:      params.Description,
-					Background:       params.RunInBackground,
-					WorkingDirectory: bgShell.WorkingDir,
-				}
-				if stdout == "" {
-					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
-				}
-				stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
-				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
+				return finishBashRun(bgShell, params, startTime, stdout, stderr, execErr)
 			}
 
 			// Still running - keep as background job
-			metadata := BashResponseMetadata{
-				StartTime:        startTime.UnixMilli(),
-				EndTime:          time.Now().UnixMilli(),
-				Description:      params.Description,
-				WorkingDirectory: bgShell.WorkingDir,
-				Background:       true,
-				ShellID:          bgShell.ID,
-			}
-			response := fmt.Sprintf("Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
+			return stillRunningBashResponse(bgShell, params, startTime,
+				"Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate."), nil
 		},
 	)
+}
+
+// finishBashRun turns a finished shell run's raw output into the tool's
+// response: a Go error for a genuine execution failure (so the whole
+// tool-call batch aborts), or a text response carrying
+// BashResponseMetadata otherwise. Shared by the run-in-background path's
+// fast-failure check and the synchronous path's within-threshold
+// completion — both call this once bgShell.GetOutput() reports done.
+func finishBashRun(bgShell *shell.BackgroundShell, params BashParams, startTime time.Time, stdout, stderr string, execErr error) (fantasy.ToolResponse, error) {
+	interrupted := shell.IsInterrupt(execErr)
+	exitCode := shell.ExitCode(execErr)
+	if exitCode == 0 && !interrupted && execErr != nil {
+		return fantasy.ToolResponse{}, fmt.Errorf("[Job %s] error executing command: %w", bgShell.ID, execErr)
+	}
+
+	stdout = formatOutput(stdout, stderr, execErr)
+
+	metadata := BashResponseMetadata{
+		StartTime:        startTime.UnixMilli(),
+		EndTime:          time.Now().UnixMilli(),
+		Output:           stdout,
+		Description:      params.Description,
+		Background:       params.RunInBackground,
+		WorkingDirectory: bgShell.WorkingDir,
+	}
+	if stdout == "" {
+		return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
+	}
+	stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
+}
+
+// stillRunningBashResponse builds the response for a shell that outlived
+// its wait window and is being left running as a background job. message
+// is a Printf format taking bgShell.ID, so the two call sites can each keep
+// their own wording for why the command ended up backgrounded.
+func stillRunningBashResponse(bgShell *shell.BackgroundShell, params BashParams, startTime time.Time, message string) fantasy.ToolResponse {
+	metadata := BashResponseMetadata{
+		StartTime:        startTime.UnixMilli(),
+		EndTime:          time.Now().UnixMilli(),
+		Description:      params.Description,
+		WorkingDirectory: bgShell.WorkingDir,
+		Background:       true,
+		ShellID:          bgShell.ID,
+	}
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(fmt.Sprintf(message, bgShell.ID)), metadata)
 }
 
 // formatOutput formats the output of a completed command with error handling

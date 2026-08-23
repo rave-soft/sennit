@@ -15,7 +15,14 @@ type Enricher interface {
 	// EnrichModels takes a slice of bare discovered models and returns
 	// them with metadata populated. Implementations should preserve
 	// existing non-zero fields (user overrides take precedence).
-	EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error)
+	//
+	// There is no error return: every implementation treats enrichment
+	// as best-effort and already swallows its own failures (a bad
+	// base_url/api_key resolution, a non-200 response, an undecodable
+	// body) by falling back to the input models unchanged, and every
+	// caller discarded the error anyway. Add one back only if a future
+	// implementation has a failure mode worth surfacing to the caller.
+	EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) []catwalk.Model
 }
 
 // enrichers maps provider type strings to their enrichment

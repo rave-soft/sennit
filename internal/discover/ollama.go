@@ -24,7 +24,7 @@ type ollamaShowResponse struct {
 // endpoint and populates context window on discovered models.
 type ollamaEnricher struct{}
 
-func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
+func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) []catwalk.Model {
 	// Collect indices that need enrichment.
 	var needEnrichment []int
 	for i := range models {
@@ -33,12 +33,12 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 		}
 	}
 	if len(needEnrichment) == 0 {
-		return models, nil
+		return models
 	}
 
 	client, err := cfg.httpClient()
 	if err != nil {
-		return models, nil
+		return models
 	}
 
 	// Fetch metadata concurrently with bounded parallelism.
@@ -82,7 +82,7 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 		}
 	}
 
-	return models, nil
+	return models
 }
 
 // extractContextLength finds the context_length value in Ollama's

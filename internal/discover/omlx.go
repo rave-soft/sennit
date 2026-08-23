@@ -2,8 +2,6 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 
 	"charm.land/catwalk/pkg/catwalk"
 )
@@ -31,29 +29,20 @@ type omlxModelStatus struct {
 // models.
 type omlxEnricher struct{}
 
-func (e *omlxEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
+func (e *omlxEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) []catwalk.Model {
 	// oMLX serves /models/status under the OpenAI-compatible /v1
 	// namespace, so the path is relative to the configured base URL
 	// (which already includes /v1) rather than the server root.
-	client, err := cfg.httpClient()
-	if err != nil {
-		return models, nil
+	statusResp, ok := fetchJSON[omlxModelsStatusResponse](ctx, cfg, resolver, cfg.BaseURL, "/models/status")
+	if !ok {
+		return models
 	}
-	resp, err := doRequest(ctx, client, http.MethodGet, cfg.BaseURL, "/models/status", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
-	if err != nil {
-		return models, nil
-	}
-	defer resp.Body.Close()
+	return applyOmlxMeta(models, statusResp)
+}
 
-	if resp.StatusCode != http.StatusOK {
-		return models, nil
-	}
-
-	var statusResp omlxModelsStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
-		return models, nil
-	}
-
+// applyOmlxMeta maps a decoded /models/status response onto models,
+// preserving existing non-zero values (user overrides take precedence).
+func applyOmlxMeta(models []catwalk.Model, statusResp omlxModelsStatusResponse) []catwalk.Model {
 	// Index by model ID for O(1) lookup.
 	metaByID := make(map[string]omlxModelStatus, len(statusResp.Models))
 	for _, m := range statusResp.Models {
@@ -73,5 +62,5 @@ func (e *omlxEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Re
 		}
 	}
 
-	return models, nil
+	return models
 }

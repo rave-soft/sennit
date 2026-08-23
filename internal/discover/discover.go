@@ -134,6 +134,36 @@ func doRequest(ctx context.Context, client *http.Client, method, baseURL, path, 
 	return client.Do(req)
 }
 
+// fetchJSON issues an authenticated GET request against baseURL+path and
+// decodes the JSON response body into a T. It reports ok=false (with T's
+// zero value) for any failure along the way -- client construction,
+// request execution, a non-200 status, or a decode error -- so enrichers
+// can degrade silently to the unenriched model list on any of those,
+// exactly as they did before this helper existed.
+func fetchJSON[T any](ctx context.Context, cfg Config, resolver Resolver, baseURL, path string) (T, bool) {
+	var zero T
+
+	client, err := cfg.httpClient()
+	if err != nil {
+		return zero, false
+	}
+	resp, err := doRequest(ctx, client, http.MethodGet, baseURL, path, cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
+	if err != nil {
+		return zero, false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return zero, false
+	}
+
+	var out T
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return zero, false
+	}
+	return out, true
+}
+
 // Config holds the provider configuration needed for model discovery.
 type Config struct {
 	ID           string

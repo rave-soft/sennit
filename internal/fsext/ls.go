@@ -18,28 +18,11 @@ import (
 	"github.com/rave-soft/sennit/internal/home"
 )
 
-// fastIgnoreDirs is a set of directory names that are always ignored.
-// This provides O(1) lookup for common cases to avoid expensive pattern matching.
-var fastIgnoreDirs = map[string]bool{
-	".git":            true,
-	".svn":            true,
-	".hg":             true,
-	".bzr":            true,
-	".vscode":         true,
-	".idea":           true,
-	"node_modules":    true,
-	"__pycache__":     true,
-	".pytest_cache":   true,
-	".cache":          true,
-	".tmp":            true,
-	".Trash":          true,
-	".Spotlight-V100": true,
-	".fseventsd":      true,
-	brand.DataDir:     true,
-	"OrbStack":        true,
-	".local":          true,
-	".share":          true,
-}
+// fastIgnoreDirs is a set of directory names that are always ignored,
+// built from the same commonIgnoredDirNames as [SkipHidden] (fileutil.go)
+// uses. This provides O(1) lookup for common cases to avoid expensive
+// pattern matching.
+var fastIgnoreDirs = commonIgnoredDirSet()
 
 // commonIgnorePatterns contains commonly ignored files and directories.
 // Note: Exact directory names that are in fastIgnoreDirs are handled there for O(1) lookup.

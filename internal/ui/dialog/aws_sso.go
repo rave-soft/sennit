@@ -65,10 +65,7 @@ func NewAWSSSO(com *common.Common, command string) (*AWSSSO, tea.Cmd) {
 		state:   awsSSOStateWaiting,
 	}
 
-	m.spinner = spinner.New(
-		spinner.WithSpinner(spinner.Dot),
-		spinner.WithStyle(t.Dialog.OAuth.Spinner),
-	)
+	m.spinner = newOAuthSpinner(t)
 
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
@@ -147,24 +144,11 @@ func (m *AWSSSO) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 func (m *AWSSSO) dialogContent() string {
 	t := m.com.Styles
 	innerWidth := m.InnerWidth()
-
-	elements := []string{
-		m.headerContent(),
-		m.innerContent(),
-		renderDialogHelp(t, &m.help, m, innerWidth),
-	}
-	return strings.Join(elements, "\n")
+	return oauthDialogContent(t, &m.help, m, m.headerContent(), m.innerContent(), innerWidth)
 }
 
 func (m *AWSSSO) headerContent() string {
-	var (
-		t            = m.com.Styles
-		titleStyle   = t.Dialog.Title
-		dialogStyle  = t.Dialog.View.Width(m.Width())
-		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-		dialogTitle  = "AWS SSO Authentication"
-	)
-	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.Width()-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
+	return oauthDialogHeader(m.com.Styles, m.Width(), "AWS SSO Authentication")
 }
 
 func (m *AWSSSO) innerContent() string {

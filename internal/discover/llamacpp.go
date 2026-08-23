@@ -2,8 +2,6 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 
 	"charm.land/catwalk/pkg/catwalk"
 )
@@ -40,26 +38,18 @@ type llamacppMeta struct {
 // falls back to n_ctx_train (the model's trained maximum).
 type llamacppEnricher struct{}
 
-func (e *llamacppEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
-	client, err := cfg.httpClient()
-	if err != nil {
-		return models, nil
+func (e *llamacppEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) []catwalk.Model {
+	modelsResp, ok := fetchJSON[llamacppModelsResponse](ctx, cfg, resolver, cfg.BaseURL, "/v1/models")
+	if !ok {
+		return models
 	}
-	resp, err := doRequest(ctx, client, http.MethodGet, cfg.BaseURL, "/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
-	if err != nil {
-		return models, nil
-	}
-	defer resp.Body.Close()
+	return applyLlamacppMeta(models, modelsResp)
+}
 
-	if resp.StatusCode != http.StatusOK {
-		return models, nil
-	}
-
-	var modelsResp llamacppModelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
-		return models, nil
-	}
-
+// applyLlamacppMeta maps a decoded /v1/models response onto models,
+// preserving existing non-zero context windows (user overrides take
+// precedence).
+func applyLlamacppMeta(models []catwalk.Model, modelsResp llamacppModelsResponse) []catwalk.Model {
 	// Index by ID for O(1) lookup.
 	metaByID := make(map[string]llamacppMeta, len(modelsResp.Data))
 	for _, m := range modelsResp.Data {
@@ -83,5 +73,5 @@ func (e *llamacppEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 		}
 	}
 
-	return models, nil
+	return models
 }

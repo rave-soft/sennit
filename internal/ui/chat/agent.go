@@ -370,12 +370,11 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		// current activity — elapsed time, step count, last child tool
 		// call — so what the task is doing is visible without opening
 		// the panel.
-		content := pendingDelegation(sty, r.agent.displayName, opts, cappedMessageWidth(width),
+		content := pendingDelegation(sty, r.agent.displayName, opts, width,
 			r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
-		return clickableItemHover(sty, content, cappedMessageWidth(width), opts.Hovered)
+		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
-	cappedWidth := cappedMessageWidth(width)
 	var params tools.AgentParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
@@ -392,8 +391,8 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if opts.Result != nil {
 		var bgMeta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &bgMeta); err == nil && bgMeta.TaskID != "" {
-			content := renderBackgroundDispatch(sty, cappedWidth, r.agent.displayName, opts, prompt, bgMeta)
-			return clickableItemHover(sty, content, cappedWidth, opts.Hovered)
+			content := renderBackgroundDispatch(sty, width, r.agent.displayName, opts, prompt, bgMeta)
+			return clickableItemHover(sty, content, width, opts.Hovered)
 		}
 	}
 
@@ -405,18 +404,18 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// model/effort subtitle carries over, since it describes the
 	// delegation's configuration rather than its runtime progress.
 	if !pending && !opts.Compact {
-		content := renderCollapsedDelegation(sty, cappedWidth, r.agent.displayName, opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
-		return clickableItemHover(sty, content, cappedWidth, opts.Hovered)
+		content := renderCollapsedDelegation(sty, width, r.agent.displayName, opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
+		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
 
-	header := toolHeader(sty, opts.Status, r.agent.displayName, cappedWidth, opts)
+	header := toolHeader(sty, opts.Status, r.agent.displayName, width, opts)
 	if opts.Compact {
 		return header
 	}
 
-	if subtitle := renderAgentSubtitle(sty, cappedWidth, r.agent.model, r.agent.effort); subtitle != "" {
+	if subtitle := renderAgentSubtitle(sty, width, r.agent.model, r.agent.effort); subtitle != "" {
 		header = lipgloss.JoinVertical(lipgloss.Left, header, subtitle)
 	}
 
@@ -425,7 +424,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	taskTagWidth := lipgloss.Width(taskTag)
 
 	// Calculate remaining width for prompt.
-	remainingWidth := min(cappedWidth-taskTagWidth-3, maxTextWidth-taskTagWidth-3) // -3 for spacing
+	remainingWidth := min(width-taskTagWidth-3, maxTextWidth-taskTagWidth-3) // -3 for spacing
 
 	promptText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(prompt)
 
@@ -446,10 +445,10 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// delegation stays legible even before its nested-tool tree grows tall
 	// enough to scroll off screen.
 	if pending {
-		if status := renderAgentStatusLine(sty, cappedWidth, r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens); status != "" {
+		if status := renderAgentStatusLine(sty, width, r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens); status != "" {
 			header = lipgloss.JoinVertical(lipgloss.Left, header, status)
 		}
-		if todos := renderChildTodos(sty, cappedWidth, r.agent.todos); todos != "" {
+		if todos := renderChildTodos(sty, width, r.agent.todos); todos != "" {
 			header = lipgloss.JoinVertical(lipgloss.Left, header, todos)
 		}
 	}
@@ -479,11 +478,11 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	// Add body content when completed.
 	if opts.HasResult() && opts.Result.Content != "" {
-		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal)
+		body := toolOutputMarkdownContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal)
 		return joinToolParts(result, body)
 	}
 
-	return clickableItemHover(sty, result, cappedWidth, opts.Hovered)
+	return clickableItemHover(sty, result, width, opts.Hovered)
 }
 
 // -----------------------------------------------------------------------------
@@ -688,12 +687,11 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	if pending {
 		// See AgentToolRenderContext.RenderTool's matching change: pending
 		// stub plus a current-activity status line underneath.
-		content := pendingDelegation(sty, agenticFetchDisplayName, opts, cappedMessageWidth(width),
+		content := pendingDelegation(sty, agenticFetchDisplayName, opts, width,
 			r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens)
-		return clickableItemHover(sty, content, cappedMessageWidth(width), opts.Hovered)
+		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
-	cappedWidth := cappedMessageWidth(width)
 	var params agenticFetchParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
@@ -707,8 +705,8 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		if headerParam == "" {
 			headerParam = prompt
 		}
-		content := renderCollapsedDelegation(sty, cappedWidth, agenticFetchDisplayName, opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens, "", "")
-		return clickableItemHover(sty, content, cappedWidth, opts.Hovered)
+		content := renderCollapsedDelegation(sty, width, agenticFetchDisplayName, opts, headerParam, r.fetch.nestedTools, r.fetch.duration, r.fetch.promptTokens, r.fetch.completionTokens, "", "")
+		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
 	prompt = strings.ReplaceAll(prompt, "\n", " ")
@@ -719,7 +717,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		toolParams = append(toolParams, params.URL)
 	}
 
-	header := toolHeader(sty, opts.Status, agenticFetchDisplayName, cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, agenticFetchDisplayName, width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -729,7 +727,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	promptTagWidth := lipgloss.Width(promptTag)
 
 	// Calculate remaining width for prompt text.
-	remainingWidth := min(cappedWidth-promptTagWidth-3, maxTextWidth-promptTagWidth-3) // -3 for spacing
+	remainingWidth := min(width-promptTagWidth-3, maxTextWidth-promptTagWidth-3) // -3 for spacing
 
 	promptText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(prompt)
 
@@ -749,10 +747,10 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	// recent child tool call, and the child session's todo list — see the
 	// "Agent" tool's RenderTool above.
 	if pending {
-		if status := renderAgentStatusLine(sty, cappedWidth, r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens); status != "" {
+		if status := renderAgentStatusLine(sty, width, r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens); status != "" {
 			header = lipgloss.JoinVertical(lipgloss.Left, header, status)
 		}
-		if todos := renderChildTodos(sty, cappedWidth, r.fetch.todos); todos != "" {
+		if todos := renderChildTodos(sty, width, r.fetch.todos); todos != "" {
 			header = lipgloss.JoinVertical(lipgloss.Left, header, todos)
 		}
 	}
@@ -782,11 +780,11 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 
 	// Add body content when completed.
 	if opts.HasResult() && opts.Result.Content != "" {
-		body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal)
+		body := toolOutputMarkdownContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal)
 		return joinToolParts(result, body)
 	}
 
-	return clickableItemHover(sty, result, cappedWidth, opts.Hovered)
+	return clickableItemHover(sty, result, width, opts.Hovered)
 }
 
 // maxVisibleNestedTools caps how many nested tool calls a delegation

@@ -11,6 +11,39 @@ import (
 	tools "github.com/rave-soft/sennit/internal/proto"
 )
 
+// extLangForCopy maps a lowercased file extension to the fenced-code-block
+// language used when copying tool results to the clipboard. Shared by
+// formatReadResultForCopy and formatWriteResultForCopy so the two don't
+// drift out of sync.
+var extLangForCopy = map[string]string{
+	".go":   "go",
+	".js":   "javascript",
+	".mjs":  "javascript",
+	".ts":   "typescript",
+	".py":   "python",
+	".rs":   "rust",
+	".java": "java",
+	".c":    "c",
+	".cpp":  "cpp",
+	".cc":   "cpp",
+	".cxx":  "cpp",
+	".sh":   "bash",
+	".bash": "bash",
+	".json": "json",
+	".yaml": "yaml",
+	".yml":  "yaml",
+	".xml":  "xml",
+	".html": "html",
+	".css":  "css",
+	".md":   "markdown",
+}
+
+// langForCopyFile returns the fenced-code-block language for filePath's
+// extension, or "" if it isn't recognized.
+func langForCopyFile(filePath string) string {
+	return extLangForCopy[strings.ToLower(filepath.Ext(filePath))]
+}
+
 // formatReadResultForCopy formats view tool results for clipboard.
 func (t *baseToolMessageItem) formatReadResultForCopy() string {
 	if t.result == nil {
@@ -28,42 +61,7 @@ func (t *baseToolMessageItem) formatReadResultForCopy() string {
 		return t.result.Content
 	}
 
-	lang := ""
-	if meta.FilePath != "" {
-		ext := strings.ToLower(filepath.Ext(meta.FilePath))
-		switch ext {
-		case ".go":
-			lang = "go"
-		case ".js", ".mjs":
-			lang = "javascript"
-		case ".ts":
-			lang = "typescript"
-		case ".py":
-			lang = "python"
-		case ".rs":
-			lang = "rust"
-		case ".java":
-			lang = "java"
-		case ".c":
-			lang = "c"
-		case ".cpp", ".cc", ".cxx":
-			lang = "cpp"
-		case ".sh", ".bash":
-			lang = "bash"
-		case ".json":
-			lang = "json"
-		case ".yaml", ".yml":
-			lang = "yaml"
-		case ".xml":
-			lang = "xml"
-		case ".html":
-			lang = "html"
-		case ".css":
-			lang = "css"
-		case ".md":
-			lang = "markdown"
-		}
-	}
+	lang := langForCopyFile(meta.FilePath)
 
 	var result strings.Builder
 	if lang != "" {
@@ -163,42 +161,7 @@ func (t *baseToolMessageItem) formatWriteResultForCopy() string {
 		return t.result.Content
 	}
 
-	lang := ""
-	if params.FilePath != "" {
-		ext := strings.ToLower(filepath.Ext(params.FilePath))
-		switch ext {
-		case ".go":
-			lang = "go"
-		case ".js", ".mjs":
-			lang = "javascript"
-		case ".ts":
-			lang = "typescript"
-		case ".py":
-			lang = "python"
-		case ".rs":
-			lang = "rust"
-		case ".java":
-			lang = "java"
-		case ".c":
-			lang = "c"
-		case ".cpp", ".cc", ".cxx":
-			lang = "cpp"
-		case ".sh", ".bash":
-			lang = "bash"
-		case ".json":
-			lang = "json"
-		case ".yaml", ".yml":
-			lang = "yaml"
-		case ".xml":
-			lang = "xml"
-		case ".html":
-			lang = "html"
-		case ".css":
-			lang = "css"
-		case ".md":
-			lang = "markdown"
-		}
-	}
+	lang := langForCopyFile(params.FilePath)
 
 	var result strings.Builder
 	fmt.Fprintf(&result, "File: %s\n", fsext.PrettyPath(params.FilePath))

@@ -56,10 +56,18 @@ func (t *baseToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
 }
 
 // RawRender implements [MessageItem].
+//
+// This is the one place a tool item's content width is computed: it is
+// handed unchanged to RenderTool and to the hook indicator below, so the
+// body and the indicator always agree, and individual RenderTool
+// implementations must not re-derive or re-cap it. The max(0, ...) guard
+// keeps toolItemWidth from going negative on a terminal narrower than
+// MessageLeftPaddingTotal, which would otherwise propagate into
+// lipgloss.Width() calls downstream.
 func (t *baseToolMessageItem) RawRender(width int) string {
-	toolItemWidth := width - MessageLeftPaddingTotal
+	toolItemWidth := max(0, width-MessageLeftPaddingTotal)
 	if t.hasCappedWidth {
-		toolItemWidth = cappedMessageWidth(width)
+		toolItemWidth = max(0, cappedMessageWidth(width))
 	}
 
 	content, height, ok := t.getCachedRender(toolItemWidth)

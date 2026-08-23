@@ -36,8 +36,6 @@ type DockerMCPToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
-
 	var params map[string]any
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		params = make(map[string]any)
@@ -119,17 +117,17 @@ func (d *DockerMCPToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return pendingToolLine(sty, d.formatToolName(sty, tool), opts.Anim, false, len(opts.ToolCall.Input))
 	}
 
-	header := d.makeHeader(sty, tool, cappedWidth, opts, toolParams...)
+	header := d.makeHeader(sty, tool, width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
 	if tool == "mcp-find" {
-		return joinToolParts(header, d.renderMCPServers(sty, opts, cappedWidth))
+		return joinToolParts(header, d.renderMCPServers(sty, opts, width))
 	}
 
 	if !opts.HasResult() {

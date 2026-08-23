@@ -57,7 +57,6 @@ type BashToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Bash", opts)
 	}
@@ -76,7 +75,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	if meta.Background {
 		description := cmp.Or(cleanDescription(meta.Description), params.Command)
 		content := "Command: " + params.Command + "\n" + opts.Result.Content
-		return renderJobTool(sty, opts, cappedWidth, "Start", meta.ShellID, description, content)
+		return renderJobTool(sty, opts, width, "Start", meta.ShellID, description, content)
 	}
 
 	// Regular bash command.
@@ -87,7 +86,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "background", "true")
 	}
 
-	header := toolHeader(sty, opts.Status, "Bash", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, "Bash", width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -103,7 +102,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// below the header. Treat that window the same as the header-only
 	// pending state instead.
 	if opts.Status != ToolStatusRunning {
-		if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+		if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 			return joinToolParts(header, earlyState)
 		}
 	}
@@ -124,7 +123,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// The body sits directly under the header (no blank separator line):
 	// up to collapsedBodyLines lines by default, the full output
 	// once the item is click-expanded (see BashToolMessageItem.ToggleExpanded).
-	return header + "\n" + expandableBodyContent(sty, output, cappedWidth, opts.Expanded, opts.Hovered)
+	return header + "\n" + expandableBodyContent(sty, output, width, opts.Expanded, opts.Hovered)
 }
 
 // collapsedBodyLines is how many content lines a collapsed expandable tool
@@ -207,14 +206,13 @@ type JobOutputToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Job", opts)
 	}
 
 	var params tools.JobOutputParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	var description string
@@ -229,7 +227,7 @@ func (j *JobOutputToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	if opts.HasResult() {
 		content = opts.Result.Content
 	}
-	return renderJobTool(sty, opts, cappedWidth, "Output", params.ShellID, description, content)
+	return renderJobTool(sty, opts, width, "Output", params.ShellID, description, content)
 }
 
 // -----------------------------------------------------------------------------
@@ -241,14 +239,13 @@ type JobKillToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Job", opts)
 	}
 
 	var params tools.JobKillParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	var description string
@@ -263,7 +260,7 @@ func (j *JobKillToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	if opts.HasResult() {
 		content = opts.Result.Content
 	}
-	return renderJobTool(sty, opts, cappedWidth, "Kill", params.ShellID, description, content)
+	return renderJobTool(sty, opts, width, "Kill", params.ShellID, description, content)
 }
 
 // renderJobTool renders a job-related tool with the common pattern:

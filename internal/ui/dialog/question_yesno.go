@@ -3,7 +3,6 @@ package dialog
 import (
 	"image"
 	"maps"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -132,17 +131,7 @@ func (d *YesNo) Height(width int) int {
 	h := sectionHeight(d.Request.Text, w-lipgloss.Width(iconPrompt)) // question
 	h++                                                              // blank
 	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(d.Request.Description, w)
-		}
+		h += questionMarkdownHeight(d.Styles, w, d.Request.Description)
 		h++ // blank
 	}
 	h++ // buttons
@@ -174,17 +163,8 @@ func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Draw optional description.
 	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, area.Dx())
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		desc, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			desc = strings.TrimSuffix(desc, "\n")
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), desc)
-		} else {
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), d.Request.Description)
-		}
+		desc := renderQuestionMarkdown(d.Styles, area.Dx(), d.Request.Description)
+		y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), desc)
 		y++ // blank
 	}
 

@@ -11,7 +11,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/question"
-	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
@@ -122,17 +121,7 @@ func (d *FreeText) Height(width int) int {
 	h := sectionHeight(d.Request.Text, w-lipgloss.Width(iconPrompt)) // question
 	h++                                                              // blank
 	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(d.Request.Description, w)
-		}
+		h += questionMarkdownHeight(d.Styles, w, d.Request.Description)
 		h++ // blank
 	}
 	h += freeTextMinEditorHeight // textarea (minimum; grows to fill at draw time)
@@ -184,15 +173,7 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		lines = append(lines, ftLine{cursorX: -1}) // blank
 
 		if d.Request.Description != "" {
-			r := common.MarkdownRenderer(d.Styles, contentWidth)
-			mu := common.LockMarkdownRenderer(r)
-			mu.Lock()
-			desc, err := r.Render(d.Request.Description)
-			mu.Unlock()
-			if err != nil {
-				desc = d.Request.Description
-			}
-			desc = strings.TrimSuffix(desc, "\n")
+			desc := renderQuestionMarkdown(d.Styles, contentWidth, d.Request.Description)
 			for _, l := range strings.Split(desc, "\n") {
 				lines = append(lines, ftLine{text: l, cursorX: -1})
 			}
@@ -232,27 +213,24 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Clamp scroll, then keep the cursor row visible unless the
 	// user is wheel-scrolling.
-	maxScroll := max(0, len(lines)-viewport)
-	d.scrollOffset = min(max(0, d.scrollOffset), maxScroll)
+	lv := lineViewport{Offset: d.scrollOffset}
+	lv.Clamp(len(lines), viewport)
 	if !d.wheelActive && cursorRow >= 0 {
-		if cursorRow < d.scrollOffset {
-			d.scrollOffset = cursorRow
-		} else if cursorRow >= d.scrollOffset+viewport {
-			d.scrollOffset = cursorRow - viewport + 1
+		if cursorRow < lv.Offset {
+			lv.Offset = cursorRow
+		} else if cursorRow >= lv.Offset+viewport {
+			lv.Offset = cursorRow - viewport + 1
 		}
-		d.scrollOffset = min(max(0, d.scrollOffset), maxScroll)
+		lv.Clamp(len(lines), viewport)
 	}
+	d.scrollOffset = lv.Offset
 
 	// Blit the visible window and place the cursor. The cursor is
 	// returned relative to the area's top-left, matching the
 	// InlineEditor contract.
 	var cur *tea.Cursor
 	baseCursor := d.editor.Cursor()
-	for screenRow := range viewport {
-		idx := d.scrollOffset + screenRow
-		if idx >= len(lines) {
-			break
-		}
+	lv.Blit(len(lines), viewport, func(idx, screenRow int) {
 		ln := lines[idx]
 		y := area.Min.Y + screenRow
 		drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), ln.text)
@@ -262,16 +240,10 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			c.Y = screenRow
 			cur = &c
 		}
-	}
+	})
 
 	// Scrollbar.
-	if overflow {
-		sb := common.Scrollbar(d.Styles, viewport, len(lines), viewport, d.scrollOffset)
-		if sb != "" {
-			x := area.Max.X - 1
-			uv.NewStyledString(sb).Draw(scr, image.Rect(x, area.Min.Y, x+1, area.Min.Y+viewport))
-		}
-	}
+	lv.DrawScrollbar(scr, d.Styles, area, len(lines), viewport)
 
 	return cur
 }

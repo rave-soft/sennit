@@ -2,8 +2,6 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 
 	"charm.land/catwalk/pkg/catwalk"
 )
@@ -40,34 +38,23 @@ func init() {
 // discovered models.
 type litellmEnricher struct{}
 
-func (e *litellmEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error) {
-	client, err := cfg.httpClient()
-	if err != nil {
-		return models, nil
+func (e *litellmEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) []catwalk.Model {
+	infoResp, ok := fetchJSON[litellmModelInfoResponse](ctx, cfg, resolver, stripV1Suffix(cfg.BaseURL), "/model/info")
+	if !ok {
+		return models
 	}
-	resp, err := doRequest(ctx, client, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/model/info", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
-	if err != nil {
-		return models, nil
-	}
-	defer resp.Body.Close()
+	return applyLitellmMeta(models, infoResp)
+}
 
-	if resp.StatusCode != http.StatusOK {
-		return models, nil
-	}
-
-	var infoResp litellmModelInfoResponse
-	if err := json.NewDecoder(resp.Body).Decode(&infoResp); err != nil {
-		return models, nil
-	}
-
+// applyLitellmMeta maps a decoded /model/info response onto models,
+// preserving existing non-zero values (user overrides take precedence).
+func applyLitellmMeta(models []catwalk.Model, infoResp litellmModelInfoResponse) []catwalk.Model {
 	// Index metadata by model name for O(1) lookup.
 	metaByID := make(map[string]litellmModelMeta, len(infoResp.Data))
 	for _, entry := range infoResp.Data {
 		metaByID[entry.ModelName] = entry.ModelInfo
 	}
 
-	// Apply metadata to discovered models, preserving existing
-	// non-zero values (user overrides win).
 	for i := range models {
 		meta, ok := metaByID[models[i].ID]
 		if !ok {
@@ -87,5 +74,5 @@ func (e *litellmEnricher) EnrichModels(ctx context.Context, cfg Config, resolver
 		}
 	}
 
-	return models, nil
+	return models
 }
