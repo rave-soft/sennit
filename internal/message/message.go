@@ -113,6 +113,14 @@ type pendingState struct {
 	// ID; until then lastFlushed is the zero value and must not be
 	// treated as a real prior state.
 	hasFlushed bool
+
+	// flushDone is created fresh each time flushing flips true and
+	// closed when that flush attempt ends (success or error). A
+	// waiter that finds flushing == true grabs a reference to this
+	// channel while holding service.mu, releases the lock, and blocks
+	// on it instead of polling — see flushOne. Nil whenever flushing
+	// is false.
+	flushDone chan struct{}
 }
 
 type service struct {
@@ -346,9 +354,18 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 				s.mu.Unlock()
 				return nil
 			}
+			// Grab a reference to this flush attempt's completion
+			// signal while still holding the lock, then wait on it
+			// instead of polling. flushOne closes it exactly once,
+			// right after clearing p.flushing below, so this can
+			// never miss a signal or double-close.
+			waitCh := p.flushDone
 			s.mu.Unlock()
-			// Brief yield; in-flight write should land in <1ms typical.
-			time.Sleep(time.Millisecond)
+			select {
+			case <-waitCh:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			continue
 		}
 		if !p.dirty {
@@ -373,12 +390,18 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		isTerminal := shouldFlushNow(prev, &snap)
 		p.flushing = true
 		p.dirty = false
+		done := make(chan struct{})
+		p.flushDone = done
 		s.mu.Unlock()
 
 		err := s.write(ctx, snap)
 
 		s.mu.Lock()
 		p.flushing = false
+		// Wake any waiters queued behind this attempt, then clear the
+		// field so the next flush attempt (if any) creates its own.
+		close(done)
+		p.flushDone = nil
 		if err == nil {
 			p.lastFlushed = snap
 			p.hasFlushed = true

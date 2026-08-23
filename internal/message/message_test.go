@@ -1026,3 +1026,144 @@ func TestUnmarshalParts_MalformedNotSwallowed(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+// TestUpdate_ConcurrentUpdateAndFlushDoesNotLoseData drives a stream of
+// updates from one goroutine while another repeatedly calls Flush and
+// Get concurrently. This exercises flushOne's channel-based wait for
+// an in-flight write (rather than the old sleep-and-poll loop) under
+// real contention: neither goroutine should ever observe a lost
+// delta, a panic, or a stuck Flush.
+func TestUpdate_ConcurrentUpdateAndFlushDoesNotLoseData(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t, WithDebounce(2*time.Millisecond))
+
+	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	const n = 50
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			msg.AppendContent("x")
+			require.NoError(t, svc.Update(t.Context(), msg))
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			require.NoError(t, svc.Flush(t.Context(), msg.ID))
+			_, err := svc.Get(t.Context(), msg.ID)
+			require.NoError(t, err)
+		}
+	}()
+
+	wg.Wait()
+
+	require.NoError(t, svc.Flush(t.Context(), msg.ID))
+	got, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Content().Text, n, "no update should be lost across concurrent Update/Flush/Get")
+}
+
+// TestFlush_MultipleWaitersWakeAfterInFlightWrite verifies the
+// channel-based wait mechanism wakes every queued waiter, not just
+// one, when the in-flight write it is blocked behind completes. This
+// is the case the old time.Sleep(time.Millisecond) poll loop handled
+// only by accident (each waiter eventually re-checked on its own
+// timer); here we assert it directly by racing several Flush callers
+// against a single blocked SQL write and requiring all of them to
+// return promptly once it is released.
+func TestFlush_MultipleWaitersWakeAfterInFlightWrite(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := session.NewService(q, conn, "/test/project")
+	sess, err := sessions.Create(t.Context(), "test")
+	require.NoError(t, err)
+
+	slow := &slowUpdateQuerier{
+		Querier: q,
+		release: make(chan struct{}),
+		started: make(chan struct{}),
+	}
+	svc := NewService(slow, WithDebounce(10*time.Millisecond))
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	msg.AppendContent("payload")
+	require.NoError(t, svc.Update(t.Context(), msg))
+
+	select {
+	case <-slow.started:
+	case <-time.After(time.Second):
+		t.Fatal("timer-fired flush never reached UpdateMessage")
+	}
+
+	const waiters = 8
+	results := make(chan error, waiters)
+	for i := 0; i < waiters; i++ {
+		go func() { results <- svc.Flush(t.Context(), msg.ID) }()
+	}
+
+	// Give every goroutine a chance to reach the blocked wait before we
+	// release the write, so this actually exercises multiple waiters
+	// queued on the same flushDone channel rather than running serially.
+	time.Sleep(20 * time.Millisecond)
+	close(slow.release)
+
+	for i := 0; i < waiters; i++ {
+		select {
+		case err := <-results:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("a Flush waiter never woke after the in-flight write completed")
+		}
+	}
+
+	got, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, "payload", got.Content().Text)
+}
+
+// TestFlushAll_DrainsQueuedUpdateUnderConcurrentWrites models the
+// shutdown path: FlushAll is the sole drain mechanism in this design
+// (no separate writer-goroutine lifecycle was introduced), so this
+// proves a debounced update still queued when FlushAll runs survives
+// it — the SQL row ends up updated, with no panic and no lost data —
+// even while another goroutine keeps issuing updates concurrently.
+func TestFlushAll_DrainsQueuedUpdateUnderConcurrentWrites(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t, WithDebounce(time.Hour))
+
+	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 20; i++ {
+			msg.AppendContent("y")
+			require.NoError(t, svc.Update(t.Context(), msg))
+		}
+	}()
+
+	// Race FlushAll against the still-running Update goroutine, the way
+	// a shutdown path would race a stream that has not yet stopped.
+	require.NoError(t, svc.FlushAll(t.Context()))
+	wg.Wait()
+	require.NoError(t, svc.FlushAll(t.Context()))
+
+	got, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Len(t, got.Content().Text, 20, "a queued update must survive FlushAll draining, even mid-stream")
+}

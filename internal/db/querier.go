@@ -46,6 +46,9 @@ type Querier interface {
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
+	// The most recently updated top-level session in a project: same scope as
+	// ListSessions (parent_session_id IS NULL), which also excludes every
+	// agent-tool sub-session, since those always carry a parent_session_id.
 	GetLastSession(ctx context.Context, projectPath string) (Session, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)

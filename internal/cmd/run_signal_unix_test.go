@@ -1,3 +1,9 @@
+//go:build unix
+
+// syscall.Kill has no Windows counterpart, and the behaviour under test
+// — a SIGTERM from `kill <pid>` cancelling the run context — is a POSIX
+// signal contract in the first place.
+
 package cmd
 
 import (

@@ -1,3 +1,9 @@
+//go:build unix
+
+// The busy-loop assertion measures consumed CPU time via
+// syscall.Getrusage, which exists only on unix. The loop it guards is
+// platform-independent, so covering it here is enough.
+
 package workspace
 
 import (

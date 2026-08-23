@@ -240,3 +240,134 @@ func TestSetModelSurvivesFetchModifySave(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, again.Model.IsZero(), "the zero ref clears the pin")
 }
+
+// setUpdatedAt backdates/forward-dates a session's updated_at directly,
+// bypassing the service so ordering in GetLast tests doesn't depend on
+// wall-clock gaps between Create calls landing in different seconds. The
+// "preserve explicit updated_at" trigger (see
+// 20260811000001_preserve_explicit_session_updated_at.sql) exists for
+// exactly this: writers that set the column explicitly keep their value.
+func setUpdatedAt(t *testing.T, conn *sql.DB, id string, updatedAt int64) {
+	t.Helper()
+	_, err := conn.ExecContext(t.Context(), `UPDATE sessions SET updated_at = ? WHERE id = ?`, updatedAt, id)
+	require.NoError(t, err)
+}
+
+// TestGetLastReturnsNewestTopLevelSession is the [Service.GetLast]
+// counterpart to workspace.ResolveSession's old client-side scan: among
+// several candidate sessions it must return the one with the highest
+// updated_at, matching the scan's `s.UpdatedAt > last.UpdatedAt` rule,
+// regardless of creation or listing order.
+func TestGetLastReturnsNewestTopLevelSession(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	oldest, err := sessions.Create(t.Context(), "oldest")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, oldest.ID, 10)
+
+	newest, err := sessions.Create(t.Context(), "newest")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, newest.ID, 100)
+
+	middle, err := sessions.Create(t.Context(), "middle")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, middle.ID, 50)
+
+	last, err := sessions.GetLast(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, newest.ID, last.ID)
+}
+
+// TestGetLastExcludesChildSessions covers the filtering the old scan did
+// client-side: agent-tool sub-sessions and title-generation sessions carry
+// a non-null parent_session_id and must never win, even when they are the
+// most recently updated row in the table.
+func TestGetLastExcludesChildSessions(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	parent, err := sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, parent.ID, 10)
+
+	childID := sessions.CreateAgentToolSessionID("msg-1", "tc-1")
+	_, err = sessions.CreateTaskSession(t.Context(), childID, parent.ID, "sub-agent delegation")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, childID, 100)
+
+	titleSess, err := sessions.CreateTitleSession(t.Context(), parent.ID)
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, titleSess.ID, 90)
+
+	last, err := sessions.GetLast(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, parent.ID, last.ID, "child/title sessions must not win even when most recently updated")
+}
+
+// TestGetLastReportsErrorWhenNoSessions covers the empty case: the old
+// scan returned "no sessions found to continue" for either an empty
+// ListSessions result or a list of only ineligible sessions.
+// workspace.ResolveSession maps any GetLast error to that same message,
+// so here it's enough to assert GetLast itself errors on an empty store.
+func TestGetLastReportsErrorWhenNoSessions(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn, dataDir)
+
+	_, err = sessions.GetLast(t.Context())
+	require.Error(t, err)
+}
+
+// TestGetLastScopesToProjectPath covers that GetLast, like List, only
+// considers sessions in this service's own project: sessions now live in
+// a single shared database, so a newer session in another project must
+// not be returned as "the last session" here.
+func TestGetLastScopesToProjectPath(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	here := NewService(db.New(conn), conn, "/project/here")
+	elsewhere := NewService(db.New(conn), conn, "/project/elsewhere")
+
+	local, err := here.Create(t.Context(), "local")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, local.ID, 10)
+
+	other, err := elsewhere.Create(t.Context(), "other")
+	require.NoError(t, err)
+	setUpdatedAt(t, conn, other.ID, 100)
+
+	last, err := here.GetLast(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, local.ID, last.ID)
+}

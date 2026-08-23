@@ -98,11 +98,14 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 const getLastSession = `-- name: GetLastSession :one
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, project_path, agent_id, model_provider, model_id
 FROM sessions
-WHERE project_path = ?
+WHERE project_path = ? AND parent_session_id IS NULL
 ORDER BY updated_at DESC
 LIMIT 1
 `
 
+// The most recently updated top-level session in a project: same scope as
+// ListSessions (parent_session_id IS NULL), which also excludes every
+// agent-tool sub-session, since those always carry a parent_session_id.
 func (q *Queries) GetLastSession(ctx context.Context, projectPath string) (Session, error) {
 	row := q.db.QueryRowContext(ctx, getLastSession, projectPath)
 	var i Session

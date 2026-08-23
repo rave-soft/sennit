@@ -42,6 +42,29 @@ func (w *fakeSessionWorkspace) ListSessions(context.Context) ([]session.Session,
 	return w.sessions, nil
 }
 
+// GetLastSession mirrors the SQL query's scope (top-level sessions only,
+// newest updated_at wins) over the fake's in-memory list, so tests can
+// drive ResolveSession's useLast branch without a real database.
+func (w *fakeSessionWorkspace) GetLastSession(context.Context) (session.Session, error) {
+	var (
+		last  session.Session
+		found bool
+	)
+	for _, s := range w.sessions {
+		if s.ParentSessionID != "" {
+			continue
+		}
+		if !found || s.UpdatedAt > last.UpdatedAt {
+			last = s
+			found = true
+		}
+	}
+	if !found {
+		return session.Session{}, sql.ErrNoRows
+	}
+	return last, nil
+}
+
 func (w *fakeSessionWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
 	parts := strings.Split(sessionID, "$$")
 	if len(parts) != 2 {
@@ -159,11 +182,15 @@ func TestResolveSession_Last_SkipsChildSessionFirst(t *testing.T) {
 // TestResolveSession_Last_SkipsAgentToolSessionFirst covers that an
 // agent-tool sub-session listed first (and newest) must not be returned,
 // matching the continueSessionID branch's rejection of such sessions.
+// session.CreateSubAgentSession always stamps ParentSessionID, which is
+// what GetLastSession's SQL scope (and this fake) actually filters on -
+// an agent-tool session id with no parent, as the pre-SQL scan's belt-
+// and-suspenders check also handled, cannot occur against a real store.
 func TestResolveSession_Last_SkipsAgentToolSessionFirst(t *testing.T) {
 	t.Parallel()
 	ws := &fakeSessionWorkspace{
 		sessions: []session.Session{
-			{ID: "msg123$$tool456", Title: "Agent tool session", UpdatedAt: 100},
+			{ID: "msg123$$tool456", ParentSessionID: "top-level", Title: "Agent tool session", UpdatedAt: 100},
 			{ID: "top-level", Title: "Top level", UpdatedAt: 50},
 		},
 	}

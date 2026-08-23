@@ -46,9 +46,12 @@ FROM sessions
 WHERE id = ? LIMIT 1;
 
 -- name: GetLastSession :one
+-- The most recently updated top-level session in a project: same scope as
+-- ListSessions (parent_session_id IS NULL), which also excludes every
+-- agent-tool sub-session, since those always carry a parent_session_id.
 SELECT *
 FROM sessions
-WHERE project_path = ?
+WHERE project_path = ? AND parent_session_id IS NULL
 ORDER BY updated_at DESC
 LIMIT 1;
 

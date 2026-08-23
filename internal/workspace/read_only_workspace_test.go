@@ -333,6 +333,10 @@ func (s *stubWorkspace) ListSessions(ctx context.Context) ([]session.Session, er
 	return []session.Session{{ID: "sess-1"}}, nil
 }
 
+func (s *stubWorkspace) GetLastSession(ctx context.Context) (session.Session, error) {
+	return session.Session{ID: "sess-1"}, nil
+}
+
 func (s *stubWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
 	s.track("SaveSession")
 	return sess, nil

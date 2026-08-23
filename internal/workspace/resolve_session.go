@@ -33,36 +33,16 @@ func ResolveSession(ctx context.Context, ws SessionStore, continueSessionID stri
 		return sess, nil
 
 	case useLast:
-		sessions, err := ws.ListSessions(ctx)
-		if err != nil || len(sessions) == 0 {
+		// GetLastSession is scoped in SQL to top-level sessions only (see
+		// its query), which already excludes agent-tool sub-sessions:
+		// those always carry a parent_session_id. Any error - including
+		// "no rows", when the project has no sessions - collapses to the
+		// same message the empty-list case always reported.
+		sess, err := ws.GetLastSession(ctx)
+		if err != nil {
 			return session.Session{}, fmt.Errorf("no sessions found to continue")
 		}
-		// ListSessions is a flat list that includes child sessions (agent-tool
-		// sub-sessions, title-generation sessions), so we must apply the same
-		// eligibility rules as the continueSessionID branch above rather than
-		// seeding the scan with sessions[0], which may itself be ineligible.
-		// TODO: replace this scan with session.Service.GetLast, scoped in SQL,
-		// once it is exposed on the Workspace interface.
-		var (
-			last  session.Session
-			found bool
-		)
-		for _, s := range sessions {
-			if s.ParentSessionID != "" {
-				continue
-			}
-			if _, _, ok := ws.ParseAgentToolSessionID(s.ID); ok {
-				continue
-			}
-			if !found || s.UpdatedAt > last.UpdatedAt {
-				last = s
-				found = true
-			}
-		}
-		if !found {
-			return session.Session{}, fmt.Errorf("no sessions found to continue")
-		}
-		return last, nil
+		return sess, nil
 
 	default:
 		return ws.CreateSession(ctx, title)

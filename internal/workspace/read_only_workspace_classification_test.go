@@ -94,6 +94,7 @@ var readOnlySafeMethods = []string{
 	"CreateAgentToolSessionID",
 	"FileTrackerLastReadTime",
 	"FileTrackerListReadFiles",
+	"GetLastSession",
 	"GetMCPPrompt",
 	"GetSession",
 	"GetThread",

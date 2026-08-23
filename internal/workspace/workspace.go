@@ -141,6 +141,11 @@ type SessionStore interface {
 	CreateSession(ctx context.Context, title string) (session.Session, error)
 	GetSession(ctx context.Context, sessionID string) (session.Session, error)
 	ListSessions(ctx context.Context) ([]session.Session, error)
+	// GetLastSession returns the most recently updated top-level session
+	// for this workspace's project, scoped the same way ListSessions is
+	// (no child or agent-tool sessions). It reports an error when there
+	// is none — see [ResolveSession]'s useLast branch, its only caller.
+	GetLastSession(ctx context.Context) (session.Session, error)
 	SaveSession(ctx context.Context, sess session.Session) (session.Session, error)
 	DeleteSession(ctx context.Context, sessionID string) error
 	CreateAgentToolSessionID(messageID, toolCallID string) string

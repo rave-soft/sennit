@@ -69,6 +69,10 @@ func (w *AppWorkspace) ListSessions(ctx context.Context) ([]session.Session, err
 	return w.app.Sessions().List(ctx)
 }
 
+func (w *AppWorkspace) GetLastSession(ctx context.Context) (session.Session, error) {
+	return w.app.Sessions().GetLast(ctx)
+}
+
 func (w *AppWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
 	return w.app.Sessions().Save(ctx, sess)
 }
