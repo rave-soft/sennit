@@ -297,11 +297,13 @@ func TestDispatch_DirectoryNotFile(t *testing.T) {
 		Cwd:     dir,
 		Stderr:  &stderr,
 	})
+	// Shell semantics: a non-zero status and the reason on stderr, not an
+	// error that aborts the rest of the script — see scriptDispatchHandler.
 	if err == nil {
-		t.Fatal("expected error when invoking a directory, got nil")
+		t.Fatal("expected a non-zero status when invoking a directory, got nil")
 	}
-	if !strings.Contains(err.Error(), "is a directory") {
-		t.Fatalf("expected 'is a directory' in error, got: %v", err)
+	if !strings.Contains(stderr.String(), "is a directory") {
+		t.Fatalf("expected 'is a directory' on stderr, got: %q (err: %v)", stderr.String(), err)
 	}
 }
 
@@ -478,15 +480,17 @@ func TestDispatch_UnreadableFile(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(script, 0o644) })
 
+	var stderr bytes.Buffer
 	err := Run(t.Context(), RunOptions{
 		Command: script,
 		Cwd:     dir,
+		Stderr:  &stderr,
 	})
 	if err == nil {
-		t.Fatal("expected permission error, got nil")
+		t.Fatal("expected a non-zero status for an unreadable script, got nil")
 	}
-	if !strings.Contains(err.Error(), "permission") {
-		t.Fatalf("expected 'permission' in error, got: %v", err)
+	if !strings.Contains(stderr.String(), "permission") {
+		t.Fatalf("expected 'permission' on stderr, got: %q (err: %v)", stderr.String(), err)
 	}
 }
 
@@ -507,20 +511,22 @@ func TestDispatch_SymlinkLoop(t *testing.T) {
 		t.Fatalf("symlink b→a: %v", err)
 	}
 
+	var stderr bytes.Buffer
 	err := Run(t.Context(), RunOptions{
 		Command: a,
 		Cwd:     dir,
+		Stderr:  &stderr,
 	})
 	if err == nil {
-		t.Fatal("expected loop error, got nil")
+		t.Fatal("expected a non-zero status for a symlink loop, got nil")
 	}
 	// The exact error varies by OS; any of these message fragments is
 	// acceptable evidence that the loop was detected.
-	msg := err.Error()
+	msg := stderr.String()
 	if !strings.Contains(msg, "too many") &&
 		!strings.Contains(msg, "loop") &&
 		!strings.Contains(msg, "level") {
-		t.Fatalf("expected symlink-loop-ish error, got: %v", err)
+		t.Fatalf("expected symlink-loop-ish message on stderr, got: %q (err: %v)", msg, err)
 	}
 }
 
@@ -594,5 +600,31 @@ func TestResolveInterpreter_NonENOENTErrorsSurface(t *testing.T) {
 	// be a valid resolution; either way, the error has to surface.
 	if !strings.Contains(err.Error(), "permission") {
 		t.Fatalf("expected permission-denied error to surface, got: %v", err)
+	}
+}
+
+// TestDispatch_MissingScriptDoesNotAbortTheRestOfTheLine pins the shell
+// semantics the dispatcher owes its caller: a script that is not there is
+// status 127 and a message, and whatever follows on the command line still
+// runs. Returning the raw *PathError instead made mvdan/sh abort the whole
+// script, so one missing helper took everything after it down with it.
+func TestDispatch_MissingScriptDoesNotAbortTheRestOfTheLine(t *testing.T) {
+	dir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: "./missing.sh; echo still-here",
+		Cwd:     dir,
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	if err != nil {
+		t.Fatalf("the line as a whole ends on the echo, so Run must succeed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "still-here") {
+		t.Fatalf("the command after the missing script must still run, stdout: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "missing.sh") {
+		t.Fatalf("the missing script must be reported, stderr: %q", stderr.String())
 	}
 }

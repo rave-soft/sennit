@@ -10,6 +10,31 @@ import (
 	"database/sql"
 )
 
+const addSessionCost = `-- name: AddSessionCost :execrows
+UPDATE sessions
+SET
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
+WHERE id = ?
+`
+
+type AddSessionCostParams struct {
+	Cost float64 `json:"cost"`
+	ID   string  `json:"id"`
+}
+
+// Accumulate a delegation's cost onto its parent. Narrow on purpose: the
+// read-modify-write this replaces raced every other writer of the row
+// (a turn saving usage, the todo tool saving todos), and two children
+// finishing together dropped one of the two deltas.
+func (q *Queries) AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, addSessionCost, arg.Cost, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
     id,
@@ -386,6 +411,27 @@ type SetSessionModelParams struct {
 // the dispatch path, and its result is never read back.
 func (q *Queries) SetSessionModel(ctx context.Context, arg SetSessionModelParams) error {
 	_, err := q.db.ExecContext(ctx, setSessionModel, arg.ModelProvider, arg.ModelID, arg.ID)
+	return err
+}
+
+const setSessionTodos = `-- name: SetSessionTodos :exec
+UPDATE sessions
+SET
+    todos = ?,
+    updated_at = strftime('%s', 'now')
+WHERE id = ?
+`
+
+type SetSessionTodosParams struct {
+	Todos sql.NullString `json:"todos"`
+	ID    string         `json:"id"`
+}
+
+// Write only the todo list. The todo tool runs mid-turn, alongside the
+// turn's own usage saves; a full-row write from either side carried a
+// stale copy of what the other had just written.
+func (q *Queries) SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) error {
+	_, err := q.db.ExecContext(ctx, setSessionTodos, arg.Todos, arg.ID)
 	return err
 }
 

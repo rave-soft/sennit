@@ -107,21 +107,37 @@ func (c Coverage) Shift(start, end, delta int) Coverage {
 	if c.Full || delta == 0 || len(c.Ranges) == 0 {
 		return c
 	}
+	// shift maps one line number through the edit. Anything above it
+	// stays; anything below moves by delta; anything inside lands on the
+	// replacement, whose new extent is [start, end+delta].
+	shift := func(line int, inside int) int {
+		switch {
+		case line < start:
+			return line
+		case line > end:
+			return line + delta
+		default:
+			return inside
+		}
+	}
 	out := make([]LineRange, 0, len(c.Ranges))
 	for _, r := range c.Ranges {
-		switch {
-		case r.End < start:
-			// Wholly above the edit.
-		case r.Start > end:
-			r.Start += delta
-			r.End += delta
-		default:
-			r.End += delta
-		}
+		// Both ends go through the same mapping — the end used to absorb
+		// delta on its own and then be clamped up to the start whenever
+		// that pushed it below. For a range whose start lies inside a
+		// shrinking edit that clamp collapsed it to a single line, so
+		// everything the session had in fact read below the edit was
+		// recorded as unread, and the next edit to those lines was
+		// refused as "read the file first".
+		r.Start, r.End = shift(r.Start, start), shift(r.End, end+delta)
 		if r.End < r.Start {
-			r.End = r.Start
+			// The edit removed every line this range stood for.
+			continue
 		}
 		out = append(out, r)
+	}
+	if len(out) == 0 {
+		return Coverage{}
 	}
 	return Coverage{Ranges: out}
 }

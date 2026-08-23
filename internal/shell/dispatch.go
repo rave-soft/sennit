@@ -59,12 +59,25 @@ func scriptDispatchHandler(blockFuncs []BlockFunc) execMiddleware {
 			scriptPath := filepathext.SmartJoin(interp.HandlerCtx(ctx).Dir, args[0])
 			probe, err := probeFile(scriptPath)
 			if err != nil {
-				return err
+				// Shell semantics: report on stderr and exit non-zero,
+				// so the rest of the command line still runs. Returning
+				// the raw *PathError instead made mvdan/sh abort the
+				// whole script, and one missing helper took everything
+				// after it down too. 127 is "not found"; anything else
+				// (a directory, an unreadable file, a symlink loop) is
+				// "found but cannot be run", which is 126.
+				status := uint8(126)
+				if errors.Is(err, fs.ErrNotExist) {
+					status = 127
+				}
+				hc := interp.HandlerCtx(ctx)
+				fmt.Fprintf(hc.Stderr, brand.Slug+": %s: %s\n", args[0], unwrapPathError(err))
+				return interp.ExitStatus(status)
 			}
 
 			switch {
 			case hasShebang(probe):
-				return dispatchShebang(ctx, scriptPath, probe, args)
+				return dispatchShebang(ctx, next, scriptPath, probe, args)
 			case isBinary(probe):
 				return next(ctx, args)
 			default:
@@ -168,11 +181,17 @@ func isBinary(probe []byte) bool {
 	return false
 }
 
-// dispatchShebang parses probe's shebang line and execs the resolved
-// interpreter via os/exec, inheriting the parent runner's cwd, env, and
-// stdio. Returns interp.ExitStatus on non-zero interpreter exit so the
-// parent interpreter sees it as a normal non-zero status.
-func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args []string) error {
+// dispatchShebang parses probe's shebang line and hands the resolved
+// interpreter invocation back to the handler chain, which is what gives it
+// the same treatment every other command gets: the block list still sees
+// it, and the base handler runs it in its own process group.
+//
+// It used to build its own exec.CommandContext, which kills only the
+// interpreter on cancellation — a script that spawned anything of its own
+// left those grandchildren running, and cmd.Run then blocked on the pipes
+// they still held, so a cancelled turn hung until they exited on their
+// own.
+func dispatchShebang(ctx context.Context, next interp.ExecHandlerFunc, scriptPath string, probe []byte, args []string) error {
 	sb, err := parseShebang(probe)
 	if err != nil {
 		hc := interp.HandlerCtx(ctx)
@@ -187,31 +206,13 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 		return interp.ExitStatus(127)
 	}
 
-	cmdArgs := append([]string{}, sb.args...)
+	cmdArgs := make([]string, 0, len(sb.args)+len(args))
+	cmdArgs = append(cmdArgs, interpreter)
+	cmdArgs = append(cmdArgs, sb.args...)
 	cmdArgs = append(cmdArgs, scriptPath)
 	cmdArgs = append(cmdArgs, args[1:]...)
 
-	cmd := exec.CommandContext(ctx, interpreter, cmdArgs...)
-	hc := interp.HandlerCtx(ctx)
-	cmd.Dir = hc.Dir
-	cmd.Env = execEnvList(hc.Env)
-	cmd.Stdin = hc.Stdin
-	cmd.Stdout = hc.Stdout
-	cmd.Stderr = hc.Stderr
-	isolateProcess(cmd)
-
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code := exitErr.ExitCode()
-			if code < 0 {
-				code = 1
-			}
-			return interp.ExitStatus(uint8(code))
-		}
-		return err
-	}
-	return nil
+	return next(ctx, cmdArgs)
 }
 
 // resolveInterpreter tries the literal shebang path first, then falls back
@@ -423,4 +424,15 @@ func execEnvList(env expand.Environ) []string {
 		return true
 	})
 	return out
+}
+
+// unwrapPathError strips the "open /abs/path:" prefix os.Open puts on its
+// errors, so the message reads the way a shell's does: the command as the
+// user wrote it, then the reason.
+func unwrapPathError(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
 }

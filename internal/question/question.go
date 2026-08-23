@@ -20,6 +20,15 @@ import (
 // ErrCancelled is returned by Ask when the user cancels the question.
 var ErrCancelled = errors.New("question cancelled by user")
 
+// ErrQuestionPending is returned by Ask when another question batch is
+// already waiting for an answer. Only one can be: the service holds a
+// single pending channel, and the person is shown a single form. A second
+// Ask used to overwrite that state, which left the first caller blocked on
+// a channel nobody would ever send to and made its deferred cleanup clear
+// the *second* one's state on the way out. Refusing tells the caller what
+// happened, and it can ask again once the form is free.
+var ErrQuestionPending = errors.New("another question is already awaiting an answer")
+
 // Type identifies the kind of question to present.
 type Type string
 
@@ -244,28 +253,43 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		return nil, err
 	}
 
+	pending := make(chan []Answer, 1)
+	cancelled := make(chan struct{})
+
 	s.mu.Lock()
-	s.pending = make(chan []Answer, 1)
-	s.cancelled = make(chan struct{})
+	if s.pending != nil {
+		s.mu.Unlock()
+		return nil, ErrQuestionPending
+	}
+	s.pending = pending
+	s.cancelled = cancelled
 	s.pendingID = req.ID
 	s.mu.Unlock()
 
 	defer func() {
+		// Only ever clear this call's own state. Identity-checked rather
+		// than cleared outright so a future caller that does install
+		// something else cannot have it wiped by an earlier Ask
+		// unwinding.
 		s.mu.Lock()
-		s.pending = nil
-		s.cancelled = nil
-		s.pendingID = ""
+		if s.pending == pending {
+			s.pending = nil
+			s.cancelled = nil
+			s.pendingID = ""
+		}
 		s.mu.Unlock()
 	}()
 
 	s.broker.Publish(pubsub.CreatedEvent, req)
 
+	// The locals, not the fields: reading s.cancelled/s.pending here would
+	// be an unsynchronised read of state Answer and Cancel mutate.
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case <-s.cancelled:
+	case <-cancelled:
 		return nil, ErrCancelled
-	case answers := <-s.pending:
+	case answers := <-pending:
 		return answers, nil
 	}
 }
@@ -296,9 +320,14 @@ func (s *questionService) Answer(answers []Answer) bool {
 // Cancel cancels the pending question. Returns false if no
 // question is pending.
 func (s *questionService) Cancel() bool {
+	// Taking the channel out under the lock is what makes a second Cancel
+	// a no-op instead of a panic: closing an already-closed channel is
+	// fatal, and two clients dismissing the same form (or a cancel racing
+	// the session teardown) is ordinary.
 	s.mu.Lock()
 	batchID := s.pendingID
 	cancelCh := s.cancelled
+	s.cancelled = nil
 	s.mu.Unlock()
 
 	if cancelCh == nil {

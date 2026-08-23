@@ -139,10 +139,17 @@ func subAgentOutput(result *fantasy.AgentResult) string {
 }
 
 // updateParentSessionCost accumulates the cost from a child session to its
-// parent session. Serialized by parentCostMu: several sub-agents of the
-// same parent can finish concurrently, and an unserialized
-// Get-modify-Save here would let two updates race on the same read,
-// silently losing one of the two deltas.
+// parent session.
+//
+// The accumulation is a single narrow UPDATE (cost = cost + delta), which
+// is what makes it safe against every other writer of that row. The
+// Get-modify-Save it replaces did not just race sibling delegations — it
+// wrote the whole row back, so a turn's usage save or a todo write that
+// landed between the read and the write was overwritten with the values
+// this call had read before them. parentCostMu is kept: two siblings
+// still read the child cost and issue their updates concurrently, and
+// serialising them keeps the published session events in a sensible
+// order.
 func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionID, parentSessionID string) error {
 	c.parentCostMu.Lock()
 	defer c.parentCostMu.Unlock()
@@ -152,15 +159,8 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 		return fmt.Errorf("get child session: %w", err)
 	}
 
-	parentSession, err := c.sessions.Get(ctx, parentSessionID)
-	if err != nil {
+	if err := c.sessions.AddCost(ctx, parentSessionID, childSession.Cost); err != nil {
 		return fmt.Errorf("get parent session: %w", err)
-	}
-
-	parentSession.Cost += childSession.Cost
-
-	if _, err := c.sessions.Save(ctx, parentSession); err != nil {
-		return fmt.Errorf("save parent session: %w", err)
 	}
 
 	return nil

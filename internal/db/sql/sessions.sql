@@ -84,6 +84,27 @@ SET
 WHERE id = ?;
 
 
+-- name: AddSessionCost :execrows
+-- Accumulate a delegation's cost onto its parent. Narrow on purpose: the
+-- read-modify-write this replaces raced every other writer of the row
+-- (a turn saving usage, the todo tool saving todos), and two children
+-- finishing together dropped one of the two deltas.
+UPDATE sessions
+SET
+    cost = cost + ?,
+    updated_at = strftime('%s', 'now')
+WHERE id = ?;
+
+-- name: SetSessionTodos :exec
+-- Write only the todo list. The todo tool runs mid-turn, alongside the
+-- turn's own usage saves; a full-row write from either side carried a
+-- stale copy of what the other had just written.
+UPDATE sessions
+SET
+    todos = ?,
+    updated_at = strftime('%s', 'now')
+WHERE id = ?;
+
 -- name: RenameSession :exec
 UPDATE sessions
 SET

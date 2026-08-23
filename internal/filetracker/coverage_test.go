@@ -91,3 +91,40 @@ func TestCoverageShift(t *testing.T) {
 	require.True(t, FullCoverage.Shift(1, 1, 5).Full)
 	require.Equal(t, c.Ranges, c.Shift(10, 10, 0).Ranges)
 }
+
+// TestCoverageShiftKeepsWhatWasReadBelowAShrinkingEdit pins the case the
+// old clamp destroyed. A range whose start lies inside a shrinking edit
+// had its end pushed below its start and was then clamped up to it,
+// collapsing the whole range to a single line: every line the session had
+// actually read below the edit was recorded as unread, and the next edit
+// to those lines was refused with "read the file first".
+func TestCoverageShiftKeepsWhatWasReadBelowAShrinkingEdit(t *testing.T) {
+	t.Parallel()
+
+	// The session read lines 80-100. An edit replaces 10-90 with a single
+	// line (delta -80), so what it read now lives at 10-20.
+	got := Coverage{Ranges: []LineRange{{Start: 80, End: 100}}}.Shift(10, 90, -80)
+
+	require.Equal(t, []LineRange{{Start: 10, End: 20}}, got.Ranges)
+}
+
+// TestCoverageShiftDropsARangeTheEditRemovedEntirely keeps the other
+// half honest: coverage of lines that no longer exist is not coverage.
+func TestCoverageShiftDropsARangeTheEditRemovedEntirely(t *testing.T) {
+	t.Parallel()
+
+	// Lines 20-30 sat inside an edit that deleted 10-30 outright.
+	got := Coverage{Ranges: []LineRange{{Start: 20, End: 30}}}.Shift(10, 30, -21)
+
+	require.Empty(t, got.Ranges)
+}
+
+// TestCoverageShiftLeavesAWholeFileReadWhole covers the ordinary case:
+// a range spanning the edit keeps its start and absorbs the delta.
+func TestCoverageShiftSpanningRangeAbsorbsTheDelta(t *testing.T) {
+	t.Parallel()
+
+	got := Coverage{Ranges: []LineRange{{Start: 1, End: 100}}}.Shift(10, 20, -5)
+
+	require.Equal(t, []LineRange{{Start: 1, End: 95}}, got.Ranges)
+}

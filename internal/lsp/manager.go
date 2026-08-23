@@ -206,6 +206,12 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 			s.callback(name, client)
 			return
 		}
+		// Anything else (StateError, StateStopped) is about to be
+		// replaced by the fresh client built below. Shut the old one
+		// down first: an errored client can still own a live process,
+		// and overwriting the map entry orphaned it — KillAll walks the
+		// map, so nothing would ever reap it.
+		client.Shutdown()
 	}
 
 	client, err := New(
@@ -236,6 +242,11 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
+		// Before the deferred callback fires, or it publishes this
+		// client as still starting — and since the entry is dropped on
+		// the next line, nothing ever corrects that: the UI showed a
+		// server stuck at "starting" for the rest of the session.
+		client.SetServerState(StateError)
 		client.Shutdown()
 		s.clients.Del(name)
 		return

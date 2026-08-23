@@ -145,9 +145,13 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 				}
 			}
 
+			// A narrow write, not a full-row Save: this tool runs
+			// mid-turn, and the turn saves the same row for usage. Each
+			// full-row write carried a stale copy of what the other had
+			// just written, so a todo list could vanish the moment a step
+			// finished.
 			currentSession.Todos = todos
-			_, err = sessions.Save(ctx, currentSession)
-			if err != nil {
+			if err := sessions.SetTodos(ctx, currentSession.ID, todos); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to save todos: %w", err)
 			}
 

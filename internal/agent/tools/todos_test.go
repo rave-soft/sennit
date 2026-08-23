@@ -11,8 +11,8 @@ import (
 )
 
 // fakeTodoSessions implements just enough of session.Service for the todos
-// tool: Get returns whatever was last Saved (or the seeded session), Save
-// records the write.
+// tool: Get returns whatever was last written (or the seeded session), and
+// SetTodos/Save record writes.
 type fakeTodoSessions struct {
 	session.Service
 	sess session.Session
@@ -25,6 +25,14 @@ func (f *fakeTodoSessions) Get(_ context.Context, id string) (session.Session, e
 func (f *fakeTodoSessions) Save(_ context.Context, s session.Session) (session.Session, error) {
 	f.sess = s
 	return s, nil
+}
+
+// SetTodos is the narrow write the tool actually performs now: only the
+// list, so a turn saving usage on the same row cannot carry a stale copy
+// of it back over the top.
+func (f *fakeTodoSessions) SetTodos(_ context.Context, _ string, todos []session.Todo) error {
+	f.sess.Todos = todos
+	return nil
 }
 
 // runTodosTool invokes the todos tool with the given items and returns the

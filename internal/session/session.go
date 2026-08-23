@@ -137,6 +137,13 @@ type Service interface {
 	// every turn would wake every subscriber for a field none of them
 	// display.
 	SetModel(ctx context.Context, sessionID string, model ModelRef) error
+	// AddCost accumulates delta onto sessionID's recorded cost with a
+	// single narrow UPDATE. It replaces a Get/modify/Save round trip that
+	// raced every other writer of the row.
+	AddCost(ctx context.Context, sessionID string, delta float64) error
+	// SetTodos writes only sessionID's todo list, for the same reason:
+	// the todo tool runs mid-turn, alongside the turn's own usage saves.
+	SetTodos(ctx context.Context, sessionID string, todos []Todo) error
 	Delete(ctx context.Context, id string) error
 
 	// Agent tool session management
@@ -332,6 +339,43 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	session.EstimatedUsage = estimatedUsage
 	s.Publish(pubsub.UpdatedEvent, session)
 	return session, nil
+}
+
+// AddCost accumulates delta onto the session's cost. See the interface.
+func (s *service) AddCost(ctx context.Context, sessionID string, delta float64) error {
+	rows, err := s.q.AddSessionCost(ctx, db.AddSessionCostParams{
+		Cost: delta,
+		ID:   sessionID,
+	})
+	if err != nil {
+		return err
+	}
+	// A narrow UPDATE against a row that is not there affects nothing and
+	// reports no error, which would turn "the parent session is gone"
+	// into a silent success. Callers accumulate a delegation's cost onto
+	// its parent and want to know when there is no parent left.
+	if rows == 0 {
+		return fmt.Errorf("session %q: %w", sessionID, ErrNotFound)
+	}
+	s.publishSessionUpdate(ctx, sessionID)
+	return nil
+}
+
+// SetTodos writes the session's todo list and nothing else. See the
+// interface.
+func (s *service) SetTodos(ctx context.Context, sessionID string, todos []Todo) error {
+	todosJSON, err := marshalTodos(todos)
+	if err != nil {
+		return err
+	}
+	if err := s.q.SetSessionTodos(ctx, db.SetSessionTodosParams{
+		Todos: sql.NullString{String: todosJSON, Valid: todosJSON != ""},
+		ID:    sessionID,
+	}); err != nil {
+		return err
+	}
+	s.publishSessionUpdate(ctx, sessionID)
+	return nil
 }
 
 // UpdateTitleAndUsage updates only the title and usage fields atomically.

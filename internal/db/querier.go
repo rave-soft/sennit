@@ -9,6 +9,11 @@ import (
 )
 
 type Querier interface {
+	// Accumulate a delegation's cost onto its parent. Narrow on purpose: the
+	// read-modify-write this replaces raced every other writer of the row
+	// (a turn saving usage, the todo tool saving todos), and two children
+	// finishing together dropped one of the two deltas.
+	AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error)
 	BatchValidateSessionIDsInTree(ctx context.Context, arg BatchValidateSessionIDsInTreeParams) ([]string, error)
 	// gc's dependent-row count for a batch of sessions it is about to delete;
 	// see CountMessagesForSessionIDs for why json_each replaces an IN-list.
@@ -192,6 +197,10 @@ type Querier interface {
 	// Deliberately not RETURNING the row: this is written on every turn, from
 	// the dispatch path, and its result is never read back.
 	SetSessionModel(ctx context.Context, arg SetSessionModelParams) error
+	// Write only the todo list. The todo tool runs mid-turn, alongside the
+	// turn's own usage saves; a full-row write from either side carried a
+	// stale copy of what the other had just written.
+	SetSessionTodos(ctx context.Context, arg SetSessionTodosParams) error
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
