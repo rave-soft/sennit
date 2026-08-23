@@ -316,3 +316,48 @@ func TestWaitForDiagnostics_NilClient(t *testing.T) {
 	// Should not panic.
 	c.WaitForDiagnostics(context.Background(), time.Second)
 }
+
+// TestClient_CloseAllFiles_DropsBookkeepingWhenTheServerIsDead pins the
+// state Restart depends on. Every didClose fails against a server that is
+// no longer answering — which is exactly when a restart happens — and the
+// bookkeeping used to be kept on a failed close. The URIs stayed in
+// c.openFiles, so Restart's reopen loop hit OpenFile's already-open check
+// for every one of them and the fresh server received not a single
+// didOpen: an LSP that came back alive and blind.
+func TestClient_CloseAllFiles_DropsBookkeepingWhenTheServerIsDead(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(filePath, []byte("package main\n"), 0o644))
+
+	cfg := config.LSPConfig{
+		Command:   exe,
+		FileTypes: []string{"go"},
+		Env:       map[string]string{fakeLSPServerEnv: "1"},
+	}
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
+
+	client, err := New("test-close-dead", cfg, resolver, dir, false)
+	require.NoError(t, err)
+	t.Cleanup(client.Kill)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	_, err = client.Initialize(ctx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(ctx))
+	require.NoError(t, client.OpenFile(ctx, filePath))
+	require.True(t, client.IsFileOpen(filePath))
+
+	// The server is gone; the close notifications have nothing to reach.
+	client.Kill()
+
+	client.CloseAllFiles(ctx)
+	require.False(t, client.IsFileOpen(filePath),
+		"a close that could not be delivered must still drop what it was tracking")
+}

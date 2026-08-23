@@ -106,7 +106,7 @@ func (t *ownedHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 func closeIdleTransport(t mcp.Transport) func() {
 	var rt http.RoundTripper
-	switch v := t.(type) {
+	switch v := unwrapTransport(t).(type) {
 	case *mcp.StreamableClientTransport:
 		rt = v.HTTPClient.Transport
 	case *mcp.SSEClientTransport:
@@ -229,4 +229,27 @@ func mcpTimeout(m config.MCPConfig) time.Duration {
 		return 30 * time.Second
 	}
 	return 10 * time.Second
+}
+
+// unwrapTransport peels the wrappers this package puts around a transport
+// before handing it to the SDK, so a type switch sees what was actually
+// built. Every connection is wrapped in a channelTransport (see
+// connection.go), and the two places that ask what kind of transport they
+// have — closeIdleTransport and maybeStdioErr — were asking the wrapper.
+// Both silently answered "neither": keep-alive connections and their
+// http.Transport goroutines were never closed on a renew, teardown or
+// Close, and a stdio server that failed to start (the npx-cannot-find-node
+// case) never got the diagnostic that exists for it.
+func unwrapTransport(t mcp.Transport) mcp.Transport {
+	for {
+		wrapper, ok := t.(interface{ innerTransport() mcp.Transport })
+		if !ok {
+			return t
+		}
+		inner := wrapper.innerTransport()
+		if inner == nil {
+			return t
+		}
+		t = inner
+	}
 }

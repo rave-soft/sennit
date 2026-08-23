@@ -483,6 +483,14 @@ func (c *Client) IsFileOpen(filepath string) bool {
 }
 
 // CloseAllFiles closes all currently open files.
+//
+// The bookkeeping is dropped whether or not the notification lands. It
+// used to be kept on failure, which is exactly backwards: the case where
+// didClose fails is a server that is already dead, and the caller is
+// Close — after which this client's idea of what is open describes a
+// server that no longer exists. Restart then reopened nothing, because
+// OpenFile treats a URI still in the map as already open, and the fresh
+// server received not one didOpen.
 func (c *Client) CloseAllFiles(ctx context.Context) {
 	for uri := range c.openFiles.Seq2() {
 		if c.debug {
@@ -490,7 +498,6 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 		}
 		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
 			slog.Warn("Error closing file", "uri", uri, "error", err)
-			continue
 		}
 		c.openFiles.Del(uri)
 	}

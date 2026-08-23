@@ -200,7 +200,7 @@ func maybeStdioErr(err error, transport mcp.Transport) error {
 	if !errors.Is(err, io.EOF) {
 		return err
 	}
-	ct, ok := transport.(*mcp.CommandTransport)
+	ct, ok := unwrapTransport(transport).(*mcp.CommandTransport)
 	if !ok {
 		return err
 	}

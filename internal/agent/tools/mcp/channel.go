@@ -296,6 +296,12 @@ type channelTransport struct {
 	reg *Registry
 }
 
+// innerTransport implements the unwrapping seam unwrapTransport uses, so
+// what this wraps is what a type switch elsewhere sees. Without it both
+// closeIdleTransport and maybeStdioErr were asking the wrapper what kind
+// of transport it was and being told "neither".
+func (t *channelTransport) innerTransport() mcp.Transport { return t.inner }
+
 // Connect implements mcp.Transport.
 func (t *channelTransport) Connect(ctx context.Context) (mcp.Connection, error) {
 	conn, err := t.inner.Connect(ctx)

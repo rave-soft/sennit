@@ -1204,6 +1204,14 @@ func (m *Chat) HandleMouseUp(x, y int) bool {
 }
 
 // HandleMouseDrag handles mouse drag events for the chat component.
+// Dragging reports whether a text-selection drag is in progress — the
+// mouse went down inside the chat and has not been released. The edge
+// auto-scroll asks before it scrolls: motion events arrive continuously
+// under MouseModeAllMotion, so scrolling on every one of them meant
+// merely moving the pointer near the bottom of the window dragged the
+// conversation along with it.
+func (m *Chat) Dragging() bool { return m.mouseDown }
+
 func (m *Chat) HandleMouseDrag(x, y int) bool {
 	if !m.mouseDown {
 		return false

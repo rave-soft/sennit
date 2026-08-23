@@ -224,7 +224,21 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				break
 			}
 
-			if msg.Y <= 0 {
+			// Edge auto-scroll belongs to a selection drag, and works in
+			// the chat's own coordinates: y, not the absolute msg.Y the
+			// comparison below used to make against a chat-relative
+			// height. Ungated, every pointer movement over the lower part
+			// of the window scrolled the chat and snapped it to the
+			// selection; measured absolutely, the bottom trigger fired
+			// while the pointer was still well inside the chat.
+			if !m.chat.Dragging() {
+				m.chat.HandleMouseDrag(x, y)
+				m.chat.HandleMouseHover(x, y)
+				m.chat.ScrollbarHoverAt(x, y)
+				break
+			}
+
+			if y <= 0 {
 				if cmd := m.chat.ScrollByAndAnimate(-1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -234,7 +248,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 						cmds = append(cmds, cmd)
 					}
 				}
-			} else if msg.Y >= m.chat.Height()-1 {
+			} else if y >= m.chat.Height()-1 {
 				if cmd := m.chat.ScrollByAndAnimate(1); cmd != nil {
 					cmds = append(cmds, cmd)
 				}

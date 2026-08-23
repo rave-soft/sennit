@@ -245,8 +245,8 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	// esc, with nothing focused to blur, actually cancels.
 	if key.Matches(msg, f.keyClose) {
 		if f.activeIdx < f.numQuestions {
-			if ft, ok := f.questions[f.activeIdx].(*FreeText); ok && ft.editor.Focused() {
-				ft.editor.Blur()
+			if ft, ok := f.questions[f.activeIdx].(*FreeText); ok && !ft.BlurredByEsc() {
+				ft.BlurForEsc()
 				return false, nil
 			}
 		}

@@ -24,6 +24,14 @@ type FreeText struct {
 	editor       textarea.Model
 	scrollOffset int  // lines scrolled past the top of the textarea viewport
 	wheelActive  bool // wheel-scroll mode: skip cursor-follow until next key press
+	// blurredByEsc records that the person pressed esc to leave the
+	// editor, so the next esc cancels the batch instead of blurring
+	// again. It has to be state of its own rather than a read of
+	// editor.Focused(): the form is redrawn every frame, and the draw
+	// calls SetFocused(focus == editor) — which re-focused the editor
+	// immediately, so the second esc always found it focused and the
+	// batch could never be cancelled by esc at all.
+	blurredByEsc bool
 	keyEnter     key.Binding
 	keyNewline   key.Binding
 	keyClose     key.Binding
@@ -63,6 +71,14 @@ func NewFreeText(sty *styles.Styles, req question.Question) *FreeText {
 // submitted or dismissed the question.
 func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	d.wheelActive = false
+	// Any key other than esc means they are back to answering: take the
+	// focus back so what they type lands in the editor.
+	if d.blurredByEsc && !key.Matches(msg, d.keyClose) {
+		d.blurredByEsc = false
+		if d.focused {
+			d.editor.Focus()
+		}
+	}
 	switch {
 	case key.Matches(msg, d.keyClose):
 		d.answer(question.Answer{QuestionID: d.Request.ID})
@@ -251,15 +267,29 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 // HeightChanged reports whether the textarea height changed.
 func (d *FreeText) HeightChanged() bool { return false }
 
-// SetFocused updates focus state.
+// SetFocused updates focus state. A component blurred by esc stays
+// blurred even while the form reports it as focused — see blurredByEsc,
+// and BlurForEsc for how it gets there.
 func (d *FreeText) SetFocused(focused bool) {
 	d.focused = focused
-	if focused {
+	if focused && !d.blurredByEsc {
 		d.editor.Focus()
 	} else {
 		d.editor.Blur()
 	}
 }
+
+// BlurForEsc records the first esc: the editor gives up the keyboard, and
+// the next esc reaches the form as a cancel.
+func (d *FreeText) BlurForEsc() {
+	d.blurredByEsc = true
+	d.editor.Blur()
+}
+
+// BlurredByEsc reports whether esc has already been pressed once with
+// this editor focused. The form asks this rather than editor.Focused(),
+// which the per-frame SetFocused makes meaningless here.
+func (d *FreeText) BlurredByEsc() bool { return d.blurredByEsc }
 
 // SetHover is a no-op for free text questions.
 func (d *FreeText) SetHover(x, y int) {}
