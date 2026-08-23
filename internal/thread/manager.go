@@ -1302,6 +1302,17 @@ func (m *Manager) Wait(ctx context.Context, ids []string, timeout time.Duration)
 		defer cancel()
 	}
 	for {
+		// Take the change channel *before* reading status, not after: a
+		// transition landing between the read and the select closes the
+		// channel this iteration would otherwise never look at, and
+		// notifyChange immediately installs a fresh one. Waiting on that
+		// fresh channel means waiting for the *next* transition — which,
+		// for a thread that just reached a terminal status, never comes,
+		// so Wait blocks until its own deadline. Holding the channel
+		// first makes the wakeup impossible to miss: any change after
+		// this point closes exactly the channel being waited on.
+		changed := m.lc.waitChan()
+
 		active, err := m.anyActive(ctx, ids)
 		if err != nil {
 			return err
@@ -1310,7 +1321,7 @@ func (m *Manager) Wait(ctx context.Context, ids []string, timeout time.Duration)
 			return nil
 		}
 		select {
-		case <-m.lc.waitChan():
+		case <-changed:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
