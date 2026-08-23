@@ -319,10 +319,23 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 
 	// Reserve acceptance before dispatch so cancellation cannot leave a run
 	// unaccounted for between goroutine scheduling and coordinator admission.
+	// Coordinator() is documented as possibly nil (a workspace with no
+	// agent configured). Dispatching into it would panic in a worker
+	// goroutine and take the process with it, so this ends the run the
+	// way any other pre-execution failure ends it.
 	coord := handle.Workspace().Coordinator()
+	if coord == nil {
+		l.handleRunComplete(ctx, id, RunComplete{
+			SessionID: sessionID,
+			RunID:     runID,
+			Error:     "workspace has no agent coordinator",
+		})
+		return
+	}
 	accept := coord.BeginAccepted(sessionID)
 	l.goWorker(func() {
 		if err := coord.RunAccepted(WithRunID(ctx, runID), accept, sessionID, prompt, nil); err != nil {
+			closeAccepted(accept)
 			slog.Error("Agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 			// AgentDispatcher.run documents this fallback for pre-execution
 			// failures. This direct RunAccepted call bypasses that wrapper,
@@ -457,6 +470,9 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 	accept := coord.BeginAccepted(sessionID)
 	l.goWorker(func() {
 		err := coord.RunAccepted(steerCtx, accept, sessionID, msg, attachments)
+		if err != nil {
+			closeAccepted(accept)
+		}
 		select {
 		case failed <- err:
 		default:
@@ -687,9 +703,16 @@ func (l *lifecycle) send(ctx, bgCtx context.Context, id string, spawner Spawner,
 		// landing in the gap between this goroutine being scheduled and
 		// the coordinator admitting the call.
 		coord := rt.handle.Workspace().Coordinator()
+		if coord == nil {
+			// See startRun: nil is a documented possibility, and a panic
+			// in a worker goroutine takes the process with it.
+			slog.Error("Queued agent run has no coordinator to dispatch to", "component", "thread", "session_id", sessionID)
+			return SendDisposition{}, errors.New("thread: workspace has no agent coordinator")
+		}
 		accept := coord.BeginAccepted(sessionID)
 		l.goWorker(func() {
 			if err := coord.RunAccepted(WithRunID(bgCtx, runID), accept, sessionID, msg, nil); err != nil {
+				closeAccepted(accept)
 				slog.Error("Queued agent run returned an error", "component", "thread", "session_id", sessionID, "error", err)
 				// Mirror startRun's fallback for pre-execution failures so
 				// the workspace is not stranded on a run that never
@@ -1043,5 +1066,17 @@ func (l *lifecycle) setPermissionsSkip(skip bool) {
 			continue
 		}
 		rt.handle.Workspace().Permissions().SetSkipRequests(skip)
+	}
+}
+
+// closeAccepted releases an acceptance reservation the coordinator never
+// consumed. RunAccepted takes ownership of the handle once it admits the
+// call, and Close is idempotent, so this is safe on every error path —
+// and necessary on them: a dispatch that failed before admission left the
+// reservation counted forever, which pins the session's dispatch state in
+// memory and makes it look permanently mid-dispatch.
+func closeAccepted(accept any) {
+	if closer, ok := accept.(interface{ Close() }); ok {
+		closer.Close()
 	}
 }

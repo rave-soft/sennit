@@ -512,6 +512,11 @@ func normalizeReasoningEffort(v string) (mapped string, adjusted bool, ok bool) 
 // during import. Kept as a literal set rather than importing
 // internal/agent/tools for its name constants: that package already imports
 // internal/config, and config importing it back would cycle.
+//
+// It must stay in step with allToolNames (toolnames.go): a name missing
+// here is reported as dropped during an import and silently removed from
+// the agent's tool list, which is how agentic_fetch and ask_parent
+// disappeared from every imported agent that named them.
 var importKnownTools = map[string]bool{
 	"read": true, "write": true, "edit": true, "multiedit": true, "bash": true,
 	"grep": true, "ripgrep": true, "glob": true, "ls": true, "fetch": true, "web_fetch": true,
@@ -526,6 +531,7 @@ var importKnownTools = map[string]bool{
 	"lsp_symbols": true, "lsp_call_hierarchy": true, "lsp_diagnostics": true,
 	"lsp_restart": true, "lsp_replace_symbol": true,
 	"list_mcp_resources": true, "read_mcp_resource": true,
+	"agentic_fetch": true, "ask_parent": true,
 }
 
 // translateAgentTools maps foreign tool names onto Sennit's, the same way

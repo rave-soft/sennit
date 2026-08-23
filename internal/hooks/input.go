@@ -206,9 +206,14 @@ func rawToString(raw json.RawMessage) string {
 
 func parseDecision(s string) Decision {
 	switch strings.ToLower(s) {
-	case "allow":
+	case "allow", "approve":
 		return DecisionAllow
-	case "deny":
+	// "block" is Claude Code's own spelling of a refusal, and hooks
+	// written for it are the commonest thing pointed at this parser.
+	// Falling through to DecisionNone made such a hook fail open — the
+	// tool call it meant to stop went ahead — which is the one direction
+	// an unrecognised decision must never take.
+	case "deny", "block":
 		return DecisionDeny
 	default:
 		return DecisionNone

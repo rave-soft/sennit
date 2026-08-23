@@ -281,13 +281,21 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID strin
 			continue
 		}
 		total++
+		// The persisted column is the fallback, and it is what makes the
+		// count right after a restart: a task resumed then has no
+		// in-memory control to read a parent from, so every one of them
+		// was invisible to the per-parent limit and a parent could
+		// exceed it without ever being told.
+		parent := tk.ParentSessionID
 		if c := t.lc.existingControl(tk.ID); c != nil {
 			c.mu.Lock()
-			match := c.parentSessionID == parentSessionID
-			c.mu.Unlock()
-			if match {
-				forParent++
+			if c.parentSessionID != "" {
+				parent = c.parentSessionID
 			}
+			c.mu.Unlock()
+		}
+		if parent == parentSessionID {
+			forParent++
 		}
 	}
 
@@ -360,6 +368,14 @@ func (t *TaskManager) Get(ctx context.Context, id string) (Thread, error) {
 // Get-then-delegate wrapper; see [lifecycle.cancel] for the mechanics
 // shared with [Manager.Cancel].
 func (t *TaskManager) Cancel(ctx context.Context, id, reason string) error {
+	// Admitted like every other mutation: without this a cancel could
+	// start after Shutdown had closed admission and begun joining
+	// workers, and then tear down state those workers were still using.
+	done, err := t.lc.beginOp()
+	if err != nil {
+		return err
+	}
+	defer done()
 	st, err := t.Get(ctx, id)
 	if err != nil {
 		return err

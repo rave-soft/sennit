@@ -300,10 +300,8 @@ func (s *ConfigStore) ReplaceInheritedAgents(inherited map[string]Agent) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	s.inheritedAgents = cloneAgents(inherited)
+	// cloneForWrite copies Problems, which setupAgents rewrites in place.
 	nc := s.Config().cloneForWrite()
-	// setupAgents rewrites Problems (dropping the previous agent ones);
-	// cloneForWrite shares that slice with the published snapshot.
-	nc.Problems = slices.Clone(nc.Problems)
 	nc.SetupAgentsWithInherited(s.inheritedAgents)
 	s.setConfig(nc)
 }

@@ -1377,6 +1377,15 @@ func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, erro
 	for _, id := range ids {
 		st, err := m.resolve(ctx, id)
 		if err != nil {
+			// A thread that is no longer there is one that finished:
+			// merging discards the row, and so does removal. Waiting for
+			// it is satisfied, not failed — reporting not-found turned
+			// "wait for these three" into an error whenever one of them
+			// completed while the call was blocked, which is the very
+			// thing being waited for.
+			if errors.Is(err, ErrNotFound) {
+				continue
+			}
 			return nil, err
 		}
 		threads = append(threads, st)

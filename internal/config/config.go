@@ -649,6 +649,11 @@ func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.RecentModels = slices.Clone(c.RecentModels)
 	nc.MCP = maps.Clone(c.MCP)
+	// Problems is rewritten in place by setupAgents (it deletes the agent
+	// entries and re-adds the current ones), so sharing the published
+	// config's slice let that rewrite reach a Config other goroutines are
+	// already reading — the one thing cloneForWrite exists to prevent.
+	nc.Problems = slices.Clone(c.Problems)
 	if c.Providers != nil {
 		nc.Providers = csync.NewMap[string, ProviderConfig]()
 		for id, provider := range c.Providers.Seq2() {
