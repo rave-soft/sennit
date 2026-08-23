@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"reflect"
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
@@ -11,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/log"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
 )
@@ -155,6 +157,53 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	deps.forwardEvents(a, mgr)
 	if local, ok := spawner.(*LocalSpawner); ok {
 		go forwardSkillsToThreads(ctx, a, local)
+		go forwardAgentsToThreads(ctx, a, local)
+	}
+}
+
+// forwardAgentsToThreads pushes the parent workspace's user-defined agents
+// into every live thread whenever the parent's config reloads with a
+// different set — the agents counterpart of forwardSkillsToThreads, and
+// for the same reason: a thread inherits its agents at spawn (see
+// LocalSpawner.Spawn / BootstrapOptions.InheritedAgents) from a directory
+// its own watcher never looks at. Without this, editing an agent in the
+// parent (its model, say) only reached threads started after the edit; a
+// thread already running kept delegating to the agent it was born with —
+// on the old model — while the parent's config, and anything reading it,
+// already showed the new one.
+//
+// Only a changed set is pushed: every push republishes the thread's
+// Config and forces its runtime to recompile before the next turn, and
+// most config reloads have nothing to do with agents.
+func forwardAgentsToThreads(ctx context.Context, parent *app.App, spawner *LocalSpawner) {
+	defer log.RecoverPanic("threadspawn.forwardAgentsToThreads", func() {})
+	events := parent.Events(ctx)
+	last := parent.Config().UserAgents()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if _, changed := ev.Payload.(pubsub.Event[app.WorkspaceChanged]); !changed {
+				continue
+			}
+			inherited := parent.Config().UserAgents()
+			if reflect.DeepEqual(inherited, last) {
+				continue
+			}
+			last = inherited
+			threadApps := spawner.Apps()
+			for _, threadApp := range threadApps {
+				threadApp.Store().ReplaceInheritedAgents(inherited)
+			}
+			if len(threadApps) > 0 {
+				slog.Info("Pushed agent update to threads",
+					"component", "agents", "threads", len(threadApps), "agents", len(inherited))
+			}
+		}
 	}
 }
 

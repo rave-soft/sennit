@@ -198,3 +198,36 @@ func TestSetupAgentsKeepsReasoningEffort(t *testing.T) {
 
 	require.Equal(t, "low", cfg.Agents["reviewer"].ReasoningEffort)
 }
+
+// ReplaceInheritedAgents is the live counterpart of
+// SetupAgentsWithInherited (a thread receiving the parent's re-discovered
+// agents): it must publish a new snapshot — bumping the version so a
+// compiled runtime notices — and leave the snapshot a concurrent reader
+// already holds untouched.
+func TestReplaceInheritedAgentsPublishesNewSnapshot(t *testing.T) {
+	cfg := newAgentConfig(t, "")
+	cfg.SetupAgentsWithInherited(map[string]Agent{
+		"reviewer": {ID: "reviewer", Name: "Reviewer", Prompt: "Review.", Description: "old"},
+	})
+	s := NewTestStore(t, cfg)
+	before := s.Config()
+	versionBefore := s.Version()
+
+	s.ReplaceInheritedAgents(map[string]Agent{
+		"reviewer": {ID: "reviewer", Name: "Reviewer", Prompt: "Review.", Description: "new"},
+		"tester":   {ID: "tester", Name: "Tester", Prompt: "Test."},
+	})
+
+	after := s.Config()
+	require.NotSame(t, before, after, "the published config must be a new snapshot")
+	require.Greater(t, s.Version(), versionBefore)
+	require.Equal(t, "new", after.Agents["reviewer"].Description)
+	require.Contains(t, after.Agents, "tester")
+	require.Contains(t, after.Agents[AgentCoder].AllowedTools, "tester")
+
+	require.Equal(t, "old", before.Agents["reviewer"].Description, "the old snapshot must not be mutated")
+	require.NotContains(t, before.Agents, "tester")
+
+	// The stored inherited set feeds the store's own later reloads.
+	require.Equal(t, "new", s.inheritedAgents["reviewer"].Description)
+}

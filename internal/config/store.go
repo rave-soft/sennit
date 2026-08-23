@@ -270,6 +270,36 @@ func (s *ConfigStore) SetupAgentsWithInherited(inherited map[string]Agent) {
 	s.Config().SetupAgentsWithInherited(s.inheritedAgents)
 }
 
+// ReplaceInheritedAgents swaps the inherited user-defined agents of a
+// running store — the parent workspace re-discovered its agents (an edited
+// .sennit/agents/*.md) and is pushing the new set into a live thread. It
+// publishes a fresh Config snapshot with the agents rebuilt, bumping the
+// store version so a runtime compiled against the old set (the thread's
+// coder and its per-agent delegation tools, each pinned to the model the
+// agent named when it was built) is recompiled before its next turn.
+// Without this a thread kept the agents it was born with until it
+// finished, so an agent whose model was changed in the parent kept
+// delegating on the old one — while the parent's own config, and anything
+// reading it, already showed the new.
+//
+// Unlike SetupAgentsWithInherited (bootstrap, before the Config is shared)
+// this never mutates the published Config in place: it clones, rebuilds
+// agents on the clone, and swaps under writeMu like every other runtime
+// mutator, so concurrent readers keep their immutable snapshot. The
+// inherited set is also stored for the thread's own later reloads, which
+// re-apply it as the lowest-priority source.
+func (s *ConfigStore) ReplaceInheritedAgents(inherited map[string]Agent) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.inheritedAgents = cloneAgents(inherited)
+	nc := s.Config().cloneForWrite()
+	// setupAgents rewrites Problems (dropping the previous agent ones);
+	// cloneForWrite shares that slice with the published snapshot.
+	nc.Problems = slices.Clone(nc.Problems)
+	nc.SetupAgentsWithInherited(s.inheritedAgents)
+	s.setConfig(nc)
+}
+
 // Overrides returns a copy of the runtime overrides for this store. It is a
 // value, not a pointer: s.overrides is mutated under writeMu by concurrent
 // setters (SetSkipPermissionRequests, SetEnabledChannels,

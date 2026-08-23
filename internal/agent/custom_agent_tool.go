@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
+	"sync"
 
 	"charm.land/fantasy"
 
@@ -73,12 +75,46 @@ func (c *coordinator) buildCustomAgentTool(ctx context.Context, id string, agent
 		return nil, err
 	}
 
+	// The delegate above is pinned to the agent definition as of this
+	// build — its model in particular. The tool list is compiled once per
+	// runtime and a runtime lives for a whole turn, so an agent edited
+	// mid-turn (its model switched in .sennit/agents while a long pipeline
+	// is delegating to it over and over) would otherwise keep running on
+	// the old definition until the turn ended, while the config — and the
+	// chat's label for the delegation, which reads it — already named the
+	// new one. Check at call time and rebuild the delegate when the
+	// definition moved; the common case is a cheap comparison.
+	var rebuildMu sync.Mutex
+	current := agentCfg
+	delegate := func(ctx context.Context) (SessionAgent, error) {
+		rebuildMu.Lock()
+		defer rebuildMu.Unlock()
+		latest, ok := c.cfg.Config().Agents[id]
+		if !ok || sameAgentDefinition(latest, current) {
+			return agent, nil
+		}
+		latestPrompt, err := prompt.NewPrompt(id, latest.Prompt, prompt.WithWorkingDir(c.cfg.WorkingDir()))
+		if err != nil {
+			return nil, fmt.Errorf("parse prompt: %w", err)
+		}
+		rebuilt, err := c.buildAgent(ctx, latestPrompt, latest, true)
+		if err != nil {
+			return nil, err
+		}
+		agent, current = rebuilt, latest
+		return agent, nil
+	}
+
 	return fantasy.NewParallelAgentTool(
 		id,
 		customAgentDescription(id, agentCfg),
 		func(ctx context.Context, params CustomAgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
+			}
+			agent, err := delegate(ctx)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("agent %q: %w", id, err)
 			}
 
 			sessionID := tools.GetSessionFromContext(ctx)
@@ -102,6 +138,20 @@ func (c *coordinator) buildCustomAgentTool(ctx context.Context, id string, agent
 			})
 		},
 	), nil
+}
+
+// sameAgentDefinition reports whether two definitions of an agent would
+// build the same delegate: the fields buildAgent and the delegate's system
+// prompt read. Description is deliberately left out — it only feeds the
+// tool's own description, which the calling model has already been shown
+// for this turn.
+func sameAgentDefinition(a, b config.Agent) bool {
+	return a.Model == b.Model &&
+		a.ReasoningEffort == b.ReasoningEffort &&
+		a.Prompt == b.Prompt &&
+		slices.Equal(a.AllowedTools, b.AllowedTools) &&
+		slices.Equal(a.ContextPaths, b.ContextPaths) &&
+		maps.EqualFunc(a.AllowedMCP, b.AllowedMCP, slices.Equal)
 }
 
 // customAgentDescription is what the calling model reads when deciding whether

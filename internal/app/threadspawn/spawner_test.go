@@ -2,12 +2,15 @@ package threadspawn
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
+	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
 )
@@ -189,4 +192,60 @@ func TestLocalSpawnerReadsParentModelPerSpawn(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), second.ID())) })
 	require.Equal(t, current, second.(*localHandle).app.Config().Model)
+}
+
+// Agents are inherited at spawn the same way skills are, and freezing
+// them there has the same cost: an agent whose model is changed in the
+// parent while a thread is running must reach that thread, not only the
+// next one to start — otherwise it keeps delegating on the old model
+// while the parent's config already names the new one.
+func TestForwardAgentsToThreadsPushesUpdateToLiveThread(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Cleanup(func() { db.ResetPool() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// A bootstrapped app stands in for the parent: forwardAgentsToThreads
+	// reads its Config and listens on its events, which NewForTest lacks.
+	parentSpawner := NewLocalSpawner(nil, nil, nil, nil)
+	parentHandle, err := parentSpawner.Spawn(ctx, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, parentSpawner.Release(context.Background(), parentHandle.ID())) })
+	parent := parentHandle.(*localHandle).app
+
+	// The field edited is the description, not the model the motivating
+	// bug was about: an agent model is validated against the configured
+	// providers, and a bare test workspace has none, so any model string
+	// would be dropped at setup. The push is field-agnostic — it hands the
+	// whole agent over.
+	original := map[string]config.Agent{"reviewer": {ID: "reviewer", Name: "Reviewer", Prompt: "Review.", Description: "old"}}
+	spawner := NewLocalSpawner(func() map[string]config.Agent { return parent.Config().UserAgents() }, nil, nil, nil)
+	parent.Store().ReplaceInheritedAgents(original)
+	handle, err := spawner.Spawn(ctx, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
+	lh := handle.(*localHandle)
+	require.Equal(t, "old", lh.app.Config().Agents["reviewer"].Description, "the thread must start on the agent it inherited")
+	versionBefore := lh.app.Store().Version()
+
+	go forwardAgentsToThreads(ctx, parent, spawner)
+
+	// Stand in for the parent's watcher reloading an edited agent file and
+	// announcing it. Every attempt is a distinct edit: the forwarder only
+	// pushes a set that differs from the last one it saw, and it may start
+	// (and take its baseline) after the first attempt has already landed.
+	attempt := 0
+	require.Eventually(t, func() bool {
+		attempt++
+		edited := map[string]config.Agent{"reviewer": {ID: "reviewer", Name: "Reviewer", Prompt: "Review.", Description: fmt.Sprintf("new-%d", attempt)}}
+		parent.Store().ReplaceInheritedAgents(edited)
+		parent.SendEvent(pubsub.Event[app.WorkspaceChanged]{Type: pubsub.UpdatedEvent})
+		return strings.HasPrefix(lh.app.Config().Agents["reviewer"].Description, "new-")
+	}, 5*time.Second, 20*time.Millisecond, "the edit never reached the running thread")
+	require.Greater(t, lh.app.Store().Version(), versionBefore, "the thread's runtime must be forced to recompile")
+	require.Contains(t, lh.app.Config().Agents[config.AgentCoder].AllowedTools, "reviewer")
 }
