@@ -238,7 +238,7 @@ func (a *testRunCompletionBrokerAdapter) Subscribe(ctx context.Context) <-chan p
 	go func() {
 		defer close(out)
 		for ev := range in {
-			out <- pubsub.Event[thread.RunComplete]{
+			converted := pubsub.Event[thread.RunComplete]{
 				Type: ev.Type,
 				Payload: thread.RunComplete{
 					SessionID: ev.Payload.SessionID,
@@ -248,6 +248,15 @@ func (a *testRunCompletionBrokerAdapter) Subscribe(ctx context.Context) <-chan p
 					Error:     ev.Payload.Error,
 					Cancelled: ev.Payload.Cancelled,
 				},
+			}
+			// Give up the send when the subscriber is gone: an event
+			// published just before ctx was cancelled otherwise parks this
+			// goroutine on `out` forever, which goleak reports as a leak
+			// at the end of an otherwise green run (seen in CI).
+			select {
+			case out <- converted:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()

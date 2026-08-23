@@ -143,6 +143,20 @@ type coordinator struct {
 	// deltas on the floor.
 	parentCostMu sync.Mutex
 
+	// subSessions counts the delegations currently running under each
+	// sub-agent session id, so IsSessionBusy can answer for them.
+	//
+	// A sub-agent runs on its own SessionAgent, and every SessionAgent
+	// carries its own dispatcher — so the child session's dispatch state
+	// lives in the delegate, not in currentAgent. Asking currentAgent
+	// alone therefore reports a mid-flight delegation as idle, and the
+	// UI asks exactly that when it loads a session: navigating into a
+	// sub-agent while it is working drew a spinner that never ticked,
+	// because the animation is only armed for a session the agent says
+	// is busy.
+	subSessionsMu sync.Mutex
+	subSessions   map[string]int
+
 	// threadsMu guards threads, which SetThreads may set after
 	// construction (thread managers are wired in post-bootstrap; see
 	// internal/app/app.go and internal/app/threadspawn/attach.go) and
@@ -1045,7 +1059,42 @@ func (c *coordinator) IsBusy() bool {
 }
 
 func (c *coordinator) IsSessionBusy(sessionID string) bool {
-	return c.currentAgent.IsSessionBusy(sessionID)
+	if c.currentAgent.IsSessionBusy(sessionID) {
+		return true
+	}
+	c.subSessionsMu.Lock()
+	defer c.subSessionsMu.Unlock()
+	return c.subSessions[sessionID] > 0
+}
+
+// markSubSessionBusy records that a delegation is running under
+// sessionID and returns the release to call when it finishes. The
+// release is idempotent, and the counter (rather than a set) keeps a
+// re-run of the same delegation — a retried tool call reuses the
+// session id, which is derived from the message and tool-call ids —
+// from clearing the flag out from under the run still in flight.
+func (c *coordinator) markSubSessionBusy(sessionID string) func() {
+	c.subSessionsMu.Lock()
+	if c.subSessions == nil {
+		c.subSessions = make(map[string]int)
+	}
+	c.subSessions[sessionID]++
+	c.subSessionsMu.Unlock()
+
+	var released bool
+	return func() {
+		if released {
+			return
+		}
+		released = true
+		c.subSessionsMu.Lock()
+		defer c.subSessionsMu.Unlock()
+		if c.subSessions[sessionID] <= 1 {
+			delete(c.subSessions, sessionID)
+			return
+		}
+		c.subSessions[sessionID]--
+	}
 }
 
 func (c *coordinator) Model() Model {

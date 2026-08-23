@@ -90,7 +90,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			OnAuthRefresh: c.makeAuthRefreshCallback(providerCfg, nil),
 		})
 	}
+	// Report the child session as busy for as long as it is running:
+	// nothing else can, since the delegate's dispatcher is not the one
+	// the coordinator asks. See markSubSessionBusy.
+	releaseBusy := c.markSubSessionBusy(session.ID)
 	result, err := run()
+	releaseBusy()
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
 	}
