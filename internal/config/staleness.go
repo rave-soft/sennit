@@ -163,8 +163,8 @@ func (s *ConfigStore) captureStalenessSnapshot(paths []string, preRead map[strin
 	}
 
 	// Also track workspace and global config paths if set
-	if s.workspacePath != "" {
-		abs, err := filepath.Abs(s.workspacePath)
+	if workspacePath := s.workspacePath.Get(); workspacePath != "" {
+		abs, err := filepath.Abs(workspacePath)
 		if err == nil {
 			seen[abs] = struct{}{}
 		}

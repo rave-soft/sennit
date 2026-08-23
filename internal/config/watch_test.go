@@ -261,7 +261,7 @@ func describeExternalChange(t *testing.T, s *ConfigStore) string {
 	return fmt.Sprintf(
 		"\n  staleness.Dirty=%v\n  workingDir=%q\n  workspacePath=%q\n  globalDataPath=%q"+
 			"\n  untracked candidates=%q\n  tracked=%q\n  agentFilesChanged=%v",
-		staleness.Dirty, s.workingDir, s.workspacePath, s.globalDataPath,
+		staleness.Dirty, s.workingDir, s.workspacePath.Get(), s.globalDataPath,
 		untracked, trackedList, s.agentFilesChanged())
 }
 

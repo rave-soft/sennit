@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/tidwall/gjson"
@@ -80,7 +81,14 @@ type ConfigStore struct {
 	workingDir     string
 	resolver       VariableResolver
 	globalDataPath string // ~/.local/share/sennit/sennit.json
-	workspacePath  string // .sennit/sennit.json
+	// workspacePath (.sennit/sennit.json) is read from paths that hold
+	// writeMu (updateLocked's staleness refresh) and from paths that hold
+	// nothing (ConfigPath's public callers), while reloadFromDisk
+	// reassigns it under writeMu. A plain field made the lock-free reads a
+	// data race, and taking writeMu inside ConfigPath would deadlock the
+	// callers that already hold it — so the value carries its own
+	// synchronisation instead.
+	workspacePath csync.Value[string]
 
 	// debugOverride is the process's --debug flag, recorded once by Load so
 	// that buildConfig can reapply it on every reload. Options.Debug is
@@ -354,10 +362,10 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 func (s *ConfigStore) ConfigPath(scope Scope) (string, error) {
 	switch scope {
 	case ScopeWorkspace:
-		if s.workspacePath == "" {
-			return "", ErrNoWorkspaceConfig
+		if path := s.workspacePath.Get(); path != "" {
+			return path, nil
 		}
-		return s.workspacePath, nil
+		return "", ErrNoWorkspaceConfig
 	default:
 		if s.globalDataPath == "" {
 			return "", ErrNoGlobalConfig
@@ -664,6 +672,11 @@ func (s *ConfigStore) isCatalogProvider(providerID string) bool {
 // returning nil when the provider is not catalog-known (e.g. a custom
 // OAuth provider the user configured by hand).
 func (s *ConfigStore) findKnownProvider(providerID string) *catwalk.Provider {
+	// Under the same lock KnownProviders takes: reloadFromDisk reassigns
+	// the slice, and every caller of this reaches it from outside writeMu
+	// (each one runs before the write it is preparing for takes the lock).
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
 	for _, p := range s.knownProviders {
 		if string(p.ID) == providerID {
 			return &p
@@ -758,13 +771,39 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		if err := s.withRefreshLock(providerID, persist); err != nil {
 			return fmt.Errorf("failed to save credentials to config file: %w", err)
 		}
+		s.reloadNewProvider(exists, providerID)
 		return nil
 	}
 
 	if err := persist(); err != nil {
 		return fmt.Errorf("failed to save api key to config file: %w", err)
 	}
+	s.reloadNewProvider(exists, providerID)
 	return nil
+}
+
+// reloadNewProvider re-runs the load pipeline after a credential write
+// that introduced a provider the config did not have before.
+//
+// The entry SetProviderAPIKey publishes for a new provider is assembled by
+// hand from the catalog record, which skips everything mergeCatalogProviders
+// would have added on top: default headers, the Vertex/Azure extra params,
+// the API-key template. Until something else happened to trigger a reload,
+// the provider ran without them — and nothing here did trigger one, despite
+// what the comment in workspace/custom_provider.go claims about every
+// mutator reloading. A provider that already existed needs none of this:
+// its entry came through the pipeline when it was loaded.
+//
+// Best-effort by design, exactly as the other autoReload sites are: the
+// credential is already on disk, and a reload that could not run leaves the
+// in-memory entry no worse than it was before this call.
+func (s *ConfigStore) reloadNewProvider(existed bool, providerID string) {
+	if existed {
+		return
+	}
+	if err := s.autoReload(context.Background()); err != nil {
+		slog.Warn("Failed to reload config after adding a provider", "provider", providerID, "error", err)
+	}
 }
 
 // PersistRefreshedToken writes a refreshed OAuth token's credential

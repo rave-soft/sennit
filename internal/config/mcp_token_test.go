@@ -49,7 +49,7 @@ func TestSetMCPToken_ProjectScopedServerPersistsToWorkspace(t *testing.T) {
 
 	// Persisted to the workspace config, as a token-only overlay, and NOT
 	// to the global data file.
-	workspaceData := requireFile(t, store.workspacePath)
+	workspaceData := requireFile(t, store.workspacePath.Get())
 	require.Equal(t, "project-token", gjson.GetBytes(workspaceData, "mcp.server.oauth_token.access_token").String())
 	// No bogus full declaration: the overlay carries only the token.
 	require.False(t, gjson.GetBytes(workspaceData, "mcp.server.type").Exists())
@@ -115,7 +115,7 @@ func TestSetMCPToken_GloballyDeclaredServerStillWritesGlobal(t *testing.T) {
 
 	require.Equal(t, "global-token", gjson.GetBytes(requireFile(t, store.globalDataPath), "mcp.server.oauth_token.access_token").String())
 	// No workspace file should have been created for this write.
-	_, statErr := os.Stat(store.workspacePath)
+	_, statErr := os.Stat(store.workspacePath.Get())
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 

@@ -77,6 +77,16 @@ func (s *ConfigStore) WatchForExternalChanges(ctx context.Context) {
 			}
 			if err := s.ReloadFromDisk(ctx); err != nil {
 				slog.Warn("Failed to reload config after external change", "error", err)
+				// Take the snapshot the failed reload never got to
+				// take. Without it the same broken file stays "changed"
+				// forever and this loop retries it on every tick — a
+				// sennitrc with a syntax error meant re-running the
+				// shell it configures, and the provider discovery HTTP
+				// behind it, every couple of seconds for the life of
+				// the process. The next genuine edit changes the file's
+				// stamp again, so a fixed config is still picked up.
+				s.CaptureStalenessSnapshot(lookupConfigs(s.workingDir))
+				s.captureAgentFileSnapshot()
 				continue
 			}
 			s.onExternalChangeMu.Lock()

@@ -113,7 +113,7 @@ func TestConfigStore_ConfigPath_WorkspaceReturnsPath(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{
-		workspacePath: "/some/workspace/.sennit/sennit.json",
+		workspacePath: *csync.NewValue("/some/workspace/.sennit/sennit.json"),
 	}
 
 	path, err := store.ConfigPath(ScopeWorkspace)
@@ -126,7 +126,7 @@ func TestConfigStore_ConfigPath_WorkspaceErrorsWhenEmpty(t *testing.T) {
 
 	store := &ConfigStore{
 		globalDataPath: "/some/global/sennit.json",
-		workspacePath:  "",
+		workspacePath:  *csync.NewValue(""),
 	}
 
 	_, err := store.ConfigPath(ScopeWorkspace)
@@ -140,7 +140,7 @@ func TestConfigStore_SetConfigField_WorkspaceScopeGuard(t *testing.T) {
 	store := &ConfigStore{
 		config:         &Config{},
 		globalDataPath: filepath.Join(t.TempDir(), "global.json"),
-		workspacePath:  "",
+		workspacePath:  *csync.NewValue(""),
 	}
 
 	err := store.SetConfigField(ScopeWorkspace, "foo", "bar")
@@ -172,7 +172,7 @@ func TestConfigStore_RemoveConfigField_WorkspaceScopeGuard(t *testing.T) {
 	store := &ConfigStore{
 		config:         &Config{},
 		globalDataPath: filepath.Join(t.TempDir(), "global.json"),
-		workspacePath:  "",
+		workspacePath:  *csync.NewValue(""),
 	}
 
 	err := store.RemoveConfigField(ScopeWorkspace, "foo")
@@ -186,7 +186,7 @@ func TestConfigStore_HasConfigField_WorkspaceScopeGuard(t *testing.T) {
 	store := &ConfigStore{
 		config:         &Config{},
 		globalDataPath: filepath.Join(t.TempDir(), "global.json"),
-		workspacePath:  "",
+		workspacePath:  *csync.NewValue(""),
 	}
 
 	has := store.HasConfigField(ScopeWorkspace, "foo")
@@ -405,7 +405,7 @@ func TestReloadFromDisk_WorkspaceMergeErrorKeepsPublishedConfig(t *testing.T) {
 	require.NoError(t, err)
 	published := store.Config()
 	require.True(t, published.Options.Debug)
-	require.Equal(t, workspacePath, store.workspacePath)
+	require.Equal(t, workspacePath, store.workspacePath.Get())
 
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":"invalid"}`), 0o644))
 	var logs strings.Builder
@@ -417,7 +417,7 @@ func TestReloadFromDisk_WorkspaceMergeErrorKeepsPublishedConfig(t *testing.T) {
 	require.True(t, published.Options.Debug)
 	require.False(t, store.Config().Options.Debug)
 	require.NotContains(t, store.LoadedPaths(), workspacePath)
-	require.Equal(t, workspacePath, store.workspacePath)
+	require.Equal(t, workspacePath, store.workspacePath.Get())
 	require.Contains(t, logs.String(), jsonPath(t, workspacePath))
 	require.Contains(t, logs.String(), "type mismatch")
 }

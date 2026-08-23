@@ -52,7 +52,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	// can race these field assignments; writeMu is taken further down only
 	// because updateLocked/SetupAgents document it as a precondition.
 	store.config = built.cfg
-	store.workspacePath = filepath.Join(built.cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
+	store.workspacePath.Set(filepath.Join(built.cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)))
 	store.loadedPaths = built.loadedPaths
 	store.knownProviders = built.providers
 	store.resolver = built.resolver

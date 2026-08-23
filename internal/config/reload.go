@@ -176,7 +176,7 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	s.loadedPaths = built.loadedPaths
 	s.resolver = built.resolver
 	s.knownProviders = built.providers
-	s.workspacePath = filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
+	s.workspacePath.Set(filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)))
 
 	// Rebuild staleness tracking. Track every discovered config path, not
 	// just the ones that loaded, so a config file created after this reload

@@ -30,9 +30,10 @@ type ConfigureCustomProviderParams struct {
 // rest of that interface.
 //
 // Discovery runs first, against params directly, before anything is
-// persisted. The result then decides how fields are ordered: every config
-// mutator here (SetConfigField, SetProviderAPIKey) triggers a full config
-// reload, and the loader itself auto-discovers models for any custom
+// persisted. The result then decides how fields are ordered: the config
+// mutators here reload (SetConfigField always; SetProviderAPIKey only when
+// it introduces a provider the config did not have — see
+// reloadNewProvider), and the loader itself auto-discovers models for any custom
 // provider whose models list is still empty once base_url lands (see
 // discoverCustomProviderModels in internal/config/load.go) — a provider
 // that ends that reload with zero models is dropped from the in-memory
