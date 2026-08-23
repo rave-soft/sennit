@@ -1,8 +1,6 @@
 package dialog
 
 import (
-	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -63,7 +61,13 @@ func (f *ModelsList) SetFilter(q string) {
 // SetSelected sets the selected item index. It overrides the base method to
 // skip non-model items.
 func (f *ModelsList) SetSelected(index int) {
-	if index < 0 || index >= f.Len() {
+	// index addresses the flat list (it is handed straight to
+	// f.List.SetSelected below), which also holds group headers and
+	// spacers, so it must be bounded by the flat list's length rather
+	// than f.Len() (the model-item count). Bounding by f.Len() rejected
+	// any index landing on a header or trailing spacer before the
+	// walk-forward loop below got a chance to skip past it.
+	if index < 0 || index >= f.List.Len() {
 		f.List.SetSelected(index)
 		return
 	}
@@ -76,7 +80,7 @@ func (f *ModelsList) SetSelected(index int) {
 		}
 		f.List.SetSelected(index + 1)
 		index++
-		if index >= f.Len() {
+		if index >= f.List.Len() {
 			return
 		}
 	}
@@ -190,63 +194,68 @@ func (f *ModelsList) VisibleItems() []list.Item {
 		return items
 	}
 
-	filterableItems := make([]list.FilterableItem, 0, f.Len())
-	for _, g := range f.groups {
+	// Build one search corpus for every item across every group, each
+	// prefixed with its own group's title, and run fuzzy.Find over it
+	// once. The previous version called fuzzy.Find per group over the
+	// full item set (with every other group's items re-prefixed and
+	// then discarded), so rendering N groups meant N full scans of all
+	// items; this makes it a single scan regardless of group count.
+	type itemInfo struct {
+		item      *ModelItem
+		groupIdx  int
+		prefixLen int
+	}
+	infos := make([]itemInfo, 0, f.Len())
+	names := make([]string, 0, f.Len())
+	for gi, g := range f.groups {
+		prefix := strings.ToLower(g.Title) + " "
 		for _, item := range g.Items {
-			filterableItems = append(filterableItems, item)
+			infos = append(infos, itemInfo{item: item, groupIdx: gi, prefixLen: len(prefix)})
+			names = append(names, prefix+item.Filter())
 		}
 	}
 
-	items := []list.Item{}
-	visitedGroups := map[int]bool{}
+	matches := fuzzy.Find(query, names)
 
-	// Reconstruct groups with matched items
-	// Find which group this item belongs to
-	for gi, g := range f.groups {
-		addedCount := 0
-		name := strings.ToLower(g.Title) + " "
-
-		names := make([]string, len(filterableItems))
-		for i, item := range filterableItems {
-			ms := item.(*ModelItem)
-			names[i] = fmt.Sprintf("%s%s", name, ms.Filter())
+	// Bucket the matches by group, keyed by the same index into infos/
+	// names used above, so each group can be rendered from its own slice
+	// without rescanning.
+	matchesByGroup := make(map[int][]fuzzy.Match, len(f.groups))
+	for _, match := range matches {
+		info := infos[match.Index]
+		idxs := []int{}
+		for _, idx := range match.MatchedIndexes {
+			// Adjusts removing provider name highlights
+			if idx < info.prefixLen {
+				continue
+			}
+			idxs = append(idxs, idx-info.prefixLen)
 		}
+		match.MatchedIndexes = idxs
+		matchesByGroup[info.groupIdx] = append(matchesByGroup[info.groupIdx], match)
+	}
 
-		matches := fuzzy.Find(query, names)
+	items := []list.Item{}
+	for gi, g := range f.groups {
+		groupMatches := matchesByGroup[gi]
+		if len(groupMatches) == 0 {
+			continue
+		}
 
 		// Sort by original index to preserve order within the group
-		sort.SliceStable(matches, func(i, j int) bool {
-			return matches[i].Index < matches[j].Index
+		sort.SliceStable(groupMatches, func(i, j int) bool {
+			return groupMatches[i].Index < groupMatches[j].Index
 		})
 
-		for _, match := range matches {
-			item := filterableItems[match.Index].(*ModelItem)
-			idxs := []int{}
-			for _, idx := range match.MatchedIndexes {
-				// Adjusts removing provider name highlights
-				if idx < len(name) {
-					continue
-				}
-				idxs = append(idxs, idx-len(name))
-			}
-
-			match.MatchedIndexes = idxs
-			if slices.Contains(g.Items, item) {
-				if !visitedGroups[gi] {
-					// Add section header
-					items = append(items, &g)
-					visitedGroups[gi] = true
-				}
-				// Add the matched item
-				item.SetMatch(match)
-				items = append(items, item)
-				addedCount++
-			}
+		// Add section header
+		items = append(items, &g)
+		for _, match := range groupMatches {
+			item := infos[match.Index].item
+			item.SetMatch(match)
+			items = append(items, item)
 		}
-		if addedCount > 0 {
-			// Add a space separator after each provider section
-			items = append(items, list.NewSpacerItem(1))
-		}
+		// Add a space separator after each provider section
+		items = append(items, list.NewSpacerItem(1))
 	}
 
 	return items

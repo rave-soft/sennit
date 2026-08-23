@@ -9,8 +9,9 @@ import (
 )
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
+	ws := m.com.Workspace
 	load := func() tea.Msg {
-		prompt, err := m.com.Workspace.GetMCPPrompt(clientID, promptID, arguments)
+		prompt, err := ws.GetMCPPrompt(clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
 			return util.ReportError(err)()
@@ -36,12 +37,14 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 }
 
 func (m *UI) handleStateChanged() tea.Cmd {
+	ws := m.com.Workspace
+	ctx := m.com.Context()
 	return m.updateAgentModelCmd(func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(m.com.Context()); err != nil {
+		if err := ws.UpdateAgentModel(ctx); err != nil {
 			return util.NewErrorMsg(err)
 		}
 		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
+			states: ws.MCPGetStates(),
 		}
 	})
 }
@@ -67,19 +70,28 @@ func handleMCPResourcesEvent(ctx context.Context, ws workspace.MCPController, na
 	}
 }
 
-func (m *UI) enableDockerMCP() tea.Msg {
+// enableDockerMCPCmd snapshots the workspace and context before returning
+// the closure: callers pass the result directly as a tea.Cmd, so it must
+// not read m off the Update goroutine when it runs.
+func (m *UI) enableDockerMCPCmd() tea.Cmd {
+	ws := m.com.Workspace
 	ctx := m.com.Context()
-	if err := m.com.Workspace.EnableDockerMCP(ctx); err != nil {
-		return util.ReportError(err)()
+	return func() tea.Msg {
+		if err := ws.EnableDockerMCP(ctx); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Docker MCP enabled and started successfully")
 	}
-
-	return util.NewInfoMsg("Docker MCP enabled and started successfully")
 }
 
-func (m *UI) disableDockerMCP() tea.Msg {
-	if err := m.com.Workspace.DisableDockerMCP(); err != nil {
-		return util.ReportError(err)()
+// disableDockerMCPCmd snapshots the workspace before returning the closure;
+// see enableDockerMCPCmd.
+func (m *UI) disableDockerMCPCmd() tea.Cmd {
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		if err := ws.DisableDockerMCP(); err != nil {
+			return util.ReportError(err)()
+		}
+		return util.NewInfoMsg("Docker MCP disabled successfully")
 	}
-
-	return util.NewInfoMsg("Docker MCP disabled successfully")
 }

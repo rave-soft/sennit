@@ -119,7 +119,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		case workspace.MCPEventStateChanged:
 			cmds = append(cmds, tea.Batch(
 				m.handleStateChanged(),
-				m.loadMCPrompts,
+				m.loadMCPromptsCmd(),
 			))
 			return cmds, true
 		case workspace.MCPEventPromptsListChanged:
@@ -136,15 +136,21 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 	return cmds, false
 }
 
-// loadMCPrompts loads the MCP prompts asynchronously.
-func (m *UI) loadMCPrompts() tea.Msg {
-	prompts, err := m.com.Workspace.ListMCPPrompts(m.com.Context())
-	if err != nil {
-		slog.Error("Failed to load MCP prompts", "error", err)
+// loadMCPromptsCmd loads the MCP prompts asynchronously. It snapshots the
+// workspace and context before returning the closure: callers pass the
+// result directly as a tea.Cmd, which runs off the Update goroutine.
+func (m *UI) loadMCPromptsCmd() tea.Cmd {
+	ws := m.com.Workspace
+	ctx := m.com.Context()
+	return func() tea.Msg {
+		prompts, err := ws.ListMCPPrompts(ctx)
+		if err != nil {
+			slog.Error("Failed to load MCP prompts", "error", err)
+		}
+		if prompts == nil {
+			// flag them as loaded even if there is none or an error
+			prompts = []commands.MCPPrompt{}
+		}
+		return mcpPromptsLoadedMsg{Prompts: prompts}
 	}
-	if prompts == nil {
-		// flag them as loaded even if there is none or an error
-		prompts = []commands.MCPPrompt{}
-	}
-	return mcpPromptsLoadedMsg{Prompts: prompts}
 }

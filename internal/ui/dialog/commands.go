@@ -186,6 +186,12 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds, ha
 }
 
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
+	// Draw is the only place this dialog ever learns its width: [Dialog]
+	// has no resize hook, and HandleMsg never sees a tea.WindowSizeMsg.
+	// This mutation only fires when the width actually changed, so
+	// repeated Draw calls for an unchanged area are idempotent — it is a
+	// lazy cache, not a per-frame side effect, the same way buttonRects
+	// gets captured at draw time in permissions.go and read back later.
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// A resize re-runs buildItems but the user didn't ask to change

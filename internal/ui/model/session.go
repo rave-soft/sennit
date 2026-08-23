@@ -477,9 +477,10 @@ func (m *UI) startLSPs(paths []string) tea.Cmd {
 	}
 
 	ctx := m.com.Context()
+	ws := m.com.Workspace
 	return func() tea.Msg {
 		for _, path := range paths {
-			m.com.Workspace.LSPStart(ctx, path)
+			ws.LSPStart(ctx, path)
 		}
 		return nil
 	}

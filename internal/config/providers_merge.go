@@ -18,14 +18,24 @@ import (
 // configureProviders is a thin wrapper around three phases that used to be
 // inlined here as one ~290-line function: mergeCatalogProviders (merge the
 // embedded catalog with user overrides, applying vendor special cases),
-// discoverCustomProviderModels (pure HTTP model discovery for custom
-// providers), and validateCustomProviders (apply discovery results and drop
-// invalid custom providers). Splitting the HTTP-performing phase out lets
-// callers (Load, reloadFromDisk) run it before taking writeMu — see those
-// call sites for why that matters.
+// discovery (pure HTTP model discovery for custom providers, itself split
+// into resolveDiscoveryRequests and runDiscoveryRequests — see below), and
+// validateCustomProviders (apply discovery results and drop invalid custom
+// providers).
+//
+// processEnvMu (see PushPopEnvOverrides) is taken and released twice here
+// rather than once around the whole call: everything on either side of the
+// HTTP round trip resolves values through resolver, which reads process env
+// on every call, so the SENNIT_ overrides must be in place for it. The
+// round trip itself (runDiscoveryRequests) never touches the resolver, so
+// it runs with the lock released — a slow discovery endpoint (bounded by a
+// 3s timeout per provider) would otherwise hold every other workspace's
+// config load hostage behind processEnvMu for that long. Splitting the
+// HTTP-performing phase out this way also lets callers (Load,
+// reloadFromDisk) run it before taking writeMu — see those call sites for
+// why that matters.
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	restore := PushPopEnvOverrides()
-	defer restore()
 
 	// When disable_default_providers is enabled, skip all default/embedded
 	// providers entirely. Users must fully specify any providers they want.
@@ -37,6 +47,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 
 	knownProviderNames, actions, err := c.mergeCatalogProviders(env, resolver, knownProviders)
 	if err != nil {
+		restore()
 		return err
 	}
 
@@ -46,7 +57,13 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	// discovered list (see resolveCustomProviderModels).
 	resolveCustomProviderModels(c.Providers, knownProviderNames, store.globalDataPath)
 
-	discoveryResults := discoverCustomProviderModels(ctx, c.Providers, knownProviderNames, resolver)
+	requests, discoveryResults := resolveDiscoveryRequests(c.Providers, knownProviderNames, resolver)
+	restore()
+
+	maps.Copy(discoveryResults, runDiscoveryRequests(ctx, requests))
+
+	restore = PushPopEnvOverrides()
+	defer restore()
 
 	err = c.validateCustomProviders(knownProviderNames, resolver, discoveryResults, store.globalDataPath)
 	if err != nil {
@@ -180,7 +197,7 @@ func applyPendingDiskActions(store *ConfigStore, actions []pendingDiskAction) {
 //
 // This is pure in-memory work plus resolver calls (which may run shell
 // commands for $(...) substitutions, but never network I/O) — no HTTP,
-// unlike discoverCustomProviderModels.
+// unlike runDiscoveryRequests.
 //
 // Per provider, this runs three passes, each factored out below so it reads
 // and tests on its own: mergeProviderOverride (user overrides onto the

@@ -140,7 +140,7 @@ func TestConfig_Load_SmallManualModelListIsNotMigrated(t *testing.T) {
 }
 
 // TestConfig_Load_DiscoverModelsFalseNeverDiscovers verifies the hard-stop
-// guard in discoverCustomProviderModels: an explicit discover_models: false
+// guard in resolveDiscoveryRequests: an explicit discover_models: false
 // must never trigger HTTP discovery, whether or not Models is empty. This
 // is what should have prevented the qwen36-local incident's junk gguf-path
 // "model" from ever reaching the config once the user set discover_models:

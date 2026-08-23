@@ -438,36 +438,61 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// applies for RenderContext dialogs.
 	helpView := shortHelpLine(&p.help, p.ShortHelp(), contentWidth)
 
+	// isSplitMode() is also read from the ToggleDiffMode key handler in
+	// HandleMsg, which — unlike Draw — never learns the dialog's current
+	// width, so the width-derived default has to be cached on the struct
+	// for it to read back. Draw is the only place that width is known,
+	// so this assignment cannot move there; it is idempotent for an
+	// unchanged width, the same lazy-cache shape as buttonRects below.
 	p.defaultDiffSplitMode = width >= splitModeMinWidth
 
-	// Pre-render content to measure its actual height, then fit the
-	// scrollable viewport into whatever height the fixed chrome leaves.
-	renderedContent := p.renderContent(contentWidth)
-	contentHeight := lipgloss.Height(renderedContent)
+	// A diff always reserves the scrollbar column below (see
+	// contentViewportHeight), so its final width is known without
+	// rendering anything first. Go straight to it instead of pre-rendering
+	// at contentWidth only to discard that render a few lines down — for
+	// diffs that pre-render used to cost a full reformat every dirty
+	// frame for a value contentViewportHeight never even reads.
+	var renderedContent string
+	var contentHeight int
+	viewportWidth := contentWidth
+	if p.hasDiffView() {
+		viewportWidth = contentWidth - 1
+		if p.viewport.Width() != viewportWidth {
+			p.viewportDirty = true
+		}
+		renderedContent = p.renderContent(viewportWidth)
+		contentHeight = lipgloss.Height(renderedContent)
+	} else {
+		// Non-diff content's need for a scrollbar depends on its
+		// rendered height, so measure it at the full width first.
+		renderedContent = p.renderContent(contentWidth)
+		contentHeight = lipgloss.Height(renderedContent)
+	}
 	fixedHeight := lipgloss.Height(header) + lipgloss.Height(buttons) +
 		lipgloss.Height(helpView) + dialogStyle.GetVerticalFrameSize() + layoutSpacingLines
 	availableHeight := p.contentViewportHeight(forceFullscreen, maxHeight, fixedHeight, contentHeight)
 
 	// Determine if scrollbar is needed.
 	needsScrollbar := p.hasDiffView() || contentHeight > availableHeight
-	viewportWidth := contentWidth
-	if needsScrollbar {
-		viewportWidth = contentWidth - 1 // Reserve space for scrollbar.
-	}
+	if !p.hasDiffView() {
+		if needsScrollbar {
+			viewportWidth = contentWidth - 1 // Reserve space for scrollbar.
+		}
 
-	// The pre-render above measured at contentWidth; the scrollbar then
-	// takes a column. Re-render at the viewport's actual width whenever
-	// the two differ and this content is going to be installed — the
-	// width-changed check alone missed the case that bites: toggling the
-	// diff split marks the content dirty without changing the viewport's
-	// width, so the wider render was set into the narrower viewport and
-	// every line overflowed by one column.
-	if p.viewport.Width() != viewportWidth {
-		// Mark content as dirty if width has changed.
-		p.viewportDirty = true
-		renderedContent = p.renderContent(viewportWidth)
-	} else if p.viewportDirty && viewportWidth != contentWidth {
-		renderedContent = p.renderContent(viewportWidth)
+		// The pre-render above measured at contentWidth; the scrollbar then
+		// takes a column. Re-render at the viewport's actual width whenever
+		// the two differ and this content is going to be installed — the
+		// width-changed check alone missed the case that bites: toggling the
+		// diff split marks the content dirty without changing the viewport's
+		// width, so the wider render was set into the narrower viewport and
+		// every line overflowed by one column.
+		if p.viewport.Width() != viewportWidth {
+			// Mark content as dirty if width has changed.
+			p.viewportDirty = true
+			renderedContent = p.renderContent(viewportWidth)
+		} else if p.viewportDirty && viewportWidth != contentWidth {
+			renderedContent = p.renderContent(viewportWidth)
+		}
 	}
 
 	var content string

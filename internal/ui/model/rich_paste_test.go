@@ -18,13 +18,20 @@ func TestRichPasteAttachesImagesAndInsertsText(t *testing.T) {
 	u := newSlashTestUI(t)
 	u.focus = uiFocusEditor
 
-	u.handleRichPaste(richPasteMsg{
+	cmd := u.handleRichPaste(richPasteMsg{
 		text: "look at this",
 		attachments: []message.Attachment{
 			{FileName: "paste_1.png", FilePath: "paste_1.png", MimeType: "image/png", Content: []byte("a")},
 			{FileName: "paste_2.png", FilePath: "paste_2.png", MimeType: "image/png", Content: []byte("b")},
 		},
 	})
+	require.NotNil(t, cmd)
+	// The text half now goes through handlePasteMsg's off-thread file-path
+	// check (pastedFilesExistAndValid stats each candidate word), so the
+	// textarea insert only lands once pasteFilesCheckedMsg is applied.
+	checked, ok := cmd().(pasteFilesCheckedMsg)
+	require.True(t, ok, "expected pasteFilesCheckedMsg, got %T", checked)
+	u.applyPasteFilesChecked(checked)
 
 	require.Equal(t, "look at this", u.editor.textarea.Value())
 	list := u.editor.attachments.List()

@@ -16,8 +16,9 @@ import (
 
 // markProjectInitializedCmd marks the current project as initialized in the config.
 func (m *UI) markProjectInitializedCmd() tea.Cmd {
+	ws := m.com.Workspace
 	return func() tea.Msg {
-		if err := m.com.Workspace.MarkProjectInitialized(); err != nil {
+		if err := ws.MarkProjectInitialized(); err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,
 				Msg:  fmt.Sprintf("Failed to mark project as initialized: %v", err),
@@ -54,8 +55,9 @@ func (m *UI) initializeProject() tea.Cmd {
 	if cmd := m.newSession(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	ws := m.com.Workspace
 	initialize := func() tea.Msg {
-		initPrompt, err := m.com.Workspace.InitializePrompt()
+		initPrompt, err := ws.InitializePrompt()
 		if err != nil {
 			return util.InfoMsg{
 				Type: util.InfoTypeError,

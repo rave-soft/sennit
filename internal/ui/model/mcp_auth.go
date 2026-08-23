@@ -30,8 +30,9 @@ func isAuthTimeout(err error) bool {
 // provided context. The dialog owns the context and cancels it if the
 // user closes the dialog.
 func (m *UI) authenticateMCP(ctx context.Context, name string) tea.Cmd {
+	ws := m.com.Workspace
 	return func() tea.Msg {
-		if err := m.com.Workspace.MCPAuthenticate(ctx, name); err != nil {
+		if err := ws.MCPAuthenticate(ctx, name); err != nil {
 			if isAuthTimeout(err) {
 				return dialog.ActionMCPAuthErrored{Name: name, Error: fmt.Errorf("authentication timed out")}
 			}
@@ -80,14 +81,15 @@ func (m *UI) openMCPAuthDialog() tea.Cmd {
 // Bubble Tea command so it doesn't block the UI.
 func (m *UI) checkPendingMCPAuth() tea.Cmd {
 	parentCtx := m.com.Context()
+	ws := m.com.Workspace
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 		defer cancel()
-		if err := m.com.Workspace.WaitForMCPInit(ctx); err != nil {
+		if err := ws.WaitForMCPInit(ctx); err != nil {
 			return nil
 		}
 		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
+			states: ws.MCPGetStates(),
 		}
 	}
 }

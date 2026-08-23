@@ -1,9 +1,14 @@
 package config
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/env"
@@ -59,4 +64,65 @@ func TestProcessEnvMu_SerializesPushPopAndApplyEnv(t *testing.T) {
 	require.True(t, bOK)
 	require.Contains(t, []string{"original-a", "applied-a"}, a)
 	require.Contains(t, []string{"original-b", "applied-b"}, b)
+}
+
+// TestConfigureProviders_DiscoveryDoesNotHoldProcessEnvMu is a regression
+// test for configureProviders holding processEnvMu across the whole call,
+// including runDiscoveryRequests' HTTP round trip. Two workspaces loading
+// concurrently (one process, one config store each — see processEnvMu's doc
+// comment) used to have the second one block behind the first one's slow
+// discovery endpoint for up to its full 3s timeout, just to push/pop its
+// own env overrides. Resolving what discovery needs to send before
+// releasing the lock (see resolveDiscoveryRequests) means the HTTP wait
+// itself never needs it.
+func TestConfigureProviders_DiscoveryDoesNotHoldProcessEnvMu(t *testing.T) {
+	const serverDelay = 200 * time.Millisecond
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sennit.json")
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(serverDelay)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "slow-model", "object": "model"}]}`))
+	}))
+	defer server.Close()
+
+	// A custom provider with no models auto-triggers discovery against the
+	// slow server on Load.
+	slowConfig := fmt.Sprintf(`{
+		"providers": {
+			"custom": {
+				"api_key": "test-key",
+				"base_url": %q
+			}
+		}
+	}`, server.URL+"/v1")
+	require.NoError(t, os.WriteFile(configPath, []byte(slowConfig), 0o600))
+
+	loadDone := make(chan error, 1)
+	go func() {
+		_, err := Load(dir, dir, false)
+		loadDone <- err
+	}()
+
+	// Give the Load goroutine time to get past mergeCatalogProviders and
+	// resolveDiscoveryRequests and into the HTTP wait, but stay well under
+	// serverDelay so we're observing mid-discovery state.
+	time.Sleep(50 * time.Millisecond)
+
+	start := time.Now()
+	restore := PushPopEnvOverrides()
+	elapsed := time.Since(start)
+	restore()
+
+	// A strict, small bound rather than "less than serverDelay": the whole
+	// point is that PushPopEnvOverrides returns essentially immediately,
+	// not merely sooner than the full 200ms round trip.
+	require.Less(t, elapsed, 50*time.Millisecond,
+		"PushPopEnvOverrides should not block for the discovery HTTP round trip")
+
+	require.NoError(t, <-loadDone)
 }

@@ -508,8 +508,9 @@ func (m *UI) loadInitialSession() tea.Cmd {
 		return m.requestSessionLoad(m.sess.initialSessionID)
 	case m.sess.continueLastSession:
 		ws := m.com.Workspace
+		ctx := m.com.Context()
 		return func() tea.Msg {
-			sessions, err := ws.ListSessions(m.com.Context())
+			sessions, err := ws.ListSessions(ctx)
 			if err != nil || len(sessions) == 0 {
 				return nil
 			}
@@ -534,13 +535,16 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
+	cfg := m.com.Config()
+	ws := m.com.Workspace
+	ctx := m.com.Context()
 	return func() tea.Msg {
-		customCommands, err := commands.LoadCustomCommands(m.com.Config())
+		customCommands, err := commands.LoadCustomCommands(cfg)
 		if err != nil {
 			slog.Error("Failed to load custom commands", "error", err)
 		}
 		// Append user-invocable skills as commands.
-		skillEntries, err := m.com.Workspace.ListSkills(m.com.Context())
+		skillEntries, err := ws.ListSkills(ctx)
 		if err != nil {
 			slog.Error("Failed to load skill commands", "error", err)
 		}
@@ -608,6 +612,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileCompletionMsg:
 		m.sess.fileReads = append(m.sess.fileReads, msg.absPath)
 		_ = m.editor.attachments.Update(msg.attachment)
+	case pasteFilesCheckedMsg:
+		if cmd := m.applyPasteFilesChecked(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case openEditorReadyMsg:
 		cmds = append(cmds, m.execEditorCmd(msg))
 	case DelayedClickMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
@@ -1056,8 +1064,10 @@ func (m *UI) setTheme(id string) tea.Cmd {
 // The name parameter is used as a fallback when the server does not
 // return one.
 func (m *UI) attachSkill(skillID, name string) tea.Cmd {
+	ws := m.com.Workspace
+	ctx := m.com.Context()
 	return func() tea.Msg {
-		content, result, err := m.com.Workspace.ReadSkill(m.com.Context(), skillID)
+		content, result, err := ws.ReadSkill(ctx, skillID)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
@@ -1148,9 +1158,11 @@ func (m *UI) newSession() tea.Cmd {
 	m.wsCache.promptQueueCache.set(nil)
 	m.editor.historyReset()
 	workspace.ResetAgentToolCache()
+	ws := m.com.Workspace
+	ctx := m.com.Context()
 	return tea.Batch(
 		func() tea.Msg {
-			m.com.Workspace.LSPStopAll(m.com.Context())
+			ws.LSPStopAll(ctx)
 			return nil
 		},
 		m.loadPromptHistory(),

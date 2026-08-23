@@ -116,6 +116,12 @@ func BridgeLocal(ctx context.Context, c *Client, src BridgeSources) {
 // events to the herdr client. If the channel closes (e.g., due to
 // broker reset), it re-subscribes after a brief delay. Runs until ctx
 // is cancelled.
+// resubscribeDelay is how long forward waits before re-subscribing to a
+// broker whose channel closed under it. Long enough that a broker closing
+// repeatedly cannot spin, short enough to be invisible to a person
+// watching events arrive.
+const resubscribeDelay = 100 * time.Millisecond
+
 func forward[T any](ctx context.Context, c *Client, subscribe func(context.Context) <-chan pubsub.Event[T]) {
 	for {
 		select {
@@ -136,9 +142,22 @@ func forward[T any](ctx context.Context, c *Client, subscribe func(context.Conte
 			case ev, ok := <-ch:
 				if !ok {
 					// Channel closed — broker may have reset.
-					// Cancel the sub-context and re-subscribe.
+					// Cancel the sub-context and re-subscribe,
+					// after a pause so a broker that keeps
+					// closing its channels cannot spin this
+					// loop. The pause watches ctx: an
+					// unconditional sleep held shutdown for
+					// its whole duration, and on a broker that
+					// closes at shutdown that is exactly when
+					// it is reached.
 					cancel()
-					time.Sleep(100 * time.Millisecond)
+					timer := time.NewTimer(resubscribeDelay)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+					}
 					break inner
 				}
 				if hev := Translate(ev); hev != nil {

@@ -111,10 +111,25 @@ type dispatcher struct {
 	// lifecycle that replaces the old dispatchMu map's permanent leak.
 	states *csync.Map[string, *sessionState]
 	// statesMu serializes creating, refcounting, and removing entries in
-	// states. It is only ever held briefly (map bookkeeping, no I/O) and
-	// is never held while acquiring a *sessionState's own mu or
-	// acceptedMu — see session's doc comment for the full ordering
-	// argument.
+	// states. It is only ever held briefly: map bookkeeping, no I/O.
+	//
+	// Lock order, where more than one is held at once: statesMu may be
+	// held while taking acceptedMu, and never the reverse. release is the
+	// one place that nests them — it decides under statesMu whether a
+	// state is idle, and the acceptedRuns/cancelMark half of that answer
+	// is acceptedMu's to give. The paths that hold acceptedMu on its own
+	// (BeginAccepted, endAccepted) release it before their deferred
+	// release runs, so they never nest the other way.
+	//
+	// A *sessionState's own mu is never taken while holding statesMu.
+	// release reads the state's fields directly instead, which is sound
+	// only because it does so at refs == 0 — see session's doc comment
+	// for that argument.
+	//
+	// This used to claim statesMu was never held while acquiring
+	// acceptedMu, which release plainly does. The order was right; the
+	// note about it was not, and it is the note a reader consults before
+	// adding a nesting of their own.
 	statesMu sync.Mutex
 
 	// acceptedMu guards every session's acceptedRuns/cancelMark fields

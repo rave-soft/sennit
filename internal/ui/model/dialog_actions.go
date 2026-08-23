@@ -214,8 +214,11 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
 			break
 		}
+		ws := m.com.Workspace
+		ctx := m.com.Context()
+		sessionID := msg.SessionID
 		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(m.com.Context(), msg.SessionID)
+			err := ws.AgentSummarize(ctx, sessionID)
 			// A cancellation is the user's own esc, not a failure worth a
 			// banner. Summarize reports it as an error deliberately — see
 			// its cancel branch, where reporting success instead let the
@@ -410,10 +413,10 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionEnableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, m.enableDockerMCP)
+		cmds = append(cmds, m.enableDockerMCPCmd())
 	case dialog.ActionDisableDockerMCP:
 		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, m.disableDockerMCP)
+		cmds = append(cmds, m.disableDockerMCPCmd())
 	case dialog.ActionOpenThreadsDashboard:
 		m.dialog.CloseDialog(dialog.CommandsID)
 		if !m.com.Workspace.SupportsThreads() {

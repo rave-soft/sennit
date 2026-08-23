@@ -256,9 +256,11 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
 
+	ws := m.com.Workspace
+	ctx := m.com.Context()
 	resourceCmd := func() tea.Msg {
-		contents, err := m.com.Workspace.ReadMCPResource(
-			m.com.Context(),
+		contents, err := ws.ReadMCPResource(
+			ctx,
 			item.MCPName,
 			item.URI,
 		)
@@ -378,42 +380,79 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 		}
 	}
 
-	// Attempt to parse pasted content as file paths. If possible to parse,
-	// all files exist and are valid, add as attachments.
-	// Otherwise, paste as text.
+	// Attempt to parse pasted content as file paths. Whether they all exist
+	// and are valid images decides the branch below, but checking that
+	// means stat'ing the filesystem — disk IO that must not run on the
+	// Update goroutine. When there are no candidate paths, no stat is
+	// needed and the usual text paste happens inline, same as always; only
+	// a non-empty candidate list detours through pasteFilesCheckedMsg
+	// (handled in Update) to do the stat off-thread.
 	paths := fsext.ParsePastedFiles(msg.Content)
-	allExistsAndValid := func() bool {
-		if len(paths) == 0 {
+	prevHeight := m.editor.textarea.Height()
+	if len(paths) == 0 {
+		cmd := m.updateTextareaWithPrevHeight(msg, prevHeight)
+		m.checkBangModeAfterPaste()
+		return cmd
+	}
+	return func() tea.Msg {
+		return pasteFilesCheckedMsg{
+			msg:        msg,
+			paths:      paths,
+			valid:      pastedFilesExistAndValid(paths),
+			prevHeight: prevHeight,
+		}
+	}
+}
+
+// pastedFilesExistAndValid reports whether paths is non-empty and every
+// entry exists on disk and has an allowed image extension. Runs off the
+// Update goroutine (os.Stat is disk IO) — see handlePasteMsg.
+func pastedFilesExistAndValid(paths []string) bool {
+	if len(paths) == 0 {
+		return false
+	}
+	for _, path := range paths {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
 			return false
 		}
-		for _, path := range paths {
-			if _, err := os.Stat(path); os.IsNotExist(err) {
-				return false
-			}
 
-			lowerPath := strings.ToLower(path)
-			isValid := false
-			for _, ext := range common.AllowedImageTypes {
-				if strings.HasSuffix(lowerPath, ext) {
-					isValid = true
-					break
-				}
-			}
-			if !isValid {
-				return false
+		lowerPath := strings.ToLower(path)
+		isValid := false
+		for _, ext := range common.AllowedImageTypes {
+			if strings.HasSuffix(lowerPath, ext) {
+				isValid = true
+				break
 			}
 		}
-		return true
+		if !isValid {
+			return false
+		}
 	}
-	if !allExistsAndValid() {
-		prevHeight := m.editor.textarea.Height()
-		cmd := m.updateTextareaWithPrevHeight(msg, prevHeight)
+	return true
+}
+
+// pasteFilesCheckedMsg carries the result of handlePasteMsg's off-loop
+// filesystem check for a pasted-file-paths paste. Update applies it via
+// applyPasteFilesChecked.
+type pasteFilesCheckedMsg struct {
+	msg        tea.PasteMsg
+	paths      []string
+	valid      bool
+	prevHeight int
+}
+
+// applyPasteFilesChecked finishes the paste handling that pastedFilesExistAndValid's
+// result decides between: pasting the content as text if the paths were not
+// all valid images, or attaching each path as a file otherwise.
+func (m *UI) applyPasteFilesChecked(msg pasteFilesCheckedMsg) tea.Cmd {
+	if !msg.valid {
+		cmd := m.updateTextareaWithPrevHeight(msg.msg, msg.prevHeight)
 		m.checkBangModeAfterPaste()
 		return cmd
 	}
 
 	var cmds []tea.Cmd
-	for _, path := range paths {
+	for _, path := range msg.paths {
 		cmds = append(cmds, m.handleFilePathPaste(path))
 	}
 	return tea.Batch(cmds...)
