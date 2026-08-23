@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -473,11 +475,24 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// substituteArgs replaces $ARG_NAME placeholders in content with actual values.
+// substituteArgs replaces $ARG_NAME placeholders in content with actual
+// values.
+//
+// Longest name first, and that ordering is the point: map iteration is
+// random, so with both $FILE and $FILE_PATH defined, whichever came out
+// first won — substituting $FILE into "$FILE_PATH" leaves "<value>_PATH",
+// and the same command produced different text on different runs. A
+// longer name can never be the prefix of a shorter one, so replacing in
+// that order is stable and correct.
 func substituteArgs(content string, args map[string]string) string {
-	for name, value := range args {
-		placeholder := "$" + name
-		content = strings.ReplaceAll(content, placeholder, value)
+	names := slices.SortedFunc(maps.Keys(args), func(a, b string) int {
+		if d := len(b) - len(a); d != 0 {
+			return d
+		}
+		return strings.Compare(a, b)
+	})
+	for _, name := range names {
+		content = strings.ReplaceAll(content, "$"+name, args[name])
 	}
 	return content
 }

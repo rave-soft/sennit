@@ -2,6 +2,8 @@ package dialog
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -232,7 +234,12 @@ func DoctorProblems(com *common.Common) []config.Problem {
 	problems := config.Doctor(com.Config())
 	problems = append(problems, config.EnvironmentProblems()...)
 	problems = append(problems, config.SkillProblems(skills.GetLatestStates())...)
-	for name, info := range com.Workspace.MCPGetStates() {
+	// Sorted, because map iteration is random and this list is rendered:
+	// the MCP problems shuffled on every open, so the row under the
+	// cursor was a different server each time.
+	states := com.Workspace.MCPGetStates()
+	for _, name := range slices.Sorted(maps.Keys(states)) {
+		info := states[name]
 		if info.State != mcptools.MCPStateError && info.State != mcptools.MCPStateNeedsAuth {
 			continue
 		}

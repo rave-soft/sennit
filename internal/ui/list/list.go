@@ -205,7 +205,7 @@ func (l *List) Len() int {
 // The result is cached and only recomputed when the item set or
 // viewport width changes.
 func (l *List) TotalHeight() int {
-	if l.totalHeightValid {
+	if l.totalHeightValid && !l.anyItemVersionMoved() {
 		return l.totalHeightCache
 	}
 	total := 0
@@ -222,6 +222,29 @@ func (l *List) TotalHeight() int {
 	l.totalHeightCache = total
 	l.totalHeightValid = true
 	return total
+}
+
+// anyItemVersionMoved reports whether any item has been mutated since its
+// cached entry was rendered.
+//
+// The height-change check inside renderItemEntry only fires for an item
+// that is actually rendered, and an item scrolled out of view is not: one
+// that grew off-screen (a message still streaming, say) left the cached
+// total describing the list as it was, so the scrollbar was drawn against
+// a length the content no longer had. This is a version comparison per
+// item, not a render — the O(N) rendering the cache exists to avoid still
+// only happens on the recompute this triggers.
+func (l *List) anyItemVersionMoved() bool {
+	for _, item := range l.items {
+		entry := l.cache[item]
+		if entry == nil {
+			return true
+		}
+		if entry.width != l.width || entry.version != item.Version() {
+			return true
+		}
+	}
+	return false
 }
 
 // Prewarm renders items in the range [from, from+batch) into the width

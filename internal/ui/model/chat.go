@@ -886,10 +886,21 @@ func (m *Chat) RemoveMessage(id string) {
 	// Remove from index map
 	delete(m.idInxMap, id)
 
-	// Rebuild index map for all items after the removed one
+	// Rebuild index map for all items after the removed one, nested tool
+	// ids included: those map to their container's index (see
+	// SetMessages), so a removal above them left every one of them
+	// pointing at the wrong row — which is what routes a nested tool's
+	// animation ticks and its clicks.
 	for i := idx; i < m.list.Len(); i++ {
-		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
-			m.idInxMap[item.ID()] = i
+		item, ok := m.list.ItemAt(i).(chat.MessageItem)
+		if !ok {
+			continue
+		}
+		m.idInxMap[item.ID()] = i
+		if container, ok := item.(chat.NestedToolContainer); ok {
+			for _, nested := range container.NestedTools() {
+				m.idInxMap[nested.ID()] = i
+			}
 		}
 	}
 

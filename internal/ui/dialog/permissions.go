@@ -788,11 +788,20 @@ func (p *Permissions) renderDefaultContent(width int) string {
 
 	// Pretty-print JSON params if available.
 	if p.permission.Params != nil {
+		// A struct rendered with %v comes out as Go's own dump —
+		// {map[] 0xc000...} — which tells the person nothing about what
+		// they are being asked to approve. Marshal it instead, and keep
+		// %v only as the last resort for something that will not encode.
 		var paramStr string
-		if str, ok := p.permission.Params.(string); ok {
-			paramStr = str
-		} else {
-			paramStr = fmt.Sprintf("%v", p.permission.Params)
+		switch v := p.permission.Params.(type) {
+		case string:
+			paramStr = v
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				paramStr = string(b)
+			} else {
+				paramStr = fmt.Sprintf("%v", v)
+			}
 		}
 
 		var parsed any

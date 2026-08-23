@@ -12,6 +12,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/pkg/browser"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/util"
 	mcptools "github.com/rave-soft/sennit/internal/workspace"
 )
 
@@ -123,8 +124,14 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 			case MCPAuthStatePrompt:
 				return m.startAuth()
 			case MCPAuthStateAuthenticating:
-				m.openAuthURL()
+				return m.openAuthURL()
 			case MCPAuthStateSuccess:
+				return m.advance()
+			case MCPAuthStateError:
+				// A failure on one server used to end the whole queue:
+				// esc was the only binding offered, and it closed the
+				// dialog with every server behind this one unvisited.
+				// Enter moves on to the next instead.
 				return m.advance()
 			}
 		case key.Matches(msg, m.keyMap.Copy):
@@ -200,12 +207,25 @@ func (m *MCPAuth) advance() Action {
 	return nil
 }
 
-func (m *MCPAuth) openAuthURL() {
-	if u := m.authURL(); u != "" {
-		if err := browser.OpenURL(u); err != nil {
-			m.err = fmt.Errorf("failed to open browser: %w", err)
-		}
+// openAuthURL launches the browser off the Update goroutine and reports a
+// failure to the person.
+//
+// Off-thread because browser.OpenURL execs a helper and waits for it,
+// which on a machine with no browser configured blocks the whole UI for
+// as long as that takes. And reported because it used to be stored in
+// m.err and never rendered from this state, so a browser that would not
+// open looked exactly like one that had.
+func (m *MCPAuth) openAuthURL() Action {
+	u := m.authURL()
+	if u == "" {
+		return nil
 	}
+	return ActionCmd{func() tea.Msg {
+		if err := browser.OpenURL(u); err != nil {
+			return util.ReportError(fmt.Errorf("failed to open browser: %w", err))()
+		}
+		return nil
+	}}
 }
 
 // authURL returns the browser authorization URL for the current server,
@@ -358,7 +378,13 @@ func (m *MCPAuth) ShortHelp() []key.Binding {
 			m.keyMap.Close,
 		}
 	case MCPAuthStateError:
-		return []key.Binding{m.keyMap.Close}
+		return []key.Binding{
+			key.NewBinding(
+				key.WithKeys("enter"),
+				key.WithHelp("enter", "next server"),
+			),
+			m.keyMap.Close,
+		}
 	default:
 		return []key.Binding{m.keyMap.Close}
 	}
