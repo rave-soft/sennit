@@ -863,7 +863,13 @@ func TestPermissionService_DelegationAttribution(t *testing.T) {
 
 	t.Run("request without a delegation ctx is published with the zero ref", func(t *testing.T) {
 		t.Parallel()
-		service := NewPermissionService("/tmp", false, nil)
+		// A real directory, not a hardcoded "/tmp": Request resolves a
+		// relative path against the working directory before publishing
+		// it, and "/tmp" is not absolute on Windows, so a literal would
+		// come back joined ("\tmp\tmp") and fail the Path assertion
+		// below for a reason that has nothing to do with delegation.
+		workingDir := t.TempDir()
+		service := NewPermissionService(workingDir, false, nil)
 		events := service.Subscribe(t.Context())
 
 		req := CreatePermissionRequest{
@@ -873,7 +879,7 @@ func TestPermissionService_DelegationAttribution(t *testing.T) {
 			Action:      "execute",
 			Description: "the visible turn's own command",
 			Params:      map[string]string{"cmd": "ls"},
-			Path:        "/tmp",
+			Path:        workingDir,
 		}
 
 		var (
