@@ -476,3 +476,60 @@ func TestHandleThreadAttachedSupersededRequestIsStale(t *testing.T) {
 	require.True(t, detached, "the superseded attachment's workspace must be released")
 	require.Equal(t, "s2", r.pendingAttach, "the latest request is still pending")
 }
+
+// TestChatWarmStepReachesMainScreenWhileThreadIsOpen is the regression
+// test for the main screen losing its chat scrollbar for good: a terminal
+// resize while a thread is drilled into still reaches the main UI
+// (handleWindowSize broadcasts it), which puts its chat into the
+// "resizing" state and arms a settle timer. That timer's chatWarmMsg used
+// to be routed by active screen — to the thread's UI — so the main chat
+// never left "resizing", the state in which it skips the scrollbar. The
+// warm step must come back to the UI that armed it, whichever screen is on
+// top.
+func TestChatWarmStepReachesMainScreenWhileThreadIsOpen(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	model, _ := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "x"})
+	r = model.(*Root)
+	model, cmd := r.Update(threadAttachedMsg{id: "s1", sessionID: "sess1", name: "x", ws: &rootTestWorkspace{}, detach: func() {}})
+	r = model.(*Root)
+	runBatchCmd(t, cmd)
+	require.Equal(t, screenThread, r.active)
+
+	r.main.state = uiChat
+	model, cmd = r.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	r = model.(*Root)
+	require.True(t, r.main.chat.resizing, "a resize must put the main chat into its resizing state")
+
+	// Pull the main chat's settle timer out of the returned cmd tree and
+	// feed its message back through Root, the way the runtime would.
+	var warm *chatWarmMsg
+	var walk func(c tea.Cmd)
+	walk = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		switch m := safeRunCmd(c).(type) {
+		case tea.BatchMsg:
+			for _, cc := range m {
+				walk(cc)
+			}
+		case chatWarmMsg:
+			if m.owner == r.main.chat {
+				mm := m
+				warm = &mm
+			}
+		}
+	}
+	walk(cmd)
+	require.NotNil(t, warm, "the main chat must have armed a warm step")
+
+	for i := 0; i < 8 && r.main.chat.resizing; i++ {
+		model, cmd = r.Update(*warm)
+		r = model.(*Root)
+		walk(cmd)
+	}
+	require.False(t, r.main.chat.resizing, "the main chat must leave resizing even while a thread is on top")
+	require.Equal(t, screenThread, r.active)
+}

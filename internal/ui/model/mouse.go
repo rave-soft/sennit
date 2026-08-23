@@ -309,7 +309,7 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				lines := int(msg.DeltaY)
 				if lines != 0 {
 					seq := m.sidebar.scrollByWheel(lines)
-					cmds = append(cmds, sidebarScrollbarHideCmd(seq))
+					cmds = append(cmds, sidebarScrollbarHideCmd(m, seq))
 				}
 				break
 			}

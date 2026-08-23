@@ -36,18 +36,25 @@ type DelayedClickMsg struct {
 
 // scrollbarHideMsg is sent to hide the scrollbar after the timeout period.
 type scrollbarHideMsg struct {
-	seq int // sequence number to ignore stale messages
+	// owner is the Chat whose timer produced this message. Root
+	// broadcasts it to every screen's UI (see Root.Update), so each
+	// handler must drop the ones that aren't its own — the main screen's
+	// chat and a drilled-in thread's chat run independent timers whose
+	// seqs can collide.
+	owner *Chat
+	seq   int // sequence number to ignore stale messages
 }
 
 // sidebarScrollbarHideMsg is sent to hide the sidebar scrollbar after timeout.
 type sidebarScrollbarHideMsg struct {
-	seq int
+	owner *UI // see scrollbarHideMsg.owner
+	seq   int
 }
 
 // scrollbarHideCmd returns a command that sends a scrollbarHideMsg after the timeout.
-func scrollbarHideCmd(seq int) tea.Cmd {
+func scrollbarHideCmd(owner *Chat, seq int) tea.Cmd {
 	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
-		return scrollbarHideMsg{seq: seq}
+		return scrollbarHideMsg{owner: owner, seq: seq}
 	})
 }
 
@@ -64,25 +71,26 @@ const warmBatchSize = 25
 // delayed until the resize settles; the rest fire immediately, one per
 // batch, so warming spreads across frames instead of blocking.
 type chatWarmMsg struct {
-	seq int // guards against stale timers from superseded resizes
+	owner *Chat // see scrollbarHideMsg.owner
+	seq   int   // guards against stale timers from superseded resizes
 }
 
 // chatWarmCmd schedules the next warming step after delay (zero fires as
 // soon as the runtime delivers it).
-func chatWarmCmd(seq int, delay time.Duration) tea.Cmd {
+func chatWarmCmd(owner *Chat, seq int, delay time.Duration) tea.Cmd {
 	if delay <= 0 {
-		return func() tea.Msg { return chatWarmMsg{seq: seq} }
+		return func() tea.Msg { return chatWarmMsg{owner: owner, seq: seq} }
 	}
 	return tea.Tick(delay, func(_ time.Time) tea.Msg {
-		return chatWarmMsg{seq: seq}
+		return chatWarmMsg{owner: owner, seq: seq}
 	})
 }
 
 // sidebarScrollbarHideCmd returns a command that sends a sidebarScrollbarHideMsg
 // after the timeout.
-func sidebarScrollbarHideCmd(seq int) tea.Cmd {
+func sidebarScrollbarHideCmd(owner *UI, seq int) tea.Cmd {
 	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
-		return sidebarScrollbarHideMsg{seq: seq}
+		return sidebarScrollbarHideMsg{owner: owner, seq: seq}
 	})
 }
 
@@ -385,7 +393,7 @@ func (m *Chat) BeginResize() tea.Cmd {
 	m.resizing = true
 	m.resizeSettleSeq++
 	m.warmNext = 0
-	return chatWarmCmd(m.resizeSettleSeq, resizeSettleDuration)
+	return chatWarmCmd(m, m.resizeSettleSeq, resizeSettleDuration)
 }
 
 // WarmStep renders the next batch of messages into the width cache and
@@ -402,7 +410,7 @@ func (m *Chat) WarmStep(seq int) (cmd tea.Cmd, done bool) {
 		m.resizing = false
 		return nil, true
 	}
-	return chatWarmCmd(seq, 0), false
+	return chatWarmCmd(m, seq, 0), false
 }
 
 // SetSize sets the size of the chat view port.
@@ -667,7 +675,7 @@ func (m *Chat) showScrollbar() tea.Cmd {
 	}
 	m.scrollbarVisible = true
 	m.scrollbarHideSeq++
-	return scrollbarHideCmd(m.scrollbarHideSeq)
+	return scrollbarHideCmd(m, m.scrollbarHideSeq)
 }
 
 // HideScrollbar hides the scrollbar if the sequence matches.

@@ -317,7 +317,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, cmd
 		}
 		switch msg.(type) {
-		case spinner.TickMsg, anim.StepMsg:
+		case spinner.TickMsg, anim.StepMsg, chatWarmMsg, scrollbarHideMsg, sidebarScrollbarHideMsg:
 			// Animation ticks keep themselves alive: the handler that
 			// receives one returns the command that schedules the next.
 			// Route one by active screen and the loop does not stall, it
@@ -329,6 +329,16 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// of the session. Both message types are id-stamped and every
 			// handler drops ticks that aren't its own, so broadcasting to
 			// each screen that owns an animation is safe.
+			//
+			// The chat's resize-settle warm step and the scrollbar hide
+			// timers are the same shape: a one-shot the main screen arms
+			// (handleWindowSize broadcasts WindowSizeMsg to it even while a
+			// thread is on top) that must come back to the UI that armed it.
+			// Routed by active screen, a warm step that fired while a
+			// thread was open went to the thread's UI, and the main chat
+			// stayed in its "resizing" state for good — the state in which
+			// it never draws its scrollbar. Each of these is owner-tagged,
+			// so broadcasting is safe.
 			var cmds []tea.Cmd
 			_, cmd := r.main.Update(msg)
 			cmds = append(cmds, cmd)

@@ -104,13 +104,17 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			}
 		}
 	case scrollbarHideMsg:
-		if m.state == uiChat {
+		// Root broadcasts these to every screen (see Root.Update); the
+		// owner tag says whose timer this is.
+		if m.state == uiChat && msg.owner == m.chat {
 			m.chat.HideScrollbar(msg.seq)
 		}
 	case chatWarmMsg:
 		// A resize has settled; warm the message cache one batch at a time
-		// so the scrollbar recompute never blocks the UI thread.
-		if m.state == uiChat {
+		// so the scrollbar recompute never blocks the UI thread. Owner
+		// check as for scrollbarHideMsg: warming the wrong chat would
+		// clear its resizing flag early, or never clear this one's.
+		if m.state == uiChat && msg.owner == m.chat {
 			cmd, done := m.chat.WarmStep(msg.seq)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -121,7 +125,7 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			}
 		}
 	case sidebarScrollbarHideMsg:
-		if msg.seq == m.sidebar.scrollbarSeq {
+		if msg.owner == m && msg.seq == m.sidebar.scrollbarSeq {
 			m.sidebar.hideScrollbar()
 		}
 	case spinner.TickMsg:
