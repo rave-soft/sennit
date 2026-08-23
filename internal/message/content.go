@@ -137,9 +137,34 @@ func (m ResponsesReasoningMetadata) MarshalJSON() ([]byte, error) {
 	}{Type: responsesReasoningMetadataType, Data: data})
 }
 
-// UnmarshalJSON is the counterpart to MarshalJSON above.
+// UnmarshalJSON is the counterpart to MarshalJSON above: it unwraps the
+// envelope that one writes. Reading the envelope's bytes as the plain
+// struct instead — what this used to do — decoded every field to its zero
+// value, so a reasoning item survived in memory and came back from SQLite
+// empty, and a turn resumed after a restart had no item id, no encrypted
+// content and no summary to resume from.
+//
+// The plain form is still accepted, and is what a value written by any
+// path that marshalled the struct directly (rather than through the
+// envelope) looks like. An envelope is recognised by its own two fields,
+// so a plain payload — which has neither — falls through to the direct
+// decode.
 func (m *ResponsesReasoningMetadata) UnmarshalJSON(data []byte) error {
 	type plain ResponsesReasoningMetadata
+
+	var envelope struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err == nil && envelope.Type != "" && len(envelope.Data) > 0 {
+		var p plain
+		if err := json.Unmarshal(envelope.Data, &p); err != nil {
+			return err
+		}
+		*m = ResponsesReasoningMetadata(p)
+		return nil
+	}
+
 	var p plain
 	if err := json.Unmarshal(data, &p); err != nil {
 		return err
@@ -381,16 +406,21 @@ func (m *Message) AppendContent(delta string) {
 	}
 }
 
+// AppendReasoningContent and the four writers below it all take a copy of
+// the existing part and change only the field they own, rather than
+// rebuilding one from a hand-written list. A rebuild silently drops
+// whatever the list forgets — and it forgot ThoughtSignature, ToolID and
+// ResponsesData, which is every piece of provider bookkeeping needed to
+// resume a reasoning item on the next turn. turn.go writes the Responses
+// metadata and a thought signature and then calls FinishThinking on the
+// same part, so the rebuild erased them before the first flush. This is
+// the mistake FinishToolCall's own comment warns about.
 func (m *Message) AppendReasoningContent(delta string) {
 	found := false
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
-			m.Parts[i] = ReasoningContent{
-				Thinking:   c.Thinking + delta,
-				Signature:  c.Signature,
-				StartedAt:  c.StartedAt,
-				FinishedAt: c.FinishedAt,
-			}
+			c.Thinking += delta
+			m.Parts[i] = c
 			found = true
 		}
 	}
@@ -405,14 +435,9 @@ func (m *Message) AppendReasoningContent(delta string) {
 func (m *Message) AppendThoughtSignature(signature string, toolCallID string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
-			m.Parts[i] = ReasoningContent{
-				Thinking:         c.Thinking,
-				ThoughtSignature: c.ThoughtSignature + signature,
-				ToolID:           toolCallID,
-				Signature:        c.Signature,
-				StartedAt:        c.StartedAt,
-				FinishedAt:       c.FinishedAt,
-			}
+			c.ThoughtSignature += signature
+			c.ToolID = toolCallID
+			m.Parts[i] = c
 			return
 		}
 	}
@@ -422,12 +447,8 @@ func (m *Message) AppendThoughtSignature(signature string, toolCallID string) {
 func (m *Message) AppendReasoningSignature(signature string) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
-			m.Parts[i] = ReasoningContent{
-				Thinking:   c.Thinking,
-				Signature:  c.Signature + signature,
-				StartedAt:  c.StartedAt,
-				FinishedAt: c.FinishedAt,
-			}
+			c.Signature += signature
+			m.Parts[i] = c
 			return
 		}
 	}
@@ -437,12 +458,8 @@ func (m *Message) AppendReasoningSignature(signature string) {
 func (m *Message) SetReasoningResponsesData(data *ResponsesReasoningMetadata) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
-			m.Parts[i] = ReasoningContent{
-				Thinking:      c.Thinking,
-				ResponsesData: data,
-				StartedAt:     c.StartedAt,
-				FinishedAt:    c.FinishedAt,
-			}
+			c.ResponsesData = data
+			m.Parts[i] = c
 			return
 		}
 	}
@@ -452,12 +469,8 @@ func (m *Message) FinishThinking() {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			if c.FinishedAt == 0 {
-				m.Parts[i] = ReasoningContent{
-					Thinking:   c.Thinking,
-					Signature:  c.Signature,
-					StartedAt:  c.StartedAt,
-					FinishedAt: time.Now().Unix(),
-				}
+				c.FinishedAt = time.Now().Unix()
+				m.Parts[i] = c
 			}
 			return
 		}

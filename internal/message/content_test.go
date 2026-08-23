@@ -32,16 +32,14 @@ func TestResponsesReasoningMetadataMarshalsWithLegacyEnvelope(t *testing.T) {
 		string(data))
 }
 
-// TestReasoningContentResponsesDataMarshalPartsQuirk pins a pre-existing
-// quirk this move deliberately reproduces rather than fixes: going through
-// MarshalParts/UnmarshalParts double-wraps ResponsesData (the outer
-// ReasoningContent's own JSON tag, then the type's own MarshalJSON
-// envelope), so decoding lands the enveloped bytes on a struct expecting
-// unwrapped fields and every field comes back zero. This is inherited
-// unchanged from fantasy/providers/openai.ResponsesReasoningMetadata (see
-// [ResponsesReasoningMetadata]'s doc comment) - not introduced by moving
-// the type into message. Fixing it is a separate change.
-func TestReasoningContentResponsesDataMarshalPartsQuirk(t *testing.T) {
+// TestReasoningContentResponsesDataSurvivesMarshalParts covers the round
+// trip a persisted reasoning item actually takes: ReasoningContent's own
+// JSON tag wraps ResponsesData, whose MarshalJSON adds the provider-data
+// envelope on top. Decoding used to read those enveloped bytes as the
+// plain struct, so every field came back zero — the item id, encrypted
+// content and summary needed to resume a reasoning item were gone the
+// moment the message left the database.
+func TestReasoningContentResponsesDataSurvivesMarshalParts(t *testing.T) {
 	t.Parallel()
 
 	encrypted := "cipher"
@@ -66,7 +64,20 @@ func TestReasoningContentResponsesDataMarshalPartsQuirk(t *testing.T) {
 	reasoning, ok := decoded[0].(ReasoningContent)
 	require.True(t, ok)
 	require.NotNil(t, reasoning.ResponsesData)
-	require.Empty(t, reasoning.ResponsesData.ItemID, "pre-existing quirk: the envelope round trip zeroes this field")
+	require.Equal(t, "item_1", reasoning.ResponsesData.ItemID)
+	require.Equal(t, &encrypted, reasoning.ResponsesData.EncryptedContent)
+	require.Equal(t, []string{"line"}, reasoning.ResponsesData.Summary)
+}
+
+// TestResponsesReasoningMetadataAcceptsThePlainForm keeps the fallback
+// honest: a payload written without the envelope still decodes.
+func TestResponsesReasoningMetadataAcceptsThePlainForm(t *testing.T) {
+	t.Parallel()
+
+	var got ResponsesReasoningMetadata
+	require.NoError(t, got.UnmarshalJSON([]byte(`{"item_id":"item_2","summary":["s"]}`)))
+	require.Equal(t, "item_2", got.ItemID)
+	require.Equal(t, []string{"s"}, got.Summary)
 }
 
 func makeTestAttachments(n int, contentSize int) []Attachment {
