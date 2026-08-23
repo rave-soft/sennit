@@ -1,18 +1,176 @@
 package config
 
+// This file holds the provider entry as it appears in the config file
+// (ProviderConfig, the fields sennitrc/sennit.json can set for a provider)
+// plus the per-vendor setup that turns one into something usable: filling in
+// the headers GitHub Copilot and Codex expect, converting to catwalk's
+// provider shape, and probing a provider's credentials over the network.
+
 import (
 	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
+	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/oauth/copilot"
 )
+
+type ProviderConfig struct {
+	// The provider's id.
+	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
+	// The provider's name, used for display purposes.
+	Name string `json:"name,omitempty" jsonschema:"description=Human-readable name for the provider,example=OpenAI"`
+	// The provider's API endpoint.
+	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
+	// The provider's proxy URL (http/https/socks5). The value runs
+	// through shell expansion at config-load time, the same as api_key
+	// and extra_headers, so $VAR and $(cmd) work. Empty means no
+	// per-provider proxy override — requests fall back to the standard
+	// HTTP_PROXY/HTTPS_PROXY/NO_PROXY environment variables via net/http's
+	// default proxy resolution.
+	ProxyURL string `json:"proxy_url,omitempty" jsonschema:"description=Proxy URL for requests to this provider (http/https/socks5); set to \"none\" to force a direct connection even if HTTP_PROXY/HTTPS_PROXY are set in the environment,example=http://localhost:8080"`
+	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
+	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
+	// The provider's API key.
+	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
+	// The original API key template before resolution (for re-resolution on auth errors).
+	APIKeyTemplate string `json:"-"`
+	// OAuthToken for providers that use OAuth2 authentication.
+	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
+	// Marks the provider as disabled.
+	Disable bool `json:"disable,omitempty" jsonschema:"description=Whether this provider is disabled,default=false"`
+
+	// Custom system prompt prefix.
+	SystemPromptPrefix string `json:"system_prompt_prefix,omitempty" jsonschema:"description=Custom prefix to add to system prompts for this provider"`
+
+	// Extra headers to send with each request to the provider. Values
+	// run through shell expansion at config-load time, so $VAR and
+	// $(cmd) work the same way they do in MCP headers. A header whose
+	// value resolves to the empty string (unset bare $VAR under
+	// lenient nounset, $(echo), or literal "") is omitted from the
+	// outgoing request rather than sent as "Header:".
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty" jsonschema:"description=Additional HTTP headers to send with requests"`
+	// ExtraBody is merged verbatim into OpenAI-compatible request
+	// bodies. String values are NOT shell-expanded: this is a plain
+	// JSON passthrough so that arbitrary provider-extension fields
+	// (numbers, nested objects, booleans) round-trip without a
+	// recursive walker guessing at intent. If you need an env-var-
+	// driven value at request time, put it in extra_headers, or in
+	// the provider's top-level api_key / base_url, all of which do
+	// expand.
+	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies\\, only works with openai-compatible providers"`
+
+	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
+
+	// Used to pass extra parameters to the provider.
+	ExtraParams map[string]string `json:"-"`
+
+	// AWSAuthRefresh is a shell command run when Bedrock returns a
+	// credential error. Output is discarded to avoid corrupting the TUI.
+	AWSAuthRefresh string `json:"aws_auth_refresh,omitempty" jsonschema:"description=Shell command to run when AWS credentials expire (Bedrock only)."`
+
+	// Skip cost accumulation for this provider when using subscription or flat rate billing.
+	FlatRate bool `json:"flat_rate,omitempty" jsonschema:"description=Flat-rate mode for this provider"`
+
+	// AutoDiscoverModels controls model discovery via /v1/models endpoint.
+	// When Models is empty and this is nil or true, Sennit auto-discovers
+	// models. When true and Models is non-empty, discovered models are
+	// merged in (user-specified models take precedence). When false,
+	// only explicitly listed models are used.
+	AutoDiscoverModels *bool `json:"discover_models,omitempty" jsonschema:"description=Auto-discover models from /v1/models endpoint. When true with existing models they are merged (yours win),default=true"`
+
+	// The provider models
+	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+
+	// ModelsSource records where Models came from for this load: the
+	// user's own config, or the global model-discovery cache (see
+	// internal/config/modelcache.go). It is in-memory bookkeeping only,
+	// never serialized — set by resolveCustomProviderModels/
+	// validateCustomProviders in load.go, and read by `sennit models
+	// refresh` (internal/cmd/models.go) to refuse silently overwriting a
+	// manually curated list with (possibly junk) discovery output.
+	ModelsSource ModelsSource `json:"-"`
+}
+
+// ModelsSource identifies where a custom provider's Models list came from.
+type ModelsSource string
+
+const (
+	// ModelsSourceConfig means Models was written by hand in sennitrc/
+	// sennit.json — refresh must never overwrite it silently.
+	ModelsSourceConfig ModelsSource = "config"
+	// ModelsSourceCache means Models came from discovery, either just now
+	// or from a previous load via the global model-discovery cache.
+	ModelsSourceCache ModelsSource = "cache"
+)
+
+// ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
+func (c *ProviderConfig) ToProvider() catwalk.Provider {
+	// Convert config provider to provider.Provider format
+	provider := catwalk.Provider{
+		Name:   c.Name,
+		ID:     catwalk.InferenceProvider(c.ID),
+		Models: make([]catwalk.Model, len(c.Models)),
+	}
+
+	// Convert models
+	for i, model := range c.Models {
+		provider.Models[i] = catwalk.Model{
+			ID:                     model.ID,
+			Name:                   model.Name,
+			CostPer1MIn:            model.CostPer1MIn,
+			CostPer1MOut:           model.CostPer1MOut,
+			CostPer1MInCached:      model.CostPer1MInCached,
+			CostPer1MOutCached:     model.CostPer1MOutCached,
+			ContextWindow:          model.ContextWindow,
+			DefaultMaxTokens:       model.DefaultMaxTokens,
+			CanReason:              model.CanReason,
+			ReasoningLevels:        model.ReasoningLevels,
+			DefaultReasoningEffort: model.DefaultReasoningEffort,
+			SupportsImages:         model.SupportsImages,
+		}
+	}
+
+	return provider
+}
+
+// SetupGitHubCopilot adds the headers Copilot requires to the provider.
+//
+// The map is created when absent: a provider declared without extra_headers
+// decodes with a nil map, and copying into a nil map panics. That is reachable
+// from the OAuth refresh path, where a Copilot entry holding only a token would
+// take down the process.
+func (c *ProviderConfig) SetupGitHubCopilot() {
+	if c.ExtraHeaders == nil {
+		c.ExtraHeaders = make(map[string]string)
+	}
+	maps.Copy(c.ExtraHeaders, copilot.Headers())
+}
+
+// SetupCodex adds the headers the Codex backend requires to the provider.
+//
+// The account header is derived from the access token rather than stored:
+// the token is a JWT that names the account it was issued for, so a token
+// refresh or an account switch carries the right value automatically, and
+// nothing extra has to be kept in sync on disk.
+func (c *ProviderConfig) SetupCodex() {
+	if c.ExtraHeaders == nil {
+		c.ExtraHeaders = make(map[string]string)
+	}
+	accountID := codex.AccountID(c.APIKey)
+	if accountID == "" && c.OAuthToken != nil {
+		accountID = codex.AccountID(c.OAuthToken.AccessToken)
+	}
+	maps.Copy(c.ExtraHeaders, codex.Headers(accountID))
+}
 
 // Providers returns the provider catalog for cfg.
 //

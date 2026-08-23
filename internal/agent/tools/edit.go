@@ -344,54 +344,35 @@ func loadExistingFile(edit editContext, filePath, sessionAction string) (existin
 	return existingFileResult{sessionID: sessionID, oldContent: oldContent, isCrlf: isCrlf}, nil
 }
 
-func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	existing, err := loadExistingFile(edit, filePath, "deleting content")
-	if err != nil {
-		var stop *mutationStop
-		if errors.As(err, &stop) {
-			return stop.Response, nil
-		}
-		return fantasy.ToolResponse{}, err
-	}
-	sessionID, oldContent, isCrlf := existing.sessionID, existing.oldContent, existing.isCrlf
-
-	newContent, whitespaceCorrected, err := findAndReplace(oldContent, oldString, "", replaceAll)
-	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
-	}
-	if resp, ok := requireReadCoverage(edit, sessionID, filePath, oldContent, newContent); !ok {
-		return resp, nil
-	}
-
-	writeContent := newContent
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
-
-	return applyFileMutation(fileMutationRequest{
-		editContext:    edit,
-		call:           call,
-		filePath:       filePath,
-		sessionID:      sessionID,
-		oldContent:     oldContent,
-		diffContent:    newContent,
-		writeContent:   writeContent,
-		toolName:       EditToolName,
-		description:    fmt.Sprintf("Delete content from file %s", filePath),
-		successMessage: withWhitespaceNote("Content deleted from file: "+filePath, whitespaceCorrected),
-		permParams: EditPermissionsParams{
-			FilePath:   filePath,
-			OldContent: oldContent,
-			NewContent: newContent,
-		},
-		metadata: func(content, _ string, additions, removals int) any {
-			return EditResponseMetadata{OldContent: oldContent, NewContent: content, Additions: additions, Removals: removals}
-		},
-	})
+// stringMutation is what deleteContent and replaceContent differ by. The
+// fields are named rather than passed positionally because two of them are
+// booleans: this is the write path, and a transposed pair would silently
+// turn a rejected no-op edit into an accepted one, or a whole-file replace
+// into a first-match one.
+type stringMutation struct {
+	filePath string
+	// readAction names this operation in the "read the file first" error
+	// loadExistingFile raises.
+	readAction string
+	oldString  string
+	newString  string
+	replaceAll bool
+	// rejectNoOp refuses an edit that would leave the file unchanged.
+	// Only replaceContent does: for a delete, "the text is not there" is
+	// already reported by findAndReplace.
+	rejectNoOp     bool
+	description    string
+	successMessage string
 }
 
-func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	existing, err := loadExistingFile(edit, filePath, "editing a file")
+// applyStringMutation holds the body shared by deleteContent and
+// replaceContent: load the file, run findAndReplace, enforce the
+// read-before-edit coverage check, and hand the result to applyFileMutation.
+// The two differed only in the fields of [stringMutation], so the plumbing
+// around them is written once.
+func applyStringMutation(edit editContext, m stringMutation, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	filePath := m.filePath
+	existing, err := loadExistingFile(edit, filePath, m.readAction)
 	if err != nil {
 		var stop *mutationStop
 		if errors.As(err, &stop) {
@@ -401,11 +382,11 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 	}
 	sessionID, oldContent, isCrlf := existing.sessionID, existing.oldContent, existing.isCrlf
 
-	newContent, whitespaceCorrected, err := findAndReplace(oldContent, oldString, newString, replaceAll)
+	newContent, whitespaceCorrected, err := findAndReplace(oldContent, m.oldString, m.newString, m.replaceAll)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
-	if newContent == oldContent {
+	if m.rejectNoOp && newContent == oldContent {
 		return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
 	}
 	if resp, ok := requireReadCoverage(edit, sessionID, filePath, oldContent, newContent); !ok {
@@ -426,8 +407,8 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		diffContent:    newContent,
 		writeContent:   writeContent,
 		toolName:       EditToolName,
-		description:    fmt.Sprintf("Replace content in file %s", filePath),
-		successMessage: withWhitespaceNote("Content replaced in file: "+filePath, whitespaceCorrected),
+		description:    m.description,
+		successMessage: withWhitespaceNote(m.successMessage, whitespaceCorrected),
 		permParams: EditPermissionsParams{
 			FilePath:   filePath,
 			OldContent: oldContent,
@@ -437,4 +418,28 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 			return EditResponseMetadata{OldContent: oldContent, NewContent: content, Additions: additions, Removals: removals}
 		},
 	})
+}
+
+func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return applyStringMutation(edit, stringMutation{
+		filePath:       filePath,
+		readAction:     "deleting content",
+		oldString:      oldString,
+		replaceAll:     replaceAll,
+		description:    fmt.Sprintf("Delete content from file %s", filePath),
+		successMessage: "Content deleted from file: " + filePath,
+	}, call)
+}
+
+func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return applyStringMutation(edit, stringMutation{
+		filePath:       filePath,
+		readAction:     "editing a file",
+		oldString:      oldString,
+		newString:      newString,
+		replaceAll:     replaceAll,
+		rejectNoOp:     true,
+		description:    fmt.Sprintf("Replace content in file %s", filePath),
+		successMessage: "Content replaced in file: " + filePath,
+	}, call)
 }

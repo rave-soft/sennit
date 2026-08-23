@@ -12,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
-	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -150,7 +149,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 			case "markdown":
 				if strings.Contains(contentType, "text/html") {
-					markdown, err := convertHTMLToMarkdown(content)
+					markdown, err := ConvertHTMLToMarkdown(content)
 					if err != nil {
 						return fantasy.NewTextErrorResponse("Failed to convert HTML to Markdown: " + err.Error()), nil
 					}
@@ -190,7 +189,13 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 // truncateToRuneBoundary truncates s to at most n bytes, backing off to the
 // nearest earlier rune boundary so a multi-byte UTF-8 rune straddling the
 // cut point is dropped whole rather than split into an invalid trailing
-// fragment.
+// fragment. This is the primitive both the fetch tool (here, for its raw
+// byte cap) and the Tavily search backend (search_backend.go, for its
+// per-result content budget) need; search_backend.go used to carry its own
+// near-identical truncateUTF8 that also appended a truncation marker, but
+// the marker is caller-specific — fetch.go adds its own byte-count message,
+// and the Tavily caller now adds its own "content truncated" marker inline —
+// so only the shared cutting logic lives here.
 func truncateToRuneBoundary(s string, n int) string {
 	if n >= len(s) {
 		return s
@@ -201,6 +206,8 @@ func truncateToRuneBoundary(s string, n int) string {
 	return s[:n]
 }
 
+// extractTextFromHTML pulls the plain text of the document body, used for
+// the fetch tool's "text" format.
 func extractTextFromHTML(html string) (string, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
@@ -211,15 +218,4 @@ func extractTextFromHTML(html string) (string, error) {
 	text = strings.Join(strings.Fields(text), " ")
 
 	return text, nil
-}
-
-func convertHTMLToMarkdown(html string) (string, error) {
-	converter := md.NewConverter("", true, nil)
-
-	markdown, err := converter.ConvertString(html)
-	if err != nil {
-		return "", err
-	}
-
-	return markdown, nil
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"unicode/utf8"
 
 	"github.com/rave-soft/sennit/internal/config"
 )
@@ -116,7 +115,18 @@ func (b *tavilyBackend) Search(ctx context.Context, query string, maxResults int
 	results := make([]SearchResult, 0, len(parsed.Results))
 	contentBudget := tavilyMaxContentTotal
 	for i, r := range parsed.Results {
-		content := truncateUTF8(r.RawContent, min(tavilyMaxContentPerResult, contentBudget))
+		// A budget of zero or less means nothing is left to spend on this
+		// result (mirrors the old truncateUTF8's limit<=0 special case:
+		// drop the content rather than cut it to an empty, marker-only
+		// string).
+		limit := min(tavilyMaxContentPerResult, contentBudget)
+		content := ""
+		if limit > 0 {
+			content = truncateToRuneBoundary(r.RawContent, limit)
+			if len(content) < len(r.RawContent) {
+				content += "\n… [content truncated]"
+			}
+		}
 		contentBudget -= len(content)
 		results = append(results, SearchResult{
 			Title:    r.Title,
@@ -127,23 +137,6 @@ func (b *tavilyBackend) Search(ctx context.Context, query string, maxResults int
 		})
 	}
 	return results, nil
-}
-
-// truncateUTF8 cuts s to at most limit bytes without splitting a UTF-8
-// sequence, appending a truncation marker when anything was dropped. A
-// limit of zero (exhausted budget) drops the content entirely.
-func truncateUTF8(s string, limit int) string {
-	if len(s) <= limit {
-		return s
-	}
-	if limit <= 0 {
-		return ""
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "\n… [content truncated]"
 }
 
 // NewSearchBackend builds the SearchBackend selected by opts. A zero-value

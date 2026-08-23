@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -133,17 +132,6 @@ func TestTavilyBackendContentBudget(t *testing.T) {
 	for _, r := range results {
 		require.Equal(t, "snippet", r.Snippet)
 	}
-}
-
-// TestTruncateUTF8 verifies truncation never splits a multi-byte rune.
-func TestTruncateUTF8(t *testing.T) {
-	require.Equal(t, "short", truncateUTF8("short", 10))
-	require.Equal(t, "", truncateUTF8("anything", 0))
-
-	s := strings.Repeat("я", 10) // 2 bytes per rune
-	cut := truncateUTF8(s, 5)
-	require.True(t, utf8.ValidString(cut))
-	require.Equal(t, strings.Repeat("я", 2)+"\n… [content truncated]", cut)
 }
 
 // TestTavilyBackendAuthError verifies a 401/403 from the API surfaces a

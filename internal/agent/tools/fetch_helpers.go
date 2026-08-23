@@ -179,7 +179,11 @@ func cleanupMarkdown(content string) string {
 	return content
 }
 
-// ConvertHTMLToMarkdown converts HTML content to markdown format.
+// ConvertHTMLToMarkdown converts HTML content to markdown format. It is
+// exported and shared by both the fetch and web_fetch tools (the latter via
+// FetchURLAndConvert, also used by the agentic_fetch sub-agent) — fetch.go
+// used to carry an unexported near-identical copy for its own "markdown"
+// format; that copy is gone and this is now the one implementation.
 func ConvertHTMLToMarkdown(htmlContent string) (string, error) {
 	converter := md.NewConverter("", true, nil)
 
