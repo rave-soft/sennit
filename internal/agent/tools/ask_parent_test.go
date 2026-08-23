@@ -40,6 +40,12 @@ func runAskParentTool(t *testing.T, ctx context.Context, messenger *fakeParentMe
 	return resp
 }
 
+func TestAskParentTool_IsSequential(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, NewAskParentTool(&fakeParentMessenger{}).Info().Parallel)
+}
+
 func TestAskParentTool_SendsMessageWithCallersSessionID(t *testing.T) {
 	t.Parallel()
 

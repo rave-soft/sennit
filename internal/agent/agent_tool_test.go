@@ -97,6 +97,18 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
 // without waiting for any subagent work: the fake TaskManager never runs
 // anything, yet the call succeeds and reports the task's id, session, and
 // status.
+func TestCoordinatorBuiltToolParallelFlags(t *testing.T) {
+	coord := newAgentToolTestCoordinator(t, nil)
+
+	agentTool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	require.NoError(t, err)
+	require.True(t, agentTool.Info().Parallel, "agent must retain its runtime parallel flag")
+
+	agenticFetchTool, err := coord.agenticFetchTool(t.Context(), nil)
+	require.NoError(t, err)
+	require.True(t, agenticFetchTool.Info().Parallel, "agentic_fetch must retain its runtime parallel flag")
+}
+
 func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)

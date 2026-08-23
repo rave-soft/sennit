@@ -76,7 +76,7 @@ type SennitLogsParams struct {
 }
 
 func NewSennitLogsTool(logFile string) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		SennitLogsToolName,
 		sennitLogsDescription(),
 		func(ctx context.Context, params SennitLogsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

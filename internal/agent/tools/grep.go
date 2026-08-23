@@ -120,7 +120,7 @@ func escapeRegexPattern(pattern string) string {
 }
 
 func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		GrepToolName,
 		grepDescription(),
 		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

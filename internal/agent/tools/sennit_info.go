@@ -46,7 +46,7 @@ func NewSennitInfoTool(
 	skillTracker *skills.Tracker,
 	skillStates []*skills.SkillState,
 ) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		SennitInfoToolName,
 		sennitInfoDescription,
 		func(ctx context.Context, params SennitInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {

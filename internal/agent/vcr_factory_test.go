@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -172,10 +174,157 @@ func normalizeForMatch(body any) any {
 		}
 		out["messages"] = normalized
 	}
+	if messages, ok := out["messages"].([]any); ok {
+		out["messages"] = normalizeToolBatchOrder(messages)
+	}
 	if tools, ok := out["tools"]; ok {
 		out["tools"] = stripDescriptions(tools)
 	}
 	return out
+}
+
+// normalizeToolBatchOrder canonicalizes every complete, valid assistant
+// tool-call batch independently. Fantasy can append concurrent results in
+// completion order, but their identity is the call ID. Results are reordered
+// only when they exactly match the unique IDs declared by their own batch; all
+// non-tool messages retain their slots. Any non-empty tool_calls declaration,
+// even malformed, closes the previous batch and prevents results from crossing
+// into it.
+func normalizeToolBatchOrder(messages []any) []any {
+	out := slices.Clone(messages)
+	for start := 0; start < len(messages); {
+		callIDs, valid := toolCallBatch(messages[start])
+		if !valid {
+			start++
+			continue
+		}
+
+		end := len(messages)
+		for i := start + 1; i < len(messages); i++ {
+			if hasToolCallBoundary(messages[i]) {
+				end = i
+				break
+			}
+		}
+		normalizeToolBatch(out, messages, start+1, end, callIDs)
+		start = end
+	}
+	return out
+}
+
+// hasToolCallBoundary identifies any assistant message with present, non-empty
+// tool_calls. It intentionally accepts malformed declarations as boundaries:
+// they must close the preceding valid batch, but are not normalized themselves.
+func hasToolCallBoundary(raw any) bool {
+	message, ok := raw.(map[string]any)
+	if !ok || message["role"] != "assistant" {
+		return false
+	}
+	calls, present := message["tool_calls"]
+	if !present || calls == nil {
+		return false
+	}
+	switch calls := calls.(type) {
+	case []any:
+		return len(calls) > 0
+	case map[string]any:
+		return len(calls) > 0
+	case string:
+		return calls != ""
+	default:
+		return true
+	}
+}
+
+// toolCallBatch returns unique, valid call IDs declared by one assistant
+// message. A malformed declaration is not normalized, while still acting as a
+// boundary through hasToolCallBoundary.
+func toolCallBatch(raw any) ([]string, bool) {
+	if !hasToolCallBoundary(raw) {
+		return nil, false
+	}
+	message := raw.(map[string]any)
+	calls, ok := message["tool_calls"].([]any)
+	if !ok {
+		return nil, false
+	}
+	ids := make([]string, 0, len(calls))
+	seen := make(map[string]struct{}, len(calls))
+	for _, rawCall := range calls {
+		call, ok := rawCall.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		id, ok := call["id"].(string)
+		if !ok || id == "" {
+			return nil, false
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return nil, false
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+
+func normalizeToolBatch(out, messages []any, start, end int, callIDs []string) {
+	resultIdx := make([]int, 0, len(callIDs))
+	resultIDs := make([]string, 0, len(callIDs))
+	for i := start; i < end; i++ {
+		message, ok := messages[i].(map[string]any)
+		if !ok || message["role"] != "tool" {
+			continue
+		}
+		id, ok := message["tool_call_id"].(string)
+		if !ok || id == "" {
+			return
+		}
+		resultIdx = append(resultIdx, i)
+		resultIDs = append(resultIDs, id)
+	}
+	if len(resultIdx) < 2 || !sameIDSet(callIDs, resultIDs) {
+		return
+	}
+
+	sortedIDs := slices.Clone(resultIDs)
+	slices.Sort(sortedIDs)
+	byID := make(map[string]any, len(resultIDs))
+	for i, id := range resultIDs {
+		byID[id] = messages[resultIdx[i]]
+	}
+	for i, id := range sortedIDs {
+		out[resultIdx[i]] = byID[id]
+	}
+}
+
+// sameIDSet reports whether a and b hold the same unique, non-empty call IDs.
+// Duplicates make a batch malformed: canonicalizing through an ID-keyed map
+// would otherwise discard one result's content.
+func sameIDSet(a, b []string) bool {
+	if len(a) != len(b) || len(a) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(a))
+	for _, id := range a {
+		if id == "" {
+			return false
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return false
+		}
+		seen[id] = struct{}{}
+	}
+	for _, id := range b {
+		if id == "" {
+			return false
+		}
+		if _, found := seen[id]; !found {
+			return false
+		}
+		delete(seen, id)
+	}
+	return len(seen) == 0
 }
 
 // stripDescriptions removes every "description" key, at any depth. Tool
@@ -283,4 +432,232 @@ func TestVCRRecordThenReplayIsStrictAndOffline(t *testing.T) {
 		response.Body.Close()
 	}
 	require.Error(t, err)
+}
+
+// The normalizeToolBatchOrder cases below pin the three boundaries the
+// normalizer must not cross: results of the same parallel batch may be
+// reordered among themselves, but nothing across a turn boundary, nothing
+// that the preceding assistant batch did not declare, and no message may be
+// reordered on the strength of a missing tool_call_id.
+func TestNormalizeToolBatchOrder(t *testing.T) {
+	user := map[string]any{"role": "user", "content": "find the files and list the directory"}
+	assistantBatch := func(ids ...string) map[string]any {
+		calls := make([]any, 0, len(ids))
+		for i, id := range ids {
+			calls = append(calls, map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "tool" + strconv.Itoa(i), "arguments": "{}"}})
+		}
+		return map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}
+	}
+	toolMsg := func(id, content string) map[string]any {
+		return map[string]any{"role": "tool", "tool_call_id": id, "content": content}
+	}
+
+	t.Run("same batch, different arrival order, equivalent", func(t *testing.T) {
+		a := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_b", "call_a"),
+			toolMsg("call_a", "result a"),
+			toolMsg("call_b", "result b"),
+		})
+		b := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_b", "call_a"),
+			toolMsg("call_b", "result b"),
+			toolMsg("call_a", "result a"),
+		})
+		require.True(t, reflect.DeepEqual(a, b), "reordering within one batch must be order-independent")
+		// And the canonical order really is sorted by call ID, not the
+		// recorded order.
+		wantOrder := []string{"call_a", "call_b"}
+		for i, id := range wantOrder {
+			require.Equal(t, id, a[len(a)-len(wantOrder)+i].(map[string]any)["tool_call_id"])
+		}
+	})
+
+	t.Run("two batches normalize independently", func(t *testing.T) {
+		// Both batches can complete in either order. Each is canonicalized
+		// independently, rather than only canonicalizing the final batch.
+		recA := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_a", "a"), toolMsg("call_b", "b"),
+			assistantBatch("call_c", "call_d"),
+			toolMsg("call_c", "c"), toolMsg("call_d", "d"),
+		})
+		recB := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_b", "b"), toolMsg("call_a", "a"),
+			assistantBatch("call_c", "call_d"),
+			toolMsg("call_d", "d"), toolMsg("call_c", "c"),
+		})
+		require.Equal(t, recA, recB)
+	})
+
+	t.Run("results do not cross batch boundaries", func(t *testing.T) {
+		// The first batch is incomplete and must not borrow call_c from the
+		// later batch merely because it appears before its own companion.
+		in := []any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_b", "b"),
+			assistantBatch("call_c", "call_d"),
+			toolMsg("call_c", "c"), toolMsg("call_d", "d"),
+		}
+		out := normalizeToolBatchOrder(in)
+		require.Equal(t, "call_b", out[2].(map[string]any)["tool_call_id"])
+		require.Equal(t, "call_c", out[4].(map[string]any)["tool_call_id"])
+		require.Equal(t, "call_d", out[5].(map[string]any)["tool_call_id"])
+	})
+
+	t.Run("malformed assistant tool calls close the preceding batch", func(t *testing.T) {
+		malformedBoundary := map[string]any{"role": "assistant", "tool_calls": "invalid"}
+		a := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_a", "result a"),
+			malformedBoundary,
+			toolMsg("call_b", "result b"),
+		})
+		b := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_b", "result b"),
+			malformedBoundary,
+			toolMsg("call_a", "result a"),
+		})
+
+		require.False(t, reflect.DeepEqual(a, b), "a malformed declaration must close, not join, the preceding batch")
+		require.Equal(t, "call_a", a[2].(map[string]any)["tool_call_id"])
+		require.Equal(t, "call_b", b[2].(map[string]any)["tool_call_id"])
+	})
+
+	t.Run("results split by an intervening message are still one batch", func(t *testing.T) {
+		// fantasy may emit an assistant text alongside the tool results of
+		// the same batch; the batch boundary is the assistant message, not
+		// adjacency. In the first recording the earlier slot holds the
+		// earlier call ID (already canonical); in the second the earlier
+		// slot holds the later call ID — only a batch-aware sort makes the
+		// two recordings equivalent.
+		a := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_b", "call_a"),
+			toolMsg("call_a", "result a"),
+			map[string]any{"role": "assistant", "content": "found both"},
+			toolMsg("call_b", "result b"),
+		})
+		b := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_b", "call_a"),
+			toolMsg("call_b", "result b"),
+			map[string]any{"role": "assistant", "content": "found both"},
+			toolMsg("call_a", "result a"),
+		})
+		require.True(t, reflect.DeepEqual(a, b), "a split batch must normalize like an unsplit one")
+	})
+
+	t.Run("three way arrival orders all equivalent", func(t *testing.T) {
+		ids := []string{"call_1", "call_2", "call_3"}
+		contents := []string{"one", "two", "three"}
+		run := func(order []int) any {
+			msgs := []any{user, assistantBatch(ids...)}
+			for _, i := range order {
+				msgs = append(msgs, toolMsg(ids[i], contents[i]))
+			}
+			return normalizeToolBatchOrder(msgs)
+		}
+		ref := run([]int{0, 1, 2})
+		for _, order := range [][]int{{1, 0, 2}, {2, 1, 0}, {2, 0, 1}} {
+			require.True(t, reflect.DeepEqual(ref, run(order)), "order %v must normalize like %v", order, []int{0, 1, 2})
+		}
+	})
+
+	t.Run("result not in the batch is not normalized away", func(t *testing.T) {
+		// The run's IDs do not set-match the batch: "call_x" was never
+		// declared and "call_b" is missing. The run must be left as-is, so
+		// it does not match any recording that carried the real batch.
+		rogue := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_a", "result a"),
+			toolMsg("call_x", "result x"),
+		})
+		legit := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_a", "result a"),
+			toolMsg("call_b", "result b"),
+		})
+		require.False(t, reflect.DeepEqual(rogue, legit), "a result for an undeclared call must not match the real batch")
+	})
+
+	t.Run("duplicate declared call IDs remain strict", func(t *testing.T) {
+		a := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_a"),
+			toolMsg("call_a", "first result"),
+			toolMsg("call_a", "second result"),
+		})
+		b := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_a"),
+			toolMsg("call_a", "second result"),
+			toolMsg("call_a", "first result"),
+		})
+
+		require.False(t, reflect.DeepEqual(a, b), "duplicate declared IDs must not create a lossy equivalence")
+		require.Equal(t, "first result", a[2].(map[string]any)["content"])
+		require.Equal(t, "second result", a[3].(map[string]any)["content"])
+	})
+
+	t.Run("duplicate result IDs remain strict", func(t *testing.T) {
+		a := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_a", "first result"),
+			toolMsg("call_a", "second result"),
+		})
+		b := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_a", "second result"),
+			toolMsg("call_a", "first result"),
+		})
+
+		require.False(t, reflect.DeepEqual(a, b), "duplicate result IDs must not be collapsed through a map")
+		require.Equal(t, "first result", a[2].(map[string]any)["content"])
+		require.Equal(t, "second result", a[3].(map[string]any)["content"])
+	})
+
+	t.Run("missing tool_call_id: no panic, no widened equivalence", func(t *testing.T) {
+		// A tool message without an ID (malformed transcript) must not be
+		// reordered with its neighbours — that would let a broken
+		// transcript match a healthy recording.
+		idless := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			map[string]any{"role": "tool", "content": "no id"},
+			toolMsg("call_a", "result a"),
+		})
+		require.Len(t, idless, 4)
+		// Position unchanged: the ID-less message is still second-to-last.
+		require.Nil(t, idless[2].(map[string]any)["tool_call_id"])
+		require.Equal(t, "call_a", idless[3].(map[string]any)["tool_call_id"])
+
+		// A run with an ID-less message is not equivalent to a run of two
+		// real results with the same call IDs — different transcripts.
+		twoResults := normalizeToolBatchOrder([]any{
+			user,
+			assistantBatch("call_a", "call_b"),
+			toolMsg("call_a", "result a"),
+			toolMsg("call_b", "result b"),
+		})
+		require.False(t, reflect.DeepEqual(idless, twoResults), "an ID-less tool message must not normalize into an equivalent of a real result")
+	})
+
+	t.Run("single result untouched", func(t *testing.T) {
+		in := []any{user, assistantBatch("call_a"), toolMsg("call_a", "only")}
+		out := normalizeToolBatchOrder(in)
+		require.Equal(t, in, out, "a single result carries no order to normalize")
+	})
 }

@@ -53,8 +53,28 @@ func NewSearchTool(workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
 	return NewGrepTool(workingDir, cfg)
 }
 
-func NewRipgrepTool(workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+// ripgrepToolOption supplies a controlled command backend for tests. Production
+// callers use getRgSearchCmd; keeping the seam at process creation lets tests
+// exercise the real tool handler without requiring rg to be installed.
+type ripgrepToolOption func(*ripgrepToolOptions)
+
+type ripgrepToolOptions struct {
+	command func(context.Context, string, string, string, bool) *exec.Cmd
+}
+
+func withRipgrepCommand(command func(context.Context, string, string, string, bool) *exec.Cmd) ripgrepToolOption {
+	return func(options *ripgrepToolOptions) {
+		options.command = command
+	}
+}
+
+func NewRipgrepTool(workingDir string, cfg config.ToolGrep, options ...ripgrepToolOption) fantasy.AgentTool {
+	toolOptions := ripgrepToolOptions{command: getRgSearchCmd}
+	for _, option := range options {
+		option(&toolOptions)
+	}
+
+	return fantasy.NewParallelAgentTool(
 		RipgrepToolName,
 		ripgrepDescription(),
 		func(ctx context.Context, params RipgrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -76,7 +96,7 @@ func NewRipgrepTool(workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
 			searchCtx, cancel := context.WithTimeout(ctx, cfg.GetTimeout())
 			defer cancel()
 
-			matches, err := searchWithRipgrep(searchCtx, searchPattern, searchPath, params.Include, params.CaseInsensitive)
+			matches, err := searchWithRipgrepCommand(searchCtx, searchPattern, searchPath, params.Include, params.CaseInsensitive, toolOptions.command)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 			}
@@ -94,7 +114,11 @@ func NewRipgrepTool(workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
 }
 
 func searchWithRipgrep(ctx context.Context, pattern, path, include string, caseInsensitive bool) ([]grepMatch, error) {
-	cmd := getRgSearchCmd(ctx, pattern, path, include, caseInsensitive)
+	return searchWithRipgrepCommand(ctx, pattern, path, include, caseInsensitive, getRgSearchCmd)
+}
+
+func searchWithRipgrepCommand(ctx context.Context, pattern, path, include string, caseInsensitive bool, command func(context.Context, string, string, string, bool) *exec.Cmd) ([]grepMatch, error) {
+	cmd := command(ctx, pattern, path, include, caseInsensitive)
 	if cmd == nil {
 		return nil, fmt.Errorf("ripgrep not found in $PATH")
 	}

@@ -51,7 +51,7 @@ type GlobResponseMetadata struct {
 }
 
 func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		GlobToolName,
 		globDescription(),
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
