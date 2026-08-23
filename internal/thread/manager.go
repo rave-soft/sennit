@@ -334,7 +334,7 @@ func (m *Manager) Create(ctx context.Context, args CreateArgs) (Thread, error) {
 	if m.parentApp != nil {
 		// deliverCompletion is always called with depth 0 for a thread; see
 		// its onAutoMerge call above.
-		registerParent(handle.Workspace().Coordinator(), m.parentApp.Coordinator(), sess.ID, args.ParentSessionID, st.ID, st.Name, KindThread, 0)
+		registerParent(handle.Workspace().Coordinator(), m.parentApp.Coordinator(), st, 0)
 	}
 
 	if args.Goal == "" {
@@ -600,7 +600,7 @@ func (m *Manager) Activate(ctx context.Context, idOrName string) (Thread, error)
 		// threadControl.depth, also in-memory-only); 0 is the safe default a
 		// resumed entity's cascade depth already silently falls back to
 		// today.
-		registerParent(handle.Workspace().Coordinator(), m.parentApp.Coordinator(), st.SessionID, st.ParentSessionID, st.ID, st.Name, KindThread, 0)
+		registerParent(handle.Workspace().Coordinator(), m.parentApp.Coordinator(), st, 0)
 	}
 	rb.commit()
 	return st, nil
@@ -730,7 +730,7 @@ func (m *Manager) send(ctx context.Context, idOrName, message string, from Sende
 			rt := c.runtime
 			c.mu.Unlock()
 			if rt != nil {
-				registerParent(rt.handle.Workspace().Coordinator(), m.parentApp.Coordinator(), st.SessionID, st.ParentSessionID, st.ID, st.Name, KindThread, 0)
+				registerParent(rt.handle.Workspace().Coordinator(), m.parentApp.Coordinator(), st, 0)
 			}
 		}
 	}
@@ -1393,25 +1393,31 @@ func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, erro
 	return threads, nil
 }
 
-// registerParent installs delegationID's parent link on registerOn — the
-// coordinator that will actually dispatch its turns — so a mid-run ask or
-// its eventual completion reaches parentSessionID through parentCoord. It
-// is a no-op when there is nothing to route to yet: registerOn nil (no
+// registerParent installs st's parent link on registerOn — the coordinator
+// that will actually dispatch its turns — so a mid-run ask or its eventual
+// completion reaches st.ParentSessionID through parentCoord. Every field it
+// registers besides depth (session id, delegation id, name, kind, parent
+// session id) already lives on st by the time any call site has one to
+// pass, so it reads them from there instead of asking five callers to repeat
+// them positionally. depth stays a separate parameter because it is not
+// part of Thread/Delegation — see threadControl.depth's doc comment.
+//
+// It is a no-op when there is nothing to route to yet: registerOn nil (no
 // runtime installed), parentCoord nil (no delivery target — for a thread,
 // see ManagerOptions.ParentApp; a task always has one, its own coordinator),
-// or parentSessionID empty (a thread with no parent — see
+// or st.ParentSessionID empty (a thread with no parent — see
 // CreateArgs.ParentSessionID; a task's is always non-empty, enforced at
 // TaskManager.Create).
-func registerParent(registerOn, parentCoord Coordinator, sessionID, parentSessionID, delegationID, name string, kind Kind, depth int) {
-	if registerOn == nil || parentCoord == nil || parentSessionID == "" {
+func registerParent(registerOn, parentCoord Coordinator, st Thread, depth int) {
+	if registerOn == nil || parentCoord == nil || st.ParentSessionID == "" {
 		return
 	}
-	registerOn.RegisterDelegationParent(sessionID, DelegationParent{
+	registerOn.RegisterDelegationParent(st.SessionID, DelegationParent{
 		Parent:          parentCoord,
-		ParentSessionID: parentSessionID,
-		DelegationID:    delegationID,
-		Kind:            string(kind),
-		Name:            name,
+		ParentSessionID: st.ParentSessionID,
+		DelegationID:    st.ID,
+		Kind:            string(st.Kind),
+		Name:            st.Name,
 		Depth:           depth,
 	})
 }

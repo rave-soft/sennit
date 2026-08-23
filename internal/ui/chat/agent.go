@@ -47,22 +47,17 @@ type ChildSessionTodoTracker interface {
 	SetChildSessionTodos(todos []session.Todo)
 }
 
-// AgentToolMessageItem is a message item that represents an agent tool call.
-type AgentToolMessageItem struct {
+// delegationToolMessageItem holds the state and behavior shared by every
+// delegation tool item ([AgentToolMessageItem], [AgenticFetchToolMessageItem]):
+// the nested-tool tree, the running status counters, and the methods that
+// operate on them. Both concrete types embed it rather than duplicating this
+// ~130 lines twice; each adds only the fields specific to its own tool
+// (agent: displayName/model/effort; agentic_fetch: none — its display name
+// is the fixed agenticFetchDisplayName constant).
+type delegationToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
-
-	// displayName is the block's title: the built-in agent tool always
-	// dispatches to config.AgentTask, so it renders as "task"; a
-	// user-defined agent tool's name is already the delegation's identity
-	// (toolCall.Name == its cfg.Agents key), so it renders as-is (e.g.
-	// "developer"). See agentDisplayName.
-	displayName string
-	// model and effort are this delegation's configured overrides (empty
-	// when the agent inherits the app's defaults — see config.Agent.Model
-	// / ReasoningEffort), rendered as a subtitle by renderAgentSubtitle.
-	model, effort string
 
 	// startTime and the token counters back the running status line (see
 	// renderAgentStatusLine): a long delegation used to render as a bare
@@ -90,6 +85,171 @@ type AgentToolMessageItem struct {
 	duration time.Duration
 }
 
+// AlwaysSpaced implements list.AlwaysSpaced. A delegation is a visually
+// significant boundary — even while it's rendering as a single running
+// "Agent ..." status line, it keeps the list's normal gap instead of
+// blending into a dense run of one-line tool calls (see
+// list.List.gapAt). Shared by both delegation types.
+func (a *delegationToolMessageItem) AlwaysSpaced() bool {
+	return true
+}
+
+// SetChildSessionTokens implements [ChildSessionTokenTracker].
+func (a *delegationToolMessageItem) SetChildSessionTokens(prompt, completion int64) {
+	if a.promptTokens == prompt && a.completionTokens == completion {
+		return
+	}
+	a.promptTokens = prompt
+	a.completionTokens = completion
+	a.clearCache()
+	a.Bump()
+}
+
+// SetChildSessionTodos implements [ChildSessionTodoTracker]. Dedupes like
+// SetChildSessionTokens: the live-update path re-delivers the full todo
+// list on every session save, not just on real changes.
+func (a *delegationToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
+	if slices.Equal(a.todos, todos) {
+		return
+	}
+	a.todos = todos
+	a.clearCache()
+	a.Bump()
+}
+
+// SetResult freezes the delegation's duration (see the duration field doc)
+// the first time a result arrives, then delegates to the embedded setter.
+func (a *delegationToolMessageItem) SetResult(res *message.ToolResult) {
+	if res != nil && a.duration == 0 {
+		a.duration = time.Since(a.startTime)
+	}
+	a.baseToolMessageItem.SetResult(res)
+}
+
+// SetStatus freezes duration on cancellation too — a canceled delegation
+// never gets a SetResult call. See the duration field doc.
+func (a *delegationToolMessageItem) SetStatus(status ToolStatus) {
+	if status == ToolStatusCanceled && a.duration == 0 {
+		a.duration = time.Since(a.startTime)
+	}
+	a.baseToolMessageItem.SetStatus(status)
+}
+
+// ToggleExpanded is a no-op: a finished delegation renders as a compact
+// summary, and its full result is only reachable by drilling into the
+// child session (click, or alt+down) — not by expanding inline. Overriding
+// (rather than removing) keeps both delegation types satisfying Expandable,
+// which HandleDelayedClick and ToggleExpandedSelectedItem both type-assert
+// against; a no-op here just means neither ever has anything to do.
+func (a *delegationToolMessageItem) ToggleExpanded() bool {
+	return false
+}
+
+// HoverableAt matches the delegation's whole-item click target.
+func (a *delegationToolMessageItem) HoverableAt(x, y, width int) bool {
+	return x >= MessageLeftPaddingTotal && y >= 0 && y < lipgloss.Height(a.Render(width))
+}
+
+// Restyle implements [Restylable]. Nested tools are not list entries of
+// their own — they render inline in this item — so nothing else would reach
+// their animations; this walks them alongside the delegation's own.
+func (a *delegationToolMessageItem) Restyle() tea.Cmd {
+	cmds := []tea.Cmd{a.baseToolMessageItem.Restyle()}
+	for _, nested := range a.nestedTools {
+		if r, ok := nested.(Restylable); ok {
+			cmds = append(cmds, r.Restyle())
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// Animate progresses the message animation if it should be spinning.
+//
+// Bumps the parent's list-cache version on both the parent-tick and
+// nested-tick branches. Nested tools are not list entries of their
+// own — their IDs map to this parent's index in idInxMap
+// (internal/ui/model/chat.go:240-246) and their renders are embedded
+// inline in this parent's output — so the list only checks the
+// parent's version. Without the bump, the list cache would serve the
+// previously rendered frame indefinitely and the spinner would appear
+// frozen.
+func (a *delegationToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
+	if a.result != nil || a.Status() == ToolStatusCanceled {
+		return nil
+	}
+	if msg.ID == a.ID() {
+		a.Bump()
+		return a.anim.Animate(msg)
+	}
+	for _, nestedTool := range a.nestedTools {
+		if msg.ID != nestedTool.ID() {
+			continue
+		}
+		if s, ok := nestedTool.(Animatable); ok {
+			a.Bump()
+			return s.Animate(msg)
+		}
+	}
+	return nil
+}
+
+// NestedTools returns the nested tools.
+func (a *delegationToolMessageItem) NestedTools() []ToolMessageItem {
+	return a.nestedTools
+}
+
+// SetNestedTools sets the nested tools.
+//
+// SetNestedTools always bumps the version. The previous design
+// deduped when the slice's length and element pointers were
+// unchanged, but the live update path in internal/ui/model/ui.go
+// mutates existing children in place (SetToolCall / SetResult on the
+// same pointers) and then calls SetNestedTools with the same slice.
+// Pointer-equality dedupe in that case skips the parent Bump even
+// though the parent's rendered output (which embeds the children
+// inline) has changed, leaving a stale parent entry in the list
+// cache. Always bumping is cheap (one uint64 increment) and called
+// at most once per agent event; in the rare case the slice is
+// truly unchanged the worst case is one extra parent re-render
+// while every child cache hit stays warm.
+func (a *delegationToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
+	a.nestedTools = tools
+	a.clearCache()
+	a.Bump()
+}
+
+// AddNestedTool adds a nested tool.
+func (a *delegationToolMessageItem) AddNestedTool(tool ToolMessageItem) {
+	// Mark nested tools as simple (compact) rendering.
+	if s, ok := tool.(Compactable); ok {
+		s.SetCompact(true)
+	}
+	a.nestedTools = append(a.nestedTools, tool)
+	a.clearCache()
+	a.Bump()
+}
+
+// PanelStatusLine implements [PanelLiveActivityProvider].
+func (a *delegationToolMessageItem) PanelStatusLine(sty *styles.Styles, width int) string {
+	return renderPanelStatusLine(sty, width, a.startTime, a.nestedTools, a.todos, a.promptTokens, a.completionTokens)
+}
+
+// AgentToolMessageItem is a message item that represents an agent tool call.
+type AgentToolMessageItem struct {
+	*delegationToolMessageItem
+
+	// displayName is the block's title: the built-in agent tool always
+	// dispatches to config.AgentTask, so it renders as "task"; a
+	// user-defined agent tool's name is already the delegation's identity
+	// (toolCall.Name == its cfg.Agents key), so it renders as-is (e.g.
+	// "developer"). See agentDisplayName.
+	displayName string
+	// model and effort are this delegation's configured overrides (empty
+	// when the agent inherits the app's defaults — see config.Agent.Model
+	// / ReasoningEffort), rendered as a subtitle by renderAgentSubtitle.
+	model, effort string
+}
+
 var (
 	_ ToolMessageItem          = (*AgentToolMessageItem)(nil)
 	_ NestedToolContainer      = (*AgentToolMessageItem)(nil)
@@ -108,7 +268,10 @@ func NewAgentToolMessageItem(
 	canceled bool,
 	cfg CustomAgentConfig,
 ) *AgentToolMessageItem {
-	t := &AgentToolMessageItem{startTime: time.Now(), displayName: agentDisplayName(toolCall.Name)}
+	t := &AgentToolMessageItem{
+		delegationToolMessageItem: &delegationToolMessageItem{startTime: time.Now()},
+		displayName:               agentDisplayName(toolCall.Name),
+	}
 	if cfg != nil {
 		// The built-in "task"/"coder" roles never carry a model/effort
 		// override (see setupAgents in internal/config/agents.go), so
@@ -146,15 +309,6 @@ func agentDisplayName(toolName string) string {
 		return builtinTaskAgentName
 	}
 	return toolName
-}
-
-// AlwaysSpaced implements list.AlwaysSpaced. A delegation is a visually
-// significant boundary — even while it's rendering as a single running
-// "Agent ..." status line, it keeps the list's normal gap instead of
-// blending into a dense run of one-line tool calls (see
-// list.List.gapAt).
-func (a *AgentToolMessageItem) AlwaysSpaced() bool {
-	return true
 }
 
 // DelegationInfoProvider is implemented by tool items that represent a
@@ -198,146 +352,6 @@ type PanelLiveActivityProvider interface {
 }
 
 var _ PanelLiveActivityProvider = (*AgentToolMessageItem)(nil)
-
-// PanelStatusLine implements [PanelLiveActivityProvider].
-func (a *AgentToolMessageItem) PanelStatusLine(sty *styles.Styles, width int) string {
-	return renderPanelStatusLine(sty, width, a.startTime, a.nestedTools, a.todos, a.promptTokens, a.completionTokens)
-}
-
-// SetChildSessionTokens implements [ChildSessionTokenTracker].
-func (a *AgentToolMessageItem) SetChildSessionTokens(prompt, completion int64) {
-	if a.promptTokens == prompt && a.completionTokens == completion {
-		return
-	}
-	a.promptTokens = prompt
-	a.completionTokens = completion
-	a.clearCache()
-	a.Bump()
-}
-
-// SetChildSessionTodos implements [ChildSessionTodoTracker]. Dedupes like
-// SetChildSessionTokens: the live-update path re-delivers the full todo
-// list on every session save, not just on real changes.
-func (a *AgentToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
-	if slices.Equal(a.todos, todos) {
-		return
-	}
-	a.todos = todos
-	a.clearCache()
-	a.Bump()
-}
-
-// SetResult freezes the delegation's duration (see the duration field doc)
-// the first time a result arrives, then delegates to the embedded setter.
-func (a *AgentToolMessageItem) SetResult(res *message.ToolResult) {
-	if res != nil && a.duration == 0 {
-		a.duration = time.Since(a.startTime)
-	}
-	a.baseToolMessageItem.SetResult(res)
-}
-
-// SetStatus freezes duration on cancellation too — a canceled delegation
-// never gets a SetResult call. See the duration field doc.
-func (a *AgentToolMessageItem) SetStatus(status ToolStatus) {
-	if status == ToolStatusCanceled && a.duration == 0 {
-		a.duration = time.Since(a.startTime)
-	}
-	a.baseToolMessageItem.SetStatus(status)
-}
-
-// ToggleExpanded is a no-op: a finished delegation renders as a compact
-// summary, and its full result is only reachable by drilling into the
-// child session (click, or alt+down) — not by expanding inline. Overriding
-// (rather than removing) keeps AgentToolMessageItem satisfying Expandable,
-// which HandleDelayedClick and ToggleExpandedSelectedItem both type-assert
-// against; a no-op here just means neither ever has anything to do.
-func (a *AgentToolMessageItem) ToggleExpanded() bool {
-	return false
-}
-
-// HoverableAt matches the delegation's whole-item click target.
-func (a *AgentToolMessageItem) HoverableAt(x, y, width int) bool {
-	return x >= MessageLeftPaddingTotal && y >= 0 && y < lipgloss.Height(a.Render(width))
-}
-
-// Restyle implements [Restylable]. Nested tools are not list entries of
-// their own — they render inline in this item — so nothing else would reach
-// their animations; this walks them alongside the delegation's own.
-func (a *AgentToolMessageItem) Restyle() tea.Cmd {
-	cmds := []tea.Cmd{a.baseToolMessageItem.Restyle()}
-	for _, nested := range a.nestedTools {
-		if r, ok := nested.(Restylable); ok {
-			cmds = append(cmds, r.Restyle())
-		}
-	}
-	return tea.Batch(cmds...)
-}
-
-// Animate progresses the message animation if it should be spinning.
-//
-// Bumps the parent's F6 list-cache version on both the parent-tick and
-// nested-tick branches. Nested tools are not list entries of their
-// own — their IDs map to this parent's index in idInxMap
-// (internal/ui/model/chat.go:240-246) and their renders are embedded
-// inline in this parent's output — so the list only checks the
-// parent's version. Without the bump, the list cache would serve the
-// previously rendered frame indefinitely and the spinner would appear
-// frozen.
-func (a *AgentToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
-	if a.result != nil || a.Status() == ToolStatusCanceled {
-		return nil
-	}
-	if msg.ID == a.ID() {
-		a.Bump()
-		return a.anim.Animate(msg)
-	}
-	for _, nestedTool := range a.nestedTools {
-		if msg.ID != nestedTool.ID() {
-			continue
-		}
-		if s, ok := nestedTool.(Animatable); ok {
-			a.Bump()
-			return s.Animate(msg)
-		}
-	}
-	return nil
-}
-
-// NestedTools returns the nested tools.
-func (a *AgentToolMessageItem) NestedTools() []ToolMessageItem {
-	return a.nestedTools
-}
-
-// SetNestedTools sets the nested tools.
-//
-// SetNestedTools always bumps the version. The previous design
-// deduped when the slice's length and element pointers were
-// unchanged, but the live update path in internal/ui/model/ui.go
-// mutates existing children in place (SetToolCall / SetResult on the
-// same pointers) and then calls SetNestedTools with the same slice.
-// Pointer-equality dedupe in that case skips the parent Bump even
-// though the parent's rendered output (which embeds the children
-// inline) has changed, leaving a stale parent entry in the list
-// cache. Always bumping is cheap (one uint64 increment) and called
-// at most once per agent event; in the rare case the slice is
-// truly unchanged the worst case is one extra parent re-render
-// while every child cache hit stays warm.
-func (a *AgentToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
-	a.nestedTools = tools
-	a.clearCache()
-	a.Bump()
-}
-
-// AddNestedTool adds a nested tool.
-func (a *AgentToolMessageItem) AddNestedTool(tool ToolMessageItem) {
-	// Mark nested tools as simple (compact) rendering.
-	if s, ok := tool.(Compactable); ok {
-		s.SetCompact(true)
-	}
-	a.nestedTools = append(a.nestedTools, tool)
-	a.clearCache()
-	a.Bump()
-}
 
 // AgentToolRenderContext renders agent tool messages.
 type AgentToolRenderContext struct {
@@ -424,21 +438,12 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 // -----------------------------------------------------------------------------
 
 // AgenticFetchToolMessageItem is a message item that represents an agentic fetch tool call.
+//
+// Unlike the agent tool, agentic_fetch has no cfg.Agents entry to name or
+// configure a model/effort override for, so it needs no fields of its own
+// beyond [delegationToolMessageItem] — see agenticFetchDisplayName.
 type AgenticFetchToolMessageItem struct {
-	*baseToolMessageItem
-
-	nestedTools []ToolMessageItem
-
-	// See [AgentToolMessageItem] for the rationale behind these fields.
-	// agenticFetchDisplayName is fixed — unlike the agent tool,
-	// agentic_fetch has no cfg.Agents entry to name or configure a
-	// model/effort override for, so there's no displayName/model/effort
-	// trio here.
-	startTime        time.Time
-	promptTokens     int64
-	completionTokens int64
-	todos            []session.Todo
-	duration         time.Duration
+	*delegationToolMessageItem
 }
 
 var (
@@ -464,12 +469,6 @@ func (r *AgenticFetchToolMessageItem) DelegationInfo() (displayName, model, effo
 
 var _ PanelLiveActivityProvider = (*AgenticFetchToolMessageItem)(nil)
 
-// PanelStatusLine implements [PanelLiveActivityProvider]. See
-// AgentToolMessageItem.PanelStatusLine.
-func (r *AgenticFetchToolMessageItem) PanelStatusLine(sty *styles.Styles, width int) string {
-	return renderPanelStatusLine(sty, width, r.startTime, r.nestedTools, r.todos, r.promptTokens, r.completionTokens)
-}
-
 // NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].
 func NewAgenticFetchToolMessageItem(
 	sty *styles.Styles,
@@ -477,134 +476,13 @@ func NewAgenticFetchToolMessageItem(
 	result *message.ToolResult,
 	canceled bool,
 ) *AgenticFetchToolMessageItem {
-	t := &AgenticFetchToolMessageItem{startTime: time.Now()}
+	t := &AgenticFetchToolMessageItem{delegationToolMessageItem: &delegationToolMessageItem{startTime: time.Now()}}
 	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgenticFetchToolRenderContext{fetch: t}, canceled)
 	// For the agentic fetch tool we keep spinning until the tool call is finished.
 	t.spinningFunc = func(state SpinningState) bool {
 		return !state.HasResult() && !state.IsCanceled()
 	}
 	return t
-}
-
-// AlwaysSpaced implements list.AlwaysSpaced. Same rationale as
-// AgentToolMessageItem.AlwaysSpaced: a delegation is a visually
-// significant boundary regardless of its current rendered height.
-func (a *AgenticFetchToolMessageItem) AlwaysSpaced() bool {
-	return true
-}
-
-// SetChildSessionTokens implements [ChildSessionTokenTracker].
-func (a *AgenticFetchToolMessageItem) SetChildSessionTokens(prompt, completion int64) {
-	if a.promptTokens == prompt && a.completionTokens == completion {
-		return
-	}
-	a.promptTokens = prompt
-	a.completionTokens = completion
-	a.clearCache()
-	a.Bump()
-}
-
-// SetChildSessionTodos implements [ChildSessionTodoTracker]. See
-// [AgentToolMessageItem.SetChildSessionTodos] for the dedupe rationale.
-func (a *AgenticFetchToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
-	if slices.Equal(a.todos, todos) {
-		return
-	}
-	a.todos = todos
-	a.clearCache()
-	a.Bump()
-}
-
-// SetResult / SetStatus / ToggleExpanded mirror AgentToolMessageItem's
-// overrides — see the doc comments there for the rationale.
-func (a *AgenticFetchToolMessageItem) SetResult(res *message.ToolResult) {
-	if res != nil && a.duration == 0 {
-		a.duration = time.Since(a.startTime)
-	}
-	a.baseToolMessageItem.SetResult(res)
-}
-
-func (a *AgenticFetchToolMessageItem) SetStatus(status ToolStatus) {
-	if status == ToolStatusCanceled && a.duration == 0 {
-		a.duration = time.Since(a.startTime)
-	}
-	a.baseToolMessageItem.SetStatus(status)
-}
-
-func (a *AgenticFetchToolMessageItem) ToggleExpanded() bool {
-	return false
-}
-
-// HoverableAt matches the delegation's whole-item click target.
-func (a *AgenticFetchToolMessageItem) HoverableAt(x, y, width int) bool {
-	return x >= MessageLeftPaddingTotal && y >= 0 && y < lipgloss.Height(a.Render(width))
-}
-
-// Restyle implements [Restylable], the same way the delegation item does
-// and for the same reason: the nested tools render inline in this item
-// rather than as list entries of their own, so nothing else reaches their
-// animations. Without it this item kept the palette it was built with —
-// a theme switch left every agentic_fetch block in the old colours until
-// the session was reloaded.
-func (a *AgenticFetchToolMessageItem) Restyle() tea.Cmd {
-	cmds := []tea.Cmd{a.baseToolMessageItem.Restyle()}
-	for _, nested := range a.nestedTools {
-		if r, ok := nested.(Restylable); ok {
-			cmds = append(cmds, r.Restyle())
-		}
-	}
-	return tea.Batch(cmds...)
-}
-
-// Animate progresses the message animation if it should be spinning.
-// See [AgentToolMessageItem.Animate] for the parent-bump rationale —
-// without an override, the embedded base.Animate would (a) drop
-// StepMsgs whose ID matches a nested child instead of the parent
-// (anim.Animate's ID check at internal/ui/anim/anim.go:326-329
-// silently returns nil), and (b) never invalidate the parent's
-// list-cache entry on a parent tick.
-func (a *AgenticFetchToolMessageItem) Animate(msg anim.StepMsg) tea.Cmd {
-	if a.result != nil || a.Status() == ToolStatusCanceled {
-		return nil
-	}
-	if msg.ID == a.ID() {
-		a.Bump()
-		return a.anim.Animate(msg)
-	}
-	for _, nestedTool := range a.nestedTools {
-		if msg.ID != nestedTool.ID() {
-			continue
-		}
-		if s, ok := nestedTool.(Animatable); ok {
-			a.Bump()
-			return s.Animate(msg)
-		}
-	}
-	return nil
-}
-
-// NestedTools returns the nested tools.
-func (a *AgenticFetchToolMessageItem) NestedTools() []ToolMessageItem {
-	return a.nestedTools
-}
-
-// SetNestedTools sets the nested tools. Always bumps the version;
-// see [AgentToolMessageItem.SetNestedTools] for the rationale.
-func (a *AgenticFetchToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
-	a.nestedTools = tools
-	a.clearCache()
-	a.Bump()
-}
-
-// AddNestedTool adds a nested tool.
-func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
-	// Mark nested tools as simple (compact) rendering.
-	if s, ok := tool.(Compactable); ok {
-		s.SetCompact(true)
-	}
-	a.nestedTools = append(a.nestedTools, tool)
-	a.clearCache()
-	a.Bump()
 }
 
 // registerAgentToolRenderers registers the agentic_fetch tool renderer.

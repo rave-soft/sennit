@@ -48,32 +48,19 @@ func refreshCodexModels(ctx context.Context, cmd *cobra.Command, cfg *config.Con
 		return err
 	}
 
+	added, removed := diffModelIDs(pc.Models, models)
+
+	// diffModelIDs only tracks IDs; a context-window change lands as neither
+	// an add nor a remove, so it needs its own pass over the full values.
 	existing := make(map[string]catwalk.Model, len(pc.Models))
 	for _, m := range pc.Models {
 		existing[m.ID] = m
 	}
-	var added, changed int
+	var changed int
 	for _, m := range models {
-		old, known := existing[m.ID]
-		switch {
-		case !known:
-			added++
-		case old.ContextWindow != m.ContextWindow:
+		if old, known := existing[m.ID]; known && old.ContextWindow != m.ContextWindow {
 			changed++
 			cmd.Printf("  %s: context window %d → %d\n", m.ID, old.ContextWindow, m.ContextWindow)
-		}
-	}
-	removed := 0
-	for id := range existing {
-		found := false
-		for _, m := range models {
-			if m.ID == id {
-				found = true
-				break
-			}
-		}
-		if !found {
-			removed++
 		}
 	}
 

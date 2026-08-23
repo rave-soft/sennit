@@ -593,7 +593,10 @@ func (l *lifecycle) withDelegation(ctx context.Context, id string) context.Conte
 	st, err := l.store.Get(ctx, id)
 	if err != nil {
 		// Tagging is best-effort: losing the label degrades a prompt,
-		// refusing the dispatch would lose the work.
+		// refusing the dispatch would lose the work. A caller that
+		// already had the values may have stamped them itself before
+		// calling in (TaskManager.Create does) — returning ctx untouched
+		// leaves that stamp in place, which is the point of it.
 		slog.Warn("Failed to tag run with its delegation", "component", "thread", "thread", id, "error", err)
 		return ctx
 	}

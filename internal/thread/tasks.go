@@ -219,7 +219,7 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	// no later error path in this function can leave a half-registered
 	// parent pointing at a session that never actually runs.
 	coord := handle.Workspace().Coordinator()
-	registerParent(coord, coord, sess.ID, args.ParentSessionID, st.ID, st.Name, KindTask, args.Depth)
+	registerParent(coord, coord, st, args.Depth)
 
 	// Into runningSt, not st: setStatus returns the zero Thread on error,
 	// and failCreate below needs st's real ID (see SetSession's identical
@@ -230,12 +230,19 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	}
 	st = runningSt
 	// A task's tool calls hit the parent App's permission.Service — the
-	// same one the visible turn uses — so without this, a prompt raised
-	// by the task's run would be indistinguishable from one raised by
-	// the user's own turn. Stamping the ref onto a context derived from
-	// t.ctx (not t.ctx itself) keeps it scoped to this run: t.ctx is
-	// shared with every other task and, transitively, with Manager's
-	// threads, and must not pick up one run's identity permanently.
+	// same one the visible turn uses — so without a delegation tag, a
+	// prompt raised by the task's run would be indistinguishable from one
+	// raised by the user's own turn.
+	//
+	// startRun stamps the tag too, from the store (lifecycle.withDelegation),
+	// and in the ordinary case that stamp simply replaces this one with the
+	// same values. This one is not therefore redundant: withDelegation is
+	// best-effort and returns the context untagged when its store lookup
+	// fails, and the values are already in hand here, where nothing can
+	// fail. Stamping a context derived from t.ctx rather than t.ctx itself
+	// keeps it scoped to this run — t.ctx is shared with every other task
+	// and, transitively, with Manager's threads, and must not pick up one
+	// run's identity permanently.
 	runCtx := permission.WithDelegation(t.ctx, permission.DelegationRef{
 		ID:   st.ID,
 		Name: st.Name,
@@ -428,7 +435,7 @@ func (t *TaskManager) Send(ctx context.Context, id, message string) (SendDisposi
 		c.mu.Unlock()
 		if rt != nil {
 			coord := rt.handle.Workspace().Coordinator()
-			registerParent(coord, coord, st.SessionID, st.ParentSessionID, st.ID, st.Name, KindTask, depth)
+			registerParent(coord, coord, st, depth)
 		}
 	}
 	return disp, nil

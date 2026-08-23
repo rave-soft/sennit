@@ -54,24 +54,9 @@ sennit models gpt5`,
 			entry := &providerEntry{
 				name:       provider.Name,
 				configured: true,
-			}
-			for _, model := range provider.Models {
-				if term != "" {
-					matched := false
-					for _, s := range []string{provider.ID, provider.Name, model.ID, model.Name} {
-						if strings.Contains(strings.ToLower(s), term) {
-							matched = true
-							break
-						}
-					}
-					if !matched {
-						continue
-					}
-				}
-				entry.models = append(entry.models, model.ID)
+				models:     matchingModelIDs(provider.ID, provider.Name, provider.Models, term),
 			}
 			if len(entry.models) > 0 {
-				slices.Sort(entry.models)
 				entries[providerID] = entry
 			}
 		}
@@ -85,24 +70,9 @@ sennit models gpt5`,
 			entry := &providerEntry{
 				name:       kp.Name,
 				configured: false,
-			}
-			for _, model := range kp.Models {
-				if term != "" {
-					matched := false
-					for _, s := range []string{providerID, kp.Name, model.ID, model.Name} {
-						if strings.Contains(strings.ToLower(s), term) {
-							matched = true
-							break
-						}
-					}
-					if !matched {
-						continue
-					}
-				}
-				entry.models = append(entry.models, model.ID)
+				models:     matchingModelIDs(providerID, kp.Name, kp.Models, term),
 			}
 			if len(entry.models) > 0 {
-				slices.Sort(entry.models)
 				entries[providerID] = entry
 			}
 		}
@@ -147,6 +117,32 @@ sennit models gpt5`,
 		cmd.Println(t)
 		return nil
 	},
+}
+
+// matchingModelIDs returns the sorted model IDs of models that pass the
+// search term, whether the provider is a configured one (provider.Models)
+// or a catwalk-known one not yet in the user's config (kp.Models) — both
+// shapes are searched the same way, against provider ID, provider name,
+// model ID, and model name. An empty term matches everything.
+func matchingModelIDs(providerID, providerName string, models []catwalk.Model, term string) []string {
+	var ids []string
+	for _, model := range models {
+		if term != "" {
+			matched := false
+			for _, s := range []string{providerID, providerName, model.ID, model.Name} {
+				if strings.Contains(strings.ToLower(s), term) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		ids = append(ids, model.ID)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 var refreshCmd = &cobra.Command{
@@ -291,23 +287,7 @@ sennit models refresh codex`,
 				continue
 			}
 
-			existing := make(map[string]bool, len(pc.Models))
-			for _, m := range pc.Models {
-				existing[m.ID] = true
-			}
-			fresh := make(map[string]bool, len(models))
-			var added, removed int
-			for _, m := range models {
-				fresh[m.ID] = true
-				if !existing[m.ID] {
-					added++
-				}
-			}
-			for existingID := range existing {
-				if !fresh[existingID] {
-					removed++
-				}
-			}
+			added, removed := diffModelIDs(pc.Models, models)
 
 			// Discovered models live in the global model-discovery cache,
 			// not providers.<id>.models in sennit.json — see
@@ -326,6 +306,31 @@ sennit models refresh codex`,
 		}
 		return nil
 	},
+}
+
+// diffModelIDs compares a provider's currently configured model list against
+// a freshly discovered/fetched one and reports how many IDs are new and how
+// many dropped out. It only compares by ID; a caller that also cares about
+// per-model field changes (Codex's context-window updates, for instance)
+// walks the fresh list itself and uses this just for the counts.
+func diffModelIDs(existing, fresh []catwalk.Model) (added, removed int) {
+	existingIDs := make(map[string]bool, len(existing))
+	for _, m := range existing {
+		existingIDs[m.ID] = true
+	}
+	freshIDs := make(map[string]bool, len(fresh))
+	for _, m := range fresh {
+		freshIDs[m.ID] = true
+		if !existingIDs[m.ID] {
+			added++
+		}
+	}
+	for id := range existingIDs {
+		if !freshIDs[id] {
+			removed++
+		}
+	}
+	return added, removed
 }
 
 func init() {

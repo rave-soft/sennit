@@ -572,6 +572,26 @@ func shouldFlushNow(prev, next *Message) bool {
 	return false
 }
 
+// messagesFrom converts a row set into domain messages, failing on the
+// first row that will not decode.
+//
+// Four List methods differ only in the query they run, so the conversion
+// is written once here rather than four times over. It is generic because
+// one of those queries (ListUnfinishedAssistantMessages) returns a row
+// type of its own rather than db.Message — see its caller, which adapts
+// each row before handing it over.
+func messagesFrom[T any](rows []T, convert func(T) (Message, error)) ([]Message, error) {
+	messages := make([]Message, len(rows))
+	for i, row := range rows {
+		msg, err := convert(row)
+		if err != nil {
+			return nil, err
+		}
+		messages[i] = msg
+	}
+	return messages, nil
+}
+
 func (s *service) Get(ctx context.Context, id string) (Message, error) {
 	dbMessage, err := s.q.GetMessage(ctx, id)
 	if err != nil {
@@ -585,14 +605,7 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]Message, len(dbMessages))
-	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
+	return messagesFrom(dbMessages, s.fromDBItem)
 }
 
 func (s *service) ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]Message, error) {
@@ -600,9 +613,10 @@ func (s *service) ListUnfinishedAssistantMessages(ctx context.Context, projectPa
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]Message, len(rows))
-	for i, row := range rows {
-		messages[i], err = s.fromDBItem(db.Message{
+	// This query has a row type of its own, so each row is adapted to
+	// db.Message before the shared conversion runs.
+	return messagesFrom(rows, func(row db.ListUnfinishedAssistantMessagesRow) (Message, error) {
+		return s.fromDBItem(db.Message{
 			ID:         row.ID,
 			SessionID:  row.SessionID,
 			Role:       row.Role,
@@ -613,11 +627,7 @@ func (s *service) ListUnfinishedAssistantMessages(ctx context.Context, projectPa
 			UpdatedAt:  row.UpdatedAt,
 			FinishedAt: row.FinishedAt,
 		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
+	})
 }
 
 func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Message, error) {
@@ -625,14 +635,7 @@ func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Mes
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]Message, len(dbMessages))
-	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
+	return messagesFrom(dbMessages, s.fromDBItem)
 }
 
 func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
@@ -640,14 +643,7 @@ func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]Message, len(dbMessages))
-	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
+	return messagesFrom(dbMessages, s.fromDBItem)
 }
 
 func (s *service) ListBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]Message, error) {

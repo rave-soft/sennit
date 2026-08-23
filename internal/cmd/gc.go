@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -137,7 +136,7 @@ func runGC(cmd *cobra.Command, _ []string) error {
 	// do and, since nothing changes, nothing to VACUUM either.
 	if retentionDays <= 0 {
 		if jsonOut {
-			return json.NewEncoder(out).Encode(report)
+			return emitJSON(out, report)
 		}
 		fmt.Fprintln(out, "History retention is disabled (history_retention_days = 0); nothing to do.")
 		return nil
@@ -178,7 +177,7 @@ func runGC(cmd *cobra.Command, _ []string) error {
 	}
 
 	if jsonOut {
-		return json.NewEncoder(out).Encode(report)
+		return emitJSON(out, report)
 	}
 	renderGCReport(out, report)
 	return nil

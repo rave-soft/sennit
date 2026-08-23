@@ -83,16 +83,7 @@ func followLogs(ctx context.Context, logsFile string, tailLines int) error {
 		return fmt.Errorf("failed to tail log file: %w", err)
 	}
 
-	var lines []string
-	for line := range t.Lines {
-		if line.Err != nil {
-			continue
-		}
-		lines = append(lines, line.Text)
-		if len(lines) > tailLines {
-			lines = lines[len(lines)-tailLines:]
-		}
-	}
+	lines := drainTailLines(t, tailLines)
 	_ = t.Stop() // tail file already drained; process may have exited
 
 	for _, line := range lines {
@@ -140,16 +131,7 @@ func showLogs(logsFile string, tailLines int) error {
 	}
 	defer func() { _ = t.Stop() }() // best-effort stop during shutdown
 
-	var lines []string
-	for line := range t.Lines {
-		if line.Err != nil {
-			continue
-		}
-		lines = append(lines, line.Text)
-		if len(lines) > tailLines {
-			lines = lines[len(lines)-tailLines:]
-		}
-	}
+	lines := drainTailLines(t, tailLines)
 
 	for _, line := range lines {
 		printLogLine(line)
@@ -160,6 +142,25 @@ func showLogs(logsFile string, tailLines int) error {
 	}
 
 	return nil
+}
+
+// drainTailLines reads every line already queued on t.Lines — the channel
+// closes once a non-following tail's initial pass finishes — keeping only
+// the last tailLines of them, the way `tail -n` would. Both the one-shot
+// "sennit logs" read and the initial catch-up before "sennit logs -f"
+// starts following need exactly this.
+func drainTailLines(t *tail.Tail, tailLines int) []string {
+	var lines []string
+	for line := range t.Lines {
+		if line.Err != nil {
+			continue
+		}
+		lines = append(lines, line.Text)
+		if len(lines) > tailLines {
+			lines = lines[len(lines)-tailLines:]
+		}
+	}
+	return lines
 }
 
 func printLogLine(lineText string) {

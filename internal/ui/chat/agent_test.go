@@ -720,16 +720,20 @@ func TestCapTodosForDelegation(t *testing.T) {
 	require.Equal(t, []string{"active 1", "active 2"}, names(capTodosForDelegation(todos, 1)))
 }
 
-// TestBothDelegationItemsRestyle pins the pair together. Nested tools
-// render inline in their container rather than as list entries, so nothing
-// but the container reaches them on a theme switch — and the agentic_fetch
-// item had no Restyle at all, so every one of its blocks kept the old
-// palette until the session was reloaded.
-func TestBothDelegationItemsRestyle(t *testing.T) {
+// TestDelegationItemsKeepTheirRestylableAndAnimatableContracts pins the
+// two delegation blocks against the shared embedding they were collapsed
+// into. Both satisfy these through promoted methods now, and a promotion
+// that silently stops applying — an override added on one type, a field
+// renamed — is not something the compiler complains about anywhere else.
+func TestDelegationItemsKeepTheirRestylableAndAnimatableContracts(t *testing.T) {
 	t.Parallel()
 
 	var (
 		_ Restylable = (*AgentToolMessageItem)(nil)
 		_ Restylable = (*AgenticFetchToolMessageItem)(nil)
+		_ Animatable = (*AgentToolMessageItem)(nil)
+		_ Animatable = (*AgenticFetchToolMessageItem)(nil)
+		_ Expandable = (*AgentToolMessageItem)(nil)
+		_ Expandable = (*AgenticFetchToolMessageItem)(nil)
 	)
 }
