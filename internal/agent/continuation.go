@@ -2,10 +2,14 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"charm.land/fantasy"
+
+	"github.com/rave-soft/sennit/internal/session"
 )
 
 // maxTaskCascadeDepth bounds how many auto-woken continuations may chain
@@ -92,10 +96,34 @@ func (a *sessionAgent) startContinuation(ctx context.Context, sessionID, reason 
 	// not from its values, mirroring how Run's own title-generation
 	// goroutine (agent.go) detaches from its triggering call's context.
 	runCtx := context.WithoutCancel(ctx)
+	// Wait out the backoff for a session whose continuations have been
+	// failing. Zero on the ordinary path, so a finished delegation still
+	// reaches the model immediately; see continuationRetryBackoff.
+	backoff := continuationRetryBackoff(a.continuationFailureCount(sessionID))
 	go func() {
-		if _, err := a.Run(runCtx, call); err != nil {
-			slog.Error("Auto-continuation turn failed", "session_id", sessionID, "error", err)
+		if backoff > 0 {
+			timer := time.NewTimer(backoff)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-runCtx.Done():
+				return
+			}
 		}
+		_, err := a.Run(runCtx, call)
+		failures := a.noteContinuationOutcome(sessionID, err)
+		if err == nil {
+			return
+		}
+		if errors.Is(err, session.ErrNotFound) {
+			// The session was deleted while its delegation was still
+			// running. Nothing will ever drain this inbox, and every
+			// attempt to is another failed turn.
+			a.dropCompletions(sessionID)
+			slog.Warn("Auto-continuation abandoned: session no longer exists", "session_id", sessionID)
+			return
+		}
+		slog.Error("Auto-continuation turn failed", "session_id", sessionID, "error", err, "failures", failures)
 	}()
 }
 

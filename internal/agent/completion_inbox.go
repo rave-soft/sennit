@@ -96,6 +96,10 @@ func (d *dispatcher) enqueueCompletion(sessionID string, completion TaskCompleti
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.completionInbox = append(s.completionInbox, completion)
+	// A new completion is a new event, not another go at the one that
+	// kept failing: give the wake path its attempts back. The cap still
+	// bounds the loop, since each reset costs an external event.
+	s.continuationFailures = 0
 	// ids, kind, status, and the is-message flag only — never
 	// completion.Goal, .ResultText, .Error, or .Message, which are the
 	// user's own work (or the delegation's own words) and must not end
@@ -150,6 +154,65 @@ func (d *dispatcher) requeueCompletions(sessionID string, remainder []TaskComple
 	s.completionInbox = merged
 }
 
+// maxContinuationAttempts bounds how many auto-woken continuation turns
+// may fail in a row for one completion batch. Three is enough to ride out
+// a transient provider failure and small enough that a permanent one
+// (a deleted session) costs a handful of attempts rather than a loop.
+const maxContinuationAttempts = 3
+
+// continuationRetryBackoff is the pause before a retry after n consecutive
+// failures. Zero for the first attempt: the ordinary wake must stay
+// immediate, since it is what makes a finished delegation feel like it
+// reached the agent at once.
+func continuationRetryBackoff(failures int) time.Duration {
+	if failures <= 0 {
+		return 0
+	}
+	return time.Duration(failures) * time.Second
+}
+
+// noteContinuationOutcome records how an auto-woken continuation ended and
+// reports the consecutive failure count. A success clears the count.
+func (d *dispatcher) noteContinuationOutcome(sessionID string, err error) int {
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err == nil {
+		s.continuationFailures = 0
+		return 0
+	}
+	s.continuationFailures++
+	return s.continuationFailures
+}
+
+// continuationFailureCount reports the consecutive failure count, for the
+// backoff a retry waits out before it starts.
+func (d *dispatcher) continuationFailureCount(sessionID string) int {
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.continuationFailures
+}
+
+// dropCompletions discards everything queued for sessionID. It is for the
+// one case where the queue can never be delivered: the session itself is
+// gone, so no turn will ever run to drain it and holding the events only
+// keeps the dispatch state alive.
+func (d *dispatcher) dropCompletions(sessionID string) {
+	s, release := d.session(sessionID)
+	defer release()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.completionInbox) == 0 {
+		return
+	}
+	slog.Warn("Dropping queued completions for a session that no longer exists",
+		"session", sessionID, "inbox_size", len(s.completionInbox))
+	s.completionInbox = nil
+}
+
 // wakeEligible reports whether sessionID currently has something in its
 // completion inbox and is eligible for an auto-wake attempt (idle, not
 // left canceled by the user). It exists for run()'s exit path: a
@@ -180,6 +243,15 @@ func (d *dispatcher) wakeEligibleLocked(s *sessionState) bool {
 		return false
 	}
 	if s.active != nil {
+		return false
+	}
+	if s.continuationFailures >= maxContinuationAttempts {
+		// Something about this session keeps the continuation from
+		// running at all — its row is gone, its history will not load.
+		// Stop attempting: the completions stay queued and reach the
+		// model the ordinary way on whatever the next real turn is.
+		slog.Warn("Delivery skipped: continuation keeps failing, completion left queued",
+			"failures", s.continuationFailures, "inbox_size", len(s.completionInbox))
 		return false
 	}
 	if s.cancelled {

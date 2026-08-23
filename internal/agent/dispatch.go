@@ -53,6 +53,19 @@ type sessionState struct {
 	// inbox — see wakeEligibleLocked.
 	cancelled bool
 
+	// continuationFailures counts consecutive auto-woken continuation
+	// turns that ended in an error without consuming the inbox. It is
+	// what stops the wake path from spinning: a continuation that fails
+	// before its PrepareStep drains anything leaves the inbox untouched
+	// and the session idle, and run()'s exit hook immediately wakes
+	// another one. A session deleted while a delegation was still
+	// running turned that into a hot loop of database writes,
+	// RunComplete publishes and error logs for as long as the process
+	// lived. Reset by a continuation that succeeds, and by a genuinely
+	// new completion arriving — see wakeEligibleLocked and
+	// noteContinuationOutcome.
+	continuationFailures int
+
 	// acceptedRuns counts dispatched-but-not-yet-active runs for this
 	// session. Guarded by dispatcher.acceptedMu, not mu — see the
 	// struct doc comment.

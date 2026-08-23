@@ -85,14 +85,13 @@ func TestSummarize_CanceledCleanupStillDeletesTheSummaryMessage(t *testing.T) {
 
 	<-streamStarted
 	cancelSummarize()
-	// summarize returns the cleanup delete's own error here (see the
-	// isCancelErr branch), not the original context.Canceled - so a
-	// successful cleanup against a working, detached context reports no
-	// error at all. Under the old bug the delete itself failed against the
-	// already-canceled ctx, so this would come back non-nil too; the
-	// meaningful assertion is the one below, on whether the message
-	// actually got deleted.
-	require.NoError(t, <-errCh)
+	// summarize reports the cancellation itself (see the isCancelErr
+	// branch): returning the cleanup delete's error instead - nil
+	// whenever cleanup worked - told finishTurn a canceled summarize had
+	// succeeded, and it went on to continue the turn on the very context
+	// that needed summarizing. The cleanup's own success is asserted
+	// below, on whether the message actually got deleted.
+	require.ErrorIs(t, <-errCh, context.Canceled)
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)

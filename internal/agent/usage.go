@@ -201,8 +201,20 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		defer cleanupCancel()
 		if isCancelErr {
 			// User cancelled summarize we need to remove the summary message.
-			deleteErr := a.messages.Delete(cleanupCtx, summaryMessage.ID)
-			return deleteErr
+			//
+			// The cancellation itself is what this returns, not the
+			// delete's own error: returning the delete result (nil on the
+			// ordinary path) reported a cancelled summarize as a
+			// successful one, and finishTurn went on to requeue a
+			// continuation — on the un-summarized context that made
+			// summarizing necessary in the first place, so the next turn
+			// walked straight back into it. A delete failure is worth
+			// logging but is not the outcome the caller has to act on.
+			if deleteErr := a.messages.Delete(cleanupCtx, summaryMessage.ID); deleteErr != nil {
+				slog.Error("Failed to remove the summary message of a cancelled summarize",
+					"session_id", sessionID, "message_id", summaryMessage.ID, "error", deleteErr)
+			}
+			return err
 		}
 		// Mark the summary message as finished with an error so the UI
 		// stops spinning.

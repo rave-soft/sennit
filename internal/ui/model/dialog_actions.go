@@ -2,6 +2,7 @@ package model
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"strings"
 
@@ -213,7 +214,11 @@ func (m *UI) applySessionDialogAction(action dialog.Action) (tea.Cmd, bool) {
 		}
 		cmds = append(cmds, func() tea.Msg {
 			err := m.com.Workspace.AgentSummarize(m.com.Context(), msg.SessionID)
-			if err != nil {
+			// A cancellation is the user's own esc, not a failure worth a
+			// banner. Summarize reports it as an error deliberately — see
+			// its cancel branch, where reporting success instead let the
+			// turn continue on the context that needed summarizing.
+			if err != nil && !errors.Is(err, context.Canceled) {
 				return util.ReportError(err)()
 			}
 			return nil
