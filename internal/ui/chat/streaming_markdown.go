@@ -494,56 +494,6 @@ func isSafeBoundaryAt(content string, p int) bool {
 
 // prefixHasOpenHazard reports whether prefix contains any of three
 // constructs that cannot be safely cut at a blank-line boundary
-// even when the immediately preceding line looks fine. Each check
-// uses the SIMPLEST viable conservative rule per the F8 round-2
-// review:
-//
-//	B1 (loose lists). A loose list has a blank line between an item
-//	   and a continuation paragraph that begins with indentation
-//	   but no list marker. If a candidate boundary lands on that
-//	   blank line, the prefix's trailing non-blank line is the
-//	   continuation paragraph, NOT a list marker, so the last-line
-//	   check would accept it even though the list is still open.
-//
-//	   Rule chosen: any list-marker line ANYWHERE in the prefix
-//	   forces -1. This is overly conservative — it forfeits
-//	   boundary advancement past a closed list — but it eliminates
-//	   the entire bug class with zero parsing of CommonMark's
-//	   loose-list closure semantics. We retain the most useful
-//	   boundary in practice: the one BEFORE the list opens (no
-//	   marker has appeared in the prefix yet).
-//
-//	B2 (HTML blocks). CommonMark defines seven HTML-block opener
-//	   patterns (script/pre/style/textarea, comments, processing
-//	   instructions, CDATA, declarations, recognised tag names).
-//	   If the prefix opens an HTML block that the suffix closes,
-//	   splitting renders the prefix as raw HTML and the suffix as
-//	   prose.
-//
-//	   Rule chosen: any HTML-block opener anywhere in the prefix
-//	   forces -1. Same trade-off as B1 — the typical assistant
-//	   output contains no raw HTML, so the perf cost is zero in
-//	   the common case.
-//
-//	B3 (reference link definitions). A line of the form
-//	   "[label]: <url>" defines a link reference that the suffix
-//	   may later use as "[text][label]". Splitting the document
-//	   loses the definition because each half is rendered as an
-//	   independent glamour document.
-//
-//	   Rule chosen: any reference link definition line anywhere in
-//	   the prefix forces -1. Suffix-side reference detection is
-//	   fragile (three syntaxes: [text][label], [label][], [label]),
-//	   so the prefix-side check is the simpler safe choice.
-//
-// All three rules accept the perf hit of "no boundary after a
-// list / HTML block / link def" in exchange for guaranteed
-// soundness. If profiling shows this kills the F8 win on real
-// streaming traces, the next iteration can promote each rule to
-// its less-conservative variant (closure-aware list tracking,
-// per-tag HTML close detection, suffix-aware ref tracking).
-// prefixHasOpenHazard reports whether prefix contains any of three
-// constructs that cannot be safely cut at a blank-line boundary
 // even when the immediately preceding line looks fine.
 //
 //	B1 (loose lists, refined). A loose list has a blank line between

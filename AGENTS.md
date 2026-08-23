@@ -64,7 +64,10 @@ internal/
 
 ### Key Patterns
 
-- **Config is a Service**: accessed via `config.Service`, not global state.
+- **Config is a store, not global state**: loaded once into a
+  `*config.ConfigStore` and read through its published `*config.Config`
+  snapshots (`store.Config()`); mutators clone-and-swap rather than
+  editing the live value.
 - **Tools are self-documenting**: each tool has a `.go` implementation and a
   `.md` description file in `internal/agent/tools/`.
 - **Tool failures: text response vs. Go error**: a model-recoverable failure
@@ -154,12 +157,12 @@ internal/
 
 - **Build**: `go build .` or `go run .`
 - **Test**: `task test` or `go test ./...` (run single test:
-  `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
+  `go test ./internal/agent/prompt -run TestNewPrompt`)
 - **Update Golden Files**: `go test ./... -update` (regenerates `.golden`
   files when test output changes)
   - Update specific package:
-    `go test ./internal/tui/components/core -update` (in this case,
-    we're updating "core")
+    `go test ./internal/ui/model -update` (in this case, we're updating
+    the TUI model's golden files)
 - **Lint**: `task lint:fix`
 - **Format**: `task fmt` (`gofumpt -w .`)
 - **Modernize**: `task modernize` (runs `modernize` which makes code
@@ -198,29 +201,29 @@ internal/
 - **Comments**: End comments in periods unless comments are at the end of the
   line.
 
-## Testing with Mock Providers
+## Testing without real providers
 
-When writing tests that involve provider configurations, use the mock
-providers to avoid API calls:
+Tests must never reach a real provider. Point the config loader at a
+throwaway global directory and give it a provider that exists only for the
+test — `disable_default_providers` keeps the embedded catalog out of it,
+so nothing resolves to a real endpoint:
 
 ```go
-func TestYourFunction(t *testing.T) {
-    // Enable mock providers for testing
-    originalUseMock := config.UseMockProviders
-    config.UseMockProviders = true
-    defer func() {
-        config.UseMockProviders = originalUseMock
-        config.ResetProviders()
-    }()
+writeGlobalConfig(t, `{
+  "options": {"disable_default_providers": true},
+  "providers": {"mock": {"id": "mock", "name": "Mock", "type": "openai",
+    "base_url": "http://127.0.0.1:9/v1", "api_key": "test-key",
+    "models": [{"id": "mock-model", "name": "Mock", "context_window": 8192}]}},
+  "models": {"large": {"provider": "mock", "model": "mock-model"},
+             "small": {"provider": "mock", "model": "mock-model"}}
+}`)
 
-    // Reset providers to ensure fresh mock data
-    config.ResetProviders()
-
-    // Your test code here - providers will now return mock data
-    providers := config.Providers()
-    // ... test logic
-}
+cfg, err := config.Load(workingDir, "", false)
 ```
+
+See `internal/agent/common_test.go` for the helper and its callers. (The
+`config.UseMockProviders` / `config.ResetProviders` globals this section
+used to describe do not exist.)
 
 ## Formatting
 

@@ -540,6 +540,22 @@ func (a *AgenticFetchToolMessageItem) HoverableAt(x, y, width int) bool {
 	return x >= MessageLeftPaddingTotal && y >= 0 && y < lipgloss.Height(a.Render(width))
 }
 
+// Restyle implements [Restylable], the same way the delegation item does
+// and for the same reason: the nested tools render inline in this item
+// rather than as list entries of their own, so nothing else reaches their
+// animations. Without it this item kept the palette it was built with —
+// a theme switch left every agentic_fetch block in the old colours until
+// the session was reloaded.
+func (a *AgenticFetchToolMessageItem) Restyle() tea.Cmd {
+	cmds := []tea.Cmd{a.baseToolMessageItem.Restyle()}
+	for _, nested := range a.nestedTools {
+		if r, ok := nested.(Restylable); ok {
+			cmds = append(cmds, r.Restyle())
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
 // Animate progresses the message animation if it should be spinning.
 // See [AgentToolMessageItem.Animate] for the parent-bump rationale —
 // without an override, the embedded base.Animate would (a) drop

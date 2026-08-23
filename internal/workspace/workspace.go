@@ -438,8 +438,12 @@ type EventSubscriber interface {
 // remote. It is a composition of narrower role interfaces (SessionStore,
 // AgentController, ...) so that consumers who only need one slice of it —
 // test stubs, most dialogs — can depend on the narrow interface instead of
-// all ~65 methods. Implementations are unaffected: this is purely a
+// all 94 methods. Implementations are unaffected: this is purely a
 // grouping of the same method set.
+//
+// Ninety-four is a lot, and the role interfaces are what keep that from
+// being the number every consumer depends on. A new method belongs on the
+// role it serves, not here.
 type Workspace interface {
 	SessionStore
 	AgentController

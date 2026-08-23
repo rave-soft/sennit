@@ -242,19 +242,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	var openrouterCost *float64
-	for _, step := range resp.Steps {
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
-			}
-			openrouterCost = &newCost
-		}
-	}
-
-	a.updateSessionUsage(model, &currentSession, resp.TotalUsage, openrouterCost, false)
+	a.updateSessionUsage(model, &currentSession, resp.TotalUsage, a.openrouterTotal(resp.Steps), false)
 
 	// Just in case, get just the last usage info.
 	usage := resp.Response.Usage
@@ -335,11 +323,7 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		session.EstimatedUsage = estimated
 	}
 
-	modelConfig := model.CatalogCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
-		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
+	cost := catalogCost(model, usage)
 
 	if !estimated {
 		a.eventTokensUsed(session.ID, model, usage, cost)
@@ -367,9 +351,49 @@ func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
 	if usage.OutputTokens != 0 {
 		session.CompletionTokens = usage.OutputTokens
 	}
-	if promptTokens := usage.InputTokens + usage.CacheReadTokens; promptTokens != 0 {
+	if promptTokens := promptTokensOf(usage); promptTokens != 0 {
 		session.PromptTokens = promptTokens
 	}
+}
+
+// promptTokensOf is what a turn counts as its prompt: the tokens the model
+// read, whether they came fresh or from the cache.
+//
+// It exists because two places counted this and disagreed — the per-turn
+// path added CacheReadTokens, and title generation added
+// CacheCreationTokens instead, so a session's token count depended on
+// which of the two wrote last.
+func promptTokensOf(usage fantasy.Usage) int64 {
+	return usage.InputTokens + usage.CacheReadTokens
+}
+
+// catalogCost is the model's own price for usage, before any provider
+// override or flat-rate rule is applied.
+func catalogCost(model Model, usage fantasy.Usage) float64 {
+	cfg := model.CatalogCfg
+	return cfg.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
+		cfg.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
+		cfg.CostPer1MIn/1e6*float64(usage.InputTokens) +
+		cfg.CostPer1MOut/1e6*float64(usage.OutputTokens)
+}
+
+// openrouterTotal sums the per-step costs OpenRouter reports, or returns
+// nil when no step carried one — in which case the caller keeps the
+// catalog price.
+func (a *sessionAgent) openrouterTotal(steps []fantasy.StepResult) *float64 {
+	var total *float64
+	for _, step := range steps {
+		stepCost := a.openrouterCost(step.ProviderMetadata)
+		if stepCost == nil {
+			continue
+		}
+		sum := *stepCost
+		if total != nil {
+			sum += *total
+		}
+		total = &sum
+	}
+	return total
 }
 
 func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message) int64 {

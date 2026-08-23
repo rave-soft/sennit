@@ -144,36 +144,21 @@ func (a *sessionAgent) generateTitle(ctx context.Context, sessionID string, user
 		title = cmp.Or(fallback, DefaultSessionName)
 	}
 
-	// Calculate usage and cost.
-	var openrouterCost *float64
-	for _, step := range resp.Steps {
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
-			}
-			openrouterCost = &newCost
-		}
-	}
-
-	modelConfig := model.CatalogCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
-		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
-
-	// Use override cost if available (e.g., from OpenRouter).
-	if openrouterCost != nil {
+	// Calculate usage and cost, through the same helpers the per-turn
+	// path uses: this used to carry its own copy of both the cost formula
+	// and the token accounting, and the token halves had drifted — the
+	// turn path counts cache *reads* as prompt tokens and this counted
+	// cache *creations*, so a session's totals depended on which of the
+	// two wrote last.
+	cost := catalogCost(model, resp.TotalUsage)
+	if openrouterCost := a.openrouterTotal(resp.Steps); openrouterCost != nil {
 		cost = *openrouterCost
 	}
-
-	// Skip cost accumulation
 	if model.FlatRate {
 		cost = 0
 	}
 
-	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
+	promptTokens := promptTokensOf(resp.TotalUsage)
 	completionTokens := resp.TotalUsage.OutputTokens
 
 	// Atomically update only title and usage fields to avoid overriding other

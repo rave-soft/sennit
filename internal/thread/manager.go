@@ -1393,11 +1393,6 @@ func (m *Manager) waitTargets(ctx context.Context, ids []string) ([]Thread, erro
 	return threads, nil
 }
 
-// isUniqueConstraintViolation reports whether err came from a UNIQUE
-// constraint failure. This package deliberately has no import on the SQL
-// driver (see the Store seam in internal/app/threadspawn), so it matches
-// on the message text every SQLite driver uses for this failure rather
-// than a driver-specific error type.
 // registerParent installs delegationID's parent link on registerOn — the
 // coordinator that will actually dispatch its turns — so a mid-run ask or
 // its eventual completion reaches parentSessionID through parentCoord. It
@@ -1421,6 +1416,11 @@ func registerParent(registerOn, parentCoord Coordinator, sessionID, parentSessio
 	})
 }
 
+// isUniqueConstraintViolation reports whether err came from a UNIQUE
+// constraint failure. This package deliberately has no import on the SQL
+// driver (see the Store seam in internal/app/threadspawn), so it matches
+// on the message text every SQLite driver uses for this failure rather
+// than a driver-specific error type.
 func isUniqueConstraintViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

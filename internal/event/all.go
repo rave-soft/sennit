@@ -17,10 +17,6 @@ func SessionDeleted() {
 	send("session deleted")
 }
 
-func SessionSwitched() {
-	send("session switched")
-}
-
 func FilePickerOpened() {
 	send("filepicker opened")
 }

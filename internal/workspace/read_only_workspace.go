@@ -43,7 +43,7 @@ func (e *ErrReadOnlyOperation) Error() string {
 // so the TUI can inspect persisted session data without risking
 // accidental writes or tearing down the parent workspace.
 //
-// It embeds Workspace rather than hand-writing a stub for all ~93 methods:
+// It embeds Workspace rather than hand-writing a stub for all 94 methods:
 // everything not overridden below is the embedded workspace's own
 // behavior, unchanged. That inverts the old failure mode. Before, a
 // forgotten stub was a compile error the moment Workspace grew a method.
