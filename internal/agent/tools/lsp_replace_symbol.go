@@ -10,6 +10,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/lsp"
@@ -48,6 +49,7 @@ func NewReplaceSymbolTool(
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
+	workingDir string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ReplaceSymbolToolName,
@@ -58,6 +60,13 @@ func NewReplaceSymbolTool(
 			}
 			if params.FilePath == "" {
 				return invalidParam("file_path"), nil
+			}
+			// See lsp_rename.go: a write tool with no session id refuses,
+			// it does not write unasked. Checked before any LSP work, so
+			// a call that cannot be permitted does no work at all.
+			sessionID := GetSessionFromContext(ctx)
+			if sessionID == "" {
+				return fantasy.ToolResponse{}, missingSessionID("replacing a symbol")
 			}
 
 			action := params.Action
@@ -73,14 +82,20 @@ func NewReplaceSymbolTool(
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("replacement is required for action %q", action)), nil
 			}
 
-			lspManager.Start(ctx, params.FilePath)
+			// Against the workspace, not the process cwd: a thread's
+			// agent works in its own worktree while the process stays in
+			// the main checkout, so a relative path here used to read and
+			// write the wrong tree's file.
+			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
-			client := findLSPClient(lspManager, params.FilePath)
+			lspManager.Start(ctx, filePath)
+
+			client := findLSPClient(lspManager, filePath)
 			if client == nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("no LSP client handles file: %s", params.FilePath)), nil
 			}
 
-			symbols, err := client.DocumentSymbols(ctx, params.FilePath)
+			symbols, err := client.DocumentSymbols(ctx, filePath)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get document symbols: %s", err)), nil
 			}
@@ -92,7 +107,7 @@ func NewReplaceSymbolTool(
 
 			rng := target.GetRange()
 
-			content, err := os.ReadFile(params.FilePath)
+			content, err := os.ReadFile(filePath)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
 			}
@@ -130,20 +145,19 @@ func NewReplaceSymbolTool(
 
 			newContent := strings.Join(newLines, "\n")
 
-			if msg, refused := confinementRefusal(permissions, params.FilePath); refused {
+			if msg, refused := confinementRefusal(permissions, filePath); refused {
 				return fantasy.NewTextErrorResponse(msg), nil
 			}
 
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID != "" && permissions != nil {
+			if permissions != nil {
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					ToolCallID:  call.ID,
-					Path:        params.FilePath,
+					Path:        filePath,
 					ToolName:    ReplaceSymbolToolName,
 					Description: fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
 					Params: ReplaceSymbolPermissionsParams{
-						FilePath:   params.FilePath,
+						FilePath:   filePath,
 						OldContent: string(content),
 						NewContent: newContent,
 					},
@@ -157,20 +171,20 @@ func NewReplaceSymbolTool(
 			}
 
 			if files != nil && sessionID != "" {
-				if _, err := files.CreateVersion(ctx, sessionID, params.FilePath, string(content)); err != nil {
-					slog.Warn("Failed to create file version before replace", "path", params.FilePath, "error", err)
+				if _, err := files.CreateVersion(ctx, sessionID, filePath, string(content)); err != nil {
+					slog.Warn("Failed to create file version before replace", "path", filePath, "error", err)
 				}
 			}
 
-			if err := os.WriteFile(params.FilePath, []byte(newContent), 0o644); err != nil {
+			if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 			}
 
 			if filetracker != nil && sessionID != "" {
-				filetracker.RecordRead(ctx, sessionID, params.FilePath)
+				filetracker.RecordRead(ctx, sessionID, filePath)
 			}
 
-			notifyLSPs(ctx, lspManager, params.FilePath)
+			notifyLSPs(ctx, lspManager, filePath)
 
 			var summary string
 			switch action {
@@ -184,9 +198,9 @@ func NewReplaceSymbolTool(
 				summary = fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
 			}
 
-			resp := fantasy.NewTextResponse(summary + "\n" + getDiagnostics(params.FilePath, lspManager))
+			resp := fantasy.NewTextResponse(summary + "\n" + getDiagnostics(filePath, lspManager))
 			resp = fantasy.WithResponseMetadata(resp, ReplaceSymbolResponseMetadata{
-				FilePath:   params.FilePath,
+				FilePath:   filePath,
 				OldContent: string(content),
 				NewContent: newContent,
 				Action:     action,

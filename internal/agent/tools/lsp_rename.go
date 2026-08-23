@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 
 	"charm.land/fantasy"
 
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/lsp"
@@ -34,6 +34,7 @@ func NewRenameTool(
 	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
+	workingDir string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		RenameToolName,
@@ -45,8 +46,22 @@ func NewRenameTool(
 			if params.NewName == "" {
 				return invalidParam("new_name"), nil
 			}
-			workingDir := cmp.Or(params.Path, ".")
-			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, workingDir)
+			// A missing session id is an error, not a reason to skip the
+			// prompt: this tool writes, and every other write tool refuses
+			// rather than proceeding unasked (see missingSessionID's own
+			// call sites). The old condition — sessionID != "" &&
+			// permissions != nil — let a call with no session in context
+			// rename across the whole workspace with no permission request
+			// at all. Checked up front, before any LSP work.
+			sessionID := GetSessionFromContext(ctx)
+			if sessionID == "" {
+				return fantasy.ToolResponse{}, missingSessionID("renaming a symbol")
+			}
+			// Against the workspace, not the process cwd — see
+			// NewDefinitionTool for why "." was the wrong tree in a
+			// thread's worktree.
+			searchDir := filepathext.SmartJoin(workingDir, params.Path)
+			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
 			}
@@ -60,8 +75,7 @@ func NewRenameTool(
 				return fantasy.NewTextResponse(fmt.Sprintf("No rename edits generated for symbol '%s'", params.Symbol)), nil
 			}
 
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID != "" && permissions != nil {
+			if permissions != nil {
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					ToolCallID:  call.ID,

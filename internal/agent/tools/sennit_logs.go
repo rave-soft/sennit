@@ -169,16 +169,25 @@ func readLastLines(filePath string, n int) ([]map[string]any, error) {
 			return nil, err
 		}
 
-		// Combine with remainder from previous (earlier) chunk.
+		// The file is read backwards, so the piece carried between
+		// iterations is the *head* of a line whose tail was already read:
+		// it belongs after this chunk's bytes, and the line it completes
+		// is this chunk's last one.
 		data := append(chunk, remainder...)
 
-		// Split into lines (without the final incomplete line if any).
 		lines := splitLines(data)
 
-		// Keep the incomplete line for next iteration.
-		if len(data) > 0 && data[len(data)-1] != '\n' {
-			remainder = lines[len(lines)-1]
-			lines = lines[:len(lines)-1]
+		// This chunk's own first line is the one the boundary cuts —
+		// its head is further back in the file — so it is what gets
+		// carried, and only while there is still file behind it. The
+		// old code carried the *last* line instead, which is the line
+		// this iteration just completed: it was dropped here and
+		// carried forward, then dropped again next time round, so every
+		// entry that happened to straddle a chunk boundary vanished
+		// from the output entirely.
+		if chunkStart > 0 && len(lines) > 0 {
+			remainder = lines[0]
+			lines = lines[1:]
 		} else {
 			remainder = nil
 		}

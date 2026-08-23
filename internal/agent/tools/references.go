@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -14,6 +13,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/lsp"
 )
 
@@ -27,7 +27,7 @@ const ReferencesToolName = "lsp_references"
 //go:embed references.md
 var referencesDescription string
 
-func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
+func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ReferencesToolName,
 		referencesDescription,
@@ -36,8 +36,14 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 				return invalidParam("symbol"), nil
 			}
 
-			workingDir := cmp.Or(params.Path, ".")
-			results, err := resolveSymbolResults(ctx, lspManager, params.Symbol, workingDir)
+			// Resolve against the workspace, not the process cwd. A
+			// thread runs its agent in its own worktree while the
+			// process stays in the main checkout, so "." — and any
+			// relative path the model gives — pointed at the wrong tree
+			// entirely: the tools searched the main checkout, or found
+			// no LSP client for a file that plainly exists.
+			searchDir := filepathext.SmartJoin(workingDir, params.Path)
+			results, err := resolveSymbolResults(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
 				return fantasy.NewTextResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
 			}

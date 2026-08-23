@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/lsp"
 )
 
@@ -31,7 +31,7 @@ type DefinitionResponseMetadata struct {
 	Content  string `json:"content"`
 }
 
-func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
+func NewDefinitionTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		DefinitionToolName,
 		definitionDescription,
@@ -39,8 +39,14 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			if params.Symbol == "" {
 				return invalidParam("symbol"), nil
 			}
-			workingDir := cmp.Or(params.Path, ".")
-			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, workingDir)
+			// Resolve against the workspace, not the process cwd. A
+			// thread runs its agent in its own worktree while the
+			// process stays in the main checkout, so "." — and any
+			// relative path the model gives — pointed at the wrong tree
+			// entirely: the tools searched the main checkout, or found
+			// no LSP client for a file that plainly exists.
+			searchDir := filepathext.SmartJoin(workingDir, params.Path)
+			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
 				return fantasy.NewTextResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
 			}

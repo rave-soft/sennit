@@ -127,7 +127,10 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return fantasy.NewTextErrorResponse("Failed to read response body: " + err.Error()), nil
 			}
 
-			content := string(body)
+			// The size cap cuts at a byte offset, which lands mid-rune on
+			// any page whose multi-byte character happens to straddle it —
+			// see dropTrailingPartialRune.
+			content := string(dropTrailingPartialRune(body))
 
 			validUTF8 := utf8.ValidString(content)
 			if !validUTF8 {

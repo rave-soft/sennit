@@ -3,7 +3,6 @@ package tools
 import (
 	"bufio"
 	"bytes"
-	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -60,7 +59,11 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 				return invalidParam("pattern"), nil
 			}
 
-			searchPath := cmp.Or(params.Path, workingDir)
+			// A relative path is relative to the workspace, the same as
+			// for every file tool. cmp.Or left it raw, so it resolved
+			// against the process cwd — in a thread, the main checkout
+			// rather than the worktree the agent is working in.
+			searchPath := filepathext.SmartJoin(workingDir, params.Path)
 
 			// Bound the search so a huge or symlink-heavy root (e.g. $HOME
 			// or a module cache) fails cleanly instead of pinning the CPU

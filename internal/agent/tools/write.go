@@ -140,7 +140,12 @@ func NewWriteTool(
 				return resp, nil
 			}
 
-			notifyLSPs(ctx, lspManager, params.FilePath)
+			// The resolved path, not the raw parameter: a relative one
+			// never matched any client's cwd, so the LSP was told nothing
+			// about a file this tool had just written and went on serving
+			// diagnostics for the old content. getDiagnostics on the next
+			// line already used the resolved form.
+			notifyLSPs(ctx, lspManager, filePath)
 			resp.Content = fmt.Sprintf("<result>\n%s\n</result>", resp.Content) + getDiagnostics(filePath, lspManager)
 			return resp, nil
 		},

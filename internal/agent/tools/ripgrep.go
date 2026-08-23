@@ -2,7 +2,6 @@ package tools
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -17,6 +16,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/filepathext"
 )
 
 type RipgrepParams struct {
@@ -67,7 +67,11 @@ func NewRipgrepTool(workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
 				searchPattern = escapeRegexPattern(params.Pattern)
 			}
 
-			searchPath := cmp.Or(params.Path, workingDir)
+			// A relative path is relative to the workspace, the same as
+			// for every file tool. cmp.Or left it raw, so it resolved
+			// against the process cwd — in a thread, the main checkout
+			// rather than the worktree the agent is working in.
+			searchPath := filepathext.SmartJoin(workingDir, params.Path)
 
 			searchCtx, cancel := context.WithTimeout(ctx, cfg.GetTimeout())
 			defer cancel()

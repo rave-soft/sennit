@@ -1,13 +1,13 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/lsp"
 )
 
@@ -22,7 +22,7 @@ const CallHierarchyToolName = "lsp_call_hierarchy"
 //go:embed lsp_call_hierarchy.md
 var callHierarchyDescription string
 
-func NewCallHierarchyTool(lspManager *lsp.Manager) fantasy.AgentTool {
+func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		CallHierarchyToolName,
 		callHierarchyDescription,
@@ -33,8 +33,14 @@ func NewCallHierarchyTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			if params.Direction != "incoming" && params.Direction != "outgoing" {
 				return fantasy.NewTextErrorResponse("direction must be 'incoming' or 'outgoing'"), nil
 			}
-			workingDir := cmp.Or(params.Path, ".")
-			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, workingDir)
+			// Resolve against the workspace, not the process cwd. A
+			// thread runs its agent in its own worktree while the
+			// process stays in the main checkout, so "." — and any
+			// relative path the model gives — pointed at the wrong tree
+			// entirely: the tools searched the main checkout, or found
+			// no LSP client for a file that plainly exists.
+			searchDir := filepathext.SmartJoin(workingDir, params.Path)
+			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, searchDir)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
 			}

@@ -50,7 +50,7 @@ func FetchURLAndConvert(ctx context.Context, client *http.Client, url string) (s
 		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	content := string(body)
+	content := string(dropTrailingPartialRune(body))
 
 	if !utf8.ValidString(content) {
 		return "", errors.New("response content is not valid UTF-8")
@@ -206,4 +206,25 @@ func FormatJSON(content string) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+// dropTrailingPartialRune drops a trailing partial UTF-8 sequence, which
+// is what a byte-limited read leaves behind when the limit falls mid-rune.
+// It is the read-side counterpart to truncateToRuneBoundary, which cuts a
+// string the caller already holds.
+// Without it a perfectly valid page failed the utf8.ValidString check
+// below purely because it was longer than the cap — "not valid UTF-8" for
+// content whose only fault was its size.
+//
+// Only a trailing partial sequence is trimmed: content that is genuinely
+// malformed still fails the check, which is the point of the check.
+func dropTrailingPartialRune(b []byte) []byte {
+	for len(b) > 0 {
+		r, size := utf8.DecodeLastRune(b)
+		if r != utf8.RuneError || size > 1 {
+			return b
+		}
+		b = b[:len(b)-1]
+	}
+	return b
 }

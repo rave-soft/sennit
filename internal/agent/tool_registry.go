@@ -165,13 +165,13 @@ func toolSpecs() []toolSpec {
 		{"lsp", lspGate, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
 				tools.NewDiagnosticsTool(c.lspManager),
-				tools.NewReferencesTool(c.lspManager),
+				tools.NewReferencesTool(c.lspManager, c.cfg.WorkingDir()),
 				tools.NewLSPRestartTool(c.lspManager),
-				tools.NewSymbolsTool(c.lspManager),
-				tools.NewDefinitionTool(c.lspManager),
-				tools.NewCallHierarchyTool(c.lspManager),
-				tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker),
-				tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker),
+				tools.NewSymbolsTool(c.lspManager, c.cfg.WorkingDir()),
+				tools.NewDefinitionTool(c.lspManager, c.cfg.WorkingDir()),
+				tools.NewCallHierarchyTool(c.lspManager, c.cfg.WorkingDir()),
+				tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+				tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 			}, nil
 		}},
 

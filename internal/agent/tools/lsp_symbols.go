@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/lsp"
 )
 
@@ -20,7 +21,7 @@ const SymbolsToolName = "lsp_symbols"
 //go:embed lsp_symbols.md
 var symbolsDescription string
 
-func NewSymbolsTool(lspManager *lsp.Manager) fantasy.AgentTool {
+func NewSymbolsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		SymbolsToolName,
 		symbolsDescription,
@@ -28,14 +29,19 @@ func NewSymbolsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			if params.FilePath == "" {
 				return invalidParam("file_path"), nil
 			}
-			lspManager.Start(ctx, params.FilePath)
+			// A relative file path is relative to the workspace, the
+			// same as for every file tool. Left raw it resolved against
+			// the process cwd, which in a thread is the main checkout
+			// rather than the worktree the agent is working in.
+			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
+			lspManager.Start(ctx, filePath)
 
-			client := findLSPClient(lspManager, params.FilePath)
+			client := findLSPClient(lspManager, filePath)
 			if client == nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("no LSP client handles file: %s", params.FilePath)), nil
 			}
 
-			symbols, err := client.DocumentSymbols(ctx, params.FilePath)
+			symbols, err := client.DocumentSymbols(ctx, filePath)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get document symbols: %s", err)), nil
 			}
