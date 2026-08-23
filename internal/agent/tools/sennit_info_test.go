@@ -201,7 +201,7 @@ func TestSennitInfo_YoloMode(t *testing.T) {
 		Providers:   csync.NewMap[string, config.ProviderConfig](),
 		Permissions: &config.Permissions{},
 	})
-	cfg.Overrides().SkipPermissionRequests = true
+	cfg.SetSkipPermissionRequests(true)
 
 	output := buildSennitInfo(cfg, nil, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[permissions]")
@@ -308,7 +308,7 @@ func TestSennitInfo_DeterministicOrdering(t *testing.T) {
 			AllowedTools: []string{"z-perm", "a-perm"},
 		},
 	})
-	cfg.Overrides().SkipPermissionRequests = true
+	cfg.SetSkipPermissionRequests(true)
 
 	// Test MCP ordering via writeMCP directly.
 	var mcpBuf strings.Builder

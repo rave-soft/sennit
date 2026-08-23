@@ -30,7 +30,7 @@ type SennitInfoParams struct {
 // *config.ConfigStore keeps this tool's dependency on config narrow (ISP).
 type SennitInfoConfig interface {
 	Config() *config.Config
-	Overrides() *config.RuntimeOverrides
+	Overrides() config.RuntimeOverrides
 	LoadedPaths() []string
 	ConfigStaleness() config.StalenessResult
 }

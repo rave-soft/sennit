@@ -157,6 +157,12 @@ func NewQuestionForm(sty *styles.Styles, batch question.Request) *QuestionForm {
 	return f
 }
 
+// isBracketKey reports whether msg is an unmodified "[" or "]" keypress —
+// the literal characters that double as this form's tab-nav shortcuts.
+func isBracketKey(msg tea.KeyPressMsg) bool {
+	return msg.Mod == 0 && (msg.Text == "[" || msg.Text == "]")
+}
+
 // shortLabel truncates a question to at most three words for use
 // as a tab header.
 func shortLabel(q string) string {
@@ -199,14 +205,24 @@ func (f *QuestionForm) firstUnanswered() int {
 // HandleKey routes keys to the active tab. Returns true when the
 // entire batch is submitted.
 func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	// "[" and "]" double as tab-nav shortcuts, but a focused FreeText
+	// editor needs them as literal characters — ctrl+left/ctrl+right (the
+	// other keys bound to the same actions) stay live either way.
+	bracketsAreLiteral := f.activeIdx < f.numQuestions && isBracketKey(msg)
+	if bracketsAreLiteral {
+		_, bracketsAreLiteral = f.questions[f.activeIdx].(*FreeText)
+	}
+
 	// Tab navigation works on all tabs including confirm.
-	switch {
-	case key.Matches(msg, f.keyNextTab):
-		f.switchTab(f.activeIdx + 1)
-		return false, nil
-	case key.Matches(msg, f.keyPrevTab):
-		f.switchTab(f.activeIdx - 1)
-		return false, nil
+	if !bracketsAreLiteral {
+		switch {
+		case key.Matches(msg, f.keyNextTab):
+			f.switchTab(f.activeIdx + 1)
+			return false, nil
+		case key.Matches(msg, f.keyPrevTab):
+			f.switchTab(f.activeIdx - 1)
+			return false, nil
+		}
 	}
 
 	// Confirm tab delegates to ConfirmComponent.

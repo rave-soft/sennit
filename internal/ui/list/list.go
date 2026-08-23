@@ -166,7 +166,7 @@ func (l *List) AtBottom() bool {
 	// Calculate the height from offsetIdx to the end.
 	var totalHeight int
 	for idx := l.offsetIdx; idx < len(l.items); idx++ {
-		if totalHeight > l.height {
+		if totalHeight-l.offsetLine > l.height {
 			// No need to calculate further, we're already past the viewport height
 			return false
 		}

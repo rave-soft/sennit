@@ -27,11 +27,15 @@ const unavailableRetryDelay = 30 * time.Second
 type Manager struct {
 	clients     *csync.Map[string, *Client]
 	unavailable *csync.Map[string, time.Time]
-	cfg         *config.ConfigStore
-	manager     *powernapconfig.Manager
-	callback    func(name string, client *Client)
-	now         func() time.Time
-	lookPath    func(string) (string, error)
+	// startMu holds one mutex per server name, taken across the
+	// check-then-create-then-store sequence in startServer so concurrent
+	// starts for the same server never spawn two LSP processes.
+	startMu  *csync.Map[string, *sync.Mutex]
+	cfg      *config.ConfigStore
+	manager  *powernapconfig.Manager
+	callback func(name string, client *Client)
+	now      func() time.Time
+	lookPath func(string) (string, error)
 }
 
 // NewManager creates a new LSP manager service.
@@ -66,6 +70,7 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 	return &Manager{
 		clients:     csync.NewMap[string, *Client](),
 		unavailable: csync.NewMap[string, time.Time](),
+		startMu:     csync.NewMap[string, *sync.Mutex](),
 		cfg:         cfg,
 		manager:     manager,
 		callback:    func(string, *Client) {}, // default no-op callback
@@ -167,6 +172,8 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		return
 	}
 
+	// Fast path: reuse an already-usable client without taking the
+	// per-name lock.
 	if client, ok := s.clients.Get(name); ok {
 		switch client.GetServerState() {
 		case StateReady, StateStarting, StateDisabled:
@@ -176,6 +183,8 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		}
 	}
 
+	// handles/canAutoStart don't touch shared mutable state, so run them
+	// before taking the lock; they can filter out most calls cheaply.
 	if isUserConfigured {
 		if !handles(server, filepath, s.cfg.WorkingDir()) {
 			return
@@ -184,7 +193,14 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		return
 	}
 
-	// Check again in case another goroutine started it in the meantime.
+	// Serialize the check-then-create-then-store sequence per server
+	// name: two concurrent Start calls for the same server must never
+	// both pass the checks below and spawn two LSP processes. The loser
+	// shuts its client down instead of leaking it.
+	mu := s.startMu.GetOrSet(name, func() *sync.Mutex { return &sync.Mutex{} })
+	mu.Lock()
+	defer mu.Unlock()
+
 	if client, ok := s.clients.Get(name); ok {
 		switch client.GetServerState() {
 		case StateReady, StateStarting, StateDisabled:
@@ -204,26 +220,10 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
 		return
 	}
-	// Only store non-nil clients. If another goroutine raced us,
-	// prefer the already-stored client.
-	if existing, ok := s.clients.Get(name); ok {
-		switch existing.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
-			client.Shutdown()
-			s.callback(name, existing)
-			return
-		}
-	}
 	s.clients.Set(name, client)
 	defer func() {
 		s.callback(name, client)
 	}()
-
-	switch client.GetServerState() {
-	case StateReady, StateStarting, StateDisabled:
-		// already done, return
-		return
-	}
 
 	client.serverState.Store(StateStarting)
 

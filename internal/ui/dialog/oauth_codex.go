@@ -121,13 +121,14 @@ func (m *OAuthCodex) initiateAuth() tea.Msg {
 // browser comes to us — but the shared dialog drives every flow through this
 // one hook.
 func (m *OAuthCodex) startPolling(_ string, _ int) tea.Cmd {
-	return func() tea.Msg {
-		if m.flow == nil {
+	if m.flow == nil {
+		return func() tea.Msg {
 			return ActionOAuthErrored{Error: fmt.Errorf("codex sign-in was not started")}
 		}
-		ctx, cancel := context.WithTimeout(m.com.Context(), codexAuthTimeout)
-		m.cancelFunc = cancel
-
+	}
+	ctx, cancel := context.WithTimeout(m.com.Context(), codexAuthTimeout)
+	m.cancelFunc = cancel
+	return func() tea.Msg {
 		token, err := m.flow.Wait(ctx)
 		if err != nil {
 			if ctx.Err() != nil {

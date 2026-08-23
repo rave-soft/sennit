@@ -206,10 +206,11 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
 
-	st, err = t.store.SetSession(ctx, st.ID, sess.ID)
+	newSt, err := t.store.SetSession(ctx, st.ID, sess.ID)
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
+	st = newSt
 	// Register the parent here, right where sess.ID becomes durably
 	// associated with the task record: a task shares its parent's own
 	// App/Coordinator (see DelegationParent's doc comment), so this is

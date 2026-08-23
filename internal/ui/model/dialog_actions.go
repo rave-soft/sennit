@@ -421,12 +421,9 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 		cmds = append(cmds, util.CmdHandler(showThreadsDashboardMsg{}))
 
 	case dialog.ActionFilePickerSelected:
+		m.dialog.CloseDialog(dialog.FilePickerID)
 		cmds = append(cmds, tea.Sequence(
 			msg.Cmd(),
-			func() tea.Msg {
-				m.dialog.CloseDialog(dialog.FilePickerID)
-				return nil
-			},
 			func() tea.Msg {
 				fimage.ResetCache()
 				return nil

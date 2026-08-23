@@ -159,6 +159,15 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 	return "    "
 }
 
+// fileCompletionMsg carries the result of insertFileCompletion's off-loop
+// file read. fileCmd's closure runs on a different goroutine than Update, so
+// it cannot append to m.sess.fileReads directly; Update does that when it
+// handles this message.
+type fileCompletionMsg struct {
+	absPath    string
+	attachment message.Attachment
+}
+
 // insertFileCompletion inserts the selected file path into the textarea,
 // replacing the @query, and adds the file as an attachment.
 func (m *UI) insertFileCompletion(path string) tea.Cmd {
@@ -168,22 +177,31 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
 
+	// Snapshot session state up front: fileCmd's closure runs on the cmd
+	// goroutine and must not read or write m.sess off the Update loop.
+	hasSession := m.hasSession()
+	var sessionID string
+	if hasSession {
+		sessionID = m.sess.current.ID
+	}
+	fileReads := append([]string(nil), m.sess.fileReads...)
+	ws := m.com.Workspace
+	ctx := m.com.Context()
+
 	fileCmd := func() tea.Msg {
 		absPath, _ := filepath.Abs(path)
 
-		if m.hasSession() {
+		if hasSession {
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := m.com.Workspace.FileTrackerLastReadTime(m.com.Context(), m.sess.current.ID, absPath)
+			lastRead := ws.FileTrackerLastReadTime(ctx, sessionID, absPath)
 			if !lastRead.IsZero() {
 				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
 					return nil
 				}
 			}
-		} else if slices.Contains(m.sess.fileReads, absPath) {
+		} else if slices.Contains(fileReads, absPath) {
 			return nil
 		}
-
-		m.sess.fileReads = append(m.sess.fileReads, absPath)
 
 		// Add file as attachment.
 		content, err := os.ReadFile(path)
@@ -192,11 +210,14 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			return nil
 		}
 
-		return message.Attachment{
-			FilePath: path,
-			FileName: filepath.Base(path),
-			MimeType: mimeOf(content),
-			Content:  content,
+		return fileCompletionMsg{
+			absPath: absPath,
+			attachment: message.Attachment{
+				FilePath: path,
+				FileName: filepath.Base(path),
+				MimeType: mimeOf(content),
+				Content:  content,
+			},
 		}
 	}
 	return tea.Batch(heightCmd, fileCmd)

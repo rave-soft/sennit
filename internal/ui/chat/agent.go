@@ -335,11 +335,24 @@ type AgentToolRenderContext struct {
 	agent *AgentToolMessageItem
 }
 
+// delegationStillRunning reports whether a delegation (agent/agentic_fetch)
+// is still active. Unlike opts.IsPending — which flips to false as soon as
+// the model finishes streaming the tool call's *arguments* — a delegation
+// stays running until its result actually arrives, which for a
+// multi-minute sub-agent call can be long after ToolCall.Finished goes
+// true. Both delegation render contexts share this predicate so they can't
+// drift apart the way AgenticFetchToolRenderContext once did (using
+// opts.IsPending directly, which made a still-running agentic_fetch render
+// as a collapsed, finished-looking block with no spinner).
+func delegationStillRunning(opts *ToolRenderOpts) bool {
+	return !opts.HasResult() && !opts.IsCanceled()
+}
+
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// ToolCall.Finished only means the model finished streaming the tool
 	// arguments. A delegation remains active until its result arrives.
-	pending := !opts.HasResult() && !opts.IsCanceled()
+	pending := delegationStillRunning(opts)
 	if pending {
 		// The session panel owns a running delegation's full live detail
 		// (todos, subtitle — see internal/ui/model/session_panel.go and
@@ -662,7 +675,7 @@ type agenticFetchParams struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	pending := opts.IsPending()
+	pending := delegationStillRunning(opts)
 	if pending {
 		// See AgentToolRenderContext.RenderTool's matching change: pending
 		// stub plus a current-activity status line underneath.

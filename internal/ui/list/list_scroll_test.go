@@ -309,6 +309,35 @@ func TestList_AtBottom_BeforeAndAfterAppend(t *testing.T) {
 	require.True(t, l.AtBottom(), "re-following restores AtBottom")
 }
 
+// TestList_AtBottom_TallFirstVisibleItemScrolledToBottom covers the
+// early-exit bail inside AtBottom's loop, which used to compare the
+// running totalHeight against l.height without subtracting
+// l.offsetLine (unlike the loop's final return, which does). When
+// the first visible item is taller than the viewport and partially
+// scrolled off the top, that early check saw the item's FULL height
+// exceed l.height on the very next iteration and bailed out
+// reporting "not at bottom" even though the true remaining content
+// (item height minus offsetLine, plus any items after it) fits
+// exactly inside the viewport.
+func TestList_AtBottom_TallFirstVisibleItemScrolledToBottom(t *testing.T) {
+	t.Parallel()
+
+	a := newMultiLineItem("a", 20)
+	b := newMultiLineItem("b", 1)
+	l := NewList(a, b)
+	l.SetSize(20, 5)
+
+	// Scroll so a's last 4 lines plus all of b's 1 line exactly fill
+	// the 5-line viewport: offsetIdx stays on a (idx 0), which is far
+	// taller than the viewport, while the list is genuinely at the
+	// bottom.
+	l.offsetIdx = 0
+	l.offsetLine = 16
+
+	require.True(t, l.AtBottom(),
+		"a tall, partially-scrolled first item must not make AtBottom bail out early")
+}
+
 // TestList_ScrollToBottom_EmptyListNoop covers the empty-list guard
 // in ScrollToBottom.
 func TestList_ScrollToBottom_EmptyListNoop(t *testing.T) {

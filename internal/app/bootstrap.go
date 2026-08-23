@@ -104,8 +104,8 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 		return nil, fmt.Errorf("failed to initialize config: %w", err)
 	}
 
-	cfg.Overrides().SkipPermissionRequests = opts.YOLO
-	cfg.Overrides().EnabledChannels = opts.Channels
+	cfg.SetSkipPermissionRequests(opts.YOLO)
+	cfg.SetEnabledChannels(opts.Channels)
 	if len(opts.InheritedAgents) > 0 {
 		cfg.SetupAgentsWithInherited(opts.InheritedAgents)
 	}

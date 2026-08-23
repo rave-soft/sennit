@@ -40,7 +40,7 @@ type attemptID struct {
 type ConfigProvider interface {
 	Config() *config.Config
 	Resolver() config.VariableResolver
-	Overrides() *config.RuntimeOverrides
+	Overrides() config.RuntimeOverrides
 	ReserveMCPTokenMutation(name string, expected config.MCPConfig) (config.MCPTokenMutation, bool)
 	SetMCPToken(reservation *config.MCPTokenMutation, token *oauth.Token) (bool, error)
 	ClearMCPToken(reservation *config.MCPTokenMutation, expectedToken *oauth.Token) (bool, error)

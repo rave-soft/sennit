@@ -39,9 +39,10 @@ type streamingMarkdown struct {
 	// Cached cumulative state at the stable prefix boundary.
 	// Used by findBoundaryAfter to validate new boundary candidates
 	// without re-scanning the entire prefix from the start.
-	// baseFenceCount is always even (safe boundaries require even
-	// fence parity), so the delta scan always starts outside a fence.
-	baseFenceCount    int
+	// baseFenceState is always closed (safe boundaries can never sit
+	// inside an open fence), so the delta scan always starts outside
+	// a fence.
+	baseFenceState    fenceState
 	baseHasListMarker bool
 }
 
@@ -51,7 +52,7 @@ func (s *streamingMarkdown) Reset() {
 	s.width = 0
 	s.stablePrefix = ""
 	s.stablePrefixRender = ""
-	s.baseFenceCount = 0
+	s.baseFenceState = fenceState{}
 	s.baseHasListMarker = false
 }
 
@@ -94,7 +95,7 @@ func (s *streamingMarkdown) Render(content string, width int, renderer *glamour.
 	}
 
 	// Incremental boundary search: only scan the delta after the
-	// stable prefix. The cached cumulative state (baseFenceCount,
+	// stable prefix. The cached cumulative state (baseFenceState,
 	// baseHasListMarker) lets us validate candidates in O(delta)
 	// instead of re-scanning the entire prefix. See upstream ticket CHARM-1785.
 	boundary := s.findBoundaryAfter(content)
@@ -119,7 +120,7 @@ func (s *streamingMarkdown) Render(content string, width int, renderer *glamour.
 	s.stablePrefixRender = glueRenders(s.stablePrefixRender, newChunkRender)
 	s.stablePrefix = content[:boundary]
 	// Update cumulative state for the new stable prefix.
-	s.baseFenceCount += countFenceLines(newChunk)
+	s.baseFenceState = scanFenceState(newChunk, s.baseFenceState)
 	s.baseHasListMarker = s.baseHasListMarker || chunkHasListMarker(newChunk)
 
 	trail := content[boundary:]
@@ -157,13 +158,13 @@ func (s *streamingMarkdown) tryAdvanceFromEmpty(content string, width int, rende
 	s.stablePrefixRender = trimGlamourMargins(out)
 	s.width = width
 	// Seed cumulative state for incremental boundary search.
-	s.baseFenceCount = countFenceLines(prefix)
+	s.baseFenceState = scanFenceState(prefix, fenceState{})
 	s.baseHasListMarker = chunkHasListMarker(prefix)
 }
 
 // findBoundaryAfter searches for the latest safe boundary in content
 // that is strictly after the stable prefix. It uses the cached
-// cumulative state (baseFenceCount, baseHasListMarker) to validate
+// cumulative state (baseFenceState, baseHasListMarker) to validate
 // candidates without re-scanning the entire prefix, making the search
 // O(delta) instead of O(n) per tick. See upstream ticket CHARM-1785.
 //
@@ -195,8 +196,9 @@ func (s *streamingMarkdown) findBoundaryAfter(content string) int {
 func (s *streamingMarkdown) isSafeBoundaryIncremental(content string, p int) bool {
 	delta := content[len(s.stablePrefix):p]
 
-	// (2) Fence parity: base count + delta count must be even.
-	if (s.baseFenceCount+countFenceLines(delta))%2 != 0 {
+	// (2) No fence left open: replaying the delta on top of the
+	// cached base state must not leave a fence open at p.
+	if scanFenceState(delta, s.baseFenceState).open {
 		return false
 	}
 
@@ -239,13 +241,11 @@ func (s *streamingMarkdown) isSafeBoundaryIncremental(content string, p int) boo
 // stable prefix and a boundary candidate) contains an HTML block
 // opener or a link reference definition.
 func deltaHasHTMLorRef(delta string) bool {
-	inFence := false
+	var fs fenceState
 	for line := range splitLines(delta) {
-		if isFenceLine(line) {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
+		var isDelim bool
+		fs, isDelim = fs.advance(line)
+		if isDelim || fs.open {
 			continue
 		}
 		if isHTMLBlockOpener(line) || isLinkRefDefinition(line) {
@@ -258,13 +258,11 @@ func deltaHasHTMLorRef(delta string) bool {
 // chunkHasListMarker reports whether any line in chunk is a
 // list-item marker (outside fenced code blocks).
 func chunkHasListMarker(chunk string) bool {
-	inFence := false
+	var fs fenceState
 	for line := range splitLines(chunk) {
-		if isFenceLine(line) {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
+		var isDelim bool
+		fs, isDelim = fs.advance(line)
+		if isDelim || fs.open {
 			continue
 		}
 		if isListItemMarker(strings.TrimLeft(line, " \t")) {
@@ -354,10 +352,13 @@ func trimGlamourMargins(s string) string {
 //
 //  1. Walk backward through every "blank line" position p such that
 //     content[:p] ends with "\n\n" (or "\n[ \t]*\n").
-//  2. For each candidate, check that content[:p] has an even
-//     number of triple-backtick fence lines (no open fenced
-//     block). Any odd count means we'd be cutting inside a fence
-//     and mis-syntax-highlighting the trailing partial.
+//  2. For each candidate, check that content[:p] has no fenced code
+//     block left open (see [fenceState]) — a proper CommonMark
+//     opener/closer match, not a bare parity count, so markdown
+//     nested inside markdown (e.g. a ```` ```markdown ```` block
+//     containing its own ``` fences) doesn't mis-flip the state.
+//     Cutting inside an open fence would mis-syntax-highlight the
+//     trailing partial.
 //     2b. Reject if any line in content[:p] (outside fenced blocks)
 //     is a list-marker line, an HTML-block opener, or a link
 //     reference definition. See [prefixHasOpenHazard] for the
@@ -456,8 +457,8 @@ func isBlankOrSpaces(s string) bool {
 func isSafeBoundaryAt(content string, p int) bool {
 	prefix := content[:p]
 
-	// (2) Even number of triple-backtick fence lines.
-	if countFenceLines(prefix)%2 != 0 {
+	// (2) No fence left open at the end of the prefix.
+	if scanFenceState(prefix, fenceState{}).open {
 		return false
 	}
 
@@ -587,18 +588,16 @@ func isSafeBoundaryAt(content string, p int) bool {
 //	   fragile (three syntaxes: [text][label], [label][], [label]),
 //	   so the prefix-side check is the simpler safe choice.
 func prefixHasOpenHazard(prefix string) bool {
-	inFence := false
+	var fs fenceState
 	hasListMarker := false
 	var lastNonBlankTrimmed string
 	var lastNonBlankRaw string
 	for line := range splitLines(prefix) {
 		// Track fenced state so list/html/ref patterns inside a
 		// fenced code block do not falsely trigger the hazards.
-		if isFenceLine(line) {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
+		var isDelim bool
+		fs, isDelim = fs.advance(line)
+		if isDelim || fs.open {
 			continue
 		}
 		trimmed := strings.TrimLeft(line, " \t")
@@ -634,49 +633,111 @@ func prefixHasOpenHazard(prefix string) bool {
 	return false
 }
 
-// countFenceLines counts lines that begin a fenced code block in
-// the CommonMark sense: a line whose first non-whitespace run is
-// at least three consecutive backticks (or tildes). Each such
-// line toggles the fenced state, so an even count means every
-// opened fence has been closed.
-//
-// We accept up to three leading spaces of indentation (CommonMark
-// rule) and require the fence characters to be the FIRST
-// non-whitespace content of the line. We deliberately do NOT
-// attempt to parse info-strings or differentiate opener from
-// closer beyond toggling — a closing fence is just any line
-// whose first non-whitespace run is >=3 of the same fence char.
-func countFenceLines(s string) int {
-	n := 0
-	for line := range splitLines(s) {
-		if isFenceLine(line) {
-			n++
-		}
-	}
-	return n
+// fenceState tracks whether a fenced code block is currently open
+// and, if so, which delimiter opened it. CommonMark closing rules
+// depend on the opener's exact character and length — a bare
+// open/close toggle (counting every line whose first non-whitespace
+// run is >=3 backticks or tildes as a parity flip) gets this wrong
+// for markdown nested inside markdown: a ```` ```markdown ```` block
+// containing its own ``` fences, or a ~~~ block containing literal
+// backticks, flips parity on lines that are plain fence CONTENT, not
+// delimiters, and mis-detects the block as closed.
+type fenceState struct {
+	open   bool
+	char   byte
+	length int
 }
 
-// isFenceLine reports whether line opens or closes a fenced code
-// block.
-func isFenceLine(line string) bool {
-	// Strip up to 3 spaces of indentation.
+// advance processes a single line against the current fence state
+// and returns the resulting state, plus whether line itself was a
+// fence delimiter (opener or matching closer) rather than ordinary
+// content. Callers that skip fenced content (to avoid false-
+// triggering hazard checks on text inside a code block) should
+// `continue` on isDelim as well as on next.open.
+func (f fenceState) advance(line string) (next fenceState, isDelim bool) {
+	if !f.open {
+		if char, length, ok := parseFenceOpener(line); ok {
+			return fenceState{open: true, char: char, length: length}, true
+		}
+		return f, false
+	}
+	if isFenceCloser(line, f.char, f.length) {
+		return fenceState{}, true
+	}
+	return f, false
+}
+
+// scanFenceState replays s line by line starting from start and
+// returns the resulting fence state. Used both to seed the
+// streamingMarkdown cache's cumulative state and to answer "is a
+// fence open at the end of this text" for a cold (non-incremental)
+// scan (start == fenceState{}).
+func scanFenceState(s string, start fenceState) fenceState {
+	fs := start
+	for line := range splitLines(s) {
+		fs, _ = fs.advance(line)
+	}
+	return fs
+}
+
+// parseFenceOpener reports whether line opens a fenced code block:
+// up to three leading spaces (CommonMark rule), then a run of three
+// or more identical backtick or tilde characters as the line's
+// first non-whitespace content. An info string after the run (e.g.
+// "```go") is allowed on an opener and doesn't affect the result.
+func parseFenceOpener(line string) (char byte, length int, ok bool) {
 	i := 0
 	for i < len(line) && i < 3 && line[i] == ' ' {
 		i++
 	}
 	if i >= len(line) {
-		return false
+		return 0, 0, false
 	}
 	c := line[i]
 	if c != '`' && c != '~' {
-		return false
+		return 0, 0, false
 	}
 	run := 0
 	for i < len(line) && line[i] == c {
 		i++
 		run++
 	}
-	return run >= 3
+	if run < 3 {
+		return 0, 0, false
+	}
+	return c, run, true
+}
+
+// isFenceCloser reports whether line closes a fence opened with the
+// given delimiter char/length: up to three leading spaces, then a
+// run of the SAME character at least `length` long, then nothing
+// but trailing whitespace. Unlike an opener, a closer carries no
+// info string — "```go" never closes a fence, only content, or
+// (post-refactor) is treated as fresh content if seen while a fence
+// is already open with a different or shorter delimiter.
+func isFenceCloser(line string, char byte, length int) bool {
+	i := 0
+	for i < len(line) && i < 3 && line[i] == ' ' {
+		i++
+	}
+	if i >= len(line) || line[i] != char {
+		return false
+	}
+	run := 0
+	for i < len(line) && line[i] == char {
+		i++
+		run++
+	}
+	if run < length {
+		return false
+	}
+	for i < len(line) {
+		if line[i] != ' ' && line[i] != '\t' {
+			return false
+		}
+		i++
+	}
+	return true
 }
 
 // lastNonBlankLine returns the last non-blank line of s, or ""

@@ -270,11 +270,31 @@ func (s *ConfigStore) SetupAgentsWithInherited(inherited map[string]Agent) {
 	s.Config().SetupAgentsWithInherited(s.inheritedAgents)
 }
 
-// Overrides returns the runtime overrides for this store.
-func (s *ConfigStore) Overrides() *RuntimeOverrides {
-	s.writeMu.RLock()
-	defer s.writeMu.RUnlock()
-	return &s.overrides
+// Overrides returns a copy of the runtime overrides for this store. It is a
+// value, not a pointer: s.overrides is mutated under writeMu by concurrent
+// setters (SetSkipPermissionRequests, SetEnabledChannels,
+// pinPreferredModelLocked) and by reloadFromDisk, so handing out a pointer
+// let callers write fields with no lock at all. Use the Set* methods to
+// mutate.
+func (s *ConfigStore) Overrides() RuntimeOverrides {
+	return s.snapshotOverrides()
+}
+
+// SetSkipPermissionRequests sets the SkipPermissionRequests runtime override
+// under writeMu so it cannot race a concurrent reload's swap or another
+// mutator.
+func (s *ConfigStore) SetSkipPermissionRequests(skip bool) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.overrides.SkipPermissionRequests = skip
+}
+
+// SetEnabledChannels sets the EnabledChannels runtime override under
+// writeMu; see SetSkipPermissionRequests.
+func (s *ConfigStore) SetEnabledChannels(channels []string) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.overrides.EnabledChannels = slices.Clone(channels)
 }
 
 // LoadedPaths returns the config file paths that were successfully loaded.
@@ -388,7 +408,7 @@ func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
 	s.stalenessMu.Lock()
 	err := s.writeConfigFields(scope, kv)
 	if err == nil {
-		s.refreshStalenessSnapshotLocked()
+		s.refreshStalenessSnapshotLocked(nil)
 	}
 	s.stalenessMu.Unlock()
 	if err != nil {

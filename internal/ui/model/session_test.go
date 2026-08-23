@@ -1,13 +1,18 @@
 package model
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
+	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/workspace"
 	"github.com/stretchr/testify/require"
 )
 
@@ -150,6 +155,50 @@ func minimalFileStyles() *styles.Styles {
 	st.Files.EmptyMessage = lipgloss.NewStyle()
 	st.Files.TruncationHint = lipgloss.NewStyle()
 	return &st
+}
+
+// fileHistoryWorkspace stubs just enough of workspace.Workspace for
+// loadModifiedFiles: the two calls handleFileEvent's returned cmd makes.
+type fileHistoryWorkspace struct {
+	workspace.Workspace
+}
+
+func (fileHistoryWorkspace) ListSessionHistory(context.Context, string) ([]history.File, error) {
+	return nil, nil
+}
+
+func (fileHistoryWorkspace) UncommittedFiles(context.Context) ([]git.FileChange, error) {
+	return nil, nil
+}
+
+func (fileHistoryWorkspace) Config() *config.Config { return nil }
+
+// TestHandleFileEvent_SessionClearedBeforeCmdRuns is the regression case for
+// the class of bug this package was audited for: a tea.Cmd closure must not
+// read model state (here, m.sess.current) after Update returns, because a
+// concurrent Update (e.g. ctrl+n's newSession) can mutate it first. The cmd
+// must instead close over a captured session ID, like refreshModifiedFiles
+// does, so clearing m.sess.current between the check and the cmd running
+// does not panic.
+func TestHandleFileEvent_SessionClearedBeforeCmdRuns(t *testing.T) {
+	t.Parallel()
+
+	com := common.DefaultCommon(context.Background(), fileHistoryWorkspace{})
+	m := &UI{com: com}
+	m.sess.current = &session.Session{ID: "s1"}
+
+	cmd := m.handleFileEvent(history.File{SessionID: "s1", Path: "main.go"})
+	require.NotNil(t, cmd)
+
+	// Simulate ctrl+n clearing the session between Update returning the cmd
+	// and the cmd goroutine actually running it.
+	m.sess.current = nil
+
+	require.NotPanics(t, func() {
+		msg := cmd()
+		_, ok := msg.(sessionFilesUpdatesMsg)
+		require.True(t, ok, "expected a sessionFilesUpdatesMsg, got %T", msg)
+	})
 }
 
 func stripANSI(s string) string {

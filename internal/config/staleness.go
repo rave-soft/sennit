@@ -76,34 +76,75 @@ func (s *ConfigStore) ConfigStaleness() StalenessResult {
 	return result
 }
 
-// refreshStalenessSnapshotLocked captures fresh snapshots of all tracked
-// config files. Caller must hold stalenessMu.
-func (s *ConfigStore) refreshStalenessSnapshotLocked() {
+// statSnapshot stats a single path and reports its current fileSnapshot.
+func statSnapshot(path string) fileSnapshot {
+	info, err := os.Stat(path)
+	exists := err == nil && !info.IsDir()
+
+	snapshot := fileSnapshot{
+		Path:   path,
+		Exists: exists,
+	}
+
+	if exists {
+		snapshot.Size = info.Size()
+		snapshot.ModTime = info.ModTime().UnixNano()
+	}
+
+	return snapshot
+}
+
+// refreshStalenessSnapshotLocked captures snapshots of all tracked config
+// files. preRead, if non-nil, supplies the snapshot for any path already
+// present in it instead of statting the path fresh — see
+// captureStalenessSnapshot for why reloadFromDisk needs this. Caller must
+// hold stalenessMu.
+func (s *ConfigStore) refreshStalenessSnapshotLocked(preRead map[string]fileSnapshot) {
 	if s.snapshots == nil {
 		s.snapshots = make(map[string]fileSnapshot)
 	}
 
 	for _, path := range s.trackedConfigPaths {
-		info, err := os.Stat(path)
-		exists := err == nil && !info.IsDir()
-
-		snapshot := fileSnapshot{
-			Path:   path,
-			Exists: exists,
+		if snapshot, ok := preRead[path]; ok {
+			s.snapshots[path] = snapshot
+			continue
 		}
-
-		if exists {
-			snapshot.Size = info.Size()
-			snapshot.ModTime = info.ModTime().UnixNano()
-		}
-
-		s.snapshots[path] = snapshot
+		s.snapshots[path] = statSnapshot(path)
 	}
 }
 
 // CaptureStalenessSnapshot captures snapshots for the given paths, building the
 // tracked config paths list. Paths are deduplicated and normalized.
 func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
+	s.captureStalenessSnapshot(paths, nil)
+}
+
+// preReloadFileSnapshots stats every currently tracked config path and
+// returns their snapshots. reloadFromDisk calls this before buildConfig
+// re-reads file contents, then feeds the result back into
+// captureStalenessSnapshot as preRead once the reload is done. Without
+// this, a write landing after the files were read but before the reload
+// finishes would get its fresh-at-swap-time mtime/size recorded even
+// though its new content was never loaded, and the change would be
+// silently absorbed instead of showing up as stale on the next check.
+func (s *ConfigStore) preReloadFileSnapshots() map[string]fileSnapshot {
+	s.stalenessMu.Lock()
+	defer s.stalenessMu.Unlock()
+
+	snapshots := make(map[string]fileSnapshot, len(s.trackedConfigPaths))
+	for _, path := range s.trackedConfigPaths {
+		snapshots[path] = statSnapshot(path)
+	}
+	return snapshots
+}
+
+// captureStalenessSnapshot is CaptureStalenessSnapshot's implementation.
+// preRead lets a caller (reloadFromDisk) supply snapshots taken before this
+// call for paths it already knew about; only paths first discovered by
+// this call (i.e. absent from preRead) are stat'd here. A nil preRead
+// stats every path fresh, which is CaptureStalenessSnapshot's documented
+// behaviour for its other callers.
+func (s *ConfigStore) captureStalenessSnapshot(paths []string, preRead map[string]fileSnapshot) {
 	s.stalenessMu.Lock()
 	defer s.stalenessMu.Unlock()
 
@@ -143,7 +184,7 @@ func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
 	slices.Sort(s.trackedConfigPaths)
 
 	// Capture initial snapshots
-	s.refreshStalenessSnapshotLocked()
+	s.refreshStalenessSnapshotLocked(preRead)
 }
 
 // trackedConfigPathSet returns a copy of the currently tracked config paths

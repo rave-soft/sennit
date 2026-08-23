@@ -20,7 +20,7 @@ func ForegroundGrad(base lipgloss.Style, input string, bold bool, color1, color2
 	if len(input) == 1 {
 		style := base.Foreground(color1)
 		if bold {
-			style.Bold(true)
+			style = style.Bold(true)
 		}
 		return []string{style.Render(input)}
 	}
@@ -34,7 +34,7 @@ func ForegroundGrad(base lipgloss.Style, input string, bold bool, color1, color2
 	for i, c := range ramp {
 		style := base.Foreground(c)
 		if bold {
-			style.Bold(true)
+			style = style.Bold(true)
 		}
 		clusters[i] = style.Render(clusters[i])
 	}

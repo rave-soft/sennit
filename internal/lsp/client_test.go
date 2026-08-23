@@ -3,6 +3,8 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -106,6 +108,76 @@ func TestNilClient(t *testing.T) {
 	require.Nil(t, c.OpenFileOnDemand(context.Background(), "/some/file.go"))
 	require.Nil(t, c.NotifyChange(context.Background(), "/some/file.go"))
 	c.WaitForDiagnostics(context.Background(), time.Second)
+}
+
+// TestClient_Restart_ReopensPreviouslyOpenFiles pins that Restart reopens
+// files that were open before it ran. Before the fix, Restart collected
+// c.openFiles' keys (URIs, e.g. "file:///...") and fed them straight to
+// OpenFile, which expects a filesystem path and checks it via
+// HandlesFile/fsext.HasPrefix(path, c.cwd) — a URI never has cwd as a
+// prefix, so the reopen silently no-op'd every time. The "server" here is
+// the test binary itself, re-exec'd as a minimal fake LSP server (see
+// fakeserver_test.go), so Restart runs its real Close/Initialize/
+// WaitForServerReady sequence rather than a stub.
+func TestClient_Restart_ReopensPreviouslyOpenFiles(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(filePath, []byte("package main\n"), 0o644))
+
+	cfg := config.LSPConfig{
+		Command:   exe,
+		FileTypes: []string{"go"},
+		Env:       map[string]string{fakeLSPServerEnv: "1"},
+	}
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
+
+	client, err := New("test-restart", cfg, resolver, dir, false)
+	require.NoError(t, err)
+	t.Cleanup(client.Kill)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	_, err = client.Initialize(ctx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(ctx))
+
+	require.NoError(t, client.OpenFile(ctx, filePath))
+	require.True(t, client.IsFileOpen(filePath), "file should be open before restart")
+
+	require.NoError(t, client.Restart())
+	require.True(t, client.IsFileOpen(filePath), "file should be reopened after restart")
+}
+
+// TestClient_HandlesFile_RejectsURIAcceptsPath documents the contract
+// OpenFile/HandlesFile rely on: HandlesFile takes a filesystem path, not a
+// URI, since it compares against c.cwd via fsext.HasPrefix. A "file://"
+// URI never has cwd as a prefix, which is exactly the mismatch that made
+// Restart's reopen loop a silent no-op before it converted URIs back to
+// paths.
+func TestClient_HandlesFile_RejectsURIAcceptsPath(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(filePath, []byte("package main\n"), 0o644))
+
+	c := newTestClient()
+	c.cwd = dir
+	c.fileTypes = []string{"go"}
+
+	uri := string(protocol.URIFromPath(filePath))
+	require.False(t, c.HandlesFile(uri), "HandlesFile must reject a raw URI")
+	require.True(t, c.HandlesFile(filePath), "HandlesFile must accept the converted path")
+
+	path, err := protocol.DocumentURI(uri).Path()
+	require.NoError(t, err)
+	require.Equal(t, filePath, path)
 }
 
 func newTestClient() *Client {

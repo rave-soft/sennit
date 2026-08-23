@@ -293,8 +293,17 @@ func (c *Client) Restart() error {
 	}
 
 	for _, uri := range openFiles {
-		if err := c.OpenFile(initCtx, uri); err != nil {
-			slog.Warn("Failed to reopen file after restart", "file", uri, "error", err)
+		// openFiles was collected from c.openFiles, which is keyed by URI,
+		// but OpenFile takes a filesystem path (it checks HandlesFile,
+		// which compares against c.cwd). Convert before calling it, or
+		// the reopen silently no-ops.
+		path, err := protocol.DocumentURI(uri).Path()
+		if err != nil {
+			slog.Warn("Failed to convert URI to path for reopen", "uri", uri, "error", err)
+			continue
+		}
+		if err := c.OpenFile(initCtx, path); err != nil {
+			slog.Warn("Failed to reopen file after restart", "file", path, "error", err)
 		}
 	}
 	return nil

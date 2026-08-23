@@ -682,12 +682,19 @@ func (p *Permissions) renderDiff(filePath, oldContent, newContent string, conten
 	}
 
 	isSplitMode := p.isSplitMode()
+	// Wrapping and horizontal scroll are mutually exclusive views of the
+	// same content: with wrapping on, every column is already on screen,
+	// so there is nothing off-screen for XOffset to reveal (DiffView
+	// ignores XOffset while WrapLines is on — see diffview.go). Wrap only
+	// while unscrolled; the first right-scroll switches to the
+	// non-wrapped renderer, which does honour XOffset, and scrolling back
+	// to 0 restores wrapping.
 	formatter := common.DiffFormatter(p.com.Styles).
 		Before(fsext.PrettyPath(filePath), oldContent).
 		After(fsext.PrettyPath(filePath), newContent).
 		XOffset(p.diffXOffset).
 		Width(contentWidth).
-		WrapLines(true)
+		WrapLines(p.diffXOffset == 0)
 
 	var result string
 	if isSplitMode {

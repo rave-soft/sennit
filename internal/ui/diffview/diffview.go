@@ -151,14 +151,19 @@ func (dv *DiffView) Width(width int) *DiffView {
 	return dv
 }
 
-// XOffset sets the horizontal offset for the DiffView.
+// XOffset sets the horizontal offset for the DiffView. It is ignored while
+// WrapLines is on: a wrapped line has no off-screen columns for the offset
+// to reveal, so the wrapped renderers never consult xOffset. Callers that
+// want horizontal scrolling must disable wrapping (see WrapLines).
 func (dv *DiffView) XOffset(xOffset int) *DiffView {
 	dv.xOffset = xOffset
 	return dv
 }
 
 // WrapLines sets whether long code lines are wrapped to the available width.
-// Continuation rows omit line numbers and diff symbols.
+// Continuation rows omit line numbers and diff symbols. Wrapping and
+// XOffset are mutually exclusive: while WrapLines is true, XOffset has no
+// effect, since every column of a wrapped line is already visible.
 func (dv *DiffView) WrapLines(wrapLines bool) *DiffView {
 	dv.wrapLines = wrapLines
 	return dv

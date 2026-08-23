@@ -194,6 +194,14 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 				// Save in progress; ignore submits until it finishes.
 				return nil
 
+			case OAuthStateInitializing, OAuthStateDisplay:
+				// Polling may already be running (Display) or about to
+				// start once ActionInitiateOAuth lands (Initializing).
+				// Closing without stopping it leaks the Copilot poll loop
+				// until expiresIn, and leaves the Codex loopback listener
+				// bound so a second sign-in attempt can't rebind the port.
+				return batchActions(ActionCmd{m.oAuthProvider.stopPolling}, ActionClose{})
+
 			default:
 				return ActionClose{}
 			}

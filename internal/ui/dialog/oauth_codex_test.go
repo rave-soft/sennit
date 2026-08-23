@@ -195,6 +195,34 @@ func TestOAuthCodexCursorDuringOnboarding(t *testing.T) {
 		"cursor must sit right after the typed value on %q", line)
 }
 
+// TestOAuthCodexStartPollingSetsCancelFuncBeforeReturning: startPolling used
+// to assign m.cancelFunc inside the returned closure, so it was both set on
+// the cmd goroutine (racing Update) and possibly not set yet if the user hit
+// esc before the closure ran, leaving stopPolling with nothing to cancel.
+// The fix assigns it in startPolling's body, mirroring OAuthCopilot.
+func TestOAuthCodexStartPollingSetsCancelFuncBeforeReturning(t *testing.T) {
+	t.Parallel()
+
+	dlg := newCodexDialog(t)
+	provider, ok := dlg.oAuthProvider.(*OAuthCodex)
+	require.True(t, ok)
+
+	flow, err := codex.StartFlow("")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = flow.Close() })
+	provider.flow = flow
+
+	cmd := provider.startPolling("", 0)
+	require.NotNil(t, cmd)
+	require.NotNil(t, provider.cancelFunc,
+		"cancelFunc must be set before the closure runs, not inside it")
+
+	// stopPolling (esc) must be able to cancel even if the closure returned
+	// by startPolling never gets scheduled.
+	provider.stopPolling()
+	require.Nil(t, provider.cancelFunc)
+}
+
 // TestOAuthCodexHidesCursorAfterProxyStep: once the step is done there is
 // nothing to type into, so a cursor left behind would point at nothing.
 func TestOAuthCodexHidesCursorAfterProxyStep(t *testing.T) {

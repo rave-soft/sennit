@@ -319,3 +319,96 @@ func TestDetachThreadDoesNotJoinTheEventPumpOnTheEventLoop(t *testing.T) {
 		t.Fatal("the event pump was never stopped")
 	}
 }
+
+// runBatchCmd executes cmd and, if it produced a tea.BatchMsg (as
+// handleThreadAttached's tea.Batch of teardown/Init/resize cmds does), runs
+// every non-nil cmd inside it too. Tests here only care that the batched
+// teardown cmd ran, not about ordering; other leaves (e.g. childUI.Init's
+// loadCustomCommands) touch workspace methods rootTestWorkspace doesn't
+// implement, so those are run via safeRunCmd and any panic is swallowed,
+// mirroring drainShowDashboard above.
+func runBatchCmd(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		return
+	}
+	msg := safeRunCmd(cmd)
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			runBatchCmd(t, c)
+		}
+	}
+}
+
+// TestHandleThreadAttachedTearsDownPreviousAttachment is the regression test
+// for the leak in handleThreadAttached: a second threadAttachedMsg for a
+// thread that's already attached (e.g. a double Enter on the same dashboard
+// row) used to overwrite r.thread outright, leaking the first attachment's
+// SubscribeWith pump goroutine and never releasing its workspace. Both
+// teardown funcs on the first attachment must now run exactly once, and the
+// second attachment must become the one installed.
+func TestHandleThreadAttachedTearsDownPreviousAttachment(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	r.active = screenDashboard
+
+	var firstStopCalls, firstDetachCalls, secondDetachCalls int
+	firstWS := &rootTestWorkspace{}
+	model, cmd := r.Update(threadAttachedMsg{
+		id: "s1", sessionID: "sess1", name: "first", ws: firstWS,
+		detach: func() { firstDetachCalls++ },
+	})
+	r = model.(*Root)
+	// The fake workspace doesn't implement threadEventSubscriber, so stop()
+	// stays the no-op default; wire our own counter onto the installed
+	// attachment directly to observe it running through detachThread.
+	r.thread.stop = func() { firstStopCalls++ }
+	runBatchCmd(t, cmd)
+	require.Equal(t, screenThread, r.active)
+	require.NotNil(t, r.thread)
+	first := r.thread
+
+	secondWS := &rootTestWorkspace{}
+	model, cmd = r.Update(threadAttachedMsg{
+		id: "s1", sessionID: "sess1", name: "second", ws: secondWS,
+		detach: func() { secondDetachCalls++ },
+	})
+	r = model.(*Root)
+	require.NotSame(t, first, r.thread, "the second attachment must replace the first")
+	require.Equal(t, screenThread, r.active)
+	require.Equal(t, 0, firstStopCalls, "stop must run inside the returned cmd, not synchronously")
+	require.Equal(t, 0, firstDetachCalls, "detach must run inside the returned cmd, not synchronously")
+
+	require.NotNil(t, cmd)
+	runBatchCmd(t, cmd)
+	require.Equal(t, 1, firstStopCalls, "the first attachment's stop must run exactly once")
+	require.Equal(t, 1, firstDetachCalls, "the first attachment's detach must run exactly once")
+	require.Equal(t, 0, secondDetachCalls, "the second (still installed) attachment must not be detached")
+}
+
+// TestHandleThreadAttachedStaleAfterLeavingDashboard covers the second half
+// of the leak fix: an attach response that lands after the user has already
+// left the dashboard (esc back to screenMain) must not force the screen
+// onto the thread — it releases the just-attached workspace instead.
+func TestHandleThreadAttachedStaleAfterLeavingDashboard(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	r.active = screenMain
+
+	detached := false
+	model, cmd := r.Update(threadAttachedMsg{
+		id: "s1", sessionID: "sess1", name: "late", ws: &rootTestWorkspace{},
+		detach: func() { detached = true },
+	})
+	r = model.(*Root)
+
+	require.Equal(t, screenMain, r.active, "a stale attach must not yank the screen")
+	require.Nil(t, r.thread)
+	require.False(t, detached, "detach must run inside the returned cmd, not synchronously")
+
+	require.NotNil(t, cmd)
+	runBatchCmd(t, cmd)
+	require.True(t, detached, "the stale attachment's workspace must still be released")
+}

@@ -255,6 +255,30 @@ func TestAgentToolMessageItem_FinishedInputWithoutResultShowsCurrentActivity(t *
 	require.Contains(t, out, `→ grep "Provider"`)
 }
 
+// TestAgenticFetchToolMessageItem_FinishedInputWithoutResultShowsCurrentActivity
+// mirrors TestAgentToolMessageItem_FinishedInputWithoutResultShowsCurrentActivity
+// for agentic_fetch. ToolCall.Finished only means the model finished
+// streaming the tool call's *arguments* — a delegation that has no result
+// yet must still render the pending/spinner form, not the collapsed
+// finished summary. Before delegationStillRunning replaced the bare
+// opts.IsPending() check in AgenticFetchToolRenderContext.RenderTool, this
+// case rendered as a collapsed, finished-looking block with no spinner for
+// the whole (possibly multi-minute) run.
+func TestAgenticFetchToolMessageItem_FinishedInputWithoutResultShowsCurrentActivity(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewAgenticFetchToolMessageItem(&sty,
+		message.ToolCall{ID: "tc-fetch", Name: tools.AgenticFetchToolName, Input: `{"url":"https://example.com","prompt":"summarize"}`, Finished: true},
+		nil, false)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "tc-child", "grep", `{"pattern":"Provider"}`))
+
+	out := ansi.Strip(item.Render(100))
+	require.Contains(t, out, "fetch")
+	require.Contains(t, out, `→ grep "Provider"`,
+		"still-running agentic_fetch must show the pending status line, not the collapsed summary")
+}
+
 // TestAgentToolMessageItem_SetChildSessionTokensBumpsVersion covers the
 // live token-count update path (handleChildSessionUpdate in
 // internal/ui/model/ui.go): pushing a new token count must invalidate

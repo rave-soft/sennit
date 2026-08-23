@@ -598,6 +598,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTerminalVersion(msg)
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
+	case clearChatMouseMsg:
+		m.chat.ClearMouse()
+	case fileCompletionMsg:
+		m.sess.fileReads = append(m.sess.fileReads, msg.absPath)
+		_ = m.editor.attachments.Update(msg.attachment)
 	case DelayedClickMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg, common.CoalescedWheelMsg:
 		var done bool
 		if cmds, done = m.updateMouse(msg, cmds); done {
@@ -1144,14 +1149,18 @@ func (m *UI) newSession() tea.Cmd {
 	)
 }
 
+// clearChatMouseMsg asks Update to clear the chat's mouse selection state
+// after a copy completes. copyChatHighlight's callback runs on the tea.Cmd
+// goroutine, so it must not touch m.chat directly.
+type clearChatMouseMsg struct{}
+
 func (m *UI) copyChatHighlight() tea.Cmd {
 	text := m.chat.HighlightContent()
 	return common.CopyToClipboardWithCallback(
 		text,
 		"Selected text copied to clipboard",
 		func() tea.Msg {
-			m.chat.ClearMouse()
-			return nil
+			return clearChatMouseMsg{}
 		},
 	)
 }

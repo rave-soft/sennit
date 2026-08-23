@@ -827,3 +827,46 @@ func TestTaskManager_OutputRejectsThreadID(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "is not a task")
 }
+
+// setSessionErrStore wraps a real Store and makes every SetSession call
+// fail, for driving TaskManager.Create's SetSession-failure path
+// (regression coverage for the st-clobbered-on-error bug fixed alongside
+// Manager.Create's identical one - see manager.go's own SetSession call).
+type setSessionErrStore struct {
+	thread.Store
+	err error
+}
+
+func (s *setSessionErrStore) SetSession(ctx context.Context, id, sessionID string) (thread.Thread, error) {
+	return thread.Thread{}, s.err
+}
+
+// TestTaskManager_CreateFailsWithRealIDWhenSetSessionErrors is the
+// regression test for tasks.go's Create: `st, err =
+// t.store.SetSession(...)` used to overwrite st with the store's zero
+// value on error, so the ensuing t.failCreate(ctx, st, err) recorded the
+// failure against an EMPTY task id instead of the real one. The actual
+// task row was left stuck at its pre-failure status forever (and kept
+// occupying a checkActiveCaps slot until process restart), because
+// nothing ever wrote StatusFailed to its real row. Create itself returns
+// (Thread{}, err) on every failure path, so this asserts against the
+// store directly rather than Create's return value.
+func TestTaskManager_CreateFailsWithRealIDWhenSetSessionErrors(t *testing.T) {
+	setSessionErr := fmt.Errorf("set-session boom")
+	store := &setSessionErrStore{Store: thread.NewStoreForTest(t), err: setSessionErr}
+	_, tasks, _ := newTestTaskManager(t, store)
+
+	_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
+	require.Error(t, err)
+	require.ErrorIs(t, err, setSessionErr)
+
+	all, listErr := store.ListAll(t.Context())
+	require.NoError(t, listErr)
+	require.Len(t, all, 1, "the task row created before SetSession failed must still exist")
+
+	got := all[0]
+	require.NotEmpty(t, got.ID, "the failure must be recorded against the real task id, not an empty one")
+	require.Equal(t, thread.StatusFailed, got.Status,
+		"the real task row must be marked failed, not left stuck pending forever")
+	require.Contains(t, got.Error, setSessionErr.Error())
+}

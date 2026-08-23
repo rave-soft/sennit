@@ -314,6 +314,113 @@ func TestFindSafeMarkdownBoundary_TableDriven(t *testing.T) {
 	}
 }
 
+// TestFenceState_MatchesCommonMark exercises fenceState against the
+// CommonMark closing rule directly: a closer must use the SAME
+// delimiter character as its opener, be at least as long, and carry
+// no info string. A bare parity count of "lines that look like a
+// fence" gets every one of these wrong — most importantly it treats
+// markdown nested inside markdown (a fenced ```markdown block whose
+// body itself contains ``` fences, or a ~~~ block containing literal
+// backticks) as closing early, which flips findSafeMarkdownBoundary's
+// parity and makes the tail of a streamed message render as prose
+// forever. See the "why" note on [fenceState].
+func TestFenceState_MatchesCommonMark(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		content string
+		// wantOpen is whether a fence should still be open after
+		// scanning all of content.
+		wantOpen bool
+	}{
+		{
+			name:     "plain closed fence",
+			content:  "```go\nfoo()\n```\n",
+			wantOpen: false,
+		},
+		{
+			name:     "unclosed fence",
+			content:  "```go\nfoo()\n",
+			wantOpen: true,
+		},
+		{
+			name: "markdown-in-markdown: bare inner ``` closes per CommonMark, trailing ``` reopens",
+			content: "```markdown\n" +
+				"Some example text.\n" +
+				"```go\n" +
+				"innerCode()\n" +
+				"```\n" +
+				"More example text.\n" +
+				"```\n",
+			// CommonMark has no fence nesting: the outer
+			// ```markdown block's content runs until the first
+			// line that legally closes it (same char, run >=
+			// length, no trailing content). "```go" carries an
+			// info string so it does NOT close (content); the
+			// next bare "```" DOES close the outer block. The
+			// final "```" then opens a fresh, still-unclosed
+			// fence, so the correct end state is OPEN.
+			//
+			// A naive parity counter (any line whose first
+			// non-whitespace run is >=3 of the same char toggles
+			// state, no char/length/info-string matching) counts
+			// FOUR fence-looking lines here and lands on CLOSED —
+			// disagreeing with the correct answer. That mismatch
+			// is exactly bug 2: it flips stablePrefix's fence
+			// parity and makes the streamed tail render as prose.
+			wantOpen: true,
+		},
+		{
+			name:     "tilde fence containing backticks",
+			content:  "~~~\nHere is `inline code` and a ``` looking line\n~~~\n",
+			wantOpen: false,
+		},
+		{
+			name:     "tilde fence containing backticks stays open without matching closer",
+			content:  "~~~\nHere is `inline code` and a ``` looking line\n",
+			wantOpen: true,
+		},
+		{
+			name:    "fence with info string does not close",
+			content: "```\ncode\n```go\nmore code\n```\n",
+			// The opener is a bare ``` (no info string, char='`',
+			// length=3). "```go" carries an info string, but
+			// isFenceCloser doesn't care about info strings on the
+			// CONTENT side — it only rejects an info string on the
+			// line being tested AS a closer candidate; "```go" is
+			// itself a valid closer's char/length prefix but fails
+			// the "nothing but whitespace after the run" rule, so
+			// it does NOT close. The block closes on the final
+			// bare ``` line.
+			wantOpen: false,
+		},
+		{
+			name:    "closer shorter than opener does not close",
+			content: "````\ncode\n```\nstill code\n````\n",
+			// Opener is 4 backticks. The 3-backtick line in the
+			// middle is too short to close it (CommonMark: closer
+			// length >= opener length) and is ordinary content.
+			// The block closes on the final 4-backtick line.
+			wantOpen: false,
+		},
+		{
+			name:     "closer shorter than opener leaves fence open when no longer closer follows",
+			content:  "````\ncode\n```\nstill code\n",
+			wantOpen: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := scanFenceState(c.content, fenceState{}).open
+			require.Equalf(t, c.wantOpen, got,
+				"scanFenceState(%q).open = %v, want %v", c.content, got, c.wantOpen)
+		})
+	}
+}
+
 // -----------------------------------------------------------------------
 // T2: streaming-equivalence tests.
 // -----------------------------------------------------------------------

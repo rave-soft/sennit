@@ -68,7 +68,12 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 	// Snapshot runtime overrides up front (a brief writeMu.RLock) rather
 	// than reading s.overrides directly, since the rest of this function
 	// runs without writeMu held and a concurrent mutator could otherwise
-	// race a later read of the same field.
+	// race a later read of the same field. This snapshot is only used to
+	// seed buildConfig's presetModel below — unlike the old behaviour, it
+	// is never written back to s.overrides, since s.overrides may have
+	// been mutated (a model pin, SkipPermissionRequests, EnabledChannels)
+	// by someone else while this reload's disk/HTTP work was in flight,
+	// and writing the stale snapshot back would silently revert that.
 	overrides := s.snapshotOverrides()
 
 	// Reapply this instance's pinned model as buildConfig's presetModel —
@@ -78,6 +83,13 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		m := *overrides.Model
 		presetModel = &m
 	}
+
+	// Stat every currently tracked config file now, before buildConfig
+	// re-reads their contents below; see preReloadFileSnapshots. Statting
+	// only at the end (after the swap) would record the mtime/size of a
+	// file written mid-reload without ever having loaded its new content,
+	// silently absorbing that write instead of flagging it as stale.
+	preRead := s.preReloadFileSnapshots()
 
 	// Apply defaults using the existing data directory, if set.
 	var dataDir string
@@ -148,17 +160,31 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		}
 	}
 
+	// presetModel (snapshotted before the slow work above) may now be
+	// stale: a concurrent OverridePreferredModel/pinPreferredModelLocked
+	// call could have pinned a different model while buildConfig's
+	// disk/HTTP work was in flight. s.overrides is authoritative here —
+	// we hold writeMu and, unlike presetModel, nothing below overwrites
+	// it — so re-check against it and, if it moved, apply the newer pin
+	// to cfg rather than publishing a config built around a model choice
+	// that has since been superseded.
+	if s.overrides.Model != nil && (presetModel == nil || !reflect.DeepEqual(*s.overrides.Model, *presetModel)) {
+		cfg.Model = *s.overrides.Model
+	}
+
 	s.setConfig(cfg)
 	s.loadedPaths = built.loadedPaths
 	s.resolver = built.resolver
 	s.knownProviders = built.providers
-	s.overrides = overrides
 	s.workspacePath = filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
 
 	// Rebuild staleness tracking. Track every discovered config path, not
 	// just the ones that loaded, so a config file created after this reload
-	// is detected as a change on the next staleness check.
-	s.CaptureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...))
+	// is detected as a change on the next staleness check. preRead supplies
+	// the pre-buildConfig stat for every path already tracked, so a write
+	// that landed after we read the files but before this point is not
+	// mistaken for "seen" — see preReloadFileSnapshots.
+	s.captureStalenessSnapshot(append(slices.Clone(built.configPaths), built.loadedPaths...), preRead)
 	s.captureAgentFileSnapshot()
 
 	return nil

@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
 	"reflect"
 	"slices"
 
@@ -71,31 +73,77 @@ func (s *ConfigStore) mutateMCPToken(reservation *MCPTokenMutation, clearExpecte
 		return false, nil
 	}
 
-	mutated := false
 	serverKey := fmt.Sprintf("mcp.%s", gjson.Escape(reservation.name))
 	tokenKey := serverKey + ".oauth_token"
-	err := s.atomicWrite(ScopeGlobal, func(data []byte) ([]byte, error) {
-		server := gjson.GetBytes(data, serverKey)
-		if !server.Exists() {
-			return nil, errAtomicWriteNoop
+
+	scope := s.mcpTokenScope(serverKey)
+	if _, pathErr := s.ConfigPath(scope); pathErr != nil {
+		// No file to target for the chosen scope (e.g. no workspace config
+		// path configured). This is a skip, not a hard failure: it keeps
+		// the same (false, nil) contract as every other guard above, and
+		// still says why the token was not persisted.
+		slog.Warn("Skipped persisting MCP OAuth token: no writable config scope",
+			"server", reservation.name, "scope", scope, "error", pathErr)
+		return false, nil
+	}
+
+	mutated := false
+	skipReason := ""
+	err := s.atomicWrite(scope, func(data []byte) ([]byte, error) {
+		if scope == ScopeGlobal {
+			// The full declaration is expected to live in this file, so the
+			// identity guard (command/url/etc. unchanged since reservation)
+			// still applies here, mirroring the in-memory checks above.
+			server := gjson.GetBytes(data, serverKey)
+			if !server.Exists() {
+				skipReason = "server declaration no longer present in the global config"
+				return nil, errAtomicWriteNoop
+			}
+			var disk MCPConfig
+			if err := json.Unmarshal([]byte(server.Raw), &disk); err != nil {
+				return nil, fmt.Errorf("decode MCP config %s: %w", reservation.name, err)
+			}
+			if disk.Disabled || !sameMCPIdentity(disk, reservation.expected) ||
+				!reflect.DeepEqual(disk.OAuthToken, expectedToken) {
+				skipReason = "on-disk MCP config changed since reservation"
+				return nil, errAtomicWriteNoop
+			}
+			mutated = true
+			if clear {
+				return sjson.DeleteBytes(data, tokenKey)
+			}
+			return sjson.SetBytes(data, tokenKey, token)
 		}
-		var disk MCPConfig
-		if err := json.Unmarshal([]byte(server.Raw), &disk); err != nil {
-			return nil, fmt.Errorf("decode MCP config %s: %w", reservation.name, err)
+
+		// ScopeWorkspace: the server may be declared only in a
+		// project-scoped config, so this file can hold nothing but a
+		// token-only overlay (mcp.<name>.oauth_token) with no identity
+		// fields to compare against. sameMCPIdentity cannot apply here;
+		// the epoch/ownership/token checks already taken above under
+		// writeMu are what guards this write, plus comparing against
+		// whatever token the overlay already holds.
+		diskToken := gjson.GetBytes(data, tokenKey)
+		var current *oauth.Token
+		if diskToken.Exists() {
+			current = &oauth.Token{}
+			if err := json.Unmarshal([]byte(diskToken.Raw), current); err != nil {
+				return nil, fmt.Errorf("decode MCP token %s: %w", reservation.name, err)
+			}
 		}
-		if disk.Disabled || !sameMCPIdentity(disk, reservation.expected) ||
-			!reflect.DeepEqual(disk.OAuthToken, expectedToken) {
+		if !reflect.DeepEqual(current, expectedToken) {
+			skipReason = "on-disk MCP token overlay changed since reservation"
 			return nil, errAtomicWriteNoop
 		}
 		mutated = true
 		if clear {
-			value, err := sjson.DeleteBytes(data, tokenKey)
-			return value, err
+			return sjson.DeleteBytes(data, tokenKey)
 		}
-		value, err := sjson.SetBytes(data, tokenKey, token)
-		return value, err
+		return sjson.SetBytes(data, tokenKey, token)
 	})
 	if err != nil || !mutated {
+		if err == nil {
+			slog.Warn("Skipped persisting MCP OAuth token", "server", reservation.name, "scope", scope, "reason", skipReason)
+		}
 		return false, err
 	}
 
@@ -105,10 +153,30 @@ func (s *ConfigStore) mutateMCPToken(reservation *MCPTokenMutation, clearExpecte
 	next.MCP[reservation.name] = mcp
 	reservation.expectedToken = token
 	s.setConfig(next)
-	if path, pathErr := s.ConfigPath(ScopeGlobal); pathErr == nil {
+	if path, pathErr := s.ConfigPath(scope); pathErr == nil {
 		s.CaptureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
 	}
 	return true, nil
+}
+
+// mcpTokenScope picks the scope a token write for serverKey (a
+// "mcp.<name>" gjson path) should target: ScopeGlobal when the server is
+// declared there, ScopeWorkspace otherwise. A server declared only in a
+// project-scoped config (./sennit.json, .sennit/sennit.json, a sennitrc)
+// has no entry in the global data file, and the workspace config is the
+// only other file Sennit is allowed to write — so the token is persisted
+// there as a token-only overlay (mcp.<name>.oauth_token), which the merge
+// pipeline layers onto the project's declaration on the next load.
+//
+// Caller must hold writeMu (read is best-effort: atomicWrite re-verifies
+// the target file's contents once the scope is chosen).
+func (s *ConfigStore) mcpTokenScope(serverKey string) Scope {
+	if path, err := s.ConfigPath(ScopeGlobal); err == nil {
+		if data, err := os.ReadFile(path); err == nil && gjson.GetBytes(data, serverKey).Exists() {
+			return ScopeGlobal
+		}
+	}
+	return ScopeWorkspace
 }
 
 func sameMCPIdentity(a, b MCPConfig) bool {

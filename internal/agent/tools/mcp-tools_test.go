@@ -16,7 +16,7 @@ type stubMCPConfigProvider struct {
 
 func (s *stubMCPConfigProvider) Config() *config.Config             { return s.cfg }
 func (s *stubMCPConfigProvider) Resolver() config.VariableResolver  { return nil }
-func (s *stubMCPConfigProvider) Overrides() *config.RuntimeOverrides { return &config.RuntimeOverrides{} }
+func (s *stubMCPConfigProvider) Overrides() config.RuntimeOverrides { return config.RuntimeOverrides{} }
 
 func (s *stubMCPConfigProvider) ReserveMCPTokenMutation(string, config.MCPConfig) (config.MCPTokenMutation, bool) {
 	return config.MCPTokenMutation{}, false

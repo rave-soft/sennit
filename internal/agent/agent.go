@@ -854,7 +854,17 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		} else if ctx.Err() != nil {
 			complete.Cancelled = true
 		}
-		reporter.publish(ctx, complete)
+		// Publish on a context detached from the run's, not on ctx:
+		// workspace shutdown may have already cancelled ctx by the time
+		// this defer runs, and publish drops the terminal event against
+		// an already-cancelled context, leaving a subscriber waiting on
+		// this RunID to hang until its own timeout. It gets its own
+		// budget rather than reusing flushCtx, whose 5s may already be
+		// spent by the flush above; the bound still keeps a publish to
+		// a subscriber that never receives from blocking forever.
+		publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer publishCancel()
+		reporter.publish(publishCtx, complete)
 	}()
 
 	streamAgent, model, agentTools, promptPrefix, disableAutoSummarize := a.buildStreamAgent(call)

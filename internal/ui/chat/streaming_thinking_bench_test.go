@@ -115,7 +115,7 @@ func BenchmarkFindBoundaryAfter(b *testing.B) {
 		sm := streamingMarkdown{
 			width:             80,
 			stablePrefix:      content[:boundary],
-			baseFenceCount:    countFenceLines(content[:boundary]),
+			baseFenceState:    scanFenceState(content[:boundary], fenceState{}),
 			baseHasListMarker: chunkHasListMarker(content[:boundary]),
 		}
 		b.ResetTimer()

@@ -340,8 +340,9 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 		return nil
 	}
 
+	sessionID := m.sess.current.ID
 	return func() tea.Msg {
-		sessionFiles, err := m.loadModifiedFiles(m.sess.current.ID)
+		sessionFiles, err := m.loadModifiedFiles(sessionID)
 		// could not load session files
 		if err != nil {
 			return util.NewErrorMsg(err)

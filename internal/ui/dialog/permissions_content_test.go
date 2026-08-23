@@ -362,6 +362,62 @@ func TestScrollLeftRight(t *testing.T) {
 	require.Equal(t, 0, p.diffXOffset)
 }
 
+// TestRenderDiff_HorizontalScrollShiftsContent pins the fix for the bug
+// where left/right scrolling a permission diff did nothing: renderDiff
+// always passed WrapLines(true), and the wrapped renderers in diffview.go
+// ignore XOffset entirely, so a non-zero p.diffXOffset never changed the
+// rendered output. renderDiff now wraps only while unscrolled
+// (WrapLines(p.diffXOffset == 0)), so scrolling right switches to the
+// non-wrapped renderer, which does honour XOffset. Covers both split and
+// unified modes, since each keeps its own cache
+// (splitDiffContent/unifiedDiffContent).
+func TestRenderDiff_HorizontalScrollShiftsContent(t *testing.T) {
+	t.Parallel()
+
+	// A line much wider than the render width, so there is content to
+	// scroll to that a truncated, unscrolled view would not show.
+	params := proto.EditPermissionsParams{
+		FilePath:   "wide.txt",
+		OldContent: "const value = \"aaaaaaaaaa-old-marker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n",
+		NewContent: "const value = \"aaaaaaaaaa-new-marker-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n",
+	}
+
+	for _, tc := range []struct {
+		name  string
+		split bool
+	}{
+		{"unified", false},
+		{"split", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := styles.SennitDark()
+			com := &common.Common{Styles: &s}
+			perm := permission.PermissionRequest{ToolName: proto.EditToolName, Params: params}
+			p := NewPermissions(com, perm, WithDiffMode(tc.split))
+			p.viewportDirty = true
+
+			const width = 40
+			atZero := p.renderDiff(params.FilePath, params.OldContent, params.NewContent, width)
+
+			p.scrollRight() // sets diffXOffset and marks viewportDirty
+			require.NotZero(t, p.diffXOffset)
+			scrolled := p.renderDiff(params.FilePath, params.OldContent, params.NewContent, width)
+
+			require.NotEqual(t, atZero, scrolled,
+				"scrolling right must change the rendered diff content")
+
+			// Scrolling back to zero must restore the original (wrapped)
+			// rendering, proving the cache was invalidated both ways.
+			p.scrollLeft() // one step of horizontalScrollStep returns to 0
+			require.Zero(t, p.diffXOffset)
+			backToZero := p.renderDiff(params.FilePath, params.OldContent, params.NewContent, width)
+			require.Equal(t, atZero, backToZero,
+				"scrolling back to zero must restore the wrapped rendering")
+		})
+	}
+}
+
 // TestRenderContentPanel verifies renderContentPanel renders the given
 // content at the requested width using the dialog's content-panel style.
 func TestRenderContentPanel(t *testing.T) {

@@ -202,13 +202,16 @@ func TestConfigStore_RuntimeOverrides_Independent(t *testing.T) {
 	require.False(t, store1.Overrides().SkipPermissionRequests)
 	require.False(t, store2.Overrides().SkipPermissionRequests)
 
-	store1.Overrides().SkipPermissionRequests = true
+	store1.SetSkipPermissionRequests(true)
 
 	require.True(t, store1.Overrides().SkipPermissionRequests)
 	require.False(t, store2.Overrides().SkipPermissionRequests)
 }
 
-func TestConfigStore_RuntimeOverrides_MutableViaPointer(t *testing.T) {
+// TestConfigStore_RuntimeOverrides_ValueIsSnapshot pins down that Overrides
+// hands back a copy: mutating the returned value must not reach back into
+// store state, since callers no longer hold any lock once it returns.
+func TestConfigStore_RuntimeOverrides_ValueIsSnapshot(t *testing.T) {
 	t.Parallel()
 
 	store := &ConfigStore{config: &Config{}}
@@ -217,7 +220,7 @@ func TestConfigStore_RuntimeOverrides_MutableViaPointer(t *testing.T) {
 	require.False(t, overrides.SkipPermissionRequests)
 
 	overrides.SkipPermissionRequests = true
-	require.True(t, store.Overrides().SkipPermissionRequests)
+	require.False(t, store.Overrides().SkipPermissionRequests)
 }
 
 func TestGlobalWorkspaceDir(t *testing.T) {
@@ -1003,6 +1006,143 @@ func TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu(t *testing.T) {
 	// writeMu before it returns (see reloadFromDisk), so the send happens
 	// after the unlock.
 	require.NoError(t, <-reloadDone)
+}
+
+// slowDiscoveryServer returns an httptest server that stalls for delay
+// before answering a model-discovery request with a minimal, valid models
+// list. It gives the tests below a way to keep a reload's buildConfig
+// in flight (past the point where it has read the config file's old
+// content) long enough to race a concurrent mutation against it.
+func slowDiscoveryServer(delay time.Duration) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(delay)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data": [{"id": "slow-model", "object": "model"}]}`))
+	}))
+}
+
+// TestReloadFromDisk_ConcurrentOverrideSurvives is a regression test for
+// reloadFromDisk snapshotting s.overrides before its slow disk/HTTP work
+// and then writing that stale snapshot back at swap time, silently
+// reverting whatever a concurrent SetSkipPermissionRequests or
+// OverridePreferredModel call did in the meantime. EXPECTED TO FAIL
+// against the old "s.overrides = overrides" write-back.
+func TestReloadFromDisk_ConcurrentOverrideSurvives(t *testing.T) {
+	const serverDelay = 150 * time.Millisecond
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sennit.json")
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	server := slowDiscoveryServer(serverDelay)
+	defer server.Close()
+
+	// Rewrite the config to add a custom provider with no models, which
+	// auto-triggers discovery against the slow server on the next reload.
+	slowConfig := fmt.Sprintf(`{
+		"providers": {
+			"custom": {
+				"api_key": "test-key",
+				"base_url": %q
+			}
+		}
+	}`, server.URL+"/v1")
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, os.WriteFile(configPath, []byte(slowConfig), 0o600))
+
+	reloadDone := make(chan error, 1)
+	go func() {
+		reloadDone <- store.ReloadFromDisk(context.Background())
+	}()
+
+	// Give the reload time to enter the slow discovery call (see the
+	// DiscoveryDoesNotBlockWriteMu test above for why this window is
+	// safe), then mutate the overrides concurrently.
+	time.Sleep(50 * time.Millisecond)
+	store.SetSkipPermissionRequests(true)
+	pinned := SelectedModel{Provider: "custom", Model: "slow-model"}
+	store.OverridePreferredModel(pinned)
+
+	require.NoError(t, <-reloadDone)
+
+	require.True(t, store.Overrides().SkipPermissionRequests,
+		"a SetSkipPermissionRequests call racing the reload must not be reverted by it")
+	require.NotNil(t, store.Overrides().Model)
+	require.Equal(t, pinned, *store.Overrides().Model,
+		"an OverridePreferredModel call racing the reload must not be reverted by it")
+	require.Equal(t, pinned, store.Config().Model,
+		"the reload must not publish a config built around a model choice since superseded")
+}
+
+// TestReloadFromDisk_ConcurrentWriteDuringReloadIsNotAbsorbed is a
+// regression test for reloadFromDisk statting its tracked config files
+// only after the swap: a write landing after the reload has already read
+// the file's old content, but before the reload finishes, would get its
+// fresh-at-swap-time size/mtime recorded as "seen" even though its new
+// content was never loaded — silently absorbing the write instead of
+// flagging it as stale. EXPECTED TO FAIL against the old CaptureStalenessSnapshot-
+// only-at-the-end behavior.
+func TestReloadFromDisk_ConcurrentWriteDuringReloadIsNotAbsorbed(t *testing.T) {
+	const serverDelay = 150 * time.Millisecond
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "sennit.json")
+	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dir)
+
+	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+
+	server := slowDiscoveryServer(serverDelay)
+	defer server.Close()
+
+	slowConfig := fmt.Sprintf(`{
+		"providers": {
+			"custom": {
+				"api_key": "test-key",
+				"base_url": %q
+			}
+		}
+	}`, server.URL+"/v1")
+	time.Sleep(10 * time.Millisecond)
+	require.NoError(t, os.WriteFile(configPath, []byte(slowConfig), 0o600))
+
+	reloadDone := make(chan error, 1)
+	go func() {
+		reloadDone <- store.ReloadFromDisk(context.Background())
+	}()
+
+	// Give the reload time to read slowConfig and enter the slow
+	// discovery call, then write the file again while it's still in
+	// flight. The differing byte size (an added "options" object) makes
+	// this detectable regardless of filesystem mtime resolution.
+	time.Sleep(50 * time.Millisecond)
+	concurrentConfig := fmt.Sprintf(`{
+		"options": {"debug": true},
+		"providers": {
+			"custom": {
+				"api_key": "test-key",
+				"base_url": %q
+			}
+		}
+	}`, server.URL+"/v1")
+	require.NoError(t, os.WriteFile(configPath, []byte(concurrentConfig), 0o600))
+
+	require.NoError(t, <-reloadDone)
+
+	staleness := store.ConfigStaleness()
+	require.True(t, staleness.Dirty, "a write landing mid-reload must be reported as stale afterward")
+	require.Contains(t, staleness.Changed, configPath)
 }
 
 // TestLoad_AppleTerminalDefaultSurvivesReload pins down whether the

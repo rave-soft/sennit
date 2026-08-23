@@ -486,6 +486,30 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 		return r, util.ReportError(msg.err)
 	}
 
+	// This attach was requested from the dashboard (or is a duplicate
+	// response for the thread already attached, e.g. two Enter presses on
+	// the same row) only if the user is still where they'd expect the
+	// result to land. Anywhere else — back on screenMain, or attached to a
+	// different thread already — means they've moved on since asking, so
+	// the attach is stale: release what was just attached instead of
+	// yanking the screen onto a thread nobody is waiting for. There is no
+	// per-request id to compare against (only the current screen/thread
+	// state), so a stale response racing a fresh request for a *different*
+	// still-dashboard-initiated thread can't be told apart from this
+	// implementation's state alone.
+	current := r.active == screenDashboard ||
+		(r.active == screenThread && r.thread != nil && r.thread.threadID == msg.id)
+	if !current {
+		if msg.detach == nil {
+			return r, nil
+		}
+		detach := msg.detach
+		return r, func() tea.Msg {
+			detach()
+			return nil
+		}
+	}
+
 	com := common.DefaultCommon(r.com.Context(), msg.ws)
 	childUI := New(com, msg.sessionID, false, WithEmbedded(), WithBreadcrumbRoot(msg.name))
 
@@ -499,6 +523,11 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 		})
 	}
 
+	// Tear down whatever was attached before installing this one — a
+	// second threadAttachedMsg for the same thread (double Enter) must not
+	// leak the previous attachment's pump goroutine or workspace.
+	detachCmd := r.detachThread()
+
 	r.thread = &threadAttachment{
 		threadID: msg.id,
 		name:     msg.name,
@@ -510,6 +539,7 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	r.active = screenThread
 
 	var cmds []tea.Cmd
+	cmds = append(cmds, detachCmd)
 	cmds = append(cmds, childUI.Init())
 	_, cmd := childUI.Update(tea.WindowSizeMsg{Width: r.width, Height: r.height})
 	cmds = append(cmds, cmd)
