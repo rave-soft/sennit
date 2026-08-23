@@ -37,9 +37,16 @@ func TestMigrateBloatedModelCache_RereadsAfterLockAndIsIdempotent(t *testing.T) 
 	}
 	require.NoError(t, os.WriteFile(path, []byte(bloatedModelConfig(`"concurrent": true`)), 0o600))
 	release()
+	// Generous on purpose. What this half asserts is that the migration
+	// finishes at all once the lock is free — the ordering it exists for
+	// is pinned by the "did not wait" check above, which keeps its tight
+	// budget. The waiter polls every 100ms (see internal/lock's
+	// retrySleep) and then rewrites the config and the model cache, so a
+	// one-second budget was close enough to the real cost to flake on a
+	// loaded Windows runner.
 	select {
 	case <-finished:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("migration did not finish after the config lock was released")
 	}
 

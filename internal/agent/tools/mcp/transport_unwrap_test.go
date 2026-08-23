@@ -46,7 +46,7 @@ func TestCloseIdleTransportSeesThroughTheChannelWrapper(t *testing.T) {
 func TestUnwrapTransportReachesTheCommandTransport(t *testing.T) {
 	t.Parallel()
 
-	inner := &mcp.CommandTransport{Command: exec.Command("true")}
+	inner := &mcp.CommandTransport{Command: exec.CommandContext(t.Context(), "true")}
 	wrapped := &channelTransport{inner: inner, name: "srv", gate: newChannelGate()}
 
 	got, ok := unwrapTransport(wrapped).(*mcp.CommandTransport)
@@ -59,6 +59,6 @@ func TestUnwrapTransportReachesTheCommandTransport(t *testing.T) {
 func TestUnwrapTransportLeavesAnUnwrappedTransportAlone(t *testing.T) {
 	t.Parallel()
 
-	inner := &mcp.CommandTransport{Command: exec.Command("true")}
+	inner := &mcp.CommandTransport{Command: exec.CommandContext(t.Context(), "true")}
 	require.Same(t, mcp.Transport(inner), unwrapTransport(inner))
 }
