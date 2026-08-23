@@ -221,10 +221,31 @@ func (d *Overlay) UpdateDialog(dialogID string, msg tea.Msg) tea.Msg {
 	return nil
 }
 
+// DialogAddressed marks a message that belongs to one particular dialog
+// rather than to whichever one happens to be on top. Update delivers it by
+// id, so a result that lands while something else has opened over the
+// dialog that started it still arrives.
+//
+// Without this, an async result was simply dropped: a permission prompt
+// raised over a ProviderForm mid-submit, or over an APIKeyInput
+// mid-verify, left that dialog stuck in its submitting state — a state
+// in which it also refuses to close, so the only way out was to restart.
+type DialogAddressed interface {
+	// DialogID is the id of the dialog this message is for.
+	DialogID() string
+}
+
 // Update handles dialog updates.
 func (d *Overlay) Update(msg tea.Msg) tea.Msg {
 	if len(d.dialogs) == 0 {
 		return nil
+	}
+
+	// Addressed results go to their own dialog wherever it sits in the
+	// stack; everything else follows the keyboard, which belongs to the
+	// dialog on top.
+	if addressed, ok := msg.(DialogAddressed); ok {
+		return d.UpdateDialog(addressed.DialogID(), msg)
 	}
 
 	// Absorb keystrokes during the grace period for async dialogs.

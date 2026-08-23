@@ -286,3 +286,27 @@ func (a ActionFilePickerSelected) Cmd() tea.Cmd {
 		return attachment
 	}
 }
+
+// The async results below are addressed to the dialog that started them —
+// see [DialogAddressed] for what that buys.
+
+// DialogID implements [DialogAddressed].
+func (ActionAPIKeySaved) DialogID() string { return APIKeyInputID }
+
+// DialogID implements [DialogAddressed].
+func (ActionCustomProviderResult) DialogID() string { return ProviderFormID }
+
+// DialogID implements [DialogAddressed].
+func (ActionMCPAuthComplete) DialogID() string { return MCPAuthID }
+
+// DialogID implements [DialogAddressed].
+func (ActionMCPAuthErrored) DialogID() string { return MCPAuthID }
+
+// DialogID implements [DialogAddressed].
+func (ActionInitiateOAuth) DialogID() string { return OAuthID }
+
+// DialogID implements [DialogAddressed].
+func (ActionCompleteOAuth) DialogID() string { return OAuthID }
+
+// DialogID implements [DialogAddressed].
+func (ActionOAuthErrored) DialogID() string { return OAuthID }

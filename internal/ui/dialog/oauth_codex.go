@@ -3,6 +3,7 @@ package dialog
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -34,10 +35,23 @@ func NewOAuthCodex(
 }
 
 type OAuthCodex struct {
-	com        *common.Common
-	proxy      string
+	com   *common.Common
+	proxy string
+
+	// flow/cancelFunc/stopped are touched from tea.Cmd goroutines
+	// (initiateAuth binds the flow, startPolling waits on it, stopPolling
+	// tears it down) rather than from Update, so they need a lock of
+	// their own.
+	//
+	// stopped is what makes an esc during "Initializing" safe: the flow
+	// binds a fixed callback port, and a teardown that ran before the
+	// bind finished used to find nothing to close — the port stayed bound
+	// and the next sign-in failed on it. A flow that lands after the
+	// teardown is closed immediately instead.
+	mu         sync.Mutex
 	flow       *codex.Flow
 	cancelFunc func()
+	stopped    bool
 }
 
 var (
@@ -109,7 +123,17 @@ func (m *OAuthCodex) initiateAuth() tea.Msg {
 	if err != nil {
 		return ActionOAuthErrored{Error: err}
 	}
+
+	m.mu.Lock()
+	if m.stopped {
+		m.mu.Unlock()
+		// Dismissed while this was binding: release the port rather than
+		// leaving it held by a dialog that is gone.
+		_ = flow.Close()
+		return nil
+	}
 	m.flow = flow
+	m.mu.Unlock()
 
 	return ActionInitiateOAuth{
 		VerificationURL: flow.URL(),
@@ -121,14 +145,17 @@ func (m *OAuthCodex) initiateAuth() tea.Msg {
 // browser comes to us — but the shared dialog drives every flow through this
 // one hook.
 func (m *OAuthCodex) startPolling(_ string, _ int) tea.Cmd {
-	if m.flow == nil {
+	m.mu.Lock()
+	flow := m.flow
+	if flow == nil {
+		m.mu.Unlock()
 		return func() tea.Msg {
 			return ActionOAuthErrored{Error: fmt.Errorf("codex sign-in was not started")}
 		}
 	}
 	ctx, cancel := context.WithTimeout(m.com.Context(), codexAuthTimeout)
 	m.cancelFunc = cancel
-	flow := m.flow
+	m.mu.Unlock()
 	return func() tea.Msg {
 		token, err := flow.Wait(ctx)
 		if err != nil {
@@ -145,13 +172,17 @@ func (m *OAuthCodex) startPolling(_ string, _ int) tea.Cmd {
 // failed, or was dismissed. Leaving it bound would break the next attempt,
 // since the redirect URI names one fixed port.
 func (m *OAuthCodex) stopPolling() tea.Msg {
-	if m.cancelFunc != nil {
-		m.cancelFunc()
-		m.cancelFunc = nil
+	m.mu.Lock()
+	m.stopped = true
+	cancel, flow := m.cancelFunc, m.flow
+	m.cancelFunc, m.flow = nil, nil
+	m.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
-	if m.flow != nil {
-		_ = m.flow.Close()
-		m.flow = nil
+	if flow != nil {
+		_ = flow.Close()
 	}
 	return nil
 }

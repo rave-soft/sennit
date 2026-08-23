@@ -233,3 +233,11 @@ func (d *MultiChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	return d.drawContent(scr, area, fillPrefix, d.choiceItemContent)
 }
+
+// TextEntryActive implements the seam QuestionForm uses: the fill-in row
+// and the inline note editor are both textareas, and the form must not
+// take esc or the bracket keys away from either — see
+// QuestionForm.activeTakesText.
+func (d *MultiChoice) TextEntryActive() bool {
+	return d.fillIn.Focused() || (d.activeNoteKey != "" && d.noteEditor.Focused())
+}

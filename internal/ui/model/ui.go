@@ -138,6 +138,11 @@ type UI struct {
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
 
+	// statusSeq stamps each status-line message so its clear timer can
+	// tell whether it is still the one on screen — see
+	// util.ClearStatusMsg.
+	statusSeq int
+
 	// editor holds the prompt textarea, attachments, completions popup
 	// state, bang (!) shell-mode flags, and prompt history. See editor.go.
 	editor editorState

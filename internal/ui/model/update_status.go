@@ -45,7 +45,7 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if ttl <= 0 {
 			ttl = DefaultStatusTTL
 		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
+		cmds = append(cmds, clearInfoMsgCmd(ttl, m.nextStatusSeq()))
 	case pubsub.Event[proto.ServerNotice]:
 		// Notices from core code arrive as the transport-neutral
 		// proto.ServerNotice so that code doesn't need to depend on
@@ -59,7 +59,7 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		if ttl <= 0 {
 			ttl = DefaultStatusTTL
 		}
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
+		cmds = append(cmds, clearInfoMsgCmd(ttl, m.nextStatusSeq()))
 	case workspace.UpdateAvailableMsg:
 		text := fmt.Sprintf("Sennit update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
@@ -71,9 +71,13 @@ func (m *UI) updateStatus(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			Msg:  text,
 			TTL:  ttl,
 		})
-		cmds = append(cmds, clearInfoMsgCmd(ttl))
+		cmds = append(cmds, clearInfoMsgCmd(ttl, m.nextStatusSeq()))
 	case util.ClearStatusMsg:
-		m.status.ClearInfoMsg()
+		// Only the timer armed for the message currently on screen may
+		// clear it; an older one has been superseded.
+		if msg.Seq == m.statusSeq {
+			m.status.ClearInfoMsg()
+		}
 	}
 	return cmds, false
 }
@@ -89,4 +93,11 @@ func serverNoticeLevelToInfoType(level proto.ServerNoticeLevel) util.InfoType {
 	default:
 		return util.InfoTypeInfo
 	}
+}
+
+// nextStatusSeq stamps the status-line message about to be shown and
+// returns the stamp for its clear timer. See util.ClearStatusMsg.
+func (m *UI) nextStatusSeq() int {
+	m.statusSeq++
+	return m.statusSeq
 }

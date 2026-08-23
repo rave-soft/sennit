@@ -76,6 +76,16 @@ func (m *UI) updateShell(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 	case shellResultMsg:
 		if (m.sess.loadExpectedID != "" && msg.sessionID != m.sess.loadExpectedID) || msg.generation != m.sess.loadGen {
+			// The result belongs to a session the user has since left, so
+			// none of the chat updates below apply. The command itself is
+			// over either way, and bangCancel is what isAgentBusy reads:
+			// left set, the editor stayed "busy" for the rest of the
+			// session with nothing running behind it.
+			m.editor.pendingSendActive = false
+			if m.editor.bangCancel != nil {
+				m.editor.bangCancel()
+				m.editor.bangCancel = nil
+			}
 			break
 		}
 		m.editor.pendingSendActive = false

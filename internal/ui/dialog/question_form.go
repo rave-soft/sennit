@@ -208,13 +208,13 @@ func (f *QuestionForm) firstUnanswered() int {
 // HandleKey routes keys to the active tab. Returns true when the
 // entire batch is submitted.
 func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
-	// "[" and "]" double as tab-nav shortcuts, but a focused FreeText
-	// editor needs them as literal characters — ctrl+left/ctrl+right (the
-	// other keys bound to the same actions) stay live either way.
-	bracketsAreLiteral := f.activeIdx < f.numQuestions && isBracketKey(msg)
-	if bracketsAreLiteral {
-		_, bracketsAreLiteral = f.questions[f.activeIdx].(*FreeText)
-	}
+	// "[" and "]" double as tab-nav shortcuts, but a component taking
+	// literal text needs them as characters — ctrl+left/ctrl+right (the
+	// other keys bound to the same actions) stay live either way. That is
+	// not only FreeText: a choice question's fill-in row and its note
+	// editor are textareas too, and typing a bracket in one of them used
+	// to switch tabs out from under the person mid-word.
+	bracketsAreLiteral := f.activeIdx < f.numQuestions && isBracketKey(msg) && f.activeTakesText()
 
 	// Tab navigation works on all tabs including confirm.
 	if !bracketsAreLiteral {
@@ -248,6 +248,20 @@ func (f *QuestionForm) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			if ft, ok := f.questions[f.activeIdx].(*FreeText); ok && !ft.BlurredByEsc() {
 				ft.BlurForEsc()
 				return false, nil
+			}
+			// A choice question's fill-in or note editor handles esc
+			// itself, by leaving the field. Cancelling the whole batch
+			// on the first esc threw away everything typed on every tab
+			// — the same reason FreeText gets the two-esc treatment
+			// above.
+			if f.activeTakesText() {
+				done, cmd := f.questions[f.activeIdx].HandleKey(msg)
+				if done {
+					resp := f.questions[f.activeIdx].Response()
+					f.answers[f.activeIdx] = &resp
+					f.syncConfirmAnswers()
+				}
+				return false, cmd
 			}
 		}
 		return true, f.cancel()
@@ -810,4 +824,17 @@ func (f *QuestionForm) HandleMouseClick(x, y int) (bool, bool, tea.Cmd) {
 		}
 	}
 	return false, false, nil
+}
+
+// activeTakesText reports whether the question on the active tab is
+// currently taking literal text — a focused FreeText editor, a choice
+// question's fill-in row, or its inline note editor. The form leaves esc
+// and the bracket keys to a component in that state instead of treating
+// them as its own shortcuts.
+func (f *QuestionForm) activeTakesText() bool {
+	if f.activeIdx >= f.numQuestions {
+		return false
+	}
+	taker, ok := f.questions[f.activeIdx].(interface{ TextEntryActive() bool })
+	return ok && taker.TextEntryActive()
 }

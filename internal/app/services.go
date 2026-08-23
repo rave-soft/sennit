@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/rave-soft/sennit/internal/agent"
 	"github.com/rave-soft/sennit/internal/agent/tools"
@@ -95,7 +96,11 @@ type appServices struct {
 	// internal/app/threadspawn/attach.go) via SetThreadManager, independent
 	// of SetThreads/Threads — both are set from the same manager, but this
 	// field is additive and neither replaces nor is replaced by the other.
-	threadManager *thread.Manager
+	// Held atomically: it is set on the main goroutine post-bootstrap and
+	// read from others — SetPermissionsSkip runs on the config-watcher
+	// goroutine, and internal/workspace reads it from wherever it is
+	// called. A plain field made that a data race.
+	threadManager atomic.Pointer[thread.Manager]
 
 	// Tasks is the task delegation manager's tool-facing counterpart to
 	// Threads, wired in post-bootstrap alongside it (see attach.go) via
@@ -108,7 +113,8 @@ type appServices struct {
 	// *thread.TaskManager instead of tools.TaskManager, for the same reason
 	// threadManager is concretely typed relative to Threads. Set via
 	// SetTaskManager, independent of SetTasks/Tasks.
-	taskManager *thread.TaskManager
+	// Held atomically for the same reason as threadManager.
+	taskManager atomic.Pointer[thread.TaskManager]
 
 	// lastConfigBypass is the permissions.bypass value from config as of
 	// the last time it was applied to Permissions.SetSkipRequests —
@@ -229,13 +235,13 @@ func (app *App) SetThreads(threads tools.ThreadManager) {
 // (see internal/app/threadspawn/attach.go), but this accessor is
 // additive and neither replaces nor is replaced by the other.
 func (app *App) SetThreadManager(m *thread.Manager) {
-	app.threadManager = m
+	app.threadManager.Store(m)
 }
 
 // ThreadManager returns the value passed to SetThreadManager, or nil if
 // unset.
 func (app *App) ThreadManager() *thread.Manager {
-	return app.threadManager
+	return app.threadManager.Load()
 }
 
 // PermissionsSkipFunc returns an accessor for this workspace's live
@@ -262,8 +268,8 @@ func (app *App) PermissionsSkipFunc() func() bool {
 // on whatever state they were spawned with.
 func (app *App) SetPermissionsSkip(skip bool) {
 	app.Permissions().SetSkipRequests(skip)
-	if app.threadManager != nil {
-		app.threadManager.SetPermissionsSkip(skip)
+	if mgr := app.threadManager.Load(); mgr != nil {
+		mgr.SetPermissionsSkip(skip)
 	}
 }
 
@@ -280,12 +286,12 @@ func (app *App) SetTasks(tasks tools.TaskManager) {
 // SetTaskManager wires the concrete task manager for callers that need it,
 // mirroring SetThreadManager.
 func (app *App) SetTaskManager(m *thread.TaskManager) {
-	app.taskManager = m
+	app.taskManager.Store(m)
 }
 
 // TaskManager returns the value passed to SetTaskManager, or nil if unset.
 func (app *App) TaskManager() *thread.TaskManager {
-	return app.taskManager
+	return app.taskManager.Load()
 }
 
 // ReportCurrentSession tells herdr which session the user is now

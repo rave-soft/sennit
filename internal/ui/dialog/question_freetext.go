@@ -311,3 +311,8 @@ func (d *FreeText) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	d.editor, cmd = d.editor.Update(msg)
 	return cmd
 }
+
+// TextEntryActive implements the seam QuestionForm uses to tell whether
+// the active question is taking literal text — see
+// QuestionForm.activeTakesText.
+func (d *FreeText) TextEntryActive() bool { return d.editor.Focused() }

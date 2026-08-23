@@ -62,7 +62,15 @@ type (
 		Msg  string
 		TTL  time.Duration
 	}
-	ClearStatusMsg struct{}
+	// ClearStatusMsg asks the status line to drop the message it is
+	// showing. Seq identifies the message the timer was armed for: a
+	// timer belongs to one status line entry, and without the tag an
+	// older one wiped a newer message — most visibly an error that
+	// replaced a long-lived notice and then vanished after whatever was
+	// left of the notice's own TTL.
+	ClearStatusMsg struct {
+		Seq int
+	}
 )
 
 // IsEmpty checks if the [InfoMsg] is empty.

@@ -326,11 +326,18 @@ type oauthProxyPrefillMsg struct {
 // details are read from the dialog's own fields when the user confirms.
 type oauthSaveDoneMsg struct{}
 
+// DialogID implements [DialogAddressed]: the save runs while the dialog is
+// open and anything may have opened over it by the time it lands.
+func (oauthSaveDoneMsg) DialogID() string { return OAuthID }
+
 // oauthSaveErrMsg is emitted by the background save command when persisting
 // the credential fails.
 type oauthSaveErrMsg struct {
 	err error
 }
+
+// DialogID implements [DialogAddressed]; see oauthSaveDoneMsg.
+func (oauthSaveErrMsg) DialogID() string { return OAuthID }
 
 // View renders the device flow dialog.
 func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
