@@ -198,25 +198,24 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, bar
 // textarea when it's focused. areaMinX is the left edge of the
 // content area; prefixWidth is the visual width of the "> " prompt.
 func (e *questionEditor) fillInCursor(screenRow, areaMinX, prefixWidth int) *tea.Cursor {
-	if !e.fillIn.Focused() {
-		return nil
-	}
-	tc := e.fillIn.Cursor()
-	if tc == nil {
-		return nil
-	}
-	tc.X += areaMinX + 1 + prefixWidth
-	tc.Y += screenRow
-	return tc
+	return textareaCursor(e.fillIn, screenRow, areaMinX, prefixWidth)
 }
 
 // noteCursor returns the hardware cursor position for the note
 // editor when it's focused.
 func (e *questionEditor) noteCursor(screenRow, areaMinX, prefixWidth int) *tea.Cursor {
-	if !e.noteEditor.Focused() {
+	return textareaCursor(e.noteEditor, screenRow, areaMinX, prefixWidth)
+}
+
+// textareaCursor returns ta's hardware cursor position offset into the
+// dialog's content area, or nil when ta isn't focused. fillInCursor and
+// noteCursor share this: same textarea type, same offset math, differing
+// only in which field they read.
+func textareaCursor(ta textarea.Model, screenRow, areaMinX, prefixWidth int) *tea.Cursor {
+	if !ta.Focused() {
 		return nil
 	}
-	tc := e.noteEditor.Cursor()
+	tc := ta.Cursor()
 	if tc == nil {
 		return nil
 	}

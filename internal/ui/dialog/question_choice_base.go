@@ -102,6 +102,29 @@ func (c *choiceList) isFillIn() bool {
 	return c.cursorIdx == len(c.Request.Choices)
 }
 
+// hitTestChoice maps a mouse click to a choice index using the compositor
+// built during the last render. It returns ok=false when the click missed
+// every hit region, or when the hit ID doesn't parse to an index in range
+// — the fill-in row is included as the index just past the last choice.
+// SingleChoice and MultiChoice share this: both need the same click-to-index
+// lookup and only differ in what a hit does once resolved.
+func (c *choiceList) hitTestChoice(x, y int) (idx int, ok bool) {
+	if c.choiceCompositor == nil {
+		return 0, false
+	}
+	hit := c.choiceCompositor.Hit(x, y)
+	if hit.Empty() {
+		return 0, false
+	}
+	if _, err := fmt.Sscanf(hit.ID(), "choice_%d", &idx); err != nil {
+		return 0, false
+	}
+	if idx < 0 || idx > len(c.Request.Choices) {
+		return 0, false
+	}
+	return idx, true
+}
+
 // moveUp moves the cursor up, wrapping around. Closes any active
 // note editor since the note context changes with the cursor.
 func (c *choiceList) moveUp() {

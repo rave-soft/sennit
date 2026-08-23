@@ -1,8 +1,6 @@
 package chat
 
 import (
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -114,28 +112,17 @@ func (t *baseToolMessageItem) Render(width int) string {
 	default:
 		key = 0
 	}
-	if useCache {
-		if cached, ok := t.getCachedPrefixedRender(width, key); ok {
-			return cached
+	return t.renderCachedPrefixed(width, key, useCache, func() string {
+		var prefix string
+		if t.isCompact {
+			prefix = t.sty.Messages.ToolCallCompact.Render()
+		} else if t.focused {
+			prefix = t.sty.Messages.ToolCallFocused.Render()
+		} else {
+			prefix = t.sty.Messages.ToolCallBlurred.Render()
 		}
-	}
-	var prefix string
-	if t.isCompact {
-		prefix = t.sty.Messages.ToolCallCompact.Render()
-	} else if t.focused {
-		prefix = t.sty.Messages.ToolCallFocused.Render()
-	} else {
-		prefix = t.sty.Messages.ToolCallBlurred.Render()
-	}
-	lines := strings.Split(t.RawRender(width), "\n")
-	for i, ln := range lines {
-		lines[i] = prefix + ln
-	}
-	out := strings.Join(lines, "\n")
-	if useCache {
-		t.setCachedPrefixedRender(out, width, key)
-	}
-	return out
+		return prefixLines(t.RawRender(width), prefix)
+	})
 }
 
 // ToolCall returns the tool call associated with this message item.

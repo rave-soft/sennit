@@ -101,11 +101,6 @@ func (t *ThemeItem) Render(width int) string {
 	if t.isCurrent {
 		info = "current"
 	}
-	styles := ListItemStyles{
-		ItemBlurred:     t.t.Dialog.NormalItem,
-		ItemFocused:     t.t.Dialog.SelectedItem,
-		InfoTextBlurred: t.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: t.t.Dialog.ListItem.InfoFocused,
-	}
+	styles := defaultListItemStyles(t.t)
 	return renderItem(styles, t.palette.Name, info, t.Focused(), width, t.Cache(), t.Match())
 }

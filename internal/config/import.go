@@ -366,7 +366,7 @@ func convertAgentFile(path, filename, dstDir string, opts ImportOptions) (Import
 		return ImportEntry{}, err
 	}
 
-	frontmatter, body, err := splitAgentFrontmatter(string(content))
+	frontmatter, body, err := skills.SplitFrontmatter(string(content))
 	if err != nil {
 		return ImportEntry{}, fmt.Errorf("no valid frontmatter: %w", err)
 	}

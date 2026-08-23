@@ -191,9 +191,7 @@ func (d *selectDialog) layout(area uv.Rectangle, height int, dynamic bool) selec
 		layout.listHeight, layout.listTotalHeight, layout.listWidth = sizeDialogList(t, d.list, layout.innerWidth, height)
 		return layout
 	}
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() + t.Dialog.View.GetVerticalFrameSize()
+	heightOffset := dialogChromeHeight(t)
 	layout.listWidth = layout.innerWidth
 	d.list.SetSize(layout.innerWidth, max(0, height-heightOffset))
 	layout.listHeight = d.list.Height()
@@ -305,10 +303,7 @@ func (d *selectDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	d.Resize(area)
 	width := d.Width()
 	innerWidth := d.InnerWidth()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+	heightOffset := dialogChromeHeight(t)
 
 	d.input.SetWidth(dialogInputTextWidth(t, d.input, innerWidth))
 
@@ -359,18 +354,15 @@ func (d *selectDialog) ShortHelp() []key.Binding {
 	}
 }
 
-// FullHelp implements [help.KeyMap].
+// FullHelp implements [help.KeyMap]. The four bindings always fit in one
+// help column (the help renderer computes column height from the row
+// count — see model/layout.go), so unlike sessions.go's FullHelp there's
+// no chunking to do.
 func (d *selectDialog) FullHelp() [][]key.Binding {
-	m := [][]key.Binding{}
-	slice := []key.Binding{
+	return [][]key.Binding{{
 		d.keyMap.Select,
 		d.keyMap.Next,
 		d.keyMap.Previous,
 		d.keyMap.Close,
-	}
-	for i := 0; i < len(slice); i += 4 {
-		end := min(i+4, len(slice))
-		m = append(m, slice[i:end])
-	}
-	return m
+	}}
 }

@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"fmt"
 	"maps"
 	"strconv"
 	"strings"
@@ -165,34 +164,21 @@ func (d *SingleChoice) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 // selects it. Does not advance — user can change their selection
 // before pressing Enter or clicking another option.
 func (d *SingleChoice) HandleMouseClick(x, y int) (bool, bool) {
-	if d.choiceCompositor == nil {
+	idx, ok := d.hitTestChoice(x, y)
+	if !ok {
 		return false, false
 	}
-	hit := d.choiceCompositor.Hit(x, y)
-	if hit.Empty() {
-		return false, false
-	}
-	var idx int
-	if _, err := fmt.Sscanf(hit.ID(), "choice_%d", &idx); err != nil {
-		return false, false
-	}
-	if idx >= 0 && idx < len(d.Request.Choices) {
-		d.cursorIdx = idx
-		d.mouseActive = false
-		d.suppressScroll = true
-		d.fillIn.Blur()
-		d.answer(d.respond())
-		return false, true
-	}
+	d.cursorIdx = idx
+	d.mouseActive = false
+	d.suppressScroll = true
 	if idx == len(d.Request.Choices) {
 		// Fill-in: focus but don't submit.
-		d.cursorIdx = idx
-		d.mouseActive = false
-		d.suppressScroll = true
 		d.fillIn.Focus()
 		return false, true
 	}
-	return false, false
+	d.fillIn.Blur()
+	d.answer(d.respond())
+	return false, true
 }
 
 // choiceItemContent renders a choice's label. Shared by Draw and

@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"time"
@@ -165,6 +166,68 @@ func gatherLatency(ctx context.Context, q Querier, req Request) ([]LatencyEvent,
 	return events, nil
 }
 
+// rawSessionRow is the column shape shared by every session-scoped stats
+// query. sqlc names it differently per query (ListSessionTreeSinceRow,
+// ListSessionsSinceWithAgentRow, ListAllSessionsSinceRow) because each
+// backs a distinct SQL statement, but the columns themselves are
+// identical, so any of the three converts into this one directly.
+type rawSessionRow struct {
+	ID               string
+	ParentSessionID  sql.NullString
+	Title            string
+	AgentID          string
+	PromptTokens     int64
+	CompletionTokens int64
+	Cost             float64
+	CreatedAt        int64
+	UpdatedAt        int64
+}
+
+// sessionsFromRows converts one scope's raw session rows into this
+// package's neutral [Session] shape. conv does nothing but the row-type
+// conversion at each call site, so the field mapping itself — the part
+// that used to be copy-pasted once per scope — is written here only once.
+func sessionsFromRows[T any](rows []T, conv func(T) rawSessionRow) []Session {
+	sessions := make([]Session, 0, len(rows))
+	for _, r := range rows {
+		raw := conv(r)
+		sessions = append(sessions, Session{
+			ID:               raw.ID,
+			ParentID:         raw.ParentSessionID.String,
+			Title:            raw.Title,
+			AgentID:          raw.AgentID,
+			PromptTokens:     raw.PromptTokens,
+			CompletionTokens: raw.CompletionTokens,
+			Cost:             raw.Cost,
+			CreatedAt:        raw.CreatedAt,
+			UpdatedAt:        raw.UpdatedAt,
+		})
+	}
+	return sessions
+}
+
+// messagesFromRows is [sessionsFromRows] for assistant-message rows. Here
+// the neutral [Message] shape matches the db row column-for-column, so
+// conv is always a bare type conversion — the duplication removed is the
+// three-line loop, not a field mapping.
+func messagesFromRows[T any](rows []T, conv func(T) Message) []Message {
+	messages := make([]Message, 0, len(rows))
+	for _, r := range rows {
+		messages = append(messages, conv(r))
+	}
+	return messages
+}
+
+// delegationsFromRows is [messagesFromRows] for delegation-outcome rows;
+// [Delegation] likewise matches its db rows column-for-column.
+func delegationsFromRows[T any](rows []T, conv func(T) Delegation) []Delegation {
+	delegations := make([]Delegation, 0, len(rows))
+	for _, r := range rows {
+		delegations = append(delegations, conv(r))
+	}
+	return delegations
+}
+
 // fetch runs the three per-scope queries. Each scope reads its own row
 // types out of the db package and converts them to this package's neutral
 // shapes; everything downstream of here is scope-agnostic.
@@ -182,30 +245,8 @@ func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, [
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("stats: list session tree messages: %w", err)
 		}
-		sessions := make([]Session, 0, len(rows))
-		for _, r := range rows {
-			sessions = append(sessions, Session{
-				ID:               r.ID,
-				ParentID:         r.ParentSessionID.String,
-				Title:            r.Title,
-				AgentID:          r.AgentID,
-				PromptTokens:     r.PromptTokens,
-				CompletionTokens: r.CompletionTokens,
-				Cost:             r.Cost,
-				CreatedAt:        r.CreatedAt,
-				UpdatedAt:        r.UpdatedAt,
-			})
-		}
-		messages := make([]Message, 0, len(msgRows))
-		for _, r := range msgRows {
-			messages = append(messages, Message{
-				SessionID:  r.SessionID,
-				Model:      r.Model,
-				Provider:   r.Provider,
-				CreatedAt:  r.CreatedAt,
-				FinishedAt: r.FinishedAt,
-			})
-		}
+		sessions := sessionsFromRows(rows, func(r db.ListSessionTreeSinceRow) rawSessionRow { return rawSessionRow(r) })
+		messages := messagesFromRows(msgRows, func(r db.ListSessionTreeAssistantMessagesRow) Message { return Message(r) })
 		// Delegations are looked up by the sessions in the tree rather
 		// than by a scope-wide query: a delegation belongs to this
 		// session's stats when this session (or one below it) ran it.
@@ -237,43 +278,9 @@ func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, [
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("stats: list project delegations: %w", err)
 		}
-		sessions := make([]Session, 0, len(rows))
-		for _, r := range rows {
-			sessions = append(sessions, Session{
-				ID:               r.ID,
-				ParentID:         r.ParentSessionID.String,
-				Title:            r.Title,
-				AgentID:          r.AgentID,
-				PromptTokens:     r.PromptTokens,
-				CompletionTokens: r.CompletionTokens,
-				Cost:             r.Cost,
-				CreatedAt:        r.CreatedAt,
-				UpdatedAt:        r.UpdatedAt,
-			})
-		}
-		messages := make([]Message, 0, len(msgRows))
-		for _, r := range msgRows {
-			messages = append(messages, Message{
-				SessionID:  r.SessionID,
-				Model:      r.Model,
-				Provider:   r.Provider,
-				CreatedAt:  r.CreatedAt,
-				FinishedAt: r.FinishedAt,
-			})
-		}
-		delegations := make([]Delegation, 0, len(delRows))
-		for _, r := range delRows {
-			delegations = append(delegations, Delegation{
-				ID:          r.ID,
-				Kind:        r.Kind,
-				Status:      r.Status,
-				SessionID:   r.SessionID,
-				AgentID:     r.AgentID,
-				Title:       r.Title,
-				CreatedAt:   r.CreatedAt,
-				CompletedAt: r.CompletedAt,
-			})
-		}
+		sessions := sessionsFromRows(rows, func(r db.ListSessionsSinceWithAgentRow) rawSessionRow { return rawSessionRow(r) })
+		messages := messagesFromRows(msgRows, func(r db.ListAssistantMessagesSinceRow) Message { return Message(r) })
+		delegations := delegationsFromRows(delRows, func(r db.ListDelegationOutcomesSinceRow) Delegation { return Delegation(r) })
 		return sessions, messages, delegations, nil
 
 	case ScopeGlobal:
@@ -289,43 +296,9 @@ func fetch(ctx context.Context, q Querier, req Request) ([]Session, []Message, [
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("stats: list all delegations: %w", err)
 		}
-		sessions := make([]Session, 0, len(rows))
-		for _, r := range rows {
-			sessions = append(sessions, Session{
-				ID:               r.ID,
-				ParentID:         r.ParentSessionID.String,
-				Title:            r.Title,
-				AgentID:          r.AgentID,
-				PromptTokens:     r.PromptTokens,
-				CompletionTokens: r.CompletionTokens,
-				Cost:             r.Cost,
-				CreatedAt:        r.CreatedAt,
-				UpdatedAt:        r.UpdatedAt,
-			})
-		}
-		messages := make([]Message, 0, len(msgRows))
-		for _, r := range msgRows {
-			messages = append(messages, Message{
-				SessionID:  r.SessionID,
-				Model:      r.Model,
-				Provider:   r.Provider,
-				CreatedAt:  r.CreatedAt,
-				FinishedAt: r.FinishedAt,
-			})
-		}
-		delegations := make([]Delegation, 0, len(delRows))
-		for _, r := range delRows {
-			delegations = append(delegations, Delegation{
-				ID:          r.ID,
-				Kind:        r.Kind,
-				Status:      r.Status,
-				SessionID:   r.SessionID,
-				AgentID:     r.AgentID,
-				Title:       r.Title,
-				CreatedAt:   r.CreatedAt,
-				CompletedAt: r.CompletedAt,
-			})
-		}
+		sessions := sessionsFromRows(rows, func(r db.ListAllSessionsSinceRow) rawSessionRow { return rawSessionRow(r) })
+		messages := messagesFromRows(msgRows, func(r db.ListAllAssistantMessagesSinceRow) Message { return Message(r) })
+		delegations := delegationsFromRows(delRows, func(r db.ListAllDelegationOutcomesSinceRow) Delegation { return Delegation(r) })
 		return sessions, messages, delegations, nil
 
 	default:
@@ -355,16 +328,7 @@ func delegationsForSessions(ctx context.Context, q Querier, sessions []Session) 
 		if !inTree[r.SessionID] {
 			continue
 		}
-		out = append(out, Delegation{
-			ID:          r.ID,
-			Kind:        r.Kind,
-			Status:      r.Status,
-			SessionID:   r.SessionID,
-			AgentID:     r.AgentID,
-			Title:       r.Title,
-			CreatedAt:   r.CreatedAt,
-			CompletedAt: r.CompletedAt,
-		})
+		out = append(out, Delegation(r))
 	}
 	return out, nil
 }

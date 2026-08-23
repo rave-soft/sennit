@@ -299,12 +299,7 @@ func (d *DoctorItem) ID() string {
 // hint are shown truncated to fit the row; Enter opens the detail screen
 // for the untruncated text.
 func (d *DoctorItem) Render(width int) string {
-	st := ListItemStyles{
-		ItemBlurred:     d.t.Dialog.NormalItem,
-		ItemFocused:     d.t.Dialog.SelectedItem,
-		InfoTextBlurred: d.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: d.t.Dialog.ListItem.InfoFocused,
-	}
+	st := defaultListItemStyles(d.t)
 	title := fmt.Sprintf("[%s/%s] %s", d.problem.Severity, d.problem.Area, d.problem.Message)
 	return renderItem(st, title, d.problem.Hint, d.Focused(), width, d.Cache(), d.Match())
 }

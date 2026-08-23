@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"fmt"
 	"maps"
 	"strings"
 
@@ -170,37 +169,24 @@ func (d *MultiChoice) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 // toggles it, or focuses the fill-in. Returns done=false since
 // multi-choice requires explicit submission.
 func (d *MultiChoice) HandleMouseClick(x, y int) (bool, bool) {
-	if d.choiceCompositor == nil {
+	idx, ok := d.hitTestChoice(x, y)
+	if !ok {
 		return false, false
 	}
-	hit := d.choiceCompositor.Hit(x, y)
-	if hit.Empty() {
-		return false, false
-	}
-	var idx int
-	if _, err := fmt.Sscanf(hit.ID(), "choice_%d", &idx); err != nil {
-		return false, false
-	}
+	d.cursorIdx = idx
+	d.mouseActive = false
+	d.suppressScroll = true
 	if idx == len(d.Request.Choices) {
 		// Fill-in item.
-		d.cursorIdx = idx
-		d.mouseActive = false
-		d.suppressScroll = true
 		d.fillIn.Focus()
 		return false, true
 	}
-	if idx >= 0 && idx < len(d.Request.Choices) {
-		d.cursorIdx = idx
-		d.mouseActive = false
-		d.suppressScroll = true
-		d.fillIn.Blur()
-		d.selected[idx] = !d.selected[idx]
-		if !d.selected[idx] {
-			delete(d.selected, idx)
-		}
-		return false, true
+	d.fillIn.Blur()
+	d.selected[idx] = !d.selected[idx]
+	if !d.selected[idx] {
+		delete(d.selected, idx)
 	}
-	return false, false
+	return false, true
 }
 
 // choiceItemContent renders a choice's checkbox and label. Shared

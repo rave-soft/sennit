@@ -184,25 +184,28 @@ func (f *QuestionForm) isConfirmTab() bool {
 
 // isAnswered reports whether a question has a meaningful answer.
 func (f *QuestionForm) isAnswered(idx int) bool {
-	if idx >= len(f.answers) || f.answers[idx] == nil {
+	if idx >= len(f.answers) {
 		return false
 	}
-	resp := f.answers[idx]
-	return len(resp.SelectedIDs) > 0 || resp.FillInText != "" || resp.Yes != nil
+	return answerIsMeaningful(f.answers[idx])
 }
 
 // firstUnanswered returns the index of the first unanswered
 // question, or -1 if all are answered.
 func (f *QuestionForm) firstUnanswered() int {
 	for i, ans := range f.answers {
-		if ans == nil {
-			return i
-		}
-		if len(ans.SelectedIDs) == 0 && ans.FillInText == "" && ans.Yes == nil {
+		if !answerIsMeaningful(ans) {
 			return i
 		}
 	}
 	return -1
+}
+
+// answerIsMeaningful reports whether ans represents a real response
+// rather than an unanswered placeholder: a nil answer, or one with
+// no selection, fill-in text, or yes/no value, doesn't count.
+func answerIsMeaningful(ans *question.Answer) bool {
+	return ans != nil && (len(ans.SelectedIDs) > 0 || ans.FillInText != "" || ans.Yes != nil)
 }
 
 // HandleKey routes keys to the active tab. Returns true when the

@@ -218,36 +218,31 @@ func (m *UserMessageItem) Render(width int) string {
 	if m.focused {
 		key = 1
 	}
-	if useCache {
-		if cached, ok := m.getCachedPrefixedRender(width, key); ok {
-			return cached
+	return m.renderCachedPrefixed(width, key, useCache, func() string {
+		var prefix string
+		if m.focused {
+			prefix = m.sty.Messages.UserFocused.Render()
+		} else {
+			prefix = m.sty.Messages.UserBlurred.Render()
 		}
-	}
-	var prefix string
-	if m.focused {
-		prefix = m.sty.Messages.UserFocused.Render()
-	} else {
-		prefix = m.sty.Messages.UserBlurred.Render()
-	}
-	// RawRender opens every user turn with a separator rule and a blank
-	// line (see withTurnSeparator); those two lines get plain indentation
-	// instead of the user border prefix, so the bar hugs the message text
-	// only.
-	pad := strings.Repeat(" ", lipgloss.Width(prefix))
-	lines := strings.Split(m.RawRender(width), "\n")
-	header := m.headerLineCount()
-	for i, line := range lines {
-		if i < header {
-			lines[i] = pad + line
-			continue
+		// RawRender opens every user turn with a separator rule and a
+		// blank line (see withTurnSeparator); those two lines get plain
+		// indentation instead of the user border prefix, so the bar
+		// hugs the message text only. This is why UserMessageItem can't
+		// use the plain prefixLines helper: its prefix isn't uniform
+		// across every line.
+		pad := strings.Repeat(" ", lipgloss.Width(prefix))
+		lines := strings.Split(m.RawRender(width), "\n")
+		header := m.headerLineCount()
+		for i, line := range lines {
+			if i < header {
+				lines[i] = pad + line
+				continue
+			}
+			lines[i] = prefix + line
 		}
-		lines[i] = prefix + line
-	}
-	out := strings.Join(lines, "\n")
-	if useCache {
-		m.setCachedPrefixedRender(out, width, key)
-	}
-	return out
+		return strings.Join(lines, "\n")
+	})
 }
 
 // ID implements MessageItem.

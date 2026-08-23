@@ -210,28 +210,23 @@ func (s *streamingMarkdown) isSafeBoundaryIncremental(content string, p int) boo
 	// (2b) List hazard: if a list marker exists anywhere in the
 	// full prefix (base OR delta), the last non-blank line before
 	// the boundary must not be an indented continuation paragraph.
+	// openListHazard is the same B1 rule isSafeBoundaryAt applies via
+	// prefixHasOpenHazard; only how hasListMarker/lastLine get
+	// computed differs (accumulated base + delta here, a fresh scan
+	// there).
 	hasListMarker := s.baseHasListMarker || chunkHasListMarker(delta)
-	if hasListMarker {
-		lastLine := lastNonBlankLine(content[:p])
-		if lastLine != "" && !isListItemMarker(strings.TrimLeft(lastLine, " \t")) {
-			if len(lastLine) > 0 && (lastLine[0] == ' ' || lastLine[0] == '\t') {
-				return false
-			}
-		}
-	}
-
-	// (3) Last non-blank line must not open a construct.
-	lastLine := lastNonBlankLine(content[:p])
-	if lastLine != "" && lineOpensConstruct(lastLine) {
+	if openListHazard(hasListMarker, lastNonBlankLine(content[:p])) {
 		return false
 	}
 
-	// (4) Setext underline check.
-	if rest := content[p:]; rest != "" {
-		first := firstNonBlankLine(rest)
-		if isSetextUnderlineCandidate(first) {
-			return false
-		}
+	// (3)+(4): the last-line and setext checks don't depend on how the
+	// prefix was scanned, so they're shared verbatim with
+	// isSafeBoundaryAt.
+	if lastLineOpensConstruct(content, p) {
+		return false
+	}
+	if boundaryFollowedBySetextUnderline(content, p) {
+		return false
 	}
 
 	return true
@@ -473,23 +468,66 @@ func isSafeBoundaryAt(content string, p int) bool {
 		return false
 	}
 
-	// (3) Inspect the last non-blank line of the prefix.
-	lastLine := lastNonBlankLine(prefix)
-	if lastLine != "" && lineOpensConstruct(lastLine) {
+	// (3) Inspect the last non-blank line of the prefix, and (4) check
+	// whatever follows for a retroactive setext underline. Both checks
+	// are shared with isSafeBoundaryIncremental, which applies them to
+	// the same (content, p) pair once its delta-only fence/hazard
+	// checks pass.
+	if lastLineOpensConstruct(content, p) {
+		return false
+	}
+	if boundaryFollowedBySetextUnderline(content, p) {
 		return false
 	}
 
-	// (4) If anything follows, make sure it doesn't look like a
-	// setext underline that would retroactively turn the last
-	// paragraph of the prefix into a header.
-	if rest := content[p:]; rest != "" {
-		first := firstNonBlankLine(rest)
-		if isSetextUnderlineCandidate(first) {
-			return false
-		}
-	}
-
 	return true
+}
+
+// lastLineOpensConstruct reports whether the last non-blank line
+// before position p in content opens a construct (list item, table,
+// block quote, indented code, setext-eligible line — see
+// lineOpensConstruct) that a boundary at p would cut in the middle
+// of. Shared by isSafeBoundaryAt's full scan and
+// isSafeBoundaryIncremental's delta scan: both need the answer for
+// the same (content, p), they just get there by different paths.
+func lastLineOpensConstruct(content string, p int) bool {
+	lastLine := lastNonBlankLine(content[:p])
+	return lastLine != "" && lineOpensConstruct(lastLine)
+}
+
+// boundaryFollowedBySetextUnderline reports whether the first
+// non-blank line after position p looks like a setext underline,
+// which would retroactively turn the prefix's trailing paragraph
+// into a header. Shared for the same reason as lastLineOpensConstruct.
+func boundaryFollowedBySetextUnderline(content string, p int) bool {
+	rest := content[p:]
+	if rest == "" {
+		return false
+	}
+	return isSetextUnderlineCandidate(firstNonBlankLine(rest))
+}
+
+// openListHazard applies hazard B1's tail rule (see
+// prefixHasOpenHazard): once a list marker has been seen somewhere in
+// the prefix, the list is still open if the last non-blank line
+// before the boundary is an indented continuation paragraph rather
+// than a marker line itself. lastLine is passed raw (untrimmed) so
+// its indentation can be read directly.
+//
+// Shared by prefixHasOpenHazard, which computes hasListMarker and
+// lastLine from a fresh scan of the whole prefix, and
+// isSafeBoundaryIncremental, which accumulates hasListMarker across
+// ticks (baseHasListMarker plus the current delta) instead — the
+// accumulation differs, but the rule applied once both inputs are in
+// hand does not.
+func openListHazard(hasListMarker bool, lastLine string) bool {
+	if !hasListMarker || lastLine == "" {
+		return false
+	}
+	if isListItemMarker(strings.TrimLeft(lastLine, " \t")) {
+		return false
+	}
+	return lastLine[0] == ' ' || lastLine[0] == '\t'
 }
 
 // prefixHasOpenHazard reports whether prefix contains any of three
@@ -544,7 +582,6 @@ func isSafeBoundaryAt(content string, p int) bool {
 func prefixHasOpenHazard(prefix string) bool {
 	var fs fenceState
 	hasListMarker := false
-	var lastNonBlankTrimmed string
 	var lastNonBlankRaw string
 	for line := range splitLines(prefix) {
 		// Track fenced state so list/html/ref patterns inside a
@@ -558,7 +595,6 @@ func prefixHasOpenHazard(prefix string) bool {
 		if trimmed == "" {
 			continue
 		}
-		lastNonBlankTrimmed = trimmed
 		lastNonBlankRaw = line
 		// B1: track list markers.
 		if isListItemMarker(trimmed) {
@@ -578,13 +614,10 @@ func prefixHasOpenHazard(prefix string) bool {
 	// is not itself a list marker (i.e. it is a continuation
 	// paragraph that lineOpensConstruct would miss because it only
 	// catches 4+ leading spaces). A non-indented last line means
-	// the list was closed by the blank line before it.
-	if hasListMarker && lastNonBlankTrimmed != "" && !isListItemMarker(lastNonBlankTrimmed) {
-		if len(lastNonBlankRaw) > 0 && (lastNonBlankRaw[0] == ' ' || lastNonBlankRaw[0] == '\t') {
-			return true
-		}
-	}
-	return false
+	// the list was closed by the blank line before it. See
+	// openListHazard for the rule itself, shared with
+	// isSafeBoundaryIncremental.
+	return openListHazard(hasListMarker, lastNonBlankRaw)
 }
 
 // fenceState tracks whether a fenced code block is currently open

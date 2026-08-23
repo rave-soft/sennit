@@ -135,7 +135,7 @@ func (c *ConfirmComponent) ShortHelp() []key.Binding {
 func (c *ConfirmComponent) unansweredCount() int {
 	n := 0
 	for _, ans := range c.Answers {
-		if ans == nil || (len(ans.SelectedIDs) == 0 && ans.FillInText == "" && ans.Yes == nil) {
+		if !answerIsMeaningful(ans) {
 			n++
 		}
 	}

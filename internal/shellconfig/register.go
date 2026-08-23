@@ -34,9 +34,11 @@ func usage(stderr io.Writer, msg string) error {
 	return fmt.Errorf("%s", msg)
 }
 
-// appendArr appends value to the string slice stored at m[key], creating it if
-// needed, and returns the result.
-func appendArr(m map[string]any, key, value string) []any {
+// appendArr appends value to the []any slice stored at m[key], creating it
+// if needed, and returns the result. Shared by the builtins' own array
+// flags and applyFlags' opAppend (flags.go), both of which store
+// list-valued config properties the same way.
+func appendArr(m map[string]any, key string, value any) []any {
 	arr, _ := m[key].([]any)
 	return append(arr, value)
 }

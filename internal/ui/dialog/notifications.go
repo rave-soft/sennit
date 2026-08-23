@@ -117,11 +117,6 @@ func (n *NotificationItem) Render(width int) string {
 	if n.isCurrent {
 		info = "current"
 	}
-	st := ListItemStyles{
-		ItemBlurred:     n.t.Dialog.NormalItem,
-		ItemFocused:     n.t.Dialog.SelectedItem,
-		InfoTextBlurred: n.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: n.t.Dialog.ListItem.InfoFocused,
-	}
+	st := defaultListItemStyles(n.t)
 	return renderItem(st, n.style.Title, info, n.Focused(), width, n.Cache(), n.Match())
 }

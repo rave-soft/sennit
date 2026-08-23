@@ -48,6 +48,17 @@ func FindModelMatches(providers map[string]ProviderConfig, modelStr string) ([]M
 		}
 	}
 
+	matches := collectModelMatches(providers, providerFilter, modelID)
+
+	return matches, nil
+}
+
+// collectModelMatches gathers every enabled provider's models that satisfy
+// the requested model ID and optional provider filter. It is the shared
+// body of FindModelMatches and ResolveModelString, which differ only in
+// what they do with the result — one hands the matches back, the other
+// insists on exactly one.
+func collectModelMatches(providers map[string]ProviderConfig, providerFilter, modelID string) []ModelMatch {
 	var matches []ModelMatch
 	for name, provider := range providers {
 		if provider.Disable {
@@ -59,8 +70,7 @@ func FindModelMatches(providers map[string]ProviderConfig, modelStr string) ([]M
 			}
 		}
 	}
-
-	return matches, nil
+	return matches
 }
 
 // modelFilterMatches reports whether a model/provider pair satisfies the
@@ -83,17 +93,7 @@ func ResolveModelString(providers map[string]ProviderConfig, modelStr string) (M
 		}
 	}
 
-	var matches []ModelMatch
-	for name, provider := range providers {
-		if provider.Disable {
-			continue
-		}
-		for _, m := range provider.Models {
-			if modelFilterMatches(modelID, providerFilter, m.ID, name) {
-				matches = append(matches, ModelMatch{Provider: name, ModelID: m.ID})
-			}
-		}
-	}
+	matches := collectModelMatches(providers, providerFilter, modelID)
 
 	return ValidateModelMatches(matches, modelID, "agent")
 }

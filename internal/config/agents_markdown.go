@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/skills"
 	"gopkg.in/yaml.v3"
 )
 
@@ -147,7 +148,7 @@ func parseAgentFile(path string, providers map[string]ProviderConfig) (string, A
 		return "", Agent{}, err
 	}
 
-	frontmatter, body, err := splitAgentFrontmatter(string(content))
+	frontmatter, body, err := skills.SplitFrontmatter(string(content))
 	if err != nil {
 		return "", Agent{}, err
 	}
@@ -224,31 +225,4 @@ func normalizeToolNames(names []string) []string {
 		}
 	}
 	return out
-}
-
-// splitAgentFrontmatter separates the leading YAML block from the body. It
-// mirrors the skills parser rather than importing it, so the config package
-// keeps its current dependency set.
-func splitAgentFrontmatter(content string) (frontmatter, body string, err error) {
-	content = strings.TrimPrefix(content, "\uFEFF")
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
-
-	lines := strings.Split(content, "\n")
-	start := slices.IndexFunc(lines, func(line string) bool {
-		return strings.TrimSpace(line) != ""
-	})
-	if start == -1 || strings.TrimSpace(lines[start]) != "---" {
-		return "", "", errors.New("no YAML frontmatter found")
-	}
-
-	endOffset := slices.IndexFunc(lines[start+1:], func(line string) bool {
-		return strings.TrimSpace(line) == "---"
-	})
-	if endOffset == -1 {
-		return "", "", errors.New("unclosed frontmatter")
-	}
-	end := start + 1 + endOffset
-
-	return strings.Join(lines[start+1:end], "\n"), strings.Join(lines[end+1:], "\n"), nil
 }

@@ -98,11 +98,6 @@ func (m *ModelItem) Render(width int) string {
 	if m.showProvider {
 		providerInfo = m.prov.Name
 	}
-	styles := ListItemStyles{
-		ItemBlurred:     m.t.Dialog.NormalItem,
-		ItemFocused:     m.t.Dialog.SelectedItem,
-		InfoTextBlurred: m.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: m.t.Dialog.ListItem.InfoFocused,
-	}
+	styles := defaultListItemStyles(m.t)
 	return renderItem(styles, m.model.Name, providerInfo, m.Focused(), width, m.Cache(), m.Match())
 }

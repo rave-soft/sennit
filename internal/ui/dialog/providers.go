@@ -127,11 +127,6 @@ func (p *ProviderItem) Render(width int) string {
 	if p.configured {
 		info = "Configured"
 	}
-	st := ListItemStyles{
-		ItemBlurred:     p.t.Dialog.NormalItem,
-		ItemFocused:     p.t.Dialog.SelectedItem,
-		InfoTextBlurred: p.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: p.t.Dialog.ListItem.InfoFocused,
-	}
+	st := defaultListItemStyles(p.t)
 	return renderItem(st, p.name, info, p.Focused(), width, p.Cache(), p.Match())
 }

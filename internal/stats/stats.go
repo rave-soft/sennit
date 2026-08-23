@@ -452,19 +452,24 @@ func ComputeAgents(sessions []Session, delegations []Delegation) []Agent {
 // nameless bucket — which is what the CLI's title-only grouping used to
 // do to *every* custom agent.
 func AgentName(s Session) string {
-	if name := strings.TrimSpace(s.AgentID); name != "" {
-		return name
-	}
-	return strings.TrimSpace(s.Title)
+	return agentNameFrom(s.AgentID, s.Title)
 }
 
 // delegationAgentName is AgentName for a delegation row whose session did
 // not come back with the scope.
 func delegationAgentName(d Delegation) string {
-	if name := strings.TrimSpace(d.AgentID); name != "" {
+	return agentNameFrom(d.AgentID, d.Title)
+}
+
+// agentNameFrom is the shared grouping rule behind [AgentName] and
+// [delegationAgentName]: prefer the agent id, and fall back to the title
+// when it's empty. Both callers read the same two columns off different
+// structs (a session vs. a delegation row), so the logic lives here once.
+func agentNameFrom(agentID, title string) string {
+	if name := strings.TrimSpace(agentID); name != "" {
 		return name
 	}
-	return strings.TrimSpace(d.Title)
+	return strings.TrimSpace(title)
 }
 
 // ComputeTotals aggregates top-level sessions (those a person started)

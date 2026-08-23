@@ -36,6 +36,19 @@ type sizer interface {
 	SetSize(width, height int)
 }
 
+// dialogChromeHeight is the vertical space a select-style dialog's title,
+// input, and help rows occupy plus the outer view frame, once each part's
+// own frame size is added to its single content line. Three call sites
+// computed this by hand and could silently drift apart; centralizing it
+// keeps a title/input/help layout change from having to be applied three
+// times.
+func dialogChromeHeight(t *styles.Styles) int {
+	return t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
+		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		t.Dialog.HelpView.GetVerticalFrameSize() +
+		t.Dialog.View.GetVerticalFrameSize()
+}
+
 // sizeDialogList computes the list dimensions within a dialog and calls
 // l.SetSize. It accounts for the title, input, help, and view frame sizes
 // so callers don't have to repeat the arithmetic. The scrollbar column is
@@ -50,12 +63,7 @@ type sizer interface {
 //   - innerWidth: dialog content width (total minus View horizontal frame).
 //   - dialogHeight: total dialog content height (already clamped).
 func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (listHeight, listTotalHeight, listWidth int) {
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
-
-	listHeight = max(0, dialogHeight-heightOffset)
+	listHeight = max(0, dialogHeight-dialogChromeHeight(t))
 	listTotalHeight = l.TotalHeight()
 
 	// Reserve one column for the scrollbar only when it will actually

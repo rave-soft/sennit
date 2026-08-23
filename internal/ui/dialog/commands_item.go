@@ -109,12 +109,7 @@ func (c *CommandItem) SetHideInfo(v bool) {
 
 // Render implements ListItem.
 func (c *CommandItem) Render(width int) string {
-	styles := ListItemStyles{
-		ItemBlurred:     c.t.Dialog.NormalItem,
-		ItemFocused:     c.t.Dialog.SelectedItem,
-		InfoTextBlurred: c.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
-	}
+	styles := defaultListItemStyles(c.t)
 	shortcut := c.shortcut
 	if c.hideInfo {
 		shortcut = ""

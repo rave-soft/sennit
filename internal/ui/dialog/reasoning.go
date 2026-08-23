@@ -119,11 +119,6 @@ func (r *ReasoningItem) Render(width int) string {
 	if r.isCurrent {
 		info = "current"
 	}
-	styles := ListItemStyles{
-		ItemBlurred:     r.t.Dialog.NormalItem,
-		ItemFocused:     r.t.Dialog.SelectedItem,
-		InfoTextBlurred: r.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: r.t.Dialog.ListItem.InfoFocused,
-	}
+	styles := defaultListItemStyles(r.t)
 	return renderItem(styles, r.title, info, r.Focused(), width, r.Cache(), r.Match())
 }

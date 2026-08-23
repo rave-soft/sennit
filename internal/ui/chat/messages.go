@@ -254,6 +254,40 @@ func (c *cachedMessageItem) setCachedPrefixedRender(rendered string, width int, 
 	c.prefixedKey = key
 }
 
+// prefixLines splits content on newlines and prepends prefix to every
+// line before rejoining. Every MessageItem's Render builds its output
+// this way: RawRender already wraps content to width, so restyling it
+// line-by-line avoids handing the whole block to lipgloss.Render, whose
+// wrapping pass gets expensive on long messages (see the comment on
+// AssistantMessageItem.Render).
+func prefixLines(content, prefix string) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderCachedPrefixed implements the "check the prefixed-render cache,
+// else build and store" shape shared by every MessageItem.Render that
+// caches its output. build computes the fully prefixed content for width;
+// it is only called on a cache miss. useCache lets a caller bypass the
+// cache for a frame whose content the key doesn't fully capture (a
+// spinner tick, an active highlight range) without having to duplicate
+// the get/set bracketing at each call site.
+func (c *cachedMessageItem) renderCachedPrefixed(width int, key uint64, useCache bool, build func() string) string {
+	if useCache {
+		if cached, ok := c.getCachedPrefixedRender(width, key); ok {
+			return cached
+		}
+	}
+	out := build()
+	if useCache {
+		c.setCachedPrefixedRender(out, width, key)
+	}
+	return out
+}
+
 // clearCache clears the cached render.
 func (c *cachedMessageItem) clearCache() {
 	c.rendered = ""
@@ -360,17 +394,10 @@ func (a *AssistantInfoItem) Render(width int) string {
 	// AssistantInfoItem uses a single, state-independent prefix; key 0
 	// is sufficient. The cache is invalidated whenever the underlying
 	// cachedMessageItem render is cleared.
-	if cached, ok := a.getCachedPrefixedRender(width, 0); ok {
-		return cached
-	}
-	prefix := a.sty.Messages.SectionHeader.Render()
-	lines := strings.Split(a.RawRender(width), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	out := strings.Join(lines, "\n")
-	a.setCachedPrefixedRender(out, width, 0)
-	return out
+	return a.renderCachedPrefixed(width, 0, true, func() string {
+		prefix := a.sty.Messages.SectionHeader.Render()
+		return prefixLines(a.RawRender(width), prefix)
+	})
 }
 
 func (a *AssistantInfoItem) renderContent(width int) string {

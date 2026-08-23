@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 )
 
 // resolveProviderHeaders resolves every value in headers (in place, via
@@ -15,17 +16,19 @@ import (
 // takes no logging/Problem parameters — there is nothing to make
 // configurable, both call sites already agree.
 func resolveProviderHeaders(headers map[string]string, resolver VariableResolver, providerID string) error {
-	for k, v := range headers {
-		resolved, err := resolver.ResolveValue(v)
-		if err != nil {
-			return fmt.Errorf("resolving provider %s header %q: %w", providerID, k, err)
-		}
-		if resolved == "" {
-			delete(headers, k)
-			continue
-		}
-		headers[k] = resolved
+	// resolveMap does the same work and iterates in sorted key order, so a
+	// config with two bad headers always names the same one — this loop
+	// used to report whichever the map handed it first. It returns a new
+	// map, and callers here hold the original, so the result is copied
+	// back over it.
+	resolved, err := resolveMap(headers, resolver, func(key string) string {
+		return fmt.Sprintf("resolving provider %s header %q", providerID, key)
+	}, true)
+	if err != nil {
+		return err
 	}
+	clear(headers)
+	maps.Copy(headers, resolved)
 	return nil
 }
 

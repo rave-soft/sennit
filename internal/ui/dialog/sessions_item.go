@@ -88,12 +88,7 @@ func (s *SessionItem) Render(width int) string {
 	if s.hideInfo {
 		info = ""
 	}
-	styles := ListItemStyles{
-		ItemBlurred:     s.t.Dialog.NormalItem,
-		ItemFocused:     s.t.Dialog.SelectedItem,
-		InfoTextBlurred: s.t.Dialog.Sessions.InfoBlurred,
-		InfoTextFocused: s.t.Dialog.Sessions.InfoFocused,
-	}
+	styles := listItemStylesWithInfo(s.t, s.t.Dialog.Sessions.InfoBlurred, s.t.Dialog.Sessions.InfoFocused)
 
 	switch s.sessionsMode {
 	case sessionsModeDeleting:
@@ -112,6 +107,26 @@ func (s *SessionItem) Render(width int) string {
 	}
 
 	return renderItem(styles, s.Title, info, s.Focused(), width, s.Cache(), s.Match())
+}
+
+// defaultListItemStyles builds the standard ListItemStyles used by nearly
+// every dialog's item type: the shared normal/selected item styles paired
+// with the shared Dialog.ListItem info-text styles.
+func defaultListItemStyles(t *styles.Styles) ListItemStyles {
+	return listItemStylesWithInfo(t, t.Dialog.ListItem.InfoBlurred, t.Dialog.ListItem.InfoFocused)
+}
+
+// listItemStylesWithInfo builds a ListItemStyles from the shared item
+// styles plus caller-supplied info-text styles. Sessions is the one item
+// type whose info text uses its own palette (Dialog.Sessions) instead of
+// the shared Dialog.ListItem one, so it calls this directly.
+func listItemStylesWithInfo(t *styles.Styles, infoBlurred, infoFocused lipgloss.Style) ListItemStyles {
+	return ListItemStyles{
+		ItemBlurred:     t.Dialog.NormalItem,
+		ItemFocused:     t.Dialog.SelectedItem,
+		InfoTextBlurred: infoBlurred,
+		InfoTextFocused: infoFocused,
+	}
 }
 
 type ListItemStyles struct {

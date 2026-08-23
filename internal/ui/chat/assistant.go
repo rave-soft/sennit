@@ -330,27 +330,13 @@ func (a *AssistantMessageItem) Render(width int) string {
 	useCache := !a.isSpinning() && !a.isHighlighted()
 	cappedWidth := cappedMessageWidth(width)
 	key := a.prefixCacheKey(cappedWidth)
-	if useCache {
-		if cached, ok := a.getCachedPrefixedRender(width, key); ok {
-			return cached
-		}
-	}
-	focused := a.sty.Messages.AssistantFocused.Render()
-	blurred := a.sty.Messages.AssistantBlurred.Render()
-	rendered := a.RawRender(width)
-	lines := strings.Split(rendered, "\n")
-	for i, line := range lines {
+	return a.renderCachedPrefixed(width, key, useCache, func() string {
+		prefix := a.sty.Messages.AssistantBlurred.Render()
 		if a.focused {
-			lines[i] = focused + line
-		} else {
-			lines[i] = blurred + line
+			prefix = a.sty.Messages.AssistantFocused.Render()
 		}
-	}
-	out := strings.Join(lines, "\n")
-	if useCache {
-		a.setCachedPrefixedRender(out, width, key)
-	}
-	return out
+		return prefixLines(a.RawRender(width), prefix)
+	})
 }
 
 // prefixCacheKey builds the F3 prefixed-render cache key. We pack the

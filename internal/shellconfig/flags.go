@@ -197,8 +197,7 @@ func storeFlag(target map[string]any, spec flagSpec, val any) {
 	case opSet:
 		target[spec.jsonKey] = val
 	case opAppend:
-		arr, _ := target[spec.jsonKey].([]any)
-		target[spec.jsonKey] = append(arr, val)
+		target[spec.jsonKey] = appendArr(target, spec.jsonKey, val)
 	case opSetChild:
 		if kv, ok := val.([2]string); ok {
 			childMap(target, spec.child)[kv[0]] = kv[1]

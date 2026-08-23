@@ -57,17 +57,11 @@ func (n *NoticeItem) RawRender(width int) string {
 
 // Render implements MessageItem.
 func (n *NoticeItem) Render(width int) string {
-	if cached, ok := n.getCachedPrefixedRender(width, 0); ok {
-		return cached
-	}
-	prefix := n.sty.Messages.SectionHeader.Render()
-	lines := strings.Split(n.RawRender(width), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	out := strings.Join(lines, "\n")
-	n.setCachedPrefixedRender(out, width, 0)
-	return out
+	// A notice has a single, state-independent prefix; key 0 is enough.
+	return n.renderCachedPrefixed(width, 0, true, func() string {
+		prefix := n.sty.Messages.SectionHeader.Render()
+		return prefixLines(n.RawRender(width), prefix)
+	})
 }
 
 func (n *NoticeItem) renderContent(width int) string {

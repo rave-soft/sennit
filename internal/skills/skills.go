@@ -182,6 +182,15 @@ func ParseContent(content []byte) (*Skill, error) {
 }
 
 // splitFrontmatter extracts YAML frontmatter and body from markdown content.
+// SplitFrontmatter is exported because internal/config parses the same
+// file shape for agent markdown and carried a line-for-line copy of this
+// function to avoid the import — an import it already has (see doctor.go
+// and import.go). One parser means one answer to the awkward cases: a BOM,
+// CRLF line endings, leading blank lines, an unclosed block.
+func SplitFrontmatter(content string) (frontmatter, body string, err error) {
+	return splitFrontmatter(content)
+}
+
 func splitFrontmatter(content string) (frontmatter, body string, err error) {
 	// Strip UTF-8 BOM for compatibility with editors that include it.
 	content = strings.TrimPrefix(content, "\uFEFF")

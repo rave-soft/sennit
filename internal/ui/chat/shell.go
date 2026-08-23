@@ -156,6 +156,12 @@ func (s *ShellItem) Animate(msg anim.StepMsg) tea.Cmd {
 	return s.anim.Animate(msg)
 }
 
+// Render implements MessageItem. Unlike the other item types, this does
+// not go through the prefixed-render cache: ShellItem's own RawRender
+// already caches the expensive part (output remapping, truncation,
+// scroll clamping), and the hovered/focused state driving the prefix
+// here changes often enough on mouse movement that caching it would
+// mostly just track hover, not save work.
 func (s *ShellItem) Render(width int) string {
 	innerWidth := max(0, width-MessageLeftPaddingTotal)
 	content := s.RawRender(innerWidth)
@@ -166,11 +172,7 @@ func (s *ShellItem) Render(width int) string {
 	} else {
 		prefix = s.sty.Messages.ShellBarBlurred.Render()
 	}
-	lines := strings.Split(content, "\n")
-	for i, ln := range lines {
-		lines[i] = prefix + ln
-	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(content, prefix)
 
 	return s.renderHighlighted(out, width, lipgloss.Height(out))
 }
