@@ -350,11 +350,13 @@ func (r *Registry) Close(ctx context.Context) error {
 	for name := range handlers {
 		r.authURLs.Del(name)
 	}
+	// Bulk variant of clearCatalog: every name is cleared under one
+	// catalogMu acquisition and one version bump rather than one each,
+	// since shutdown wants a single consistent "everything's gone" snapshot,
+	// not N intermediate ones a concurrent CatalogSnapshot could observe.
 	r.catalogMu.Lock()
 	for name := range names {
-		r.allTools.Del(name)
-		r.allPrompts.Del(name)
-		r.allResources.Del(name)
+		r.clearCatalogEntriesLocked(name)
 	}
 	r.catalogChanged()
 	r.catalogMu.Unlock()

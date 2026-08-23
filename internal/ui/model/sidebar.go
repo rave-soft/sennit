@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
+	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/logo"
@@ -34,6 +35,118 @@ type sidebarState struct {
 	contentHeight    int    // available height for sidebar content
 	contentWidth     int    // available width for sidebar content
 	drawLogo         string // logo to render (may differ from logo for short heights)
+
+	// sig is the last set of inputs `content` was rendered from. See
+	// sidebarSig and computeSidebarSig: updateSidebarScrollState skips the
+	// render (and the BackgroundJobCounts mutex acquisition it implies)
+	// whenever a freshly computed signature still equals this one.
+	sig    sidebarSig
+	sigSet bool
+}
+
+// sidebarSig is everything updateSidebarScrollState's rendered content
+// depends on, captured cheaply (no rendering, no lipgloss) so it can be
+// recomputed and compared every frame without paying for the thing it's
+// trying to avoid. Two frames with an equal sig are guaranteed to render
+// identical content, so the cached content/totalLines/etc. can be reused
+// as-is.
+//
+// Every field here is either a pointer/struct that's always replaced
+// wholesale when it changes (sess, so identity comparison is exact) or a
+// version counter bumped at the handful of call sites that replace a map
+// or slice this depends on (lsp states, mcp states, skill states, session
+// files — see lspState.version, integrationsState.mcpVersion/
+// skillsVersion, sessionState.filesVersion). Anything else read here is a
+// cheap scalar (ints, strings, bools) copied directly, since comparing
+// those is no more expensive than reading them.
+type sidebarSig struct {
+	area image.Rectangle // m.lay.layout.sidebar; covers width/height changes
+
+	sess *session.Session // identity only; see sessionState doc comment
+	cwd  string
+
+	modelNil        bool
+	modelProviderID string
+	providerName    string
+	modelName       string
+	canReason       bool
+	reasoningLevels int
+	think           bool
+	reasoningEffort string
+
+	planKnown              bool
+	plan                   string
+	primaryUsedPercent     int
+	primaryWindowMinutes   int
+	primaryResetsAt        int64
+	secondaryUsedPercent   int
+	secondaryWindowMinutes int
+	secondaryResetsAt      int64
+
+	jobCounts shell.BackgroundJobCounts
+
+	filesVersion  int
+	lspVersion    int
+	mcpVersion    int
+	skillsVersion int
+
+	// theme is the palette the cached content was rendered in. Every
+	// other field here is model state; this one is not, and it is the
+	// input a signature over model state alone misses: setTheme swaps
+	// *com.Styles in place, so the pointer is unchanged and so is
+	// everything else keyed above — the sidebar went on serving content
+	// painted in the previous palette until something unrelated
+	// invalidated it.
+	theme string
+}
+
+// computeSidebarSig reads the current values of everything
+// updateSidebarScrollState's render depends on. It must stay cheap: it runs
+// every frame regardless of whether the cache hits.
+func (m *UI) computeSidebarSig() sidebarSig {
+	sig := sidebarSig{
+		area:      m.lay.layout.sidebar,
+		sess:      m.sess.current,
+		theme:     m.ops.themeLive,
+		cwd:       m.com.Workspace.WorkingDir(),
+		jobCounts: m.com.Workspace.BackgroundJobCounts(),
+
+		filesVersion:  m.sess.filesVersion,
+		lspVersion:    m.lsp.version,
+		mcpVersion:    m.mcpVersion,
+		skillsVersion: m.skillsVersion,
+	}
+
+	model := m.viewedModel()
+	if model == nil {
+		sig.modelNil = true
+		return sig
+	}
+
+	sig.modelProviderID = model.ModelCfg.Provider
+	sig.modelName = model.CatalogCfg.Name
+	sig.canReason = model.CatalogCfg.CanReason
+	sig.reasoningLevels = len(model.CatalogCfg.ReasoningLevels)
+	sig.think = model.ModelCfg.Think
+	sig.reasoningEffort = model.ModelCfg.ReasoningEffort
+	if providerConfig, ok := m.com.Config().Providers.Get(model.ModelCfg.Provider); ok {
+		sig.providerName = providerConfig.Name
+	}
+
+	if model.ModelCfg.Provider == codex.ProviderID {
+		if usage, ok := codex.LatestUsage(); ok {
+			sig.planKnown = true
+			sig.plan = usage.Plan
+			sig.primaryUsedPercent = usage.Primary.UsedPercent
+			sig.primaryWindowMinutes = usage.Primary.WindowMinutes
+			sig.primaryResetsAt = usage.Primary.ResetsAt.UnixNano()
+			sig.secondaryUsedPercent = usage.Secondary.UsedPercent
+			sig.secondaryWindowMinutes = usage.Secondary.WindowMinutes
+			sig.secondaryResetsAt = usage.Secondary.ResetsAt.UnixNano()
+		}
+	}
+
+	return sig
 }
 
 // scrollByWheel adjusts the scroll offset by delta lines from a mouse wheel
@@ -140,13 +253,34 @@ func backgroundJobsInfo(t *styles.Styles, counts shell.BackgroundJobCounts, widt
 	return lipgloss.JoinVertical(lipgloss.Left, header, active)
 }
 
-// updateSidebarScrollState renders the sidebar content and computes scroll
-// state (scrollability, max offset, clamp) before drawing. This keeps all
-// state mutation in the update path rather than in the draw function.
+// updateSidebarScrollState computes scroll state (scrollability, max
+// offset, clamp) before drawing, re-rendering the sidebar content only when
+// something it depends on actually changed. This keeps all state mutation
+// in the update path rather than in the draw function.
+//
+// The sidebar render loops over LSP/MCP/skill state and calls
+// BackgroundJobCounts (a mutex acquisition in the shell package), and this
+// runs every frame — a redraw does too, TUI or not. computeSidebarSig
+// captures those inputs cheaply; a frame whose signature matches the one
+// `content` was last built from reuses it instead of re-rendering.
 func (m *UI) updateSidebarScrollState() {
 	if m.sess.current == nil || m.lay.isCompact {
 		return
 	}
+
+	sig := m.computeSidebarSig()
+	if m.sidebar.sigSet && sig == m.sidebar.sig {
+		// Nothing that feeds the render changed; only the scroll clamp
+		// below can still matter (e.g. a wheel scroll moved the offset),
+		// and that reads cached content/contentHeight/totalLines, none of
+		// which need recomputing.
+		if m.sidebar.offset > m.sidebar.maxOffset {
+			m.sidebar.offset = m.sidebar.maxOffset
+		}
+		return
+	}
+	m.sidebar.sig = sig
+	m.sidebar.sigSet = true
 
 	const logoHeightBreakpoint = 30
 
@@ -186,7 +320,7 @@ func (m *UI) updateSidebarScrollState() {
 		"",
 		m.modelInfo(contentWidth),
 		"",
-		backgroundJobsInfo(t, m.com.Workspace.BackgroundJobCounts(), contentWidth),
+		backgroundJobsInfo(t, sig.jobCounts, contentWidth),
 		"",
 		filesSection,
 		"",

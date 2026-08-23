@@ -23,6 +23,13 @@ type integrationsState struct {
 	mcpStates   map[string]workspace.MCPClientInfo
 	skillStates []*skills.SkillState
 
+	// mcpVersion / skillsVersion bump every time mcpStates / skillStates are
+	// replaced. The sidebar cache (sidebar.go) keys off these instead of
+	// diffing the slices/maps themselves, since both are always assigned
+	// wholesale when they change.
+	mcpVersion    int
+	skillsVersion int
+
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 }
@@ -77,6 +84,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
+		m.mcpVersion++
 		// Auto-open the MCP auth dialog if any servers need authentication.
 		if cmd := m.openMCPAuthDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -106,6 +114,7 @@ func (m *UI) updateIntegrations(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+		m.skillsVersion++
 	case dialog.ActionMCPAuthStarted:
 		cmds = append(cmds, m.authenticateMCP(msg.Ctx, msg.Name))
 	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:

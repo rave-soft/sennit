@@ -138,22 +138,7 @@ func (r *Registry) RefreshTools(ctx context.Context, cfg ConfigProvider, name st
 		return
 	}
 	tools = filterTools(m, tools)
-	r.publishMu.Lock()
-	defer r.publishMu.Unlock()
-	if !r.ownsSessionLocked(name, owner, session) {
-		return
-	}
-	r.catalogMu.Lock()
-	if len(tools) == 0 {
-		r.allTools.Del(name)
-	} else {
-		r.allTools.Set(name, tools)
-	}
-	r.catalogChanged()
-	r.catalogMu.Unlock()
-	prev, _ := r.states.Get(name)
-	prev.Counts.Tools = len(tools)
-	r.updateStateLocked(name, StateConnected, nil, session, prev.Counts)
+	publishSingleCatalog(r, r.allTools, name, owner, session, tools, func(c *Counts, n int) { c.Tools = n })
 }
 
 func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {

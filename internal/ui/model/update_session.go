@@ -75,6 +75,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		m.clearQueuedPrompts()
 		m.sidebar.offset = 0
 		m.sess.files = msg.files
+		m.sess.filesVersion++
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
 		// off-thread so the queue pill and esc behavior track the new
@@ -161,6 +162,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			break
 		}
 		m.sess.files = msg.sessionFiles
+		m.sess.filesVersion++
 		var paths []string
 		for _, f := range msg.sessionFiles {
 			paths = append(paths, f.LatestVersion.Path)

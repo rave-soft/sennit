@@ -43,7 +43,7 @@ func (f *filterableTrackedItem) Invalidate() { f.Bump() }
 func names(items []Item) []string {
 	out := make([]string, len(items))
 	for i, it := range items {
-		out[i] = it.(*filterableTrackedItem).name
+		out[i] = it.(FilterableItem).Filter()
 	}
 	return out
 }
@@ -249,6 +249,94 @@ func TestFilterableList_Render_AppliesCurrentFilter(t *testing.T) {
 	out := f.Render()
 	require.Contains(t, out, "banana")
 	require.NotContains(t, out, "apple")
+}
+
+// filterableCountingItem wraps filterableTrackedItem to count SetMatch
+// calls, so tests can assert the fuzzy filter only reruns when its inputs
+// (query, item set) actually changed.
+type filterableCountingItem struct {
+	*filterableTrackedItem
+	setMatchCalls int
+}
+
+func newCountingFilterableItem(name string) *filterableCountingItem {
+	return &filterableCountingItem{filterableTrackedItem: newFilterableItem(name)}
+}
+
+func (f *filterableCountingItem) SetMatch(m fuzzy.Match) {
+	f.setMatchCalls++
+	f.filterableTrackedItem.SetMatch(m)
+}
+
+// TestFilterableList_FilteredItems_CachesUntilQueryOrItemsChange covers the
+// memoization added to FilteredItems: repeated calls with an unchanged
+// query against an unchanged item set must not re-run the fuzzy filter (or
+// re-touch each item's match state via SetMatch), and the result must stay
+// identical to a fresh computation until the query or the item set does
+// change.
+func TestFilterableList_FilteredItems_CachesUntilQueryOrItemsChange(t *testing.T) {
+	t.Parallel()
+
+	a := newCountingFilterableItem("apple")
+	b := newCountingFilterableItem("apricot")
+	c := newCountingFilterableItem("banana")
+	f := NewFilterableList(a, b, c)
+
+	f.SetFilter("ap")
+	require.Equal(t, 1, a.setMatchCalls, "SetFilter computes the filter once")
+	require.ElementsMatch(t, []string{"apple", "apricot"}, names(f.FilteredItems()))
+
+	// Repeated reads with nothing changed must hit the cache: no further
+	// SetMatch calls, and the same result.
+	for range 3 {
+		got := names(f.FilteredItems())
+		require.ElementsMatch(t, []string{"apple", "apricot"}, got)
+	}
+	require.Equal(t, 1, a.setMatchCalls, "unchanged query/items must not rerun the filter")
+	require.Equal(t, 1, b.setMatchCalls)
+	require.Equal(t, 0, c.setMatchCalls, "a non-matching item is never handed a match to set")
+
+	// Changing the query invalidates the cache: "an" matches banana (not
+	// apple/apricot, which have no 'n'), and c only gets a SetMatch call
+	// once the filter actually reruns against the new query.
+	require.Equal(t, 0, c.setMatchCalls)
+	f.SetFilter("an")
+	require.Equal(t, []string{"banana"}, names(f.FilteredItems()))
+	require.Equal(t, 1, c.setMatchCalls, "a query change must recompute the filter")
+
+	// Changing the item set invalidates the cache even with the query
+	// unchanged.
+	d := newCountingFilterableItem("banjo")
+	f.AppendItems(d)
+	got := names(f.FilteredItems())
+	require.ElementsMatch(t, []string{"banana", "banjo"}, got)
+}
+
+// TestFilterableList_Render_SkipsResyncWhenFilterUnchanged covers the
+// listSynced optimization in Render: once the embedded List reflects the
+// current filtered set, a Render call that changes nothing must not reset
+// the scroll offset the embedded List.SetItems call would otherwise clamp
+// back (a symptom that would show up as ScrollToIndex getting silently
+// undone by the very next Render).
+func TestFilterableList_Render_SkipsResyncWhenFilterUnchanged(t *testing.T) {
+	t.Parallel()
+
+	items := make([]FilterableItem, 0, 10)
+	for i := range 10 {
+		items = append(items, newFilterableItem("item"+string(rune('a'+i))))
+	}
+	f := NewFilterableList(items...)
+	f.SetSize(20, 3)
+	f.Render() // sync the embedded List once so ScrollToIndex below has content to scroll within.
+
+	f.ScrollToIndex(5)
+	offset := f.Offset()
+	require.NotEqual(t, 0, offset, "scrolled away from the top")
+
+	// Nothing changed (no SetFilter/SetItems/Append/Prepend in between):
+	// Render must leave the scroll position alone.
+	f.Render()
+	require.Equal(t, offset, f.Offset(), "an unchanged filter must not reset scroll state")
 }
 
 // TestFilterableList_Len_TracksFilteredCount covers Len (inherited

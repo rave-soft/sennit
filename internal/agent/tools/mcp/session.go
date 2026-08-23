@@ -86,12 +86,7 @@ func (r *Registry) teardown(name string) {
 	}
 	session, hasSession := r.sessions.Take(name)
 	delete(r.sessionOwners, name)
-	r.catalogMu.Lock()
-	r.allTools.Del(name)
-	r.allPrompts.Del(name)
-	r.allResources.Del(name)
-	r.catalogChanged()
-	r.catalogMu.Unlock()
+	r.clearCatalog(name)
 	waiters := r.tokenWriteWaitersLocked(name)
 	r.publishMu.Unlock()
 	r.cancelAuthFlow(name)

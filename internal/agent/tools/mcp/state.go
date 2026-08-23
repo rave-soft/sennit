@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
@@ -238,14 +239,62 @@ func (r *Registry) updateStateLocked(name string, state State, err error, client
 	return cleanup
 }
 
-// clearMCPData removes a stale MCP server's tools, prompts,
-// resources, and auth handlers from global state so they are not
-// served to the agent.
-func (r *Registry) clearCatalog(name string) {
-	r.catalogMu.Lock()
+// clearCatalogEntriesLocked removes name's entries from all three catalogs
+// without marking the catalog changed or touching catalogMu itself — callers
+// hold catalogMu (for writing) and own the single catalogChanged() call, so
+// a bulk clear across several names (see Close) can still do it under one
+// lock acquisition and one version bump instead of one per name.
+func (r *Registry) clearCatalogEntriesLocked(name string) {
 	r.allTools.Del(name)
 	r.allPrompts.Del(name)
 	r.allResources.Del(name)
+}
+
+// clearCatalog removes a stale MCP server's tools, prompts, and resources
+// from global state so they are not served to the agent, and bumps the
+// catalog version. Callers that already hold publishMu (every caller does:
+// this only ever runs as part of a state/session transition) may call this
+// directly; it takes and releases catalogMu itself and never touches
+// publishMu, so the lock order stays publishMu -> catalogMu wherever it is
+// used from.
+func (r *Registry) clearCatalog(name string) {
+	r.catalogMu.Lock()
+	r.clearCatalogEntriesLocked(name)
 	r.catalogChanged()
 	r.catalogMu.Unlock()
+}
+
+// publishSingleCatalog is the shared tail of RefreshTools, RefreshPrompts,
+// ListResources, and RefreshResources: each fetched a fresh single-kind
+// catalog (tools, prompts, or resources) for one server and needs to commit
+// it — replacing or clearing that server's entries, bumping the catalog
+// version, and republishing StateConnected with the refreshed count — but
+// only if owner/session still own the server. They differ only in which
+// catalog map they write and which Counts field they bump, both supplied
+// by the caller.
+//
+// Lock order matches every other commit path in this package: publishMu is
+// taken first and held for the whole check-then-write, and catalogMu is
+// only ever taken while publishMu is already held, so a concurrent teardown
+// can't observe or clear a half-written catalog. It returns whether the
+// commit happened, so ListResources can still hand back the freshly fetched
+// resources even when a race meant they were never published.
+func publishSingleCatalog[T any](r *Registry, catalog *csync.Map[string, []T], name string, owner attemptID, session *ClientSession, items []T, setCount func(*Counts, int)) bool {
+	r.publishMu.Lock()
+	defer r.publishMu.Unlock()
+	if !r.ownsSessionLocked(name, owner, session) {
+		return false
+	}
+	r.catalogMu.Lock()
+	if len(items) == 0 {
+		catalog.Del(name)
+	} else {
+		catalog.Set(name, items)
+	}
+	r.catalogChanged()
+	r.catalogMu.Unlock()
+	prev, _ := r.states.Get(name)
+	setCount(&prev.Counts, len(items))
+	r.updateStateLocked(name, StateConnected, nil, session, prev.Counts)
+	return true
 }

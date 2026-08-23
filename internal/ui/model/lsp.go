@@ -27,6 +27,11 @@ type lspState struct {
 	states        map[string]workspace.LSPClientInfo
 	diagnostics   map[string]lsp.DiagnosticCounts
 	fetchInFlight bool
+	// version bumps every time states/diagnostics are replaced (see
+	// applyLSPStates). The sidebar cache (sidebar.go) keys off it instead of
+	// diffing the maps themselves, since they're always assigned wholesale
+	// on refresh.
+	version int
 	// refreshQueued records that an LSP event arrived while a fetch was
 	// already in flight; applyLSPStates re-dispatches so the freshest state
 	// still lands.
@@ -101,6 +106,7 @@ func (m *UI) applyLSPStates(msg lspStatesMsg) tea.Cmd {
 	m.lsp.checkedAt = time.Now()
 	m.lsp.states = msg.states
 	m.lsp.diagnostics = msg.diagnostics
+	m.lsp.version++
 	if m.lsp.refreshQueued {
 		m.lsp.refreshQueued = false
 		return m.dispatchLSPRefresh()

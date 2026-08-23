@@ -40,22 +40,11 @@ func (r *Registry) ListResources(ctx context.Context, cfg ConfigProvider, name s
 	if err != nil {
 		return nil, err
 	}
-	r.publishMu.Lock()
-	defer r.publishMu.Unlock()
-	if !r.ownsSessionLocked(name, owner, session) {
-		return resources, nil
-	}
-	r.catalogMu.Lock()
-	if len(resources) == 0 {
-		r.allResources.Del(name)
-	} else {
-		r.allResources.Set(name, resources)
-	}
-	r.catalogChanged()
-	r.catalogMu.Unlock()
-	prev, _ := r.states.Get(name)
-	prev.Counts.Resources = len(resources)
-	r.updateStateLocked(name, StateConnected, nil, session, prev.Counts)
+	// Hand back the freshly fetched resources even if the commit below is
+	// skipped because a concurrent teardown/reconnect has since taken over
+	// the server — the caller asked for the current list, not for whether
+	// this attempt still owns publication.
+	publishSingleCatalog(r, r.allResources, name, owner, session, resources, func(c *Counts, n int) { c.Resources = n })
 	return resources, nil
 }
 
@@ -85,22 +74,7 @@ func (r *Registry) RefreshResources(ctx context.Context, name string) {
 		r.updateStateForSession(name, owner, session, StateError, err, Counts{})
 		return
 	}
-	r.publishMu.Lock()
-	defer r.publishMu.Unlock()
-	if !r.ownsSessionLocked(name, owner, session) {
-		return
-	}
-	r.catalogMu.Lock()
-	if len(resources) == 0 {
-		r.allResources.Del(name)
-	} else {
-		r.allResources.Set(name, resources)
-	}
-	r.catalogChanged()
-	r.catalogMu.Unlock()
-	prev, _ := r.states.Get(name)
-	prev.Counts.Resources = len(resources)
-	r.updateStateLocked(name, StateConnected, nil, session, prev.Counts)
+	publishSingleCatalog(r, r.allResources, name, owner, session, resources, func(c *Counts, n int) { c.Resources = n })
 }
 
 func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {

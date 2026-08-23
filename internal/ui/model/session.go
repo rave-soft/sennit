@@ -30,6 +30,10 @@ import (
 type sessionState struct {
 	current *session.Session
 	files   []SessionFile
+	// filesVersion bumps every time files is replaced. The sidebar cache
+	// (sidebar.go) keys off it instead of diffing the slice itself, since
+	// files is always assigned wholesale when it changes.
+	filesVersion int
 
 	// keeps track of read files while we don't have a session id
 	fileReads []string

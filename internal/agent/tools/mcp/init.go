@@ -101,12 +101,7 @@ func (r *Registry) clearMCPDataFor(name string, owner attemptID) {
 		r.publishMu.Unlock()
 		return
 	}
-	r.catalogMu.Lock()
-	r.allTools.Del(name)
-	r.allPrompts.Del(name)
-	r.allResources.Del(name)
-	r.catalogChanged()
-	r.catalogMu.Unlock()
+	r.clearCatalog(name)
 	r.publishMu.Unlock()
 	r.detachAuth(name, owner, nil).Close()
 }
