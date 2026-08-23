@@ -210,8 +210,9 @@ func ResetPool() {
 }
 
 func initGoose() error {
+	// FS is already set by the package init() above; only the dialect needs
+	// to happen here, once, before goose is used.
 	gooseInitOnce.Do(func() {
-		goose.SetBaseFS(FS)
 		gooseInitErr = goose.SetDialect("sqlite3")
 	})
 

@@ -359,13 +359,15 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.threadsActive = len(active)
 		plan.threadsExpanded = !m.panel.threadsCollapsed
 		if plan.threadsExpanded {
-			visible, more := visibleDockThreads(active)
-			plan.threads = visible
-			plan.threadsMore = more
-			plan.threadsRows = len(visible) * 2
-			if more > 0 {
-				plan.threadsRows++
-			}
+			// The dock shows every active thread here — no fixed cap. The
+			// panel is the live view of what is running right now, and a
+			// running thread the panel refuses to name is exactly the one a
+			// user goes looking for. Fitting the list on screen is the row
+			// budget's job: shedThreadBlocks below sheds thread blocks (and
+			// sets plan.threadsMore) only after todos and the queue, i.e.
+			// only in a genuinely short terminal.
+			plan.threads = active
+			plan.threadsRows = len(active) * 2
 		}
 	}
 

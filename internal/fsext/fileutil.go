@@ -176,7 +176,14 @@ func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit i
 		}
 
 		found.Append(FileInfo{Path: path, ModTime: info.ModTime()})
-		if limit > 0 && found.Len() >= limit*2 { // NOTE: why x2?
+		// Walk order has no relation to ModTime, and the result below is
+		// sorted newest-first and truncated to limit. Stopping right at
+		// limit would let whichever limit files the walk happens to reach
+		// first win, even if files visited a moment later are more
+		// recently modified. Overshooting to limit*2 gives the sort a
+		// larger pool to pick the true most-recent limit files from,
+		// without walking the whole tree.
+		if limit > 0 && found.Len() >= limit*2 {
 			return filepath.SkipAll
 		}
 		return nil

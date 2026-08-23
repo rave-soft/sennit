@@ -13,13 +13,6 @@ import (
 // Glob Tool
 // -----------------------------------------------------------------------------
 
-// GlobToolMessageItem is a message item that represents a glob tool call.
-type GlobToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*GlobToolMessageItem)(nil)
-
 // registerSearchToolRenderers registers the glob, grep, ripgrep and ls
 // tool renderers.
 func registerSearchToolRenderers() {
@@ -69,13 +62,6 @@ func (g *GlobToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 // -----------------------------------------------------------------------------
 // Grep Tool
 // -----------------------------------------------------------------------------
-
-// GrepToolMessageItem is a message item that represents a grep tool call.
-type GrepToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*GrepToolMessageItem)(nil)
 
 // GrepToolRenderContext renders grep and ripgrep tool messages.
 type GrepToolRenderContext struct {

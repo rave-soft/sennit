@@ -210,3 +210,28 @@ func TestJQ_Success(t *testing.T) {
 		t.Fatalf("stdout = %q, want %q", got, "1\n")
 	}
 }
+
+// TestJQ_UnknownFlagBeforeFilter verifies that an unrecognized flag given
+// before the filter is rejected instead of silently being treated as the
+// filter itself (which would then make the real filter an unexpected file
+// argument).
+func TestJQ_UnknownFlagBeforeFilter(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	err := handleJQ(
+		t.Context(),
+		[]string{"jq", "-x", ".a"},
+		strings.NewReader(`{"a":1}`),
+		&stdout, &stderr,
+	)
+	if err == nil {
+		t.Fatal("expected an error for an unknown flag, got nil")
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	if !strings.Contains(stderr.String(), "unknown option: -x") {
+		t.Fatalf("stderr = %q, want it to mention the unknown option", stderr.String())
+	}
+}

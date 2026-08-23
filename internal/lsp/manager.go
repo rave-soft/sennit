@@ -91,19 +91,16 @@ func (s *Manager) SetCallback(cb func(name string, client *Client)) {
 }
 
 // TrackConfigured notifies the UI about user-configured LSP servers without
-// starting them. Servers start on demand via Start().
+// starting them. Servers start on demand via Start(). The callback is a
+// synchronous, in-memory notification (see app.go's SetCallback), so this
+// just calls it directly instead of fanning out across goroutines.
 func (s *Manager) TrackConfigured(ctx context.Context) {
-	var wg sync.WaitGroup
-	servers := s.manager.GetServers()
-	for name := range servers {
+	for name := range s.manager.GetServers() {
 		if !s.isUserConfigured(name) {
 			continue
 		}
-		wg.Go(func() {
-			s.callback(name, nil)
-		})
+		s.callback(name, nil)
 	}
-	wg.Wait()
 }
 
 // Start starts an LSP server that can handle the given file path.
@@ -408,7 +405,7 @@ func (s *Manager) StopAll(ctx context.Context) {
 				!errors.Is(err, io.EOF) &&
 				!errors.Is(err, context.Canceled) &&
 				!errors.Is(err, jsonrpc2.ErrClosed) &&
-				err.Error() != "signal: killed" {
+				!processKilledBySignal(err) {
 				slog.Warn("Failed to stop LSP client", "name", name, "error", err)
 			}
 			client.cancelCtx()
@@ -418,4 +415,14 @@ func (s *Manager) StopAll(ctx context.Context) {
 		})
 	}
 	wg.Wait()
+}
+
+// processKilledBySignal reports whether err is the *exec.ExitError produced
+// when the LSP server's process was terminated by a signal rather than
+// exiting on its own (Close's closeCtx timeout falls back to Kill(), and
+// exec.CommandContext also kills the process on cancellation) — an expected
+// outcome, not a failure worth warning about.
+func processKilledBySignal(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ProcessState != nil && !exitErr.Exited()
 }

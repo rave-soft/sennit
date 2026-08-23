@@ -15,13 +15,6 @@ import (
 // Todos Tool
 // -----------------------------------------------------------------------------
 
-// TodosToolMessageItem is a message item that represents a todos tool call.
-type TodosToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*TodosToolMessageItem)(nil)
-
 // TodosToolRenderContext renders todos tool messages.
 type TodosToolRenderContext struct{}
 

@@ -86,6 +86,9 @@ func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 		questionDescription,
 		func(ctx context.Context, params QuestionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID := GetSessionFromContext(ctx)
+			if sessionID == "" {
+				return fantasy.ToolResponse{}, missingSessionID(QuestionToolName)
+			}
 
 			if len(params.Questions) == 0 {
 				return fantasy.NewTextErrorResponse("at least one question is required"), nil

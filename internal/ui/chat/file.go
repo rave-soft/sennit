@@ -16,13 +16,6 @@ import (
 // Read Tool
 // -----------------------------------------------------------------------------
 
-// ReadToolMessageItem is a message item that represents a view tool call.
-type ReadToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*ReadToolMessageItem)(nil)
-
 // registerReadToolRenderer registers the read tool renderer, including
 // the legacy pre-rename tool name so old sessions keep rendering.
 func registerReadToolRenderer() {

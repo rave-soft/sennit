@@ -140,9 +140,10 @@ func renderHeaderDetails(
 	}
 
 	// activeThreads counts pending/running/merging threads (see
-	// thread_indicator.go); shown so a "ctrl+e" glance from the main chat
-	// confirms background threads are still alive without switching
-	// screens. Zero threads (the common case) renders nothing.
+	// activeThreadCount in threads_cache.go); shown so a "ctrl+e" glance
+	// from the main chat confirms background threads are still alive
+	// without switching screens. Zero threads (the common case) renders
+	// nothing.
 	if activeThreads > 0 {
 		parts = append(parts, t.Status.InfoMessage.Render(fmt.Sprintf("⋈ %d", activeThreads)))
 	}

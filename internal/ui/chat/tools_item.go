@@ -215,11 +215,6 @@ func (t *baseToolMessageItem) isSpinning() bool {
 	return !t.toolCall.Finished && t.result == nil && t.status != ToolStatusCanceled
 }
 
-// SetSpinningFunc sets a custom function to determine if the tool should spin.
-func (t *baseToolMessageItem) SetSpinningFunc(fn SpinningFunc) {
-	t.spinningFunc = fn
-}
-
 // Finished implements list.Item. A tool call is freezable once it can no
 // longer be in progress: it has been canceled, or a result has been
 // recorded. A result on its own is enough, for the same reason isSpinning

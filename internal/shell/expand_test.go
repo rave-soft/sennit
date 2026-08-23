@@ -238,4 +238,11 @@ func TestSanitizeStderr(t *testing.T) {
 		got := sanitizeStderr([]byte(strings.Repeat("x", maxInnerStderrBytes*2)))
 		require.Len(t, got, maxInnerStderrBytes)
 	})
+
+	t.Run("preserves non-ASCII text", func(t *testing.T) {
+		t.Parallel()
+		// Multi-byte runes must survive whole, not get scrubbed
+		// byte-by-byte into a run of '?'.
+		require.Equal(t, "café: 世界", sanitizeStderr([]byte("café: 世界")))
+	})
 }

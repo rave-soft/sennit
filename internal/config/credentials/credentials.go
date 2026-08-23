@@ -437,8 +437,10 @@ func (m *Manager) applyToken(_ config.ProviderConfig, token *oauth.Token, provid
 }
 
 // loadTokenFromDisk reads the OAuth token for the given provider from the
-// config file on disk. Returns nil if the token is not found or matches the
-// current in-memory token.
+// config file on disk. Returns nil if the config file or the provider's
+// oauth field is missing, or the token it holds has no access token.
+// Comparing against the current in-memory token is the caller's job — see
+// newerDiskToken.
 func (m *Manager) loadTokenFromDisk(scope config.Scope, providerID string) (*oauth.Token, error) {
 	path, err := m.store.ConfigPath(scope)
 	if err != nil {

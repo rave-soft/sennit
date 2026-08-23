@@ -193,11 +193,6 @@ func (c *Completions) Size() (width, height int) {
 	return width, height
 }
 
-// KeyMap returns the key bindings.
-func (c *Completions) KeyMap() KeyMap {
-	return c.keyMap
-}
-
 // SetMaxWidth caps the popup width to at most maxW columns, in addition to
 // the package-wide maxWidth ceiling. Callers should call this before Open /
 // OpenCommands with the currently available editor width, since the popup

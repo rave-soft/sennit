@@ -1536,10 +1536,6 @@ func findWordBoundaries(line string, col int) (startCol, endCol int) {
 		return 0, 0
 	}
 
-	i := displaywidth.StringGraphemes(line)
-	for i.Next() {
-	}
-
 	// Segment the line into words using UAX#29.
 	lineCol := 0 // tracks the visited column widths
 	lastCol := 0 // tracks the start of the current token

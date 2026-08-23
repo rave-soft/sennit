@@ -91,14 +91,20 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 		return AggregateResult{Decision: DecisionNone}, nil
 	}
 
-	// Deduplicate by command string.
-	seen := make(map[string]bool, len(matching))
+	// Deduplicate exact-duplicate hook entries (e.g. the same hook
+	// inherited from both a global and a project config layer). Keying
+	// on the whole config, not just Command, matters: two hooks can
+	// legitimately share a command string while differing in matcher,
+	// timeout, or display name, and deduping by Command alone would
+	// silently drop one of them, leaving the survivor's timeout and name
+	// applied to what the config author intended as two separate hooks.
+	seen := make(map[config.HookConfig]bool, len(matching))
 	var deduped []config.HookConfig
 	for _, h := range matching {
-		if seen[h.Command] {
+		if seen[h] {
 			continue
 		}
-		seen[h.Command] = true
+		seen[h] = true
 		deduped = append(deduped, h)
 	}
 

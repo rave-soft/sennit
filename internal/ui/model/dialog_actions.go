@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
-	fimage "github.com/rave-soft/sennit/internal/ui/image"
 	"github.com/rave-soft/sennit/internal/ui/util"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -355,10 +354,6 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 			break
 		}
 
-		if m.dialog.ContainsDialog(dialog.FilePickerID) {
-			defer fimage.ResetCache()
-		}
-
 		// Leaving the theme picker without choosing puts the palette that
 		// was live when it opened back on screen.
 		if front := m.dialog.DialogLast(); front != nil && front.ID() == dialog.ThemeID {
@@ -422,13 +417,7 @@ func (m *UI) applyChromeDialogAction(action dialog.Action) tea.Cmd {
 
 	case dialog.ActionFilePickerSelected:
 		m.dialog.CloseDialog(dialog.FilePickerID)
-		cmds = append(cmds, tea.Sequence(
-			msg.Cmd(),
-			func() tea.Msg {
-				fimage.ResetCache()
-				return nil
-			},
-		))
+		cmds = append(cmds, msg.Cmd())
 
 	case dialog.ActionRunCustomCommand:
 		if len(msg.Arguments) > 0 && msg.Args == nil {

@@ -1088,14 +1088,6 @@ func (m *Manager) WorkspaceID(threadID string) string {
 	return ""
 }
 
-// Shutdown stops admission, cancels manager work, releases live runtimes, and
-// waits for manager-owned goroutines. It is idempotent and safe concurrently.
-//
-// m.cancel cancels m.ctx, the base context every runtime's watch loop and
-// in-flight run derive from — including a [TaskManager]'s, if one was
-// constructed sharing this Manager's lifecycle and ctx (see NewManager),
-// since m.lc.snapshotControls below walks that same shared controls map
-// regardless of which kind registered each entry.
 // SetPermissionsSkip propagates the parent workspace's permission-bypass
 // ("yolo") state to every delegation workspace currently live under this
 // manager, threads and tasks alike. Called by the parent App whenever its
@@ -1143,6 +1135,14 @@ func (m *Manager) PermissionsFor(delegationID string) permission.Service {
 	return a.Permissions()
 }
 
+// Shutdown stops admission, cancels manager work, releases live runtimes, and
+// waits for manager-owned goroutines. It is idempotent and safe concurrently.
+//
+// m.cancel cancels m.ctx, the base context every runtime's watch loop and
+// in-flight run derive from — including a [TaskManager]'s, if one was
+// constructed sharing this Manager's lifecycle and ctx (see NewManager),
+// since m.lc.snapshotControls below walks that same shared controls map
+// regardless of which kind registered each entry.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.shutdownOnce.Do(func() {
 		m.lc.closeAdmission()

@@ -123,18 +123,6 @@ func activeDockThreads(threads []proto.Thread) []proto.Thread {
 	return active
 }
 
-// visibleDockThreads returns the threads the dock renders: all of them.
-// There used to be a fixed cap of 5 here, with the remainder reported as an
-// "…and N more threads" footer — but the panel is the live view of what is
-// running right now, and a running thread the panel refuses to name is
-// exactly the one a user goes looking for. Fitting the list on screen is
-// the row budget's job (sessionPanelPlan sheds thread blocks only after
-// todos and the queue, i.e. only in a genuinely short terminal), not a
-// policy cap applied while the space is still there.
-func visibleDockThreads(active []proto.Thread) (visible []proto.Thread, moreCount int) {
-	return active, 0
-}
-
 // threadDockActivityLoadedMsg delivers the result of an off-thread
 // AttachThread + GetSession fetch for a single thread's live activity.
 type threadDockActivityLoadedMsg struct {

@@ -1145,10 +1145,9 @@ func TestOAuthTokenPersistenceCurrentOwnerPersistsOnce(t *testing.T) {
 	require.NoError(t, err)
 	r.updateStateFor(name, owner, StateStarting, nil)
 	var writes atomic.Int32
-	r.tokenPersist = func(_ context.Context, _ ConfigProvider, key string, value any) error {
+	r.tokenCommit = func(_ ConfigProvider, _ *config.MCPTokenMutation, token *oauth.Token) error {
 		writes.Add(1)
-		require.Equal(t, "mcp.token-owner.oauth_token", key)
-		require.Equal(t, "fresh", value.(*oauth.Token).AccessToken)
+		require.Equal(t, "fresh", token.AccessToken)
 		return nil
 	}
 
@@ -1170,7 +1169,7 @@ func TestOAuthTokenPersistenceInvalidatedBeforeReservationIsDropped(t *testing.T
 			release := make(chan struct{})
 			r.beforeTokenPersist = func() { close(blocked); <-release }
 			var writes atomic.Int32
-			r.tokenPersist = func(context.Context, ConfigProvider, string, any) error {
+			r.tokenCommit = func(ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error {
 				writes.Add(1)
 				return nil
 			}
@@ -1212,7 +1211,7 @@ func TestOAuthTokenPersistenceReservedWriteDelaysTeardown(t *testing.T) {
 	r.updateStateFor(name, owner, StateStarting, nil)
 	started := make(chan struct{})
 	release := make(chan struct{})
-	r.tokenPersist = func(context.Context, ConfigProvider, string, any) error {
+	r.tokenCommit = func(ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error {
 		close(started)
 		<-release
 		return nil

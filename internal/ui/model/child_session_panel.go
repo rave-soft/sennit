@@ -135,7 +135,7 @@ func (m *UI) drawChildSessionPanel(scr uv.Screen, area uv.Rectangle) {
 
 // childPanelModelSubtitle formats the model/effort line for the
 // child-session panel, mirroring renderAgentSubtitle's collapsed delegation
-// block subtitle in chat/proto.go. "" when the delegation has no override
+// block subtitle in chat/agent.go. "" when the delegation has no override
 // to report (agentic_fetch, or an agent tool using the app's default
 // model).
 func childPanelModelSubtitle(model, effort string) string {

@@ -8,14 +8,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
-// GenericToolMessageItem is a message item that represents an unknown tool call.
-type GenericToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*GenericToolMessageItem)(nil)
-
-// NewGenericToolMessageItem creates a new [GenericToolMessageItem].
+// NewGenericToolMessageItem creates a new generic tool message item.
 func NewGenericToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,

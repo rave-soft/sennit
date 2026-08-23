@@ -336,7 +336,7 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	if m.state == uiChat && len(m.threadList.cache.value) > 0 {
-		visible, _ := visibleDockThreads(activeDockThreads(m.threadList.cache.value))
+		visible := activeDockThreads(m.threadList.cache.value)
 		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds

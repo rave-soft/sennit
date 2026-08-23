@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/question"
 	"github.com/stretchr/testify/require"
 )
@@ -70,4 +71,26 @@ func TestFormatAnswer_Skipped(t *testing.T) {
 	answer := question.Answer{}
 	resp := formatAnswer(&answer, question.TypeFreeText)
 	require.Equal(t, "User skipped this question", resp.Content)
+}
+
+// TestQuestionTool_MissingSessionIDIsRejected verifies the question tool
+// checks for an empty session ID like its neighbors (e.g. ask_parent,
+// task_cancel): a missing session ID is a wiring bug, not something the
+// model's call can fix, so it must surface as a Go error rather than
+// reaching svc.Ask.
+func TestQuestionTool_MissingSessionIDIsRejected(t *testing.T) {
+	t.Parallel()
+
+	tool := NewQuestionTool(nil)
+
+	input, err := json.Marshal(QuestionParams{
+		Questions: []QuestionItem{
+			{Type: "yes_no", Question: "OK?", Description: "test"},
+		},
+	})
+	require.NoError(t, err)
+
+	_, err = tool.Run(t.Context(), fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "session ID is required for question")
 }

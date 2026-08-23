@@ -119,7 +119,11 @@ func handleJQ(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 				i++
 			}
 			continue
-		case strings.HasPrefix(arg, "-") && queryStr != "":
+		case strings.HasPrefix(arg, "-") && arg != "-":
+			// Unrecognized flag. Must be checked before the filter is
+			// captured below, or an unknown flag preceding the filter
+			// (e.g. "jq -x '.foo'") would silently become the filter
+			// itself instead of being rejected.
 			fmt.Fprintf(stderr, "jq: unknown option: %s\n", arg)
 			return interp.ExitStatus(2)
 		default:

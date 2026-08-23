@@ -14,11 +14,11 @@ import (
 // responseContextHeight limits the number of lines displayed in tool output.
 // Regular tool calls (view/write/edit/bash/grep/...) never show a body at
 // all — see appendResultSummary — so in practice this only still bounds the
-// still-alive running-delegation preview in tools.go (toolOutputMarkdownContent).
+// still-alive running-delegation preview in agent.go (toolOutputMarkdownContent).
 const responseContextHeight = 10
 
 // previewTruncateFormat notes how much of a body was cut off. The tools
-// rendering through this (the running-delegation preview in tools.go) have
+// rendering through this (the running-delegation preview in agent.go) have
 // no click-to-see-more, so unlike assistantMessageTruncateFormat (the
 // assistant's own message text) and Bash's click-to-expand body, this
 // never invites a click.
@@ -275,7 +275,7 @@ func NewToolMessageItem(
 }
 
 // isCustomAgentTool reports whether name is a user-defined agent tool.
-// domain/agent/custom_agent_tool.go registers one delegation tool per
+// internal/agent/custom_agent_tool.go registers one delegation tool per
 // entry in cfg.Agents, named after the agent's id — AgentOverride already
 // excludes "coder" and "task", the built-in roles rather than tools a
 // model can call.

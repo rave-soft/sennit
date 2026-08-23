@@ -64,7 +64,6 @@ type Permissions struct {
 
 	viewport      viewport.Model
 	viewportDirty bool // true when viewport content needs to be re-rendered
-	viewportWidth int
 
 	// Diff view state.
 	diffSplitMode        *bool // nil means use default based on width
@@ -467,7 +466,6 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	p.viewport.SetHeight(availableHeight)
 	if p.viewportDirty {
 		p.viewport.SetContent(renderedContent)
-		p.viewportWidth = p.viewport.Width()
 		p.viewportDirty = false
 	}
 	content = p.viewport.View()

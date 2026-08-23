@@ -48,24 +48,10 @@ func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessag
 		return nil, err
 	}
 
-	for _, reg := range registerParams.Registrations {
-		switch reg.Method {
-		case "workspace/didChangeWatchedFiles":
-			// Parse the registration options
-			optionsJSON, err := json.Marshal(reg.RegisterOptions)
-			if err != nil {
-				slog.Error("Error marshaling registration options", "error", err)
-				continue
-			}
-			var options protocol.DidChangeWatchedFilesRegistrationOptions
-			if err := json.Unmarshal(optionsJSON, &options); err != nil {
-				slog.Error("Error unmarshaling registration options", "error", err)
-				continue
-			}
-			// Store the file watchers registrations
-			notifyFileWatchRegistration(reg.ID, options.Watchers)
-		}
-	}
+	// Registrations are otherwise ignored: Sennit doesn't watch files on the
+	// server's behalf, so there is nothing further to do here beyond
+	// acknowledging the request (an empty response, which the return below
+	// provides).
 	return nil, nil
 }
 
@@ -89,19 +75,6 @@ func HandleApplyEdit(encoding func() powernap.OffsetEncoding) func(_ context.Con
 		}
 
 		return protocol.ApplyWorkspaceEditResult{Applied: true}, nil
-	}
-}
-
-// FileWatchRegistrationHandler is a function that will be called when file watch registrations are received
-type FileWatchRegistrationHandler func(id string, watchers []protocol.FileSystemWatcher)
-
-// fileWatchHandler holds the current handler for file watch registrations
-var fileWatchHandler FileWatchRegistrationHandler
-
-// notifyFileWatchRegistration notifies the handler about new file watch registrations
-func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatcher) {
-	if fileWatchHandler != nil {
-		fileWatchHandler(id, watchers)
 	}
 }
 

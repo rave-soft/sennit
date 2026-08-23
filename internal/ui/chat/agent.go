@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
@@ -138,9 +137,10 @@ const builtinTaskAgentName = "task"
 // The built-in agent tool (tools.AgentToolName) always dispatches to the
 // fixed config.AgentTask sub-agent — AgentParams carries no field
 // identifying a specific target — so it always renders as "task". A
-// user-defined agent tool's own name already is its identity: custom_agent_tool.go
-// registers one tool per cfg.Agents entry, named after the map key, so
-// toolCall.Name is already the right display name (e.g. "developer").
+// user-defined agent tool's own name already is its identity:
+// internal/agent/custom_agent_tool.go registers one tool per cfg.Agents
+// entry, named after the map key, so toolCall.Name is already the right
+// display name (e.g. "developer").
 func agentDisplayName(toolName string) string {
 	if toolName == tools.AgentToolName {
 		return builtinTaskAgentName
@@ -380,7 +380,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	prompt := params.Prompt
 
-	// runBackgroundAgent (domain/agent/agent_tool.go) returns synchronously
+	// runBackgroundAgent (internal/agent/agent_tool.go) returns synchronously
 	// with an acknowledgment, not the delegation's actual answer — HasResult
 	// is already true the moment this block first renders, well before the
 	// background task has done any real work. Detect that case via the
@@ -397,92 +397,26 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	// A finished (or canceled) top-level delegation collapses to a compact
-	// summary — the full result and nested-tool tree are only reachable by
-	// drilling into the child session (click, or alt+down), never by
-	// expanding this block inline. See ToggleExpanded above. Todos are
-	// deliberately dropped here (see the todos field doc) — only the
-	// model/effort subtitle carries over, since it describes the
-	// delegation's configuration rather than its runtime progress.
-	if !pending && !opts.Compact {
+	// summary — the full result is only reachable by drilling into the
+	// child session (click, or alt+down), never by expanding this block
+	// inline. See ToggleExpanded above. Todos are deliberately dropped here
+	// (see the todos field doc) — only the model/effort subtitle carries
+	// over, since it describes the delegation's configuration rather than
+	// its runtime progress.
+	//
+	// pending is always false here (the early return above already handled
+	// it), so this is really just "!opts.Compact": a nested (compact)
+	// delegation falls through to the bare header below instead.
+	if !opts.Compact {
 		content := renderCollapsedDelegation(sty, width, r.agent.displayName, opts, prompt, r.agent.nestedTools, r.agent.duration, r.agent.promptTokens, r.agent.completionTokens, r.agent.model, r.agent.effort)
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
-
-	header := toolHeader(sty, opts.Status, r.agent.displayName, width, opts)
-	if opts.Compact {
-		return header
-	}
-
-	if subtitle := renderAgentSubtitle(sty, width, r.agent.model, r.agent.effort); subtitle != "" {
-		header = lipgloss.JoinVertical(lipgloss.Left, header, subtitle)
-	}
-
-	// Build the task tag and prompt.
-	taskTag := sty.Tool.AgentTaskTag.Render("Task")
-	taskTagWidth := lipgloss.Width(taskTag)
-
-	// Calculate remaining width for prompt.
-	remainingWidth := min(width-taskTagWidth-3, maxTextWidth-taskTagWidth-3) // -3 for spacing
-
-	promptText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(prompt)
-
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			taskTag,
-			" ",
-			promptText,
-		),
-	)
-
-	// While still running, surface elapsed time, step count, the most
-	// recent child tool call, and the child session's todo list so a long
-	// delegation stays legible even before its nested-tool tree grows tall
-	// enough to scroll off screen.
-	if pending {
-		if status := renderAgentStatusLine(sty, width, r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens); status != "" {
-			header = lipgloss.JoinVertical(lipgloss.Left, header, status)
-		}
-		if todos := renderChildTodos(sty, width, r.agent.todos); todos != "" {
-			header = lipgloss.JoinVertical(lipgloss.Left, header, todos)
-		}
-	}
-
-	// Build tree with nested tool calls.
-	childTools := tree.Root(header)
-
-	leading, shown := visibleNestedTools(sty, remainingWidth, r.agent.nestedTools)
-	if leading != "" {
-		childTools.Child(leading)
-	}
-	for _, nestedTool := range shown {
-		childView := nestedTool.Render(remainingWidth)
-		childTools.Child(childView)
-	}
-
-	// Build parts.
-	var parts []string
-	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, taskTagWidth-5)).String())
-
-	// Show animation if still running.
-	if !opts.HasResult() && !opts.IsCanceled() {
-		parts = append(parts, "", opts.Anim.Render())
-	}
-
-	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
-
-	// Add body content when completed.
-	if opts.HasResult() && opts.Result.Content != "" {
-		body := toolOutputMarkdownContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal)
-		return joinToolParts(result, body)
-	}
-
-	return clickableItemHover(sty, result, width, opts.Hovered)
+	// Compact (nested) rendering: a finished delegation embedded in a
+	// parent's tree gets a bare header line, matching every other nested
+	// tool call — no prompt, subtitle, or body, which are reserved for the
+	// top-level, non-compact case just above.
+	return toolHeader(sty, opts.Status, r.agent.displayName, width, opts)
 }
 
 // -----------------------------------------------------------------------------
@@ -699,8 +633,9 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 
 	// A finished (or canceled) top-level delegation collapses to a compact
 	// summary — see AgentToolRenderContext.RenderTool above for the
-	// rationale.
-	if !pending && !opts.Compact {
+	// rationale, including why this is really just "!opts.Compact"
+	// (pending is always false past the early return above).
+	if !opts.Compact {
 		headerParam := params.URL
 		if headerParam == "" {
 			headerParam = prompt
@@ -709,107 +644,15 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
-	prompt = strings.ReplaceAll(prompt, "\n", " ")
-
-	// Build header with optional URL param.
+	// Compact (nested) rendering: a finished delegation embedded in a
+	// parent's tree gets a bare header line (name plus URL param, if any)
+	// — no prompt or body, reserved for the top-level, non-compact case
+	// just above.
 	var toolParams []string
 	if params.URL != "" {
 		toolParams = append(toolParams, params.URL)
 	}
-
-	header := toolHeader(sty, opts.Status, agenticFetchDisplayName, width, opts, toolParams...)
-	if opts.Compact {
-		return header
-	}
-
-	// Build the prompt tag.
-	promptTag := sty.Tool.AgenticFetchPromptTag.Render("Prompt")
-	promptTagWidth := lipgloss.Width(promptTag)
-
-	// Calculate remaining width for prompt text.
-	remainingWidth := min(width-promptTagWidth-3, maxTextWidth-promptTagWidth-3) // -3 for spacing
-
-	promptText := sty.Tool.AgentPrompt.Width(remainingWidth).Render(prompt)
-
-	header = lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		"",
-		lipgloss.JoinHorizontal(
-			lipgloss.Left,
-			promptTag,
-			" ",
-			promptText,
-		),
-	)
-
-	// While still running, surface elapsed time, step count, the most
-	// recent child tool call, and the child session's todo list — see the
-	// "Agent" tool's RenderTool above.
-	if pending {
-		if status := renderAgentStatusLine(sty, width, r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens); status != "" {
-			header = lipgloss.JoinVertical(lipgloss.Left, header, status)
-		}
-		if todos := renderChildTodos(sty, width, r.fetch.todos); todos != "" {
-			header = lipgloss.JoinVertical(lipgloss.Left, header, todos)
-		}
-	}
-
-	// Build tree with nested tool calls.
-	childTools := tree.Root(header)
-
-	leading, shown := visibleNestedTools(sty, remainingWidth, r.fetch.nestedTools)
-	if leading != "" {
-		childTools.Child(leading)
-	}
-	for _, nestedTool := range shown {
-		childView := nestedTool.Render(remainingWidth)
-		childTools.Child(childView)
-	}
-
-	// Build parts.
-	var parts []string
-	parts = append(parts, childTools.Enumerator(roundedEnumerator(2, promptTagWidth-5)).String())
-
-	// Show animation if still running.
-	if !opts.HasResult() && !opts.IsCanceled() {
-		parts = append(parts, "", opts.Anim.Render())
-	}
-
-	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
-
-	// Add body content when completed.
-	if opts.HasResult() && opts.Result.Content != "" {
-		body := toolOutputMarkdownContent(sty, opts.Result.Content, width-toolBodyLeftPaddingTotal)
-		return joinToolParts(result, body)
-	}
-
-	return clickableItemHover(sty, result, width, opts.Hovered)
-}
-
-// maxVisibleNestedTools caps how many nested tool calls a delegation
-// renders inline. A long-running agent/agentic_fetch can accumulate
-// dozens of child tool calls; rendering all of them makes the tree grow
-// unboundedly tall, so only the most recent ones are shown.
-const maxVisibleNestedTools = 3
-
-// visibleNestedTools trims nested to the last maxVisibleNestedTools
-// entries for display. When entries are dropped, leading is a single
-// "…+N earlier steps" summary line (styled and width-truncated like
-// renderAgentStatusLine's status note) meant to be added as the first
-// child before shown; it's "" when nothing was dropped. The underlying
-// nested slice is never modified — this only affects what gets rendered.
-func visibleNestedTools(sty *styles.Styles, width int, nested []ToolMessageItem) (leading string, shown []ToolMessageItem) {
-	if len(nested) <= maxVisibleNestedTools {
-		return "", nested
-	}
-	dropped := len(nested) - maxVisibleNestedTools
-	note := fmt.Sprintf("…+%d earlier steps", dropped)
-	if width > 0 {
-		note = ansi.Truncate(note, width, "…")
-	}
-	leading = sty.Tool.TodoStatusNote.Render(note)
-	return leading, nested[len(nested)-maxVisibleNestedTools:]
+	return toolHeader(sty, opts.Status, agenticFetchDisplayName, width, opts, toolParams...)
 }
 
 // -----------------------------------------------------------------------------
@@ -1076,37 +919,18 @@ func renderAgentSubtitle(sty *styles.Styles, width int, model, effort string) st
 	return sty.Tool.TodoStatusNote.Render(ansi.Truncate(line, width, "…"))
 }
 
-// -----------------------------------------------------------------------------
-// Child session todo pane
-// -----------------------------------------------------------------------------
-//
-// A running delegation's todo list is the clearest signal of what it's
-// actually doing, beyond "some tool ran recently" (renderAgentStatusLine)
-// — so it's surfaced directly under the status line. Only shown while
-// running: a finished delegation collapses to a summary (see
-// renderCollapsedDelegation / AgentToolMessageItem.ToggleExpanded) and its
-// todos, like its nested-tool tree, are only reachable by drilling into the
-// child session.
-
-// maxDelegationTodoLines caps how many todo lines the compact per-
-// delegation pane renders — mirrors maxVisibleNestedTools's rationale for
-// the nested-tool tree.
-const maxDelegationTodoLines = 5
-
-// renderChildTodos renders a running child session's todo list, capped to
-// maxDelegationTodoLines lines via capTodosForDelegation. Returns "" for an
-// empty list or non-positive width.
-func renderChildTodos(sty *styles.Styles, width int, todos []session.Todo) string {
-	if width <= 0 || len(todos) == 0 {
-		return ""
-	}
-	return FormatTodosList(sty, capTodosForDelegation(todos, maxDelegationTodoLines), styles.ArrowRightIcon, width)
-}
-
 // capTodosForDelegation keeps every in-progress item, then fills the
 // remaining line budget with pending and completed items in that order. This
 // intentionally lets in-progress rows exceed maxLines: hiding active work is
 // less useful than preserving the nominal compact-pane cap.
+//
+// Currently exercised only by TestCapTodosForDelegation: its production
+// caller (a running delegation's inline todo pane) was removed as dead code
+// — a running delegation's todos are no longer shown in the chat transcript
+// at all (see PanelStatusLine's caller in internal/ui/model, and
+// TestAgentToolRender_RunningHidesTodosFromTranscript, which pins that).
+// Left in place rather than deleted alongside its caller, since the
+// prioritization logic itself is still correct and may be wired back up.
 func capTodosForDelegation(todos []session.Todo, maxLines int) []session.Todo {
 	buckets := presentation.BucketTodos(todos)
 	out := make([]session.Todo, 0, len(todos))

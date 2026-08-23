@@ -486,7 +486,7 @@ func (dv *DiffView) renderUnified() string {
 
 	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
 		content = strings.TrimSuffix(in, "\n")
-		content = dv.hightlightCode(content, ls.Code.GetBackground())
+		content = dv.highlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = truncateCode(content, dv.codeWidth, ls)
 		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
@@ -664,7 +664,7 @@ func (dv *DiffView) renderWrappedUnified() string {
 		beforeLine, afterLine := h.FromLine, h.ToLine
 		for _, l := range h.Lines {
 			ls := dv.lineStyleForType(l.Kind)
-			parts := dv.wrapCode(dv.hightlightCode(strings.TrimSuffix(l.Content, "\n"), ls.Code.GetBackground()), dv.codeWidth)
+			parts := dv.wrapCode(dv.highlightCode(strings.TrimSuffix(l.Content, "\n"), ls.Code.GetBackground()), dv.codeWidth)
 			for j, part := range parts {
 				row := ""
 				if dv.lineNumbers {
@@ -767,7 +767,7 @@ func (dv *DiffView) wrappedSplitPane(line *udiff.Line, lineNumber, numDigits, fu
 	}
 	ls := dv.lineStyleForType(line.Kind)
 	codeWidth := fullWidth - leadingSymbolsSize
-	parts := dv.wrapCode(dv.hightlightCode(strings.TrimSuffix(line.Content, "\n"), ls.Code.GetBackground()), codeWidth)
+	parts := dv.wrapCode(dv.highlightCode(strings.TrimSuffix(line.Content, "\n"), ls.Code.GetBackground()), codeWidth)
 	rows := make([]string, len(parts))
 	for i, part := range parts {
 		row := ""
@@ -803,7 +803,7 @@ func (dv *DiffView) renderSplit() string {
 
 	getContent := func(in string, ls LineStyle) (content string, leadingEllipsis bool) {
 		content = strings.TrimSuffix(in, "\n")
-		content = dv.hightlightCode(content, ls.Code.GetBackground())
+		content = dv.highlightCode(content, ls.Code.GetBackground())
 		content = ansi.GraphemeWidth.Cut(content, dv.xOffset, len(content))
 		content = truncateCode(content, dv.codeWidth, ls)
 		leadingEllipsis = dv.xOffset > 0 && strings.TrimSpace(content) != ""
@@ -1009,7 +1009,7 @@ func (dv *DiffView) lineStyleForType(t udiff.OpKind) LineStyle {
 	}
 }
 
-func (dv *DiffView) hightlightCode(source string, bgColor color.Color) string {
+func (dv *DiffView) highlightCode(source string, bgColor color.Color) string {
 	if dv.chromaStyle == nil {
 		return source
 	}

@@ -1,13 +1,4 @@
 // Package main is the entry point for the Sennit CLI.
-//
-//	@title			Sennit API
-//	@version		1.0
-//	@description	Sennit is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.
-//	@contact.name	rave-soft
-//	@contact.url	https://github.com/rave-soft/sennit
-//	@license.name	MIT
-//	@license.url	https://github.com/rave-soft/sennit/blob/main/LICENSE
-//	@BasePath		/v1
 package main
 
 import (

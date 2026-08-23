@@ -1,6 +1,7 @@
 // Package presentation provides shared, pure UI formatting and row-rendering
-// helpers. It deliberately depends only on leaf UI packages so chat and model
-// can share presentation rules without an import cycle.
+// helpers. It deliberately depends only on leaf packages (styles, and
+// session for its Todo type) so chat and model can share presentation rules
+// without an import cycle.
 package presentation
 
 import (

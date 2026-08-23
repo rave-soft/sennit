@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/stringext"
@@ -19,7 +18,7 @@ import (
 // lines. There is no click-to-expand for tool bodies (see
 // appendResultSummary) — the only remaining caller of this is
 // toolOutputMarkdownContent's parse-error fallback, itself only reachable
-// from the still-alive running-delegation preview in proto.go.
+// from the still-alive running-delegation preview in agent.go.
 func toolOutputPlainContent(sty *styles.Styles, content string, width int) string {
 	content = stringext.NormalizeSpace(content)
 	content = common.StripCursorControl(content)
@@ -239,65 +238,4 @@ func formatTimeout(timeout int) string {
 		return ""
 	}
 	return fmt.Sprintf("%ds", timeout)
-}
-
-// roundedEnumerator creates a tree enumerator with rounded corners.
-func roundedEnumerator(lPadding, width int) tree.Enumerator {
-	if width == 0 {
-		width = 2
-	}
-	if lPadding == 0 {
-		lPadding = 1
-	}
-	return func(children tree.Children, index int) string {
-		line := strings.Repeat("─", width)
-		padding := strings.Repeat(" ", lPadding)
-		if children.Length()-1 == index {
-			return padding + "╰" + line
-		}
-		return padding + "├" + line
-	}
-}
-
-// toolOutputMarkdownContent renders markdown content, capped to
-// responseContextHeight lines. Used only by proto.go for the still-alive
-// running-delegation preview — no per-tool result body renders through
-// this anymore (see appendResultSummary).
-func toolOutputMarkdownContent(sty *styles.Styles, content string, width int) string {
-	content = stringext.NormalizeSpace(content)
-
-	// Cap width for readability.
-	if width > maxTextWidth {
-		width = maxTextWidth
-	}
-
-	renderer := common.QuietMarkdownRenderer(sty, width)
-	mu := common.LockMarkdownRenderer(renderer)
-	mu.Lock()
-	rendered, err := renderer.Render(content)
-	mu.Unlock()
-	if err != nil {
-		return toolOutputPlainContent(sty, content, width)
-	}
-
-	lines := strings.Split(rendered, "\n")
-	maxLines := min(responseContextHeight, len(lines))
-
-	var out []string
-	for i, ln := range lines {
-		if i >= maxLines {
-			break
-		}
-		out = append(out, ln)
-	}
-
-	if len(lines) > maxLines {
-		out = append(
-			out, sty.Tool.ContentTruncation.
-				Width(width).
-				Render(fmt.Sprintf(previewTruncateFormat, len(lines)-maxLines)),
-		)
-	}
-
-	return sty.Tool.Body.Render(strings.Join(out, "\n"))
 }

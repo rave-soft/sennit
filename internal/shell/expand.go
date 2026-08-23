@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"unicode"
+	"unicode/utf8"
 
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -157,18 +159,31 @@ func wrapCmdSubstErr(err error, stderrBytes []byte) error {
 // sanitizeStderr trims, bounds, and scrubs non-printable bytes from the
 // stderr of a failing command so the result is safe to include in an
 // error message shown to the user.
+//
+// This walks runes, not bytes: a command's stderr is frequently non-ASCII
+// (a translated error message, a path with accented characters, etc.), and
+// ranging over the []byte would test each UTF-8 continuation byte against
+// the ASCII printable range on its own, scrubbing every multi-byte rune to
+// a run of '?'. Only genuinely non-printable runes and invalid encoding
+// are replaced.
 func sanitizeStderr(b []byte) string {
 	b = bytes.TrimRight(b, "\n")
 	if len(b) > maxInnerStderrBytes {
 		b = b[:maxInnerStderrBytes]
 	}
-	out := make([]byte, len(b))
-	for i, c := range b {
-		if c == '\t' || c == '\n' || (c >= 0x20 && c < 0x7f) {
-			out[i] = c
-		} else {
-			out[i] = '?'
+	var out strings.Builder
+	out.Grow(len(b))
+	for i := 0; i < len(b); {
+		r, size := utf8.DecodeRune(b[i:])
+		switch {
+		case r == '\t' || r == '\n' || unicode.IsPrint(r):
+			out.WriteRune(r)
+		default:
+			// Covers control characters and invalid UTF-8 (DecodeRune
+			// returns utf8.RuneError with size 1 for a single bad byte).
+			out.WriteByte('?')
 		}
+		i += size
 	}
-	return string(out)
+	return out.String()
 }

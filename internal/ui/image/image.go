@@ -46,8 +46,6 @@ type PreviewPreparedMsg struct {
 	Err        error
 }
 
-func ResetCache() {}
-
 func (k PreviewKey) ID() string {
 	return fmt.Sprintf("%s-%d-%d-%dx%d-%d-%dx%d-%t", k.Path, k.Size, k.ModTimeUnixNano, k.Columns, k.Rows, k.Encoding, k.CellSize.Width, k.CellSize.Height, k.Tmux)
 }

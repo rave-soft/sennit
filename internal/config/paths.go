@@ -152,19 +152,64 @@ func isInsideWorktree(dir string) bool {
 // repositories, missing git binary, plain directories, or any other
 // failure mode). Linked worktrees and submodules each report their own
 // top-level, which is what callers want when bounding lookups.
-// worktreeRootCache memoizes the git worktree root per directory. The root
-// is stable for the life of the process, so we avoid re-shelling out to
-// "git rev-parse" on every config reload. Keyed by the requested dir; the
-// value is the resolved root ("" when dir is not in a git worktree).
+// worktreeRootCache memoizes positive git worktree root lookups per
+// directory, so we avoid re-shelling out to "git rev-parse" on every config
+// reload. Once dir resolves to a worktree root, that root is stable for the
+// life of the process and safe to cache. A negative result ("" — dir is not
+// in a worktree) is never cached: `git init` can turn a plain directory into
+// one mid-session, and caching "" would leave that dir stuck outside its new
+// worktree boundary until the process restarts.
+//
+// worktreeRoot is on a hot, polled path — WatchForExternalChanges (watch.go)
+// calls lookupConfigs, and therefore this, on every tick — so the uncached
+// negative case must not shell out. findGitEntry answers it with a plain
+// upward stat walk instead; only a directory that actually has a .git entry
+// pays for a git subprocess.
 var worktreeRootCache sync.Map // map[string]string
 
 func worktreeRoot(dir string) string {
 	if cached, ok := worktreeRootCache.Load(dir); ok {
 		return cached.(string)
 	}
+	if !findGitEntry(dir) {
+		return ""
+	}
 	root := computeWorktreeRoot(dir)
-	worktreeRootCache.Store(dir, root)
+	if root != "" {
+		worktreeRootCache.Store(dir, root)
+	}
 	return root
+}
+
+// findGitEntry reports whether dir or one of its ancestors has a .git entry
+// (a directory for a normal clone, a file for a linked worktree or
+// submodule). It walks upward with plain stats, stopping at $HOME or the
+// filesystem root, whichever comes first — the same bound lookupClosest
+// uses in fsext/lookup.go — so an unrelated .git far above the user's home
+// directory is never treated as project state, and a deeply nested dir
+// never turns into an unbounded walk. This is the cheap pre-check that lets
+// worktreeRoot's negative case go uncached without shelling out to git on
+// every poll.
+func findGitEntry(dir string) bool {
+	cwd, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	homeDir := fsext.Canonical(home.Dir())
+
+	for {
+		if _, err := os.Lstat(filepath.Join(cwd, ".git")); err == nil {
+			return true
+		}
+		if fsext.Canonical(cwd) == homeDir {
+			return false
+		}
+		parent := filepath.Dir(cwd)
+		if parent == cwd {
+			return false
+		}
+		cwd = parent
+	}
 }
 
 func computeWorktreeRoot(dir string) string {

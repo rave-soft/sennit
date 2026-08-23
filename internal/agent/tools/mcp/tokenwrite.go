@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 
 	"github.com/rave-soft/sennit/internal/config"
@@ -87,7 +86,7 @@ func (r *Registry) finishTokenWrite(name string, owner attemptID, write *tokenWr
 	r.publishMu.Unlock()
 }
 
-func (r *Registry) persistOAuthToken(ctx context.Context, cfg ConfigProvider, name string, owner attemptID, tok *oauth.Token) {
+func (r *Registry) persistOAuthToken(_ context.Context, cfg ConfigProvider, name string, owner attemptID, tok *oauth.Token) {
 	if m, ok := cfg.Config().MCP[name]; ok && !r.reserveTokenMutation(cfg, name, m, owner) {
 		return
 	}
@@ -96,11 +95,6 @@ func (r *Registry) persistOAuthToken(ctx context.Context, cfg ConfigProvider, na
 		return
 	}
 	defer r.finishTokenWrite(name, owner, write)
-	key := fmt.Sprintf("mcp.%s.oauth_token", name)
-	if err := r.tokenPersist(ctx, cfg, key, tok); err != nil {
-		slog.Warn("Failed to persist MCP OAuth token", "name", name, "error", err)
-		return
-	}
 	r.publishMu.Lock()
 	defer r.publishMu.Unlock()
 	if !r.ownsLocked(name, owner) {

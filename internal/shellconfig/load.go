@@ -13,11 +13,14 @@ import (
 	"github.com/rave-soft/sennit/internal/version"
 )
 
-// loadTimeout bounds a single sennitrc execution. Config loading runs on the
-// startup and reload critical paths while the config store's write lock is
-// held, so a script that blocks (a hung command substitution, a stray loop)
-// must not be able to wedge the whole store. The interpreter honors context
-// cancellation, so this deadline reliably interrupts a runaway script.
+// loadTimeout bounds a single sennitrc execution. This runs on the startup
+// and reload critical paths — Load and reloadFromDisk both call it before
+// ever taking the config store's write lock, specifically so a slow script
+// can't hold that lock — but callers there still block synchronously
+// waiting on the result, so a script that hangs (a stuck command
+// substitution, a stray loop) must not be able to wedge them forever. The
+// interpreter honors context cancellation, so this deadline reliably
+// interrupts a runaway script.
 const loadTimeout = 30 * time.Second
 
 // LoadShellConfig executes a sennitrc script and returns its config as a

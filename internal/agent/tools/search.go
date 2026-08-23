@@ -42,7 +42,9 @@ type duckDuckGoBackend struct {
 }
 
 func (b *duckDuckGoBackend) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
-	maybeDelaySearch()
+	if err := maybeDelaySearch(ctx); err != nil {
+		return nil, err
+	}
 	return searchDuckDuckGo(ctx, b.client, query, maxResults)
 }
 
@@ -267,14 +269,33 @@ var (
 )
 
 // maybeDelaySearch adds a random delay if the last search was recent.
-func maybeDelaySearch() {
+//
+// The mutex only reserves this call's slot in the sequence of searches
+// (bumping lastSearchTime forward by minGap); it is never held across the
+// actual wait, so concurrent searches queue up as staggered time slots
+// instead of blocking each other for the full duration. The wait itself
+// respects ctx, so a hook timeout or tool cancellation interrupts it
+// immediately instead of always paying up to 2s.
+func maybeDelaySearch(ctx context.Context) error {
 	lastSearchMu.Lock()
-	defer lastSearchMu.Unlock()
-
 	minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
-	elapsed := time.Since(lastSearchTime)
-	if elapsed < minGap {
-		time.Sleep(minGap - elapsed)
+	next := lastSearchTime.Add(minGap)
+	if now := time.Now(); next.Before(now) {
+		next = now
 	}
-	lastSearchTime = time.Now()
+	lastSearchTime = next
+	lastSearchMu.Unlock()
+
+	wait := time.Until(next)
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

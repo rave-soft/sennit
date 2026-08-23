@@ -14,14 +14,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
-// DockerMCPToolMessageItem is a message item that represents a Docker MCP tool call.
-type DockerMCPToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*DockerMCPToolMessageItem)(nil)
-
-// NewDockerMCPToolMessageItem creates a new [DockerMCPToolMessageItem].
+// NewDockerMCPToolMessageItem creates a new Docker MCP tool message item.
 func NewDockerMCPToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,

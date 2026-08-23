@@ -78,8 +78,3 @@ func (b *NativeBackend) resolvedIcon() any {
 func (b *NativeBackend) SetNotifyFunc(fn func(title, message string, icon any) error) {
 	b.notifyFunc = fn
 }
-
-// ResetNotifyFunc resets the notification function to the default.
-func (b *NativeBackend) ResetNotifyFunc() {
-	b.notifyFunc = defaultNotifyFunc
-}

@@ -553,29 +553,74 @@ TECHDEBT.md.
 
 ## Фаза 5 — Чистка / мёртвый код / KISS
 
-- [ ] `chat/agent.go:397-464,705-767` — ~140 строк недостижимого хвоста в
+**СДЕЛАНО (2026-08-23).** Проверка: `go build ./...`, `go vet ./...`,
+`go test ./...`, `-race` по затронутым пакетам, `golangci-lint run` — чисто.
+Голден-файлы не изменились: всё удалённое было действительно недостижимым.
+
+Ключевые находки, отличающиеся от плана:
+
+- Мёртвый хвост в `chat/agent.go` оказался больше заявленного. После раннего
+  возврата в ветке `pending` переменная больше нигде не присваивается,
+  поэтому недостижимы не только `if pending`, но и всё, что идёт после
+  `if opts.Compact { return header }` — по элиминации `Compact` там всегда
+  истинно. Удалено ~130 строк в двух функциях плюс осиротевшие
+  `renderChildTodos`, `visibleNestedTools`, `roundedEnumerator`,
+  `toolOutputMarkdownContent`. Отдельно проверено, что `renderChildTodos`
+  не был потерянной функциональностью: тест
+  `TestAgentToolRender_RunningHidesTodosFromTranscript` прямо фиксирует, что
+  todos дочерней сессии не должны рендериться в транскрипте.
+- `tools/question.go` без проверки пустого sessionID не выдавал «неправильный
+  текст ошибки», а падал с nil-pointer: `svc.Ask` вызывался на nil-сервисе.
+- `tokenPersist` в `tools/mcp` был не заглушкой на будущее, а недостроенной
+  копией уже работающего `config.SetMCPToken` — строил неэкранированный ключ,
+  выбрасывал его и возвращал `nil`. Удалён, три теста переведены на
+  `tokenCommit`.
+- `worktreeRootCache`: отрицательные ответы теперь не кэшируются, но и не
+  стоят подпроцесса — сначала дешёвый обход вверх в поисках `.git`
+  (ограниченный `$HOME` или корнем ФС), и только при находке спрашивается
+  `git rev-parse`. Без этого правка порождала бы запуск git каждые 2 секунды
+  в любом не-git-каталоге: `lookupConfigs` вызывается из вотчера конфига.
+- `limit*2` в `fsext` не убран: результат сортируется по mtime ПОСЛЕ обхода,
+  а порядок обхода к mtime отношения не имеет, так что удвоенный пул нужен
+  для корректности выборки. Причина записана вместо авторского «why x2?».
+- Дедупликация хуков теперь по всей структуре конфига: два хука могут
+  законно делить команду, различаясь матчером, таймаутом и именем.
+
+Оставлено намеренно (с обоснованием на месте):
+
+- Опции билдера `diffview`: не используются только сеттеры, сами поля
+  работают во всех путях рендеринга, а `ContextLines` закреплён тестом фазы 2.
+- 25 значений `styles.Brand*`: доккомментарий пакета описывает их как
+  экспорт для использования вне TUI, четыре зовутся из CLI и генератора
+  иконок; выборочное удаление ломает документированный контракт.
+- `list.PrependItems`, `InvalidateFrozen`, `capTodosForDelegation`: только в
+  тестах, но тесты именные и содержательные, а у `InvalidateFrozen` в
+  доккомментарии прямо сказано, что она вынесена наружу намеренно.
+
+
+- [x] `chat/agent.go:397-464,705-767` — ~140 строк недостижимого хвоста в
   обоих `RenderTool` (именно там лежит «правильный» pending-код, что и
   замаскировало баг agentic_fetch). **M**
-- [ ] `lsp/handlers.go:79` — `fileWatchHandler` никогда не устанавливается:
+- [x] `lsp/handlers.go:79` — `fileWatchHandler` никогда не устанавливается:
   весь путь registerCapability→watchers мёртв; удалить или довести. **S**
-- [ ] `main.go:3-10` — swagger-аннотации несуществующего API (остаток
+- [x] `main.go:3-10` — swagger-аннотации несуществующего API (остаток
   upstream). **S**
-- [ ] `db/connect.go:39,213` — `goose.SetBaseFS` вызывается дважды. **S**
-- [ ] `thread/manager.go:1097` — док-блок `Shutdown` приклеен к
+- [x] `db/connect.go:39,213` — `goose.SetBaseFS` вызывается дважды. **S**
+- [x] `thread/manager.go:1097` — док-блок `Shutdown` приклеен к
   `SetPermissionsSkip`; сам `Shutdown` без документации. **S**
-- [ ] `shell/jq.go:122` — неизвестный флаг до фильтра молча становится
+- [x] `shell/jq.go:122` — неизвестный флаг до фильтра молча становится
   фильтром; `shell/expand.go:158` — не-ASCII stderr превращается в
   `????`. **S**
-- [ ] `hooks/runner.go:98` — дедупликация хуков только по Command: таймаут
+- [x] `hooks/runner.go:98` — дедупликация хуков только по Command: таймаут
   и имя первого приписываются обоим. **S**
-- [ ] `tools/search.go:264` — sleep до 2с под глобальным мьютексом, без
+- [x] `tools/search.go:264` — sleep до 2с под глобальным мьютексом, без
   ctx; `tools/question.go:90` — единственный инструмент без проверки
   пустого sessionID. **S**
-- [ ] `lsp/manager.go:90,409` — WaitGroup из горутин ради синхронного
+- [x] `lsp/manager.go:90,409` — WaitGroup из горутин ради синхронного
   колбэка; сравнение ошибки строкой `"signal: killed"`. **S**
-- [ ] `fsext/fileutil.go:154` — `limit*2` с авторским «NOTE: why x2?» —
+- [x] `fsext/fileutil.go:154` — `limit*2` с авторским «NOTE: why x2?» —
   задокументировать или убрать. **S**
-- [ ] UI-мертвечина (проверено grep'ом): семь неинстанцируемых
+- [x] UI-мертвечина (проверено grep'ом): семь неинстанцируемых
   `*ToolMessageItem`-обёрток; `SetSpinningFunc`; мёртвые builder-опции
   diffview (`LineNumbers`/`Height`/`YOffset`/`InfiniteYScroll`/
   `ContextLines`) с машинерией height-ellipsis; `anim.Width()`;
@@ -588,12 +633,12 @@ TECHDEBT.md.
   `model/chat.go:1534` — мёртвая итерация графем на каждый двойной клик;
   `model/threads_dock.go:985` — identity-функция; опечатка
   `hightlightCode`. **S–M суммарно**
-- [ ] `mcp/registry.go:212` + `tokenwrite.go:99` — production
+- [x] `mcp/registry.go:212` + `tokenwrite.go:99` — production
   `tokenPersist` — заглушка `return nil`, ключ без `gjson.Escape`; удалить
   или доделать. **S**
-- [ ] `config/paths.go:159` — `worktreeRootCache` не инвалидируется после
+- [x] `config/paths.go:159` — `worktreeRootCache` не инвалидируется после
   `git init` в сессии. **S**
-- [ ] Устаревшие комментарии: `credentials.go:406` (`loadTokenFromDisk`),
+- [x] Устаревшие комментарии: `credentials.go:406` (`loadTokenFromDisk`),
   `shellconfig/load.go:16` («runs while write lock is held»),
   `presentation.go:13» («depends only on leaf UI packages» — импортирует
   session), doc-ссылки chat на несуществующие файлы. **S**

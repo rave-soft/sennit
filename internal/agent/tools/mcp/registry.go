@@ -144,7 +144,6 @@ type Registry struct {
 
 	tokenWrites        map[tokenWriteOwner]map[*tokenWrite]struct{}
 	tokenReservations  map[tokenWriteOwner]*config.MCPTokenMutation
-	tokenPersist       func(context.Context, ConfigProvider, string, any) error
 	tokenCommit        func(ConfigProvider, *config.MCPTokenMutation, *oauth.Token) error
 	beforeTokenPersist func()
 
@@ -209,7 +208,6 @@ func NewRegistry() *Registry {
 	r.runAuth = r.runAuthFlow
 	r.ping = r.pingSession
 	r.listResources = getResources
-	r.tokenPersist = func(context.Context, ConfigProvider, string, any) error { return nil }
 	r.tokenCommit = func(cfg ConfigProvider, reservation *config.MCPTokenMutation, token *oauth.Token) error {
 		_, err := cfg.SetMCPToken(reservation, token)
 		return err

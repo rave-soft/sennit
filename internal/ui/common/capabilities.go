@@ -98,19 +98,9 @@ func QueryCmd(env uv.Environ) tea.Cmd {
 	return tea.Raw(sb.String())
 }
 
-// SupportsTrueColor returns true if the terminal supports true color.
-func (c Capabilities) SupportsTrueColor() bool {
-	return c.Profile == colorprofile.TrueColor
-}
-
 // SupportsKittyGraphics returns true if the terminal supports Kitty graphics.
 func (c Capabilities) SupportsKittyGraphics() bool {
 	return c.KittyGraphics
-}
-
-// SupportsSixelGraphics returns true if the terminal supports Sixel graphics.
-func (c Capabilities) SupportsSixelGraphics() bool {
-	return c.SixelGraphics
 }
 
 // CellSize returns the size of a single terminal cell in pixels.

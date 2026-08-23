@@ -61,39 +61,6 @@ func TestThreadDockStatusWordIdleIsExplicit(t *testing.T) {
 	require.NotEqual(t, threadDockStatusWord(proto.ThreadStatusFailed), word, "must not fall through to an unhandled-status default indistinguishable from idle")
 }
 
-// TestVisibleDockThreadsReturnsEveryThread pins the removal of the old
-// fixed visible cap: however many threads are active, the panel names all
-// of them and never reports a hidden remainder. Only the row budget may
-// still shed blocks, and that is decided in sessionPanelPlan, not here.
-func TestVisibleDockThreadsReturnsEveryThread(t *testing.T) {
-	t.Parallel()
-
-	mk := func(n int) []proto.Thread {
-		threads := make([]proto.Thread, n)
-		for i := range threads {
-			threads[i] = proto.Thread{ID: string(rune('a' + i))}
-		}
-		return threads
-	}
-
-	cases := []struct {
-		n             int
-		wantVisible   int
-		wantMoreCount int
-	}{
-		{0, 0, 0},
-		{3, 3, 0},
-		{5, 5, 0},
-		{6, 6, 0},
-		{10, 10, 0},
-	}
-	for _, tc := range cases {
-		visible, more := visibleDockThreads(mk(tc.n))
-		require.Lenf(t, visible, tc.wantVisible, "n=%d", tc.n)
-		require.Equalf(t, tc.wantMoreCount, more, "n=%d", tc.n)
-	}
-}
-
 func TestThreadDockGoalFirstLine(t *testing.T) {
 	t.Parallel()
 

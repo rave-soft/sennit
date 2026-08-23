@@ -9,14 +9,7 @@ import (
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
-// MCPToolMessageItem is a message item that represents a bash tool call.
-type MCPToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*MCPToolMessageItem)(nil)
-
-// NewMCPToolMessageItem creates a new [MCPToolMessageItem].
+// NewMCPToolMessageItem creates a new MCP tool message item.
 func NewMCPToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,
