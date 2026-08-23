@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"charm.land/lipgloss/v2"
 	"github.com/pkg/browser"
@@ -151,13 +152,20 @@ func loginCopilot(ws workspace.ConfigAccessor, force bool) error {
 	return nil
 }
 
+// getLoginContext returns a context cancelled by an interrupt, so a
+// sign-in flow that is waiting on a browser round-trip can unwind through
+// its own deferred cleanup (the callback listener, the temporary
+// credentials) instead of being cut off mid-way.
+//
+// os.Kill was listed here and is not catchable — SIGKILL never reaches a
+// handler — so a `kill` of the process left the flow no chance to clean
+// up at all; SIGTERM is the one that can be handled. The os.Exit that
+// used to fire from a goroutine is gone with it: it skipped every defer
+// in the flow, including the listener close that frees the fixed callback
+// port. NotifyContext stops trapping after the first signal, so a second
+// interrupt still ends the process immediately.
 func getLoginContext() context.Context {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-	go func() {
-		<-ctx.Done()
-		cancel()
-		os.Exit(1)
-	}()
+	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	return ctx
 }
 

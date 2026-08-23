@@ -256,6 +256,13 @@ func readInputs(ctx context.Context, stdin io.Reader, files []string, nullInput,
 
 		if rawInput {
 			lines := strings.Split(string(data), "\n")
+			// A trailing newline terminates the last line, it does not
+			// start an empty one — jq -R reads a three-line file as three
+			// strings, not four. Splitting alone produced the extra ""
+			// and every -R pipeline ended on a spurious empty value.
+			if n := len(lines); n > 0 && lines[n-1] == "" {
+				lines = lines[:n-1]
+			}
 			if slurp {
 				vals = append(vals, strings.Join(lines, "\n"))
 			} else {

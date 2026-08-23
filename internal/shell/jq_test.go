@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -233,5 +234,29 @@ func TestJQ_UnknownFlagBeforeFilter(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown option: -x") {
 		t.Fatalf("stderr = %q, want it to mention the unknown option", stderr.String())
+	}
+}
+
+// TestJQRawInputDropsTheTrailingNewline pins jq -R against real jq: a
+// trailing newline terminates the last line rather than starting an empty
+// one, so a three-line file is three strings. Splitting alone produced a
+// fourth, empty one and every -R pipeline ended on a spurious "".
+func TestJQRawInputDropsTheTrailingNewline(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	err := Run(t.Context(), RunOptions{
+		Command: `printf 'a\nb\nc\n' | jq -R .`,
+		Cwd:     t.TempDir(),
+		Stdout:  &out,
+	})
+	if err != nil {
+		t.Fatalf("jq -R must succeed: %v", err)
+	}
+
+	got := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	want := []string{`"a"`, `"b"`, `"c"`}
+	if !slices.Equal(got, want) {
+		t.Fatalf("jq -R over three lines must yield three strings, got %q", got)
 	}
 }

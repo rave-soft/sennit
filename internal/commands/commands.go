@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -160,8 +161,19 @@ func loadFromSource(source commandSource) ([]CustomCommand, error) {
 	var commands []CustomCommand
 
 	err := filepath.WalkDir(source.path, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !isMarkdownFile(d.Name()) {
-			return err
+		if err != nil {
+			// One unreadable entry is not a reason to abandon the walk:
+			// returning the error aborted it, and loadAll then discarded
+			// this source entirely — a single subdirectory the process
+			// cannot read hid every command the source had.
+			slog.Warn("Skipping unreadable command path", "path", path, "error", err)
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || !isMarkdownFile(d.Name()) {
+			return nil
 		}
 
 		cmd, err := loadCommand(path, source.path, source.prefix)

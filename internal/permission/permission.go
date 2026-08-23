@@ -371,8 +371,14 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 	} else if !filepath.IsAbs(path) {
 		path = filepath.Join(s.workingDir, path)
 	}
+	// The key is the containing directory for anything that is not a
+	// directory itself — including a path that does not exist yet. Keying
+	// a missing path on itself made the grant recorded for a file the
+	// agent was about to create disagree with the one looked up on the
+	// next write to it, once the file existed: the person was asked for
+	// the same file twice, having already said "allow for this session".
 	dir := path
-	if fileInfo, err := os.Stat(path); err == nil && !fileInfo.IsDir() {
+	if fileInfo, err := os.Stat(path); err != nil || !fileInfo.IsDir() {
 		dir = filepath.Dir(path)
 	}
 	permission := PermissionRequest{

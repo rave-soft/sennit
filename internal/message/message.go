@@ -431,6 +431,12 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		s.mu.Unlock()
 
 		if err != nil {
+			// dirty was restored above so the next flush retries — but
+			// for a message whose stream has already ended there is no
+			// next flush to piggyback on, and the delta sat unwritten
+			// until something unrelated touched the message. Give the
+			// retry a timer of its own.
+			s.rearmFlushTimer(id, p)
 			return err
 		}
 
@@ -449,15 +455,24 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		if wasDirty {
 			// Timer-fired path: give the leftover dirty state a fresh
 			// debounce window instead of rewriting immediately.
-			s.mu.Lock()
-			if cur, ok := s.pending[id]; ok && cur == p && cur.dirty && !cur.flushing && cur.timer == nil {
-				cur.timer = time.AfterFunc(s.debounce, func() {
-					_ = s.flushOne(context.Background(), id, false)
-				})
-			}
-			s.mu.Unlock()
+			s.rearmFlushTimer(id, p)
 		}
 		return nil
+	}
+}
+
+// rearmFlushTimer gives id's pending state a fresh debounce window, if it
+// is still the same state, still dirty, and has no timer of its own. Used
+// both after a flush that left a delta behind and after one that failed —
+// in either case something has to come back for the write, and an Update
+// that happens to arrive later is not something to count on.
+func (s *service) rearmFlushTimer(id string, p *pendingState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.pending[id]; ok && cur == p && cur.dirty && !cur.flushing && cur.timer == nil {
+		cur.timer = time.AfterFunc(s.debounce, func() {
+			_ = s.flushOne(context.Background(), id, false)
+		})
 	}
 }
 

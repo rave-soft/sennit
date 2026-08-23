@@ -184,7 +184,12 @@ func printLogLine(lineText string) {
 			if !ok {
 				continue
 			}
-			sourceFile := fmt.Sprintf("%s:%d", source["file"], int(source["line"].(float64)))
+			// Both fields are checked rather than asserted: this parses
+			// whatever is in the log file, and one line written by
+			// something else (or truncated mid-write) used to panic the
+			// whole command on the bare assertion.
+			line, _ := source["line"].(float64)
+			sourceFile := fmt.Sprintf("%s:%d", source["file"], int(line))
 			otherData = append(otherData, "source", sourceFile)
 
 		default:
@@ -193,7 +198,11 @@ func printLogLine(lineText string) {
 	}
 	log.SetTimeFunction(func(_ time.Time) time.Time {
 		// parse the timestamp from the log line if available
-		t, err := time.Parse(time.RFC3339, data["time"].(string))
+		stamp, ok := data["time"].(string)
+		if !ok {
+			return time.Now()
+		}
+		t, err := time.Parse(time.RFC3339, stamp)
 		if err != nil {
 			return time.Now() // fallback to current time if parsing fails
 		}

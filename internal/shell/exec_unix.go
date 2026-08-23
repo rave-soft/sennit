@@ -64,20 +64,40 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 
 		err = cmd.Start()
 		if err == nil {
+			// reaped closes once Wait has returned, which is the moment
+			// the pid stops being ours: the kernel is free to hand it to
+			// something else, and a SIGKILL sent to -pid after that can
+			// land on an unrelated process group. The escalation waits
+			// on this as well as on its timer, and the immediate branch
+			// checks it before signalling.
+			reaped := make(chan struct{})
+			pid := cmd.Process.Pid
 			stopf := context.AfterFunc(ctx, func() {
 				if killTimeout <= 0 {
-					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+					select {
+					case <-reaped:
+						return
+					default:
+					}
+					_ = syscall.Kill(-pid, syscall.SIGKILL)
 					return
 				}
 				// Signal the child's process group (negative PID) so
 				// grandchildren also receive it.
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
-				time.Sleep(killTimeout)
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				_ = syscall.Kill(-pid, syscall.SIGINT)
+				timer := time.NewTimer(killTimeout)
+				defer timer.Stop()
+				select {
+				case <-reaped:
+					return
+				case <-timer.C:
+				}
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
 			})
 			defer stopf()
 
 			err = cmd.Wait()
+			close(reaped)
 		}
 
 		return exitStatusFromError(ctx, hc.Stderr, err)

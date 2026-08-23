@@ -260,10 +260,16 @@ func (s *Shell) updateShellFromRunner(runner *interp.Runner) {
 func (s *Shell) execCommon(ctx context.Context, command string, stdout, stderr io.Writer) (err error) {
 	var runner *interp.Runner
 	defer func() {
+		panicked := false
 		if r := recover(); r != nil {
+			panicked = true
 			err = fmt.Errorf("command execution panic: %v", r)
 		}
-		if runner != nil {
+		// Not after a panic: the runner may have died before it populated
+		// Vars, and updateShellFromRunner rebuilds s.env from exactly
+		// that map — so one panicking command wiped the shell's
+		// environment for every command after it.
+		if runner != nil && !panicked {
 			s.updateShellFromRunner(runner)
 		}
 		s.logger.InfoPersist("command finished", "command", command, "err", err)

@@ -63,8 +63,11 @@ sennit run --continue "Follow up on your last response"
 			useLast, _   = cmd.Flags().GetBool("continue")
 		)
 
-		// Cancel on SIGINT or SIGTERM.
-		ctx, cancel := runSignalContext(context.Background())
+		// Cancel on SIGINT or SIGTERM. Rooted at the command's own
+		// context, not Background: everything downstream (the App, its
+		// agent, its shells) hangs off this one, and a context with no
+		// parent left them running when cobra's was cancelled.
+		ctx, cancel := runSignalContext(cmd.Context())
 		defer cancel()
 
 		prompt := strings.Join(args, " ")
