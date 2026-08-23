@@ -86,7 +86,11 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 			// Check if directory is outside working directory and request permission if needed
 			absSearchPath, outside, err := resolveWithinWorkdir(workingDir, searchPath)
 			if err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
+				// Resolving a path is infrastructure, not something the
+				// model can act on by rewording its call, so it is a Go
+				// error rather than a tool result — see AGENTS.md on the
+				// difference.
+				return fantasy.ToolResponse{}, fmt.Errorf("resolve path: %w", err)
 			}
 			if outside {
 				sessionID := GetSessionFromContext(ctx)
@@ -152,7 +156,11 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %[1]d files and directories are included below.\n", maxFiles)
 	}
 	if depth > 0 {
-		output = fmt.Sprintf("The directory tree is shown up to a depth of %d. Use a higher depth and a specific path to see more levels.\n", cmp.Or(params.Depth, depth))
+		// Appended, not assigned: both notes can apply at once, and the
+		// assignment threw the truncation warning away — the model was
+		// then told the tree was depth-limited but not that it was also
+		// cut off at maxFiles.
+		output += fmt.Sprintf("The directory tree is shown up to a depth of %d. Use a higher depth and a specific path to see more levels.\n", cmp.Or(params.Depth, depth))
 	}
 	return output + "\n" + printTree(tree, searchPath), metadata, nil
 }

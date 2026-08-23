@@ -98,11 +98,18 @@ func NewWriteTool(
 				}
 
 				oldBytes, readErr := os.ReadFile(filePath)
-				if readErr == nil {
-					oldContent = string(oldBytes)
-					if oldContent == params.Content {
-						return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s already contains the exact content. No changes made.", filePath)), nil
-					}
+				if readErr != nil {
+					// The file is there (the stat above succeeded) but
+					// cannot be read. Carrying on with an empty
+					// oldContent told the diff and the permission dialog
+					// this was a brand-new file, and stored an empty
+					// baseline in history — so the version the user
+					// would restore to was blank.
+					return fantasy.ToolResponse{}, fmt.Errorf("read existing file: %w", readErr)
+				}
+				oldContent = string(oldBytes)
+				if oldContent == params.Content {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s already contains the exact content. No changes made.", filePath)), nil
 				}
 			case !os.IsNotExist(err):
 				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)

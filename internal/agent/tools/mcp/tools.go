@@ -22,6 +22,11 @@ type ToolResult struct {
 	Content   string
 	Data      []byte
 	MediaType string
+	// IsError mirrors CallToolResult.IsError: the server ran the tool and
+	// the tool itself failed. It used to be dropped on the floor, so a
+	// failure came back to the model as an ordinary successful result and
+	// it carried on as though the call had worked.
+	IsError bool
 }
 
 // Tools returns all available MCP tools.
@@ -56,7 +61,7 @@ func (r *Registry) RunTool(ctx context.Context, cfg ConfigProvider, name, toolNa
 	}
 
 	if len(result.Content) == 0 {
-		return ToolResult{Type: "text", Content: ""}, nil
+		return ToolResult{Type: "text", Content: "", IsError: result.IsError}, nil
 	}
 
 	var textParts []string
@@ -94,6 +99,7 @@ func (r *Registry) RunTool(ctx context.Context, cfg ConfigProvider, name, toolNa
 			Content:   textContent,
 			Data:      ensureRawBytes(imageData),
 			MediaType: imageMimeType,
+			IsError:   result.IsError,
 		}, nil
 	}
 
@@ -103,12 +109,14 @@ func (r *Registry) RunTool(ctx context.Context, cfg ConfigProvider, name, toolNa
 			Content:   textContent,
 			Data:      ensureRawBytes(audioData),
 			MediaType: audioMimeType,
+			IsError:   result.IsError,
 		}, nil
 	}
 
 	return ToolResult{
 		Type:    "text",
 		Content: textContent,
+		IsError: result.IsError,
 	}, nil
 }
 

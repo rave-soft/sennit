@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
@@ -572,7 +573,15 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// handled transparently inside OnAuthRefresh, so it needs no post-run
 	// notification here.
 	if hasLatest && c.runComplete != nil {
-		c.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, latest)
+		// Detached, with a bounded deadline of its own: this is the
+		// authoritative terminal event, and the commonest reason to be
+		// publishing it is that the run was cancelled — which cancels
+		// ctx too, so publishing on it dropped the very event a caller
+		// waiting on this RunID needs. The deferred publisher inside
+		// sessionAgent.run already detaches for the same reason.
+		publishCtx, cancelPublish := context.WithTimeout(context.WithoutCancel(ctx), runCompletePublishTimeout)
+		c.runComplete.PublishMustDeliver(publishCtx, pubsub.UpdatedEvent, latest)
+		cancelPublish()
 		// Signal to the dispatcher (AgentDispatcher.run) that the
 		// authoritative terminal RunComplete for this run was already
 		// emitted, so it does not publish a duplicate fallback for the
@@ -585,6 +594,12 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 // waitForMCPInit blocks until this coordinator's MCP registry finishes
 // initializing. A coordinator built without a registry (a handful of
 // tests construct one directly) has nothing to wait for.
+// runCompletePublishTimeout bounds the detached publish of a coalesced
+// terminal RunComplete. PublishMustDeliver waits for a slow subscriber
+// rather than dropping the event, so it needs a deadline that is not the
+// run's own.
+const runCompletePublishTimeout = 5 * time.Second
+
 func (c *coordinator) waitForMCPInit(ctx context.Context) error {
 	if c.mcp == nil {
 		return nil

@@ -161,6 +161,17 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
+	// The server ran the tool and the tool reported failure. Returned as
+	// an ordinary response, that reached the model as a success and it
+	// carried on as though the call had worked.
+	if result.IsError {
+		content := result.Content
+		if content == "" {
+			content = fmt.Sprintf("MCP tool %q reported an error with no message", m.tool.Name)
+		}
+		return fantasy.NewTextErrorResponse(content), nil
+	}
+
 	switch result.Type {
 	case "image", "media":
 		if !GetSupportsImagesFromContext(ctx) {

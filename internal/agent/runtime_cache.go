@@ -102,6 +102,16 @@ func (c *runtimeCache) getOrBuild(ctx context.Context, current func() runtimeKey
 					if errors.Is(flight.err, errRuntimeChanged) {
 						continue
 					}
+					// The build ran on whichever caller started the
+					// flight. If that one was cancelled, the failure is
+					// theirs, not ours: adopting it failed a turn whose
+					// own context was perfectly alive, just because it
+					// arrived second. Go round again — with no flight in
+					// progress, this caller becomes the builder and uses
+					// its own context.
+					if ctx.Err() == nil && (errors.Is(flight.err, context.Canceled) || errors.Is(flight.err, context.DeadlineExceeded)) {
+						continue
+					}
 					return nil, flight.err
 				}
 				if current() == key {

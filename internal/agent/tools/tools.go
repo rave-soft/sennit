@@ -3,6 +3,8 @@ package tools
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/history"
@@ -168,6 +171,13 @@ func writeFileWithHistory(ctx context.Context, files history.Service, sessionID,
 
 	file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
 	switch {
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		// A real lookup failure, not "no such row". Treating every error
+		// as "nothing recorded" wrote a fresh baseline over a history
+		// that may well exist, which is how an undo loses the version it
+		// was meant to restore. The write itself already landed, so this
+		// reports rather than pretending it did not happen.
+		return fmt.Errorf("read file history: %w", err)
 	case err != nil:
 		// Nothing recorded for this path in this session yet: the content
 		// that was on disk before this write becomes the baseline. The

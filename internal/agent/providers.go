@@ -709,8 +709,20 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
-	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
+	// A resolve failure (an env var that is not set, a shell command that
+	// exits non-zero) leaves the value empty, and the provider then fails
+	// on an empty key or URL with nothing pointing at the cause. Log it
+	// here rather than dropping it: the call still proceeds on what it
+	// has, which is what it did before, but the reason is now on the
+	// record.
+	apiKey, err := c.cfg.Resolve(providerCfg.APIKey)
+	if err != nil {
+		slog.Warn("Failed to resolve provider API key", "provider", providerCfg.ID, "error", err)
+	}
+	baseURL, err := c.cfg.Resolve(providerCfg.BaseURL)
+	if err != nil {
+		slog.Warn("Failed to resolve provider base URL", "provider", providerCfg.ID, "error", err)
+	}
 
 	switch providerCfg.ID {
 	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
