@@ -114,13 +114,13 @@ func TestTaskManager_CreateRunsToCompletion(t *testing.T) {
 	require.Equal(t, "parent-sess", created.ParentSessionID)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), st.ID)
 		return err == nil && got.Status == thread.StatusCompleted
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 	require.Equal(t, thread.KindTask, got.Kind)
@@ -143,10 +143,10 @@ func TestTaskManager_CompletionDeliveredToParentNotChild(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 
-	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick)
 
 	delivered := coord.deliveredCompletions()
 	require.Len(t, delivered, 1)
@@ -212,11 +212,11 @@ func TestTaskManager_CompletionCarriesTerminalAtStamp(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	before := time.Now()
 	publishSuccess(t, parentApp, st.SessionID)
-	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(coord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick)
 	after := time.Now()
 
 	delivered := coord.deliveredCompletions()
@@ -249,12 +249,12 @@ func TestTaskManager_CreateDoesNotSpawnAppAndReleaseLeavesParentUsable(t *testin
 	require.Same(t, parentApp, ph.app)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 
 	// The run completing releases the task's runtime (rt.spawner, a
 	// ParentAppSpawner, not the Manager's own thread Spawner).
-	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, eventuallyTimeout, eventuallyTick)
 
 	// Prove the parent App itself is still alive and usable, not torn
 	// down by that release.
@@ -275,7 +275,7 @@ func TestTaskManager_ShutdownJoinsInFlightRun(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	// Deliberately no RunComplete published: the run is left in flight,
 	// the way an equivalent thread shutdown test leaves a thread's run.
 
@@ -308,7 +308,7 @@ func TestTaskManager_CreateAttributesRunToDelegation(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	coord.mu.Lock()
 	got := coord.runs[0].delegation
@@ -340,7 +340,7 @@ func TestTaskManager_ShutdownCancelsOnlyItsOwnSessionNotParentWork(t *testing.T)
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
 	// Deliberately no RunComplete published for the task: its run is left
 	// in flight, so Shutdown's teardown has something live to cancel.
 
@@ -371,7 +371,7 @@ func publishSuccessForSession(t *testing.T, a *app.App, sessionID string) {
 			}
 		}
 		return false
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 	a.RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: sessionID, RunID: runID, Text: "finished"})
 }
 
@@ -395,7 +395,7 @@ func TestTaskManager_CreateRefusedAtWorkspaceCap(t *testing.T) {
 		require.NoError(t, err)
 		created = append(created, st)
 	}
-	require.Eventually(t, func() bool { return coord.runCount() == thread.MaxActiveTasksPerWorkspaceForTest }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == thread.MaxActiveTasksPerWorkspaceForTest }, eventuallyTimeout, eventuallyTick)
 
 	_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "one too many", ParentSessionID: "parent-overflow"})
 	require.Error(t, err)
@@ -409,7 +409,7 @@ func TestTaskManager_CreateRefusedAtWorkspaceCap(t *testing.T) {
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), created[0].ID)
 		return err == nil && got.Status == thread.StatusCompleted
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 
 	_, err = tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "now it fits", ParentSessionID: "parent-overflow"})
 	require.NoError(t, err, "completing one task must free a slot for the next Create")
@@ -435,7 +435,7 @@ func TestTaskManager_PerParentCapIndependentOfWorkspaceCap(t *testing.T) {
 		})
 		require.NoError(t, err)
 	}
-	require.Eventually(t, func() bool { return coord.runCount() == thread.MaxActiveTasksPerParentTurnForTest }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == thread.MaxActiveTasksPerParentTurnForTest }, eventuallyTimeout, eventuallyTick)
 
 	_, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "one too many for this turn", ParentSessionID: "busy-parent"})
 	require.Error(t, err)
@@ -467,7 +467,7 @@ func TestTaskManager_InFlightTaskStillHoldsSlot(t *testing.T) {
 	// prompt the user has not answered yet) - never completed.
 	blocked, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "waiting on a prompt", ParentSessionID: "parent-blocked"})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	got, err := store.Get(t.Context(), blocked.ID)
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusRunning, got.Status, "blocked mid-run is still StatusRunning, not a distinct 'waiting' status")
@@ -508,7 +508,7 @@ func TestTaskManager_TerminalTasksDoNotOccupySlots(t *testing.T) {
 		require.Eventually(t, func() bool {
 			got, err := store.Get(t.Context(), st.ID)
 			return err == nil && got.Status == thread.StatusCompleted
-		}, time.Second, time.Millisecond)
+		}, eventuallyTimeout, eventuallyTick)
 	}
 	require.Equal(t, thread.MaxActiveTasksPerWorkspaceForTest, coord.runCount())
 
@@ -593,7 +593,7 @@ func TestTaskManager_CancelLeavesTerminalWithReasonAndParentUntouched(t *testing
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
 	// Deliberately no RunComplete published: the run is left in flight.
 
 	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "no longer needed"))
@@ -616,7 +616,7 @@ func TestTaskManager_CancelDefaultsReasonWhenEmpty(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	require.NoError(t, tasks.Cancel(t.Context(), st.ID, ""))
 
@@ -635,12 +635,12 @@ func TestTaskManager_CancelAlreadyFinishedIsNoop(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), st.ID)
 		return err == nil && got.Status == thread.StatusCompleted
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 
 	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "too late"))
 
@@ -677,10 +677,10 @@ func TestTaskManager_SendReachesLiveTask(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	require.NoError(t, sendErr(tasks.Send(t.Context(), st.ID, "follow up")))
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
 
 	coord.mu.Lock()
 	last := coord.runs[len(coord.runs)-1]
@@ -702,12 +702,12 @@ func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), st.ID)
 		return err == nil && got.Status == thread.StatusCompleted
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 	require.Nil(t, mgr.Handle(st.ID), "runtime must have been released once the run completed")
 
 	require.NoError(t, sendErr(tasks.Send(t.Context(), st.ID, "one more thing")))
@@ -721,7 +721,7 @@ func TestTaskManager_SendReactivatesUnspawnedTask(t *testing.T) {
 	got, err := store.Get(t.Context(), st.ID)
 	require.NoError(t, err)
 	require.Equal(t, thread.StatusRunning, got.Status)
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
 }
 
 // TestTaskManager_SendReactivationPreservesCascadeDepth is the regression
@@ -736,12 +736,12 @@ func TestTaskManager_SendReactivationPreservesCascadeDepth(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess", Depth: 2})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	publishSuccess(t, parentApp, st.SessionID)
 	require.Eventually(t, func() bool {
 		got, err := store.Get(t.Context(), st.ID)
 		return err == nil && got.Status == thread.StatusCompleted
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 
 	require.NoError(t, sendErr(tasks.Send(t.Context(), st.ID, "one more thing")))
 
@@ -763,7 +763,7 @@ func TestTaskManager_SendRefusesCancelledTask(t *testing.T) {
 
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "do the thing", ParentSessionID: "parent-sess"})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	require.NoError(t, tasks.Cancel(t.Context(), st.ID, "no longer needed"))
 
@@ -807,7 +807,7 @@ func TestTaskManager_OutputReturnsUserAndAssistantTextOnly(t *testing.T) {
 	require.NoError(t, err)
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "investigate X", ParentSessionID: parentSess.ID})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	seedMessage(t, messages, st.SessionID, message.User, "investigate X")
 	seedMessage(t, messages, st.SessionID, message.Tool, "tool output that should not appear")
@@ -833,7 +833,7 @@ func TestTaskManager_OutputReportsTruncation(t *testing.T) {
 	require.NoError(t, err)
 	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{Goal: "go", ParentSessionID: parentSess.ID})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	for i := range 5 {
 		seedMessage(t, messages, st.SessionID, message.User, fmt.Sprintf("message %d", i))

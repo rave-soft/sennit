@@ -37,10 +37,13 @@ func NewNativeBackend(icon []byte) *NativeBackend {
 // Send returns a command that sends a desktop notification using the native
 // OS notification system.
 func (b *NativeBackend) Send(n Notification) tea.Cmd {
+	// Snapshot both: Send returns a command that runs later, and the
+	// backend's notifyFunc is swappable (SetNotifyFunc).
+	notify, icon := b.notifyFunc, b.resolvedIcon()
 	return func() tea.Msg {
 		slog.Debug("Sending native notification", "title", n.Title, "message", n.Message)
 
-		if err := b.notifyFunc(n.Title, n.Message, b.resolvedIcon()); err != nil {
+		if err := notify(n.Title, n.Message, icon); err != nil {
 			slog.Error("Failed to send notification", "error", err)
 		} else {
 			slog.Debug("Notification sent successfully")

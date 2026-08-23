@@ -733,10 +733,24 @@ func shutdownManagerOnCleanup(t *testing.T, mgr *thread.Manager) {
 }
 
 // publishSuccess simulates a thread's agent run finishing successfully.
+// eventuallyTimeout and eventuallyTick bound every require.Eventually in
+// these tests: a run reaching the fake coordinator, a RunComplete event
+// travelling through the lifecycle's subscriber, a status landing in the
+// store. Same reasoning as settleTimeout above — the deadline only decides
+// how long a genuinely broken test takes to fail, while too small a number
+// fails tests that were merely slow. One second was too small: a loaded CI
+// runner under -race failed TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle
+// on a commit that changed no code at all. The tick stays at a millisecond,
+// so a healthy machine still finishes in microseconds.
+const (
+	eventuallyTimeout = 10 * time.Second
+	eventuallyTick    = time.Millisecond
+)
+
 func publishSuccess(t *testing.T, a *app.App, sessionID string) {
 	t.Helper()
 	coord := a.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return coord.runCount() > 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() > 0 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	runID := coord.runs[len(coord.runs)-1].runID
 	coord.mu.Unlock()

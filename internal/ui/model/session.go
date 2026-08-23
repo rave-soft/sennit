@@ -333,10 +333,6 @@ func loadModifiedFiles(ctx context.Context, ws workspace.Workspace, sessionID st
 	return sessionFiles, nil
 }
 
-func (m *UI) loadModifiedFiles(sessionID string) ([]SessionFile, error) {
-	return loadModifiedFiles(m.com.Context(), m.com.Workspace, sessionID)
-}
-
 // handleFileEvent processes file change events and updates the session file
 // list with new or updated file information.
 func (m *UI) handleFileEvent(file history.File) tea.Cmd {
@@ -345,8 +341,9 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 	}
 
 	sessionID := m.sess.current.ID
+	ctx, ws := m.com.Context(), m.com.Workspace
 	return func() tea.Msg {
-		sessionFiles, err := m.loadModifiedFiles(sessionID)
+		sessionFiles, err := loadModifiedFiles(ctx, ws, sessionID)
 		// could not load session files
 		if err != nil {
 			return util.NewErrorMsg(err)
@@ -363,8 +360,9 @@ func (m *UI) refreshModifiedFiles() tea.Cmd {
 		return nil
 	}
 	sessionID := m.sess.current.ID
+	ctx, ws := m.com.Context(), m.com.Workspace
 	return func() tea.Msg {
-		files, err := m.loadModifiedFiles(sessionID)
+		files, err := loadModifiedFiles(ctx, ws, sessionID)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}

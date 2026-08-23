@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/rave-soft/sennit/internal/ui/rendercachetest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,4 +64,25 @@ func TestCompletionItem_CacheSurvivesInvalidation(t *testing.T) {
 	item.SetFocused(false) // invalidate again
 	_ = item.Render(30)
 	require.Contains(t, item.cache, 30, "the cache must still be writable after a second invalidation cycle")
+}
+
+// TestCompletionItem_RenderIsGenuinelyCached is the counterpart the two
+// tests above don't cover: they only check that the cache map ends up
+// holding *an* entry, which a correct uncached Render would also leave
+// behind by definition (it writes the same key either way). This test
+// proves the second Render(width) call actually *reads* that entry back —
+// and that a different width is never served from it — using
+// [rendercachetest.AssertPerWidthCacheHit]'s sentinel technique.
+func TestCompletionItem_RenderIsGenuinelyCached(t *testing.T) {
+	t.Parallel()
+
+	item := NewCompletionItem(
+		"a-genuinely-cached-item",
+		FileCompletionValue{Path: "a-genuinely-cached-item"},
+		lipgloss.NewStyle(),
+		lipgloss.NewStyle(),
+		lipgloss.NewStyle(),
+	)
+
+	rendercachetest.AssertPerWidthCacheHit(t, item.Render, item.cache, 30, 50)
 }

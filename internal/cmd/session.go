@@ -178,7 +178,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 
 	var writeErr error
 	for _, s := range list {
-		hash := session.HashID(s.ID)[:7]
+		hash := session.HashID(s.ID)[:7] // ok: ascii — a hex session hash
 		date := time.Unix(s.CreatedAt, 0).Format(time.RFC3339)
 		title := strings.ReplaceAll(s.Title, "\n", " ")
 		title = ansi.Truncate(title, titleWidth, "…")
@@ -269,7 +269,7 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	fmt.Fprintf(out, "Deleted session %s\n", session.HashID(sess.ID)[:12])
+	fmt.Fprintf(out, "Deleted session %s\n", session.HashID(sess.ID)[:12]) // ok: ascii — a hex session hash
 	return nil
 }
 
@@ -305,7 +305,7 @@ func runSessionRename(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	fmt.Fprintf(out, "Renamed session %s to %q\n", session.HashID(sess.ID)[:12], newTitle)
+	fmt.Fprintf(out, "Renamed session %s to %q\n", session.HashID(sess.ID)[:12], newTitle) // ok: ascii — a hex session hash
 	return nil
 }
 
@@ -406,7 +406,7 @@ func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess sessi
 	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
 	valStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
 
-	hash := session.HashID(sess.ID)[:12]
+	hash := session.HashID(sess.ID)[:12] // ok: ascii — a hex session hash
 	created := time.Unix(sess.CreatedAt, 0).Format("Mon Jan 2 15:04:05 2006 -0700")
 
 	skills := extractSkillsFromMessages(msgs)

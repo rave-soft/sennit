@@ -128,8 +128,9 @@ func (m *OAuthCodex) startPolling(_ string, _ int) tea.Cmd {
 	}
 	ctx, cancel := context.WithTimeout(m.com.Context(), codexAuthTimeout)
 	m.cancelFunc = cancel
+	flow := m.flow
 	return func() tea.Msg {
-		token, err := m.flow.Wait(ctx)
+		token, err := flow.Wait(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil // cancelled or timed out; the dialog is gone.

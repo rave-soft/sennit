@@ -51,6 +51,42 @@ func TestMarkdownRenderer_ThemeSwitchEvictsStaleRendererLocks(t *testing.T) {
 	require.False(t, stillHeld, "the old renderer's lock entry must be evicted on a theme switch")
 }
 
+// TestMarkdownRenderer_WidthsCachedIndependently proves mdCache is
+// genuinely keyed by width, not just "return whatever was built most
+// recently": pointer identity is the observation here, and it's a
+// non-tautological one — glamour.NewTermRenderer always heap-allocates a
+// fresh renderer, so two calls returning the *same* pointer can only mean
+// the second one read the cache instead of building again, and two
+// different widths returning *different* pointers can only mean they
+// weren't served from the same entry.
+func TestMarkdownRenderer_WidthsCachedIndependently(t *testing.T) {
+	sty := styles.Theme(styles.PaletteSteelTeal.ID)
+
+	at80 := MarkdownRenderer(&sty, 80)
+	at120 := MarkdownRenderer(&sty, 120)
+	require.NotSame(t, at80, at120, "different widths must not share a cache entry")
+
+	require.Same(t, at80, MarkdownRenderer(&sty, 80), "width 80 must still hit its own cache entry")
+	require.Same(t, at120, MarkdownRenderer(&sty, 120), "width 120 must still hit its own cache entry")
+}
+
+// TestMarkdownRenderer_CacheRepopulatesAfterThemeSwitch is the other half
+// of TestMarkdownRenderer_RebuiltOnThemeSwitch: that test only proves the
+// entry is *dropped* on a switch. This proves the dropped entry doesn't
+// stay dropped — the next render at the same width must populate a real,
+// reusable cache entry rather than rebuilding on every call forever
+// (which the old `c.cache = nil`-style bug in the per-item caches would
+// have produced if applied here: an invalidate that never comes back).
+func TestMarkdownRenderer_CacheRepopulatesAfterThemeSwitch(t *testing.T) {
+	sty := styles.Theme(styles.PaletteSteelTeal.ID)
+	_ = MarkdownRenderer(&sty, 90)
+
+	sty = styles.Theme(styles.PaletteInkSage.ID)
+	rebuilt := MarkdownRenderer(&sty, 90)
+	require.Same(t, rebuilt, MarkdownRenderer(&sty, 90),
+		"the render right after a theme switch must itself be cached, not rebuilt on every subsequent call")
+}
+
 func TestChromaStyle_RebuiltOnThemeSwitch(t *testing.T) {
 	sty := styles.Theme(styles.PaletteSteelTeal.ID)
 	before := ChromaStyle(&sty, nil)

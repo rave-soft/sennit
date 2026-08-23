@@ -1,8 +1,10 @@
 package list
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/ui/rendercachetest"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -61,6 +63,32 @@ func TestBaseItemCache_SurvivesRepeatedInvalidation(t *testing.T) {
 	if got := item.Cache()[40]; got != "second" {
 		t.Fatalf("cache write after invalidation must persist, got %q", got)
 	}
+}
+
+// TestBaseItem_RenderIsGenuinelyCached drives BaseItem through the exact
+// nil-guard shape dialog.renderItem uses (`if cache == nil { cache =
+// make(...) }`, read-through, write-back on miss) and proves a second
+// render at the same width is a genuine cache hit, not just a matching
+// recomputation — see [rendercachetest.AssertPerWidthCacheHit]. Checking
+// only "the map contains this width" (as the tests above do) would also
+// pass against a version of dialog.renderItem whose nil-guard reassigns a
+// local variable instead of the field it was handed: that bug still
+// leaves a real entry in the field after a *successful* write, it just
+// never reads it back on the next call.
+func TestBaseItem_RenderIsGenuinelyCached(t *testing.T) {
+	item := NewBaseItem()
+
+	render := func(width int) string {
+		cache := item.Cache()
+		if cached, ok := cache[width]; ok {
+			return cached
+		}
+		content := fmt.Sprintf("rendered at width %d", width)
+		cache[width] = content
+		return content
+	}
+
+	rendercachetest.AssertPerWidthCacheHit(t, render, item.Cache(), 40, 60)
 }
 
 // TestNewSpacerItem covers the height-minus-one bookkeeping:

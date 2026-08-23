@@ -56,8 +56,11 @@ func (m *OAuthCopilot) initiateAuth() tea.Msg {
 func (m *OAuthCopilot) startPolling(deviceCode string, expiresIn int) tea.Cmd {
 	ctx, cancel := context.WithCancel(m.com.Context())
 	m.cancelFunc = cancel
+	// Snapshot the device code: the poll below runs off the Update
+	// goroutine, and m.deviceCode is reassigned when a new flow starts.
+	device := m.deviceCode
 	return func() tea.Msg {
-		token, err := copilot.PollForToken(ctx, m.deviceCode)
+		token, err := copilot.PollForToken(ctx, device)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil // cancelled, don't report error.

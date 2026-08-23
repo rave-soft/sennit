@@ -2,7 +2,6 @@ package thread_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/rave-soft/sennit/internal/thread"
 
@@ -38,7 +37,7 @@ func TestManager_SendFromPersonFoldsIntoRunningTurn(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	coord.setQueue(true, 2)
 	goalRunID := runtimeRunID(t, mgr, st.ID)
 	require.NotEmpty(t, goalRunID)
@@ -48,7 +47,7 @@ func TestManager_SendFromPersonFoldsIntoRunningTurn(t *testing.T) {
 	require.True(t, disp.Steered, "a turn was in flight, so the message folded into it")
 	require.False(t, disp.Queued, "folding is the opposite of queueing behind the turn")
 
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	folded := coord.runs[1]
 	coord.mu.Unlock()
@@ -76,7 +75,7 @@ func TestManager_SendFromPersonStartsOwnTurnWhenIdle(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	coord.setQueue(false, 0)
 
 	disp, err := mgr.SendFromPerson(t.Context(), st.ID, "now do this instead")
@@ -84,7 +83,7 @@ func TestManager_SendFromPersonStartsOwnTurnWhenIdle(t *testing.T) {
 	require.False(t, disp.Steered)
 	require.False(t, disp.Queued)
 
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	own := coord.runs[1]
 	coord.mu.Unlock()
@@ -106,7 +105,7 @@ func TestManager_SendFromAgentStillQueuesBehindRunningTurn(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	coord.setQueue(true, 1)
 	goalRunID := runtimeRunID(t, mgr, st.ID)
 
@@ -116,7 +115,7 @@ func TestManager_SendFromAgentStillQueuesBehindRunningTurn(t *testing.T) {
 	require.Equal(t, 1, disp.Ahead)
 	require.False(t, disp.Steered)
 
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	queued := coord.runs[1]
 	coord.mu.Unlock()
@@ -167,7 +166,7 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	require.Equal(t, thread.StatusRunning, st.Status)
 	require.Empty(t, st.Error, "a turn is in flight; the old failure is no longer the current state")
 
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	personRun := coord.runs[0]
 	coord.mu.Unlock()
@@ -179,7 +178,7 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
 		return err == nil && got.Status == thread.StatusIdle
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 
 	require.NotNil(t, mgr.Handle(st.ID), "the workspace stays live: the person is working in it")
 	got, err := mgr.Get(t.Context(), st.ID)
@@ -194,7 +193,7 @@ func TestManager_RunFromPersonTracksTheTurnAndRestsAtIdle(t *testing.T) {
 func publishFailure(t *testing.T, a *app.App, sessionID, errText string) {
 	t.Helper()
 	coord := a.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return coord.runCount() > 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() > 0 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	runID := coord.runs[len(coord.runs)-1].runID
 	coord.mu.Unlock()
@@ -215,7 +214,7 @@ func TestManager_SendFromPersonCancelledOnEntryRestsAtIdle(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	goalRunID := runtimeRunID(t, mgr, st.ID)
 	coord.setQueue(false, 0)
 	coord.setCancelOnEntry(true)

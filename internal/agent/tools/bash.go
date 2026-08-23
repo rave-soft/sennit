@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"mvdan.cc/sh/v3/syntax"
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
@@ -195,6 +196,144 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
+// bashConfinementRefusal is confinementRefusal's counterpart for the
+// command text itself. The working-dir check only shuts the front door —
+// it stops a command from being *rooted* outside the workspace boundary,
+// but a command rooted inside it can still touch an absolute path
+// elsewhere: `cp x /main/repo/…`, `echo x > /main/repo/y`. This parses
+// command with mvdan/sh (the same parser package `shell` runs the command
+// with) and walks the AST for literal absolute-path arguments and redirect
+// targets that resolve outside the boundary.
+//
+// This is a static best-effort check, not a sandbox, and it is
+// deliberately narrow about what it claims to catch:
+//   - Only words it can resolve without running anything: plain literal
+//     text, and single/double-quoted text made entirely of literals. A
+//     parameter expansion ($VAR), command substitution ($(...) or `...`),
+//     or arithmetic expansion anywhere in the word means the word is
+//     skipped, not "resolved" — pretending to evaluate those statically
+//     would be worse than not trying.
+//   - Glob characters (*, ?, [) are left alone for the same reason: what
+//     they expand to depends on the filesystem at the moment the command
+//     actually runs, not on the literal text.
+//   - A path that is relative in the command text but escapes via a
+//     symlink resolved only at run time is invisible here.
+//   - The command name itself (argv[0] of each simple command) is not
+//     checked: `/usr/bin/env python3` names a binary to run, not a target
+//     being written to.
+//
+// None of that is a gap in this function so much as the reason it exists
+// instead of a sandbox — see the bash entry in TECHDEBT.md.
+func bashConfinementRefusal(permissions permission.Service, command string) (message string, ok bool) {
+	if permissions == nil {
+		return "", false
+	}
+	boundary := permissions.ConfinedDir()
+	if boundary == "" {
+		return "", false
+	}
+	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		// An unparseable command will also fail once the shell actually
+		// tries to run it; nothing further to check here.
+		return "", false
+	}
+
+	var outsidePath string
+	syntax.Walk(file, func(node syntax.Node) bool {
+		if outsidePath != "" {
+			return false
+		}
+		switch n := node.(type) {
+		case *syntax.CallExpr:
+			if len(n.Args) < 2 {
+				return true
+			}
+			for _, w := range n.Args[1:] {
+				if p, found := literalAbsPathOutside(w, boundary); found {
+					outsidePath = p
+					return false
+				}
+			}
+		case *syntax.Redirect:
+			if p, found := literalAbsPathOutside(n.Word, boundary); found {
+				outsidePath = p
+				return false
+			}
+		}
+		return true
+	})
+	if outsidePath == "" {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"refusing to run: %s is outside this workspace. "+
+			"This workspace is isolated to %s.",
+		outsidePath, boundary,
+	), true
+}
+
+// literalAbsPathOutside reports the absolute path w statically evaluates
+// to, if any, when it resolves outside boundary. See
+// bashConfinementRefusal for what this deliberately does not attempt.
+func literalAbsPathOutside(w *syntax.Word, boundary string) (path string, found bool) {
+	lit, ok := literalWordValue(w)
+	if !ok || lit == "" {
+		return "", false
+	}
+	if strings.ContainsAny(lit, "*?[") {
+		return "", false
+	}
+	if !filepathext.SmartIsAbs(lit) {
+		return "", false
+	}
+	_, outside, err := resolveWithinWorkdir(boundary, lit)
+	if err != nil || !outside {
+		return "", false
+	}
+	return lit, true
+}
+
+// literalWordValue returns w's value when every part of it is literal text
+// (plain, or inside single/double quotes with no nested expansion), so the
+// caller can trust it as the exact string the shell would see — no
+// variable, command, or arithmetic substitution resolved or guessed at.
+func literalWordValue(w *syntax.Word) (string, bool) {
+	var sb strings.Builder
+	for _, part := range w.Parts {
+		s, ok := literalWordPart(part)
+		if !ok {
+			return "", false
+		}
+		sb.WriteString(s)
+	}
+	return sb.String(), true
+}
+
+// literalWordPart returns part's literal value, recursing into quotes made
+// entirely of literals. Anything else (ParamExp, CmdSubst, ArithmExp,
+// ExtGlob, ...) is not statically resolvable and reports false.
+func literalWordPart(part syntax.WordPart) (string, bool) {
+	switch p := part.(type) {
+	case *syntax.Lit:
+		return p.Value, true
+	case *syntax.SglQuoted:
+		return p.Value, true
+	case *syntax.DblQuoted:
+		var sb strings.Builder
+		for _, sub := range p.Parts {
+			s, ok := literalWordPart(sub)
+			if !ok {
+				return "", false
+			}
+			sb.WriteString(s)
+		}
+		return sb.String(), true
+	default:
+		return "", false
+	}
+}
+
 // NewBashTool builds the bash tool. bgManager must be non-nil; the
 // coordinator's constructor already rejects a nil BackgroundShells before any
 // tool is built (see NewCoordinator's errBackgroundShellsRequired check), so
@@ -222,6 +361,15 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// a shell can write anywhere — but it keeps the obvious
 			// front door shut and the permission key canonical.
 			if msg, refused := confinementRefusal(permissions, execWorkingDir); refused {
+				return fantasy.NewTextErrorResponse(msg), nil
+			}
+
+			// The working-dir check only shuts the front door; the command
+			// text itself can still name an absolute path outside the
+			// boundary. Catch what a static AST parse can see and refuse
+			// outright — see bashConfinementRefusal's doc comment for
+			// exactly what this does and does not catch.
+			if msg, refused := bashConfinementRefusal(permissions, params.Command); refused {
 				return fantasy.NewTextErrorResponse(msg), nil
 			}
 

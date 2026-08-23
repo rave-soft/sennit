@@ -622,10 +622,13 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 	if m.State != OAuthStateDisplay {
 		return nil
 	}
+	// Snapshot the URL: both closures below run off the Update goroutine,
+	// where m.verificationURL may already belong to the next flow.
+	verificationURL := m.verificationURL
 	if !m.hasUserCode() {
 		// Nothing to copy: the URL is the whole authorization request.
 		return func() tea.Msg {
-			if err := browser.OpenURL(m.verificationURL); err != nil {
+			if err := browser.OpenURL(verificationURL); err != nil {
 				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
 			}
 			return nil
@@ -635,7 +638,7 @@ func (m *OAuth) copyCodeAndOpenURL() tea.Cmd {
 		m.userCode,
 		"Code copied and URL opened",
 		func() tea.Msg {
-			if err := browser.OpenURL(m.verificationURL); err != nil {
+			if err := browser.OpenURL(verificationURL); err != nil {
 				return ActionOAuthErrored{fmt.Errorf("failed to open browser: %w", err)}
 			}
 			return nil

@@ -442,7 +442,7 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 		// command text.
 		col := m.editor.textarea.Column()
 		line := m.editor.textarea.Line()
-		stripped := trimmedNew[1:]
+		stripped := trimmedNew[1:] // ok: ascii — strips the literal "!" bang prefix
 		m.editor.textarea.SetValue(stripped)
 		m.editor.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 		_ = line // cursor line doesn't change; prefix removed
@@ -479,7 +479,10 @@ func (m *UI) handleEditorTextInput(msg tea.KeyPressMsg, cmds []tea.Cmd) []tea.Cm
 			}
 			word := m.editor.textareaWord()
 			if strings.HasPrefix(word, triggerChar) {
-				m.editor.completionsQuery = word[1:]
+				// len(triggerChar), not 1: the trigger is a variable, and a
+				// multi-byte one would leave a broken rune at the front of
+				// the query.
+				m.editor.completionsQuery = word[len(triggerChar):]
 				m.editor.completions.Filter(m.editor.completionsQuery)
 			} else if m.editor.completionsOpen {
 				m.editor.closeCompletions()

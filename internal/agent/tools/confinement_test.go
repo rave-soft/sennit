@@ -283,3 +283,97 @@ func TestBashTool_ConfinedWorkspaceRefusesAWorkingDirOutside(t *testing.T) {
 	require.True(t, resp.IsError, "running outside the workspace must be refused")
 	require.Contains(t, resp.Content, "outside this workspace")
 }
+
+// TestBashTool_ConfinedWorkspaceRefusesAnAbsoluteArgumentOutside closes the
+// gap the previous test's own doc comment named: a command rooted inside
+// the boundary can still name an absolute path outside it as a plain
+// argument, e.g. a destination for `cp`.
+func TestBashTool_ConfinedWorkspaceRefusesAnAbsoluteArgumentOutside(t *testing.T) {
+	t.Parallel()
+
+	workdir, outside, perms := writeOutsideAttempt(t)
+	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  BashToolName,
+		Input: mustJSONInput(t, BashParams{Command: "cp x " + outside}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "an absolute-path argument outside the workspace must be refused")
+	require.Contains(t, resp.Content, "outside this workspace")
+	require.Contains(t, resp.Content, outside, "the refusal must name the offending path")
+}
+
+// TestBashTool_ConfinedWorkspaceRefusesAnAbsoluteRedirectOutside: the other
+// half of the same gap — a redirect target, not a bare argument.
+func TestBashTool_ConfinedWorkspaceRefusesAnAbsoluteRedirectOutside(t *testing.T) {
+	t.Parallel()
+
+	workdir, outside, perms := writeOutsideAttempt(t)
+	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  BashToolName,
+		Input: mustJSONInput(t, BashParams{Command: "echo overwritten > " + outside}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "an absolute redirect target outside the workspace must be refused")
+	require.Contains(t, resp.Content, "outside this workspace")
+	require.Contains(t, resp.Content, outside)
+
+	onDisk, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	require.Equal(t, "original\n", string(onDisk), "the redirect must never have run")
+}
+
+// TestBashTool_ConfinedWorkspaceAllowsLegitimateCommandInsideBoundary is
+// the false-positive check: a command that only ever touches paths inside
+// the workspace — including an absolute one that happens to resolve
+// inside it, and a command invoked by its absolute binary path — must run
+// exactly as it would unconfined. Refusing this would make the confined
+// workspace unusable for real work.
+func TestBashTool_ConfinedWorkspaceAllowsLegitimateCommandInsideBoundary(t *testing.T) {
+	t.Parallel()
+
+	workdir, _, perms := writeOutsideAttempt(t)
+	target := filepath.Join(workdir, "out.txt")
+	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  BashToolName,
+		Input: mustJSONInput(t, BashParams{Command: "echo hello > " + target}),
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "a command writing only inside the workspace must not be refused: %s", resp.Content)
+
+	onDisk, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "hello\n", string(onDisk))
+}
+
+// TestBashTool_ConfinedWorkspaceDoesNotCatchDynamicPaths pins the
+// documented blind spot rather than leaving it as an unverified claim in a
+// comment: a path built from a variable is opaque to a static parse, so
+// this is not refused. It is not a sandbox — see bashConfinementRefusal's
+// doc comment for the full list of what it cannot see.
+func TestBashTool_ConfinedWorkspaceDoesNotCatchDynamicPaths(t *testing.T) {
+	t.Parallel()
+
+	workdir, outside, perms := writeOutsideAttempt(t)
+	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  BashToolName,
+		Input: mustJSONInput(t, BashParams{Command: "OUT=" + outside + "; echo overwritten > \"$OUT\""}),
+	})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "a variable-built path is not statically resolvable and must not be refused")
+
+	onDisk, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	require.Equal(t, "overwritten\n", string(onDisk), "the write went through — this is the documented gap, not a sandbox")
+}

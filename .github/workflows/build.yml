@@ -53,6 +53,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: ./scripts/check_log_capitalization.sh
+      # Compiles _test.go for every OS CI builds: a unix-only syscall or a
+      # POSIX path literal in a test is invisible to a host-only vet.
+      - run: ./scripts/check_cross_platform.sh
       # Built from source with this repo's Go rather than installed as a
       # release binary: golangci-lint refuses to run when the Go it was
       # built with is older than the version the module targets, and its

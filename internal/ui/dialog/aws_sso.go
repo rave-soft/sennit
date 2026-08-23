@@ -275,11 +275,12 @@ func (m *AWSSSO) ShortHelp() []key.Binding {
 }
 
 func (m *AWSSSO) openURLCmd() tea.Cmd {
+	url := m.url
 	return func() tea.Msg {
-		if m.url == "" {
+		if url == "" {
 			return nil
 		}
-		_ = browser.OpenURL(m.url)
+		_ = browser.OpenURL(url)
 		return nil
 	}
 }

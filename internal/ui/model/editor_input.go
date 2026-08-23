@@ -342,7 +342,7 @@ func (m *UI) checkBangModeAfterPaste() {
 	}
 	m.editor.bangMode = true
 	m.editor.bangWasEmpty = true
-	stripped := trimmed[1:]
+	stripped := trimmed[1:] // ok: ascii — strips the literal "!" bang prefix
 	m.editor.textarea.SetValue(stripped)
 	col := m.editor.textarea.Column()
 	m.editor.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))

@@ -135,7 +135,7 @@ func resolveSessionID(ctx context.Context, lookup sessionByIDLister, id string) 
 		// Keep title on one line by replacing newlines with spaces, and truncate.
 		title := strings.ReplaceAll(m.Title, "\n", " ")
 		title = ansi.Truncate(title, 50, "…")
-		fmt.Fprintf(&sb, "  %s... %q (created %s)\n", hash[:12], title, created)
+		fmt.Fprintf(&sb, "  %s... %q (created %s)\n", hash[:12], title, created) // ok: ascii — a hex session hash
 	}
 	sb.WriteString("\nUse more characters or the full hash")
 	return session.Session{}, errors.New(sb.String())

@@ -545,7 +545,7 @@ func TestManager_ManualPolicyCompleted(t *testing.T) {
 
 	writeFile(t, st.WorktreePath, "output.txt", "did the work\n")
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() >= 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() >= 1 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	runID := coord.runs[0].runID
 	coord.mu.Unlock()
@@ -995,14 +995,14 @@ func TestManager_SendOwnershipFollowsLatestRun(t *testing.T) {
 	require.Zero(t, spawner.releases(st.WorktreePath)-1) // only the goal run's release so far
 
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	ownerRunID := coord.runs[0].runID
 	coord.mu.Unlock()
 
 	// Queue a follow-up while the first run is in flight.
 	require.NoError(t, sendErr(mgr.Send(t.Context(), st.ID, "second")))
-	require.Eventually(t, func() bool { return coord.runCount() == 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 2 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	followUpRunID := coord.runs[1].runID
 	coord.mu.Unlock()
@@ -1019,11 +1019,11 @@ func TestManager_SendOwnershipFollowsLatestRun(t *testing.T) {
 
 	// The follow-up completing settles everything.
 	spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: followUpRunID, Text: "second done"})
-	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, eventuallyTimeout, eventuallyTick)
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
 		return err == nil && got.Status == thread.StatusCompleted
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 }
 
 func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
@@ -1045,7 +1045,7 @@ func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
 	// Spawn builds a fresh one): one respawned run from the first Send
 	// plus eleven queued follow-ups — each dispatched asynchronously, so
 	// wait for all of them to land before completing them.
-	require.Eventually(t, func() bool { return coord.runCount() == 12 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 12 }, eventuallyTimeout, eventuallyTick)
 	// Every dispatched turn eventually publishes its own RunComplete. The
 	// workspace is released only by the turn that currently owns the
 	// runtime (the last dispatched RunID) — completing all of them models
@@ -1059,13 +1059,13 @@ func TestManager_ConcurrentSendRespawnsOnce(t *testing.T) {
 	for _, id := range runIDs {
 		spawner.appFor(st.WorktreePath).RunCompletions().Publish(pubsub.UpdatedEvent, notify.RunComplete{SessionID: st.SessionID, RunID: id, Text: "finished"})
 	}
-	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return mgr.Handle(st.ID) == nil }, eventuallyTimeout, eventuallyTick)
 	// Wait for the release rather than asserting it outright: the
 	// run-completion path clears c.runtime (which is what makes Handle
 	// return nil) and only then calls Spawner.Release, so a bare
 	// assertion here races that window and fails intermittently under
 	// -race.
-	require.Eventually(t, func() bool { return spawner.releases(st.WorktreePath) >= 2 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return spawner.releases(st.WorktreePath) >= 2 }, eventuallyTimeout, eventuallyTick)
 }
 
 func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {
@@ -1074,7 +1074,7 @@ func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "cancel-error", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	runID := coord.runs[0].runID
 	coord.mu.Unlock()
@@ -1082,7 +1082,7 @@ func TestManager_CancelledRunCompleteWinsOverError(t *testing.T) {
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
 		return err == nil && got.Status == thread.StatusInterrupted
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 }
 
 func TestManager_RunAcceptedImmediateErrorCompletesAndReleases(t *testing.T) {
@@ -1102,7 +1102,7 @@ func TestManager_RunAcceptedImmediateErrorCompletesAndReleases(t *testing.T) {
 	require.Eventually(t, func() bool {
 		got, err := mgr.Get(t.Context(), st.ID)
 		return err == nil && got.Status == thread.StatusFailed && strings.Contains(got.Error, "boom")
-	}, time.Second, time.Millisecond)
+	}, eventuallyTimeout, eventuallyTick)
 	require.Nil(t, mgr.Handle(st.ID))
 	require.Equal(t, 1, spawner.releases(st.WorktreePath))
 	require.NoError(t, mgr.Shutdown(t.Context()))
@@ -1162,7 +1162,7 @@ func TestManager_RemoveAndCompletionReleaseOnce(t *testing.T) {
 	st, err := mgr.Create(t.Context(), thread.CreateArgs{Name: "race-remove", Goal: "go", MergePolicy: thread.MergeManual})
 	require.NoError(t, err)
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 	coord.mu.Lock()
 	runID := coord.runs[0].runID
 	coord.mu.Unlock()
@@ -1186,7 +1186,7 @@ func TestManager_RemoveForceCancelsThreadOwnSession(t *testing.T) {
 	require.NoError(t, err)
 
 	coord := spawner.coordFor(st.WorktreePath)
-	require.Eventually(t, func() bool { return coord.runCount() == 1 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return coord.runCount() == 1 }, eventuallyTimeout, eventuallyTick)
 
 	require.NoError(t, mgr.Remove(t.Context(), st.ID, true, true))
 

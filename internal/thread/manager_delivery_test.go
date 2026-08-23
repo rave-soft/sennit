@@ -56,7 +56,7 @@ func TestManager_ManualPolicyThreadDeliversCompletionToParentOnce(t *testing.T) 
 		"a manual-policy thread rests at completed - no merge flow to hand off to")
 
 	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick)
 
 	// Nothing else touches this session, so the count is stable once
 	// observed non-empty - no need for a settling sleep before asserting
@@ -95,7 +95,7 @@ func TestManager_AutoMergeThreadDeliversOnceAcrossRunAndMerge(t *testing.T) {
 	require.NoError(t, mgr.Wait(t.Context(), []string{st.ID}, settleTimeout))
 
 	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick)
 
 	// Give a wrongly-duplicated delivery (one at run-completion, one at
 	// merge) a moment to land before asserting the final count is
@@ -142,7 +142,7 @@ func TestManager_AutoMergeThreadConflictDeliversOnceNotAgainOnManualRetry(t *tes
 	require.Equal(t, thread.StatusConflict, st.Status)
 
 	parentCoord := parentApp.AgentCoordinator.(*fakeCoordinator)
-	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return len(parentCoord.deliveredCompletions()) > 0 }, eventuallyTimeout, eventuallyTick)
 	require.Len(t, parentCoord.deliveredCompletions(), 1)
 	require.Equal(t, string(thread.StatusConflict), parentCoord.deliveredCompletions()[0].completion.Status)
 

@@ -9,21 +9,6 @@ deleted, and the history stays in git.
 
 ## Open debt
 
-- **Bash в confined-workspace может писать за границу изнутри команды.**
-  Фаза 0 ревью 2026-08-23 закрыла входную дверь: относительный
-  `working_dir` теперь резолвится от workspace, а confined-workspace
-  отказывается запускать команду, чей рабочий каталог вне границы
-  (`internal/agent/tools/bash.go`, тест
-  `TestBashTool_ConfinedWorkspaceRefusesAWorkingDirOutside`). Но сама
-  команда по-прежнему может трогать произвольные пути (`cp x /main/repo/…`,
-  абсолютные редиректы): статически это не ловится без AST-анализа
-  mvdan/sh или sandbox-исполнения. Следующий шаг — парсить команду
-  mvdan/sh (уже в зависимостях) и отклонять/спрашивать при абсолютных
-  путях-аргументах вне границы, либо исполнять bash тредов в bubblewrap/
-  landlock-песочнице. До тех пор границу треда для bash держит только
-  permission-промпт (а тред наследует yolo).
-
-
 - **Gemini and two consecutive user contents.** Steering is delivered as its
   own `user` message after all tool results
   (`internal/agent/completion_inbox.go`, `prepareStep` in
@@ -79,36 +64,20 @@ deleted, and the history stays in git.
   400s, the fix has to land in fantasy (file it upstream); there is nothing
   further to try from this side first.
 
-- **Профилактика вместо поштучной ловли: четыре класса, а не четыре бага.**
-  Ревью 2026-08-23 закрыло свои находки, но сами классы ошибок ничем не
-  удерживаются, и следующая партия придёт тем же путём. Осталось завести
-  механические проверки:
+- **Bash в confined-workspace: статический разбор есть, песочницы нет.**
+  Фаза 0 закрыла рабочий каталог, а разбор команды через `mvdan/sh` теперь
+  ловит и литеральные абсолютные пути в аргументах и целях редиректов вне
+  границы (`bashConfinementRefusal` в `internal/agent/tools/bash.go`).
+  Отказ, а не запрос разрешения: confined-workspace — это тред, который
+  наследует yolo, и запрос там был бы автоматически одобрен.
 
-  1. *Гонки cmd-замыканий в UI* — 12+ мест одного класса при живой
-     конвенции в `internal/ui/AGENTS.md`. Нужно правило «возвращаемая
-     `func() tea.Msg` не захватывает `m`» (линт или пункт ревью) плюс
-     `-race`-прогон TUI-тестов в CI.
-  2. *Кэши, которые молча не кэшируют* — три независимых случая
-     (`completions/item`, `list/BaseItem`, `chat/ShellItem`): nil-guard
-     писал в локальную переменную, `invalidate` обнулял навсегда. Нужен
-     тест-хелпер, проверяющий cache-hit после повторного `Render`.
-  3. *Байтовые обрезки и индексы вместо `ansi.Truncate`/рун* — пять мест в
-     одном ревью (`cmd/threads`, `chat/question`, `tools/fetch`,
-     `common/button`, `common/elements`). Один grep-линт по `[:\d+]` в
-     UI-пакетах окупится.
-  4. *Обходы permission сбоку* — после фазы 0 нужен таблично-управляемый
-     тест: каждый инструмент, способный писать, обязан проходить
-     permission и confinement, а новый инструмент, не внесённый в
-     таблицу, даёт красный тест.
-
-- **`GOOS=windows go vet ./...` не входит в локальный прогон.** Дважды за
-  ревью 2026-08-23 CI ловил то, что локально не воспроизводилось: тест с
-  захардкоженным `/tmp` (на Windows это не абсолютный путь, и канонизация
-  склеивала его с рабочим каталогом) и два теста с unix-only
-  `syscall.Kill`/`syscall.Getrusage` без build-тега. Обе поймались бы
-  `GOOS=windows go vet ./...`, который тайпчекает и тестовые файлы.
-  Следующий шаг — добавить кросс-платформенный vet в `scripts/` и в
-  lint-джобу CI, чтобы это не зависело от памяти автора.
+  Осталось непокрытым и намеренно не угадывается: `$VAR`, `$(...)`,
+  арифметические подстановки, глобы и относительные пути, убегающие через
+  симлинк во время выполнения. Всё это зафиксировано тестом
+  `TestBashTool_ConfinedWorkspaceDoesNotCatchDynamicPaths`, чтобы никто не
+  принял проверку за песочницу. Настоящая граница — это bubblewrap или
+  landlock; до тех пор динамические пути в треде держит только
+  permission-промпт.
 
 ## Decisions deferred pending confirmation
 

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rave-soft/sennit/internal/fsext"
 	tools "github.com/rave-soft/sennit/internal/proto"
@@ -194,8 +195,12 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 		var parts []string
 		for _, key := range keys {
 			displayKey := strings.ReplaceAll(key, "_", " ")
-			if len(displayKey) > 0 {
-				displayKey = strings.ToUpper(displayKey[:1]) + displayKey[1:]
+			if displayKey != "" {
+				// By rune: an MCP server is free to name a parameter in any
+				// script, and slicing the first byte off a multi-byte one
+				// puts a broken rune at the head of the copied text.
+				first, size := utf8.DecodeRuneInString(displayKey)
+				displayKey = strings.ToUpper(string(first)) + displayKey[size:]
 			}
 			parts = append(parts, fmt.Sprintf("**%s:** %v", displayKey, params[key]))
 		}
