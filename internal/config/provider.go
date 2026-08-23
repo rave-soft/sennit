@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -113,7 +112,11 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	case catwalk.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
-		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
+		// The key goes in a header, never the URL: a failed request wraps
+		// the full URL into the returned error (*url.Error), which ends up
+		// in the UI and logs.
+		testURL = baseURL + "/v1beta/models"
+		headers["x-goog-api-key"] = apiKey
 	case catwalk.TypeBedrock:
 		// NOTE: Bedrock has a `/foundation-models` endpoint that we could in
 		// theory use, but apparently the authorization is region-specific,
@@ -147,7 +150,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+		return fmt.Errorf("failed to connect to provider %s: %w", c.ID, err)
 	}
 	defer resp.Body.Close()
 

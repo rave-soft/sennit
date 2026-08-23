@@ -7,16 +7,21 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
 )
 
-// whitelistDockerTools contains Docker MCP tools that don't require permission.
+// whitelistDockerTools lists tools of the managed Docker MCP gateway that
+// run without a permission request. The bypass applies only to the built-in
+// gateway (`docker mcp gateway run`): a user-configured server that merely
+// shares the name "docker" gets no exemption, so the check goes through
+// isWhitelistedDockerTool rather than matching on the tool name alone.
 var whitelistDockerTools = []string{
-	"mcp_docker_mcp-find",
-	"mcp_docker_mcp-add",
-	"mcp_docker_mcp-remove",
-	"mcp_docker_mcp-config-set",
-	"mcp_docker_code-mode",
+	"mcp-find",
+	"mcp-add",
+	"mcp-remove",
+	"mcp-config-set",
+	"code-mode",
 }
 
 // GetMCPTools gets all the currently available MCP tools from reg, the
@@ -101,14 +106,38 @@ func (m *Tool) Info() fantasy.ToolInfo {
 	}
 }
 
+// isWhitelistedDockerTool reports whether this tool belongs to the managed
+// Docker MCP gateway and is on the no-permission whitelist. It fails closed:
+// any deviation of the configured server from the built-in gateway command
+// means the server is user-controlled and every call goes through the
+// normal permission flow.
+func (m *Tool) isWhitelistedDockerTool() bool {
+	if m.mcpName != config.DockerMCPName || !slices.Contains(whitelistDockerTools, m.tool.Name) {
+		return false
+	}
+	if m.cfg == nil {
+		return false
+	}
+	cfg := m.cfg.Config()
+	if cfg == nil || cfg.MCP == nil {
+		return false
+	}
+	mc, ok := cfg.MCP[config.DockerMCPName]
+	if !ok {
+		return false
+	}
+	managed := config.DockerMCPConfig()
+	return mc.Type == managed.Type && mc.Command == managed.Command && slices.Equal(mc.Args, managed.Args)
+}
+
 func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID := GetSessionFromContext(ctx)
 	if sessionID == "" {
 		return fantasy.ToolResponse{}, missingSessionID("running the MCP tool")
 	}
 
-	// Skip permission for whitelisted Docker MCP tools.
-	if !slices.Contains(whitelistDockerTools, params.Name) {
+	// Skip permission for whitelisted tools of the managed Docker MCP.
+	if !m.isWhitelistedDockerTool() {
 		permissionDescription := fmt.Sprintf("execute %s with the following parameters:", m.Info().Name)
 		resp, denied, err := requirePermission(ctx, m.permissions, permission.CreatePermissionRequest{
 			SessionID:   sessionID,

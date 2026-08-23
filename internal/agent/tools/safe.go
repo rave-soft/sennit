@@ -61,13 +61,21 @@ var safeCommands = []string{
 var chainingMetacharacters = []string{
 	";",
 	"|",
-	"&&",
+	"&", // also covers "&&" and "&>"
 	"$(",
 	"`",
+	// Redirections: a read-only command with ">" writes an arbitrary file,
+	// and "<(" runs an arbitrary command. "<" alone is harmless, but it is
+	// cheaper to prompt than to distinguish it from "<(".
+	">",
+	"<",
+	"\n",
 }
 
 // containsCommandChaining reports whether s contains shell metacharacters
-// that enable command chaining or substitution.
+// that enable command chaining, substitution, or redirection. A command
+// containing any of these is never treated as safe/read-only, so it always
+// goes through the permission request.
 func containsCommandChaining(s string) bool {
 	return slices.ContainsFunc(chainingMetacharacters, func(c string) bool {
 		return strings.Contains(s, c)

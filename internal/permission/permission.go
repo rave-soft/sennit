@@ -360,18 +360,20 @@ func (s *permissionService) Request(ctx context.Context, opts CreatePermissionRe
 		return true, nil
 	}
 
-	fileInfo, err := os.Stat(opts.Path)
-	dir := opts.Path
-	if err == nil {
-		if fileInfo.IsDir() {
-			dir = opts.Path
-		} else {
-			dir = filepath.Dir(opts.Path)
-		}
+	// A relative path is relative to the workspace, not to the process
+	// cwd — resolving it before the Stat and before it becomes the
+	// persistent-grant key keeps that key canonical, so a grant recorded
+	// for a relative spelling matches the later absolute request for the
+	// same file (and never a same-named file elsewhere).
+	path := opts.Path
+	if path == "" || path == "." {
+		path = s.workingDir
+	} else if !filepath.IsAbs(path) {
+		path = filepath.Join(s.workingDir, path)
 	}
-
-	if dir == "." {
-		dir = s.workingDir
+	dir := path
+	if fileInfo, err := os.Stat(path); err == nil && !fileInfo.IsDir() {
+		dir = filepath.Dir(path)
 	}
 	permission := PermissionRequest{
 		ID:          uuid.New().String(),

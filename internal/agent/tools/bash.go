@@ -16,6 +16,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -208,8 +209,21 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				return invalidParam("command"), nil
 			}
 
-			// Determine working directory
-			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
+			// Determine working directory. A relative working_dir is
+			// relative to the workspace, not to the process cwd — same as
+			// every file tool.
+			execWorkingDir := workingDir
+			if params.WorkingDir != "" {
+				execWorkingDir = filepathext.SmartJoin(workingDir, params.WorkingDir)
+			}
+
+			// A confined workspace refuses to run commands rooted outside
+			// it. This does not confine what the command itself touches —
+			// a shell can write anywhere — but it keeps the obvious
+			// front door shut and the permission key canonical.
+			if msg, refused := confinementRefusal(permissions, execWorkingDir); refused {
+				return fantasy.NewTextErrorResponse(msg), nil
+			}
 
 			isSafeReadOnly := false
 			cmdLower := strings.ToLower(params.Command)

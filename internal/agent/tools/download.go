@@ -75,6 +75,10 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			relPath, _ := filepath.Rel(workingDir, filePath)
 			relPath = filepath.ToSlash(cmp.Or(relPath, filePath))
 
+			if msg, refused := confinementRefusal(permissions, filePath); refused {
+				return fantasy.NewTextErrorResponse(msg), nil
+			}
+
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, missingSessionID("downloading files")
@@ -82,6 +86,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 
 			permResp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 				SessionID:   sessionID,
+				ToolCallID:  call.ID,
 				Path:        filePath,
 				ToolName:    DownloadToolName,
 				Action:      "download",

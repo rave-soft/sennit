@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
+	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
 
@@ -237,4 +239,47 @@ func TestConfinedWorkspace_PathWithBackslashSurvivesJSONEncoding(t *testing.T) {
 	require.True(t, resp.IsError, "the write must be refused, not performed")
 	require.Contains(t, resp.Content, "outside this workspace")
 	require.Contains(t, resp.Content, outside, "the backslash in the path must survive the JSON round trip intact")
+}
+
+// TestDownloadTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside: download
+// writes a file too, so the same boundary applies — otherwise a thread
+// could route its escape through a URL instead of write/edit. The refusal
+// happens before any network I/O, so no server is needed here.
+func TestDownloadTool_ConfinedWorkspaceRefusesAnAbsolutePathOutside(t *testing.T) {
+	t.Parallel()
+
+	workdir, outside, perms := writeOutsideAttempt(t)
+	tool := NewDownloadTool(perms, workdir, nil)
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  DownloadToolName,
+		Input: mustJSONInput(t, DownloadParams{URL: "https://example.invalid/x", FilePath: outside}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "the download must be refused, not performed")
+	require.Contains(t, resp.Content, "outside this workspace")
+
+	onDisk, err := os.ReadFile(outside)
+	require.NoError(t, err)
+	require.Equal(t, "original\n", string(onDisk), "the file outside must be untouched")
+}
+
+// TestBashTool_ConfinedWorkspaceRefusesAWorkingDirOutside: bash cannot be
+// confined in what a command touches, but a confined workspace at least
+// refuses to root a command outside itself.
+func TestBashTool_ConfinedWorkspaceRefusesAWorkingDirOutside(t *testing.T) {
+	t.Parallel()
+
+	workdir, outside, perms := writeOutsideAttempt(t)
+	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+
+	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+		ID:    "call-1",
+		Name:  BashToolName,
+		Input: mustJSONInput(t, BashParams{Command: "pwd", WorkingDir: filepath.Dir(outside)}),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "running outside the workspace must be refused")
+	require.Contains(t, resp.Content, "outside this workspace")
 }

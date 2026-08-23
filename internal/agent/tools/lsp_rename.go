@@ -64,6 +64,7 @@ func NewRenameTool(
 			if sessionID != "" && permissions != nil {
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
+					ToolCallID:  call.ID,
 					ToolName:    RenameToolName,
 					Description: fmt.Sprintf("Rename '%s' to '%s'", params.Symbol, params.NewName),
 				})
@@ -76,6 +77,14 @@ func NewRenameTool(
 			}
 
 			affectedFiles := collectAffectedFiles(edit)
+
+			// A rename is a write to every affected file, so the workspace
+			// boundary applies to each of them, same as write/edit.
+			for _, path := range affectedFiles {
+				if msg, refused := confinementRefusal(permissions, path); refused {
+					return fantasy.NewTextErrorResponse(msg), nil
+				}
+			}
 
 			if files != nil && sessionID != "" {
 				for _, path := range affectedFiles {

@@ -288,7 +288,16 @@ func confinementRefusal(permissions permission.Service, filePath string) (messag
 		return "", false
 	}
 	abs, outside, err := resolveWithinWorkdir(dir, filePath)
-	if err != nil || !outside {
+	if err != nil {
+		// A path that cannot be resolved cannot be shown to be inside the
+		// boundary; a confinement check has to fail closed.
+		return fmt.Sprintf(
+			"refusing to write outside this workspace: cannot resolve %s: %s. "+
+				"This workspace is isolated to %s.",
+			filePath, err, dir,
+		), true
+	}
+	if !outside {
 		return "", false
 	}
 	return fmt.Sprintf(

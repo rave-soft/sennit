@@ -130,10 +130,15 @@ func NewReplaceSymbolTool(
 
 			newContent := strings.Join(newLines, "\n")
 
+			if msg, refused := confinementRefusal(permissions, params.FilePath); refused {
+				return fantasy.NewTextErrorResponse(msg), nil
+			}
+
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID != "" && permissions != nil {
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
+					ToolCallID:  call.ID,
 					Path:        params.FilePath,
 					ToolName:    ReplaceSymbolToolName,
 					Description: fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),

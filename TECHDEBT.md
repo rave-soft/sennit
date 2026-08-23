@@ -9,6 +9,21 @@ deleted, and the history stays in git.
 
 ## Open debt
 
+- **Bash в confined-workspace может писать за границу изнутри команды.**
+  Фаза 0 ревью 2026-08-23 закрыла входную дверь: относительный
+  `working_dir` теперь резолвится от workspace, а confined-workspace
+  отказывается запускать команду, чей рабочий каталог вне границы
+  (`internal/agent/tools/bash.go`, тест
+  `TestBashTool_ConfinedWorkspaceRefusesAWorkingDirOutside`). Но сама
+  команда по-прежнему может трогать произвольные пути (`cp x /main/repo/…`,
+  абсолютные редиректы): статически это не ловится без AST-анализа
+  mvdan/sh или sandbox-исполнения. Следующий шаг — парсить команду
+  mvdan/sh (уже в зависимостях) и отклонять/спрашивать при абсолютных
+  путях-аргументах вне границы, либо исполнять bash тредов в bubblewrap/
+  landlock-песочнице. До тех пор границу треда для bash держит только
+  permission-промпт (а тред наследует yolo).
+
+
 - **Gemini and two consecutive user contents.** Steering is delivered as its
   own `user` message after all tool results
   (`internal/agent/completion_inbox.go`, `prepareStep` in
