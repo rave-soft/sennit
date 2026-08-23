@@ -21,6 +21,13 @@ import (
 // releasing via the wrong one is exactly the kind of mistake that would
 // either leak a workspace or, for a task, tear down its parent App), and
 // the cancel function for its RunComplete watcher goroutine.
+// terminalBookkeepingTimeout bounds the detached context
+// handleRunComplete does its terminal work on. The work is local store
+// I/O and a worktree release, so this is a backstop against a wedged
+// store rather than a budget anything normally approaches — and it has
+// to be a backstop, since shutdown joins the worker goroutine running it.
+const terminalBookkeepingTimeout = 15 * time.Second
+
 type runtimeState struct {
 	handle      Handle
 	spawner     Spawner
@@ -771,6 +778,27 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 // Manager.deliverMergeOutcome, which deliver that event once mergeAttempt
 // concludes instead.
 func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComplete) {
+	// Everything below is terminal bookkeeping — releasing the workspace,
+	// recording the final status, telling the parent — and none of it may
+	// run on a context the very event being handled has already canceled.
+	// The contexts reaching here are the run's own and the manager's
+	// long-lived one, and a cancellation is exactly what cancels those:
+	// the run a person interrupted arrives here with err ==
+	// context.Canceled and a dead ctx, so the store.Get failed, the status
+	// was "left stale" at StatusRunning, and deliverCompletion was never
+	// reached — the parent was never told its delegation had ended. Detach
+	// so the bookkeeping still lands, with a deadline so a wedged store
+	// cannot hold shutdown (which joins these workers) forever.
+	//
+	// followUpCtx keeps the caller's own lifetime for the one branch that
+	// outlives this call: onRunSuccess hands an auto-merge thread to a
+	// worker goroutine that captures the context it is given, so handing
+	// it the bounded one below would cancel the merge the moment this
+	// function returns.
+	followUpCtx := ctx
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalBookkeepingTimeout)
+	defer cancel()
+
 	c := l.existingControl(id)
 	if c == nil {
 		return
@@ -842,7 +870,7 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 			return
 		}
 	default:
-		if l.onRunSuccess != nil && l.onRunSuccess(ctx, c, st, rc.Text) {
+		if l.onRunSuccess != nil && l.onRunSuccess(followUpCtx, c, st, rc.Text) {
 			return
 		}
 		finalSt, err = l.setStatus(ctx, id, StatusCompleted, "", rc.Text, time.Now().Unix())

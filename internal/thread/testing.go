@@ -111,3 +111,13 @@ func (m *Manager) WorktreeDirForTest() string {
 func (m *Manager) ShutdownStartedForTest() <-chan struct{} {
 	return m.shutdownStarted
 }
+
+// HandleRunCompleteForTest drives lifecycle.handleRunComplete directly,
+// for tests outside this package that need to hand it a context of their
+// own choosing. Production always reaches it through a run's own
+// completion (see startRun and the RunComplete watcher), whose context a
+// test cannot cancel without shutting the manager down — and a canceled
+// context is exactly the case the terminal bookkeeping has to survive.
+func (m *Manager) HandleRunCompleteForTest(ctx context.Context, id string, rc RunComplete) {
+	m.lc.handleRunComplete(ctx, id, rc)
+}
