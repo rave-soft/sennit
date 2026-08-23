@@ -1010,7 +1010,10 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 			return err
 		}
 	}
-	model := a.model.Get()
+	// The model this turn was actually dispatched on, not whatever the
+	// instance has switched to since — the record written here is what
+	// the transcript shows for the cancelled turn.
+	model := a.callModel(call)
 	assistant, err := a.messages.Create(writeCtx, call.SessionID, message.CreateMessageParams{
 		Role:     message.Assistant,
 		Parts:    []message.ContentPart{},

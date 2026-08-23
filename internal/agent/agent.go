@@ -802,7 +802,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	// Best-effort on purpose: a session whose model failed to persist runs
 	// exactly as it did before this was recorded at all, and failing a
 	// turn over its bookkeeping would be the worse trade.
-	a.recordSessionModel(ctx, call.SessionID)
+	a.recordSessionModel(ctx, call)
 
 	// reporter is this turn's single owner of the terminal RunComplete
 	// event (see completionReporter's own doc comment). It is
@@ -930,7 +930,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	t.historyTokens = estimateMessageTokens(ownHistory)
 
 	startTime := time.Now()
-	a.eventPromptSent(call.SessionID)
+	a.eventPromptSent(call)
 
 	// Don't send MaxOutputTokens if 0 — some providers (e.g. LM Studio) reject it
 	var maxOutputTokens *int64
@@ -970,7 +970,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		},
 	})
 
-	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
+	a.eventPromptResponded(call, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
 		streamResult, streamErr := t.handleStreamError(err)
@@ -1088,11 +1088,12 @@ func (a *sessionAgent) SetModel(model Model) {
 // that is already starting, and a session that keeps no model behaves the
 // way every session behaved before the column existed — it falls back to
 // the instance's own selection.
-func (a *sessionAgent) recordSessionModel(ctx context.Context, sessionID string) {
+func (a *sessionAgent) recordSessionModel(ctx context.Context, call SessionAgentCall) {
 	if a.sessions == nil {
 		return
 	}
-	cfg := a.model.Get().ModelCfg
+	sessionID := call.SessionID
+	cfg := a.callModel(call).ModelCfg
 	if cfg.Provider == "" || cfg.Model == "" {
 		// Nothing worth recording, and writing the zero ref here would
 		// clear a pin the session legitimately has.
@@ -1174,4 +1175,20 @@ func (a *sessionAgent) waitReady(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// callModel is the model this call actually runs on: the runtime the
+// coordinator resolved for it, if there is one, and the agent's own copy
+// otherwise.
+//
+// The distinction matters wherever a turn is described rather than run —
+// the model pinned on the session, the assistant record written for a
+// cancelled turn, the telemetry — because a.model is replaced by
+// UpdateModels while a turn is in flight, so those all attributed the
+// turn to whatever the instance had switched to since.
+func (a *sessionAgent) callModel(call SessionAgentCall) Model {
+	if call.Runtime != nil {
+		return call.Runtime.model
+	}
+	return a.model.Get()
 }

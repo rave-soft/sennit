@@ -95,13 +95,20 @@ func (r *Registry) persistOAuthToken(_ context.Context, cfg ConfigProvider, name
 		return
 	}
 	defer r.finishTokenWrite(name, owner, write)
+
+	// publishMu covers the two map reads below and nothing more: the
+	// commit writes the config to disk, and that takes a cross-process
+	// file lock with a five-second deadline. Holding the registry's
+	// publish lock across it stalled every other registry operation —
+	// state changes, tool-list refreshes, every subscriber — for as long
+	// as another process happened to be mid-write. beginTokenWrite above
+	// is what actually serialises token writes for this server.
 	r.publishMu.Lock()
-	defer r.publishMu.Unlock()
-	if !r.ownsLocked(name, owner) {
-		return
-	}
+	owns := r.ownsLocked(name, owner)
 	reservation, ok := r.tokenReservations[tokenWriteOwner{name: name, attempt: owner}]
-	if !ok {
+	r.publishMu.Unlock()
+
+	if !owns || !ok {
 		return
 	}
 	if err := r.tokenCommit(cfg, reservation, tok); err != nil {

@@ -7,16 +7,16 @@ import (
 	"github.com/rave-soft/sennit/internal/event"
 )
 
-func (a *sessionAgent) eventPromptSent(sessionID string) {
+func (a *sessionAgent) eventPromptSent(call SessionAgentCall) {
 	event.PromptSent(
-		a.eventCommon(sessionID, a.model.Get())...,
+		a.eventCommon(call.SessionID, a.callModel(call))...,
 	)
 }
 
-func (a *sessionAgent) eventPromptResponded(sessionID string, duration time.Duration) {
+func (a *sessionAgent) eventPromptResponded(call SessionAgentCall, duration time.Duration) {
 	event.PromptResponded(
 		append(
-			a.eventCommon(sessionID, a.model.Get()),
+			a.eventCommon(call.SessionID, a.callModel(call)),
 			"prompt duration pretty", duration.String(),
 			"prompt duration in seconds", int64(duration.Seconds()),
 		)...,

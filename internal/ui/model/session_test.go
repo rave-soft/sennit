@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -218,4 +219,29 @@ func stripANSI(s string) string {
 		b.WriteByte(s[i])
 	}
 	return b.String()
+}
+
+// TestFileListFitsItsBudget pins the line count against maxItems. The
+// truncation hint is a line of its own, and rendering it on top of a full
+// maxItems rows made the section one line taller than the caller had
+// allowed — enough to push the row below it off the panel.
+func TestFileListFitsItsBudget(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.Theme("")
+	files := make([]SessionFile, 0, 10)
+	for i := range 10 {
+		files = append(files, SessionFile{
+			FirstVersion: history.File{Path: fmt.Sprintf("/repo/file%d.go", i)},
+			Additions:    1,
+		})
+	}
+
+	for _, maxItems := range []int{1, 2, 5} {
+		out := fileList(&sty, "/repo", files, 60, maxItems)
+		lines := strings.Split(out, "\n")
+		require.LessOrEqual(t, len(lines), maxItems,
+			"maxItems=%d must bound the rendered lines, got:\n%s", maxItems, out)
+		require.Contains(t, out, "more", "the hint must still be shown")
+	}
 }

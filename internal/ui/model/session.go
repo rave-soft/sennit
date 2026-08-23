@@ -410,12 +410,21 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 	if maxItems <= 0 {
 		return ""
 	}
+	// The truncation hint is a line of its own, so it has to come out of
+	// the budget rather than sit on top of it: rendering maxItems rows
+	// *and* the hint made the section one line taller than the caller had
+	// allowed for, which pushed the row below it off the panel.
+	showLimit := maxItems
+	if len(filesWithChanges) > maxItems {
+		showLimit = maxItems - 1
+	}
+
 	var renderedFiles []string
 	filesShown := 0
 
 	for _, f := range filesWithChanges {
 		// Skip files with no changes
-		if filesShown >= maxItems {
+		if filesShown >= showLimit {
 			break
 		}
 
@@ -454,8 +463,7 @@ func fileList(t *styles.Styles, cwd string, filesWithChanges []SessionFile, widt
 		filesShown++
 	}
 
-	if len(filesWithChanges) > maxItems {
-		remaining := len(filesWithChanges) - maxItems
+	if remaining := len(filesWithChanges) - filesShown; remaining > 0 {
 		renderedFiles = append(renderedFiles, t.Files.TruncationHint.Render(fmt.Sprintf("…and %d more", remaining)))
 	}
 

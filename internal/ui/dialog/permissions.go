@@ -455,9 +455,18 @@ func (p *Permissions) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		viewportWidth = contentWidth - 1 // Reserve space for scrollbar.
 	}
 
+	// The pre-render above measured at contentWidth; the scrollbar then
+	// takes a column. Re-render at the viewport's actual width whenever
+	// the two differ and this content is going to be installed — the
+	// width-changed check alone missed the case that bites: toggling the
+	// diff split marks the content dirty without changing the viewport's
+	// width, so the wider render was set into the narrower viewport and
+	// every line overflowed by one column.
 	if p.viewport.Width() != viewportWidth {
 		// Mark content as dirty if width has changed.
 		p.viewportDirty = true
+		renderedContent = p.renderContent(viewportWidth)
+	} else if p.viewportDirty && viewportWidth != contentWidth {
 		renderedContent = p.renderContent(viewportWidth)
 	}
 
