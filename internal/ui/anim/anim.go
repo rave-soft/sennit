@@ -103,6 +103,26 @@ type StepMsg struct {
 	Gen int64
 }
 
+// RetryDelay is the cadence at which a tick that could not be delivered
+// is retried. A tick chain is self-perpetuating — the handler that
+// receives a StepMsg returns the command that schedules the next one — so
+// a receiver that drops one (the item scrolled out of view, the screen it
+// lives on is not the one showing) does not stall the animation, it ends
+// it: nothing on the way back re-arms a spinner mid-flight, and it sits
+// frozen on the frame it happened to reach. Retry instead of dropping,
+// slowly enough that an off-screen spinner costs nothing.
+const RetryDelay = time.Second / 2
+
+// Retry re-emits msg after [RetryDelay], keeping a tick chain alive across
+// a receiver that could not use it. The generation stamped on msg is
+// preserved, so a chain that has since been superseded by a Start() still
+// dies on arrival exactly as it would have.
+func Retry(msg StepMsg) tea.Cmd {
+	return tea.Tick(RetryDelay, func(time.Time) tea.Msg {
+		return msg
+	})
+}
+
 // Settings defines settings for the animation.
 type Settings struct {
 	ID          string

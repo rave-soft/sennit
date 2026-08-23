@@ -558,15 +558,44 @@ func (m *Chat) Animate(msg anim.StepMsg) tea.Cmd {
 	isVisible := idx >= startIdx && idx <= endIdx
 
 	if !isVisible {
-		// Item not visible - pause animation by not propagating.
-		// Track it so we can restart when it becomes visible.
+		// Item not visible - pause the animation by not propagating the
+		// tick to it, but keep the chain itself alive on a slow retry.
+		// RestartPausedVisibleAnimations re-arms it as soon as a scroll
+		// brings the item back; the retry is what covers everything that
+		// never scrolls. Dropping the tick outright ended the chain, and
+		// a spinner that went off-screen mid-turn stayed frozen on the
+		// frame it had reached even once it was visible again.
 		m.pausedAnimations[msg.ID] = struct{}{}
-		return nil
+		if !m.AnimationLives(msg.ID) {
+			// Whatever it was waiting on has landed while it was out of
+			// view: let the chain end here rather than retrying forever.
+			delete(m.pausedAnimations, msg.ID)
+			return nil
+		}
+		return anim.Retry(msg)
 	}
 
 	// Item is visible - remove from paused set and animate.
 	delete(m.pausedAnimations, msg.ID)
 	return animatable.Animate(msg)
+}
+
+// AnimationLives reports whether id still names an item of this chat that
+// has something left to animate. It is what bounds the tick retries: a
+// chain kept alive across an undeliverable tick has to end once its item
+// is gone (the session was replaced) or done (the turn finished, the tool
+// returned), or an off-screen spinner would tick at the retry cadence for
+// the rest of the session.
+//
+// Nested tools answer through their container, whose index their id maps
+// to and which is unfinished for as long as any of them is.
+func (m *Chat) AnimationLives(id string) bool {
+	idx, ok := m.idInxMap[id]
+	if !ok {
+		return false
+	}
+	item := m.list.ItemAt(idx)
+	return item != nil && !item.Finished()
 }
 
 // RestartPausedVisibleAnimations restarts animations for items that were paused

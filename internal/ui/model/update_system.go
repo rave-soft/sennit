@@ -93,14 +93,25 @@ func (m *UI) updateSystem(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		}
 
 	case anim.StepMsg:
-		if m.state == uiChat {
-			if cmd := m.chat.Animate(msg); cmd != nil {
-				cmds = append(cmds, cmd)
+		if m.state != uiChat {
+			// Another screen is up (the landing screen of a session being
+			// created, say). Retry rather than drop: the chat's spinners
+			// are still the truth about a turn that is still running, and
+			// a dropped tick ends the chain outright — every one of them
+			// would sit frozen until the next session load re-armed it.
+			// AnimationLives is what stops the retry once the item is
+			// gone or done.
+			if m.chat.AnimationLives(msg.ID) {
+				cmds = append(cmds, anim.Retry(msg))
 			}
-			if m.chat.Follow() {
-				if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+			break
+		}
+		if cmd := m.chat.Animate(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if m.chat.Follow() {
+			if cmd := m.chat.ScrollToBottomAndAnimate(); cmd != nil {
+				cmds = append(cmds, cmd)
 			}
 		}
 	case scrollbarHideMsg:
