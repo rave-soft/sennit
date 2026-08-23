@@ -278,7 +278,14 @@ func (w *AppWorkspace) SubscribeWith(send func(tea.Msg)) func() {
 				if !ok {
 					return
 				}
-				send(ev.Payload)
+				// Through the same translation the main screen's own
+				// subscription uses. Sent raw, an embedded thread's UI
+				// received app-internal shapes its Update has no case
+				// for — so a thread view showed none of its agent's
+				// errors, re-auth prompts, or MCP/LSP state changes.
+				if translated := w.translateEvent(ev.Payload); translated != nil {
+					send(translated)
+				}
 			}
 		}
 	}()

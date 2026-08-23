@@ -422,7 +422,7 @@ func TestThreadRemoveTool_ForceRemoves(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestThreadMergeTool_ManualPolicyMergesAfterCompletion(t *testing.T) {
+func TestThreadMergeTool_RefusesAThreadWithATurnInFlight(t *testing.T) {
 	repo := initRepo(t)
 	mgr := newTestThreadManager(t, repo)
 
@@ -431,14 +431,16 @@ func TestThreadMergeTool_ManualPolicyMergesAfterCompletion(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(st.WorktreePath, "output.txt"), []byte("content\n"), 0o644))
 
+	// No completion is ever published in this fake-spawner setup, so the
+	// thread is still running — and merging under a live turn commits
+	// whatever half-written state the agent is holding. The manager
+	// refuses; this pins that the tool surfaces that refusal rather than
+	// swallowing it. The merge state machine itself is covered by
+	// internal/thread's own tests.
 	tool := tools.NewThreadMergeTool(mgr, grantingPermissions(t))
 	resp := callTool(t, tool, tools.ThreadMergeParams{ID: st.ID})
-	// The thread is still "running" (no completion was ever published in
-	// this fake-spawner setup), so mergeAttempt's status transitions still
-	// run without error even though nothing meaningful merges yet; this
-	// exercises the tool's plumbing, not thread's merge state machine
-	// (covered by internal/thread's own tests).
-	require.False(t, resp.IsError)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "active")
 }
 
 func TestThreadWaitTool_ReturnsImmediatelyWhenNothingActive(t *testing.T) {

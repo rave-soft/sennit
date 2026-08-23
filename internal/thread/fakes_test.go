@@ -339,6 +339,10 @@ type fakeCoordinator struct {
 	// session in the state lifecycle.send reports as a queued delivery.
 	busy   bool
 	queued int
+	// steerDispatchErr makes a steering dispatch fail without ever
+	// reporting a decision — the shape lifecycle.steer's error branch
+	// exists for: a coordinator that never admitted the call at all.
+	steerDispatchErr error
 	// cancelOnEntry makes a steering dispatch resolve the way the real
 	// coordinator resolves one that a cancel already covered when it
 	// arrived: neither run nor folded. Only reachable because the dispatch
@@ -437,6 +441,11 @@ type fakeRun struct {
 func (f *fakeCoordinator) dispatch(ctx context.Context, sessionID, prompt string) error {
 	onDispatch, steering := agent.SteeringFromContext(ctx)
 	f.mu.Lock()
+	if steering && f.steerDispatchErr != nil {
+		err := f.steerDispatchErr
+		f.mu.Unlock()
+		return err
+	}
 	if steering && f.cancelOnEntry {
 		f.mu.Unlock()
 		if onDispatch != nil {

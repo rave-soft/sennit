@@ -403,6 +403,12 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 	}
 	done := make(chan response, 1)
 
+	// Subscribed before the run starts, not inside the reader goroutine
+	// below: a subscription taken after Run is already going misses
+	// whatever it published in between, which for a short answer can be
+	// the whole thing.
+	messageEvents := w.app.Messages().Subscribe(ctx)
+
 	go func() {
 		result, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt)
 		if err != nil {
@@ -416,9 +422,60 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 		defer cancel()
 		defer close(out)
 
-		messageEvents := w.app.Messages().Subscribe(ctx)
 		readBytes := make(map[string]int)
 		var printed bool
+
+		// emit turns one message event into a text delta, or reports that
+		// the stream must end. Shared by the live loop and the drain after
+		// the run finishes, so both produce identical output.
+		emit := func(ev pubsub.Event[message.Message]) (stop bool, fail error) {
+			msg := ev.Payload
+			if msg.SessionID != sessionID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
+				return false, nil
+			}
+			content := msg.Content().String()
+			rb := readBytes[msg.ID]
+			if len(content) < rb {
+				return true, fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), rb)
+			}
+			part := content[rb:]
+			// Trim leading whitespace. Sometimes the LLM includes
+			// leading formatting and indentation, which we don't
+			// want here.
+			if rb == 0 {
+				part = strings.TrimLeft(part, " \t")
+			}
+			readBytes[msg.ID] = len(content)
+
+			// Ignore initial whitespace-only messages.
+			if !printed && strings.TrimSpace(part) == "" {
+				return false, nil
+			}
+			printed = true
+			out <- AgentRunEvent{TextDelta: part}
+			return false, nil
+		}
+
+		// drain empties whatever the run published just before it
+		// returned. The last chunk of an answer is routinely still in the
+		// subscription when done fires, and returning straight away
+		// dropped it — the visible symptom being a reply that ends
+		// mid-sentence.
+		drain := func() error {
+			for {
+				select {
+				case ev, ok := <-messageEvents:
+					if !ok {
+						return nil
+					}
+					if _, err := emit(ev); err != nil {
+						return err
+					}
+				default:
+					return nil
+				}
+			}
+		}
 
 		for {
 			select {
@@ -429,6 +486,10 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 						return
 					}
 					out <- AgentRunEvent{Done: true, Err: fmt.Errorf("agent processing failed: %w", result.err)}
+					return
+				}
+				if err := drain(); err != nil {
+					out <- AgentRunEvent{Done: true, Err: err}
 					return
 				}
 				out <- AgentRunEvent{Done: true}
@@ -443,33 +504,10 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 					messageEvents = nil
 					continue
 				}
-				msg := ev.Payload
-				if msg.SessionID != sessionID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
-					continue
-				}
-
-				content := msg.Content().String()
-				rb := readBytes[msg.ID]
-				if len(content) < rb {
-					out <- AgentRunEvent{Done: true, Err: fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), rb)}
+				if _, err := emit(ev); err != nil {
+					out <- AgentRunEvent{Done: true, Err: err}
 					return
 				}
-
-				part := content[rb:]
-				// Trim leading whitespace. Sometimes the LLM includes
-				// leading formatting and indentation, which we don't
-				// want here.
-				if rb == 0 {
-					part = strings.TrimLeft(part, " \t")
-				}
-				readBytes[msg.ID] = len(content)
-
-				// Ignore initial whitespace-only messages.
-				if !printed && strings.TrimSpace(part) == "" {
-					continue
-				}
-				printed = true
-				out <- AgentRunEvent{TextDelta: part}
 
 			case <-ctx.Done():
 				out <- AgentRunEvent{Done: true, Err: ctx.Err()}

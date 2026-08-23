@@ -760,6 +760,14 @@ func (m *Manager) Merge(ctx context.Context, idOrName string) (Thread, error) {
 	if st.Kind != KindThread {
 		return Thread{}, fmt.Errorf("thread: %q is not a thread", idOrName)
 	}
+	// A turn still in flight owns the worktree: merging under it commits
+	// whatever half-written state the agent happens to be holding, and
+	// then finishMerge cancels the run — whose cancelled RunComplete is
+	// dropped, since the row is no longer StatusRunning by the time it
+	// lands. Refuse, the way Remove refuses for the same statuses.
+	if st.Status.Active() {
+		return Thread{}, fmt.Errorf("thread: %q is active (status=%s) and cannot be merged; cancel or wait for it first", st.Name, st.Status)
+	}
 	// Empty resultSummary tells mergeAttempt to keep whatever is already
 	// on the row (e.g. from the run that led to the current conflict or
 	// merge_blocked state) instead of clobbering it.
@@ -1046,16 +1054,29 @@ func (m *Manager) Remove(ctx context.Context, idOrName string, force, deleteBran
 		}
 	}
 
+	// c.removed was set above so a Create racing this teardown cannot
+	// resurrect the entity mid-removal. It has to come back off if the
+	// removal then fails: the row is still there and still resolvable,
+	// but every later operation consults this flag and answers "has been
+	// removed" — a thread that could not be deleted became one nothing
+	// could touch either, with no way back short of a restart.
+	abort := func(err error) error {
+		c.mu.Lock()
+		c.removed = false
+		c.mu.Unlock()
+		return err
+	}
+
 	if err := git.WorktreeRemove(ctx, m.repoRoot, st.WorktreePath, force); err != nil {
-		return fmt.Errorf("thread: remove worktree: %w", err)
+		return abort(fmt.Errorf("thread: remove worktree: %w", err))
 	}
 	if deleteBranch {
 		if err := git.DeleteBranch(ctx, m.repoRoot, st.Branch, force); err != nil {
-			return fmt.Errorf("thread: delete branch: %w", err)
+			return abort(fmt.Errorf("thread: delete branch: %w", err))
 		}
 	}
 	if err := m.store.Delete(ctx, st.ID); err != nil {
-		return fmt.Errorf("thread: delete record: %w", err)
+		return abort(fmt.Errorf("thread: delete record: %w", err))
 	}
 	m.lc.publish(EventRemoved, st)
 	return nil

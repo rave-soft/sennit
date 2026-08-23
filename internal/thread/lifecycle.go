@@ -477,8 +477,12 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 		}
 	})
 
-	select {
-	case outcome := <-decided:
+	// applyDecision is the reaction to a dispatch outcome, shared by the
+	// two branches below: a decision and a dispatch error can become
+	// ready in the same instant, and Go picks between ready cases at
+	// random. Reached through the error branch, that would have thrown
+	// away a decision that had in fact been made.
+	applyDecision := func(outcome DispatchOutcome) (SendDisposition, error) {
 		switch outcome {
 		case DispatchFolded:
 			// Folded into the turn in flight: that turn's completion is
@@ -508,12 +512,29 @@ func (l *lifecycle) steer(bgCtx context.Context, c *threadControl, rt *runtimeSt
 		rt.person = true
 		c.mu.Unlock()
 		return SendDisposition{}, nil
+	}
+
+	select {
+	case outcome := <-decided:
+		return applyDecision(outcome)
 	case err := <-failed:
+		// A decision may have landed in the same instant the dispatch
+		// returned; it is the more specific answer, so take it first.
+		select {
+		case outcome := <-decided:
+			return applyDecision(outcome)
+		default:
+		}
 		// The dispatch failed before reaching a decision (a coordinator
 		// that never admitted the call). Nothing was queued and no run
 		// started, so there is nothing to own and nothing to report but
 		// the error.
 		if err != nil {
+			// The caller moved the delegation to running before
+			// dispatching. No run exists to move it back, so without this
+			// the thread sat at running for the rest of the process — the
+			// same reason the cancelled branch rests it.
+			l.restIdleAfterPersonTurn(bgCtx, id, RunComplete{SessionID: sessionID})
 			return SendDisposition{}, err
 		}
 		// Returned cleanly without ever reporting a decision. Not a state
