@@ -305,9 +305,14 @@ func (p *shutdownPhases) Shutdown() {
 	// 3. Flush any debounced message updates before the DB-close cleanup
 	// runs. message.Service buffers streaming deltas and we must land
 	// them while the connection is still open.
+	//
+	// Close rather than FlushAll: a drain alone leaves the service free
+	// to arm another debounce timer, and one that fires after this point
+	// writes to a database that is closing underneath it. Close stops the
+	// timers first and drains second, so nothing is left to fire.
 	if app.messages != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), p.shutdownTimeout)
-		if err := app.messages.FlushAll(ctx); err != nil {
+		if err := app.messages.Close(ctx); err != nil {
 			slog.Error("Failed to flush pending message updates on shutdown", "error", err)
 		}
 		cancel()

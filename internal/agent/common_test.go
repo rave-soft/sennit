@@ -111,6 +111,14 @@ func testEnvAt(t *testing.T, workingDir string) fakeEnv {
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
 	t.Cleanup(func() {
+		// Close the message service before the connection: it owns
+		// debounce timers that write on their own schedule, and one
+		// firing after conn.Close holds a connection open — which on
+		// Windows keeps the database file locked and makes t.TempDir's
+		// own cleanup fail the test that had already passed.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = messages.Close(closeCtx)
+		cancel()
 		_ = conn.Close()
 		_ = os.RemoveAll(workingDir)
 	})

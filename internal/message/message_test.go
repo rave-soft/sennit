@@ -1167,3 +1167,41 @@ func TestFlushAll_DrainsQueuedUpdateUnderConcurrentWrites(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got.Content().Text, 20, "a queued update must survive FlushAll draining, even mid-stream")
 }
+
+// TestCloseStopsTimersSoNothingWritesAfterwards pins what Close adds over
+// FlushAll. A drain empties what is pending at the instant it runs, but a
+// debounce timer armed a moment earlier still fires afterwards and issues
+// its own write — against a database the caller is about to close. On
+// Windows that is not merely a logged error: the connection it takes
+// keeps the file open, and the directory cannot be removed, which failed
+// tests that had already passed.
+func TestCloseStopsTimersSoNothingWritesAfterwards(t *testing.T) {
+	t.Parallel()
+
+	svc, sessID := newTestService(t, WithDebounce(20*time.Millisecond))
+
+	msg, err := svc.Create(t.Context(), sessID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	// An update arms a debounce timer.
+	msg.AppendContent("hello")
+	require.NoError(t, svc.Update(t.Context(), msg))
+
+	require.NoError(t, svc.Close(t.Context()))
+
+	// What Close drained is on disk...
+	stored, err := svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, "hello", stored.Content().Text)
+
+	// ...and a further update arms nothing: well past the debounce
+	// window, the store still holds what Close left there.
+	msg.AppendContent(" again")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	time.Sleep(100 * time.Millisecond)
+
+	stored, err = svc.Get(t.Context(), msg.ID)
+	require.NoError(t, err)
+	require.Equal(t, "hello", stored.Content().Text,
+		"Close must stop the service arming new debounced work")
+}

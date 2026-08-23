@@ -75,6 +75,21 @@ type Service interface {
 	// message known to the service. Intended for shutdown and
 	// session-switch paths.
 	FlushAll(ctx context.Context) error
+
+	// Close drains like FlushAll and then stops the service accepting
+	// further debounced work: no new timer is armed after it returns, so
+	// nothing writes to the database behind the caller's back.
+	//
+	// FlushAll alone is not enough for a caller that is about to close
+	// the database. It drains what is pending at the instant it runs, but
+	// a timer armed a moment earlier — or the retry a failed flush arms
+	// for itself — still fires afterwards and issues its own write.
+	// Against a closed database that is a logged error; on Windows it is
+	// worse than that, because the connection it takes keeps the file
+	// open and the directory cannot be removed.
+	//
+	// Idempotent, and safe to call on a service that was never used.
+	Close(ctx context.Context) error
 }
 
 // pendingState holds the in-memory coalescing buffer for a single
@@ -128,7 +143,10 @@ type service struct {
 	q        db.Querier
 	debounce time.Duration
 
-	mu      sync.Mutex
+	mu sync.Mutex
+	// closed is set by Close: rearmFlushTimer and the debounce arming in
+	// Update both consult it, so no timer outlives the drain.
+	closed  bool
 	pending map[string]*pendingState
 }
 
@@ -290,7 +308,7 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 	// Debounce: schedule a single flush per pending state. If a flush
 	// is already running we let it finish; the trailing dirty bit will
 	// be picked up by the next Update or by Flush.
-	if p.timer == nil && !p.flushing {
+	if p.timer == nil && !p.flushing && !s.closed {
 		id := msg.ID
 		p.timer = time.AfterFunc(s.debounce, func() {
 			// Detached from caller ctx so a cancelled stream context
@@ -328,6 +346,24 @@ func (s *service) FlushAll(ctx context.Context) error {
 		}
 	}
 	return firstErr
+}
+
+// Close implements [Service.Close].
+func (s *service) Close(ctx context.Context) error {
+	// Stop first, drain second. The other order leaves a window in which
+	// a timer that fired during the drain arms its own successor, which
+	// is exactly the write that outlives this call.
+	s.mu.Lock()
+	s.closed = true
+	for _, p := range s.pending {
+		if p.timer != nil {
+			p.timer.Stop()
+			p.timer = nil
+		}
+	}
+	s.mu.Unlock()
+
+	return s.FlushAll(ctx)
 }
 
 // flushOne drains a single message ID. When syncCaller is true the
@@ -469,6 +505,9 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 func (s *service) rearmFlushTimer(id string, p *pendingState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
 	if cur, ok := s.pending[id]; ok && cur == p && cur.dirty && !cur.flushing && cur.timer == nil {
 		cur.timer = time.AfterFunc(s.debounce, func() {
 			_ = s.flushOne(context.Background(), id, false)
