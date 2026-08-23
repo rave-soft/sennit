@@ -19,14 +19,18 @@ import (
 // internal/thread must not import internal/app (the composition root that
 // imports thread's types), so *App satisfies this interface structurally
 // and is handed in as a thread.Workspace by whichever spawner produced it
-// (see internal/app/threadspawn). app deliberately keeps no import of
-// internal/thread in its own production code, but internal/thread's own
-// tests import app for realistic *app.App-backed fakes (see
-// internal/thread/fakes_test.go) — so even a one-way production import
-// from app to thread would turn `go test ./internal/thread/...` into an
-// import cycle. That is why the thread managers this App carries (see the
-// Threads/Tasks fields) stay typed through the agent-tool seams and the
-// untyped accessors instead.
+// (see internal/app/threadspawn).
+//
+// app does import internal/thread — services.go names *thread.Manager and
+// *thread.TaskManager for the two concretely-typed accessors — and
+// internal/thread's own tests import app back for realistic *app.App
+// fakes (see internal/thread/fakes_test.go). That is legal because those
+// fakes live in package thread_test, whose imports are not part of
+// internal/thread's own import graph; a production import from thread to
+// app is what would cycle. An earlier version of this comment claimed app
+// kept no thread import at all, and the Threads/Tasks seams were said to
+// exist for that reason — they exist because the agent-tool layer needs a
+// narrower interface than the manager, which is a different argument.
 
 // Coordinator returns this workspace's agent coordinator, or nil if it
 // has not been initialized yet (an unconfigured project).

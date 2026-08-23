@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/tidwall/sjson"
 )
@@ -191,3 +192,41 @@ func shallowMerge(base, patch string) (string, error) {
 type errNotObject string
 
 func (e errNotObject) Error() string { return string(e) + " is not a JSON object" }
+
+// Hook is one configured hook: what to run, when, and how long to wait.
+//
+// It lives here rather than in internal/config because this package is
+// where hooks are executed, and config is a large package that pulls in
+// the database, the shell and the OAuth providers — everything that only
+// wanted to describe a hook was linking all of it. Hook is
+// an alias for this type, so both names refer to one definition and no
+// conversion is needed anywhere.
+type Hook struct {
+	// Name is the friendly display name shown in the TUI. Falls back to
+	// Command when empty.
+	Name string `json:"name,omitempty" jsonschema:"description=Friendly display name shown in the TUI for this hook"`
+	// Matcher is a regex tested against the tool name. Empty matches all.
+	Matcher string `json:"matcher,omitempty" jsonschema:"description=Regex pattern tested against the tool name. Empty means match all tools."`
+	// Command is the shell command to execute.
+	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
+	// Timeout is the hook's timeout in seconds. Default 30.
+	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
+}
+
+// DisplayName returns the hook name for display purposes: Name when set,
+// and the command otherwise.
+func (h *Hook) DisplayName() string {
+	if h.Name != "" {
+		return h.Name
+	}
+	return h.Command
+}
+
+// TimeoutDuration returns the hook timeout as a duration, defaulting to
+// 30s.
+func (h *Hook) TimeoutDuration() time.Duration {
+	if h.Timeout <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(h.Timeout) * time.Second
+}

@@ -3,12 +3,12 @@ package hooks
 import (
 	"context"
 	"io"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -224,10 +224,10 @@ func TestBuildPayload(t *testing.T) {
 
 func TestRunnerExitCode0Allow(t *testing.T) {
 	t.Parallel()
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `echo '{"decision":"allow","context":"ok"}'`,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, result.Decision)
@@ -236,10 +236,10 @@ func TestRunnerExitCode0Allow(t *testing.T) {
 
 func TestRunnerExitCode2Deny(t *testing.T) {
 	t.Parallel()
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `echo "forbidden" >&2; exit 2`,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionDeny, result.Decision)
@@ -249,10 +249,10 @@ func TestRunnerExitCode2Deny(t *testing.T) {
 
 func TestRunnerExitCode49Halt(t *testing.T) {
 	t.Parallel()
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `echo "stop the turn" >&2; exit 49`,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	require.NoError(t, err)
 	require.True(t, result.Halt)
@@ -262,10 +262,10 @@ func TestRunnerExitCode49Halt(t *testing.T) {
 
 func TestRunnerHaltViaJSON(t *testing.T) {
 	t.Parallel()
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `echo '{"halt":true,"reason":"via json"}'`,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	require.NoError(t, err)
 	require.True(t, result.Halt)
@@ -274,10 +274,10 @@ func TestRunnerHaltViaJSON(t *testing.T) {
 
 func TestRunnerExitCodeOtherNonBlocking(t *testing.T) {
 	t.Parallel()
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `exit 1`,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionNone, result.Decision)
@@ -285,11 +285,11 @@ func TestRunnerExitCodeOtherNonBlocking(t *testing.T) {
 
 func TestRunnerTimeout(t *testing.T) {
 	t.Parallel()
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `sleep 10`,
 		Timeout: 1,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	start := time.Now()
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	elapsed := time.Since(start)
@@ -301,10 +301,10 @@ func TestRunnerTimeout(t *testing.T) {
 func TestRunnerDeduplication(t *testing.T) {
 	t.Parallel()
 	// Two hooks with the same command should only run once.
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `echo '{"decision":"allow"}'`,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg, hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg, hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, result.Decision)
@@ -319,17 +319,21 @@ func TestRunnerNoMatchingHooks(t *testing.T) {
 	require.Equal(t, DecisionNone, result.Decision)
 }
 
-// validatedHooks builds hook configs and runs ValidateHooks to compile
-// matcher regexes, mirroring the real config-load path.
-func validatedHooks(t *testing.T, hooks []config.HookConfig) []config.HookConfig {
+// validatedHooks mirrors what the config-load path checks before a hook
+// set is handed to a Runner: a command is required, and a matcher must
+// compile. It is spelled out here rather than calling config.ValidateHooks
+// because this package no longer imports config — see Hook's doc comment.
+func validatedHooks(t *testing.T, hooks []Hook) []Hook {
 	t.Helper()
-	cfg := &config.Config{
-		Hooks: map[string][]config.HookConfig{
-			EventPreToolUse: hooks,
-		},
+	for i, h := range hooks {
+		require.NotEmpty(t, h.Command, "hook[%d]: command is required", i)
+		if h.Matcher == "" {
+			continue
+		}
+		_, err := regexp.Compile(h.Matcher)
+		require.NoError(t, err, "hook[%d]: matcher must compile", i)
 	}
-	require.NoError(t, cfg.ValidateHooks())
-	return cfg.Hooks[EventPreToolUse]
+	return hooks
 }
 
 func TestRunnerMatcherFiltering(t *testing.T) {
@@ -337,7 +341,7 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 
 	t.Run("compiled regex matches", func(t *testing.T) {
 		t.Parallel()
-		hooks := validatedHooks(t, []config.HookConfig{
+		hooks := validatedHooks(t, []Hook{
 			{Command: `echo '{"decision":"deny","reason":"blocked"}'`, Matcher: "^bash$"},
 		})
 		r := NewRunner(hooks, t.TempDir(), t.TempDir())
@@ -348,7 +352,7 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 
 	t.Run("compiled regex does not match", func(t *testing.T) {
 		t.Parallel()
-		hooks := validatedHooks(t, []config.HookConfig{
+		hooks := validatedHooks(t, []Hook{
 			{Command: `echo '{"decision":"deny","reason":"blocked"}'`, Matcher: "^edit$"},
 		})
 		r := NewRunner(hooks, t.TempDir(), t.TempDir())
@@ -359,7 +363,7 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 
 	t.Run("no matcher matches everything", func(t *testing.T) {
 		t.Parallel()
-		hooks := validatedHooks(t, []config.HookConfig{
+		hooks := validatedHooks(t, []Hook{
 			{Command: `echo '{"decision":"allow"}'`},
 		})
 		r := NewRunner(hooks, t.TempDir(), t.TempDir())
@@ -370,7 +374,7 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 
 	t.Run("partial regex match", func(t *testing.T) {
 		t.Parallel()
-		hooks := validatedHooks(t, []config.HookConfig{
+		hooks := validatedHooks(t, []Hook{
 			{Command: `echo '{"decision":"deny","reason":"mcp blocked"}'`, Matcher: "^mcp_"},
 		})
 		r := NewRunner(hooks, t.TempDir(), t.TempDir())
@@ -389,7 +393,7 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 	// the reload-drops-matcher class of bug.
 	t.Run("runner compiles matcher without ValidateHooks", func(t *testing.T) {
 		t.Parallel()
-		raw := []config.HookConfig{
+		raw := []Hook{
 			{Command: `echo '{"decision":"deny","reason":"blocked"}'`, Matcher: "^bash$"},
 		}
 		r := NewRunner(raw, t.TempDir(), t.TempDir())
@@ -407,7 +411,7 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 	// degrade to match-everything; the hook is dropped instead.
 	t.Run("runner skips hooks with invalid matcher", func(t *testing.T) {
 		t.Parallel()
-		raw := []config.HookConfig{
+		raw := []Hook{
 			{Command: `echo '{"decision":"deny","reason":"should not fire"}'`, Matcher: "[invalid"},
 		}
 		r := NewRunner(raw, t.TempDir(), t.TempDir())
@@ -419,73 +423,16 @@ func TestRunnerMatcherFiltering(t *testing.T) {
 	})
 }
 
-func TestValidateHooksInvalidRegex(t *testing.T) {
-	t.Parallel()
-	cfg := &config.Config{
-		Hooks: map[string][]config.HookConfig{
-			EventPreToolUse: {
-				{Command: "true", Matcher: "[invalid"},
-			},
-		},
-	}
-	err := cfg.ValidateHooks()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid matcher regex")
-}
-
-func TestValidateHooksEmptyCommand(t *testing.T) {
-	t.Parallel()
-	cfg := &config.Config{
-		Hooks: map[string][]config.HookConfig{
-			EventPreToolUse: {
-				{Command: ""},
-			},
-		},
-	}
-	err := cfg.ValidateHooks()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "command is required")
-}
-
-func TestValidateHooksNormalizesEventNames(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{"canonical", "PreToolUse"},
-		{"lowercase", "pretooluse"},
-		{"snake_case", "pre_tool_use"},
-		{"upper_snake", "PRE_TOOL_USE"},
-		{"mixed_case", "preToolUse"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			cfg := &config.Config{
-				Hooks: map[string][]config.HookConfig{
-					tt.input: {
-						{Command: "true"},
-					},
-				},
-			}
-			require.NoError(t, cfg.ValidateHooks())
-			require.Len(t, cfg.Hooks[EventPreToolUse], 1)
-		})
-	}
-}
-
 func TestRunnerHookNameUsesDisplayName(t *testing.T) {
 	t.Parallel()
 
 	t.Run("name field is used when set", func(t *testing.T) {
 		t.Parallel()
-		hookCfg := config.HookConfig{
+		hookCfg := Hook{
 			Name:    "my-hook",
 			Command: `echo '{"decision":"allow"}'`,
 		}
-		r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+		r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 		result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 		require.NoError(t, err)
 		require.Equal(t, DecisionAllow, result.Decision)
@@ -495,10 +442,10 @@ func TestRunnerHookNameUsesDisplayName(t *testing.T) {
 
 	t.Run("command is used when name is empty", func(t *testing.T) {
 		t.Parallel()
-		hookCfg := config.HookConfig{
+		hookCfg := Hook{
 			Command: `echo '{"decision":"allow"}'`,
 		}
-		r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+		r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 		result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 		require.NoError(t, err)
 		require.Equal(t, DecisionAllow, result.Decision)
@@ -510,7 +457,7 @@ func TestRunnerHookNameUsesDisplayName(t *testing.T) {
 func TestRunnerParallelExecution(t *testing.T) {
 	t.Parallel()
 	// Two hooks: one allows, one denies. Deny should win.
-	hooks := []config.HookConfig{
+	hooks := []Hook{
 		{Command: `echo '{"decision":"allow","context":"hook1"}'`},
 		{Command: `echo '{"decision":"deny","reason":"nope"}' ; exit 0`},
 	}
@@ -523,10 +470,10 @@ func TestRunnerParallelExecution(t *testing.T) {
 
 func TestRunnerEnvVarsPropagated(t *testing.T) {
 	t.Parallel()
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `printf '{"decision":"allow","context":"%s"}' "$SENNIT_TOOL_NAME"`,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, result.Decision)
@@ -681,8 +628,8 @@ func TestRunnerAbandonRaceSafety(t *testing.T) {
 		return nil
 	}
 
-	hookCfg := config.HookConfig{Command: "# irrelevant; runShell is stubbed"}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	hookCfg := Hook{Command: "# irrelevant; runShell is stubbed"}
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	r.runShell = stubRunShell
 	r.abandonFor = 20 * time.Millisecond
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
@@ -702,10 +649,10 @@ func TestRunnerAbandonRaceSafety(t *testing.T) {
 
 func TestRunnerUpdatedInput(t *testing.T) {
 	t.Parallel()
-	hookCfg := config.HookConfig{
+	hookCfg := Hook{
 		Command: `echo '{"decision":"allow","updated_input":{"command":"echo rewritten"}}'`,
 	}
-	r := NewRunner([]config.HookConfig{hookCfg}, t.TempDir(), t.TempDir())
+	r := NewRunner([]Hook{hookCfg}, t.TempDir(), t.TempDir())
 	result, err := r.Run(context.Background(), EventPreToolUse, "sess", "bash", `{"command":"echo original","timeout":60}`)
 	require.NoError(t, err)
 	require.Equal(t, DecisionAllow, result.Decision)

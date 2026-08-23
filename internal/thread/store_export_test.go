@@ -11,7 +11,14 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// store scaffolding for tests, exported for the same reason
+// store scaffolding for tests. This is a _test.go file on purpose: it
+// names sqlc's db.Querier and testify, and as a production file it put
+// both into every binary that links internal/thread — a domain package
+// whose own Store doc explicitly disclaims a database dependency. Test
+// files in this directory are still visible to package thread_test, which
+// is where every caller lives.
+//
+// Exported for the same reason
 // [NewTaskManagerFromManager] is: it names sqlc's db.Querier/db.Thread and
 // builds a real Store around them, which only makes sense from within this
 // package, but every test that wants a real store — this package's own

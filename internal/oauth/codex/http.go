@@ -1,22 +1,22 @@
 package codex
 
 import (
-	"fmt"
 	"net/http"
-	"net/url"
 	"time"
+
+	"github.com/rave-soft/sennit/internal/proxyhttp"
 )
 
 // ProxyDirect is the proxy sentinel meaning "no proxy, even if HTTP_PROXY /
 // HTTPS_PROXY are set". An empty proxy means "no override — inherit the
 // process default", which is what most users want.
 //
-// This duplicates config.ProxyDirect's literal, and httpClient below
-// duplicates config.NewProxyHTTPClient's small parse-and-validate, on
-// purpose: internal/config imports this package (the catalog entry and the
-// provider setup live there), so importing it back would be a cycle. The
-// discover package duplicates the same helper for the same reason.
-const ProxyDirect = "none"
+// It aliases internal/proxyhttp's, the leaf package that owns this logic:
+// internal/config imports this package (the catalog entry and the provider
+// setup live there), so importing config back would be a cycle — the
+// reason this file, config and discover each carried their own copy of the
+// same parse-and-validate until proxyhttp existed to hold one.
+const ProxyDirect = proxyhttp.Direct
 
 // httpClient builds the client every call in this package makes.
 //
@@ -25,30 +25,10 @@ const ProxyDirect = "none"
 // list that ignored it would fail while the provider itself looked
 // correctly configured.
 func httpClient(proxyURL string, timeout time.Duration) (*http.Client, error) {
-	client := &http.Client{Timeout: timeout}
-	switch proxyURL {
-	case "":
-		return client, nil
-	case ProxyDirect:
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		client.Transport = transport
-		return client, nil
+	if proxyURL == "" {
+		return &http.Client{Timeout: timeout}, nil
 	}
-
-	parsed, err := url.Parse(proxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid proxy %q: %w", proxyURL, err)
-	}
-	switch parsed.Scheme {
-	case "http", "https", "socks5", "socks5h":
-	default:
-		return nil, fmt.Errorf("invalid proxy %q: unsupported scheme %q (expected http, https, socks5, or socks5h)", proxyURL, parsed.Scheme)
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = http.ProxyURL(parsed)
-	client.Transport = transport
-	return client, nil
+	return proxyhttp.NewClient(proxyURL, timeout)
 }
 
 // ValidateProxy reports whether a proxy value is usable, so a UI can reject

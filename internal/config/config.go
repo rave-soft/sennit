@@ -6,12 +6,12 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/invopop/jsonschema"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/csync"
+	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/rave-soft/sennit/internal/oauth/copilot"
@@ -497,34 +497,13 @@ func (l LSPs) Sorted() []LSP {
 // event (e.g. PreToolUse). This is a pure-data struct: matcher compilation
 // is owned by hooks.Runner so a JSON round-trip, merge, or reload can't
 // silently drop compiled state.
-type HookConfig struct {
-	// Friendly display name shown in the TUI. Falls back to Command when empty.
-	Name string `json:"name,omitempty" jsonschema:"description=Friendly display name shown in the TUI for this hook"`
-	// Regex pattern tested against the tool name. Empty means match all.
-	Matcher string `json:"matcher,omitempty" jsonschema:"description=Regex pattern tested against the tool name. Empty means match all tools."`
-	// Shell command to execute.
-	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
-	// Timeout in seconds. Default 30.
-	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
-}
-
-// DisplayName returns the hook name for display purposes. It returns Name
-// when set, otherwise falls back to Command.
-func (h *HookConfig) DisplayName() string {
-	if h.Name != "" {
-		return h.Name
-	}
-	return h.Command
-}
-
-// TimeoutDuration returns the hook timeout as a time.Duration, defaulting
-// to 30s.
-func (h *HookConfig) TimeoutDuration() time.Duration {
-	if h.Timeout <= 0 {
-		return 30 * time.Second
-	}
-	return time.Duration(h.Timeout) * time.Second
-}
+// HookConfig is the shape of one configured hook. It is an alias for
+// hooks.Hook, which is where the type now lives: this package is imported
+// by nearly everything and pulls in the database, the shell and the OAuth
+// providers, so a consumer that only wanted to describe a hook had to link
+// all of it. An alias rather than a distinct type means every existing
+// use, including the JSON schema generated from these tags, is unchanged.
+type HookConfig = hooks.Hook
 
 // normalizeHookEvent maps user-provided event names to their canonical
 // form. Matching is case-insensitive and accepts snake_case variants

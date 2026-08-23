@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/shell"
 )
 
@@ -22,7 +21,7 @@ const abandonGrace = time.Second
 // compiledHook pairs a HookConfig with its compiled matcher regex. A nil
 // matcher means "match every tool".
 type compiledHook struct {
-	cfg     config.HookConfig
+	cfg     Hook
 	matcher *regexp.Regexp
 }
 
@@ -43,7 +42,7 @@ type Runner struct {
 // Hooks whose matcher fails to compile are skipped with a warning rather
 // than treated as match-everything. ValidateHooks is expected to have
 // caught syntax errors earlier, so this is defense in depth.
-func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
+func NewRunner(hooks []Hook, cwd, projectDir string) *Runner {
 	compiled := make([]compiledHook, 0, len(hooks))
 	for _, h := range hooks {
 		ch := compiledHook{cfg: h}
@@ -75,8 +74,8 @@ func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
 // order. Hooks whose matcher failed to compile at construction are
 // omitted. Intended for diagnostics; callers should not rely on ordering
 // or identity beyond that.
-func (r *Runner) Hooks() []config.HookConfig {
-	out := make([]config.HookConfig, len(r.hooks))
+func (r *Runner) Hooks() []Hook {
+	out := make([]Hook, len(r.hooks))
 	for i, h := range r.hooks {
 		out[i] = h.cfg
 	}
@@ -98,8 +97,8 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	// timeout, or display name, and deduping by Command alone would
 	// silently drop one of them, leaving the survivor's timeout and name
 	// applied to what the config author intended as two separate hooks.
-	seen := make(map[config.HookConfig]bool, len(matching))
-	var deduped []config.HookConfig
+	seen := make(map[Hook]bool, len(matching))
+	var deduped []Hook
 	for _, h := range matching {
 		if seen[h] {
 			continue
@@ -116,7 +115,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	wg.Add(len(deduped))
 
 	for i, h := range deduped {
-		go func(idx int, hook config.HookConfig) {
+		go func(idx int, hook Hook) {
 			defer wg.Done()
 			results[idx] = r.runOne(ctx, hook, envVars, payload)
 		}(i, h)
@@ -147,8 +146,8 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 
 // matchingHooks returns hooks whose matcher matches the tool name (or has
 // no matcher, which matches everything).
-func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
-	var matched []config.HookConfig
+func (r *Runner) matchingHooks(toolName string) []Hook {
+	var matched []Hook
 	for _, h := range r.hooks {
 		if h.matcher == nil || h.matcher.MatchString(toolName) {
 			matched = append(matched, h.cfg)
@@ -173,7 +172,7 @@ func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
 //     outer frame reads them;
 //   - on the abandon path, the goroutine may still be writing and the
 //     outer frame must not touch them again.
-func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVars []string, payload []byte) HookResult {
+func (r *Runner) runOne(parentCtx context.Context, hook Hook, envVars []string, payload []byte) HookResult {
 	timeout := hook.TimeoutDuration()
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()

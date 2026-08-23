@@ -1,16 +1,16 @@
 package config
 
 import (
-	"fmt"
 	"net/http"
-	"net/url"
+
+	"github.com/rave-soft/sennit/internal/proxyhttp"
 )
 
 // ProxyDirect is the proxy_url sentinel value meaning "no proxy, even if
 // HTTP_PROXY/HTTPS_PROXY are set in the environment." Distinct from an
 // empty proxy_url, which means "no explicit override — inherit the
 // process's default proxy behavior (env vars via net/http)."
-const ProxyDirect = "none"
+const ProxyDirect = proxyhttp.Direct
 
 // NewProxyHTTPClient builds an *http.Client whose Transport routes requests
 // through proxyURL. An empty proxyURL returns a nil client and nil error,
@@ -25,21 +25,7 @@ func NewProxyHTTPClient(proxyURL string) (*http.Client, error) {
 	if proxyURL == "" {
 		return nil, nil
 	}
-	if proxyURL == ProxyDirect {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		return &http.Client{Transport: transport}, nil
-	}
-	u, err := url.Parse(proxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid proxy_url %q: %w", proxyURL, err)
-	}
-	switch u.Scheme {
-	case "http", "https", "socks5", "socks5h":
-	default:
-		return nil, fmt.Errorf("invalid proxy_url %q: unsupported scheme %q (expected http, https, socks5, or socks5h)", proxyURL, u.Scheme)
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = http.ProxyURL(u)
-	return &http.Client{Transport: transport}, nil
+	// No timeout: this client is used for streaming model responses,
+	// which run far longer than any fixed deadline would allow.
+	return proxyhttp.NewClient(proxyURL, 0)
 }

@@ -143,3 +143,22 @@ func (a *MessageAdapter) List(ctx context.Context, sessionID string) ([]thread.M
 func NewMessageService(full message.Service) thread.MessageService {
 	return &MessageAdapter{full: full}
 }
+
+// AppOf resolves the *app.App behind a delegation's workspace handle, or
+// nil when the handle carries something else (a fake, in tests).
+//
+// The assertion lives here rather than at the call sites: this package is
+// what put the adapter behind the handle in the first place, so it is the
+// one place that may reasonably know what to assert. internal/workspace
+// used to reach through the handle itself and name the adapter type by
+// hand, twice.
+func AppOf(h thread.Handle) *app.App {
+	if h == nil {
+		return nil
+	}
+	adapter, ok := h.Workspace().(*AppWorkspaceAdapter)
+	if !ok {
+		return nil
+	}
+	return adapter.App
+}

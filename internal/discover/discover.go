@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/proxyhttp"
 )
 
 // httpClient is shared across all discovery and enrichment calls. It
@@ -25,31 +25,14 @@ var httpClient = &http.Client{Timeout: 10 * time.Second}
 // already builds discover.Config (see load.go's discoverCustomProviderModels),
 // so importing config from here would create an import cycle, and pulling in
 // the whole config package just for this one helper isn't warranted anyway.
-const proxyDirect = "none"
+const proxyDirect = proxyhttp.Direct
 
-// newProxyHTTPClient builds an *http.Client whose Transport routes requests
-// through proxyURL. proxyURL == proxyDirect returns a client whose Transport
-// has Proxy explicitly nil'd out, forcing a direct connection even when
-// HTTP_PROXY/HTTPS_PROXY are set. http, https, socks5, and socks5h schemes
-// are all supported natively by net/http's Transport.Proxy.
+// newProxyHTTPClient builds the discovery client, routed through
+// proxyURL. The logic lives in internal/proxyhttp, a leaf package: this
+// one is imported by config, so it cannot reach back for config's own
+// copy — which is exactly how three copies of it came to exist.
 func newProxyHTTPClient(proxyURL string) (*http.Client, error) {
-	if proxyURL == proxyDirect {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		return &http.Client{Timeout: 10 * time.Second, Transport: transport}, nil
-	}
-	u, err := url.Parse(proxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid proxy_url %q: %w", proxyURL, err)
-	}
-	switch u.Scheme {
-	case "http", "https", "socks5", "socks5h":
-	default:
-		return nil, fmt.Errorf("invalid proxy_url %q: unsupported scheme %q (expected http, https, socks5, or socks5h)", proxyURL, u.Scheme)
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = http.ProxyURL(u)
-	return &http.Client{Timeout: 10 * time.Second, Transport: transport}, nil
+	return proxyhttp.NewClient(proxyURL, 10*time.Second)
 }
 
 // httpClient returns the client to use for requests against this provider:

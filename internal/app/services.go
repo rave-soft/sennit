@@ -96,6 +96,11 @@ type appServices struct {
 	// internal/app/threadspawn/attach.go) via SetThreadManager, independent
 	// of SetThreads/Threads — both are set from the same manager, but this
 	// field is additive and neither replaces nor is replaced by the other.
+	//
+	// The two fields are not a workaround for an import restriction: this
+	// package imports internal/thread for exactly this type. They are two
+	// different interfaces onto one manager — a deliberately narrow one
+	// for the agent tools, the concrete one for the composition layer.
 	// Held atomically: it is set on the main goroutine post-bootstrap and
 	// read from others — SetPermissionsSkip runs on the config-watcher
 	// goroutine, and internal/workspace reads it from wherever it is

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/rave-soft/sennit/internal/proto"
@@ -173,15 +174,14 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 		// release here — teardown happens via Manager.Remove or process
 		// shutdown, not via this detach.
 		// The handle's Workspace is the domain-facing thread.Workspace
-		// seam; the spawners present it as a threadspawn.AppWorkspaceAdapter
-		// (see its doc comment), so assert that back here at the boundary
-		// to reach the concrete *app.App it wraps — this façade layer is
-		// allowed to know it (NewAppWorkspace needs it).
-		aw, ok := h.Workspace().(*threadspawn.AppWorkspaceAdapter)
-		if !ok || aw.App == nil {
+		// seam; threadspawn is what put its own adapter behind it, so
+		// threadspawn is what unwraps it — this façade only needs the
+		// *app.App that comes back (NewAppWorkspace takes one).
+		threadApp := threadspawn.AppOf(h)
+		if threadApp == nil {
 			return nil, nil, fmt.Errorf("thread: workspace handle does not wrap an *app.App")
 		}
-		ws := NewAppWorkspace(aw.App, aw.App.Store())
+		ws := NewAppWorkspace(threadApp, threadApp.Store())
 		// Wrapped so a turn the person starts in the thread's own session
 		// goes through the Manager rather than past it — see
 		// attachedThreadWorkspace. Reading the row for its session id is
@@ -229,7 +229,7 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 	// Same wrapping as the live branch — and this is the branch that most
 	// needs it: a thread revived here is idle by definition, and everything
 	// that happens in it next is the person's own doing.
-	ws := NewAppWorkspace(a.App, a.App.Store())
+	ws := NewAppWorkspace(a, a.Store())
 	return &attachedThreadWorkspace{Workspace: ws, mgr: mgr, parent: w, threadID: st.ID, sessionID: st.SessionID}, func() {}, nil
 }
 
@@ -241,7 +241,7 @@ func (w *AppWorkspace) AttachThread(ctx context.Context, id string) (Workspace, 
 // something other than an in-process app. Both are unreachable in local
 // mode today, and both used to fall through to the read-only fallback
 // with nothing said at all.
-func reactivate(ctx context.Context, mgr *thread.Manager, id string) (*threadspawn.AppWorkspaceAdapter, error) {
+func reactivate(ctx context.Context, mgr *thread.Manager, id string) (*app.App, error) {
 	if _, err := mgr.Activate(ctx, id); err != nil {
 		return nil, err
 	}
@@ -249,11 +249,12 @@ func reactivate(ctx context.Context, mgr *thread.Manager, id string) (*threadspa
 	if h == nil {
 		return nil, fmt.Errorf("thread: reactivated workspace was released before it could be attached")
 	}
-	a, ok := h.Workspace().(*threadspawn.AppWorkspaceAdapter)
-	if !ok || a.App == nil {
+	// Unwrapped by threadspawn, which is what wrapped it — see AppOf.
+	threadApp := threadspawn.AppOf(h)
+	if threadApp == nil {
 		return nil, fmt.Errorf("thread: reactivated workspace is not an in-process app")
 	}
-	return a, nil
+	return threadApp, nil
 }
 
 // SubscribeWith runs a second, independently stoppable event subscription

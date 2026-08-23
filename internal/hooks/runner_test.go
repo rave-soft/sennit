@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -21,11 +20,11 @@ func TestRunner_DedupKeyIncludesFullConfig(t *testing.T) {
 	var calls atomic.Int32
 	r := &Runner{
 		hooks: []compiledHook{
-			{cfg: config.HookConfig{Name: "first", Command: "true", Timeout: 5}},
-			{cfg: config.HookConfig{Name: "second", Command: "true", Timeout: 10}},
+			{cfg: Hook{Name: "first", Command: "true", Timeout: 5}},
+			{cfg: Hook{Name: "second", Command: "true", Timeout: 10}},
 			// Exact duplicate of "first": same Name, Command, Timeout,
 			// Matcher. This one really should collapse.
-			{cfg: config.HookConfig{Name: "first", Command: "true", Timeout: 5}},
+			{cfg: Hook{Name: "first", Command: "true", Timeout: 5}},
 		},
 		runShell: func(context.Context, shell.RunOptions) error {
 			calls.Add(1)
