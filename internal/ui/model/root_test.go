@@ -352,6 +352,10 @@ func TestHandleThreadAttachedTearsDownPreviousAttachment(t *testing.T) {
 
 	r := newTestRoot(t, true)
 	r.active = screenDashboard
+	// The request itself (Enter on the dashboard row) is what marks the
+	// answer as wanted; see Root.pendingAttach.
+	model, _ := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "first"})
+	r = model.(*Root)
 
 	var firstStopCalls, firstDetachCalls, secondDetachCalls int
 	firstWS := &rootTestWorkspace{}
@@ -411,4 +415,64 @@ func TestHandleThreadAttachedStaleAfterLeavingDashboard(t *testing.T) {
 	require.NotNil(t, cmd)
 	runBatchCmd(t, cmd)
 	require.True(t, detached, "the stale attachment's workspace must still be released")
+}
+
+// TestHandleThreadAttachedFromMainScreenPanel is the regression test for a
+// click on a thread block in the main screen's session panel doing nothing:
+// the attach result was judged wanted by "is the dashboard active?", so a
+// request that started on screenMain (enterThreadMsg from mouse.go) was
+// treated as stale and its workspace silently released. The request the
+// user is still waiting on (pendingAttach) must land whichever screen it
+// started from.
+func TestHandleThreadAttachedFromMainScreenPanel(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	r.active = screenMain
+
+	model, cmd := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "panel"})
+	r = model.(*Root)
+	require.NotNil(t, cmd, "enterThreadMsg must start an attach")
+	require.Equal(t, "s1", r.pendingAttach)
+
+	detached := false
+	model, cmd = r.Update(threadAttachedMsg{
+		id: "s1", sessionID: "sess1", name: "panel", ws: &rootTestWorkspace{},
+		detach: func() { detached = true },
+	})
+	r = model.(*Root)
+	runBatchCmd(t, cmd)
+
+	require.Equal(t, screenThread, r.active, "the attach the user asked for must open the thread")
+	require.NotNil(t, r.thread)
+	require.Equal(t, "s1", r.thread.threadID)
+	require.Empty(t, r.pendingAttach, "an answered request is no longer pending")
+	require.False(t, detached, "the wanted attachment must stay installed, not be released")
+}
+
+// TestHandleThreadAttachedSupersededRequestIsStale: asking for a second
+// thread before the first attach answers makes the first answer stale —
+// only the latest request (pendingAttach) is wanted.
+func TestHandleThreadAttachedSupersededRequestIsStale(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	r.active = screenDashboard
+
+	model, _ := r.Update(enterThreadMsg{id: "s1", sessionID: "sess1", name: "first"})
+	r = model.(*Root)
+	model, _ = r.Update(enterThreadMsg{id: "s2", sessionID: "sess2", name: "second"})
+	r = model.(*Root)
+
+	detached := false
+	model, cmd := r.Update(threadAttachedMsg{
+		id: "s1", sessionID: "sess1", name: "first", ws: &rootTestWorkspace{},
+		detach: func() { detached = true },
+	})
+	r = model.(*Root)
+	require.Equal(t, screenDashboard, r.active, "a superseded attach must not take the screen")
+	require.Nil(t, r.thread)
+	runBatchCmd(t, cmd)
+	require.True(t, detached, "the superseded attachment's workspace must be released")
+	require.Equal(t, "s2", r.pendingAttach, "the latest request is still pending")
 }

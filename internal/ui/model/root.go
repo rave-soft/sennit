@@ -80,6 +80,17 @@ type Root struct {
 	thread          *threadAttachment // non-nil while attached to a thread
 	active          screenID
 
+	// pendingAttach is the ID of the thread the user most recently asked
+	// to drill into (enterThreadMsg) and whose attachThreadCmd has not
+	// answered yet. handleThreadAttached uses it to tell a wanted result
+	// from a stale one: a request can come from the dashboard or from the
+	// main screen's session panel (a click on a thread block), so "which
+	// screen is active" alone cannot say whether the user is still waiting
+	// — the main screen is both where a panel click starts and where an
+	// abandoned dashboard request lands. Cleared when the answer arrives
+	// or when the user navigates away (leaves the dashboard or a thread).
+	pendingAttach string
+
 	// send delivers messages back into the Bubble Tea event loop from
 	// outside Update (the per-thread SubscribeWith pump runs its own
 	// goroutine and cannot return a tea.Cmd). Wired by cmd/root.go via
@@ -231,6 +242,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return r, tea.Batch(cmds...)
 	case enterThreadMsg:
+		r.pendingAttach = msg.id
 		return r, r.attachThreadCmd(msg.id, msg.sessionID, msg.name)
 	case leaveThreadRequestedMsg:
 		// The Back button at the top of a drilled-in thread. The thread's
@@ -256,6 +268,7 @@ func (r *Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return r, nil
 		}
 		r.active = screenMain
+		r.pendingAttach = ""
 		return r, r.dashboard.SetActive(false)
 	case openThreadCreateMsg:
 		r.dashboardDialog.OpenDialog(dialog.NewThreadCreate(r.com))
@@ -371,12 +384,14 @@ func (r *Root) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case toggle && r.active == screenDashboard:
 			r.active = screenMain
+			r.pendingAttach = ""
 			r.dashboard.SetActive(false)
 			return r, nil
 		case toggle && r.active == screenThread:
 			return r, r.leaveThread()
 		case key.Matches(msg, dialog.CloseKey) && r.active == screenDashboard && !r.dashboardDialog.HasDialogs():
 			r.active = screenMain
+			r.pendingAttach = ""
 			r.dashboard.SetActive(false)
 			return r, nil
 		case r.active == screenThread && key.Matches(msg, r.main.KeyMap().Chat.ExitChildSession) && !r.thread.ui.viewingChildSession():
@@ -486,18 +501,17 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 		return r, util.ReportError(msg.err)
 	}
 
-	// This attach was requested from the dashboard (or is a duplicate
-	// response for the thread already attached, e.g. two Enter presses on
-	// the same row) only if the user is still where they'd expect the
-	// result to land. Anywhere else — back on screenMain, or attached to a
-	// different thread already — means they've moved on since asking, so
-	// the attach is stale: release what was just attached instead of
-	// yanking the screen onto a thread nobody is waiting for. There is no
-	// per-request id to compare against (only the current screen/thread
-	// state), so a stale response racing a fresh request for a *different*
-	// still-dashboard-initiated thread can't be told apart from this
-	// implementation's state alone.
-	current := r.active == screenDashboard ||
+	// The result is wanted only if it answers the request the user is
+	// still waiting on — the most recent enterThreadMsg (from the dashboard
+	// or the main screen's session panel; see pendingAttach) — or is a
+	// duplicate response for the thread already attached (e.g. two Enter
+	// presses on the same dashboard row). Anything else means they've moved
+	// on since asking (left the dashboard, asked for a different thread):
+	// release what was just attached instead of yanking the screen onto a
+	// thread nobody is waiting for. pendingAttach holds only the latest
+	// request, so an older request for a different thread that lands later
+	// is stale by construction.
+	current := msg.id == r.pendingAttach ||
 		(r.active == screenThread && r.thread != nil && r.thread.threadID == msg.id)
 	if !current {
 		if msg.detach == nil {
@@ -509,6 +523,7 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 			return nil
 		}
 	}
+	r.pendingAttach = ""
 
 	com := common.DefaultCommon(r.com.Context(), msg.ws)
 	childUI := New(com, msg.sessionID, false, WithEmbedded(), WithBreadcrumbRoot(msg.name))
@@ -587,6 +602,7 @@ func (r *Root) detachThread() tea.Cmd {
 func (r *Root) leaveThread() tea.Cmd {
 	cmd := r.detachThread()
 	r.active = screenDashboard
+	r.pendingAttach = ""
 
 	var cmds []tea.Cmd
 	if cmd != nil {
@@ -610,6 +626,7 @@ func (r *Root) leaveThread() tea.Cmd {
 func (r *Root) leaveThreadToMain() tea.Cmd {
 	cmd := r.detachThread()
 	r.active = screenMain
+	r.pendingAttach = ""
 	return cmd
 }
 
