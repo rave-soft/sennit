@@ -31,6 +31,7 @@ import (
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/version"
+	"golang.org/x/sync/errgroup"
 )
 
 var userAgent = fmt.Sprintf(brand.Name+"/%s ("+brand.RepoURL+")", version.Version)
@@ -288,6 +289,21 @@ type sessionAgent struct {
 	// a database relies on that, and measurement must never be the
 	// reason a turn cannot run.
 	latency latency.Recorder
+
+	// continuationRunner, when set, is how an auto-woken continuation is
+	// dispatched: through the coordinator, so the turn gets the runtime,
+	// provider options, token refresh and MCP wait a prompted turn gets.
+	// Only the coordinator's own agent has one; anything else falls back
+	// to a plain Run. See startContinuation and coordinator.runContinuation.
+	continuationRunner func(ctx context.Context, sessionID string) error
+
+	// subReady is the readiness group of a sub-agent build: the system
+	// prompt and tool list are assembled off the build's own goroutine,
+	// and a delegation that starts before they land runs with neither.
+	// Only set for sub-agents — the coordinator's own agent is waited on
+	// by run()'s preamble instead. See waitReady, and buildAgent for why
+	// each sub-agent build gets a group of its own.
+	subReady *errgroup.Group
 
 	// dispatch owns the accept/queue/cancel protocol state shared by Run
 	// and Summarize's dispatch handoffs. Embedded (via the dispatch
@@ -1137,4 +1153,25 @@ func withoutUnusableParentTool(agentTools []fantasy.AgentTool, dispatch *dispatc
 		return agentTools
 	}
 	return slices.Delete(slices.Clone(agentTools), idx, idx+1)
+}
+
+// waitReady blocks until this agent's build has finished assembling its
+// system prompt and tools, or ctx ends. A nil group (the coordinator's own
+// agent, or any agent built without one) is already ready.
+//
+// errgroup.Wait is safe to call from more than one goroutine here: every
+// Add happened before the group was handed over, and each caller gets the
+// same stored error.
+func (a *sessionAgent) waitReady(ctx context.Context) error {
+	if a == nil || a.subReady == nil {
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- a.subReady.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

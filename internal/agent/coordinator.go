@@ -393,7 +393,67 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+	// An auto-woken continuation is a real turn and needs a real turn's
+	// runtime — see runContinuation. Wired here rather than inside
+	// buildAgent because only the coordinator's own agent ever runs one.
+	if sa, ok := agent.(*sessionAgent); ok {
+		sa.continuationRunner = c.runContinuation
+	}
 	return c, nil
+}
+
+// runContinuation dispatches an auto-woken continuation turn for
+// sessionID through the same preparation a prompted turn gets: MCP
+// initialization waited out, a runtime resolved from the current config,
+// an expired OAuth token refreshed first, and the model's own call
+// options carried onto the call.
+//
+// It exists because the wake path used to go straight to
+// sessionAgent.Run with nothing but the session id and a placeholder
+// prompt: no Runtime, so no thinking options and no output-token budget;
+// no OnAuthRefresh, so an OAuth token that expired while a delegation ran
+// produced a 401 with no retry; and no MCP wait, so a continuation that
+// woke early could be built without the tools it needed. Every one of
+// those is most likely precisely when a continuation fires — long after
+// the turn that started the delegation.
+func (c *coordinator) runContinuation(ctx context.Context, sessionID string) error {
+	if err := c.readyWg.Wait(); err != nil {
+		return err
+	}
+	if err := c.waitForMCPInit(ctx); err != nil {
+		return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+	}
+
+	runtime, err := c.runtimeFor(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to prepare agent runtime: %w", err)
+	}
+	if err := c.refreshTokenIfExpired(ctx, runtime.providerCfg); err != nil {
+		slog.Error("Failed to refresh OAuth2 token for a continuation. Proceeding with existing token.", "error", err)
+	} else if c.runtimeKey() != runtime.key {
+		runtime, err = c.runtimeFor(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to prepare refreshed agent runtime: %w", err)
+		}
+	}
+	active := newActiveRuntime(runtime)
+
+	_, err = c.currentAgent.Run(ctx, SessionAgentCall{
+		Runtime:          runtime,
+		ActiveRuntime:    active,
+		SessionID:        sessionID,
+		Prompt:           continuationPromptPlaceholder,
+		Continuation:     true,
+		MaxOutputTokens:  runtime.maxOutputTokens,
+		ProviderOptions:  runtime.providerOptions,
+		Temperature:      runtime.temperature,
+		TopP:             runtime.topP,
+		TopK:             runtime.topK,
+		FrequencyPenalty: runtime.frequencyPenalty,
+		PresencePenalty:  runtime.presencePenalty,
+		OnAuthRefresh:    c.makeAuthRefreshCallback(runtime.providerCfg, active),
+	})
+	return err
 }
 
 // Run implements Coordinator.
@@ -677,10 +737,16 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	if isSubAgent {
-		// Nothing blocks on a sub-agent's readiness today (the delegation
-		// tool isn't invoked until much later in the conversation, by
-		// which point this has long finished), so just surface failures
-		// instead of silently dropping them.
+		// runSubAgent waits on this before dispatching, so a delegation
+		// can no longer start on an agent whose system prompt and tools
+		// have not landed yet — a real possibility, since sub-agents are
+		// rebuilt on every runtime invalidation and a tool call can
+		// follow one immediately. The goroutine stays for the case
+		// nothing ever delegates to this build: a failure is worth a log
+		// line even when no caller is left to receive it.
+		if sa, ok := result.(*sessionAgent); ok {
+			sa.subReady = ready
+		}
 		go func() {
 			if err := ready.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 				slog.Error("Failed to prepare sub-agent", "agent", agent.Name, "error", err)

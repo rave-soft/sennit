@@ -62,6 +62,19 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		params.SessionSetup(session.ID)
 	}
 
+	// The delegate is built with its system prompt and tools assembled on
+	// the build's own goroutines; a delegation dispatched before those
+	// land runs with an empty prompt and no tools at all. Sub-agents are
+	// rebuilt on every runtime invalidation, so a tool call arriving just
+	// after one is exactly when that happens.
+	if waiter, ok := params.Agent.(interface {
+		waitReady(context.Context) error
+	}); ok {
+		if err := waiter.waitReady(ctx); err != nil {
+			return fantasy.ToolResponse{}, fmt.Errorf("agent not ready: %w", err)
+		}
+	}
+
 	// Get model configuration
 	model := params.Agent.Model()
 	maxTokens := modelMaxOutputTokens(model)

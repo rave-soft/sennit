@@ -110,7 +110,12 @@ func (a *sessionAgent) startContinuation(ctx context.Context, sessionID, reason 
 				return
 			}
 		}
-		_, err := a.Run(runCtx, call)
+		var err error
+		if a.continuationRunner != nil {
+			err = a.continuationRunner(runCtx, sessionID)
+		} else {
+			_, err = a.Run(runCtx, call)
+		}
 		failures := a.noteContinuationOutcome(sessionID, err)
 		if err == nil {
 			return

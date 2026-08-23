@@ -101,6 +101,17 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		a.clearActiveIfMatch(sessionID, ac)
 		cancel()
 
+		// The queue handoff belongs to a summarize that owns the whole
+		// dispatch — the caller asked for a summary and nothing else.
+		// With claim != nil this runs *inside* finishTurn, before its
+		// turn has published AgentFinished: the nested Run would execute
+		// a queued follow-up too early, and its error would replace the
+		// result of the outer turn that had in fact succeeded. finishTurn
+		// does its own handoff, at the point it is finished.
+		if claim != nil {
+			return
+		}
+
 		_, next, canceledRunIDDrops := a.drainNext(sessionID)
 		a.publishCanceledQueueDrops(canceledRunIDDrops)
 		if next == nil {
