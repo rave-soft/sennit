@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -660,4 +661,44 @@ func TestNormalizeToolBatchOrder(t *testing.T) {
 		out := normalizeToolBatchOrder(in)
 		require.Equal(t, in, out, "a single result carries no order to normalize")
 	})
+}
+
+// failFastOnCassetteMiss converts a replay miss into a synthetic 400
+// response instead of letting it surface as a transport error.
+//
+// A cassette miss reaches the caller as a *url.Error, which implements
+// net.Error, so fantasy's retry middleware classifies it as a transient
+// network failure and re-runs the step three times with 5s/10s/20s backoff:
+// every stale-cassette test burned 35 seconds before reporting a mismatch
+// that could never fix itself (the whole -race suite ran 8m50s instead of
+// ~1m30s that way). A 4xx is non-retryable, so the same failure is reported
+// on the first attempt, with the cassette path in the message.
+type failFastOnCassetteMiss struct{ inner http.RoundTripper }
+
+func (f failFastOnCassetteMiss) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := f.inner.RoundTrip(req)
+	if err == nil || !errors.Is(err, cassette.ErrInteractionNotFound) {
+		return resp, err
+	}
+	body, marshalErr := json.Marshal(map[string]any{"error": map[string]any{
+		"type": "vcr_cassette_miss",
+		"message": fmt.Sprintf(
+			"no recorded interaction matches %s %s: the cassette is out of date, re-record it (see SENNIT_TEST_VCR_MODE=fixture)",
+			req.Method, req.URL,
+		),
+	}})
+	if marshalErr != nil {
+		return resp, err
+	}
+	return &http.Response{
+		Status:        http.StatusText(http.StatusBadRequest),
+		StatusCode:    http.StatusBadRequest,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        http.Header{"Content-Type": []string{"application/json"}},
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+		Request:       req,
+	}, nil
 }

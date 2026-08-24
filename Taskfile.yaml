@@ -94,11 +94,19 @@ tasks:
       - go test -race -failfast ./... {{.CLI_ARGS}}
 
   test:record:
-    desc: Run tests and record all VCR cassettes again
+    desc: Re-record the agent VCR cassettes against the offline fixture server
     aliases: [record]
     cmds:
-      - rm -r internal/agent/testdata
-      - go test -v -count=1 -timeout=1h ./internal/agent
+      # Offline and deterministic: fixture mode serves the recorded traffic
+      # from internal/agent's own fixture server, so this needs no API key.
+      # Without SENNIT_TEST_VCR_MODE the tests run in replay mode and record
+      # nothing, which is why deleting testdata first used to leave the suite
+      # with no cassettes at all.
+      - rm -rf internal/agent/testdata/TestCoderAgent
+      - >-
+        SENNIT_TEST_VCR_MODE=fixture
+        SENNIT_TEST_CASSETTE_ROOT="$PWD/internal/agent/testdata"
+        go test -count=1 -timeout=1h -run 'TestCoderAgent$' ./internal/agent
 
   fmt:
     desc: Run gofumpt

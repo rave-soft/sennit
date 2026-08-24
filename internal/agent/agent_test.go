@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,9 +101,10 @@ func setupAgentWithVCR(t *testing.T, cfg testVCRConfig, cassetteBasename, worksp
 	}
 
 	recorder := newTestRecorder(t, cfg, cassetteBasename)
-	model := getModel(t, recorder, cfg.BaseURL, cfg.Model)
+	transport := failFastOnCassetteMiss{inner: recorder}
+	model := getModel(t, transport, cfg.BaseURL, cfg.Model)
 	createSimpleGoProject(t, env.workingDir)
-	agent, err := coderAgent(recorder.GetDefaultClient(), env, model)
+	agent, err := coderAgent(&http.Client{Transport: transport}, env, model)
 	require.NoError(t, err)
 	return agent, env
 }
