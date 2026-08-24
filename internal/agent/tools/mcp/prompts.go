@@ -58,7 +58,7 @@ func (r *Registry) RefreshPrompts(ctx context.Context, name string) {
 	}
 	prompts, err := getPrompts(ctx, session)
 	if err != nil {
-		r.updateStateForSession(name, owner, session, StateError, err, Counts{})
+		r.failStateForSession(name, owner, session, err)
 		return
 	}
 	publishSingleCatalog(r, r.allPrompts, name, owner, session, prompts, func(c *Counts, n int) { c.Prompts = n })

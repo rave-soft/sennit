@@ -218,10 +218,6 @@ func grepMatchPageKey(m grepMatch, order string) string {
 	return grepMatchKey(m)
 }
 
-func sortGrepMatches(matches []grepMatch, order string) {
-	sort.Slice(matches, func(i, j int) bool { return grepMatchPageKey(matches[i], order) < grepMatchPageKey(matches[j], order) })
-}
-
 func sortAndTruncateMatches(matches []grepMatch, limit int) ([]grepMatch, bool) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		return matches[i].modTime.After(matches[j].modTime)
@@ -233,13 +229,6 @@ func sortAndTruncateMatches(matches []grepMatch, limit int) ([]grepMatch, bool) 
 	}
 
 	return matches, truncated
-}
-
-// renderGrepMatches renders search matches grouped by file, shared by the
-// grep and ripgrep tools.
-func renderGrepMatches(matches []grepMatch, truncated bool) string {
-	output, _ := renderGrepMatchesWithContext(context.Background(), matches, truncated, 0, 0)
-	return output
 }
 
 func renderGrepMatchesWithContext(ctx context.Context, matches []grepMatch, truncated bool, before, after int) (string, error) {
@@ -454,18 +443,6 @@ type lineMatch struct {
 	lineNum  int
 	charNum  int
 	lineText string
-}
-
-// fileMatches returns every line in filePath that matches pattern. Like
-// ripgrep, it reports one entry per matching line (using the first match
-// on the line for the column) instead of stopping at the first match in
-// the file.
-func fileMatches(filePath string, pattern *regexp.Regexp) ([]lineMatch, error) {
-	var matches []lineMatch
-	err := visitFileMatches(context.Background(), filePath, pattern, func(match lineMatch) {
-		matches = append(matches, match)
-	})
-	return matches, err
 }
 
 func visitFileMatches(ctx context.Context, filePath string, pattern *regexp.Regexp, visit func(lineMatch)) error {

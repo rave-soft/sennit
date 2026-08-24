@@ -296,7 +296,9 @@ func TestRuntimeCacheDiscardsOldInflightBuildAfterInvalidation(t *testing.T) {
 	generation.Store(1)
 	started := make(chan struct{})
 	release := make(chan struct{})
-	build := func(_ context.Context, key runtimeKey) (*compiledRuntime, error) {
+	// The nil error is not a shortcut: this test is about which build wins
+	// after an invalidation, so both builds have to succeed.
+	build := func(_ context.Context, key runtimeKey) (*compiledRuntime, error) { //nolint:unparam // signature fixed by getOrBuild
 		if key.local == 1 {
 			close(started)
 			<-release

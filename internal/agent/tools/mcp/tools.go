@@ -130,7 +130,7 @@ func (r *Registry) RefreshTools(ctx context.Context, cfg ConfigProvider, name st
 	}
 	tools, err := getTools(ctx, session)
 	if err != nil {
-		r.updateStateForSession(name, owner, session, StateError, err, Counts{})
+		r.failStateForSession(name, owner, session, err)
 		return
 	}
 	m, ok := cfg.Config().MCP[name]
@@ -139,7 +139,7 @@ func (r *Registry) RefreshTools(ctx context.Context, cfg ConfigProvider, name st
 	}
 	tools = filterTools(m, tools)
 	if err := validateToolSchemas(tools); err != nil {
-		r.updateStateForSession(name, owner, session, StateError, err, Counts{})
+		r.failStateForSession(name, owner, session, err)
 		return
 	}
 	publishSingleCatalog(r, r.allTools, name, owner, session, tools, func(c *Counts, n int) { c.Tools = n })

@@ -135,7 +135,7 @@ func TestRepairDiag_InjectResultFields(t *testing.T) {
 		withRepairOrigins(originSlice(msgs, originPersisted)),
 	)
 
-	line := repairLine(t, logs, "Injecting synthetic tool result for orphaned tool call", matchSessionID(sessionID))
+	line := repairLine(t, logs, repairSyntheticResultMsg, matchSessionID(sessionID))
 	require.NotNil(t, line, "the orphaned tool call must produce an inject_result repair line")
 
 	require.Equal(t, sessionID, line["session_id"])
@@ -257,7 +257,7 @@ func TestRepairDiag_CarriedVsPersistedOrigin(t *testing.T) {
 		withRepairOrigins(turnOrigins(carriedMsgs, ownMsgs)),
 	)
 
-	inject := repairLine(t, logs, "Injecting synthetic tool result for orphaned tool call", matchSessionID(sessionID))
+	inject := repairLine(t, logs, repairSyntheticResultMsg, matchSessionID(sessionID))
 	require.NotNil(t, inject, "the carried + own orphaned call must be repaired")
 	require.Equal(t, ownOrphanMsgID, inject["message_id"])
 	require.Equal(t, string(originPersisted), inject["origin"],
@@ -296,7 +296,7 @@ func TestRepairDiag_SummaryOrigin(t *testing.T) {
 		withRepairOrigins(originSlice(msgs, originSummary)),
 	)
 
-	line := repairLine(t, logs, "Injecting synthetic tool result for orphaned tool call", matchSessionID(sessionID))
+	line := repairLine(t, logs, repairSyntheticResultMsg, matchSessionID(sessionID))
 	require.NotNil(t, line)
 	require.Equal(t, string(originSummary), line["origin"],
 		"a repair made while summarizing must be localized as a summary, not persisted")
@@ -333,7 +333,7 @@ func TestRepairDiag_CountersIncrementPerCause(t *testing.T) {
 		withRepairSessionID(injSess, "run-count-1"),
 		withRepairOrigins(originSlice(injMsgs, originPersisted)),
 	)
-	injLine := repairLine(t, logs, "Injecting synthetic tool result for orphaned tool call", matchSessionID(injSess))
+	injLine := repairLine(t, logs, repairSyntheticResultMsg, matchSessionID(injSess))
 	require.NotNil(t, injLine)
 	injTotal, ok := injLine["orphan_repair_injected_total"].(float64)
 	require.True(t, ok, "the inject line must carry the running injected-repair counter")
@@ -423,7 +423,7 @@ func TestRepairDiag_NoSecretsInAnyLine(t *testing.T) {
 		require.NotContains(t, raw, secret, "no repair line may log tool input or result content")
 	}
 	// Both repairs fired.
-	require.NotNil(t, repairLine(t, logs, "Injecting synthetic tool result for orphaned tool call", matchSessionID(sess.ID)))
+	require.NotNil(t, repairLine(t, logs, repairSyntheticResultMsg, matchSessionID(sess.ID)))
 	require.NotNil(t, repairLine(t, logs, "Dropping orphaned tool result with no matching tool call", matchSessionID(sess.ID)))
 }
 
@@ -449,7 +449,7 @@ func TestRepairDiag_DefaultsAreSafe(t *testing.T) {
 	// No options at all.
 	_, _ = agent.preparePrompt(msgs, true, nil, nil)
 
-	line := repairLine(t, logs, "Injecting synthetic tool result for orphaned tool call", matchMessageID(assistantMsgID))
+	line := repairLine(t, logs, repairSyntheticResultMsg, matchMessageID(assistantMsgID))
 	require.NotNil(t, line, "an orphan must still be repaired and logged with no options")
 	require.Equal(t, string(originPersisted), line["origin"], "the default origin is persisted")
 	require.Equal(t, "", line["session_id"], "no options means no correlation id is supplied")
@@ -495,7 +495,7 @@ func TestRepairDiag_SuppressedEstimationPass(t *testing.T) {
 	// the proof this pass did not bump the counter (the global counter is
 	// shared with parallel tests, so it cannot be asserted as "unchanged" -
 	// only "this pass contributed no line, hence no bump").
-	require.Nil(t, repairLine(t, logs, "Injecting synthetic tool result for orphaned tool call", matchSessionID(sessionID)),
+	require.Nil(t, repairLine(t, logs, repairSyntheticResultMsg, matchSessionID(sessionID)),
 		"a suppressed estimation pass must not emit a repair line")
 	require.Nil(t, repairLine(t, logs, "Dropping orphaned tool result with no matching tool call", matchSessionID(sessionID)),
 		"a suppressed estimation pass must not emit a drop line")
@@ -524,10 +524,14 @@ func countRepairLines(buf *syncLogBuffer, msg string, match func(map[string]any)
 // repairLineByToolCallID scopes a repair line to the tool_call_id it repaired,
 // which is unique per orphaned exchange even when the messages share (or lack)
 // an id.
-func repairLineByToolCallID(t *testing.T, buf *syncLogBuffer, msg, toolCallID string) map[string]any {
+func repairLineByToolCallID(t *testing.T, buf *syncLogBuffer, toolCallID string) map[string]any {
 	t.Helper()
-	return repairLine(t, buf, msg, func(line map[string]any) bool { return line["tool_call_id"] == toolCallID })
+	return repairLine(t, buf, repairSyntheticResultMsg, func(line map[string]any) bool { return line["tool_call_id"] == toolCallID })
 }
+
+// repairSyntheticResultMsg is the log message every orphaned tool call is
+// repaired with; see coordinator's repair path.
+const repairSyntheticResultMsg = "Injecting synthetic tool result for orphaned tool call"
 
 // assistantWithOrphanCall builds a direct (store-independent) assistant message
 // with one orphaned tool call. Constructing message.Message by hand - rather
@@ -541,18 +545,6 @@ func assistantWithOrphanCall(id, toolCallID, name string) message.Message {
 		Parts: []message.ContentPart{
 			message.TextContent{Text: "working"},
 			message.ToolCall{ID: toolCallID, Name: name, Input: `{}`, Finished: true},
-		},
-	}
-}
-
-// toolWithOrphanResult builds a direct tool message with one orphaned result
-// (a result whose tool_call_id appears nowhere).
-func toolWithOrphanResult(id, toolCallID, name string) message.Message {
-	return message.Message{
-		ID:   id,
-		Role: message.Tool,
-		Parts: []message.ContentPart{
-			message.ToolResult{ToolCallID: toolCallID, Name: name, Content: "ok"},
 		},
 	}
 }
@@ -584,14 +576,14 @@ func TestRepairDiag_DuplicateIDsPositionalOrigin(t *testing.T) {
 		withRepairOrigins([]historyOrigin{originCarried, originPersisted}),
 	)
 
-	carried := repairLineByToolCallID(t, logs, "Injecting synthetic tool result for orphaned tool call", "call_dup_carried")
+	carried := repairLineByToolCallID(t, logs, "call_dup_carried")
 	require.NotNil(t, carried, "the carried-side orphaned call must be repaired")
 	require.Equal(t, "dup", carried["message_id"],
 		"the message id is logged as-is, even when duplicated")
 	require.Equal(t, string(originCarried), carried["origin"],
 		"the first message's origin must be carried, not the id's last-written value")
 
-	persisted := repairLineByToolCallID(t, logs, "Injecting synthetic tool result for orphaned tool call", "call_dup_persisted")
+	persisted := repairLineByToolCallID(t, logs, "call_dup_persisted")
 	require.NotNil(t, persisted, "the persisted-side orphaned call must be repaired")
 	require.Equal(t, "dup", persisted["message_id"],
 		"the same message id is logged on the second line too")
@@ -623,14 +615,14 @@ func TestRepairDiag_EmptyIDMixedOrigins(t *testing.T) {
 		withRepairOrigins([]historyOrigin{originCarried, originPersisted}),
 	)
 
-	emptyLine := repairLineByToolCallID(t, logs, "Injecting synthetic tool result for orphaned tool call", "call_empty_carried")
+	emptyLine := repairLineByToolCallID(t, logs, "call_empty_carried")
 	require.NotNil(t, emptyLine, "the empty-id orphaned call must be repaired and logged")
 	require.Equal(t, "", emptyLine["message_id"],
 		"an empty message id is logged as empty, not defaulted")
 	require.Equal(t, string(originCarried), emptyLine["origin"],
 		"the empty-id message's origin comes from its position, not a failed id lookup")
 
-	namedLine := repairLineByToolCallID(t, logs, "Injecting synthetic tool result for orphaned tool call", "call_named_persisted")
+	namedLine := repairLineByToolCallID(t, logs, "call_named_persisted")
 	require.NotNil(t, namedLine)
 	require.Equal(t, "real-id", namedLine["message_id"])
 	require.Equal(t, string(originPersisted), namedLine["origin"],
@@ -657,7 +649,7 @@ func TestRepairDiag_MultipleEmptyIDsOneRepair(t *testing.T) {
 	answered := message.ToolResult{ToolCallID: "call_answered_1", Name: "bash", Content: "ok"}
 	answered2 := message.ToolResult{ToolCallID: "call_answered_2", Name: "read", Content: "ok"}
 	msgs := []message.Message{
-		message.Message{
+		{
 			ID:   "",
 			Role: message.Assistant,
 			Parts: []message.ContentPart{
@@ -667,7 +659,7 @@ func TestRepairDiag_MultipleEmptyIDsOneRepair(t *testing.T) {
 		},
 		// Index 1: the lone orphan (carried).
 		assistantWithOrphanCall("", "call_lone_orphan", "glob"),
-		message.Message{
+		{
 			ID:   "",
 			Role: message.Assistant,
 			Parts: []message.ContentPart{
@@ -688,9 +680,9 @@ func TestRepairDiag_MultipleEmptyIDsOneRepair(t *testing.T) {
 	)
 
 	// Exactly one repair line for this session, and it is the lone orphan's.
-	require.Equal(t, 1, countRepairLines(logs, "Injecting synthetic tool result for orphaned tool call", matchSessionID("sess-multi")),
+	require.Equal(t, 1, countRepairLines(logs, repairSyntheticResultMsg, matchSessionID("sess-multi")),
 		"only the single orphaned call must be repaired, the answered ones must not")
-	line := repairLineByToolCallID(t, logs, "Injecting synthetic tool result for orphaned tool call", "call_lone_orphan")
+	line := repairLineByToolCallID(t, logs, "call_lone_orphan")
 	require.NotNil(t, line)
 	require.Equal(t, "", line["message_id"], "the orphaned message has an empty id")
 	require.Equal(t, string(originCarried), line["origin"],

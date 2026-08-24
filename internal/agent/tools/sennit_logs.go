@@ -619,7 +619,7 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 	// behind alike). It is the budget: once it reaches maxScanBytes the scan
 	// stops, so a pathological file cannot run the tool forever and match_count
 	// becomes a lower bound (reported via reachedStart=false).
-	budget := int64(maxScanBytes)
+	budget := maxScanBytes
 	bytesScanned := int64(0)
 
 	// stopNow reports whether the byte budget is exhausted; the caller then
@@ -677,7 +677,7 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 		// offset base is the end of this chunk's bytes (data = chunk + the
 		// carried head), which is the correct absolute file position whether or
 		// not the head was discarded.
-		lineEnd := int64(chunkStart + int64(len(data)))
+		lineEnd := chunkStart + int64(len(data))
 		for i := len(lines) - 1; i >= 0; i-- {
 			line := lines[i]
 			if len(line) == 0 {
@@ -943,8 +943,6 @@ type fileIdentity struct {
 	prefixLength int64
 	fingerprint  string
 }
-
-const cursorFingerprintBytes = int64(256)
 
 func newFileIdentity(file *os.File, info os.FileInfo, anchor int64) (fileIdentity, error) {
 	return newFileIdentityWithStableID(file, info, anchor, fileDevInode)

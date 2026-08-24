@@ -859,8 +859,12 @@ func TestSennitLogs_ValidationPrecedesFilesystemAccess(t *testing.T) {
 	empty := writeRawLog(t)
 	missing := filepath.Join(t.TempDir(), "missing.log")
 	invalid := []SennitLogsParams{
-		{Limit: -1}, {Lines: maxLogLines + 1}, {Level: "verbose"},
-		{Since: "yesterday"}, {Cursor: "bad-cursor"}, {Chain: true},
+		{Limit: -1},
+		{Lines: maxLogLines + 1},
+		{Level: "verbose"},
+		{Since: "yesterday"},
+		{Cursor: "bad-cursor"},
+		{Chain: true},
 	}
 	for _, path := range []string{empty, missing} {
 		for _, params := range invalid {
@@ -896,8 +900,10 @@ func TestSennitLogs_InvalidLimitIsATextError(t *testing.T) {
 	t.Parallel()
 	path := writeRawLog(t, entryLine("INFO", "one", nil))
 	for _, params := range []SennitLogsParams{
-		{Limit: maxLogLines + 1}, {Lines: maxLogLines + 1},
-		{Limit: -1}, {Lines: -1},
+		{Limit: maxLogLines + 1},
+		{Lines: maxLogLines + 1},
+		{Limit: -1},
+		{Lines: -1},
 	} {
 		_, _, err := runFull(t, path, params)
 		require.Error(t, err)

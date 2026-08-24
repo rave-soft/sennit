@@ -71,7 +71,7 @@ func (r *Registry) RefreshResources(ctx context.Context, name string) {
 	}
 	resources, err := r.listResources(ctx, session)
 	if err != nil {
-		r.updateStateForSession(name, owner, session, StateError, err, Counts{})
+		r.failStateForSession(name, owner, session, err)
 		return
 	}
 	publishSingleCatalog(r, r.allResources, name, owner, session, resources, func(c *Counts, n int) { c.Resources = n })

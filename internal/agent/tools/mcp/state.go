@@ -111,13 +111,16 @@ type ClientInfo struct {
 	PendingConfig *config.MCPConfig
 }
 
-func (r *Registry) updateStateForSession(name string, owner attemptID, session *ClientSession, state State, err error, counts Counts) {
+// failStateForSession publishes StateError for an attempt that is still the
+// owning one. Every caller reports a failure with nothing to count, so the
+// state and the counts are fixed rather than parameters.
+func (r *Registry) failStateForSession(name string, owner attemptID, session *ClientSession, err error) {
 	r.publishMu.Lock()
 	if !r.ownsSessionLocked(name, owner, session) {
 		r.publishMu.Unlock()
 		return
 	}
-	cleanup := r.updateStateLocked(name, state, err, nil, counts)
+	cleanup := r.updateStateLocked(name, StateError, err, nil, Counts{})
 	r.publishMu.Unlock()
 	r.runStateCleanup(name, cleanup)
 }

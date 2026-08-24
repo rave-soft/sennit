@@ -124,8 +124,8 @@ func TestRunWithStreamRuntimeUsesCapturedSnapshotEndToEnd(t *testing.T) {
 	require.True(t, promptHasRoleText(call.Prompt, fantasy.MessageRoleSystem, "captured MCP instructions"))
 	require.False(t, promptHasRoleText(call.Prompt, fantasy.MessageRoleSystem, "mutated system"))
 	require.False(t, promptHasRoleText(call.Prompt, fantasy.MessageRoleSystem, "mutated MCP instructions"))
-	require.Equal(t, 1, countPromptRoleText(call.Prompt, fantasy.MessageRoleSystem, "captured prefix"), "prefix must be a single separate system message")
-	require.Zero(t, countPromptRoleText(call.Prompt, fantasy.MessageRoleSystem, "mutated prefix"))
+	require.Equal(t, 1, countSystemText(call.Prompt, "captured prefix"), "prefix must be a single separate system message")
+	require.Zero(t, countSystemText(call.Prompt, "mutated prefix"))
 }
 
 type snapshotMutatingSessionAgent struct {
@@ -228,8 +228,8 @@ func TestRunSubAgentUsesOneRuntimeSnapshotForBudgetAndProvider(t *testing.T) {
 	require.True(t, promptHasRoleText(call.Prompt, fantasy.MessageRoleSystem, capturedBase))
 	require.True(t, promptHasRoleText(call.Prompt, fantasy.MessageRoleSystem, capturedMCP))
 	require.False(t, promptHasRoleText(call.Prompt, fantasy.MessageRoleSystem, mutatedSystem))
-	require.Equal(t, 1, countPromptRoleText(call.Prompt, fantasy.MessageRoleSystem, capturedPref))
-	require.Zero(t, countPromptRoleText(call.Prompt, fantasy.MessageRoleSystem, mutatedPref))
+	require.Equal(t, 1, countSystemText(call.Prompt, capturedPref))
+	require.Zero(t, countSystemText(call.Prompt, mutatedPref))
 	carriedLen := longestPromptRoleText(call.Prompt, fantasy.MessageRoleAssistant)
 	require.Equal(t, messagesTextLen(wantPrior), carriedLen, "provider must receive history trimmed to the captured runtime budget")
 	require.NotEqual(t, messagesTextLen(livePrior), carriedLen, "provider history must not use the mutated live runtime budget")
@@ -259,10 +259,12 @@ func providerToolNames(tools []fantasy.Tool) []string {
 	return names
 }
 
-func countPromptRoleText(prompt fantasy.Prompt, role fantasy.MessageRole, text string) int {
+// countSystemText counts the system messages carrying exactly text. Only the
+// system role is ever asked about: the prompt prefix is what these tests pin.
+func countSystemText(prompt fantasy.Prompt, text string) int {
 	count := 0
 	for _, msg := range prompt {
-		if msg.Role != role {
+		if msg.Role != fantasy.MessageRoleSystem {
 			continue
 		}
 		for _, part := range msg.Content {

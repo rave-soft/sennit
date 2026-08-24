@@ -987,6 +987,8 @@ func TestTrimToBudgetExchangeBoundariesAndPlaceholder(t *testing.T) {
 	t.Parallel()
 
 	t.Run("membership follows IDs across assistant text", func(t *testing.T) {
+		t.Parallel()
+
 		calls := message.Message{Role: message.Assistant, Parts: []message.ContentPart{
 			message.ToolCall{ID: "a", Name: "read", Input: "{}", Finished: true},
 			message.ToolCall{ID: "b", Name: "glob", Input: "{}", Finished: true},
@@ -1005,6 +1007,8 @@ func TestTrimToBudgetExchangeBoundariesAndPlaceholder(t *testing.T) {
 	})
 
 	t.Run("placeholder is budget-aware text only", func(t *testing.T) {
+		t.Parallel()
+
 		calls := make([]message.ContentPart, 0, 20)
 		for i := range 20 {
 			calls = append(calls, message.ToolCall{ID: fmt.Sprintf("id-%d", i), Name: "very-long-tool-name", Input: "{}", Finished: true})
@@ -1030,6 +1034,8 @@ func TestHasOrphanResultMatchesPreparePromptRoles(t *testing.T) {
 	t.Parallel()
 
 	t.Run("call outside assistant role cannot satisfy tool result", func(t *testing.T) {
+		t.Parallel()
+
 		msgs := []message.Message{
 			{Role: message.User, Parts: []message.ContentPart{message.ToolCall{ID: "shared", Name: "read"}}},
 			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "shared", Content: "result"}}},
@@ -1038,6 +1044,8 @@ func TestHasOrphanResultMatchesPreparePromptRoles(t *testing.T) {
 	})
 
 	t.Run("result outside tool role cannot satisfy assistant call", func(t *testing.T) {
+		t.Parallel()
+
 		msgs := []message.Message{
 			{Role: message.Assistant, Parts: []message.ContentPart{message.ToolCall{ID: "shared", Name: "read"}}},
 			{Role: message.User, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "shared", Content: "result"}}},
@@ -1138,6 +1146,8 @@ func TestTrimToBudgetUTF8Boundaries(t *testing.T) {
 	t.Parallel()
 
 	t.Run("oversized plain text keeps the maximum valid suffix", func(t *testing.T) {
+		t.Parallel()
+
 		const budget = 10
 		text := "префикс🙂конец"
 		kept := trimToBudget([]message.Message{{Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: text}}}}, budget)
@@ -1149,6 +1159,8 @@ func TestTrimToBudgetUTF8Boundaries(t *testing.T) {
 	})
 
 	t.Run("oversized placeholder is valid UTF-8 and serializable", func(t *testing.T) {
+		t.Parallel()
+
 		msgs := []message.Message{
 			{Role: message.Assistant, Parts: []message.ContentPart{message.ToolCall{ID: "id", Name: "инструмент🙂", Input: "{}"}}},
 			{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "id", Content: strings.Repeat("результат🙂", 20)}}},

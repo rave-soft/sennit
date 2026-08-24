@@ -5,6 +5,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -142,8 +143,11 @@ func NewRipgrepTool(workingDir string, cfg config.ToolGrep, options ...ripgrepTo
 	})
 }
 
-func searchWithRipgrep(ctx context.Context, pattern, path, include string, caseInsensitive bool) ([]grepMatch, error) {
-	return searchWithRipgrepCommand(ctx, pattern, path, include, caseInsensitive, getRgSearchCmd)
+// searchWithRipgrep collects every match for a case-sensitive search. Case
+// insensitivity is reached through searchWithRipgrepCommand directly; no
+// caller needs both a canned command and a case-insensitive search.
+func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
+	return searchWithRipgrepCommand(ctx, pattern, path, include, false, getRgSearchCmd)
 }
 
 func searchWithRipgrepCommand(ctx context.Context, pattern, path, include string, caseInsensitive bool, command func(context.Context, string, string, string, bool) *exec.Cmd) ([]grepMatch, error) {
@@ -200,7 +204,8 @@ func visitRipgrepMatches(ctx context.Context, pattern, path, include string, cas
 	}
 	// rg uses exit code 1 for no matches, which is not an operational error.
 	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+		var exitErr *exec.ExitError
+		if !errors.As(waitErr, &exitErr) || exitErr.ExitCode() != 1 {
 			return waitErr
 		}
 	}

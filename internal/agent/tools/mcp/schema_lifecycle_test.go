@@ -90,7 +90,7 @@ func TestInvalidSchemaRefreshFailsClosedWithoutClobberingNewSession(t *testing.T
 	r.sessions.Set(name, fresh)
 	r.sessionOwners[name] = freshOwner
 	r.publishMu.Unlock()
-	r.updateStateForSession(name, owner, old, StateError, errors.New("stale bad-tool"), Counts{})
+	r.failStateForSession(name, owner, old, errors.New("stale bad-tool"))
 	published, exists := r.sessions.Get(name)
 	require.True(t, exists)
 	require.Same(t, fresh, published)

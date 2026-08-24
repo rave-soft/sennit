@@ -12,7 +12,9 @@ import (
 // cursor can carry: a byte offset is only meaningful for the same file.
 func fileDevInode(_ *os.File, info os.FileInfo) (dev, ino uint64) {
 	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		return uint64(st.Dev), uint64(st.Ino)
+		// Redundant on Linux, which is all the linter sees, but Stat_t.Dev
+		// is int32 on darwin — this file builds there too.
+		return uint64(st.Dev), uint64(st.Ino) //nolint:unconvert // see above
 	}
 	return 0, 0
 }

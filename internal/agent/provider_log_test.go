@@ -250,9 +250,11 @@ func (f *fakeStreamModel) Stream(ctx context.Context, _ fantasy.Call) (fantasy.S
 func (f *fakeStreamModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
 	return nil, errors.New("not used")
 }
+
 func (f *fakeStreamModel) GenerateObject(ctx context.Context, call fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, errors.New("not used")
 }
+
 func (f *fakeStreamModel) StreamObject(ctx context.Context, call fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, errors.New("not used")
 }
@@ -367,7 +369,7 @@ func TestInstrumentedModel_StreamErrorPart(t *testing.T) {
 	var sawError bool
 	for part := range stream {
 		if part.Type == fantasy.StreamPartTypeError {
-			sawError = part.Error == sentinel
+			sawError = errors.Is(part.Error, sentinel)
 		}
 	}
 	require.True(t, sawError, "the error part must be teed through to the consumer unchanged")
@@ -398,6 +400,8 @@ func TestInstrumentedModel_StreamCanceledErrorPart(t *testing.T) {
 		{name: "wrapped", err: fmt.Errorf("stream stopped: %w", context.Canceled)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			logs := captureJSONLogs(t)
 			sessionID := "sess-mid-canceled-" + tc.name
 			corr := providerCorrelation{sessionID: sessionID, runID: "run-mid-canceled", turnID: "turn-mid-canceled", step: 0, attempt: 1, reason: reasonTurn}
@@ -956,6 +960,7 @@ func (*summaryAfterTurnModel) Model() string    { return "fake-model" }
 func (*summaryAfterTurnModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, error) {
 	return nil, errors.New("not used")
 }
+
 func (m *summaryAfterTurnModel) Stream(_ context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
 	stream := m.streams.Add(1)
 	return func(yield func(fantasy.StreamPart) bool) {
@@ -967,9 +972,11 @@ func (m *summaryAfterTurnModel) Stream(_ context.Context, _ fantasy.Call) (fanta
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
 	}, nil
 }
+
 func (*summaryAfterTurnModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, errors.New("not used")
 }
+
 func (*summaryAfterTurnModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, errors.New("not used")
 }
@@ -1053,7 +1060,7 @@ func TestProviderRequest_SummarizeLabeled(t *testing.T) {
 
 	model := &usageReportingModel{usage: fantasy.Usage{InputTokens: 40, OutputTokens: 20, CacheReadTokens: 15}}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Model:        Model{Model: model, CatalogCfg: catwalkModel(200000, 10000)},
+		Model:        Model{Model: model, CatalogCfg: catwalkModel()},
 		SystemPrompt: "system",
 		Sessions:     env.sessions,
 		Messages:     env.messages,
@@ -1105,7 +1112,7 @@ func TestProviderRequest_SummarizeCancel(t *testing.T) {
 	// stream is then abandoned by the cancellation.
 	model := &blockingStreamModel{}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Model:        Model{Model: model, CatalogCfg: catwalkModel(200000, 10000)},
+		Model:        Model{Model: model, CatalogCfg: catwalkModel()},
 		SystemPrompt: "system",
 		Sessions:     env.sessions,
 		Messages:     env.messages,
@@ -1178,9 +1185,11 @@ func (c *callCountedModel) Stream(ctx context.Context, _ fantasy.Call) (fantasy.
 func (c *callCountedModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
 	return nil, errors.New("not used")
 }
+
 func (c *callCountedModel) GenerateObject(ctx context.Context, call fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, errors.New("not used")
 }
+
 func (c *callCountedModel) StreamObject(ctx context.Context, call fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, errors.New("not used")
 }
@@ -1206,7 +1215,7 @@ func TestProviderRequest_SummarizeRetryLabeled(t *testing.T) {
 		okScript:   streamScript{parts: []fantasy.StreamPart{{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{OutputTokens: 3}}}},
 	}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Model:        Model{Model: model, CatalogCfg: catwalkModel(200000, 10000)},
+		Model:        Model{Model: model, CatalogCfg: catwalkModel()},
 		SystemPrompt: "system",
 		Sessions:     env.sessions,
 		Messages:     env.messages,
@@ -1256,7 +1265,7 @@ func TestProviderRequest_SummarizeUnauthorizedWithoutRefresh(t *testing.T) {
 		okScript:   streamScript{parts: []fantasy.StreamPart{{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop}}},
 	}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Model:        Model{Model: model, CatalogCfg: catwalkModel(200000, 10000)},
+		Model:        Model{Model: model, CatalogCfg: catwalkModel()},
 		SystemPrompt: "system",
 		Sessions:     env.sessions,
 		Messages:     env.messages,
@@ -1287,7 +1296,7 @@ func TestProviderRequest_SummarizeAuthRefreshLabeled(t *testing.T) {
 		okScript:   streamScript{parts: []fantasy.StreamPart{{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{OutputTokens: 3}}}},
 	}
 	sa := NewSessionAgent(SessionAgentOptions{
-		Model:        Model{Model: model, CatalogCfg: catwalkModel(200000, 10000)},
+		Model:        Model{Model: model, CatalogCfg: catwalkModel()},
 		SystemPrompt: "system",
 		Sessions:     env.sessions,
 		Messages:     env.messages,
@@ -1463,9 +1472,11 @@ func (f *usageReportingModel) Stream(ctx context.Context, _ fantasy.Call) (fanta
 func (f *usageReportingModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
 	return nil, errors.New("not used")
 }
+
 func (f *usageReportingModel) GenerateObject(ctx context.Context, call fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, errors.New("not used")
 }
+
 func (f *usageReportingModel) StreamObject(ctx context.Context, call fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, errors.New("not used")
 }
@@ -1487,9 +1498,11 @@ func (b *blockingStreamModel) Stream(ctx context.Context, _ fantasy.Call) (fanta
 func (b *blockingStreamModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
 	return nil, errors.New("not used")
 }
+
 func (b *blockingStreamModel) GenerateObject(ctx context.Context, call fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, errors.New("not used")
 }
+
 func (b *blockingStreamModel) StreamObject(ctx context.Context, call fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, errors.New("not used")
 }
@@ -1498,6 +1511,6 @@ func (b *blockingStreamModel) Model() string    { return "fake-model" }
 
 // catwalkModel is a tiny helper to build a catwalk.Model with the summarize
 // buffer's required context window and default max tokens.
-func catwalkModel(contextWindow, defaultMaxTokens int64) catwalk.Model {
-	return catwalk.Model{ContextWindow: contextWindow, DefaultMaxTokens: defaultMaxTokens}
+func catwalkModel() catwalk.Model {
+	return catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}
 }
