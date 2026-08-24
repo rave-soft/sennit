@@ -945,13 +945,22 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 
 	// Carried-over history goes in front of this session's own
 	// messages.
-	history, files := a.preparePrompt(withPriorMessages(call.PriorMessages, msgs), model.CatalogCfg.SupportsImages, currentSession.Todos, call.Attachments...)
+	history, files := a.preparePrompt(withPriorMessages(call.PriorMessages, msgs), model.CatalogCfg.SupportsImages, currentSession.Todos, call.Attachments,
+		withRepairSessionID(call.SessionID, call.RunID),
+		withRepairOrigins(turnOrigins(call.PriorMessages, msgs)),
+	)
 
 	// Only this session's own messages, not the carried ones: a summary
 	// replaces exactly what msgs holds, which is what stopOnContextWindow
 	// needs to know to tell a summarizable context from an irreducible
-	// one.
-	ownHistory, _ := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages, currentSession.Todos)
+	// one. This pass is purely for the token estimate - it is not the prompt
+	// the model sees - so it suppresses the orphan-repair diagnostics: the
+	// main history pass above already logged (and counted) the orphans this
+	// pass would meet again, and a second line would not correspond to a
+	// request actually sent.
+	ownHistory, _ := a.preparePrompt(msgs, model.CatalogCfg.SupportsImages, currentSession.Todos, nil,
+		withRepairSuppressed(),
+	)
 	t.historyTokens = estimateMessageTokens(ownHistory)
 
 	startTime := time.Now()

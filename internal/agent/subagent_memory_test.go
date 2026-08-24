@@ -1232,7 +1232,7 @@ func TestTrimToBudgetPreparePromptProducesNoOrphanRepairs(t *testing.T) {
 		assert.False(t, hasOrphanToolResult(kept),
 			"budget %d: trimming must not leave a result whose call was dropped", budget)
 
-		_, _ = agent.preparePrompt(kept, true, nil)
+		_, _ = agent.preparePrompt(kept, true, nil, nil)
 	}
 	// The trimming orphans that the old code produced are repaired by
 	// preparePrompt with a warning; T1 must not create any of them.

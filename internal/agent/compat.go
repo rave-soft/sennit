@@ -22,7 +22,20 @@ import (
 	"github.com/rave-soft/sennit/internal/stringext"
 )
 
-func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, todos []session.Todo, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
+// preparePrompt converts the session's persisted (and, for a named sub-agent,
+// carried-in) history into the fantasy messages a turn sends to the model,
+// repairing broken tool exchanges on the way (see the two repair sites below).
+//
+// opts carries the orphan-repair diagnostics (T4): the session/run ids and the
+// per-message history origin, so a repair log line can localize the orphan by
+// one entry. It is variadic and optional: callers that pass nothing (including
+// the T1 trim integration path, which must NOT repair) get the zero options,
+// meaning "no correlation, every message is persisted-origin".
+func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, todos []session.Todo, attachments []message.Attachment, opts ...preparePromptOption) ([]fantasy.Message, []fantasy.FilePart) {
+	var o preparePromptOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	var history []fantasy.Message
 	if !a.isSubAgent {
 		history = append(history, fantasy.NewUserMessage(
@@ -51,7 +64,13 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 		}
 	}
 
-	for _, m := range msgs {
+	for i, m := range msgs {
+		// The history origin is carried positionally: origins[i] is this
+		// message's origin, independent of its id (which may be empty or
+		// duplicated and is not preserved one-to-one through the conversion).
+		// It is resolved here, at the input index, and passed to the repair
+		// sites so the line's origin is never looked up by id.
+		origin := o.originAt(i)
 		if len(m.Parts) == 0 {
 			continue
 		}
@@ -60,7 +79,7 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 			continue
 		}
 		if m.Role == message.Tool {
-			if msg, ok := filterOrphanedToolResults(m, knownToolCallIDs); ok {
+			if msg, ok := filterOrphanedToolResults(m, knownToolCallIDs, origin, o); ok {
 				history = append(history, msg)
 			}
 			continue
@@ -76,7 +95,7 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 		history = append(history, aiMsgs...)
 
 		if m.Role == message.Assistant {
-			if msg, ok := syntheticToolResultsForOrphanedCalls(m, knownToolResultIDs); ok {
+			if msg, ok := syntheticToolResultsForOrphanedCalls(m, knownToolResultIDs, origin, o); ok {
 				history = append(history, msg)
 			}
 		}
@@ -144,10 +163,23 @@ func filterFileParts(parts []fantasy.MessagePart) []fantasy.MessagePart {
 // in the known set. An orphaned result causes API validation to fail on every
 // subsequent turn, permanently locking the session. Returns the filtered
 // message and true if at least one valid part remains.
-func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]struct{}) (fantasy.Message, bool) {
+//
+// Each dropped part is logged as an orphan repair (T4) carrying the session/run
+// ids, the message id, the history origin (persisted/carried/summary) carried
+// in positionally via origin, the repair action, the tool_call_id, and the
+// running drop counter. The repair is a no-op on the returned history except
+// for the dropped part.
+func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]struct{}, origin historyOrigin, o preparePromptOptions) (fantasy.Message, bool) {
 	aiMsgs := toAIMessage(&m)
 	if len(aiMsgs) == 0 {
 		return fantasy.Message{}, false
+	}
+	// The fantasy part carries only the tool_call_id, not the tool name, so the
+	// repair line resolves the name from the original message's results (the
+	// name is authorship metadata, safe to log; the result content is not).
+	toolNames := make(map[string]string, len(m.ToolResults()))
+	for _, tr := range m.ToolResults() {
+		toolNames[tr.ToolCallID] = tr.Name
 	}
 	var validParts []fantasy.MessagePart
 	for _, part := range aiMsgs[0].Content {
@@ -159,10 +191,8 @@ func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]st
 		if _, known := knownToolCallIDs[tr.ToolCallID]; known {
 			validParts = append(validParts, part)
 		} else {
-			slog.Warn(
-				"Dropping orphaned tool result with no matching tool call",
-				"tool_call_id", tr.ToolCallID,
-			)
+			recordRepair("Dropping orphaned tool result with no matching tool call",
+				o, m.ID, origin, repairDropResult, tr.ToolCallID, toolNames[tr.ToolCallID])
 		}
 	}
 	if len(validParts) == 0 {
@@ -180,17 +210,20 @@ func filterOrphanedToolResults(m message.Message, knownToolCallIDs map[string]st
 // session can leave orphaned tool_use blocks that permanently lock the
 // conversation. Returns the message and true if any synthetic results were
 // produced.
-func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs map[string]struct{}) (fantasy.Message, bool) {
+//
+// Each injected result is logged as an orphan repair (T4). An orphaned *call*
+// is the interrupted-stream signature (the call was emitted but its result
+// never arrived), so the line is tagged interrupted=true, and its repair
+// action is inject_result. origin is the positionally-carried history origin
+// for the message index the orphan belongs to.
+func syntheticToolResultsForOrphanedCalls(m message.Message, knownToolResultIDs map[string]struct{}, origin historyOrigin, o preparePromptOptions) (fantasy.Message, bool) {
 	var syntheticParts []fantasy.MessagePart
 	for _, tc := range m.ToolCalls() {
 		if _, hasResult := knownToolResultIDs[tc.ID]; hasResult {
 			continue
 		}
-		slog.Warn(
-			"Injecting synthetic tool result for orphaned tool call",
-			"tool_call_id", tc.ID,
-			"tool_name", tc.Name,
-		)
+		recordRepair("Injecting synthetic tool result for orphaned tool call",
+			o, m.ID, origin, repairInjectResult, tc.ID, tc.Name)
 		syntheticParts = append(syntheticParts, fantasy.ToolResultPart{
 			ToolCallID: tc.ID,
 			Output: fantasy.ToolResultOutputContentError{
