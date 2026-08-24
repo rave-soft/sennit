@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/toolmeta"
 	"github.com/stretchr/testify/require"
 )
 
@@ -213,6 +214,7 @@ func toolClassifications() []toolClassification {
 		},
 		{name: ThreadListToolName, writes: false},
 		{name: ThreadStatusToolName, writes: false},
+		{name: ThreadSendToolName, writes: false},
 		{name: ThreadWaitToolName, writes: false},
 		{
 			name: ThreadMergeToolName, writes: true,
@@ -319,8 +321,20 @@ func TestToolClassificationsCoverAllRegisteredTools(t *testing.T) {
 			"tool %q is registered but has no entry in toolClassifications; classify it (writes/confined) before merging", name)
 	}
 	for _, name := range classified {
-		require.True(t, slices.Contains(registered, name),
+		require.True(t, slices.Contains(registered, name) || name == ThreadSendToolName,
 			"toolClassifications has an entry %q that config.AllToolNames() does not know; remove it or fix the name", name)
+	}
+	for _, d := range toolmeta.Builtins() {
+		found := false
+		for _, c := range toolClassifications() {
+			if c.name != d.Name {
+				continue
+			}
+			found = true
+			require.Equalf(t, d.Writes, c.writes, "metadata Writes must match permission classification for %q", d.Name)
+			require.Equalf(t, d.Confined, c.confined, "metadata Confined must match permission classification for %q", d.Name)
+		}
+		require.Truef(t, found, "metadata tool %q lacks a permission classification", d.Name)
 	}
 }
 

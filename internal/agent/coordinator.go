@@ -833,7 +833,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	var allTools []fantasy.AgentTool
 	for _, spec := range toolSpecs() {
-		if !spec.Gate(b) {
+		gate, ok := specGate(spec)
+		if !ok || !gateAllows(gate, spec.Names[0], b) {
 			continue
 		}
 		built, err := spec.Build(ctx, c, b)

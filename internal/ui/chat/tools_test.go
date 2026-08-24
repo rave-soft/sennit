@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
 	tools "github.com/rave-soft/sennit/internal/proto"
+	"github.com/rave-soft/sennit/internal/toolmeta"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 	"github.com/stretchr/testify/require"
 )
@@ -116,6 +118,35 @@ func TestToolMessageItemFactories_MatchExpectedNames(t *testing.T) {
 	for name := range toolRenderers {
 		require.Truef(t, known[name] || known[config.CanonicalToolName(name)],
 			"tool %q has a registered renderer but is neither in config.AllToolNames() nor a legacy name of a tool that is", name)
+	}
+	for _, d := range toolmeta.Builtins() {
+		names := append([]string{d.Name}, d.Aliases...)
+		for _, name := range names {
+			renderer, factory, registered := lookupToolRenderer(name)
+			switch d.Renderer {
+			case toolmeta.RendererGeneric:
+				require.Falsef(t, registered, "generic tool %q unexpectedly has a renderer", name)
+				require.Nilf(t, factory, "generic tool %q unexpectedly has a special item factory", name)
+			case toolmeta.RendererDedicated:
+				require.Truef(t, registered, "dedicated tool %q has no renderer", name)
+				require.NotNilf(t, renderer, "dedicated tool %q has a nil renderer", name)
+				require.Nilf(t, factory, "dedicated tool %q unexpectedly has a special item factory", name)
+			case toolmeta.RendererSpecial:
+				if d.Name == tools.AgentToolName {
+					require.Falsef(t, registered, "agent is dispatched before the renderer registry")
+					sty := styles.SennitDark()
+					item := NewToolMessageItem(&sty, "msg", message.ToolCall{ID: "tc-agent", Name: name, Input: "{}"}, nil, false, nil)
+					require.IsTypef(t, &AgentToolMessageItem{}, item, "special tool %q must use its factual item", name)
+					continue
+				}
+				require.Truef(t, registered, "special tool %q has no renderer", name)
+				require.NotNilf(t, renderer, "special tool %q has a nil renderer", name)
+				require.NotNilf(t, factory, "special tool %q has no special item factory", name)
+				sty := styles.SennitDark()
+				item := NewToolMessageItem(&sty, "msg", message.ToolCall{ID: "tc-" + name, Name: name, Input: "{}"}, nil, false, nil)
+				require.NotEqualf(t, "*chat.baseToolMessageItem", fmt.Sprintf("%T", item), "special tool %q fell back to the base item", name)
+			}
+		}
 	}
 }
 

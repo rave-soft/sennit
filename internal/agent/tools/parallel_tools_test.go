@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/shell"
+	"github.com/rave-soft/sennit/internal/toolmeta"
 	"github.com/stretchr/testify/require"
 )
 
@@ -94,7 +95,7 @@ var legacyParallelExceptions = []struct {
 	{AgenticFetchToolName, "runs a sub-agent over an outbound fetch; built by the coordinator. Pre-existing parallel flag; no T0 re-audit — tech debt"},
 	{DownloadToolName, "MUTATING: writes the downloaded file into the workspace while marked parallel. Pre-existing flag, kept untouched by T0; re-audit before relying on it — tech debt"},
 	{ListMCPResourcesToolName, "shared *mcp.Registry client lifecycle + permission gate. Pre-existing parallel flag; no T0 re-audit — tech debt"},
-	{ReadMCPResourceToolName, "MUTATING: writes the resource into the workspace while marked parallel; shared *mcp.Registry + permission gate. Pre-existing flag, kept untouched by T0; re-audit before relying on it — tech debt"},
+	{ReadMCPResourceToolName, "reads an MCP resource through shared registry state and permission gate; pre-existing parallel flag, retained as legacy behavior"},
 }
 
 // sequentialDenyList is the complement: every other built-in tool, each
@@ -366,6 +367,32 @@ func testConfigStore(t *testing.T, dir string) *config.ConfigStore {
 // only way to change the parallel set is to change the classification in
 // this file in the same commit. Coordinator-built agent and agentic_fetch
 // tools are verified by runtime tests in internal/agent.
+func TestToolMetadataMatchesConstructedInfo(t *testing.T) {
+	t.Parallel()
+
+	seen := make(map[string]bool)
+	for _, descriptor := range toolmeta.Builtins() {
+		if descriptor.Builder == toolmeta.BuilderCoordinator {
+			continue
+		}
+		t.Run(descriptor.Name, func(t *testing.T) {
+			t.Parallel()
+			tool := buildForInfo(t, descriptor.Name)
+			require.NotNilf(t, tool, "metadata tool %q has no constructor fixture", descriptor.Name)
+			info := tool.Info()
+			require.Equal(t, descriptor.Name, info.Name)
+			require.Equal(t, descriptor.ParallelSafe, info.Parallel)
+			require.NotEmpty(t, info.InputSchema, "constructor must own a non-empty schema")
+		})
+		seen[descriptor.Name] = true
+	}
+	for _, descriptor := range toolmeta.Builtins() {
+		if descriptor.Builder == toolmeta.BuilderToolsPackage {
+			require.Truef(t, seen[descriptor.Name], "metadata tool %q was not checked", descriptor.Name)
+		}
+	}
+}
+
 func TestParallelFlagsMatchClassification(t *testing.T) {
 	t.Parallel()
 

@@ -4,36 +4,15 @@ import (
 	"slices"
 	"time"
 
-	"github.com/rave-soft/sennit/internal/brand"
+	"github.com/rave-soft/sennit/internal/toolmeta"
 )
-
-// legacyToolNames maps names Sennit used to expose onto the names its tools
-// carry today. Tool names reach us from places we do not control and cannot
-// migrate: a sennit.json checked into a repo, a .sennit/agents/*.md file, a
-// `permissions allow ...` line in a shell config. Folding the old name onto
-// the current one wherever such a list is read keeps those files working
-// across a rename instead of silently ignoring an entry — an ignored
-// allowed_tools entry means an unexpected permission prompt, and an ignored
-// disabled_tools entry means a tool the user thought they had turned off.
-//
-// Kept as literals rather than referencing internal/agent/tools for its name
-// constants: that package imports internal/config, so importing it back
-// would cycle.
-var legacyToolNames = map[string]string{
-	// The read tool was called "view" until it took the name the UI had
-	// always shown for it.
-	"view": "read",
-}
 
 // CanonicalToolName folds a possibly-legacy tool name onto the name the
 // agent registers today. Names it does not recognize pass through
 // untouched: MCP tools (mcp_<server>_<tool>) and user-defined agents are
 // named at runtime, so an unknown name here is not necessarily a wrong one.
 func CanonicalToolName(name string) string {
-	if current, ok := legacyToolNames[name]; ok {
-		return current
-	}
-	return name
+	return toolmeta.CanonicalName(name)
 }
 
 // canonicalToolNames applies [CanonicalToolName] across a list, dropping
@@ -97,78 +76,7 @@ func AllToolNames() []string {
 }
 
 func allToolNames() []string {
-	return []string{
-		"agent",
-		"bash",
-		brand.ToolInfo,
-		brand.ToolLogs,
-		"job_output",
-		"job_kill",
-		"download",
-		"edit",
-		"multiedit",
-		"lsp_diagnostics",
-		"lsp_references",
-		"lsp_restart",
-		"lsp_symbols",
-		"lsp_definition",
-		"lsp_call_hierarchy",
-		"lsp_rename",
-		"lsp_replace_symbol",
-		"fetch",
-		"agentic_fetch",
-		"web_fetch",
-		"web_search",
-		"glob",
-		"grep",
-		"ripgrep",
-		"ls",
-		"question",
-		"todos",
-		"read",
-		"write",
-		"list_mcp_resources",
-		"read_mcp_resource",
-		"thread_create",
-		"thread_list",
-		"thread_status",
-		// thread_send is deliberately absent from the default set. A
-		// thread that is mid-turn does not read a follow-up until that
-		// turn ends, and an agent deep in a sub-agent call can be many
-		// minutes from that point — so the tool's most tempting use,
-		// steering or time-boxing a thread while it works, is the one it
-		// cannot actually do. It remains available to any agent config
-		// that names it in AllowedTools. The person's own path into a
-		// thread's session is unaffected by any of this and is the one
-		// path that *can* steer: workspace.SendThread goes through
-		// thread.Manager.SendFromPerson, which folds into the turn in
-		// flight rather than queueing behind it — a person correcting
-		// their own delegation is not an agent derailing another's work.
-		// When this tool is enabled, its result says which of the two
-		// happened; see tools.SendOutcome.
-		//
-		// thread_wait was once left out of the default set on the grounds
-		// that a thread's completion arrives on its own (the completion
-		// inbox), making the blocking wait redundant. It is back because
-		// that reasoning only covers the single-thread case: an agent
-		// running several threads and holding work until they all land —
-		// the "wait before merging" case the tool was kept around for —
-		// has nothing to wait *with* if it is not in the default set, and
-		// what it reaches for instead is `bash sleep 300`, which burns a
-		// turn, learns nothing, and has to be repeated. Between a blocking
-		// wait that ends the moment the threads finish and a blind sleep
-		// that does not, the wait is strictly better for the model and for
-		// the person watching it.
-		"thread_wait",
-		"thread_merge",
-		"thread_remove",
-		"task_list",
-		"task_result",
-		"task_cancel",
-		"task_send",
-		"task_output",
-		"ask_parent",
-	}
+	return toolmeta.DefaultNames()
 }
 
 func resolveAllowedTools(allTools []string, disabledTools []string) []string {
@@ -183,7 +91,7 @@ func resolveReadOnlyTools(tools []string) []string {
 	// fetch, web_fetch, and web_search don't modify local state, so they're
 	// read-only in the same sense as glob/grep/view; the network calls they
 	// make still go through the real permission.Service like the coder's.
-	readOnlyTools := []string{"glob", "grep", "ripgrep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "read", "fetch", "web_fetch", "web_search"}
+	readOnlyTools := toolmeta.TaskReadOnlyNames()
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }

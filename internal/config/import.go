@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/toolmeta"
 	"gopkg.in/yaml.v3"
 )
 
@@ -508,30 +509,15 @@ func normalizeReasoningEffort(v string) (mapped string, adjusted bool, ok bool) 
 	}
 }
 
-// importKnownTools are Sennit's own tool names, accepted as pass-through
-// during import. Kept as a literal set rather than importing
-// internal/agent/tools for its name constants: that package already imports
-// internal/config, and config importing it back would cycle.
-//
-// It must stay in step with allToolNames (toolnames.go): a name missing
-// here is reported as dropped during an import and silently removed from
-// the agent's tool list, which is how agentic_fetch and ask_parent
-// disappeared from every imported agent that named them.
-var importKnownTools = map[string]bool{
-	"read": true, "write": true, "edit": true, "multiedit": true, "bash": true,
-	"grep": true, "ripgrep": true, "glob": true, "ls": true, "fetch": true, "web_fetch": true,
-	"web_search": true, "download": true, "todos": true, "agent": true,
-	"question": true, brand.ToolInfo: true, brand.ToolLogs: true,
-	"job_output": true, "job_kill": true,
-	"thread_create": true, "thread_list": true, "thread_merge": true,
-	"thread_remove": true, "thread_send": true, "thread_status": true, "thread_wait": true,
-	"task_list": true, "task_result": true, "task_cancel": true,
-	"task_send": true, "task_output": true,
-	"lsp_definition": true, "lsp_references": true, "lsp_rename": true,
-	"lsp_symbols": true, "lsp_call_hierarchy": true, "lsp_diagnostics": true,
-	"lsp_restart": true, "lsp_replace_symbol": true,
-	"list_mcp_resources": true, "read_mcp_resource": true,
-	"agentic_fetch": true, "ask_parent": true,
+// importKnownTools is derived from the canonical static registry. Foreign
+// names are mapped by ClaudeToolNames; aliases owned by Sennit are folded by
+// toolmeta.CanonicalName below.
+func importKnownTools() map[string]bool {
+	known := make(map[string]bool, len(toolmeta.NamesAll()))
+	for _, name := range toolmeta.NamesAll() {
+		known[name] = true
+	}
+	return known
 }
 
 // translateAgentTools maps foreign tool names onto Sennit's, the same way
@@ -541,6 +527,7 @@ var importKnownTools = map[string]bool{
 // silently granted the wrong tools would be worse than one that grants
 // fewer, correctly.
 func translateAgentTools(names []string) (mapped []string, dropped []string) {
+	knownTools := importKnownTools()
 	seen := make(map[string]bool, len(names))
 	for _, name := range names {
 		name = strings.TrimSpace(name)
@@ -551,12 +538,12 @@ func translateAgentTools(names []string) (mapped []string, dropped []string) {
 		switch {
 		case ClaudeToolNames[lower] != "":
 			name = ClaudeToolNames[lower]
-		case importKnownTools[lower]:
+		case knownTools[lower]:
 			name = lower
-		case legacyToolNames[lower] != "":
+		case toolmeta.CanonicalName(lower) != lower:
 			// One of Sennit's own older names — fold it forward rather
 			// than dropping it. See [CanonicalToolName].
-			name = legacyToolNames[lower]
+			name = toolmeta.CanonicalName(lower)
 		default:
 			dropped = append(dropped, name)
 			continue

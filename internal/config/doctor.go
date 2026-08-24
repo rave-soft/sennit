@@ -10,6 +10,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/clipboard"
 	"github.com/rave-soft/sennit/internal/skills"
+	"github.com/rave-soft/sennit/internal/toolmeta"
 )
 
 // Severity classifies how urgently a Problem needs attention.
@@ -164,17 +165,16 @@ func doctorAgentReasoning(cfg *Config) []Problem {
 // was, not a new false positive.
 func doctorToolNames(cfg *Config) []Problem {
 	known := make(map[string]bool)
-	for _, name := range allToolNames() {
+	for _, name := range toolmeta.NamesAll() {
 		known[name] = true
 	}
 	for id := range cfg.Agents {
 		known[id] = true
 	}
-	// Names Sennit has since renamed are known too: they are folded onto
-	// the current name when the config is read (see [CanonicalToolName]),
-	// so warning about one would be warning about a name that works.
-	for legacy := range legacyToolNames {
-		known[legacy] = true
+	// Aliases are accepted and folded onto their canonical names when config
+	// is read, so doctor must not warn about a name that works.
+	for _, alias := range toolmeta.AliasNames() {
+		known[alias] = true
 	}
 	isKnown := func(name string) bool {
 		return known[name] || strings.HasPrefix(name, "mcp_")
