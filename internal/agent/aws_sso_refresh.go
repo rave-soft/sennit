@@ -80,7 +80,7 @@ func (c *coordinator) refreshAWSCredentials(ctx context.Context, providerCfg con
 	}
 	// Rebuild models so the AWS SDK credential chain re-reads the refreshed
 	// SSO cache on the next attempt.
-	c.invalidateRuntime()
+	c.invalidateRuntime(runCtx, "aws_auth_refresh", func() bool { return true })
 	if err := c.UpdateModels(runCtx); err != nil {
 		slog.Error("Failed to update models after AWS SSO refresh", "provider", providerCfg.ID, "error", err)
 		return err

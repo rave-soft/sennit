@@ -3,9 +3,12 @@ package agent
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"charm.land/fantasy"
+	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
 )
 
@@ -64,6 +67,15 @@ type runtimeCache struct {
 	mu      sync.Mutex
 	entries map[runtimeKey]*compiledRuntime
 	flight  map[runtimeKey]*runtimeFlight
+
+	hits, misses, builds, invalidations atomic.Uint64
+	lastKey                             runtimeKey
+	hasLastKey                          bool
+	pendingReason                       map[runtimeKey]string
+}
+
+type runtimeCacheStats struct {
+	Hits, Misses, Builds, Invalidations uint64
 }
 
 type runtimeFlight struct {
@@ -73,13 +85,44 @@ type runtimeFlight struct {
 }
 
 func newRuntimeCache() *runtimeCache {
-	return &runtimeCache{entries: make(map[runtimeKey]*compiledRuntime), flight: make(map[runtimeKey]*runtimeFlight)}
+	return &runtimeCache{
+		entries:       make(map[runtimeKey]*compiledRuntime),
+		flight:        make(map[runtimeKey]*runtimeFlight),
+		pendingReason: make(map[runtimeKey]string),
+	}
 }
 
 // getOrBuild returns a runtime only after its key remains current. A catalog or
 // config update may race either a cache hit or an in-flight build, so every
 // completion path validates the key and retries until it observes a stable
 // snapshot or the caller cancels the context.
+func (c *runtimeCache) log(ctx context.Context, event, reason string, key runtimeKey, count uint64) {
+	level := slog.LevelDebug
+	if event == "invalidate" {
+		level = slog.LevelInfo
+	}
+	slog.Log(ctx, level, "runtime cache", "component", "runtime_cache", "event", event, "reason", reason, "config_version", key.config, "mcp_version", key.mcp, "local_version", key.local, "count", count, "session_id", tools.GetSessionFromContext(ctx), "run_id", RunIDFromContext(ctx))
+}
+
+func (c *runtimeCache) missReasonLocked(key runtimeKey) string {
+	if reason := c.pendingReason[key]; reason != "" {
+		return reason
+	}
+	if !c.hasLastKey {
+		return "cold"
+	}
+	if c.lastKey.config != key.config {
+		return "config_changed"
+	}
+	if c.lastKey.mcp != key.mcp {
+		return "mcp_changed"
+	}
+	if c.lastKey.local != key.local {
+		return "local_changed"
+	}
+	return "cold"
+}
+
 func (c *runtimeCache) getOrBuild(ctx context.Context, current func() runtimeKey, build func(context.Context, runtimeKey) (*compiledRuntime, error)) (*compiledRuntime, error) {
 	for {
 		if err := ctx.Err(); err != nil {
@@ -87,7 +130,11 @@ func (c *runtimeCache) getOrBuild(ctx context.Context, current func() runtimeKey
 		}
 		key := current()
 		c.mu.Lock()
+		reason := c.missReasonLocked(key)
+
 		if run := c.entries[key]; run != nil {
+			count := c.hits.Add(1)
+			c.log(ctx, "hit", "current_key", key, count)
 			c.mu.Unlock()
 			if current() == key {
 				return run, nil
@@ -122,18 +169,24 @@ func (c *runtimeCache) getOrBuild(ctx context.Context, current func() runtimeKey
 				return nil, ctx.Err()
 			}
 		}
+		count := c.misses.Add(1)
+		c.log(ctx, "miss", reason, key, count)
 		flight := &runtimeFlight{done: make(chan struct{})}
 		c.flight[key] = flight
 		c.mu.Unlock()
 
 		run, err := build(ctx, key)
+		count = c.builds.Add(1)
+		c.log(ctx, "build", "completed", key, count)
 		c.mu.Lock()
 		if err == nil && current() == key {
-			// Retain only the published generation. Existing callers hold
-			// their own runtime pointer, so evicting stale entries cannot
-			// invalidate an in-flight Run.
+			// Publish only the current generation. The mutex makes this atomic
+			// with invalidation, so an old in-flight builder cannot retain an
+			// entry after the generation has advanced.
 			clear(c.entries)
 			c.entries[key] = run
+			clear(c.pendingReason)
+			c.lastKey, c.hasLastKey = key, true
 		} else if err == nil {
 			run = nil
 			err = errRuntimeChanged
@@ -149,8 +202,33 @@ func (c *runtimeCache) getOrBuild(ctx context.Context, current func() runtimeKey
 	}
 }
 
-func (c *runtimeCache) invalidate() {
+func (c *runtimeCache) invalidate(ctx context.Context, reason string, key runtimeKey) {
+	c.invalidateAndPublish(ctx, reason, key, nil)
+}
+
+// invalidateAndPublish records an invalidation reason and publishes its
+// generation while holding the cache mutex. This closes the only window in
+// which an old builder could otherwise publish and clear the pending reason
+// between reason registration and generation publication.
+func (c *runtimeCache) invalidateAndPublish(ctx context.Context, reason string, key runtimeKey, publish func()) {
 	c.mu.Lock()
-	clear(c.entries)
+	// Retain at most the generation being published. A builder may publish only
+	// after confirming its key is still current under this same mutex.
+	for cachedKey := range c.entries {
+		if cachedKey != key {
+			delete(c.entries, cachedKey)
+		}
+	}
+	clear(c.pendingReason)
+	c.pendingReason[key] = reason
+	if publish != nil {
+		publish()
+	}
 	c.mu.Unlock()
+	count := c.invalidations.Add(1)
+	c.log(ctx, "invalidate", reason, key, count)
+}
+
+func (c *runtimeCache) stats() runtimeCacheStats {
+	return runtimeCacheStats{Hits: c.hits.Load(), Misses: c.misses.Load(), Builds: c.builds.Load(), Invalidations: c.invalidations.Load()}
 }

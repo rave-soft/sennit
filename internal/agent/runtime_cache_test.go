@@ -39,6 +39,10 @@ func TestRuntimeCacheHitAndConcurrentMiss(t *testing.T) {
 	_, err := cache.getOrBuild(context.Background(), func() runtimeKey { return key }, build)
 	require.NoError(t, err)
 	require.Equal(t, int32(1), calls.Load())
+	stats := cache.stats()
+	require.GreaterOrEqual(t, stats.Hits, uint64(1))
+	require.Equal(t, uint64(1), stats.Builds)
+	require.GreaterOrEqual(t, stats.Misses, uint64(1))
 }
 
 func TestRuntimeCacheRetriesStaleHitUntilStable(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -177,8 +178,14 @@ type coordinator struct {
 	// construction (thread managers are wired in post-bootstrap; see
 	// internal/app/app.go and internal/app/threadspawn/attach.go) and
 	// buildTools reads on every run via UpdateModels.
-	threadsMu sync.RWMutex
-	threads   tools.ThreadManager
+	threadsMu       sync.RWMutex
+	threads         tools.ThreadManager
+	threadsIdentity managerIdentity
+
+	// runtimeInvalidationMu serializes runtime-affecting state mutation and
+	// publication of each local generation with its exact invalidation reason.
+	// Runtime builds never hold it.
+	runtimeInvalidationMu sync.Mutex
 
 	// tasksMu guards tasks, wired the same way and for the same reason as
 	// threads above, but read by the "agent" tool's background branch at
@@ -374,29 +381,30 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:          opts.Config,
-		credentials:  opts.Credentials,
-		sessions:     opts.Sessions,
-		messages:     opts.Messages,
-		permissions:  opts.Permissions,
-		questions:    opts.Questions,
-		history:      opts.History,
-		filetracker:  opts.FileTracker,
-		lspManager:   opts.LSPManager,
-		notify:       opts.Notify,
-		runComplete:  opts.RunComplete,
-		agents:       make(map[string]SessionAgent),
-		allSkills:    allSkills,
-		activeSkills: activeSkills,
-		skillTracker: skillTracker,
-		skillsMgr:    opts.Skills,
-		interactive:  opts.Interactive,
-		mcp:          opts.MCP,
-		threads:      opts.Threads,
-		tasks:        opts.Tasks,
-		background:   opts.BackgroundShells,
-		latency:      opts.Latency,
-		runtime:      newRuntimeCache(),
+		cfg:             opts.Config,
+		credentials:     opts.Credentials,
+		sessions:        opts.Sessions,
+		messages:        opts.Messages,
+		permissions:     opts.Permissions,
+		questions:       opts.Questions,
+		history:         opts.History,
+		filetracker:     opts.FileTracker,
+		lspManager:      opts.LSPManager,
+		notify:          opts.Notify,
+		runComplete:     opts.RunComplete,
+		agents:          make(map[string]SessionAgent),
+		allSkills:       allSkills,
+		activeSkills:    activeSkills,
+		skillTracker:    skillTracker,
+		skillsMgr:       opts.Skills,
+		interactive:     opts.Interactive,
+		mcp:             opts.MCP,
+		threads:         opts.Threads,
+		threadsIdentity: managerIdentityOf(opts.Threads),
+		tasks:           opts.Tasks,
+		background:      opts.BackgroundShells,
+		latency:         opts.Latency,
+		runtime:         newRuntimeCache(),
 	}
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
@@ -777,7 +785,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		// runSubAgent waits on this before dispatching, so a delegation
 		// can no longer start on an agent whose system prompt and tools
 		// have not landed yet — a real possibility, since sub-agents are
-		// rebuilt on every runtime invalidation and a tool call can
+		// rebuilt when the effective runtime key changes; a tool call can
 		// follow one immediately. The goroutine stays for the case
 		// nothing ever delegates to this build: a failure is worth a log
 		// line even when no caller is left to receive it.
@@ -1083,10 +1091,16 @@ func (c *coordinator) ClearQueue(sessionID string) {
 
 // SetThreads implements Coordinator.
 func (c *coordinator) SetThreads(threads tools.ThreadManager) {
-	c.threadsMu.Lock()
-	c.threads = threads
-	c.threadsMu.Unlock()
-	c.invalidateRuntime()
+	c.invalidateRuntime(context.Background(), "threads_changed", func() bool {
+		identity := managerIdentityOf(threads)
+		c.threadsMu.Lock()
+		defer c.threadsMu.Unlock()
+		if c.threadsIdentity.same(identity) {
+			return false
+		}
+		c.threads, c.threadsIdentity = threads, identity
+		return true
+	})
 }
 
 // SetTasks implements Coordinator. No invalidateRuntime call: unlike
@@ -1114,18 +1128,94 @@ func (c *coordinator) SendToParent(ctx context.Context, sessionID, message strin
 	return c.currentAgent.SendToParent(ctx, sessionID, message)
 }
 
+type managerIdentity struct {
+	typ           reflect.Type
+	comparable    any
+	ptr           uintptr
+	alwaysChanged bool
+}
+
+func (i managerIdentity) same(other managerIdentity) bool {
+	if i.alwaysChanged || other.alwaysChanged || i.typ != other.typ {
+		return false
+	}
+	if i.comparable != nil || other.comparable != nil {
+		return i.comparable == other.comparable
+	}
+	return i.ptr == other.ptr
+}
+
+// managerIdentityOf provides stable identity for implementations backed by
+// comparable values and map, slice, function, pointer, or chan values. The
+// latter cannot be compared through an interface without panicking.
+// managerIdentityOf avoids interface equality for non-comparable managers.
+// Maps expose stable identity. Functions, slices, and unknown non-comparable
+// values deliberately force a rebuild: a function pointer identifies code, not
+// captured closure state, and the others have no stable interface identity.
+func managerIdentityOf(manager tools.ThreadManager) managerIdentity {
+	if manager == nil {
+		return managerIdentity{}
+	}
+	value := reflect.ValueOf(manager)
+	identity := managerIdentity{typ: value.Type()}
+	if value.Type().Comparable() {
+		identity.comparable = manager
+		return identity
+	}
+	switch value.Kind() {
+	case reflect.Map:
+		identity.ptr = value.Pointer()
+	case reflect.Func:
+		identity.alwaysChanged = true
+	default:
+		identity.alwaysChanged = true
+	}
+	return identity
+}
+
+type effectiveSkill struct {
+	Name, Description, SkillFilePath string
+	DisableModelInvocation, Builtin  bool
+}
+
+// sameSkills includes only fields emitted into the runtime skill prompt.
+// Discovery details and skill content are consumed by the tracker at skill-use
+// time, rather than by compiled tool/prompt construction.
+func sameSkills(a, b []*skills.Skill) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] == nil || b[i] == nil {
+			if a[i] != b[i] {
+				return false
+			}
+			continue
+		}
+		left := effectiveSkill{a[i].Name, a[i].Description, a[i].SkillFilePath, a[i].DisableModelInvocation, a[i].Builtin}
+		right := effectiveSkill{b[i].Name, b[i].Description, b[i].SkillFilePath, b[i].DisableModelInvocation, b[i].Builtin}
+		if !reflect.DeepEqual(left, right) {
+			return false
+		}
+	}
+	return true
+}
+
 // RefreshSkills implements Coordinator.RefreshSkills.
 func (c *coordinator) RefreshSkills(allSkills, activeSkills []*skills.Skill) {
-	c.skillsMu.Lock()
-	c.allSkills = allSkills
-	c.activeSkills = activeSkills
-	// The tracker itself is not replaced: UpdateActiveSkills mutates it
-	// in place under its own lock, keeping loaded state for names still
-	// active rather than wiping it (see UpdateActiveSkills).
-	tracker := c.skillTracker
-	c.skillsMu.Unlock()
-	tracker.UpdateActiveSkills(activeSkills)
-	c.invalidateRuntime()
+	c.invalidateRuntime(context.Background(), "skills_changed", func() bool {
+		c.skillsMu.Lock()
+		changed := !sameSkills(c.allSkills, allSkills) || !sameSkills(c.activeSkills, activeSkills)
+		c.allSkills = allSkills
+		c.activeSkills = activeSkills
+		// The tracker itself is not replaced: UpdateActiveSkills mutates it
+		// in place under its own lock, keeping loaded state for names still
+		// active rather than wiping it (see UpdateActiveSkills).
+		tracker := c.skillTracker
+		c.skillsMu.Unlock()
+		tracker.UpdateActiveSkills(activeSkills)
+		return changed
+	})
 }
 
 // skillStates returns the workspace's current skill discovery states, or
@@ -1296,17 +1386,25 @@ func (c *coordinator) runtimeKey() runtimeKey {
 	return key
 }
 
-func (c *coordinator) invalidateRuntime() {
-	c.localVersion.Add(1)
-	if c.runtime != nil {
-		c.runtime.invalidate()
+func (c *coordinator) invalidateRuntime(ctx context.Context, reason string, mutate func() bool) {
+	c.runtimeInvalidationMu.Lock()
+	defer c.runtimeInvalidationMu.Unlock()
+	if !mutate() {
+		return
 	}
+	nextVersion := c.localVersion.Load() + 1
+	nextKey := c.runtimeKey()
+	nextKey.local = nextVersion
+	if c.runtime != nil {
+		c.runtime.invalidateAndPublish(ctx, reason, nextKey, func() {
+			c.localVersion.Store(nextVersion)
+		})
+		return
+	}
+	c.localVersion.Store(nextVersion)
 }
 
 func (c *coordinator) runtimeFor(ctx context.Context) (*compiledRuntime, error) {
-	if c.runtime == nil {
-		c.runtime = newRuntimeCache()
-	}
 	return c.runtime.getOrBuild(ctx, c.runtimeKey, func(ctx context.Context, key runtimeKey) (*compiledRuntime, error) {
 		model, err := c.buildAgentModel(ctx, false)
 		if err != nil {

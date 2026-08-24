@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/agent/notify"
+	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -73,8 +74,14 @@ func TestRefreshAWSCredentials_Success_PublishesURLAndRetries(t *testing.T) {
 	const ssoURL = "https://device.sso.us-east-1.amazonaws.com/?user_code=ABCD-EFGH"
 	providerCfg := config.ProviderConfig{ID: "bedrock", AWSAuthRefresh: "echo " + ssoURL}
 
-	err := co.refreshAWSCredentials(t.Context(), providerCfg)
+	logs := captureLogs(t)
+	ctx := WithRunID(context.WithValue(t.Context(), tools.SessionIDContextKey, "aws-session"), "aws-run")
+	err := co.refreshAWSCredentials(ctx, providerCfg)
 	require.NoError(t, err)
+	require.Contains(t, logs.String(), "event=invalidate")
+	require.Contains(t, logs.String(), "reason=aws_auth_refresh")
+	require.Contains(t, logs.String(), "session_id=aws-session")
+	require.Contains(t, logs.String(), "run_id=aws-run")
 
 	dialogs := notifier.ofType(notify.TypeAWSSSOAuth)
 	require.GreaterOrEqual(t, len(dialogs), 2, "expected the initial dialog-open plus a follow-up carrying the URL")
