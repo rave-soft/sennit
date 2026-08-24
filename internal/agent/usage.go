@@ -161,19 +161,80 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 
 	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
 
+	// The summarize pass is a real provider request of its own, so it gets
+	// its own started/finished pair - not folded into the turn's request
+	// count, which is the whole point of the request_reason distinction (a
+	// summarize is an extra request a run_id's log must show as a cause, not
+	// as an ordinary tool-continuation step). The turn id is minted per pass
+	// so a session that summarizes several times stays separable, and the run
+	// id is read from the context the pass was started under (finishTurn's
+	// shouldSummarize path carries the turn's). The pair is logged by the
+	// instrumented model returned from the ModelProvider below - the same
+	// mechanism the turn uses - so a summarize retry produces its own 1:1
+	// pair rather than an orphaned started.
+	//
+	// The request_reason for the summarize's attempts is tracked the same way
+	// the turn tracks it: the first attempt is a summary, a retry is a retry
+	// (a transient failure fantasy chose to re-attempt), and a re-attempt made
+	// after a successful OnAuthRefresh is an auth_refresh. All of this state
+	// is read/written on the stream's own goroutine, in the retry loop's order
+	// (OnRetry / OnAuthRefresh fire before the next attempt's ModelProvider),
+	// so no lock is needed - the same guarantee the turn's runTurn relies on.
+	summaryTurnID := newTurnID()
+	summaryRunID := RunIDFromContext(ctx)
+	summaryAttempt := 0
+	summaryPendingReason := "" // "" | reasonRetry | reasonAuthRefresh, for the next attempt
+	// Preserve nil: fantasy treats a configured callback as permission to
+	// restart a failed auth request. A synthetic wrapper around nil would turn
+	// a 401 into a false successful refresh and issue an unintended retry.
+	var summaryOnAuthRefresh fantasy.OnAuthRefreshFunc
+	if onAuthRefresh != nil {
+		summaryOnAuthRefresh = func(ctx context.Context, err *fantasy.ProviderError) error {
+			if refreshErr := onAuthRefresh(ctx, err); refreshErr != nil {
+				return refreshErr
+			}
+			summaryPendingReason = reasonAuthRefresh
+			return nil
+		}
+	}
+
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
 		Messages:        aiMsgs,
 		Headers:         sessionHeaders(sessionID),
 		ProviderOptions: opts,
-		OnAuthRefresh:   onAuthRefresh,
+		OnAuthRefresh:   summaryOnAuthRefresh,
+		OnRetry: func(err *fantasy.ProviderError, _ time.Duration) {
+			// A transient failure the retry loop is about to re-attempt: the
+			// next attempt is a retry, not a fresh summary.
+			summaryPendingReason = reasonRetry
+		},
 		ModelProvider: func() fantasy.LanguageModel {
+			// Count the attempt and label the summarize's request. Each
+			// ModelProvider call is one summarize attempt, so a retry gets its
+			// own pair (attempt 2, 3, ...). The reason is a pending re-attempt
+			// cause (retry / auth_refresh) when set, otherwise the baseline
+			// summary cause for the pass's first attempt.
+			summaryAttempt++
+			reason := reasonSummary
+			if summaryPendingReason != "" {
+				reason = summaryPendingReason
+				summaryPendingReason = ""
+			}
+			corr := providerCorrelation{
+				sessionID: sessionID,
+				runID:     summaryRunID,
+				turnID:    summaryTurnID,
+				step:      0,
+				attempt:   summaryAttempt,
+				reason:    reason,
+			}
 			if active != nil {
 				if activeRuntime := active.load(); activeRuntime != nil && activeRuntime.model.ModelCfg.Provider == model.ModelCfg.Provider && activeRuntime.model.ModelCfg.Model == model.ModelCfg.Model {
-					return activeRuntime.model.Model
+					return newInstrumentedModel(activeRuntime.model.Model, corr)
 				}
 			}
-			return model.Model
+			return newInstrumentedModel(model.Model, corr)
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages
@@ -241,6 +302,12 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	if err != nil {
 		return err
 	}
+
+	// The summarize request's "finished" line is logged by the instrumented
+	// model that performed the Stream (the 1:1 counterpart of the started
+	// line, carrying finish_reason + usage + the summarize's cache
+	// read/creation). We do not log a second finished line here - that was
+	// the duplicate the audit caught.
 
 	a.updateSessionUsage(model, &currentSession, resp.TotalUsage, a.openrouterTotal(resp.Steps), false)
 

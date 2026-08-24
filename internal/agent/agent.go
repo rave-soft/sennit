@@ -706,7 +706,14 @@ func (a *sessionAgent) finishTurn(
 		// queued continuation could claim the session first, turning this
 		// successful turn's summarize into an ErrSessionBusy. summarize
 		// swaps the slot atomically instead.
-		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, t.model, t.promptPrefix, call.ActiveRuntime, ac); summarizeErr != nil {
+		// summarize derives its provider-log correlation from its context. A
+		// SessionAgentCall may be constructed directly (without WithRunID on
+		// the parent context), and queued calls can carry a RunID different
+		// from the context that originally started the parent turn. Stamp this
+		// call's RunID explicitly so the summary belongs to the turn that
+		// triggered it.
+		summarizeCtx := WithRunID(genCtx, call.RunID)
+		if summarizeErr := a.summarize(summarizeCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, t.model, t.promptPrefix, call.ActiveRuntime, ac); summarizeErr != nil {
 			return nil, nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -955,6 +962,16 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
+	// onAuthRefresh is the turn's OnAuthRefresh: it wraps the call's
+	// (coordinator's) credential refresh so a *successful* refresh marks the
+	// next attempt as an auth_refresh request. When the call carries no
+	// refresh (the in-memory/continuation path), pass nil so fantasy does not
+	// even attempt a refresh - the wrapper must not run and pretend a
+	// refresh succeeded when none was configured.
+	var turnOnAuthRefresh fantasy.OnAuthRefreshFunc
+	if call.OnAuthRefresh != nil {
+		turnOnAuthRefresh = t.onAuthRefresh
+	}
 	result, err = streamAgent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,
@@ -975,7 +992,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		OnToolInputStart: t.onToolInputStart,
 		OnToolInputDelta: t.onToolInputDelta,
 		OnRetry:          t.onRetry,
-		OnAuthRefresh:    call.OnAuthRefresh,
+		OnAuthRefresh:    turnOnAuthRefresh,
 		ModelProvider:    t.modelProvider,
 		OnToolCall:       t.onToolCall,
 		OnToolResult:     t.onToolResult,

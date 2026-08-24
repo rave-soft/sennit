@@ -32,6 +32,40 @@ type runTurn struct {
 	agent *sessionAgent
 	call  SessionAgentCall
 
+	// turnID is this turn's correlation id, minted once in newRunTurn and
+	// shared by every provider request the turn makes (see provider_log.go).
+	// A turn is exactly one runTurn, so it is stable for the whole turn even
+	// when run_id is empty or the same run_id spans several queued turns.
+	turnID string
+
+	// stepNumber/attempt/pendingReason are the mutable per-attempt state that
+	// modelProvider folds into a providerCorrelation for the instrumented
+	// model (see provider_log.go). stepNumber is the current fantasy step
+	// (PrepareStep stamps it); attempt is the 1-based network attempt within
+	// the current step (the first is 1, a retry is 2, ...). Both are written
+	// by PrepareStep/modelProvider and read by modelProvider, on the stream's
+	// own goroutine, so no lock is needed.
+	//
+	// pendingReason is the request_reason token for the *next* attempt: ""
+	// (the baseline turn/continuation cause), reasonRetry (the previous
+	// attempt failed transiently and fantasy chose to retry it), or
+	// reasonAuthRefresh (the previous attempt failed with an auth error that
+	// a successful OnAuthRefresh resolved, and fantasy restarted the pass).
+	// It is set by onRetry / onAuthRefresh and consumed (read + cleared) by
+	// the next modelProvider call via requestStartReason. Written by the
+	// callbacks, read+cleared by modelProvider - all on the stream's
+	// goroutine, in the retry loop's own order, so no lock is needed.
+	//
+	// pendingRetryReason is the filterable retry_reason label the onRetry
+	// warning carries (auth / rate_limited / server_error / ...). It is set
+	// and logged inside onRetry itself; requestStartReason no longer reads
+	// it (pendingReason is the request_reason source), so it is a warning
+	// detail, not the retry-pending flag.
+	stepNumber         int
+	attempt            int
+	pendingReason      string
+	pendingRetryReason string
+
 	// ctx is Run's outer per-call context (NOT genCtx): several callbacks
 	// deliberately use it instead of genCtx so their writes still land
 	// even if the request is canceled mid-stream.
@@ -88,6 +122,7 @@ func newRunTurn(
 	return &runTurn{
 		agent:                a,
 		call:                 call,
+		turnID:               newTurnID(),
 		ctx:                  ctx,
 		genCtx:               genCtx,
 		model:                model,
@@ -105,6 +140,14 @@ func newRunTurn(
 // foldSteering), applies cache-control provider options (applyCacheControl),
 // and creates the step's assistant message (createStepAssistant).
 func (t *runTurn) prepareStep(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
+	// Stamp the step for the provider request log lines: the ModelProvider
+	// callback (where a request actually starts) does not receive the step
+	// number, so it reads the value PrepareStep records here. A fresh step
+	// also means the first network attempt of it, so reset the attempt
+	// counter to 1 - a retry within the step then reads 2, 3, ...
+	t.stepNumber = options.StepNumber
+	t.attempt = 0
+
 	prepared.Messages = options.Messages
 	for i := range prepared.Messages {
 		prepared.Messages[i].ProviderOptions = nil
@@ -417,7 +460,21 @@ func (t *runTurn) onToolInputDelta(id string, delta string) error {
 }
 
 func (t *runTurn) onRetry(err *fantasy.ProviderError, delay time.Duration) {
-	slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
+	// Record why this attempt failed so the next attempt's "provider request
+	// started" line is labeled retry, and tag the warning with the turn's
+	// correlation ids plus a filterable retry_reason. The failed attempt is
+	// the one that just ran, so attempt/step number are still the failed
+	// attempt's (modelProvider set them) - this is what ties the warning to
+	// the started line it interrupts.
+	//
+	// pendingReason marks the next attempt as a retry; pendingRetryReason is
+	// the filterable label the warning itself carries.
+	t.pendingReason = reasonRetry
+	t.pendingRetryReason = providerRetryReason(err)
+	fields := providerRequestLogFields(t.call.SessionID, t.call.RunID, t.turnID, t.stepNumber, t.attempt, reasonRetry)
+	fields = append(fields, "retry_reason", t.pendingRetryReason)
+	fields = append(fields, providerRetryLogFields(err, delay)...)
+	slog.Warn("provider request failed, retrying", fields...)
 	// Reset streamed content so the retried response doesn't
 	// concatenate with partial content from the failed attempt.
 	// On the final attempt (no more retries), any partial content
@@ -426,6 +483,32 @@ func (t *runTurn) onRetry(err *fantasy.ProviderError, delay time.Duration) {
 	if updateErr := t.agent.messages.Update(t.genCtx, *t.currentAssistant); updateErr != nil {
 		slog.Error("Failed to reset message on retry", "error", updateErr)
 	}
+}
+
+// onAuthRefresh wraps the call's OnAuthRefresh (the coordinator's credential
+// refresh) so a *successful* refresh marks the next attempt as an
+// auth_refresh: fantasy restarts the whole retry pass with a fresh budget
+// after a refresh, so the first attempt of that pass is this cause, distinct
+// from a plain transient retry. A failed refresh does not mark anything -
+// fantasy returns the original auth error and no further attempt runs.
+//
+// It is wired into the turn's AgentStreamCall in Run; the inner callback is
+// the one the coordinator supplies (which rebuilds the credentials and swaps
+// the active runtime, so the next modelProvider reads the refreshed model).
+// The pendingReason write is on the stream's goroutine, in the retry loop's
+// order (OnAuthRefresh fires before the restarted pass's first
+// ModelProvider), so no lock is needed.
+func (t *runTurn) onAuthRefresh(ctx context.Context, err *fantasy.ProviderError) error {
+	if t.call.OnAuthRefresh == nil {
+		return nil
+	}
+	if refreshErr := t.call.OnAuthRefresh(ctx, err); refreshErr != nil {
+		return refreshErr
+	}
+	// The refresh succeeded: the next attempt runs with fresh credentials and
+	// is labeled auth_refresh rather than a plain retry.
+	t.pendingReason = reasonAuthRefresh
+	return nil
 }
 
 // modelProvider is the turn's fantasy.AgentStreamCall.ModelProvider. It is
@@ -439,10 +522,56 @@ func (t *runTurn) modelProvider() fantasy.LanguageModel {
 			m = runtime.model
 		}
 	}
-	slog.Info("ModelProvider called",
+	// This is fantasy's runtime ModelProvider callback - it fires once per
+	// stream attempt. It used to be the Info "ModelProvider called" line the
+	// audit flagged as noise (mistaken for the request count, carrying no
+	// session/run id or reason); it now goes to Debug. The line that *is*
+	// the request count is the "provider request started" the instrumented
+	// model logs, one per real Stream attempt.
+	slog.Debug("ModelProvider called",
+		"session_id", t.call.SessionID,
+		"run_id", t.call.RunID,
+		"turn_id", t.turnID,
 		"provider", m.ModelCfg.Provider,
 		"model", m.ModelCfg.Model)
-	return m.Model
+
+	// Count the attempt and wrap the real model so its Stream is logged as a
+	// started/finished pair. attempt is 1-based within the current step (a
+	// retry reads 2, 3, ...); requestStartReason prefers an in-flight retry
+	// (recorded by onRetry) over the step's baseline cause. The instrumented
+	// model owns both halves of the pair - started here, finished when the
+	// Stream terminates - so a failed-then-retried attempt and a multi-attempt
+	// step each produce a complete, 1:1 pair instead of an orphaned started.
+	t.attempt++
+	corr := providerCorrelation{
+		sessionID: t.call.SessionID,
+		runID:     t.call.RunID,
+		turnID:    t.turnID,
+		step:      t.stepNumber,
+		attempt:   t.attempt,
+		reason:    t.requestStartReason(),
+	}
+	return newInstrumentedModel(m.Model, corr)
+}
+
+// requestStartReason labels the request about to be made. It prefers a
+// pending re-attempt cause (set by onRetry -> retry, or by a successful
+// onAuthRefresh -> auth_refresh) over the step's baseline cause, so a step's
+// log stream reads "started(turn)" then "started(retry)" or
+// "started(auth_refresh)" for its attempts. The baseline is a continuation
+// when the turn auto-woke from the inbox, otherwise an ordinary turn step. A
+// summarize pass never runs through this path - it is its own agent.Stream in
+// usage.go, labeled there by its own state (summary / retry / auth_refresh).
+func (t *runTurn) requestStartReason() string {
+	if t.pendingReason != "" {
+		reason := t.pendingReason
+		t.pendingReason = ""
+		return reason
+	}
+	if t.call.Continuation {
+		return reasonContinuation
+	}
+	return reasonTurn
 }
 
 func (t *runTurn) onToolCall(tc fantasy.ToolCallContent) error {
@@ -517,6 +646,12 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 		}
 	}
 	t.currentAssistant.AddFinish(finishReason, "", "")
+	// The provider request's "finished" line is logged by the instrumented
+	// model that performed this step's Stream (it is the 1:1 counterpart of
+	// the "started" line, and it is what carries finish_reason + usage). We
+	// do NOT log a second finished line here - that was the duplicate the
+	// audit caught. onStepFinish still owns the session usage accounting and
+	// latency recording below.
 	t.sessionLock.Lock()
 	defer t.sessionLock.Unlock()
 
