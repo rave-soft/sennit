@@ -169,15 +169,6 @@ type SennitLogsResponseMetadata struct {
 	ChainRun         string `json:"chain_run,omitempty"`
 }
 
-// toolInfoOverride supplies schema constraints that fantasy's reflection-based
-// generator does not derive from struct tags.
-type toolInfoOverride struct {
-	fantasy.AgentTool
-	info fantasy.ToolInfo
-}
-
-func (t toolInfoOverride) Info() fantasy.ToolInfo { return t.info }
-
 func NewSennitLogsTool(logFile string) fantasy.AgentTool {
 	tool := fantasy.NewParallelAgentTool(
 		SennitLogsToolName,

@@ -41,17 +41,21 @@ func globDescription() string {
 }
 
 type GlobParams struct {
-	Pattern string `json:"pattern" description:"The glob pattern to match files against"`
-	Path    string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
+	Pattern    string `json:"pattern" description:"The glob pattern to match files against"`
+	Path       string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
+	MaxResults int    `json:"max_results,omitempty" description:"Maximum results (1-1000, defaults to 100)"`
+	Cursor     string `json:"cursor,omitempty" description:"Stable continuation token returned by a previous response"`
 }
 
 type GlobResponseMetadata struct {
-	NumberOfFiles int  `json:"number_of_files"`
-	Truncated     bool `json:"truncated"`
+	NumberOfFiles int    `json:"number_of_files"`
+	TotalFiles    int    `json:"total_files"`
+	Truncated     bool   `json:"truncated"`
+	Cursor        string `json:"cursor,omitempty"`
 }
 
 func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
-	return fantasy.NewParallelAgentTool(
+	tool := fantasy.NewParallelAgentTool(
 		GlobToolName,
 		globDescription(),
 		func(ctx context.Context, params GlobParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -71,31 +75,54 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 			searchCtx, cancel := context.WithTimeout(ctx, cfg.GetTimeout())
 			defer cancel()
 
-			files, truncated, err := globFiles(searchCtx, params.Pattern, searchPath, 100)
+			limit := params.MaxResults
+			if limit == 0 {
+				limit = 100
+			}
+			if limit < 1 || limit > maxPageResults {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("max_results must be between 1 and %d", maxPageResults)), nil
+			}
+			query := fingerprintPage(canonicalPath(searchPath), params.Pattern)
+			continuation, err := openPageKeyCursor(params.Cursor, "glob", query)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			scan := newPageScan[string](continuation.Last, limit)
+			err = visitGlobFiles(searchCtx, params.Pattern, searchPath, func(path string) { scan.Add(path, path) })
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error finding files: %v", err)), nil
 			}
-
-			var output string
-			if len(files) == 0 {
-				output = "No files found"
-			} else {
-				normalizeFilePaths(files)
-				output = strings.Join(files, "\n")
-				if truncated {
-					output += "\n\n(Results are truncated. Consider using a more specific path or pattern.)"
-				}
+			files, last, truncated, total, generation := scan.Finish()
+			if err := finishPageKeyCursor(continuation, generation); err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
-
-			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(output),
-				GlobResponseMetadata{
-					NumberOfFiles: len(files),
-					Truncated:     truncated,
-				},
-			), nil
+			normalizeFilePaths(files)
+			output := "No files found"
+			if len(files) > 0 {
+				output = strings.Join(files, "\n")
+			}
+			if truncated {
+				output += "\n\n(Results are truncated. Consider using a more specific path or pattern.)"
+			}
+			cursor := ""
+			if truncated {
+				cursor = makePageKeyCursor("glob", query, generation, last)
+			}
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GlobResponseMetadata{NumberOfFiles: len(files), TotalFiles: total, Truncated: truncated, Cursor: cursor}), nil
 		},
 	)
+	return withToolParameterSchema(tool, map[string]toolParameterSchema{
+		"max_results": intSchemaBounds(1, maxPageResults),
+	})
+}
+
+func visitGlobFiles(ctx context.Context, pattern, searchPath string, visit func(string)) error {
+	prefix, rest := filepathext.SplitGlobPrefix(pattern)
+	walkRoot, walkPattern := searchPath, pattern
+	if prefix != "" {
+		walkRoot, walkPattern = filepath.Join(searchPath, prefix), rest
+	}
+	return fsext.VisitGlobGitignoreAware(ctx, walkPattern, walkRoot, visit)
 }
 
 func globFiles(ctx context.Context, pattern, searchPath string, limit int) ([]string, bool, error) {

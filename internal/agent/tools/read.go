@@ -46,13 +46,15 @@ func readDescription() string {
 type ReadParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
 	Offset   int    `json:"offset,omitempty" description:"The line number to start reading from (0-based)"`
-	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 2000)"`
+	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 2000; maximum 2000)"`
+	Cursor   string `json:"cursor,omitempty" description:"Stable continuation token returned by a previous read"`
 }
 
 type ReadPermissionsParams struct {
 	FilePath string `json:"file_path"`
 	Offset   int    `json:"offset"`
 	Limit    int    `json:"limit"`
+	Cursor   string `json:"cursor"`
 }
 
 type ReadResourceType string
@@ -65,6 +67,10 @@ const (
 type ReadResponseMetadata struct {
 	FilePath            string           `json:"file_path"`
 	Content             string           `json:"content"`
+	TotalLines          int              `json:"total_lines"`
+	NextOffset          int              `json:"next_offset,omitempty"`
+	Truncated           bool             `json:"truncated"`
+	Cursor              string           `json:"cursor,omitempty"`
 	ResourceType        ReadResourceType `json:"resource_type,omitempty"`
 	ResourceName        string           `json:"resource_name,omitempty"`
 	ResourceDescription string           `json:"resource_description,omitempty"`
@@ -95,7 +101,7 @@ func NewReadTool(
 	workingDir string,
 	skillsPaths ...string,
 ) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	tool := fantasy.NewAgentTool(
 		ReadToolName,
 		readDescription(),
 		func(ctx context.Context, params ReadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -191,6 +197,17 @@ func NewReadTool(
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
 			}
 
+			if params.Cursor != "" {
+				offset, cursorErr := parsePageCursor(params.Cursor, "read", filePath)
+				if cursorErr != nil {
+					return fantasy.NewTextErrorResponse(cursorErr.Error()), nil
+				}
+				params.Offset = offset
+			}
+			if params.Limit > DefaultReadLimit {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("limit must be between 1 and %d", DefaultReadLimit)), nil
+			}
+
 			// Set default limit if not provided (no limit for SKILL.md files)
 			if params.Limit <= 0 {
 				if isSkillFile {
@@ -232,7 +249,7 @@ func NewReadTool(
 			if isSkillFile {
 				maxContentSize = 0
 			}
-			content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit, maxContentSize)
+			content, hasMore, consumedLines, err := readTextFileCount(filePath, params.Offset, params.Limit, maxContentSize)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error reading file: %w", err)
 			}
@@ -246,8 +263,7 @@ func NewReadTool(
 			output += addLineNumbers(content, params.Offset+1)
 
 			if hasMore {
-				output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)",
-					params.Offset+len(strings.Split(content, "\n")))
+				output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)", params.Offset+consumedLines)
 			}
 			output += "\n</file>\n"
 			output += getDiagnostics(filePath, lspManager)
@@ -258,16 +274,29 @@ func NewReadTool(
 			// touch lines the session has seen. Recording a windowed read
 			// as a full one is what let an edit land blind on line 1900 of
 			// a file whose first 50 lines had been read.
-			lineCount := len(strings.Split(content, "\n"))
+			lineCount := consumedLines
 			if params.Offset == 0 && !hasMore {
 				filetracker.RecordRead(ctx, sessionID, filePath)
 			} else {
 				filetracker.RecordPartialRead(ctx, sessionID, filePath, params.Offset+1, params.Offset+lineCount)
 			}
 
+			totalLines, countErr := countFileLines(filePath)
+			if countErr != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("counting file lines: %w", countErr)
+			}
+			nextOffset := 0
+			cursor := ""
+			if hasMore {
+				nextOffset = params.Offset + consumedLines
+				cursor, err = makePageCursor("read", filePath, nextOffset)
+				if err != nil {
+					return fantasy.ToolResponse{}, fmt.Errorf("creating read cursor: %w", err)
+				}
+			}
 			meta := ReadResponseMetadata{
-				FilePath: filePath,
-				Content:  content,
+				FilePath: filePath, Content: content, TotalLines: totalLines,
+				NextOffset: nextOffset, Truncated: hasMore, Cursor: cursor,
 			}
 			if isSkillFile {
 				if skill, err := skills.Parse(filePath); err == nil {
@@ -284,6 +313,10 @@ func NewReadTool(
 			), nil
 		},
 	)
+	return withToolParameterSchema(tool, map[string]toolParameterSchema{
+		"offset": intSchemaMinimum(0),
+		"limit":  intSchemaBounds(1, DefaultReadLimit),
+	})
 }
 
 func addLineNumbers(content string, startLine int) string {
@@ -311,10 +344,41 @@ func addLineNumbers(content string, startLine int) string {
 	return strings.Join(result, "\n")
 }
 
+// countFileLines counts physical lines without Scanner's token-size limit.
+// A non-empty final line is a line even when it lacks a trailing newline.
+func countFileLines(filePath string) (int, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	reader := bufio.NewReader(f)
+	lines := 0
+	for {
+		line, err := reader.ReadString('\n')
+		if err == nil {
+			lines++
+			continue
+		}
+		if err == io.EOF {
+			if len(line) > 0 {
+				lines++
+			}
+			return lines, nil
+		}
+		return 0, err
+	}
+}
+
 func readTextFile(filePath string, offset, limit, maxContentSize int) (string, bool, error) {
+	content, hasMore, _, err := readTextFileCount(filePath, offset, limit, maxContentSize)
+	return content, hasMore, err
+}
+
+func readTextFileCount(filePath string, offset, limit, maxContentSize int) (string, bool, int, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
 	defer file.Close()
 
@@ -324,9 +388,9 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 		_, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				return "", false, nil
+				return "", false, 0, nil
 			}
-			return "", false, err
+			return "", false, 0, err
 		}
 		skipped++
 	}
@@ -337,7 +401,7 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 	for len(lines) < limit {
 		lineText, err := reader.ReadString('\n')
 		if err != nil && err != io.EOF {
-			return "", false, err
+			return "", false, 0, err
 		}
 		lineText = strings.TrimSuffix(lineText, "\n")
 		lineText = strings.TrimSuffix(lineText, "\r")
@@ -354,7 +418,7 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 			// Stop at the size cap instead of failing the whole read:
 			// everything gathered so far is returned, and hasMore=true
 			// tells the caller to advertise offset-based continuation.
-			return strings.Join(lines, "\n"), true, nil
+			return strings.Join(lines, "\n"), true, len(lines), nil
 		}
 		contentSize = projectedSize
 		lines = append(lines, lineText)
@@ -370,7 +434,7 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 		hasMore = len(lineText) > 0 || peekErr == nil
 	}
 
-	return strings.Join(lines, "\n"), hasMore, nil
+	return strings.Join(lines, "\n"), hasMore, len(lines), nil
 }
 
 func getImageMimeType(filePath string) (bool, string) {

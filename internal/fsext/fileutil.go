@@ -121,6 +121,48 @@ func GlobGitignoreAwareCtx(ctx context.Context, pattern, cwd string, limit int) 
 	return globWithDoubleStar(ctx, pattern, cwd, limit, true)
 }
 
+// VisitGlobGitignoreAware streams every matching path without retaining the
+// result set. Callers that paginate can therefore scan wide trees with memory
+// proportional to their page size.
+func VisitGlobGitignoreAware(ctx context.Context, pattern, searchPath string, visit func(string)) error {
+	pattern = filepath.ToSlash(pattern)
+	walker := NewFastGlobWalker(searchPath)
+	conf := fastwalk.Config{Follow: false, ToSlash: fastwalk.DefaultToSlash(), Sort: fastwalk.SortFilesFirst}
+	err := fastwalk.Walk(&conf, searchPath, func(path string, d os.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if walker.ShouldSkipDir(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if walker.ShouldSkip(path) {
+			return nil
+		}
+		relPath, relErr := filepath.Rel(searchPath, path)
+		if relErr != nil {
+			relPath = path
+		}
+		matched, matchErr := doublestar.Match(pattern, filepath.ToSlash(relPath))
+		if matchErr != nil {
+			return matchErr
+		}
+		if matched {
+			visit(path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("fastwalk error: %w", err)
+	}
+	return nil
+}
+
 func globWithDoubleStar(ctx context.Context, pattern, searchPath string, limit int, gitignore bool) ([]string, bool, error) {
 	// Normalize pattern to forward slashes on Windows so their config can use
 	// backslashes

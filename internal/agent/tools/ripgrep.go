@@ -1,13 +1,13 @@
 package tools
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +25,11 @@ type RipgrepParams struct {
 	Include         string `json:"include,omitempty" description:"Glob pattern for files to include in the search (e.g. \"*.js\", \"*.{ts,tsx}\")"`
 	LiteralText     bool   `json:"literal_text,omitempty" description:"If true, the pattern will be treated as literal text with special regex characters escaped. Default is false."`
 	CaseInsensitive bool   `json:"case_insensitive,omitempty" description:"If true, the search is case-insensitive. Default is false."`
+	MaxResults      int    `json:"max_results,omitempty" description:"Maximum results (1-1000, defaults to 100)"`
+	BeforeContext   int    `json:"before_context,omitempty" description:"Lines before each match (0-10)"`
+	AfterContext    int    `json:"after_context,omitempty" description:"Lines after each match (0-10)"`
+	Cursor          string `json:"cursor,omitempty" description:"Stable continuation token"`
+	Sort            string `json:"sort,omitempty" description:"Sort by path or mtime" enum:"path,mtime"`
 }
 
 const RipgrepToolName = "ripgrep"
@@ -73,44 +78,67 @@ func NewRipgrepTool(workingDir string, cfg config.ToolGrep, options ...ripgrepTo
 	for _, option := range options {
 		option(&toolOptions)
 	}
-
-	return fantasy.NewParallelAgentTool(
-		RipgrepToolName,
-		ripgrepDescription(),
+	tool := fantasy.NewParallelAgentTool(
+		RipgrepToolName, ripgrepDescription(),
 		func(ctx context.Context, params RipgrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
 				return invalidParam("pattern"), nil
 			}
-
-			searchPattern := params.Pattern
-			if params.LiteralText {
-				searchPattern = escapeRegexPattern(params.Pattern)
+			if params.BeforeContext < 0 || params.BeforeContext > 10 || params.AfterContext < 0 || params.AfterContext > 10 {
+				return fantasy.NewTextErrorResponse("context must be between 0 and 10 lines"), nil
 			}
-
-			// A relative path is relative to the workspace, the same as
-			// for every file tool. cmp.Or left it raw, so it resolved
-			// against the process cwd — in a thread, the main checkout
-			// rather than the worktree the agent is working in.
+			limit := params.MaxResults
+			if limit == 0 {
+				limit = 100
+			}
+			if limit < 1 || limit > maxPageResults {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("max_results must be between 1 and %d", maxPageResults)), nil
+			}
+			if params.Sort != "" && params.Sort != "path" && params.Sort != "mtime" {
+				return fantasy.NewTextErrorResponse("sort must be path or mtime"), nil
+			}
+			if params.Sort == "" {
+				params.Sort = "mtime"
+			}
+			pattern := params.Pattern
+			if params.LiteralText {
+				pattern = escapeRegexPattern(pattern)
+			}
 			searchPath := filepathext.SmartJoin(workingDir, params.Path)
-
 			searchCtx, cancel := context.WithTimeout(ctx, cfg.GetTimeout())
 			defer cancel()
-
-			matches, err := searchWithRipgrepCommand(searchCtx, searchPattern, searchPath, params.Include, params.CaseInsensitive, toolOptions.command)
+			query := fingerprintPage(canonicalPath(searchPath), params.Pattern, params.Include, fmt.Sprint(params.LiteralText), fmt.Sprint(params.CaseInsensitive), params.Sort, fmt.Sprint(params.BeforeContext), fmt.Sprint(params.AfterContext))
+			continuation, err := openPageKeyCursor(params.Cursor, "ripgrep", query)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			scan := newPageScan[grepMatch](continuation.Last, limit)
+			err = visitRipgrepMatches(searchCtx, pattern, searchPath, params.Include, params.CaseInsensitive, toolOptions.command, func(match grepMatch) {
+				scan.Add(grepMatchPageKey(match, params.Sort), match)
+			})
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 			}
-			matches, truncated := sortAndTruncateMatches(matches, 100)
-
-			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(renderGrepMatches(matches, truncated)),
-				GrepResponseMetadata{
-					NumberOfMatches: len(matches),
-					Truncated:       truncated,
-				},
-			), nil
+			page, last, truncated, total, generation := scan.Finish()
+			if err := finishPageKeyCursor(continuation, generation); err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			cursor := ""
+			if truncated {
+				cursor = makePageKeyCursor("ripgrep", query, generation, last)
+			}
+			output, err := renderGrepMatchesWithContext(searchCtx, page, truncated, params.BeforeContext, params.AfterContext)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("rendering search context: %w", err)
+			}
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GrepResponseMetadata{NumberOfMatches: len(page), TotalMatches: total, Truncated: truncated, Cursor: cursor}), nil
 		},
 	)
+	return withToolParameterSchema(tool, map[string]toolParameterSchema{
+		"max_results":    intSchemaBounds(1, maxPageResults),
+		"before_context": intSchemaBounds(0, 10),
+		"after_context":  intSchemaBounds(0, 10),
+	})
 }
 
 func searchWithRipgrep(ctx context.Context, pattern, path, include string, caseInsensitive bool) ([]grepMatch, error) {
@@ -118,9 +146,17 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string, caseI
 }
 
 func searchWithRipgrepCommand(ctx context.Context, pattern, path, include string, caseInsensitive bool, command func(context.Context, string, string, string, bool) *exec.Cmd) ([]grepMatch, error) {
+	var matches []grepMatch
+	err := visitRipgrepMatches(ctx, pattern, path, include, caseInsensitive, command, func(match grepMatch) {
+		matches = append(matches, match)
+	})
+	return matches, err
+}
+
+func visitRipgrepMatches(ctx context.Context, pattern, path, include string, caseInsensitive bool, command func(context.Context, string, string, string, bool) *exec.Cmd, visit func(grepMatch)) error {
 	cmd := command(ctx, pattern, path, include, caseInsensitive)
 	if cmd == nil {
-		return nil, fmt.Errorf("ripgrep not found in $PATH")
+		return fmt.Errorf("ripgrep not found in $PATH")
 	}
 
 	// Only add ignore files if they exist
@@ -131,44 +167,43 @@ func searchWithRipgrepCommand(ctx context.Context, pattern, path, include string
 		}
 	}
 
-	output, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			return []grepMatch{}, nil
-		}
-		return nil, err
+		return err
 	}
-
-	var matches []grepMatch
-	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
-		if len(line) == 0 {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	reader := bufio.NewReader(stdout)
+	var readErr error
+	for readErr == nil {
+		var record []byte
+		record, readErr = reader.ReadBytes('\n')
+		if len(record) == 0 {
 			continue
 		}
 		var match ripgrepMatch
-		if err := json.Unmarshal(line, &match); err != nil {
+		if json.Unmarshal(record, &match) != nil || match.Type != "match" || len(match.Data.Submatches) == 0 {
 			continue
 		}
-		if match.Type != "match" {
+		fi, statErr := os.Stat(match.Data.Path.Text)
+		if statErr != nil {
 			continue
 		}
-		for _, m := range match.Data.Submatches {
-			fi, err := os.Stat(match.Data.Path.Text)
-			if err != nil {
-				continue // Skip files we can't access
-			}
-			matches = append(matches, grepMatch{
-				path:     match.Data.Path.Text,
-				modTime:  fi.ModTime(),
-				lineNum:  match.Data.LineNumber,
-				charNum:  m.Start + 1, // ensure 1-based
-				lineText: strings.TrimSpace(match.Data.Lines.Text),
-			})
-			// only get the first match of each line
-			break
+		m := match.Data.Submatches[0]
+		visit(grepMatch{path: match.Data.Path.Text, modTime: fi.ModTime(), lineNum: match.Data.LineNumber, charNum: m.Start + 1, lineText: strings.TrimRight(match.Data.Lines.Text, "\r\n")})
+	}
+	waitErr := cmd.Wait()
+	if readErr != nil && readErr != io.EOF {
+		return readErr
+	}
+	// rg uses exit code 1 for no matches, which is not an operational error.
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			return waitErr
 		}
 	}
-	return matches, nil
+	return nil
 }
 
 type ripgrepMatch struct {

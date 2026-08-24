@@ -122,21 +122,11 @@ func parsePatterns(lines []string, domain []string) []gitignore.Pattern {
 }
 
 type directoryLister struct {
-	// dirPatterns caches parsed patterns from .gitignore/.sennitignore for each directory.
-	// This avoids re-reading files when building combined matchers.
-	dirPatterns *csync.Map[string, []gitignore.Pattern]
-	// combinedMatchers caches a combined matcher for each directory that includes
-	// all ancestor patterns. This allows O(1) matching per file.
-	combinedMatchers *csync.Map[string, gitignore.Matcher]
-	rootPath         string
+	rootPath string
 }
 
 func NewDirectoryLister(rootPath string) *directoryLister {
-	return &directoryLister{
-		rootPath:         rootPath,
-		dirPatterns:      csync.NewMap[string, []gitignore.Pattern](),
-		combinedMatchers: csync.NewMap[string, gitignore.Matcher](),
-	}
+	return &directoryLister{rootPath: rootPath}
 }
 
 // pathToComponents splits a path into its components for gitignore matching.
@@ -148,65 +138,48 @@ func pathToComponents(path string) []string {
 	return strings.Split(path, "/")
 }
 
-// getDirPatterns returns the parsed patterns for a specific directory's
-// .gitignore and .sennitignore files. Results are cached.
+// getDirPatterns parses the ignore files for one ancestor. Directory walks do
+// not retain per-directory state, so memory stays proportional to the active
+// path and the configured page size even for very wide trees.
 func (dl *directoryLister) getDirPatterns(dir string) []gitignore.Pattern {
-	return dl.dirPatterns.GetOrSet(dir, func() []gitignore.Pattern {
-		var allPatterns []gitignore.Pattern
-
-		relPath, _ := filepath.Rel(dl.rootPath, dir)
-		var domain []string
-		if relPath != "" && relPath != "." {
-			domain = pathToComponents(relPath)
+	var allPatterns []gitignore.Pattern
+	relPath, _ := filepath.Rel(dl.rootPath, dir)
+	var domain []string
+	if relPath != "" && relPath != "." {
+		domain = pathToComponents(relPath)
+	}
+	for _, ignoreFile := range []string{".gitignore", brand.IgnoreFile} {
+		ignPath := filepath.Join(dir, ignoreFile)
+		if content, err := os.ReadFile(ignPath); err == nil {
+			allPatterns = append(allPatterns, parsePatterns(strings.Split(string(content), "\n"), domain)...)
 		}
-
-		for _, ignoreFile := range []string{".gitignore", brand.IgnoreFile} {
-			ignPath := filepath.Join(dir, ignoreFile)
-			if content, err := os.ReadFile(ignPath); err == nil {
-				lines := strings.Split(string(content), "\n")
-				allPatterns = append(allPatterns, parsePatterns(lines, domain)...)
-			}
-		}
-		return allPatterns
-	})
+	}
+	return allPatterns
 }
 
-// getCombinedMatcher returns a matcher that combines all gitignore patterns
-// from the root to the given directory, plus common patterns and home patterns.
-// Results are cached per directory, and we reuse parent directory matchers.
+// getCombinedMatcher builds one bounded ancestor view for the current path.
+// It deliberately avoids a matcher cache whose retained pattern copies grow
+// quadratically with tree depth and without bound with tree width.
 func (dl *directoryLister) getCombinedMatcher(dir string) gitignore.Matcher {
-	return dl.combinedMatchers.GetOrSet(dir, func() gitignore.Matcher {
-		var allPatterns []gitignore.Pattern
-
-		// Add common patterns first (lowest priority).
-		allPatterns = append(allPatterns, commonIgnorePatterns()...)
-
-		// Add global ignore patterns (git core.excludesFile + sennit global ignore).
-		allPatterns = append(allPatterns, gitGlobalIgnorePatterns()...)
-		allPatterns = append(allPatterns, globalIgnorePatterns()...)
-
-		// Collect patterns from root to this directory.
-		relDir, _ := filepath.Rel(dl.rootPath, dir)
-		var pathParts []string
-		if relDir != "" && relDir != "." {
-			pathParts = pathToComponents(relDir)
-		}
-
-		// Add patterns from each directory from root to current.
-		currentPath := dl.rootPath
+	allPatterns := append([]gitignore.Pattern{}, commonIgnorePatterns()...)
+	allPatterns = append(allPatterns, gitGlobalIgnorePatterns()...)
+	allPatterns = append(allPatterns, globalIgnorePatterns()...)
+	relDir, _ := filepath.Rel(dl.rootPath, dir)
+	var pathParts []string
+	if relDir != "" && relDir != "." {
+		pathParts = pathToComponents(relDir)
+	}
+	currentPath := dl.rootPath
+	allPatterns = append(allPatterns, dl.getDirPatterns(currentPath)...)
+	for _, part := range pathParts {
+		currentPath = filepath.Join(currentPath, part)
 		allPatterns = append(allPatterns, dl.getDirPatterns(currentPath)...)
-
-		for _, part := range pathParts {
-			currentPath = filepath.Join(currentPath, part)
-			allPatterns = append(allPatterns, dl.getDirPatterns(currentPath)...)
-		}
-
-		return gitignore.NewMatcher(allPatterns)
-	})
+	}
+	return gitignore.NewMatcher(allPatterns)
 }
 
 // shouldIgnore checks if a path should be ignored based on gitignore rules.
-// This uses a combined matcher that includes all ancestor patterns for O(1) matching.
+// This uses a combined matcher containing all ancestor patterns.
 func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, isDir bool) bool {
 	base := filepath.Base(path)
 
@@ -249,6 +222,106 @@ func (dl *directoryLister) shouldIgnore(path string, ignorePatterns []string, is
 	}
 
 	return false
+}
+
+// VisitDirectory streams directory entries using the same ignore and depth
+// semantics as ListDirectory. Its ignore state is an ancestor stack: walking a
+// sibling releases the previous subtree's patterns instead of retaining a
+// matcher for every directory in a wide tree.
+func VisitDirectory(initialPath string, ignorePatterns []string, depth int, visit func(string)) error {
+	walker := newDirectoryVisitState(initialPath)
+	return filepath.Walk(initialPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(initialPath, path)
+		if relErr != nil {
+			return nil
+		}
+		level := 0
+		if rel != "." {
+			level = len(pathToComponents(rel))
+		}
+		if depth > 0 && level > depth {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		walker.enterParent(filepath.Dir(path))
+		isDir := info.IsDir()
+		if walker.shouldIgnore(path, ignorePatterns, isDir) {
+			if isDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if path != initialPath {
+			outputPath := path
+			if isDir {
+				outputPath += string(filepath.Separator)
+			}
+			visit(outputPath)
+		}
+		if isDir {
+			walker.enter(path)
+		}
+		return nil
+	})
+}
+
+type directoryVisitFrame struct {
+	dir          string
+	patternCount int
+}
+
+type directoryVisitState struct {
+	rootPath string
+	patterns []gitignore.Pattern
+	frames   []directoryVisitFrame
+}
+
+func newDirectoryVisitState(rootPath string) *directoryVisitState {
+	state := &directoryVisitState{rootPath: rootPath}
+	state.patterns = append(state.patterns, commonIgnorePatterns()...)
+	state.patterns = append(state.patterns, gitGlobalIgnorePatterns()...)
+	state.patterns = append(state.patterns, globalIgnorePatterns()...)
+	return state
+}
+
+func (s *directoryVisitState) enterParent(parent string) {
+	for len(s.frames) > 0 && s.frames[len(s.frames)-1].dir != parent {
+		frame := s.frames[len(s.frames)-1]
+		s.patterns = s.patterns[:frame.patternCount]
+		s.frames = s.frames[:len(s.frames)-1]
+	}
+}
+
+func (s *directoryVisitState) enter(dir string) {
+	before := len(s.patterns)
+	dl := directoryLister{rootPath: s.rootPath}
+	s.patterns = append(s.patterns, dl.getDirPatterns(dir)...)
+	s.frames = append(s.frames, directoryVisitFrame{dir: dir, patternCount: before})
+}
+
+func (s *directoryVisitState) shouldIgnore(path string, ignorePatterns []string, isDir bool) bool {
+	base := filepath.Base(path)
+	if isDir && fastIgnoreDirs[base] {
+		return true
+	}
+	for _, pattern := range ignorePatterns {
+		if matched, err := filepath.Match(pattern, base); err == nil && matched {
+			return true
+		}
+	}
+	if path == s.rootPath {
+		return false
+	}
+	relPath, err := filepath.Rel(s.rootPath, path)
+	if err != nil {
+		return false
+	}
+	return gitignore.NewMatcher(s.patterns).Match(pathToComponents(relPath), isDir)
 }
 
 // ListDirectory lists files and directories in the specified path.

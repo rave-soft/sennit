@@ -65,10 +65,15 @@ var (
 )
 
 type GrepParams struct {
-	Pattern     string `json:"pattern" description:"The regex pattern to search for in file contents"`
-	Path        string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
-	Include     string `json:"include,omitempty" description:"File pattern to include in the search (e.g. \"*.js\", \"*.{ts,tsx}\")"`
-	LiteralText bool   `json:"literal_text,omitempty" description:"If true, the pattern will be treated as literal text with special regex characters escaped. Default is false."`
+	Pattern       string `json:"pattern" description:"The regex pattern to search for in file contents"`
+	Path          string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
+	Include       string `json:"include,omitempty" description:"File pattern to include in the search"`
+	LiteralText   bool   `json:"literal_text,omitempty" description:"Treat pattern as literal text"`
+	MaxResults    int    `json:"max_results,omitempty" description:"Maximum results (1-1000, defaults to 100)"`
+	BeforeContext int    `json:"before_context,omitempty" description:"Lines before each match (0-10)"`
+	AfterContext  int    `json:"after_context,omitempty" description:"Lines after each match (0-10)"`
+	Cursor        string `json:"cursor,omitempty" description:"Stable continuation token"`
+	Sort          string `json:"sort,omitempty" description:"Sort by path or mtime" enum:"path,mtime"`
 }
 
 type grepMatch struct {
@@ -80,8 +85,10 @@ type grepMatch struct {
 }
 
 type GrepResponseMetadata struct {
-	NumberOfMatches int  `json:"number_of_matches"`
-	Truncated       bool `json:"truncated"`
+	NumberOfMatches int    `json:"number_of_matches"`
+	TotalMatches    int    `json:"total_matches"`
+	Truncated       bool   `json:"truncated"`
+	Cursor          string `json:"cursor,omitempty"`
 }
 
 const (
@@ -120,42 +127,68 @@ func escapeRegexPattern(pattern string) string {
 }
 
 func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
-	return fantasy.NewParallelAgentTool(
+	tool := fantasy.NewParallelAgentTool(
 		GrepToolName,
 		grepDescription(),
 		func(ctx context.Context, params GrepParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Pattern == "" {
 				return invalidParam("pattern"), nil
 			}
-
-			searchPattern := params.Pattern
-			if params.LiteralText {
-				searchPattern = escapeRegexPattern(params.Pattern)
+			if params.BeforeContext < 0 || params.BeforeContext > 10 || params.AfterContext < 0 || params.AfterContext > 10 {
+				return fantasy.NewTextErrorResponse("context must be between 0 and 10 lines"), nil
 			}
-
-			// A relative path is relative to the workspace, the same as
-			// for every file tool. cmp.Or left it raw, so it resolved
-			// against the process cwd — in a thread, the main checkout
-			// rather than the worktree the agent is working in.
+			limit := params.MaxResults
+			if limit == 0 {
+				limit = 100
+			}
+			if limit < 1 || limit > maxPageResults {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("max_results must be between 1 and %d", maxPageResults)), nil
+			}
+			if params.Sort != "" && params.Sort != "path" && params.Sort != "mtime" {
+				return fantasy.NewTextErrorResponse("sort must be path or mtime"), nil
+			}
+			if params.Sort == "" {
+				params.Sort = "mtime"
+			}
+			pattern := params.Pattern
+			if params.LiteralText {
+				pattern = escapeRegexPattern(pattern)
+			}
 			searchPath := filepathext.SmartJoin(workingDir, params.Path)
-
 			searchCtx, cancel := context.WithTimeout(ctx, config.GetTimeout())
 			defer cancel()
-
-			matches, truncated, err := searchFiles(searchCtx, searchPattern, searchPath, params.Include, 100)
+			query := fingerprintPage(canonicalPath(searchPath), params.Pattern, params.Include, fmt.Sprint(params.LiteralText), params.Sort, fmt.Sprint(params.BeforeContext), fmt.Sprint(params.AfterContext))
+			continuation, err := openPageKeyCursor(params.Cursor, "grep", query)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			scan := newPageScan[grepMatch](continuation.Last, limit)
+			err = visitSearchMatches(searchCtx, pattern, searchPath, params.Include, func(match grepMatch) {
+				scan.Add(grepMatchPageKey(match, params.Sort), match)
+			})
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("error searching files: %v", err)), nil
 			}
-
-			return fantasy.WithResponseMetadata(
-				fantasy.NewTextResponse(renderGrepMatches(matches, truncated)),
-				GrepResponseMetadata{
-					NumberOfMatches: len(matches),
-					Truncated:       truncated,
-				},
-			), nil
+			page, last, truncated, total, generation := scan.Finish()
+			if err := finishPageKeyCursor(continuation, generation); err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			cursor := ""
+			if truncated {
+				cursor = makePageKeyCursor("grep", query, generation, last)
+			}
+			output, err := renderGrepMatchesWithContext(searchCtx, page, truncated, params.BeforeContext, params.AfterContext)
+			if err != nil {
+				return fantasy.ToolResponse{}, fmt.Errorf("rendering search context: %w", err)
+			}
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(output), GrepResponseMetadata{NumberOfMatches: len(page), TotalMatches: total, Truncated: truncated, Cursor: cursor}), nil
 		},
 	)
+	return withToolParameterSchema(tool, map[string]toolParameterSchema{
+		"max_results":    intSchemaBounds(1, maxPageResults),
+		"before_context": intSchemaBounds(0, 10),
+		"after_context":  intSchemaBounds(0, 10),
+	})
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
@@ -172,6 +205,22 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 // matches a single file can contribute (all sharing the same modTime) keep
 // their original line order and stay grouped together in the rendered
 // output.
+func grepMatchKey(m grepMatch) string {
+	return fmt.Sprintf("%s\x00%020d\x00%020d\x00%s", filepath.ToSlash(m.path), m.lineNum, m.charNum, fingerprintPage(m.lineText))
+}
+
+func grepMatchPageKey(m grepMatch, order string) string {
+	if order == "mtime" {
+		// Invert the timestamp so the lexicographic key orders newest first.
+		return fmt.Sprintf("%020d\x00%s", ^uint64(m.modTime.UnixNano()), grepMatchKey(m))
+	}
+	return grepMatchKey(m)
+}
+
+func sortGrepMatches(matches []grepMatch, order string) {
+	sort.Slice(matches, func(i, j int) bool { return grepMatchPageKey(matches[i], order) < grepMatchPageKey(matches[j], order) })
+}
+
 func sortAndTruncateMatches(matches []grepMatch, limit int) ([]grepMatch, bool) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		return matches[i].modTime.After(matches[j].modTime)
@@ -188,10 +237,19 @@ func sortAndTruncateMatches(matches []grepMatch, limit int) ([]grepMatch, bool) 
 // renderGrepMatches renders search matches grouped by file, shared by the
 // grep and ripgrep tools.
 func renderGrepMatches(matches []grepMatch, truncated bool) string {
+	output, _ := renderGrepMatchesWithContext(context.Background(), matches, truncated, 0, 0)
+	return output
+}
+
+func renderGrepMatchesWithContext(ctx context.Context, matches []grepMatch, truncated bool, before, after int) (string, error) {
+	contexts, err := loadGrepContexts(ctx, matches, before, after, os.Open)
+	if err != nil {
+		return "", err
+	}
 	var output strings.Builder
 	if len(matches) == 0 {
 		output.WriteString("No files found")
-		return output.String()
+		return output.String(), nil
 	}
 
 	fmt.Fprintf(&output, "Found %d matches\n", len(matches))
@@ -206,10 +264,11 @@ func renderGrepMatches(matches []grepMatch, truncated bool) string {
 			fmt.Fprintf(&output, "%s:\n", filepath.ToSlash(match.path))
 		}
 		if match.lineNum > 0 {
-			lineText := match.lineText
-			if ansi.StringWidth(lineText) > maxGrepContentWidth {
-				lineText = ansi.Truncate(lineText, maxGrepContentWidth, "...")
+			for _, line := range contexts[match.path][match.lineNum] {
+				fmt.Fprintf(&output, "  %s Line %d: %s\n", line.marker, line.number, truncateGrepLine(line.text))
 			}
+			lineText := match.lineText
+			lineText = truncateGrepLine(lineText)
 			if match.charNum > 0 {
 				fmt.Fprintf(&output, "  Line %d, Char %d: %s\n", match.lineNum, match.charNum, lineText)
 			} else {
@@ -224,16 +283,102 @@ func renderGrepMatches(matches []grepMatch, truncated bool) string {
 		output.WriteString("\n(Results are truncated. Consider using a more specific path or pattern.)")
 	}
 
-	return output.String()
+	return output.String(), nil
+}
+
+type grepContextLine struct {
+	number       int
+	text, marker string
+}
+
+func truncateGrepLine(line string) string {
+	if ansi.StringWidth(line) > maxGrepContentWidth {
+		return ansi.Truncate(line, maxGrepContentWidth, "...")
+	}
+	return line
+}
+
+type grepContextOpener func(string) (*os.File, error)
+
+func loadGrepContexts(ctx context.Context, matches []grepMatch, before, after int, open grepContextOpener) (map[string]map[int][]grepContextLine, error) {
+	result := make(map[string]map[int][]grepContextLine)
+	if before == 0 && after == 0 {
+		return result, nil
+	}
+	wanted := make(map[string]map[int]struct{})
+	maxLine := make(map[string]int)
+	for _, match := range matches {
+		lines := wanted[match.path]
+		if lines == nil {
+			lines = make(map[int]struct{})
+			wanted[match.path] = lines
+		}
+		for line := max(1, match.lineNum-before); line <= match.lineNum+after; line++ {
+			if line != match.lineNum {
+				lines[line] = struct{}{}
+			}
+		}
+		maxLine[match.path] = max(maxLine[match.path], match.lineNum+after)
+	}
+	for path, lines := range wanted {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		file, err := open(path)
+		if err != nil {
+			continue
+		}
+		text := make(map[int]string, len(lines))
+		reader := bufio.NewReader(file)
+		for lineNum := 1; lineNum <= maxLine[path]; lineNum++ {
+			if err := ctx.Err(); err != nil {
+				_ = file.Close()
+				return nil, err
+			}
+			line, readErr := reader.ReadString('\n')
+			if _, ok := lines[lineNum]; ok {
+				text[lineNum] = strings.TrimRight(line, "\r\n")
+			}
+			if readErr != nil {
+				break
+			}
+		}
+		_ = file.Close()
+		perMatch := make(map[int][]grepContextLine)
+		for _, match := range matches {
+			if match.path != path {
+				continue
+			}
+			for line := max(1, match.lineNum-before); line <= match.lineNum+after; line++ {
+				value, ok := text[line]
+				if !ok || line == match.lineNum {
+					continue
+				}
+				marker := "-"
+				if line > match.lineNum {
+					marker = "+"
+				}
+				perMatch[match.lineNum] = append(perMatch[match.lineNum], grepContextLine{line, value, marker})
+			}
+		}
+		result[path] = perMatch
+	}
+	return result, nil
 }
 
 func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string) ([]grepMatch, error) {
 	matches := []grepMatch{}
+	err := visitSearchMatches(ctx, pattern, rootPath, include, func(match grepMatch) {
+		matches = append(matches, match)
+	})
+	return matches, err
+}
 
+func visitSearchMatches(ctx context.Context, pattern, rootPath, include string, visit func(grepMatch)) error {
 	// Use cached regex compilation
 	regex, err := searchRegexCache.get(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+		return fmt.Errorf("invalid regex pattern: %w", err)
 	}
 
 	var includePattern *regexp.Regexp
@@ -246,7 +391,7 @@ func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string
 		regexPattern := "(^|/)" + globToRegex(include) + "$"
 		includePattern, err = globRegexCache.get(regexPattern)
 		if err != nil {
-			return nil, fmt.Errorf("invalid include pattern: %w", err)
+			return fmt.Errorf("invalid include pattern: %w", err)
 		}
 	}
 
@@ -284,31 +429,21 @@ func searchFilesWithRegex(ctx context.Context, pattern, rootPath, include string
 			return nil
 		}
 
-		lineMatches, err := fileMatches(path, regex)
-		if err != nil {
-			return nil // Skip files we can't read
-		}
-
-		for _, lm := range lineMatches {
-			matches = append(matches, grepMatch{
+		matchErr := visitFileMatches(ctx, path, regex, func(lm lineMatch) {
+			visit(grepMatch{
 				path:     path,
 				modTime:  info.ModTime(),
 				lineNum:  lm.lineNum,
 				charNum:  lm.charNum,
 				lineText: lm.lineText,
 			})
-			if len(matches) >= 200 {
-				return filepath.SkipAll
-			}
+		})
+		if matchErr != nil && ctx.Err() != nil {
+			return ctx.Err()
 		}
-
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return matches, nil
+	return err
 }
 
 // lineMatch is a single matching line within a file: its 1-based line
@@ -325,44 +460,43 @@ type lineMatch struct {
 // on the line for the column) instead of stopping at the first match in
 // the file.
 func fileMatches(filePath string, pattern *regexp.Regexp) ([]lineMatch, error) {
-	if pattern == nil {
-		return nil, nil
-	}
-	// Only search text files.
-	if !isTextFile(filePath) {
-		return nil, nil
-	}
+	var matches []lineMatch
+	err := visitFileMatches(context.Background(), filePath, pattern, func(match lineMatch) {
+		matches = append(matches, match)
+	})
+	return matches, err
+}
 
+func visitFileMatches(ctx context.Context, filePath string, pattern *regexp.Regexp, visit func(lineMatch)) error {
+	if pattern == nil || !isTextFile(filePath) {
+		return nil
+	}
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer file.Close()
-
-	var matches []lineMatch
 	reader := bufio.NewReader(file)
 	lineNum := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		line, err := reader.ReadString('\n')
 		lineNum++
 		line = strings.TrimSuffix(line, "\n")
 		line = strings.TrimSuffix(line, "\r")
 		if loc := pattern.FindStringIndex(line); loc != nil {
-			matches = append(matches, lineMatch{
-				lineNum:  lineNum,
-				charNum:  loc[0] + 1,
-				lineText: line,
-			})
+			visit(lineMatch{lineNum: lineNum, charNum: loc[0] + 1, lineText: line})
 		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-
-	return matches, nil
+	return nil
 }
 
 // isTextFile checks if a file is a text file by examining its MIME type.

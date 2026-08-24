@@ -21,12 +21,14 @@ type LSParams struct {
 	Path   string   `json:"path,omitempty" description:"The path to the directory to list (defaults to current working directory)"`
 	Ignore []string `json:"ignore,omitempty" description:"List of glob patterns to ignore"`
 	Depth  int      `json:"depth,omitempty" description:"The maximum depth to traverse"`
+	Cursor string   `json:"cursor,omitempty" description:"Stable continuation token"`
 }
 
 type LSPermissionsParams struct {
 	Path   string   `json:"path"`
 	Ignore []string `json:"ignore"`
 	Depth  int      `json:"depth"`
+	Cursor string   `json:"cursor"`
 }
 
 type NodeType string
@@ -44,8 +46,10 @@ type TreeNode struct {
 }
 
 type LSResponseMetadata struct {
-	NumberOfFiles int  `json:"number_of_files"`
-	Truncated     bool `json:"truncated"`
+	NumberOfFiles int    `json:"number_of_files"`
+	TotalFiles    int    `json:"total_files"`
+	Truncated     bool   `json:"truncated"`
+	Cursor        string `json:"cursor,omitempty"`
 }
 
 const (
@@ -135,21 +139,26 @@ func ListDirectoryTree(searchPath string, params LSParams, lsConfig config.ToolL
 
 	depth, limit := lsConfig.Limits()
 	maxFiles := cmp.Or(limit, maxLSFiles)
-	files, truncated, err := fsext.ListDirectory(
-		searchPath,
-		params.Ignore,
-		cmp.Or(params.Depth, depth),
-		maxFiles,
-	)
+	effectiveDepth := cmp.Or(params.Depth, depth)
+	query := fingerprintPage(canonicalPath(searchPath), strings.Join(params.Ignore, "\x00"), fmt.Sprint(effectiveDepth))
+	continuation, err := openPageKeyCursor(params.Cursor, "ls", query)
+	if err != nil {
+		return "", LSResponseMetadata{}, err
+	}
+	scan := newPageScan[string](continuation.Last, maxFiles)
+	err = fsext.VisitDirectory(searchPath, params.Ignore, effectiveDepth, func(path string) { scan.Add(path, path) })
 	if err != nil {
 		return "", LSResponseMetadata{}, fmt.Errorf("error listing directory: %w", err)
 	}
-
-	metadata := LSResponseMetadata{
-		NumberOfFiles: len(files),
-		Truncated:     truncated,
+	page, last, truncated, total, generation := scan.Finish()
+	if err := finishPageKeyCursor(continuation, generation); err != nil {
+		return "", LSResponseMetadata{}, err
 	}
-	tree := createFileTree(files, searchPath)
+	metadata := LSResponseMetadata{NumberOfFiles: len(page), TotalFiles: total, Truncated: truncated}
+	if truncated {
+		metadata.Cursor = makePageKeyCursor("ls", query, generation, last)
+	}
+	tree := createFileTree(page, searchPath)
 
 	var output string
 	if truncated {

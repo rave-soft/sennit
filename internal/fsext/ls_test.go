@@ -1,8 +1,11 @@
 package fsext
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -96,6 +99,26 @@ func TestListDirectoryStillListsGeneratedAndLogs(t *testing.T) {
 		"generated", "generated/file.txt",
 		"logs", "logs/file.txt",
 	}, relPaths(t, files, tmp))
+}
+
+func TestDirectoryListerDoesNotRetainWideTreeState(t *testing.T) {
+	t.Parallel()
+	tmp := t.TempDir()
+	for i := range 2000 {
+		dir := filepath.Join(tmp, fmt.Sprintf("dir-%04d", i))
+		require.NoError(t, os.Mkdir(dir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0o644))
+	}
+	dl := NewDirectoryLister(tmp)
+	var count atomic.Int64
+	require.NoError(t, VisitDirectory(tmp, nil, 2, func(string) { count.Add(1) }))
+	require.EqualValues(t, 4000, count.Load())
+	value := reflect.ValueOf(dl).Elem()
+	for i := range value.NumField() {
+		kind := value.Field(i).Kind()
+		require.NotEqual(t, reflect.Map, kind, "directory lister must not retain per-directory maps")
+		require.NotEqual(t, reflect.Slice, kind, "directory lister must not retain per-directory slices")
+	}
 }
 
 func relPaths(tb testing.TB, in []string, base string) []string {
