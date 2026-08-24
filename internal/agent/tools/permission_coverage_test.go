@@ -81,6 +81,7 @@ func toolClassifications() []toolClassification {
 	newBg := func() *shell.BackgroundShellManager { return shell.NewBackgroundShellManager() }
 
 	return []toolClassification{
+		{name: AgentTraceToolName},
 		{name: "agent", writes: true},
 		{
 			name: BashToolName, writes: true, confined: true,

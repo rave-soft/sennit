@@ -95,7 +95,7 @@ func one(fn func(c *coordinator, b *buildToolsCtx) fantasy.AgentTool) func(conte
 //   - the per-MCP-server tools (tools.GetMCPTools), gated by AllowedMCP
 //     rather than AllowedTools and likewise dynamic in name and count.
 func coreToolNames() []string {
-	names := []string{"bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit", "fetch", "web_fetch", "web_search", "glob"}
+	names := []string{"bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "agent_trace", "job_output", "job_kill", "download", "edit", "multiedit", "fetch", "web_fetch", "web_search", "glob"}
 	if tools.HasRipgrep() {
 		names = append(names, tools.RipgrepToolName)
 	} else {
@@ -141,6 +141,7 @@ func toolSpecs() []toolSpec {
 				tools.NewGitLogTool(c.cfg.WorkingDir()),
 				tools.NewSennitInfoTool(c.cfg, c.mcp, c.lspManager, b.allSkills, b.activeSkills, b.skillTracker, c.skillStates()),
 				tools.NewSennitLogsTool(b.logFile),
+				tools.NewAgentTraceTool(b.logFile),
 				tools.NewJobOutputTool(c.background),
 				tools.NewJobKillTool(c.background),
 				tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),

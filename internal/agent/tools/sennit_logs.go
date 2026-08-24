@@ -481,6 +481,10 @@ type logFilter struct {
 	sinceTime    *time.Time
 	chain        bool
 	chainAnchors map[string]bool
+	// accept is an optional tool-specific predicate applied after standard filters.
+	accept func(map[string]any) bool
+	// observe is called for every matching record, including records behind a full page.
+	observe func(logRecord)
 }
 
 // newLogFilter builds the filter predicate for one call, validating the
@@ -722,6 +726,9 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 				// "more matches exist" is proven by seeing one, not merely by
 				// the scan having stopped (block 2).
 				if rec, ok := parseRecord(); ok && matchesFilter(filt, rec) {
+					if filt.observe != nil {
+						filt.observe(rec)
+					}
 					matchedBehind++
 					truncated = true
 				}
@@ -739,6 +746,9 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 			}
 			if !matchesFilter(filt, rec) {
 				continue
+			}
+			if filt.observe != nil {
+				filt.observe(rec)
 			}
 			page = append(page, rec)
 		}
@@ -774,6 +784,9 @@ func scanBackward(f *os.File, start, boundary int64, filt *logFilter, limit int)
 				rec.t, rec.hasTime = t, true
 			}
 			if matchesFilter(filt, rec) {
+				if filt.observe != nil {
+					filt.observe(rec)
+				}
 				if len(page) >= limit {
 					matchedBehind++
 					truncated = true
@@ -841,6 +854,9 @@ func matchesFilter(f *logFilter, rec logRecord) bool {
 		}
 	}
 	if f.chain && !f.chainAnchors[extractMessage(rec.entry)] {
+		return false
+	}
+	if f.accept != nil && !f.accept(rec.entry) {
 		return false
 	}
 	return true

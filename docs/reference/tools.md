@@ -142,6 +142,7 @@ allowed, denied or matched by a hook under that full name.
 | `todos` | Maintain the visible task list for multi-step work. Every call replaces the whole list |
 | `sennit_info` | Sennit's runtime state: model, provider, LSP/MCP status, skills, hooks, permissions, disabled tools |
 | `sennit_logs` | Read Sennit's own logs — for diagnosing provider errors, tool failures, LSP/MCP problems |
+| `agent_trace` | Read a redacted lifecycle trace and aggregate outcomes for a session or run |
 
 ## The read-only set
 

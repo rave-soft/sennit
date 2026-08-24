@@ -81,6 +81,7 @@ var descriptors = []Descriptor{
 	{Name: "git_log", Access: AccessRead, ParallelSafe: true, Confined: true, DefaultAllowed: true, TaskReadOnly: true, Gate: GateAlways, Renderer: RendererDedicated, Docs: DocsShell},
 	{Name: "sennit_info", Docs: DocsInteraction, Access: AccessRead, ParallelSafe: true, DefaultAllowed: true},
 	{Name: "sennit_logs", Docs: DocsInteraction, Access: AccessRead, ParallelSafe: true, DefaultAllowed: true},
+	{Name: "agent_trace", Docs: DocsInteraction, Access: AccessRead, ParallelSafe: true, TaskReadOnly: true, DefaultAllowed: true, Gate: GateAlways},
 	{Name: "job_output", Renderer: RendererDedicated, Docs: DocsShell, Access: AccessRead, DefaultAllowed: true},
 	{Name: "job_kill", Renderer: RendererDedicated, Docs: DocsShell, Access: AccessWrite, DefaultAllowed: true},
 	{Name: "download", Renderer: RendererDedicated, Access: AccessWrite, Writes: true, ParallelSafe: true, Confined: true, DefaultAllowed: true, Docs: DocsWeb},

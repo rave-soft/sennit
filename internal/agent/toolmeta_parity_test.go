@@ -14,7 +14,7 @@ import (
 var expectedGateByName = map[toolmeta.Gate][]string{
 	toolmeta.GateAlways: {
 		"bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit",
-		"fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "todos", "read", "multi_read", "write",
+		"fetch", "web_fetch", "web_search", "agent_trace", "glob", "grep", "ripgrep", "ls", "todos", "read", "multi_read", "write",
 	},
 	toolmeta.GateAllowed:     {"agent", "agentic_fetch"},
 	toolmeta.GateNotSubAgent: {"ask_parent"},

@@ -34,6 +34,7 @@ var toolsHandledOutsideFactoryMap = []string{
 var toolsWithoutDedicatedRenderer = []string{
 	tools.SennitInfoToolName,
 	tools.SennitLogsToolName,
+	"agent_trace",
 	tools.ListMCPResourcesToolName,
 	tools.ReadMCPResourceToolName,
 	"multi_read",

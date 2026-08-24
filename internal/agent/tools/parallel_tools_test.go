@@ -77,6 +77,7 @@ var t0ParallelAllowList = []string{
 	GlobToolName,       // rg --files or gitignore-aware walk; read-only
 	LSToolName,         // tree listing; outside-working-dir paths hit a pure permission check
 	SennitLogsToolName, // tails a fixed log file path
+	AgentTraceToolName, // reads a filtered fixed log file path
 	SennitInfoToolName, // renders the snapshot captured at construction
 	GitStatusToolName,  // validated read-only git status; no shared Go state
 	GitDiffToolName,    // validated read-only git diff; no shared Go state
@@ -273,6 +274,8 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 		return NewLsTool(nil, dir, config.ToolLs{})
 	case SennitLogsToolName:
 		return NewSennitLogsTool(filepath.Join(dir, "nonexistent.log"))
+	case AgentTraceToolName:
+		return NewAgentTraceTool(filepath.Join(dir, "nonexistent.log"))
 	case SennitInfoToolName:
 		return NewSennitInfoTool(testConfigStore(t, dir), nil, nil, nil, nil, nil, nil)
 	case BashToolName:
