@@ -575,6 +575,11 @@ func (t *runTurn) requestStartReason() string {
 }
 
 func (t *runTurn) onToolCall(tc fantasy.ToolCallContent) error {
+	// Lifecycle logs deliberately contain correlation only: tool arguments may
+	// contain paths, source, credentials, or other user data.
+	slog.Info("tool lifecycle", "session_id", t.call.SessionID, "run_id", t.call.RunID,
+		"turn_id", t.turnID, "tool_call_id", tc.ToolCallID, "tool_name", tc.ToolName,
+		"event", "tool_call", "tool_outcome", "started")
 	input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
 	if wasSanitized {
 		t.sanitizedToolCalls[tc.ToolCallID] = true
@@ -593,6 +598,14 @@ func (t *runTurn) onToolCall(tc fantasy.ToolCallContent) error {
 }
 
 func (t *runTurn) onToolResult(result fantasy.ToolResultContent) error {
+	outcome := "success"
+	if result.Result.GetType() == fantasy.ToolResultContentTypeError {
+		outcome = "error"
+	}
+	// Do not log result content: it can include file data or command output.
+	slog.Info("tool lifecycle", "session_id", t.call.SessionID, "run_id", t.call.RunID,
+		"turn_id", t.turnID, "tool_call_id", result.ToolCallID, "tool_name", result.ToolName,
+		"event", "tool_result", "tool_outcome", outcome)
 	toolResult := t.agent.convertToToolResult(result)
 	if t.sanitizedToolCalls[result.ToolCallID] {
 		toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."

@@ -1399,6 +1399,41 @@ func TestProviderRequestLogs_CorrelationMatchesModelProvider(t *testing.T) {
 	require.Equal(t, turnID, started["turn_id"], "the request line must carry the turn id")
 }
 
+// TestToolLifecycleLogs_ActualCallbacksEmitSafeCorrelation exercises the real
+// callbacks wired into fantasy.AgentStreamCall. Their records join on the tool
+// call ID but never serialize user-supplied arguments or tool output.
+func TestToolLifecycleLogs_ActualCallbacksEmitSafeCorrelation(t *testing.T) {
+	t.Parallel()
+	logs := captureJSONLogs(t)
+
+	rt, sessionID := newTurnForLogTest(t, "run-tool", "turn-tool")
+	const secretInput = `{"token":"do-not-log"}`
+	const secretOutput = "do-not-log-output"
+	require.NoError(t, rt.onToolCall(fantasy.ToolCallContent{
+		ToolCallID: "tool-1", ToolName: "read", Input: secretInput,
+	}))
+	require.NoError(t, rt.onToolResult(fantasy.ToolResultContent{
+		ToolCallID: "tool-1", ToolName: "read",
+		Result: fantasy.ToolResultOutputContentText{Text: secretOutput},
+	}))
+
+	call := findProviderLogLine(t, logs, "tool lifecycle", sessionID)
+	require.NotNil(t, call)
+	lines := allProviderLogLines(t, logs, "tool lifecycle", sessionID)
+	require.Len(t, lines, 2)
+	for _, line := range lines {
+		require.Equal(t, "run-tool", line["run_id"])
+		require.Equal(t, "turn-tool", line["turn_id"])
+		require.Equal(t, "tool-1", line["tool_call_id"])
+		require.Equal(t, "read", line["tool_name"])
+		require.NotContains(t, mustMarshal(t, line), "do-not-log")
+	}
+	require.Equal(t, "tool_call", lines[0]["event"])
+	require.Equal(t, "started", lines[0]["tool_outcome"])
+	require.Equal(t, "tool_result", lines[1]["event"])
+	require.Equal(t, "success", lines[1]["tool_outcome"])
+}
+
 // mustMarshal renders a decoded log line back to a string so a test can assert
 // on the absence of a needle anywhere in it (keys and values).
 func mustMarshal(t *testing.T, line map[string]any) string {

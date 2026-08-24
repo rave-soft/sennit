@@ -237,6 +237,20 @@ func preparedFunctionTool(tool fantasy.AgentTool) fantasy.FunctionTool {
 // waitReady first), so the budget is computed from the actual system prompt,
 // tool schemas and delegation prompt this call will send - not from
 // conservative upper bounds.
+// trimCorrelation carries the session/run ids a trim log line echoes (T5), so
+// the carried-history trim is correlatable by the same ids the provider and
+// repair lines use. It is variadic on trimToBudget/applyCarryOverBudget so the
+// many test callers (which pass no correlation) keep their current 2-arg form;
+// the production call site (carryOverMessages) passes the ids.
+type trimCorrelation struct {
+	sessionID string
+	runID     string
+}
+
+func trimCorr(sessionID, runID string) trimCorrelation {
+	return trimCorrelation{sessionID: sessionID, runID: runID}
+}
+
 func (c *coordinator) carryOverMessages(ctx context.Context, in carryOverBudgetInput, parentSessionID, agentID, currentSessionID string) ([]message.Message, error) {
 	if agentID == "" {
 		return nil, nil
@@ -266,7 +280,10 @@ func (c *coordinator) carryOverMessages(ctx context.Context, in carryOverBudgetI
 	}
 
 	budget := carryOverBudget(in)
-	kept, dropped := applyCarryOverBudget(perSession, budget)
+	// The trim is correlated to the PARENT session (the one whose sub-agent
+	// history is being carried) and the current run, so the chain tool can
+	// group it with the run's provider/repair lines by session_id/run_id.
+	kept, dropped := applyCarryOverBudget(perSession, budget, trimCorr(parentSessionID, RunIDFromContext(ctx)))
 	if dropped > 0 {
 		slog.Info(
 			"Dropped oldest sub-agent sessions from carried history",
@@ -296,7 +313,7 @@ func (c *coordinator) carryOverMessages(ctx context.Context, in carryOverBudgetI
 // one, so there was nothing there to summarize (see
 // runTurn.stopOnContextWindow). The budget has to bind here too, or it
 // is not a budget.
-func applyCarryOverBudget(perSession [][]message.Message, budget int) ([]message.Message, int) {
+func applyCarryOverBudget(perSession [][]message.Message, budget int, corr ...trimCorrelation) ([]message.Message, int) {
 	if len(perSession) == 0 {
 		return nil, 0
 	}
@@ -317,7 +334,7 @@ func applyCarryOverBudget(perSession [][]message.Message, budget int) ([]message
 		carried = append(carried, msgs...)
 	}
 	if first == len(perSession)-1 {
-		carried = trimToBudget(carried, budget)
+		carried = trimToBudget(carried, budget, corr...)
 	}
 	return carried, first
 }
@@ -330,10 +347,14 @@ func applyCarryOverBudget(perSession [][]message.Message, budget int) ([]message
 // If an exchange itself cannot fit, it is omitted and represented by a single,
 // budget-aware text placeholder. The placeholder has no tool parts, so it
 // cannot create protocol repairs when the carried history reaches preparePrompt.
-func trimToBudget(msgs []message.Message, budget int) []message.Message {
+func trimToBudget(msgs []message.Message, budget int, corr ...trimCorrelation) []message.Message {
 	result := trimToBudgetResult(msgs, budget)
 	if result.trimmed {
-		logTrim(result, budget)
+		var c trimCorrelation
+		if len(corr) > 0 {
+			c = corr[0]
+		}
+		logTrim(result, budget, c)
 	}
 	return result.messages
 }
@@ -530,9 +551,14 @@ func truncatedPlainTextTail(m message.Message, budget int) []message.Message {
 // logTrim reports source-message accounting: dropped_messages counts original
 // messages excluded completely; kept_messages counts original messages retained
 // unchanged. Replacements are reported separately as truncated_messages and
-// placeholder_messages.
-func logTrim(result trimResult, budget int) {
+// placeholder_messages. It also echoes session_id/run_id (T5) so the carried-
+// history trim is correlatable by the same ids the provider and repair lines
+// use; the ids are empty when the caller (a test, or a path with no run id)
+// did not supply them.
+func logTrim(result trimResult, budget int, c trimCorrelation) {
 	slog.Info("Trimmed the carried sub-agent session to the budget",
+		"session_id", c.sessionID,
+		"run_id", c.runID,
 		"dropped_messages", result.dropped,
 		"kept_messages", result.kept,
 		"truncated_messages", result.truncated,

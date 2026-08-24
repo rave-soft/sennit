@@ -65,7 +65,7 @@ func TestSennitLogs_HappyPath(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 3})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 3)
@@ -93,37 +93,67 @@ func TestSennitLogs_DefaultLines(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	// Call with Lines: 0 should default to 50.
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 0})
+	// Call with Lines: 0 should default to 100 (the consistent per-call
+	// default; see resolveLimit). The file holds 100, so all are returned.
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 0})
 
 	lines := strings.Split(result, "\n")
-	require.Len(t, lines, 50)
+	require.Len(t, lines, defaultLogLines)
+	require.Equal(t, 100, defaultLogLines, "the per-call default must be 100")
 
-	// Verify we got the last 50 entries (entry 50-99).
-	require.Contains(t, lines[0], "Entry 50")
-	require.Contains(t, lines[49], "Entry 99")
+	// Verify we got the last `defaultLogLines` entries (the whole 100-entry file).
+	require.Contains(t, lines[0], "Entry 0")
+	require.Contains(t, lines[defaultLogLines-1], "Entry 99")
 }
 
 func TestSennitLogs_MaxCap(t *testing.T) {
 	t.Parallel()
-	// Create 200 log entries.
+	// A limit ABOVE the hard safety cap (500) is rejected as a text error
+	// (block 6), not silently clamped: the model learns the cap instead of
+	// getting a quietly-reduced page.
+	const total = 700
 	var entries []map[string]any
-	for i := range 200 {
+	for i := range total {
 		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i, nil))
 	}
-
 	logFile := createTestLogFile(t, entries)
 
-	// Request 200 lines, but should only get 100 (max cap).
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 200})
+	_, _, err := runSennitLogs(logFile, SennitLogsParams{Limit: total})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid limit")
+	require.Contains(t, err.Error(), fmt.Sprintf("%d", maxLogLines))
 
+	// The cap itself (500) is accepted and returns the most recent 500.
+	result := runSennitLogsText(logFile, SennitLogsParams{Limit: maxLogLines})
+	lines := strings.Split(result, "\n")
+	require.Len(t, lines, maxLogLines)
+	// The most recent `maxLogLines` entries (the last ones in the file).
+	require.Contains(t, lines[0], fmt.Sprintf("Entry %d", total-maxLogLines))
+	require.Contains(t, lines[maxLogLines-1], fmt.Sprintf("Entry %d", total-1))
+}
+
+// TestSennitLogs_LimitBelowCapReturnsAll pins the non-capped path: a request
+// within the safety cap returns exactly that many entries (the cursor is not
+// engaged because the file holds fewer than the limit).
+func TestSennitLogs_LimitWithinCap(t *testing.T) {
+	t.Parallel()
+	var entries []map[string]any
+	for i := range 100 {
+		entries = append(entries, makeLogEntry("INFO", fmt.Sprintf("Entry %d", i), "app.go", i, nil))
+	}
+	logFile := createTestLogFile(t, entries)
+
+	// 100 entries, ask for 100 (<= cap) -> all 100.
+	result := runSennitLogsText(logFile, SennitLogsParams{Limit: 100})
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 100)
+	require.Contains(t, lines[0], "Entry 0")
+	require.Contains(t, lines[99], "Entry 99")
 }
 
 func TestSennitLogs_MissingFile(t *testing.T) {
 	t.Parallel()
-	result := runSennitLogs("/nonexistent/path/sennit.log", SennitLogsParams{Lines: 50})
+	result := runSennitLogsText("/nonexistent/path/sennit.log", SennitLogsParams{Lines: 50})
 	require.Contains(t, result, "No log file found")
 }
 
@@ -134,7 +164,7 @@ func TestSennitLogs_EmptyFile(t *testing.T) {
 	_, err := os.Create(logFile)
 	require.NoError(t, err)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 50})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 50})
 	require.Contains(t, result, "Log file is empty")
 }
 
@@ -159,7 +189,7 @@ func TestSennitLogs_MalformedLines(t *testing.T) {
 
 	file.Close()
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 10})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 	// Only 2 valid lines should be returned.
@@ -180,7 +210,7 @@ func TestSennitLogs_ExtraFieldsSorted(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 1})
 
 	// Fields should be sorted alphabetically.
 	idxA := strings.Index(result, "a_field=first")
@@ -208,7 +238,7 @@ func TestSennitLogs_NonStringValues(t *testing.T) {
 
 	logFile := createTestLogFile(t, []map[string]any{entry})
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 1})
 
 	// Numbers should be bare (not quoted).
 	require.Contains(t, result, "count=42")
@@ -245,7 +275,7 @@ func TestSennitLogs_Redaction(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 1})
 
 	// All sensitive fields should be redacted.
 	require.Contains(t, result, "authorization=[REDACTED]")
@@ -284,7 +314,7 @@ func TestSennitLogs_ReservedFields(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 1})
 
 	// Reserved fields (case-insensitive) should not appear in extra fields.
 	require.NotContains(t, result, "Time=")
@@ -330,7 +360,7 @@ func TestSennitLogs_OversizedLines(t *testing.T) {
 
 	file.Close()
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 10})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 
@@ -359,7 +389,7 @@ func TestSennitLogs_PartialTrailingLine(t *testing.T) {
 	_, _ = file.WriteString(`{"time": "2024-01-15T10:00:00Z", "level": "INFO", "msg": "Truncated`)
 	file.Close()
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 10})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 10})
 
 	lines := strings.Split(result, "\n")
 
@@ -386,7 +416,7 @@ func TestSennitLogs_ValueQuoting(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 1})
 
 	// Empty strings should be quoted.
 	require.Contains(t, result, `empty=""`)
@@ -437,7 +467,7 @@ func TestSennitLogs_ChronologicalOrder(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 3})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 
@@ -459,7 +489,7 @@ func TestSennitLogs_TimeOnlyFormat(t *testing.T) {
 
 	logFile := createTestLogFile(t, []map[string]any{entry})
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 1})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 1})
 
 	// Should show time-only format.
 	require.True(t, strings.HasPrefix(result, "15:04:05"), "Expected time-only format, got: %s", result)
@@ -477,7 +507,7 @@ func TestSennitLogs_LevelVariations(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 5})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 5})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 5)
@@ -517,7 +547,7 @@ func TestSennitLogs_SourceVariations(t *testing.T) {
 
 	logFile := createTestLogFile(t, entries)
 
-	result := runSennitLogs(logFile, SennitLogsParams{Lines: 3})
+	result := runSennitLogsText(logFile, SennitLogsParams{Lines: 3})
 
 	lines := strings.Split(result, "\n")
 	require.Len(t, lines, 3)

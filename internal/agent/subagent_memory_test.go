@@ -1077,6 +1077,44 @@ func TestTrimToBudgetLogsActualCounts(t *testing.T) {
 	}
 }
 
+// TestTrimToBudgetLogsCorrelationIDs is the actual-site integration contract
+// for the T5 correlated chain: it proves the REAL carried-history trim log line
+// carries session_id and run_id, so a sennit_logs chain can group the trim with
+// the run's provider/repair lines by one session_id/run_id. Before T5 the trim
+// line had no correlation ids and a chain filter on session_id/run_id could
+// never match it - this test pins that gap closed at the site, not just in a
+// synthetic log fixture.
+func TestTrimToBudgetLogsCorrelationIDs(t *testing.T) {
+	t.Parallel()
+	logs := captureJSONLogs(t)
+	const sessionID, runID = "sess-trim-contract", "run-trim-contract"
+
+	// A history large enough to force a real trim through the production path.
+	msgs := []message.Message{assistantText(strings.Repeat("a", 200)), assistantText("tail")}
+	kept := trimToBudget(msgs, len("tail")+5, trimCorr(sessionID, runID))
+	assert.LessOrEqual(t, messagesTextLen(kept), len("tail")+5)
+
+	// Find the trim line scoped to this session and assert it carries BOTH
+	// correlation ids (the chain's anchor predicate is the exact message, and
+	// the chain's session_id/run_id filter is what makes it findable).
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
+			continue
+		}
+		if decoded["msg"] != "Trimmed the carried sub-agent session to the budget" {
+			continue
+		}
+		require.Equal(t, sessionID, decoded["session_id"], "the real trim line must carry the session id for the chain")
+		require.Equal(t, runID, decoded["run_id"], "the real trim line must carry the run id for the chain")
+		return
+	}
+	t.Fatal("the trim log line was not emitted")
+}
+
 func TestTrimToBudgetUTF8Boundaries(t *testing.T) {
 	t.Parallel()
 
