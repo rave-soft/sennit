@@ -57,5 +57,5 @@ func NewTaskOutputTool(manager TaskManager) fantasy.AgentTool {
 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(strings.TrimSpace(sb.String())), out), nil
 		},
-	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}, "limit": intSchemaBounds(0, 100)})
+	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}, "limit": intSchemaBounds(100)})
 }

@@ -186,6 +186,7 @@ func toolClassifications() []toolClassification {
 		{name: QuestionToolName, writes: false},
 		{name: TodosToolName, writes: false},
 		{name: ReadToolName, writes: false},
+		{name: MultiReadToolName, writes: false},
 		{
 			name: WriteToolName, writes: true, confined: true,
 			run: func(t *testing.T, perms permission.Service, workingDir, target string) fantasy.ToolResponse {

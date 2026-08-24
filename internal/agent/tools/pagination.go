@@ -45,7 +45,8 @@ type ToolSchemaConstraint struct {
 	Pattern                       string
 }
 
-func intSchemaBounds(minimum, maximum int) toolParameterSchema {
+func intSchemaBounds(maximum int) toolParameterSchema {
+	minimum := 0
 	return toolParameterSchema{minimum: &minimum, maximum: &maximum}
 }
 
@@ -149,6 +150,7 @@ type pageCursor struct {
 	Path    string `json:"p,omitempty"`
 	Offset  int    `json:"o,omitempty"`
 	FileID  string `json:"i,omitempty"`
+	Index   int    `json:"x,omitempty"`
 }
 
 var (
@@ -230,15 +232,12 @@ func finishPageKeyCursor(c pageCursor, generation string) error {
 	return nil
 }
 
-func parsePageKeyCursor(token, kind, query, generation string) (string, error) {
+func validatePageKeyCursor(token, kind, query, generation string) error {
 	c, err := openPageKeyCursor(token, kind, query)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if err := finishPageKeyCursor(c, generation); err != nil {
-		return "", err
-	}
-	return c.Last, nil
+	return finishPageKeyCursor(c, generation)
 }
 
 type pageItem[T any] struct {

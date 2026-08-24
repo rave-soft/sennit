@@ -18,17 +18,17 @@ func TestPageCursorRejectsTampering(t *testing.T) {
 	if tampered == token {
 		tampered = token[:len(token)-1] + "B"
 	}
-	if _, err := parsePageKeyCursor(tampered, "grep", "query", "generation"); err == nil {
+	if err := validatePageKeyCursor(tampered, "grep", "query", "generation"); err == nil {
 		t.Fatal("tampered cursor accepted")
 	}
 }
 
 func TestPageCursorBindsQueryAndGeneration(t *testing.T) {
 	token := makePageKeyCursor("glob", "query", "generation", "last")
-	if _, err := parsePageKeyCursor(token, "glob", "other", "generation"); err == nil || !strings.Contains(err.Error(), "request") {
+	if err := validatePageKeyCursor(token, "glob", "other", "generation"); err == nil || !strings.Contains(err.Error(), "request") {
 		t.Fatalf("query error = %v", err)
 	}
-	if _, err := parsePageKeyCursor(token, "glob", "query", "other"); err == nil || !strings.Contains(err.Error(), "stale") {
+	if err := validatePageKeyCursor(token, "glob", "query", "other"); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("generation error = %v", err)
 	}
 }

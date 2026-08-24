@@ -36,6 +36,7 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.SennitLogsToolName,
 	tools.ListMCPResourcesToolName,
 	tools.ReadMCPResourceToolName,
+	"multi_read",
 	// Thread tools (domain/agent/tools/thread_*.go) don't have a
 	// dedicated renderer yet; they fall back to the generic one until the
 	// TUI grows one.

@@ -102,6 +102,7 @@ var descriptors = []Descriptor{
 	{Name: "question", Renderer: RendererDedicated, Docs: DocsInteraction, Access: AccessWrite, DefaultAllowed: true, Gate: GateInteractive},
 	{Name: "todos", Renderer: RendererDedicated, Docs: DocsInteraction, Access: AccessWrite, DefaultAllowed: true},
 	{Name: "read", Aliases: []string{"view"}, Access: AccessRead, DefaultAllowed: true, TaskReadOnly: true, Renderer: RendererDedicated, Docs: DocsFiles},
+	{Name: "multi_read", Access: AccessRead, DefaultAllowed: true, TaskReadOnly: true, Renderer: RendererGeneric, Docs: DocsFiles},
 	{Name: "write", Access: AccessWrite, Writes: true, Confined: true, DefaultAllowed: true, Renderer: RendererSpecial, Docs: DocsFiles},
 	{Name: "list_mcp_resources", Access: AccessRead, ParallelSafe: true, DefaultAllowed: true, Gate: GateMCP, Docs: DocsMCP},
 	{Name: "read_mcp_resource", Access: AccessRead, ParallelSafe: true, DefaultAllowed: true, Gate: GateMCP, Docs: DocsMCP},
@@ -159,7 +160,7 @@ func names(match func(Descriptor) bool) []string {
 	}
 	return out
 }
-func NamesAll() []string { return names(func(Descriptor) bool { return true }) }
+func NamesAll() []string     { return names(func(Descriptor) bool { return true }) }
 func DefaultNames() []string { return names(func(d Descriptor) bool { return d.DefaultAllowed }) }
 
 func TaskReadOnlyNames() []string { return names(func(d Descriptor) bool { return d.TaskReadOnly }) }

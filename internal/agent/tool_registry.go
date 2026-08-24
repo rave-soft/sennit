@@ -101,7 +101,7 @@ func coreToolNames() []string {
 	} else {
 		names = append(names, tools.GrepToolName)
 	}
-	return append(names, "ls", "todos", "read", "write")
+	return append(names, "ls", "todos", "read", tools.MultiReadToolName, "write")
 }
 
 func toolSpecs() []toolSpec {
@@ -151,6 +151,7 @@ func toolSpecs() []toolSpec {
 				tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), b.cfg.Ls()),
 				tools.NewTodosTool(c.sessions),
 				tools.NewReadTool(c.lspManager, c.permissions, c.filetracker, b.skillTracker, c.cfg.WorkingDir(), b.cfg.SkillsPaths()...),
+				tools.NewMultiReadTool(c.lspManager, c.permissions, c.filetracker, b.skillTracker, c.cfg.WorkingDir(), b.cfg.SkillsPaths()...),
 				tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 			}, nil
 		}},

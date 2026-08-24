@@ -183,7 +183,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 			return fantasy.NewTextResponse(content), nil
 		},
-	), map[string]toolParameterSchema{"url": {minLength: intPtr(1)}, "format": {enum: []string{"text", "markdown", "html"}}, "timeout": intSchemaBounds(0, 120)})
+	), map[string]toolParameterSchema{"url": {minLength: intPtr(1)}, "format": {enum: []string{"text", "markdown", "html"}}, "timeout": intSchemaBounds(120)})
 }
 
 // truncateToRuneBoundary truncates s to at most n bytes, backing off to the

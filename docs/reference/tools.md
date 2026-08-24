@@ -10,6 +10,7 @@ a [hook's `--matcher`](../extending/hooks.md).
 | Tool | Does | Read-only |
 |:--|:--|:--|
 | `read` | Read a file with line numbers; supports offset and limit; renders PNG, JPEG, GIF and WebP | yes |
+| `multi_read` | Read up to 20 file ranges sequentially with per-file status and one shared 200 KB response budget | yes |
 | `write` | Create or overwrite a file, creating parent directories. Cannot append | |
 | `edit` | Exact find-and-replace in one file. Tolerates whitespace-only mismatches by re-indenting to the file's style, and says when it did | |
 | `multiedit` | Several find-and-replace edits to one file, applied in sequence | |

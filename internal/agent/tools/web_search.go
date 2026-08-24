@@ -126,7 +126,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 
 			return fantasy.NewTextResponse(formatSearchResults(results)), nil
 		},
-	), map[string]toolParameterSchema{"query": {minLength: intPtr(1)}, "max_results": intSchemaBounds(0, 20)})
+	), map[string]toolParameterSchema{"query": {minLength: intPtr(1)}, "max_results": intSchemaBounds(20)})
 }
 
 func intPtr(value int) *int { return &value }

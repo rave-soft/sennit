@@ -107,6 +107,7 @@ var sequentialDenyList = []struct {
 }{
 	// Files.
 	{ReadToolName, "filetracker RMW (RecordRead/RecordPartialRead) + lazy LSP start (openInLSPs) + permission gate outside working dir"},
+	{MultiReadToolName, "sequential batch read delegates shared filetracker, LSP, and permission state"},
 	{BashToolName, "executes commands, background shells, git, permission prompts"},
 	{EditToolName, "writes files, filetracker, permission prompts"},
 	{MultiEditToolName, "writes files, filetracker, permission prompts"},
@@ -255,6 +256,8 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 	switch name {
 	case ReadToolName:
 		return NewReadTool(nil, nil, nil, nil, dir)
+	case MultiReadToolName:
+		return NewMultiReadTool(nil, nil, nil, nil, dir)
 	case GlobToolName:
 		return NewGlobTool(dir, config.ToolGlob{})
 	case GrepToolName:

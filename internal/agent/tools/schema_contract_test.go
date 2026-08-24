@@ -30,7 +30,7 @@ var schemaContracts = map[string]schemaContract{
 	"lsp_diagnostics": {audited: true, reason: "file_path is optional"}, "lsp_references": {audited: true, empty: []string{"symbol"}}, "lsp_restart": {audited: true, reason: "no input"}, "lsp_symbols": {audited: true, empty: []string{"file_path"}}, "lsp_definition": {audited: true, empty: []string{"symbol"}}, "lsp_call_hierarchy": {audited: true, empty: []string{"symbol"}}, "lsp_rename": {audited: true, empty: []string{"symbol", "new_name"}}, "lsp_replace_symbol": {audited: true, empty: []string{"symbol", "file_path"}, example: map[string]any{"symbol": "target", "file_path": "file.go", "replacement": "new body"}},
 	"fetch": {audited: true, empty: []string{"url"}}, "web_fetch": {audited: true, empty: []string{"url"}}, "web_search": {audited: true, empty: []string{"query"}}, "glob": {audited: true, empty: []string{"pattern"}}, "grep": {audited: true, empty: []string{"pattern"}}, "ripgrep": {audited: true, empty: []string{"pattern"}}, "ls": {audited: true, reason: "path is optional"},
 	"question": {audited: true, reason: "nested conditional constraints are covered by TestQuestionSchemaParity", example: map[string]any{"questions": []any{map[string]any{"type": "yes_no", "question": "Continue?", "description": "Choose yes or no."}, map[string]any{"type": "single_choice", "question": "Pick one", "description": "Pick exactly one.", "choices": []any{map[string]any{"id": "one", "label": "One"}}}, map[string]any{"type": "multi_choice", "question": "Pick many", "description": "Pick any.", "options": []any{map[string]any{"id": "one", "label": "One"}}}, map[string]any{"type": "free_text", "question": "Explain", "description": "Write details.", "choices": []any{}}}}},
-	"todos":    {audited: true, reason: "todo fields are intentionally optional"}, "read": {audited: true, empty: []string{"file_path"}}, "write": {audited: true, empty: []string{"file_path"}}, "list_mcp_resources": {audited: true, empty: []string{"mcp_name"}}, "read_mcp_resource": {audited: true, empty: []string{"mcp_name", "uri"}},
+	"todos":    {audited: true, reason: "todo fields are intentionally optional"}, "read": {audited: true, empty: []string{"file_path"}}, "multi_read": {audited: true, reason: "files is a required bounded array; item paths are validated by each read"}, "write": {audited: true, empty: []string{"file_path"}}, "list_mcp_resources": {audited: true, empty: []string{"mcp_name"}}, "read_mcp_resource": {audited: true, empty: []string{"mcp_name", "uri"}},
 	"thread_create": {audited: true, empty: []string{"name", "goal"}}, "thread_list": {audited: true, reason: "all filters are optional"}, "thread_status": {audited: true, empty: []string{"id"}}, "thread_send": {audited: true, empty: []string{"id", "message"}}, "thread_wait": {audited: true, reason: "id is optional"}, "thread_merge": {audited: true, empty: []string{"id"}}, "thread_remove": {audited: true, empty: []string{"id"}},
 	"task_list": {audited: true, reason: "all filters are optional"}, "task_result": {audited: true, empty: []string{"id"}}, "task_cancel": {audited: true, empty: []string{"id"}}, "task_send": {audited: true, empty: []string{"id", "message"}}, "task_output": {audited: true, empty: []string{"id"}}, "ask_parent": {audited: true, empty: []string{"message"}},
 }
@@ -62,6 +62,50 @@ func TestToolSchemaContractsAreExhaustiveAndValid(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMultiReadNestedSchemaParity(t *testing.T) {
+	schema := buildForInfo(t, MultiReadToolName).Info().InputSchema
+	constraints := []struct {
+		path, key string
+		want      any
+	}{
+		{"files", "minItems", 1},
+		{"files", "maxItems", MaxMultiReadFiles},
+		{"files.items.file_path", "minLength", 1},
+		{"files.items.offset", "minimum", 0},
+		{"files.items.limit", "minimum", 0},
+		{"files.items.limit", "maximum", DefaultReadLimit},
+		{"files.items.cursor", "minLength", 1},
+		{"max_bytes", "minimum", 0},
+		{"max_bytes", "maximum", MaxReadSize},
+		{"max_tokens", "minimum", 0},
+		{"max_tokens", "maximum", MaxReadSize},
+		{"cursor", "minLength", 1},
+	}
+	for _, constraint := range constraints {
+		require.Equal(t, constraint.want, schemaPath(t, schema, constraint.path)[constraint.key], "%s/%s", constraint.path, constraint.key)
+	}
+
+	valid := map[string]any{"files": []any{map[string]any{"file_path": "file.go", "offset": 0, "limit": DefaultReadLimit, "cursor": "item"}}, "max_bytes": MaxReadSize, "max_tokens": MaxReadSize, "cursor": "batch"}
+	require.NoError(t, validateSchema(schema, valid))
+	for _, invalid := range []map[string]any{
+		{"files": []any{}},
+		{"files": []any{map[string]any{"file_path": ""}}},
+		{"files": []any{map[string]any{"file_path": "file.go", "offset": -1}}},
+		{"files": []any{map[string]any{"file_path": "file.go", "limit": DefaultReadLimit + 1}}},
+		{"files": []any{map[string]any{"file_path": "file.go", "cursor": ""}}},
+		{"files": []any{map[string]any{"file_path": "file.go"}}, "max_bytes": MaxReadSize + 1},
+		{"files": []any{map[string]any{"file_path": "file.go"}}, "max_tokens": -1},
+		{"files": []any{map[string]any{"file_path": "file.go"}}, "cursor": ""},
+	} {
+		require.Error(t, validateSchema(schema, invalid), "%#v", invalid)
+	}
+	tooMany := make([]any, MaxMultiReadFiles+1)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"file_path": "file.go"}
+	}
+	require.Error(t, validateSchema(schema, map[string]any{"files": tooMany}))
 }
 
 func TestQuestionSchemaParity(t *testing.T) {

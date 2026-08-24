@@ -164,5 +164,5 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 
 			return fantasy.NewTextResponse(responseMsg), nil
 		},
-	), map[string]toolParameterSchema{"url": {minLength: intPtr(1)}, "file_path": {minLength: intPtr(1)}, "timeout": intSchemaBounds(0, 600)})
+	), map[string]toolParameterSchema{"url": {minLength: intPtr(1)}, "file_path": {minLength: intPtr(1)}, "timeout": intSchemaBounds(600)})
 }
