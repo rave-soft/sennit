@@ -40,6 +40,18 @@ type AgentBackgroundResponseMetadata struct {
 	Status    string `json:"status"`
 }
 
+// AgentDetachedResponseMetadata is the structured metadata a foreground
+// delegation returns when it detaches into the background mid-run (see
+// coordinator.runDetachableSubAgent) instead of blocking for its result.
+// Deliberately its own type rather than a reuse of
+// AgentBackgroundResponseMetadata: a detached delegation was never
+// created through the task manager, so it has no TaskID and no Status
+// beyond "still running" - carrying those fields empty would read as if
+// they meant something.
+type AgentDetachedResponseMetadata struct {
+	SessionID string `json:"session_id"`
+}
+
 func (c *coordinator) agentTool(ctx context.Context, cfg agentConfig) (fantasy.AgentTool, error) {
 	agentCfg, ok := cfg.Agents()[config.AgentTask]
 	if !ok {
@@ -83,6 +95,7 @@ func (c *coordinator) agentTool(ctx context.Context, cfg agentConfig) (fantasy.A
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
 				SessionTitle:   "New Agent Session",
+				Detachable:     true,
 			})
 		},
 	), nil

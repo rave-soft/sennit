@@ -135,6 +135,7 @@ func (c *coordinator) buildCustomAgentTool(ctx context.Context, id string, agent
 				Prompt:         params.Prompt,
 				SessionTitle:   agentCfg.Name,
 				AgentID:        id,
+				Detachable:     true,
 			})
 		},
 	), nil

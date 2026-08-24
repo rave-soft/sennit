@@ -568,10 +568,16 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 		// only now that the lock is released.
 		a.notifyQueueChanged(call.SessionID)
 		// Release anything in the active turn that is only waiting (a
-		// thread_wait, say). The prompt stays queued either way; this
-		// just stops the turn from sitting idle on something else while
-		// the user has already moved on.
-		a.signalUserInput(call.SessionID)
+		// thread_wait, say) - but only for the person's own words. An
+		// agent-originated prompt (a delegation follow-up queued behind
+		// a turn already in flight) still stays queued; it just must
+		// not cut short whatever the active turn is waiting on, or one
+		// agent could use its own queued prompt to derail another
+		// agent's work in flight - the same doctrine as
+		// agent.WithSteering and thread.lifecycle's steer.
+		if call.PromptOrigin != message.OriginAgent {
+			a.signalUserInput(call.SessionID)
+		}
 		return dispatchOutcome{steer: SteerEnqueued}
 	}
 

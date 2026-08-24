@@ -158,6 +158,21 @@ type coordinator struct {
 	subSessionsMu sync.Mutex
 	subSessions   map[string]int
 
+	// detachedDelegationsMu guards detachedDelegations.
+	//
+	// detachedDelegations maps a detached delegation's child session id
+	// to its owner: the parent session it was launched from (Cancel
+	// reaches it that way) and the cancel that stops its child run
+	// (runDetachableSubAgent's cancelChild). A detached run's context no
+	// longer descends from the parent turn's ctx by the time it is
+	// running (see runDetachableSubAgent), so once it detaches this
+	// registry is the only remaining handle Cancel/CancelAll/Close have
+	// on it. Registered the moment a delegation actually detaches,
+	// removed once its completion has been delivered - see
+	// registerDetachedDelegation and unregisterDetachedDelegation.
+	detachedDelegationsMu sync.Mutex
+	detachedDelegations   map[string]detachedDelegation
+
 	// threadsMu guards threads, which SetThreads may set after
 	// construction (thread managers are wired in post-bootstrap; see
 	// internal/app/app.go and internal/app/threadspawn/attach.go) and
@@ -272,6 +287,13 @@ func (c *coordinator) Close(ctx context.Context) error {
 		c.closing = true
 		c.readyMu.Unlock()
 		c.lifecycleCancel()
+
+		// A detached delegation's context is rooted independently of
+		// lifecycleCtx (see runDetachableSubAgent), so lifecycleCancel
+		// above does not reach it - without this, it would keep running
+		// past Close and writing into a session store the rest of the
+		// app just tore down.
+		c.cancelAllDetachedDelegations()
 
 		go func() {
 			c.readyGroup.Wait()
@@ -1030,12 +1052,28 @@ func (c *coordinator) Steer(ctx context.Context, call SessionAgentCall) (SteerOu
 	return c.currentAgent.Steer(ctx, call)
 }
 
+// Cancel stops sessionID's run and, if it has one, any detached
+// delegation owned by it - either launched from it (parentSessionID
+// match) or detached under sessionID itself, since a detached child
+// session is visible in the UI as a session of its own (see
+// IsSessionBusy) and must be cancelable by its own id too.
+//
+// currentAgent.Cancel runs first. It is what flips the *parent*
+// session's dispatcher state to cancelled, and that flag is what keeps
+// wakeEligibleLocked from treating the "interrupted" completion the
+// cancelled delegation delivers next as an invitation to auto-continue
+// (see deliverDetachedCompletion and wakeEligibleLocked). Cancelling the
+// delegation first would risk it finishing and enqueuing that
+// completion before the flag lands, letting a continuation slip through
+// for an instant after the person just asked to stop.
 func (c *coordinator) Cancel(sessionID string) {
 	c.currentAgent.Cancel(sessionID)
+	c.cancelDetachedDelegations(sessionID)
 }
 
 func (c *coordinator) CancelAll() {
 	c.currentAgent.CancelAll()
+	c.cancelAllDetachedDelegations()
 }
 
 func (c *coordinator) ClearQueue(sessionID string) {
@@ -1175,6 +1213,70 @@ func (c *coordinator) markSubSessionBusy(sessionID string) func() {
 			return
 		}
 		c.subSessions[sessionID]--
+	}
+}
+
+// detachedDelegation is one registry entry in coordinator's
+// detachedDelegations map - see that field's doc comment.
+type detachedDelegation struct {
+	parentSessionID string
+	cancel          context.CancelFunc
+}
+
+// registerDetachedDelegation records a detached delegation's owner, the
+// moment runDetachableSubAgent actually detaches it, so Cancel/
+// CancelAll/Close can reach it afterwards.
+func (c *coordinator) registerDetachedDelegation(childSessionID, parentSessionID string, cancel context.CancelFunc) {
+	c.detachedDelegationsMu.Lock()
+	defer c.detachedDelegationsMu.Unlock()
+	if c.detachedDelegations == nil {
+		c.detachedDelegations = make(map[string]detachedDelegation)
+	}
+	c.detachedDelegations[childSessionID] = detachedDelegation{parentSessionID: parentSessionID, cancel: cancel}
+}
+
+// unregisterDetachedDelegation drops childSessionID's registry entry.
+// Called once its completion has been delivered (see
+// runDetachableSubAgent's detach goroutine), so nothing leaks on any
+// path: normal finish, cancellation, or delivery error all funnel
+// through the same defer.
+func (c *coordinator) unregisterDetachedDelegation(childSessionID string) {
+	c.detachedDelegationsMu.Lock()
+	defer c.detachedDelegationsMu.Unlock()
+	delete(c.detachedDelegations, childSessionID)
+}
+
+// cancelDetachedDelegations cancels every registered detached
+// delegation owned by sessionID - launched from it, or itself the
+// detached child. The cancels run outside the lock: cancelChild's
+// forwarding goroutine and deliverDetachedCompletion never touch this
+// map's lock, but there is no reason to hold it across an arbitrary
+// context.CancelFunc regardless.
+func (c *coordinator) cancelDetachedDelegations(sessionID string) {
+	c.detachedDelegationsMu.Lock()
+	var cancels []context.CancelFunc
+	for childID, d := range c.detachedDelegations {
+		if d.parentSessionID == sessionID || childID == sessionID {
+			cancels = append(cancels, d.cancel)
+		}
+	}
+	c.detachedDelegationsMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
+// cancelAllDetachedDelegations cancels every registered detached
+// delegation, for CancelAll and Close.
+func (c *coordinator) cancelAllDetachedDelegations() {
+	c.detachedDelegationsMu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(c.detachedDelegations))
+	for _, d := range c.detachedDelegations {
+		cancels = append(cancels, d.cancel)
+	}
+	c.detachedDelegationsMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
 	}
 }
 

@@ -171,13 +171,19 @@ type dispatcher struct {
 	onQueueChanged func(sessionID string)
 
 	// userInput holds, per session, a channel closed when a prompt from
-	// the user is queued while a turn is already running. Tools that spend
-	// a turn waiting on something else (thread_wait) select on it so they
-	// can cut the wait short and let the user be answered — see
-	// tools.WaitForUserInput. The entry is dropped as it is closed, so the
-	// next request arms a fresh one. Kept separate from sessionState: it
-	// is its own small, self-contained get-or-create/close-and-delete
-	// protocol, unrelated to the accept/queue/cancel state above.
+	// the person is queued while a turn is already running. Tools that
+	// spend a turn waiting on something else (thread_wait) select on it
+	// so they can cut the wait short and let the person be answered —
+	// see tools.WaitForUserInput. Only a prompt with PromptOrigin !=
+	// message.OriginAgent closes it: interrupting a wait already in
+	// flight is the interactive "wait, do this instead" correction only
+	// a person gets to make, not a way for one agent to derail another's
+	// work in progress — the same doctrine as agent.WithSteering and
+	// thread.lifecycle's steer. See dispatchDecision's busy branch. The
+	// entry is dropped as it is closed, so the next request arms a fresh
+	// one. Kept separate from sessionState: it is its own small,
+	// self-contained get-or-create/close-and-delete protocol, unrelated
+	// to the accept/queue/cancel state above.
 	userInput *csync.Map[string, chan struct{}]
 	// userInputMu guards the get-or-create and close-and-delete pair
 	// against each other; without it two goroutines can hand out different
@@ -299,8 +305,9 @@ func (d *dispatcher) RegisterDelegationParent(sessionID string, parent Delegatio
 	d.delegationParents.Set(sessionID, parent)
 }
 
-// userInputChan returns the channel that closes when the user next sends a
-// message to this session, creating it on first use.
+// userInputChan returns the channel that closes when the person next sends
+// a message to this session (an agent-originated prompt does not close it —
+// see signalUserInput), creating it on first use.
 func (d *dispatcher) userInputChan(sessionID string) <-chan struct{} {
 	d.userInputMu.Lock()
 	defer d.userInputMu.Unlock()
@@ -312,9 +319,12 @@ func (d *dispatcher) userInputChan(sessionID string) <-chan struct{} {
 	return ch
 }
 
-// signalUserInput reports that the user has queued a prompt for this
-// session, releasing anything waiting on it. Sessions nobody is waiting on
-// have no channel and cost nothing here.
+// signalUserInput reports that the person has queued a prompt for this
+// session, releasing anything waiting on it. Callers pass this only for
+// prompts with PromptOrigin != message.OriginAgent — see dispatchDecision's
+// busy branch — so a delegation follow-up queued behind an in-flight turn
+// never cuts that turn's wait short. Sessions nobody is waiting on have no
+// channel and cost nothing here.
 func (d *dispatcher) signalUserInput(sessionID string) {
 	d.userInputMu.Lock()
 	defer d.userInputMu.Unlock()
