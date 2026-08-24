@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -45,11 +46,47 @@ func TestEnterChildSessionPushesFrame(t *testing.T) {
 
 	frame := u.sess.navStack[0]
 	require.Equal(t, "parent-session", frame.parentSessionID)
-	require.Equal(t, []childSessionRef{
-		{messageID: "msg1", toolCallID: "tc-1"},
-		{messageID: "msg1", toolCallID: "tc-2"},
-	}, frame.siblings)
+	// Only the identity is pinned here; the display data each ref also
+	// carries (label, timing — see childSessionRef) is covered by
+	// TestCycleChildSessionKeepsSiblingTiming.
+	require.Len(t, frame.siblings, 2)
+	require.Equal(t, "msg1", frame.siblings[0].messageID)
+	require.Equal(t, "tc-1", frame.siblings[0].toolCallID)
+	require.Equal(t, "msg1", frame.siblings[1].messageID)
+	require.Equal(t, "tc-2", frame.siblings[1].toolCallID)
 	require.Equal(t, 1, frame.siblingIndex, "tc-2 is the second sibling in chat order")
+}
+
+// TestCycleChildSessionKeepsSiblingTiming: cycling to a sibling happens
+// after navigation has descended, so the parent's chat items are gone by
+// then. The sibling's label and elapsed-time origin must come from the
+// snapshot taken when the frame was pushed — looking them up in the
+// now-loaded child session finds nothing and used to leave the panel
+// describing a nameless delegation that had just started.
+func TestCycleChildSessionKeepsSiblingTiming(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionTestUI(t)
+	u.sess.current = &session.Session{ID: "parent-session"}
+
+	second := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "tc-2", Name: "agent", Input: `{"prompt":"review the parser"}`}, nil, false, nil)
+	second.SetMessageID("msg1")
+	start := time.Now().Add(-12 * time.Minute)
+	second.RestoreTiming(start, time.Time{})
+	u.chat.AppendMessages(newAgentItem(u.com.Styles, "tc-1"), second)
+
+	require.NotNil(t, u.enterChildSession("msg1", "tc-1"))
+	// Standing in the child session now: its own items replaced the
+	// parent's, which is what makes the sibling unlookupable.
+	u.chat.SetMessages()
+
+	require.NotNil(t, u.cycleChildSession(1))
+	frame := u.sess.navStack[0]
+	require.Equal(t, 1, frame.siblingIndex)
+	require.Equal(t, "review the parser", frame.label)
+	require.WithinDuration(t, start, frame.delegationStart, time.Second,
+		"the sibling's elapsed time must continue from when it started, not from the moment it was cycled to")
 }
 
 // TestCycleChildSessionWrapsAndReplacesTopFrame: with multiple sibling

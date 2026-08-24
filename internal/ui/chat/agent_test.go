@@ -737,3 +737,122 @@ func TestDelegationItemsKeepTheirRestylableAndAnimatableContracts(t *testing.T) 
 		_ Expandable = (*AgenticFetchToolMessageItem)(nil)
 	)
 }
+
+// TestExtractMessageItems_RestoresDelegationStartTime pins the fix for a
+// running delegation whose elapsed time restarted from zero on every
+// session load. Chat items are rebuilt from stored messages on each load —
+// and navigating into a sub-agent session and back out performs two of
+// them — so a delegation item that anchors its elapsed time to
+// time.Now() at construction forgets how long it has actually been
+// running. The assistant message that issued the tool call carries the
+// real start.
+func TestExtractMessageItems_RestoresDelegationStartTime(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	start := time.Now().Add(-7 * time.Minute).Truncate(time.Second)
+	msg := &message.Message{
+		ID:        "m1",
+		Role:      message.Assistant,
+		CreatedAt: start.Unix(),
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"fix the bug"}`},
+		},
+	}
+
+	items := ExtractMessageItems(&sty, msg, nil, nil)
+	require.Len(t, items, 1)
+
+	provider, ok := items[0].(DelegationInfoProvider)
+	require.True(t, ok, "an agent tool call must rebuild as a delegation item")
+	_, _, _, gotStart, _ := provider.DelegationInfo()
+	require.WithinDuration(t, start, gotStart, time.Second,
+		"the delegation must keep the start time recorded on its message, not restart at load time")
+}
+
+// TestExtractMessageItems_RestoresDelegationDuration: a delegation
+// rebuilt from history used to lose its runtime entirely — duration is
+// frozen by SetResult, which a rebuilt item never gets, since its result
+// arrives at construction. The tool message carrying that result knows
+// when it landed.
+func TestExtractMessageItems_RestoresDelegationDuration(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	start := time.Now().Add(-30 * time.Minute).Truncate(time.Second)
+	end := start.Add(4 * time.Minute)
+	msg := &message.Message{
+		ID:        "m1",
+		Role:      message.Assistant,
+		CreatedAt: start.Unix(),
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"fix the bug"}`},
+		},
+	}
+	results := map[string]ToolResultRef{
+		"tc-1": {Result: message.ToolResult{ToolCallID: "tc-1", Content: "done"}, CreatedAt: end.Unix()},
+	}
+
+	items := ExtractMessageItems(&sty, msg, results, nil)
+	require.Len(t, items, 1)
+	provider, ok := items[0].(DelegationInfoProvider)
+	require.True(t, ok)
+	_, _, _, gotStart, gotDuration := provider.DelegationInfo()
+	require.WithinDuration(t, start, gotStart, time.Second)
+	require.Equal(t, 4*time.Minute, gotDuration,
+		"a finished delegation must report the runtime its two messages bracket")
+}
+
+// TestExtractMessageItems_SubSecondDelegationReportsNoDuration: message
+// timestamps have second granularity, so a delegation that starts and
+// finishes inside the same second has no runtime this can express.
+// Duration must stay zero ("unknown") rather than become a misleading
+// "0s".
+func TestExtractMessageItems_SubSecondDelegationReportsNoDuration(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	at := time.Now().Add(-time.Minute).Truncate(time.Second)
+	msg := &message.Message{
+		ID:        "m1",
+		Role:      message.Assistant,
+		CreatedAt: at.Unix(),
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"fix the bug"}`},
+		},
+	}
+	results := map[string]ToolResultRef{
+		"tc-1": {Result: message.ToolResult{ToolCallID: "tc-1"}, CreatedAt: at.Unix()},
+	}
+
+	items := ExtractMessageItems(&sty, msg, results, nil)
+	require.Len(t, items, 1)
+	provider, ok := items[0].(DelegationInfoProvider)
+	require.True(t, ok)
+	_, _, _, _, gotDuration := provider.DelegationInfo()
+	require.Zero(t, gotDuration)
+}
+
+// TestExtractMessageItems_IgnoresMissingCreatedAt: a message with no
+// stored timestamp must leave the construction-time default alone rather
+// than dating the delegation to the Unix epoch, which would render as
+// decades of elapsed time.
+func TestExtractMessageItems_IgnoresMissingCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	msg := &message.Message{
+		ID:   "m1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "tc-1", Name: "agent", Input: `{"prompt":"fix the bug"}`},
+		},
+	}
+
+	items := ExtractMessageItems(&sty, msg, nil, nil)
+	require.Len(t, items, 1)
+	provider, ok := items[0].(DelegationInfoProvider)
+	require.True(t, ok)
+	_, _, _, gotStart, _ := provider.DelegationInfo()
+	require.WithinDuration(t, time.Now(), gotStart, time.Minute)
+}

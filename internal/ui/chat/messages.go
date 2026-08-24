@@ -435,7 +435,7 @@ func cappedMessageWidth(availableWidth int) int {
 // Use BuildToolResultMap to create this map from all messages in a session.
 // cfg is forwarded to NewToolMessageItem to recognize user-defined agent
 // tools; it may be nil.
-func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, cfg CustomAgentConfig) []MessageItem {
+func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]ToolResultRef, cfg CustomAgentConfig) []MessageItem {
 	switch msg.Role {
 	case message.User:
 		// Reconstruct shell command items from ShellCommand parts.
@@ -464,17 +464,27 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		}
 		for _, tc := range msg.ToolCalls() {
 			var result *message.ToolResult
-			if tr, ok := toolResults[tc.ID]; ok {
-				result = &tr
+			var finishedAt int64
+			if ref, ok := toolResults[tc.ID]; ok {
+				result = &ref.Result
+				finishedAt = ref.CreatedAt
 			}
-			items = append(items, NewToolMessageItem(
+			item := NewToolMessageItem(
 				sty,
 				msg.ID,
 				tc,
 				result,
 				msg.FinishReason() == message.FinishReasonCanceled,
 				cfg,
-			))
+			)
+			// A delegation rebuilt here ran between the two stored
+			// messages, not from now on — see RestoreTiming. Timestamps
+			// are skipped when absent, which would otherwise date the
+			// delegation to 1970 and report decades of elapsed time.
+			if r, ok := item.(DelegationTimingRestorer); ok {
+				r.RestoreTiming(unixOrZero(msg.CreatedAt), unixOrZero(finishedAt))
+			}
+			items = append(items, item)
 		}
 		return items
 	case message.System:
@@ -486,6 +496,16 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		return []MessageItem{NewNoticeItem(sty, msg)}
 	}
 	return []MessageItem{}
+}
+
+// unixOrZero converts a stored second-granularity timestamp to a
+// time.Time, mapping the "not recorded" zero to the zero time rather than
+// to the Unix epoch.
+func unixOrZero(sec int64) time.Time {
+	if sec <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(sec, 0)
 }
 
 // ShouldRenderAssistantMessage determines if an assistant message should be rendered
@@ -500,16 +520,25 @@ func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || msg.IsErrorLike() || isCancelled
 }
 
+// ToolResultRef is a tool result together with the timestamp of the tool
+// message that carried it. The timestamp is when the tool call finished,
+// which is what lets a delegation rebuilt from history report the runtime
+// it actually had instead of an unknown one (see RestoreTiming).
+type ToolResultRef struct {
+	Result    message.ToolResult
+	CreatedAt int64
+}
+
 // BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.
 // Tool result messages (role == message.Tool) contain the results that should be linked
 // to tool calls in assistant messages.
-func BuildToolResultMap(messages []*message.Message) map[string]message.ToolResult {
-	resultMap := make(map[string]message.ToolResult)
+func BuildToolResultMap(messages []*message.Message) map[string]ToolResultRef {
+	resultMap := make(map[string]ToolResultRef)
 	for _, msg := range messages {
 		if msg.Role == message.Tool {
 			for _, result := range msg.ToolResults() {
 				if result.ToolCallID != "" {
-					resultMap[result.ToolCallID] = result
+					resultMap[result.ToolCallID] = ToolResultRef{Result: result, CreatedAt: msg.CreatedAt}
 				}
 			}
 		}

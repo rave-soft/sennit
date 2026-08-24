@@ -218,11 +218,20 @@ func (m *UI) childPanelContextWindow(frame sessionNavFrame) int64 {
 // often enough while an agent is active that this reads as ticking).
 // Returns "" when neither is available, matching renderDelegationOutcomeLine's
 // policy of omitting a misleading/unknown duration rather than guessing.
+//
+// The busy question is about this delegation specifically, not the
+// workspace: delegationStart is now the delegation's real start recovered
+// from message history (see chat.RestoreTiming), so a workspace-wide gate
+// would have drilling into a long-finished delegation, while some
+// unrelated agent happens to be running, report the hours since it ran as
+// if it were still going. A delegation that finishes while it is being
+// viewed doesn't fall off this branch into "" — freezeFinishedChildDelegation
+// gives the frame a duration at that moment, and the first case takes over.
 func (m *UI) childPanelElapsedText(frame sessionNavFrame) string {
 	if frame.delegationDuration > 0 {
 		return presentation.FormatElapsed(frame.delegationDuration)
 	}
-	if m.isAgentBusy() && !frame.delegationStart.IsZero() {
+	if m.childDelegationBusy(frame) && !frame.delegationStart.IsZero() {
 		return presentation.FormatElapsed(time.Since(frame.delegationStart)) + " elapsed"
 	}
 	return ""

@@ -558,6 +558,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	// Update terminal capabilities
 	m.caps.Update(msg)
+	m.freezeFinishedChildDelegation()
 	if m.dialog.ContainsDialog(dialog.FilePickerID) {
 		switch msg := msg.(type) {
 		case tea.WindowSizeMsg:
@@ -709,9 +710,24 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // childSessionRef identifies a sub-agent delegation (agent / agentic_fetch
 // tool call) that can be entered as its own child session, via
 // workspace.Workspace.CreateAgentToolSessionID(messageID, toolCallID).
+// childSessionRef identifies one delegation in a parent chat, together
+// with the display data captured from its chat item at the moment the
+// sibling list was built (see Chat.NestedToolContainerRefs). Carrying that
+// snapshot is what lets alt+left/alt+right cycle between siblings without
+// the parent's chat items, which are no longer loaded once navigation has
+// descended into a child session.
 type childSessionRef struct {
 	messageID  string
 	toolCallID string
+
+	// label, agentName, model, effort, delegationStart and
+	// delegationDuration mirror the same-named sessionNavFrame fields; see
+	// their doc there. All zero for a ref built from an item that isn't a
+	// resolvable delegation.
+	label                    string
+	agentName, model, effort string
+	delegationStart          time.Time
+	delegationDuration       time.Duration
 }
 
 // sessionNavFrame is one level of the sub-agent session-navigation stack
@@ -749,6 +765,78 @@ type sessionNavFrame struct {
 	agentName, model, effort string
 	delegationStart          time.Time
 	delegationDuration       time.Duration
+
+	// childSessionID is the session this frame descends into — the id
+	// requestSessionLoad was given. Kept so the delegation's own busy
+	// state can be asked about by id (see childDelegationBusy) rather
+	// than inferred from whichever session happens to be loaded.
+	childSessionID string
+	// delegationSawBusy records that this delegation was observed
+	// generating at least once while being viewed, which is what lets
+	// freezeFinishedChildDelegation tell "finished just now, freeze the
+	// elapsed time" apart from "was already finished before we got
+	// here, its runtime is unknown".
+	delegationSawBusy bool
+}
+
+// adoptRef copies a sibling's captured delegation data onto the frame,
+// which is everything the child-session panel needs to describe the level
+// the frame points at. Used both when the frame is pushed and when
+// alt+left/alt+right moves it to another sibling.
+func (f *sessionNavFrame) adoptRef(ref childSessionRef) {
+	f.label = ref.label
+	if f.label == "" {
+		f.label = defaultChildSessionLabel
+	}
+	f.agentName, f.model, f.effort = ref.agentName, ref.model, ref.effort
+	f.delegationStart, f.delegationDuration = ref.delegationStart, ref.delegationDuration
+	f.delegationSawBusy = false
+}
+
+// childDelegationBusy reports whether the delegation the frame points at
+// is generating right now. Deliberately by session id rather than via
+// [UI.isCurrentSessionBusy]: navigation is asynchronous, so the loaded
+// session briefly remains the parent after a frame is pushed, and the
+// parent is busy for as long as its delegation runs.
+func (m *UI) childDelegationBusy(frame sessionNavFrame) bool {
+	if frame.childSessionID == "" || m.com == nil || m.com.Workspace == nil {
+		return false
+	}
+	return m.com.Workspace.AgentIsSessionBusy(frame.childSessionID)
+}
+
+// freezeFinishedChildDelegation stops the viewed delegation's elapsed
+// time at the moment its child session finishes, instead of letting the
+// reading vanish along with the busy state it is gated on.
+//
+// The end timestamp isn't available here — it lands in the parent
+// session, whose chat isn't loaded while a child is being viewed — so
+// this freezes on the transition, exactly as SetResult does for a live
+// delegation block. Runs from Update rather than from the draw path both
+// because the view must not mutate state and because the transition has
+// to be caught when it happens: a finished delegation produces no further
+// frames to notice it in.
+func (m *UI) freezeFinishedChildDelegation() {
+	if len(m.sess.navStack) == 0 {
+		return
+	}
+	frame := &m.sess.navStack[len(m.sess.navStack)-1]
+	if frame.delegationDuration > 0 || frame.delegationStart.IsZero() {
+		return
+	}
+	if m.childDelegationBusy(*frame) {
+		frame.delegationSawBusy = true
+		return
+	}
+	if !frame.delegationSawBusy {
+		// Already finished when we arrived: its runtime is whatever the
+		// captured ref said, and "unknown" is the honest answer if that
+		// was nothing. Timing it from here would report how long the
+		// session has been open.
+		return
+	}
+	frame.delegationSawBusy = false
+	frame.delegationDuration = time.Since(frame.delegationStart)
 }
 
 // handleSelectModel performs the model selection after any provider

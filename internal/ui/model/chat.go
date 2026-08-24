@@ -972,10 +972,16 @@ func (m *Chat) PlainToolItemAt(x, y int) bool {
 	return !isContainer
 }
 
-// NestedToolContainerRefs returns, in list order, the message ID and
-// tool-call ID of every top-level chat item that is a nested-tool
-// container (agent / agentic_fetch delegation). Used to build the
-// sibling list for alt+left/alt+right session-navigation cycling.
+// NestedToolContainerRefs returns, in list order, a reference to every
+// top-level chat item that is a nested-tool container (agent /
+// agentic_fetch delegation). Used to build the sibling list for
+// alt+left/alt+right session-navigation cycling.
+//
+// Each ref carries the delegation's label/model/timing as well as its ids:
+// cycling happens after navigation has already descended, when this chat
+// holds the child session's items rather than the parent's, so a ref that
+// was only a pair of ids left the panel with nothing to describe the
+// sibling it cycled to.
 func (m *Chat) NestedToolContainerRefs() []childSessionRef {
 	refs := make([]childSessionRef, 0)
 	for i := range m.list.Len() {
@@ -987,7 +993,7 @@ func (m *Chat) NestedToolContainerRefs() []childSessionRef {
 		if _, isContainer := item.(chat.NestedToolContainer); !isContainer {
 			continue
 		}
-		refs = append(refs, childSessionRef{messageID: toolItem.MessageID(), toolCallID: toolItem.ToolCall().ID})
+		refs = append(refs, captureDelegationRef(toolItem))
 	}
 	return refs
 }

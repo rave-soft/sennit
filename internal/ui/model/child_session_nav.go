@@ -3,7 +3,6 @@ package model
 import (
 	"encoding/json"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/message"
@@ -34,6 +33,10 @@ func (m *UI) childSessionSiblingCount() int {
 // snippet shown in the child-session breadcrumb before it's truncated.
 const childSessionBreadcrumbMaxLen = 40
 
+// defaultChildSessionLabel names a delegation whose prompt snippet
+// couldn't be resolved.
+const defaultChildSessionLabel = "subagent"
+
 // childSessionLabel builds a short label for a nested-tool-container item
 // (agent / agentic_fetch delegation), taken from the first line of its
 // running prompt. Falls back to "subagent" if the item's input can't be
@@ -43,11 +46,11 @@ func childSessionLabel(item chat.ToolMessageItem) string {
 		Prompt string `json:"prompt"`
 	}
 	if err := json.Unmarshal([]byte(item.ToolCall().Input), &p); err != nil {
-		return "subagent"
+		return defaultChildSessionLabel
 	}
 	prompt := strings.TrimSpace(p.Prompt)
 	if prompt == "" {
-		return "subagent"
+		return defaultChildSessionLabel
 	}
 	if i := strings.IndexByte(prompt, '\n'); i >= 0 {
 		prompt = prompt[:i]
@@ -56,6 +59,19 @@ func childSessionLabel(item chat.ToolMessageItem) string {
 		prompt = string(r[:childSessionBreadcrumbMaxLen]) + "…"
 	}
 	return prompt
+}
+
+// captureDelegationRef snapshots everything the child-session panel needs
+// to describe a delegation — its ids, prompt-snippet label, agent name,
+// model/effort override and timing — while its chat item is still loaded.
+func captureDelegationRef(item chat.ToolMessageItem) childSessionRef {
+	ref := childSessionRef{
+		messageID:  item.MessageID(),
+		toolCallID: item.ToolCall().ID,
+		label:      childSessionLabel(item),
+	}
+	ref.agentName, ref.model, ref.effort, ref.delegationStart, ref.delegationDuration = delegationInfo(item)
+	return ref
 }
 
 // enterChildSession pushes a navigation frame for the currently loaded
@@ -86,27 +102,25 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 		}
 	}
 
-	label := "subagent"
-	var agentName, model, effort string
-	var delegationStart time.Time
-	var delegationDuration time.Duration
-	if item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem); ok {
-		label = childSessionLabel(item)
-		agentName, model, effort, delegationStart, delegationDuration = delegationInfo(item)
+	// The delegation being entered is one of the siblings just captured,
+	// so its display data comes from there. The direct lookup is only a
+	// fallback for a caller that entered something not in the list.
+	var ref childSessionRef
+	if siblingIndex < len(siblings) && siblings[siblingIndex].toolCallID == toolCallID {
+		ref = siblings[siblingIndex]
+	} else if item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem); ok {
+		ref = captureDelegationRef(item)
 	}
 
-	m.sess.navStack = append(m.sess.navStack, sessionNavFrame{
-		parentSessionID:    m.sess.current.ID,
-		parentTitle:        parentTitle,
-		label:              label,
-		siblings:           siblings,
-		siblingIndex:       siblingIndex,
-		agentName:          agentName,
-		model:              model,
-		effort:             effort,
-		delegationStart:    delegationStart,
-		delegationDuration: delegationDuration,
-	})
+	frame := sessionNavFrame{
+		parentSessionID: m.sess.current.ID,
+		parentTitle:     parentTitle,
+		siblings:        siblings,
+		siblingIndex:    siblingIndex,
+		childSessionID:  childID,
+	}
+	frame.adoptRef(ref)
+	m.sess.navStack = append(m.sess.navStack, frame)
 
 	// Child sessions are read-only: keep focus/keys on the chat list and
 	// don't let the editor hold focus while viewing one.
@@ -160,24 +174,15 @@ func (m *UI) cycleChildSession(delta int) tea.Cmd {
 	frame.siblingIndex = ((frame.siblingIndex+delta)%n + n) % n
 	sibling := frame.siblings[frame.siblingIndex]
 
-	// The sibling's own tool-call item generally isn't in m.chat here —
-	// m.chat currently holds the child session we're navigating away from,
-	// not the parent — so this lookup routinely misses and falls back to
-	// the generic "subagent" label. frame.parentTitle was captured at
-	// enterChildSession time and doesn't have that problem.
-	label := "subagent"
-	var agentName, model, effort string
-	var delegationStart time.Time
-	var delegationDuration time.Duration
-	if item, ok := m.chat.MessageItem(sibling.toolCallID).(chat.ToolMessageItem); ok {
-		label = childSessionLabel(item)
-		agentName, model, effort, delegationStart, delegationDuration = delegationInfo(item)
-	}
-	frame.label = label
-	frame.agentName, frame.model, frame.effort = agentName, model, effort
-	frame.delegationStart, frame.delegationDuration = delegationStart, delegationDuration
+	// From the ref, not from m.chat: it holds the child session we're
+	// navigating away from, not the parent, so the sibling's own tool-call
+	// item isn't there to look up. The ref was captured from the parent
+	// chat when the frame was pushed (see NestedToolContainerRefs), the
+	// same way frame.parentTitle was.
+	frame.adoptRef(sibling)
+	frame.childSessionID = m.com.Workspace.CreateAgentToolSessionID(sibling.messageID, sibling.toolCallID)
 
-	return m.requestSessionLoad(m.com.Workspace.CreateAgentToolSessionID(sibling.messageID, sibling.toolCallID))
+	return m.requestSessionLoad(frame.childSessionID)
 }
 
 // handleChildSessionUpdate propagates a child agent-tool session's running

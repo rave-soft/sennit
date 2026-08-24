@@ -22,6 +22,16 @@ import (
 // (session.service.CreateAgentToolSessionID / ParseAgentToolSessionID).
 type agentSessionWorkspace struct {
 	workspace.Workspace
+
+	// busySessions holds the session IDs AgentIsSessionBusy should report
+	// as generating. The child-session panel's elapsed line asks about the
+	// loaded child session specifically (see childPanelElapsedText), not
+	// the workspace-wide agentBusyCache, so tests need a way to answer it.
+	busySessions map[string]bool
+}
+
+func (w agentSessionWorkspace) AgentIsSessionBusy(sessionID string) bool {
+	return w.busySessions[sessionID]
 }
 
 // Config satisfies the workspace.ConfigAccessor DefaultCommon needs to

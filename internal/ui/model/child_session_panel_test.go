@@ -83,6 +83,16 @@ func TestChildSessionPanelReplacesEditor(t *testing.T) {
 		"viewing a child session must give the editor area the panel's fixed height")
 }
 
+// setChildSessionBusy makes the workspace stub report the delegation the
+// top nav frame points at as generating, which is what the panel's
+// elapsed line gates on — the workspace-wide agentBusyCache would also be
+// true for an unrelated running agent.
+func setChildSessionBusy(u *UI, busy bool) {
+	frame := &u.sess.navStack[len(u.sess.navStack)-1]
+	frame.childSessionID = u.sess.current.ID
+	u.com.Workspace = agentSessionWorkspace{busySessions: map[string]bool{frame.childSessionID: busy}}
+}
+
 // TestDrawChildSessionPanel_ShowsModelEffortTokensAndNoNavigation covers
 // the panel's content end to end — the model/effort line and the split
 // token usage — and pins the division of labour: where you are and how to
@@ -153,13 +163,60 @@ func TestDrawChildSessionPanel_RunningShowsTickingElapsed(t *testing.T) {
 	u := newChildSessionPanelTestUI(t)
 	u.sess.navStack[len(u.sess.navStack)-1].delegationStart = time.Now().Add(-45 * time.Second)
 	u.sess.navStack[len(u.sess.navStack)-1].delegationDuration = 0
-	u.wsCache.agentBusyCache.set(true)
+	setChildSessionBusy(u, true)
 
 	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
 	u.drawChildSessionPanel(scr, u.lay.layout.editor)
 	out := ansi.Strip(scr.Render())
 
 	require.Contains(t, out, "45s elapsed")
+}
+
+// TestFreezeFinishedChildDelegation_FreezesOnFinish: a delegation that
+// finishes while it is being viewed must keep its final runtime on screen.
+// The elapsed reading is gated on the delegation being busy, so without
+// this the number simply disappeared the moment it stopped — the one
+// moment the user is waiting for it.
+func TestFreezeFinishedChildDelegation_FreezesOnFinish(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	top := len(u.sess.navStack) - 1
+	u.sess.navStack[top].delegationStart = time.Now().Add(-45 * time.Second)
+	u.sess.navStack[top].delegationDuration = 0
+
+	setChildSessionBusy(u, true)
+	u.freezeFinishedChildDelegation()
+	require.Zero(t, u.sess.navStack[top].delegationDuration, "a running delegation has nothing to freeze yet")
+
+	setChildSessionBusy(u, false)
+	u.freezeFinishedChildDelegation()
+	require.InDelta(t, (45 * time.Second).Seconds(),
+		u.sess.navStack[top].delegationDuration.Seconds(), 1)
+
+	scr := uv.NewScreenBuffer(u.lay.width, u.lay.height)
+	u.drawChildSessionPanel(scr, u.lay.layout.editor)
+	out := ansi.Strip(scr.Render())
+	require.Contains(t, out, "45s")
+	require.NotContains(t, out, "elapsed", "a finished delegation's runtime is a final total")
+}
+
+// TestFreezeFinishedChildDelegation_IgnoresAlreadyFinished: drilling into
+// a delegation that was already done must not start timing it. Its
+// runtime is whatever history recorded, and "unknown" is the honest
+// answer when history recorded nothing — never "how long this session has
+// been open".
+func TestFreezeFinishedChildDelegation_IgnoresAlreadyFinished(t *testing.T) {
+	t.Parallel()
+
+	u := newChildSessionPanelTestUI(t)
+	top := len(u.sess.navStack) - 1
+	u.sess.navStack[top].delegationStart = time.Now().Add(-3 * time.Hour)
+	u.sess.navStack[top].delegationDuration = 0
+	setChildSessionBusy(u, false)
+
+	u.freezeFinishedChildDelegation()
+	require.Zero(t, u.sess.navStack[top].delegationDuration)
 }
 
 // TestDrawChildSessionPanel_DoneShowsFrozenDuration covers the finished

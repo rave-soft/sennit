@@ -117,6 +117,37 @@ func (a *delegationToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
 	a.Bump()
 }
 
+// RestoreTiming re-anchors the delegation's timing to the timestamps of
+// the messages it was rebuilt from: start is when the assistant message
+// issuing the tool call was stored, end when the tool message carrying
+// its result was. A zero end means the delegation is still running.
+//
+// startTime is otherwise wall-clock at construction and duration stays
+// zero ("unknown"), which is right for a delegation observed live but
+// wrong for one rebuilt from history — and chat items are rebuilt on
+// every session load, including the two loads that navigating into a
+// sub-agent session and back out perform. Without this, a still-running
+// delegation's elapsed time (both the block's own status line and the
+// child-session panel's, which captures startTime from here) restarted
+// from zero on every navigation, and a finished one lost its runtime
+// entirely.
+//
+// Timestamps that can't be trusted are ignored rather than turned into a
+// nonsense reading: a zero start, a start in the future, or an end at or
+// before the start. The last case also covers a delegation that began and
+// finished inside the same stored second — message timestamps have second
+// granularity, so its real runtime is below what this can express, and
+// reporting nothing beats reporting "0s".
+func (a *delegationToolMessageItem) RestoreTiming(start, end time.Time) {
+	if start.IsZero() || start.After(time.Now()) {
+		return
+	}
+	a.startTime = start
+	if a.duration == 0 && end.After(start) {
+		a.duration = end.Sub(start)
+	}
+}
+
 // SetResult freezes the delegation's duration (see the duration field doc)
 // the first time a result arrives, then delegates to the embedded setter.
 func (a *delegationToolMessageItem) SetResult(res *message.ToolResult) {
@@ -331,7 +362,19 @@ type DelegationInfoProvider interface {
 	DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration)
 }
 
-var _ DelegationInfoProvider = (*AgentToolMessageItem)(nil)
+// DelegationTimingRestorer is implemented by delegation items whose
+// timing can be re-anchored to persisted timestamps when the item is
+// rebuilt from stored messages. See ExtractMessageItems, the only caller,
+// and RestoreTiming for why it's needed.
+type DelegationTimingRestorer interface {
+	RestoreTiming(start, end time.Time)
+}
+
+var (
+	_ DelegationInfoProvider   = (*AgentToolMessageItem)(nil)
+	_ DelegationTimingRestorer = (*AgentToolMessageItem)(nil)
+	_ DelegationTimingRestorer = (*AgenticFetchToolMessageItem)(nil)
+)
 
 // DelegationInfo implements [DelegationInfoProvider].
 func (a *AgentToolMessageItem) DelegationInfo() (displayName, model, effort string, startTime time.Time, duration time.Duration) {
