@@ -138,6 +138,10 @@ func (r *Registry) RefreshTools(ctx context.Context, cfg ConfigProvider, name st
 		return
 	}
 	tools = filterTools(m, tools)
+	if err := validateToolSchemas(tools); err != nil {
+		r.updateStateForSession(name, owner, session, StateError, err, Counts{})
+		return
+	}
 	publishSingleCatalog(r, r.allTools, name, owner, session, tools, func(c *Counts, n int) { c.Tools = n })
 }
 

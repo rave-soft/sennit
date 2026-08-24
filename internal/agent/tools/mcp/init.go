@@ -54,6 +54,9 @@ func (r *Registry) publishSession(ctx context.Context, name string, m config.MCP
 		return err
 	}
 	tools = filterTools(m, tools)
+	if err := validateToolSchemas(tools); err != nil {
+		return err
+	}
 	if !r.owns(name, owner) {
 		return context.Canceled
 	}

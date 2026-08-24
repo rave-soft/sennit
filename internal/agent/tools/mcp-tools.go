@@ -77,32 +77,42 @@ func (m *Tool) MCPToolName() string {
 	return m.tool.Name
 }
 
-func (m *Tool) Info() fantasy.ToolInfo {
-	parameters := make(map[string]any)
-	required := make([]string, 0)
-
-	if input, ok := m.tool.InputSchema.(map[string]any); ok {
-		if props, ok := input["properties"].(map[string]any); ok {
-			parameters = props
-		}
-		if req, ok := input["required"].([]any); ok {
-			// Convert []any -> []string when elements are strings
-			for _, v := range req {
-				if s, ok := v.(string); ok {
-					required = append(required, s)
-				}
+func schemaRequired(value any) []string {
+	switch required := value.(type) {
+	case []string:
+		return append([]string(nil), required...)
+	case []any:
+		result := make([]string, 0, len(required))
+		for _, value := range required {
+			if name, ok := value.(string); ok {
+				result = append(result, name)
 			}
-		} else if reqStr, ok := input["required"].([]string); ok {
-			// Handle case where it's already []string
-			required = reqStr
 		}
+		return result
+	default:
+		return []string{}
 	}
+}
 
+func (m *Tool) Info() fantasy.ToolInfo {
+	// Registration validates schemas before publication. Clone again here so a
+	// caller cannot mutate an MCP SDK-owned schema through ToolInfo.
+	inputSchema, err := mcp.CloneToolSchema(m.tool.InputSchema)
+	if err != nil {
+		// An invalid tool is never published; retain a safe legacy shape if a
+		// caller races a mutable third-party SDK object after registration.
+		inputSchema = map[string]any{"type": "object", "properties": map[string]any{}}
+	}
+	parameters, _ := inputSchema["properties"].(map[string]any)
+	if parameters == nil {
+		parameters = map[string]any{}
+	}
 	return fantasy.ToolInfo{
 		Name:        m.Name(),
 		Description: m.tool.Description,
 		Parameters:  parameters,
-		Required:    required,
+		Required:    schemaRequired(inputSchema["required"]),
+		InputSchema: inputSchema,
 	}
 }
 

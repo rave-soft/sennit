@@ -195,18 +195,36 @@ func toolSchemaBytes(tools []fantasy.AgentTool) int {
 // reaches providers.
 func preparedFunctionTool(tool fantasy.AgentTool) fantasy.FunctionTool {
 	info := tool.Info()
-	inputSchema := map[string]any{
-		"type":       "object",
-		"properties": info.Parameters,
-		"required":   info.Required,
+	inputSchema := info.InputSchema
+	if inputSchema == nil {
+		inputSchema = map[string]any{
+			"type":       "object",
+			"properties": info.Parameters,
+			"required":   info.Required,
+		}
+		schema.Normalize(inputSchema)
 	}
-	schema.Normalize(inputSchema)
+	// ToolInfo values can be backed by mutable MCP SDK maps; duplicate before
+	// marshalling the budget envelope so this path cannot mutate published data.
+	inputSchema = cloneJSONSchema(inputSchema)
 	return fantasy.FunctionTool{
 		Name:            info.Name,
 		Description:     info.Description,
 		InputSchema:     inputSchema,
 		ProviderOptions: tool.ProviderOptions(),
 	}
+}
+
+func cloneJSONSchema(input map[string]any) map[string]any {
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil
+	}
+	var cloned map[string]any
+	if json.Unmarshal(data, &cloned) != nil {
+		return nil
+	}
+	return cloned
 }
 
 // carryOverMessages assembles the history a named sub-agent should see

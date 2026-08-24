@@ -483,6 +483,15 @@ func TestCarryOverBudget(t *testing.T) {
 	})
 }
 
+type schemaInfoTool struct{ info fantasy.ToolInfo }
+
+func (t schemaInfoTool) Info() fantasy.ToolInfo { return t.info }
+func (schemaInfoTool) Run(context.Context, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return fantasy.ToolResponse{}, nil
+}
+func (schemaInfoTool) ProviderOptions() fantasy.ProviderOptions   { return nil }
+func (schemaInfoTool) SetProviderOptions(fantasy.ProviderOptions) {}
+
 // TestToolSchemaBytes covers the helper that measures the serialized tool
 // schemas: it is the sum of each ToolInfo's JSON length, so a larger or
 // richer schema set yields a larger count, and the count is stable across
@@ -538,6 +547,16 @@ func TestToolSchemaBytes(t *testing.T) {
 		require.NoError(t, err)
 		assert.JSONEq(t, expected, string(wire))
 		assert.Equal(t, len(expected), toolSchemaBytes([]fantasy.AgentTool{tool}))
+	})
+
+	t.Run("full root schema is measured without mutation", func(t *testing.T) {
+		t.Parallel()
+		source := map[string]any{"type": "object", "$defs": map[string]any{"id": map[string]any{"type": "string"}}, "properties": map[string]any{"value": map[string]any{"$ref": "#/$defs/id"}}, "additionalProperties": false}
+		tool := schemaInfoTool{info: fantasy.ToolInfo{Name: "full", InputSchema: source}}
+		wire, err := json.Marshal(preparedFunctionTool(tool))
+		require.NoError(t, err)
+		assert.Equal(t, len(wire), toolSchemaBytes([]fantasy.AgentTool{tool}))
+		assert.Equal(t, false, source["additionalProperties"], "budget preparation must not mutate source")
 	})
 
 	t.Run("an empty set is zero", func(t *testing.T) {
