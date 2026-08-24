@@ -48,7 +48,7 @@ func TestFrozenAccessAndGateClassifications(t *testing.T) {
 		AccessRead: {
 			"sennit_info", "sennit_logs", "job_output", "lsp_diagnostics", "lsp_references", "lsp_symbols",
 			"lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "grep",
-			"ripgrep", "ls", "read", "multi_read", "list_mcp_resources", "read_mcp_resource", "thread_list",
+			"ripgrep", "ls", "read", "multi_read", "git_status", "git_diff", "git_log", "list_mcp_resources", "read_mcp_resource", "thread_list",
 			"thread_status", "thread_wait", "task_list", "task_result", "task_output",
 		},
 		AccessWrite: {
@@ -59,7 +59,7 @@ func TestFrozenAccessAndGateClassifications(t *testing.T) {
 	}
 	wantGate := map[Gate][]string{
 		GateAlways: {
-			"bash", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit",
+			"bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit",
 			"fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "todos", "read", "multi_read", "write",
 		},
 		GateAllowed:     {"agent", "agentic_fetch"},
@@ -93,11 +93,11 @@ func TestFrozenAccessAndGateClassifications(t *testing.T) {
 }
 
 func TestConfiguredSetsAreExact(t *testing.T) {
-	wantDefault := []string{"agent", "bash", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "question", "todos", "read", "multi_read", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_wait", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}
+	wantDefault := []string{"agent", "bash", "git_status", "git_diff", "git_log", "sennit_info", "sennit_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "question", "todos", "read", "multi_read", "write", "list_mcp_resources", "read_mcp_resource", "thread_create", "thread_list", "thread_status", "thread_wait", "thread_merge", "thread_remove", "task_list", "task_result", "task_cancel", "task_send", "task_output", "ask_parent"}
 	if !slices.Equal(DefaultNames(), wantDefault) {
 		t.Fatalf("defaults = %v", DefaultNames())
 	}
-	wantReadOnly := []string{"lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "read", "multi_read"}
+	wantReadOnly := []string{"git_status", "git_diff", "git_log", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "fetch", "web_fetch", "web_search", "glob", "grep", "ripgrep", "ls", "read", "multi_read"}
 	if !slices.Equal(TaskReadOnlyNames(), wantReadOnly) {
 		t.Fatalf("task read-only = %v", TaskReadOnlyNames())
 	}
@@ -108,7 +108,7 @@ func TestDocsReferenceToolsParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	headings := map[string]DocsCategory{"Files": DocsFiles, "Shell": DocsShell, "Language servers": DocsLSP, "Network": DocsWeb, "Delegation": DocsDelegation, "Threads": DocsThreads, "MCP": DocsMCP, "Interaction and state": DocsInteraction}
+	headings := map[string]DocsCategory{"Files": DocsFiles, "Shell": DocsShell, "Language servers": DocsLSP, "Network": DocsWeb, "Delegation": DocsDelegation, "Threads": DocsThreads, "MCP": DocsMCP, "Interaction and state": DocsInteraction, "Git": DocsShell}
 	section := ""
 	documented := map[string]DocsCategory{}
 	tool := regexp.MustCompile("`([a-z][a-z0-9_]*)`")

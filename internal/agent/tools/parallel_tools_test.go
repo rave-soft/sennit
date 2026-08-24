@@ -78,6 +78,9 @@ var t0ParallelAllowList = []string{
 	LSToolName,         // tree listing; outside-working-dir paths hit a pure permission check
 	SennitLogsToolName, // tails a fixed log file path
 	SennitInfoToolName, // renders the snapshot captured at construction
+	GitStatusToolName,  // validated read-only git status; no shared Go state
+	GitDiffToolName,    // validated read-only git diff; no shared Go state
+	GitLogToolName,     // validated read-only git log; no shared Go state
 }
 
 // legacyParallelExceptions are the tools that already carried
@@ -272,6 +275,12 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 		return NewSennitInfoTool(testConfigStore(t, dir), nil, nil, nil, nil, nil, nil)
 	case BashToolName:
 		return NewBashTool(nil, dir, attribution, "test-model", shell.NewBackgroundShellManager())
+	case GitStatusToolName:
+		return NewGitStatusTool(dir)
+	case GitDiffToolName:
+		return NewGitDiffTool(dir)
+	case GitLogToolName:
+		return NewGitLogTool(dir)
 	case EditToolName:
 		return NewEditTool(nil, nil, &mockHistoryService{}, mockFileTrackerService{}, dir)
 	case MultiEditToolName:

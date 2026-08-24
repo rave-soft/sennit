@@ -71,6 +71,9 @@ var toolsWithoutBehavioralCoverage = map[string]string{
 	AgenticFetchToolName:  "built in internal/agent; importing it here would cycle",
 	RenameToolName:        "reaches its gates only after a real LSP resolves the symbol",
 	ReplaceSymbolToolName: "reaches its gates only after a real LSP resolves the symbol",
+	GitStatusToolName:     "uses Git worktree path validation rather than the permission service",
+	GitDiffToolName:       "uses Git worktree path validation rather than the permission service",
+	GitLogToolName:        "uses Git worktree path validation rather than the permission service",
 }
 
 func toolClassifications() []toolClassification {
@@ -92,6 +95,9 @@ func toolClassifications() []toolClassification {
 			},
 		},
 		{name: SennitInfoToolName, writes: false},
+		{name: GitStatusToolName, writes: false, confined: true},
+		{name: GitDiffToolName, writes: false, confined: true},
+		{name: GitLogToolName, writes: false, confined: true},
 		{name: SennitLogsToolName, writes: false},
 		{name: JobOutputToolName, writes: false},
 		{name: JobKillToolName, writes: false},

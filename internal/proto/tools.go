@@ -8,6 +8,12 @@ import "github.com/rave-soft/sennit/internal/agent/tools"
 
 const BashToolName = "bash"
 
+const (
+	GitStatusToolName = tools.GitStatusToolName
+	GitDiffToolName   = tools.GitDiffToolName
+	GitLogToolName    = tools.GitLogToolName
+)
+
 // BashParams represents the parameters for the bash tool.
 type BashParams struct {
 	Description         string `json:"description"`

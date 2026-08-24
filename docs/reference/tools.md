@@ -24,6 +24,16 @@ a [hook's `--matcher`](../extending/hooks.md).
 > and folded onto `read`, so an existing `permissions allow view` keeps
 > working.
 
+## Git
+
+| Tool | Does | Read-only |
+|:--|:--|:--|
+| `git_status` | Read current worktree status with relative path filters and bounded results | yes |
+| `git_diff` | Read staged, unstaged, or revision diffs with patch/stat output and a byte limit | yes |
+| `git_log` | Read commit history with revision and relative path filters | yes |
+
+These tools execute fixed git argv directly in the active worktree; they do not accept a repository path or invoke a shell.
+
 ## Shell
 
 | Tool | Does |

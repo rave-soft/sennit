@@ -76,6 +76,9 @@ type Descriptor struct {
 var descriptors = []Descriptor{
 	{Name: "agent", Renderer: RendererSpecial, Docs: DocsDelegation, Access: AccessWrite, Builder: BuilderCoordinator, Writes: true, ParallelSafe: true, DefaultAllowed: true, Gate: GateAllowed},
 	{Name: "bash", Access: AccessDynamic, Writes: true, Confined: true, DefaultAllowed: true, Gate: GateAlways, Renderer: RendererSpecial, Docs: DocsShell},
+	{Name: "git_status", Access: AccessRead, ParallelSafe: true, Confined: true, DefaultAllowed: true, TaskReadOnly: true, Gate: GateAlways, Renderer: RendererDedicated, Docs: DocsShell},
+	{Name: "git_diff", Access: AccessRead, ParallelSafe: true, Confined: true, DefaultAllowed: true, TaskReadOnly: true, Gate: GateAlways, Renderer: RendererDedicated, Docs: DocsShell},
+	{Name: "git_log", Access: AccessRead, ParallelSafe: true, Confined: true, DefaultAllowed: true, TaskReadOnly: true, Gate: GateAlways, Renderer: RendererDedicated, Docs: DocsShell},
 	{Name: "sennit_info", Docs: DocsInteraction, Access: AccessRead, ParallelSafe: true, DefaultAllowed: true},
 	{Name: "sennit_logs", Docs: DocsInteraction, Access: AccessRead, ParallelSafe: true, DefaultAllowed: true},
 	{Name: "job_output", Renderer: RendererDedicated, Docs: DocsShell, Access: AccessRead, DefaultAllowed: true},
