@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,6 +37,15 @@ func TestMain(m *testing.M) {
 // a client left blocked there past Close's deadline is a real race
 // against whatever creates the next client (e.g. Restart) — tests must
 // let shutdown complete cleanly to avoid tripping it under -race.
+func fakeWorkspaceSymbolResult() string {
+	root := os.Getenv("SENNIT_LSP_FAKE_ROOT")
+	if root == "" {
+		root = "/workspace"
+	}
+	uri := "file://" + filepath.ToSlash(filepath.Join(root, "main.go"))
+	return `[{"name":"Alpha","kind":12,"location":{"uri":"` + uri + `","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":5}}}},{"name":"Beta","kind":12,"location":{"uri":"` + uri + `"}}]`
+}
+
 func runFakeLSPServer() {
 	r := bufio.NewReader(os.Stdin)
 	for {
@@ -54,8 +64,21 @@ func runFakeLSPServer() {
 			continue // notification, no response expected
 		}
 		result := "null"
-		if envelope.Method == "initialize" {
-			result = `{"capabilities":{}}`
+		switch envelope.Method {
+		case "initialize":
+			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "symbols" {
+				result = `{"capabilities":{"hoverProvider":true,"workspaceSymbolProvider":true}}`
+			} else {
+				result = `{"capabilities":{}}`
+			}
+		case "workspace/symbol":
+			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "symbols" {
+				result = fakeWorkspaceSymbolResult()
+			}
+		case "textDocument/hover":
+			if os.Getenv("SENNIT_LSP_FAKE_SCENARIO") == "symbols" {
+				result = `{"contents":{"kind":"markdown","value":"` + "`Alpha() string`" + `"}}`
+			}
 		}
 		resp := []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":%s}`, envelope.ID, result))
 		writeLSPFrame(os.Stdout, resp)

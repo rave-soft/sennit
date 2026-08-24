@@ -201,3 +201,5 @@ require (
 )
 
 replace charm.land/fantasy => ./third_party/fantasy
+
+replace github.com/charmbracelet/x/powernap => ./third_party/powernap

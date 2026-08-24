@@ -20,7 +20,7 @@ var expectedGateByName = map[toolmeta.Gate][]string{
 	toolmeta.GateNotSubAgent: {"ask_parent"},
 	toolmeta.GateThreads:     {"thread_create", "thread_list", "thread_status", "thread_send", "thread_wait", "thread_merge", "thread_remove"},
 	toolmeta.GateTasks:       {"task_list", "task_result", "task_cancel", "task_send", "task_output"},
-	toolmeta.GateLSP:         {"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"},
+	toolmeta.GateLSP:         {"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"},
 	toolmeta.GateMCP:         {"list_mcp_resources", "read_mcp_resource"},
 	toolmeta.GateInteractive: {"question"},
 }

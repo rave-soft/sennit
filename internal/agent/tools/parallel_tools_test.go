@@ -119,6 +119,8 @@ var sequentialDenyList = []struct {
 	{DiagnosticsToolName, "lazy LSP start + workspace didChange notifications"},
 	{ReferencesToolName, "resolveSymbolResults → lspManager.Start"},
 	{SymbolsToolName, "lspManager.Start"},
+	{WorkspaceSymbolsToolName, "lspManager.WorkspaceClients"},
+	{HoverToolName, "lspManager.Start"},
 	{DefinitionToolName, "resolveSymbol → lspManager.Start"},
 	{CallHierarchyToolName, "resolveSymbol → lspManager.Start"},
 	{RenameToolName, "writes files through the LSP"},
@@ -301,6 +303,10 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 		return NewReferencesTool(nil, dir)
 	case SymbolsToolName:
 		return NewSymbolsTool(nil, dir)
+	case WorkspaceSymbolsToolName:
+		return NewWorkspaceSymbolsTool(nil, dir)
+	case HoverToolName:
+		return NewHoverTool(nil, dir)
 	case DefinitionToolName:
 		return NewDefinitionTool(nil, dir)
 	case CallHierarchyToolName:

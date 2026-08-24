@@ -23,6 +23,8 @@ const (
 	ReplaceSymbolToolName    = "lsp_replace_symbol"
 	CallHierarchyToolName    = "lsp_call_hierarchy"
 	SymbolsToolName          = "lsp_symbols"
+	WorkspaceSymbolsToolName = "lsp_workspace_symbols"
+	HoverToolName            = "lsp_hover"
 	LSPRestartToolName       = "lsp_restart"
 	DiagnosticsToolName      = "lsp_diagnostics"
 	SennitInfoToolName       = brand.ToolInfo

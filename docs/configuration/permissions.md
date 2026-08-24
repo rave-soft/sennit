@@ -22,7 +22,7 @@ hidden, so the model doesn't attempt it, doesn't reason about it, and doesn't
 route around a refusal. It simply isn't there.
 
 A reasonable starting point is to allow the read-only tools — `read`, `ls`,
-`grep`, `glob`, `ripgrep`, `lsp_definition`, `lsp_symbols`,
+`grep`, `glob`, `ripgrep`, `lsp_definition`, `lsp_symbols`, `lsp_workspace_symbols`, `lsp_hover`,
 `lsp_call_hierarchy` — and keep prompting for anything that writes or executes.
 
 Tool names are listed in the [tools reference](../reference/tools.md).

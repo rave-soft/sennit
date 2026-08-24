@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -122,6 +123,41 @@ func (s *Manager) Start(ctx context.Context, path string) {
 		})
 	}
 	wg.Wait()
+}
+
+// WorkspaceClients starts configured servers for representative files below root
+// and returns the clients scoped to that workspace.  It deliberately limits the
+// walk: server selection only needs one supported file, not an index of the tree.
+func (s *Manager) WorkspaceClients(ctx context.Context, root string) []*Client {
+	root = fsext.Canonical(root)
+	if !fsext.HasPrefix(root, fsext.Canonical(s.cfg.WorkingDir())) {
+		return nil
+	}
+	servers := s.manager.GetServers()
+	found := make(map[string]bool)
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || len(found) == len(servers) {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			if path != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		for name, server := range servers {
+			if !found[name] && handles(server, path, root) {
+				found[name] = true
+				s.startServer(name, path, server)
+			}
+		}
+		return nil
+	})
+	clients := make([]*Client, 0)
+	for _, client := range s.clients.Copy() {
+		clients = append(clients, client)
+	}
+	return clients
 }
 
 // skipAutoStartCommands contains commands that are too generic or ambiguous to

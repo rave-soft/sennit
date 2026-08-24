@@ -95,6 +95,8 @@ func toolClassifications() []toolClassification {
 			},
 		},
 		{name: SennitInfoToolName, writes: false},
+		{name: WorkspaceSymbolsToolName, writes: false},
+		{name: HoverToolName, writes: false},
 		{name: GitStatusToolName, writes: false, confined: true},
 		{name: GitDiffToolName, writes: false, confined: true},
 		{name: GitLogToolName, writes: false, confined: true},

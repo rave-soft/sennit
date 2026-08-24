@@ -90,6 +90,8 @@ var descriptors = []Descriptor{
 	{Name: "lsp_references", Renderer: RendererDedicated, Access: AccessRead, DefaultAllowed: true, Gate: GateLSP, Docs: DocsLSP},
 	{Name: "lsp_restart", Renderer: RendererDedicated, Access: AccessWrite, DefaultAllowed: true, Gate: GateLSP, Docs: DocsLSP},
 	{Name: "lsp_symbols", Renderer: RendererDedicated, Access: AccessRead, DefaultAllowed: true, TaskReadOnly: true, Gate: GateLSP, Docs: DocsLSP},
+	{Name: "lsp_workspace_symbols", Renderer: RendererDedicated, Access: AccessRead, DefaultAllowed: true, TaskReadOnly: true, Gate: GateLSP, Docs: DocsLSP},
+	{Name: "lsp_hover", Renderer: RendererDedicated, Access: AccessRead, DefaultAllowed: true, TaskReadOnly: true, Gate: GateLSP, Docs: DocsLSP},
 	{Name: "lsp_definition", Renderer: RendererDedicated, Access: AccessRead, DefaultAllowed: true, TaskReadOnly: true, Gate: GateLSP, Docs: DocsLSP},
 	{Name: "lsp_call_hierarchy", Renderer: RendererDedicated, Access: AccessRead, DefaultAllowed: true, TaskReadOnly: true, Gate: GateLSP, Docs: DocsLSP},
 	{Name: "lsp_rename", Renderer: RendererDedicated, Access: AccessWrite, Writes: true, Confined: true, DefaultAllowed: true, Gate: GateLSP, Docs: DocsLSP},

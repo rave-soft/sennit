@@ -201,12 +201,14 @@ func toolSpecs() []toolSpec {
 
 		// LSP tools: offered whenever the user configured an LSP
 		// explicitly, or auto_lsp is unset/true.
-		{[]string{"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"}, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		{[]string{"lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_workspace_symbols", "lsp_hover", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol"}, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
 				tools.NewDiagnosticsTool(c.lspManager),
 				tools.NewReferencesTool(c.lspManager, c.cfg.WorkingDir()),
 				tools.NewLSPRestartTool(c.lspManager),
 				tools.NewSymbolsTool(c.lspManager, c.cfg.WorkingDir()),
+				tools.NewWorkspaceSymbolsTool(c.lspManager, c.cfg.WorkingDir()),
+				tools.NewHoverTool(c.lspManager, c.cfg.WorkingDir()),
 				tools.NewDefinitionTool(c.lspManager, c.cfg.WorkingDir()),
 				tools.NewCallHierarchyTool(c.lspManager, c.cfg.WorkingDir()),
 				tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),

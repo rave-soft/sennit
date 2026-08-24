@@ -20,6 +20,8 @@ func registerLSPToolRenderers() {
 	registerToolRenderer(tools.ReplaceSymbolToolName, &ReplaceSymbolToolRenderContext{})
 	registerToolRenderer(tools.CallHierarchyToolName, &callHierarchyToolRenderer)
 	registerToolRenderer(tools.SymbolsToolName, &symbolsToolRenderer)
+	registerToolRenderer(tools.WorkspaceSymbolsToolName, &workspaceSymbolsToolRenderer)
+	registerToolRenderer(tools.HoverToolName, &hoverToolRenderer)
 	registerToolRenderer(tools.LSPRestartToolName, &lspRestartToolRenderer)
 	registerToolRenderer(tools.DiagnosticsToolName, &diagnosticsToolRenderer)
 }
@@ -114,3 +116,8 @@ var lspRestartToolRenderer = simpleToolRenderer{
 	},
 	summary: contentLineCountSummary,
 }
+
+var (
+	workspaceSymbolsToolRenderer = simpleToolRenderer{title: "Workspace Symbols", summary: contentLineCountSummary}
+	hoverToolRenderer            = simpleToolRenderer{title: "Hover", summary: contentLineCountSummary}
+)

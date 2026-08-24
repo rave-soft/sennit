@@ -62,7 +62,9 @@ lsp add gopls --command gopls \
 |:--|:--|
 | `lsp_definition` | jump to where a symbol is defined |
 | `lsp_references` | every use of a symbol |
-| `lsp_symbols` | search symbols across the project |
+| `lsp_symbols` | outline symbols in a file |
+| `lsp_workspace_symbols` | search symbols across the project |
+| `lsp_hover` | show type, signature, and documentation |
 | `lsp_call_hierarchy` | callers and callees |
 | `lsp_rename` | rename a symbol everywhere |
 | `lsp_replace_symbol` | replace a symbol's whole definition |

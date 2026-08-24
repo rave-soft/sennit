@@ -114,25 +114,8 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 		return nil, fmt.Errorf("failed to initialize the lsp client: %w", err)
 	}
 
-	// Convert powernap capabilities to protocol capabilities
-	caps := c.client.GetCapabilities()
-	protocolCaps := protocol.ServerCapabilities{
-		TextDocumentSync: caps.TextDocumentSync,
-		CompletionProvider: func() *protocol.CompletionOptions {
-			if caps.CompletionProvider != nil {
-				return &protocol.CompletionOptions{
-					TriggerCharacters:   caps.CompletionProvider.TriggerCharacters,
-					AllCommitCharacters: caps.CompletionProvider.AllCommitCharacters,
-					ResolveProvider:     caps.CompletionProvider.ResolveProvider,
-				}
-			}
-			return nil
-		}(),
-	}
-
-	result := &protocol.InitializeResult{
-		Capabilities: protocolCaps,
-	}
+	// Keep the complete server capability payload, including union providers.
+	result := &protocol.InitializeResult{Capabilities: c.client.GetCapabilities()}
 
 	return result, nil
 }
@@ -742,6 +725,61 @@ func (c *Client) Rename(ctx context.Context, filepath string, line, character in
 
 	return c.client.RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
 }
+
+// Hover returns hover information at a file position.
+func (c *Client) Hover(ctx context.Context, filepath string, line, character int) (*protocol.Hover, error) {
+	return c.client.RequestHover(ctx, filepath, protocol.Position{Line: uint32(line), Character: uint32(character)}) //nolint:wrapcheck
+}
+
+type WorkspaceSymbol struct {
+	Name            string
+	Kind            protocol.SymbolKind
+	Path            string
+	Line, Character int
+	Container       string
+}
+
+// WorkspaceSymbolResults normalizes the legacy SymbolInformation and modern
+// WorkspaceSymbol workspace/symbol result variants.
+func (c *Client) WorkspaceSymbolResults(ctx context.Context, query string) ([]WorkspaceSymbol, error) {
+	raw, err := c.client.RequestWorkspaceSymbols(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeWorkspaceSymbolResults(raw)
+}
+
+func normalizeWorkspaceSymbolResults(raw protocol.Or_Result_workspace_symbol) ([]WorkspaceSymbol, error) {
+	results, err := raw.Results()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]WorkspaceSymbol, 0, len(results))
+	for _, result := range results {
+		loc := result.GetLocation()
+		path, err := loc.URI.Path()
+		if err != nil || path == "" {
+			continue
+		}
+		item := WorkspaceSymbol{Name: result.GetName(), Path: path, Line: int(loc.Range.Start.Line) + 1, Character: int(loc.Range.Start.Character) + 1}
+		switch v := result.(type) {
+		case *protocol.WorkspaceSymbol:
+			item.Kind, item.Container = v.Kind, v.ContainerName
+		case *protocol.SymbolInformation:
+			item.Kind, item.Container = v.Kind, v.ContainerName
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// SupportsWorkspaceSymbols reports whether the initialized server advertises workspace symbols.
+func (c *Client) SupportsWorkspaceSymbols() bool {
+	return c.client.GetCapabilities().WorkspaceSymbolProvider != nil
+}
+
+// SupportsHover reports whether the initialized server advertises hover support.
+func (c *Client) SupportsHover() bool { return c.client.GetCapabilities().HoverProvider != nil }
 
 // DocumentSymbols returns the document symbols for the given file.
 func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protocol.DocumentSymbolResult, error) {

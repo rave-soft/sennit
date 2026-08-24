@@ -52,6 +52,8 @@ Accurate where grep is approximate. See
 | `lsp_definition` | Where a symbol is defined | yes |
 | `lsp_references` | Every use of a symbol | |
 | `lsp_symbols` | Outline of a file's symbols | yes |
+| `lsp_workspace_symbols` | Search symbols across configured workspace language servers | yes |
+| `lsp_hover` | Read type, signature, and documentation at a position or symbol | yes |
 | `lsp_call_hierarchy` | Callers and callees of a symbol | yes |
 | `lsp_rename` | Semantic rename across files | |
 | `lsp_replace_symbol` | Replace, insert or delete a whole symbol by name | |
