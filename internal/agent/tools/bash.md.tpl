@@ -55,7 +55,7 @@ When user asks to create a git commit:
 
 1. Single message with three tool_use blocks (IMPORTANT for speed): `git status`, `git diff` (staged+unstaged), `git log` (style reference).
 2. Stage relevant untracked files. Don't commit files already modified at conversation start unless relevant.
-3. Analyze staged changes in <commit_analysis> tags: list changed/added files, nature of change (feature/fix/refactor/test/docs), purpose, project impact, check for sensitive info. Don't use tools beyond git context.
+3. Work out, without writing the analysis into your reply: which files changed/were added, the nature of the change (feature/fix/refactor/test/docs), its purpose, its project impact, and whether anything sensitive is included. Don't use tools beyond git context.
 4. Draft the message per <commit_messages> and check it against the <git_message_quality> litmus test.
 5. Create the commit{{ if eq .Attribution.TrailerStyle "assisted-by" }} with attribution{{ end }} using HEREDOC:
    git commit -m "$(cat <<'EOF'
@@ -85,7 +85,7 @@ When user asks you to create or update a PR:
 
 1. Single message with multiple tool_use blocks (VERY IMPORTANT for speed): `git status`, `git diff`, check if the branch tracks remote and is up to date, `git log` and `git diff main...HEAD` (full history since main divergence).
 2. Create a new branch if needed; commit changes if needed; push with -u if needed.
-3. Analyze changes in <pr_analysis> tags: commits since diverging from main, nature of changes, purpose, project impact, sensitive info. Don't use tools beyond git context.
+3. Work out, without writing the analysis into your reply: the commits since diverging from main, the nature of the changes, their purpose, their project impact, and whether anything sensitive is included. Don't use tools beyond git context.
 4. Draft the PR message per <git_message_quality>: concise 1-2 bullet summary focused on "why", reflecting ALL changes since main divergence, checked against the litmus test.
 5. Create the PR with `gh pr create` using HEREDOC:
    gh pr create --title "title" --body "$(cat <<'EOF'
