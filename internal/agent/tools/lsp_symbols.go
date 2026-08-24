@@ -22,7 +22,7 @@ const SymbolsToolName = "lsp_symbols"
 var symbolsDescription string
 
 func NewSymbolsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		SymbolsToolName,
 		symbolsDescription,
 		func(ctx context.Context, params SymbolsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -51,7 +51,7 @@ func NewSymbolsTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentToo
 
 			return fantasy.NewTextResponse(formatSymbols(symbols, 0)), nil
 		},
-	)
+	), map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}})
 }
 
 func formatSymbols(symbols []protocol.DocumentSymbolResult, indent int) string {

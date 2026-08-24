@@ -42,7 +42,7 @@ type mcpResourceConfig interface {
 var _ mcpResourceConfig = (*config.ConfigStore)(nil)
 
 func NewListMCPResourcesTool(cfg mcpResourceConfig, reg *mcp.Registry, permissions permission.Service) fantasy.AgentTool {
-	return fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewParallelAgentTool(
 		ListMCPResourcesToolName,
 		listMCPResourcesDescription,
 		func(ctx context.Context, params ListMCPResourcesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -106,5 +106,5 @@ func NewListMCPResourcesTool(cfg mcpResourceConfig, reg *mcp.Registry, permissio
 			sort.Strings(lines)
 			return fantasy.NewTextResponse(strings.Join(lines, "\n")), nil
 		},
-	)
+	), map[string]toolParameterSchema{"mcp_name": {minLength: intPtr(1)}})
 }

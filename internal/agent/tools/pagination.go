@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 
 	"charm.land/fantasy"
@@ -28,8 +29,20 @@ type toolInfoOverride struct {
 func (t toolInfoOverride) Info() fantasy.ToolInfo { return t.info }
 
 type toolParameterSchema struct {
-	minimum *int
-	maximum *int
+	minimum, maximum              *int
+	minLength, minItems, maxItems *int
+	enum                          []string
+	pattern                       string
+}
+
+// ToolSchemaConstraint describes constraints omitted by Fantasy's reflection
+// schema generator. It lets coordinator-built tools use the same strict schema
+// path handling as package-built tools.
+type ToolSchemaConstraint struct {
+	Minimum, Maximum              *int
+	MinLength, MinItems, MaxItems *int
+	Enum                          []string
+	Pattern                       string
 }
 
 func intSchemaBounds(minimum, maximum int) toolParameterSchema {
@@ -40,23 +53,91 @@ func intSchemaMinimum(minimum int) toolParameterSchema {
 	return toolParameterSchema{minimum: &minimum}
 }
 
-// withToolParameterSchema fills constraints that Fantasy's reflection schema
-// generator does not derive from numeric struct tags.
+// withToolParameterSchema applies explicit JSON-schema constraints omitted by
+// Fantasy's reflection generator. Paths use dot notation and may descend via
+// "items" and "properties" (for example, "questions.items.type"). A stale
+// path is a programming error: silently accepting it would advertise a schema
+// contract the tool does not actually have.
+// WithToolSchemaConstraints applies explicit constraints to a coordinator-built
+// or package-built tool. It is intentionally strict about paths.
+func WithToolSchemaConstraints(tool fantasy.AgentTool, constraints map[string]ToolSchemaConstraint) fantasy.AgentTool {
+	schemas := make(map[string]toolParameterSchema, len(constraints))
+	for path, constraint := range constraints {
+		schemas[path] = toolParameterSchema{minimum: constraint.Minimum, maximum: constraint.Maximum, minLength: constraint.MinLength, minItems: constraint.MinItems, maxItems: constraint.MaxItems, enum: constraint.Enum, pattern: constraint.Pattern}
+	}
+	return withToolParameterSchema(tool, schemas)
+}
+
 func withToolParameterSchema(tool fantasy.AgentTool, schemas map[string]toolParameterSchema) fantasy.AgentTool {
 	info := tool.Info()
-	for name, schema := range schemas {
-		parameter, ok := info.Parameters[name].(map[string]any)
-		if !ok {
-			continue
-		}
+	for path, schema := range schemas {
+		parameter := schemaParameter(info.Parameters, path)
 		if schema.minimum != nil {
 			parameter["minimum"] = *schema.minimum
 		}
 		if schema.maximum != nil {
 			parameter["maximum"] = *schema.maximum
 		}
+		if schema.enum != nil {
+			values := make([]any, len(schema.enum))
+			for i, v := range schema.enum {
+				values[i] = v
+			}
+			parameter["enum"] = values
+		}
+		for key, value := range map[string]*int{"minLength": schema.minLength, "minItems": schema.minItems, "maxItems": schema.maxItems} {
+			if value != nil {
+				parameter[key] = *value
+			}
+		}
+		if schema.pattern != "" {
+			parameter["pattern"] = schema.pattern
+		}
 	}
 	return toolInfoOverride{AgentTool: tool, info: info}
+}
+
+// withToolRootSchema appends constraints that compose at the input object's
+// root, where relationships between multiple parameters must be expressed.
+func withToolRootSchema(tool fantasy.AgentTool, constraints ...map[string]any) fantasy.AgentTool {
+	info := tool.Info()
+	allOf, _ := info.InputSchema["allOf"].([]any)
+	for _, constraint := range constraints {
+		allOf = append(allOf, constraint)
+	}
+	info.InputSchema["allOf"] = allOf
+	return toolInfoOverride{AgentTool: tool, info: info}
+}
+
+func schemaParameter(parameters map[string]any, path string) map[string]any {
+	parts := strings.Split(path, ".")
+	current, ok := parameters[parts[0]]
+	if !ok {
+		panic(fmt.Sprintf("tool schema path %q: missing root parameter", path))
+	}
+	for _, part := range parts[1:] {
+		object, ok := current.(map[string]any)
+		if !ok {
+			panic(fmt.Sprintf("tool schema path %q: expected object before %q", path, part))
+		}
+		if part == "items" || part == "properties" {
+			current = object[part]
+		} else {
+			properties, ok := object["properties"].(map[string]any)
+			if !ok {
+				panic(fmt.Sprintf("tool schema path %q: missing properties", path))
+			}
+			current = properties[part]
+		}
+		if current == nil {
+			panic(fmt.Sprintf("tool schema path %q: missing %q", path, part))
+		}
+	}
+	parameter, ok := current.(map[string]any)
+	if !ok {
+		panic(fmt.Sprintf("tool schema path %q: expected parameter object", path))
+	}
+	return parameter
 }
 
 type pageCursor struct {

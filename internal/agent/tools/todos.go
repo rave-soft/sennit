@@ -41,7 +41,7 @@ type TodosResponseMetadata struct {
 }
 
 func NewTodosTool(sessions session.Service) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		TodosToolName,
 		todosDescription,
 		func(ctx context.Context, params TodosParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -185,5 +185,5 @@ func NewTodosTool(sessions session.Service) fantasy.AgentTool {
 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 		},
-	)
+	), map[string]toolParameterSchema{"todos.items.status": {enum: []string{"pending", "in_progress", "completed"}}})
 }

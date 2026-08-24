@@ -25,7 +25,7 @@ type ThreadSendParams struct {
 // NewThreadSendTool creates the thread_send tool. See [NewThreadCreateTool]
 // for the manager nil-safety note.
 func NewThreadSendTool(manager ThreadManager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		ThreadSendToolName,
 		renderToolDescription(threadSendDescriptionTpl),
 		func(ctx context.Context, params ThreadSendParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -43,5 +43,5 @@ func NewThreadSendTool(manager ThreadManager) fantasy.AgentTool {
 
 			return fantasy.NewTextResponse(outcome.Describe("thread", params.ID)), nil
 		},
-	)
+	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}, "message": {minLength: intPtr(1)}})
 }

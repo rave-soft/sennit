@@ -112,7 +112,8 @@ func NewGlobTool(workingDir string, cfg config.ToolGlob) fantasy.AgentTool {
 		},
 	)
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{
-		"max_results": intSchemaBounds(1, maxPageResults),
+		"pattern":     {minLength: intPtr(1)},
+		"max_results": intSchemaBounds(0, maxPageResults),
 	})
 }
 

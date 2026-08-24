@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"charm.land/fantasy"
@@ -81,7 +82,7 @@ type QuestionChoice struct {
 
 // NewQuestionTool creates a new question tool.
 func NewQuestionTool(svc question.Service) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	tool := withToolParameterSchema(fantasy.NewAgentTool(
 		QuestionToolName,
 		questionDescription,
 		func(ctx context.Context, params QuestionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -100,12 +101,27 @@ func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 			questions := make([]question.Question, len(params.Questions))
 			for i, item := range params.Questions {
 				qType := question.Type(item.Type)
+				label := item.Label
+				if label == "" {
+					label = item.Question
+				}
 				if qType != question.TypeYesNo && qType != question.TypeSingleChoice && qType != question.TypeMultiChoice && qType != question.TypeFreeText {
-					label := item.Label
-					if label == "" {
-						label = item.Question
-					}
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("question %d [%s]: invalid type %q (must be yes_no, single_choice, multi_choice, or free_text)", i+1, label, item.Type)), nil
+				}
+				if item.Question == "" || item.Description == "" {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("question %d [%s]: question and description are required", i+1, label)), nil
+				}
+				choices := item.GetChoices()
+				if (qType == question.TypeSingleChoice || qType == question.TypeMultiChoice) && len(choices) == 0 {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("question %d [%s]: choices are required for %s", i+1, label, qType)), nil
+				}
+				if qType == question.TypeYesNo && len(choices) != 0 {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("question %d [%s]: choices are not allowed for yes_no", i+1, label)), nil
+				}
+				for _, choice := range choices {
+					if choice.ID == "" || choice.Label == "" {
+						return fantasy.NewTextErrorResponse(fmt.Sprintf("question %d [%s]: each choice requires id and label", i+1, label)), nil
+					}
 				}
 				questions[i] = question.Question{
 					Type:        qType,
@@ -136,7 +152,52 @@ func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 
 			return formatAnswers(answers, questions)
 		},
-	)
+	), map[string]toolParameterSchema{"questions": {minItems: intPtr(1), maxItems: intPtr(question.MaxQuestions)}, "questions.items.type": {enum: []string{"yes_no", "single_choice", "multi_choice", "free_text"}}, "questions.items.question": {minLength: intPtr(1)}, "questions.items.description": {minLength: intPtr(1)}})
+	info := tool.Info()
+	questions := info.Parameters["questions"].(map[string]any)
+	items := questions["items"].(map[string]any)
+	properties := items["properties"].(map[string]any)
+	choiceSchemas := make(map[string]map[string]any, 2)
+	for _, name := range []string{"choices", "options"} {
+		array := properties[name].(map[string]any)
+		item := array["items"].(map[string]any)
+		itemProperties := item["properties"].(map[string]any)
+		selectedProperties := make(map[string]any, len(itemProperties))
+		for key, value := range itemProperties {
+			property := maps.Clone(value.(map[string]any))
+			if key == "id" || key == "label" {
+				property["minLength"] = 1
+			}
+			selectedProperties[key] = property
+		}
+		selectedItem := maps.Clone(item)
+		selectedItem["properties"] = selectedProperties
+		choiceSchemas[name] = map[string]any{"type": "array", "minItems": 1, "items": selectedItem}
+		array["items"] = map[string]any{}
+	}
+	choicesPresent := map[string]any{"required": []string{"choices"}, "properties": map[string]any{"choices": map[string]any{"type": "array", "minItems": 1}}}
+	optionsPresent := map[string]any{"required": []string{"options"}, "properties": map[string]any{"options": map[string]any{"type": "array", "minItems": 1}}}
+	selectedChoices := map[string]any{"required": []string{"choices"}, "properties": map[string]any{"choices": choiceSchemas["choices"]}}
+	selectedOptions := map[string]any{"not": choicesPresent, "required": []string{"options"}, "properties": map[string]any{"options": choiceSchemas["options"]}}
+	noSelectedChoices := map[string]any{"allOf": []any{map[string]any{"not": choicesPresent}, map[string]any{"not": optionsPresent}}}
+	items["allOf"] = []any{
+		map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"type": map[string]any{"enum": []any{"single_choice", "multi_choice"}}}},
+			"then": map[string]any{"anyOf": []any{selectedChoices, selectedOptions}},
+		},
+		map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"type": map[string]any{"const": "free_text"}}},
+			"then": map[string]any{"anyOf": []any{selectedChoices, selectedOptions, noSelectedChoices}},
+		},
+		map[string]any{
+			"if": map[string]any{"properties": map[string]any{"type": map[string]any{"const": "yes_no"}}},
+			"then": map[string]any{"properties": map[string]any{
+				"choices": map[string]any{"type": "array", "maxItems": 0},
+				"options": map[string]any{"type": "array", "maxItems": 0},
+			}},
+		},
+	}
+	return toolInfoOverride{AgentTool: tool, info: info}
 }
 
 func convertChoices(in []QuestionChoice) []question.Choice {

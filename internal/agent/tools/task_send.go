@@ -25,7 +25,7 @@ type TaskSendParams struct {
 // NewTaskSendTool creates the task_send tool. See [NewTaskListTool] for
 // the manager nil-safety note.
 func NewTaskSendTool(manager TaskManager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		TaskSendToolName,
 		renderToolDescription(taskSendDescriptionTpl),
 		func(ctx context.Context, params TaskSendParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -43,5 +43,5 @@ func NewTaskSendTool(manager TaskManager) fantasy.AgentTool {
 
 			return fantasy.NewTextResponse(outcome.Describe("task", params.ID)), nil
 		},
-	)
+	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}, "message": {minLength: intPtr(1)}})
 }

@@ -28,6 +28,17 @@ func (rt erroringRoundTripper) RoundTrip(*http.Request) (*http.Response, error) 
 // react to — e.g. by trying a different URL — instead of a Go error that
 // aborts the whole tool-call batch. This matches web_fetch's handling of the
 // same failure (see web_fetch.go).
+func TestFetchToolRejectsSchemaDriftValues(t *testing.T) {
+	tool := NewFetchTool(&stubPermissionService{granted: true}, t.TempDir(), &http.Client{Transport: erroringRoundTripper{err: errors.New("unused")}})
+	for _, params := range []FetchParams{{URL: "https://example.invalid", Format: "TEXT"}, {URL: "https://example.invalid", Format: "text", Timeout: -1}, {URL: "https://example.invalid", Format: "text", Timeout: 121}} {
+		input, err := json.Marshal(params)
+		require.NoError(t, err)
+		resp, err := tool.Run(context.WithValue(context.Background(), SessionIDContextKey, "test-session"), fantasy.ToolCall{Input: string(input)})
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+	}
+}
+
 func TestFetchToolNetworkFailureIsTextResponseNotError(t *testing.T) {
 	t.Parallel()
 

@@ -201,7 +201,7 @@ func blockFuncs() []shell.BlockFunc {
 // this path is unreachable in production and callers no longer need a panic
 // guard here.
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, bgManager *shell.BackgroundShellManager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		BashToolName,
 		bashDescription(attribution, modelID),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -345,7 +345,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			return stillRunningBashResponse(bgShell, params, startTime,
 				"Command is taking longer than expected and has been moved to background.\n\nBackground shell ID: %s\n\nUse job_output tool to view output or job_kill to terminate."), nil
 		},
-	)
+	), map[string]toolParameterSchema{"command": {minLength: intPtr(1)}})
 }
 
 // finishBashRun turns a finished shell run's raw output into the tool's

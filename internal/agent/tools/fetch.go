@@ -47,7 +47,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 		client = newHTTPClient(30 * time.Second)
 	}
 
-	return fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewParallelAgentTool(
 		FetchToolName,
 		fetchDescription(),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -55,9 +55,9 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 				return invalidParam("url"), nil
 			}
 
-			format := strings.ToLower(params.Format)
+			format := params.Format
 			if format != "text" && format != "markdown" && format != "html" {
-				return fantasy.NewTextErrorResponse("Format must be one of: text, markdown, html"), nil
+				return fantasy.NewTextErrorResponse("Format must be one of: text, markdown, html (lowercase)"), nil
 			}
 
 			if !strings.HasPrefix(params.URL, "http://") && !strings.HasPrefix(params.URL, "https://") {
@@ -87,13 +87,13 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 			// maxFetchTimeoutSeconds is the maximum allowed timeout for fetch requests (2 minutes)
 			const maxFetchTimeoutSeconds = 120
+			if params.Timeout < 0 || params.Timeout > maxFetchTimeoutSeconds {
+				return fantasy.NewTextErrorResponse("timeout must be between 0 and 120 seconds"), nil
+			}
 
 			// Handle timeout with context
 			requestCtx := ctx
 			if params.Timeout > 0 {
-				if params.Timeout > maxFetchTimeoutSeconds {
-					params.Timeout = maxFetchTimeoutSeconds
-				}
 				var cancel context.CancelFunc
 				requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
 				defer cancel()
@@ -183,7 +183,7 @@ func NewFetchTool(permissions permission.Service, workingDir string, client *htt
 
 			return fantasy.NewTextResponse(content), nil
 		},
-	)
+	), map[string]toolParameterSchema{"url": {minLength: intPtr(1)}, "format": {enum: []string{"text", "markdown", "html"}}, "timeout": intSchemaBounds(0, 120)})
 }
 
 // truncateToRuneBoundary truncates s to at most n bytes, backing off to the

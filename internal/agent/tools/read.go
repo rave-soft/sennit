@@ -204,12 +204,12 @@ func NewReadTool(
 				}
 				params.Offset = offset
 			}
-			if params.Limit > DefaultReadLimit {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("limit must be between 1 and %d", DefaultReadLimit)), nil
+			if params.Limit < 0 || params.Limit > DefaultReadLimit {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("limit must be between 0 and %d", DefaultReadLimit)), nil
 			}
 
 			// Set default limit if not provided (no limit for SKILL.md files)
-			if params.Limit <= 0 {
+			if params.Limit == 0 {
 				if isSkillFile {
 					params.Limit = 1000000 // Effectively no limit for skill files
 				} else {
@@ -314,8 +314,9 @@ func NewReadTool(
 		},
 	)
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{
-		"offset": intSchemaMinimum(0),
-		"limit":  intSchemaBounds(1, DefaultReadLimit),
+		"file_path": {minLength: intPtr(1)},
+		"offset":    intSchemaMinimum(0),
+		"limit":     intSchemaBounds(0, DefaultReadLimit),
 	})
 }
 

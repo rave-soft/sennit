@@ -73,7 +73,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 		}
 	}
 
-	return fantasy.NewParallelAgentTool(
+	return tools.WithToolSchemaConstraints(fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
 		agenticFetchToolDescription,
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -213,5 +213,5 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				SessionTitle:   "Fetch Analysis",
 			})
 		},
-	), nil
+	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil
 }

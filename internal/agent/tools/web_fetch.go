@@ -31,7 +31,7 @@ func NewWebFetchTool(permissions permission.Service, workingDir string, client *
 		client = newHTTPClient(30 * time.Second)
 	}
 
-	return fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewParallelAgentTool(
 		WebFetchToolName,
 		renderToolDescription(webFetchDescriptionTpl),
 		func(ctx context.Context, params WebFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -79,5 +79,5 @@ func NewWebFetchTool(permissions permission.Service, workingDir string, client *
 
 			return fantasy.NewTextResponse(result.String()), nil
 		},
-	)
+	), map[string]toolParameterSchema{"url": {minLength: intPtr(1)}})
 }

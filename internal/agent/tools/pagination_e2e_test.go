@@ -201,10 +201,10 @@ func TestPaginationToolInfoSchemaContract(t *testing.T) {
 		bounds map[string][2]int
 		sort   bool
 	}{
-		{name: "read", tool: newReadToolForTest(dir), bounds: map[string][2]int{"offset": {0, 0}, "limit": {1, DefaultReadLimit}}},
-		{name: "grep", tool: NewGrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {1, maxPageResults}, "before_context": {0, 10}, "after_context": {0, 10}}, sort: true},
-		{name: "ripgrep", tool: NewRipgrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {1, maxPageResults}, "before_context": {0, 10}, "after_context": {0, 10}}, sort: true},
-		{name: "glob", tool: NewGlobTool(dir, config.ToolGlob{}), bounds: map[string][2]int{"max_results": {1, maxPageResults}}},
+		{name: "read", tool: newReadToolForTest(dir), bounds: map[string][2]int{"offset": {0, 0}, "limit": {0, DefaultReadLimit}}},
+		{name: "grep", tool: NewGrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, 10}, "after_context": {0, 10}}, sort: true},
+		{name: "ripgrep", tool: NewRipgrepTool(dir, config.ToolGrep{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}, "before_context": {0, 10}, "after_context": {0, 10}}, sort: true},
+		{name: "glob", tool: NewGlobTool(dir, config.ToolGlob{}), bounds: map[string][2]int{"max_results": {0, maxPageResults}}},
 	}
 	for _, test := range tools {
 		t.Run(test.name, func(t *testing.T) {

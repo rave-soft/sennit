@@ -34,7 +34,7 @@ type ParentMessenger interface {
 // it (see ParentMessenger.SendToParent). The target is implicit: the
 // caller's own session id, resolved from context, not a parameter.
 func NewAskParentTool(messenger ParentMessenger) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		AskParentToolName,
 		renderToolDescription(askParentDescriptionTpl),
 		func(ctx context.Context, params AskParentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -56,5 +56,5 @@ func NewAskParentTool(messenger ParentMessenger) fantasy.AgentTool {
 
 			return fantasy.NewTextResponse("Message sent to parent session."), nil
 		},
-	)
+	), map[string]toolParameterSchema{"message": {minLength: intPtr(1)}})
 }

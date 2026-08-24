@@ -9,6 +9,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestQuestionItemGetChoicesPrefersNonEmptyChoicesAlias(t *testing.T) {
+	preferred := []QuestionChoice{{ID: "choice", Label: "Choice"}}
+	fallback := []QuestionChoice{{ID: "option", Label: "Option"}}
+
+	require.Equal(t, preferred, (QuestionItem{Choices: preferred, Options: fallback}).GetChoices())
+	require.Equal(t, fallback, (QuestionItem{Options: fallback}).GetChoices())
+}
+
 func TestQuestionParamsUnmarshalJSON_NativeArray(t *testing.T) {
 	t.Parallel()
 	input := `{"questions": [{"type": "yes_no", "question": "OK?", "description": "test"}]}`

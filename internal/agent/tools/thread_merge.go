@@ -30,7 +30,7 @@ type ThreadMergePermissionParams struct {
 // NewThreadMergeTool creates the thread_merge tool. See
 // [NewThreadCreateTool] for the manager nil-safety note.
 func NewThreadMergeTool(manager ThreadManager, permissions permission.Service) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		ThreadMergeToolName,
 		renderToolDescription(threadMergeDescriptionTpl),
 		func(ctx context.Context, params ThreadMergeParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -73,5 +73,5 @@ func NewThreadMergeTool(manager ThreadManager, permissions permission.Service) f
 				return fantasy.NewTextResponse(fmt.Sprintf("Thread %q status: %s (%s)", params.ID, st.Status, st.Error)), nil
 			}
 		},
-	)
+	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}})
 }

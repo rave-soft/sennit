@@ -45,7 +45,7 @@ func NewWriteTool(
 	filetracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		WriteToolName,
 		writeDescription,
 		func(ctx context.Context, params WriteParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -156,5 +156,5 @@ func NewWriteTool(
 			resp.Content = fmt.Sprintf("<result>\n%s\n</result>", resp.Content) + getDiagnostics(filePath, lspManager)
 			return resp, nil
 		},
-	)
+	), map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}})
 }

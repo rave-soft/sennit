@@ -79,7 +79,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 		backend = &duckDuckGoBackend{client: client}
 	}
 
-	return fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewParallelAgentTool(
 		WebSearchToolName,
 		renderWebSearchDescription(backend),
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -88,11 +88,11 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 			}
 
 			maxResults := params.MaxResults
-			if maxResults <= 0 {
-				maxResults = 10
+			if maxResults < 0 || maxResults > 20 {
+				return fantasy.NewTextErrorResponse("max_results must be between 0 and 20"), nil
 			}
-			if maxResults > 20 {
-				maxResults = 20
+			if maxResults == 0 {
+				maxResults = 10
 			}
 
 			if permissions != nil {
@@ -126,5 +126,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 
 			return fantasy.NewTextResponse(formatSearchResults(results)), nil
 		},
-	)
+	), map[string]toolParameterSchema{"query": {minLength: intPtr(1)}, "max_results": intSchemaBounds(0, 20)})
 }
+
+func intPtr(value int) *int { return &value }

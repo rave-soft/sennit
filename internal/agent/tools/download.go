@@ -55,7 +55,7 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 	if client == nil {
 		client = newHTTPClient(5 * time.Minute) // Default 5 minute timeout for downloads
 	}
-	return fantasy.NewParallelAgentTool(
+	return withToolParameterSchema(fantasy.NewParallelAgentTool(
 		DownloadToolName,
 		downloadDescription(),
 		func(ctx context.Context, params DownloadParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -65,6 +65,10 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 
 			if params.FilePath == "" {
 				return invalidParam("file_path"), nil
+			}
+
+			if params.Timeout < 0 || params.Timeout > 600 {
+				return fantasy.NewTextErrorResponse("timeout must be between 0 and 600 seconds"), nil
 			}
 
 			if !strings.HasPrefix(params.URL, "http://") && !strings.HasPrefix(params.URL, "https://") {
@@ -103,10 +107,6 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			// Handle timeout with context
 			requestCtx := ctx
 			if params.Timeout > 0 {
-				maxTimeout := 600 // 10 minutes
-				if params.Timeout > maxTimeout {
-					params.Timeout = maxTimeout
-				}
 				var cancel context.CancelFunc
 				requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
 				defer cancel()
@@ -164,5 +164,5 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 
 			return fantasy.NewTextResponse(responseMsg), nil
 		},
-	)
+	), map[string]toolParameterSchema{"url": {minLength: intPtr(1)}, "file_path": {minLength: intPtr(1)}, "timeout": intSchemaBounds(0, 600)})
 }

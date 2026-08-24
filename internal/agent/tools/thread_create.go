@@ -45,7 +45,7 @@ type ThreadResponseMetadata struct {
 // nil (see coordinator.buildTools); it is never constructed with a nil
 // manager.
 func NewThreadCreateTool(manager ThreadManager, permissions permission.Service) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		ThreadCreateToolName,
 		renderToolDescription(threadCreateDescriptionTpl),
 		func(ctx context.Context, params ThreadCreateParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -103,5 +103,5 @@ func NewThreadCreateTool(manager ThreadManager, permissions permission.Service) 
 				Status:       st.Status,
 			}), nil
 		},
-	)
+	), map[string]toolParameterSchema{"name": {minLength: intPtr(1)}, "goal": {minLength: intPtr(1)}})
 }

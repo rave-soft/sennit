@@ -185,7 +185,8 @@ func NewGrepTool(workingDir string, config config.ToolGrep) fantasy.AgentTool {
 		},
 	)
 	return withToolParameterSchema(tool, map[string]toolParameterSchema{
-		"max_results":    intSchemaBounds(1, maxPageResults),
+		"pattern":        {minLength: intPtr(1)},
+		"max_results":    intSchemaBounds(0, maxPageResults),
 		"before_context": intSchemaBounds(0, 10),
 		"after_context":  intSchemaBounds(0, 10),
 	})

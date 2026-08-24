@@ -60,7 +60,7 @@ func NewMultiEditTool(
 	filetracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		MultiEditToolName,
 		multieditDescription,
 		func(ctx context.Context, params MultiEditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -111,7 +111,7 @@ func NewMultiEditTool(
 			response.Content = text
 			return response, nil
 		},
-	)
+	), map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}, "edits": {minItems: intPtr(1)}})
 }
 
 func validateEdits(edits []MultiEditOperation) error {

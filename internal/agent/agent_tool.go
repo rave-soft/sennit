@@ -30,6 +30,8 @@ const (
 	AgentToolName = "agent"
 )
 
+func intPointer(value int) *int { return &value }
+
 // AgentBackgroundResponseMetadata is the structured metadata a
 // background agent tool call returns immediately: enough for the caller
 // to reference the task later (poll it or be notified), not the
@@ -66,7 +68,7 @@ func (c *coordinator) agentTool(ctx context.Context, cfg agentConfig) (fantasy.A
 	if err != nil {
 		return nil, err
 	}
-	return fantasy.NewParallelAgentTool(
+	return tools.WithToolSchemaConstraints(fantasy.NewParallelAgentTool(
 		AgentToolName,
 		agentToolDescription,
 		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -98,7 +100,7 @@ func (c *coordinator) agentTool(ctx context.Context, cfg agentConfig) (fantasy.A
 				Detachable:     true,
 			})
 		},
-	), nil
+	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil
 }
 
 // runBackgroundAgent creates a task delegation for prompt, parented to

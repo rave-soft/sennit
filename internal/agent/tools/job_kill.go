@@ -30,7 +30,7 @@ func NewJobKillTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool {
 	if bgManager == nil {
 		panic("background shell manager is required")
 	}
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		JobKillToolName,
 		jobKillDescription,
 		func(ctx context.Context, params JobKillParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -57,5 +57,5 @@ func NewJobKillTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool {
 			result := fmt.Sprintf("Background shell %s terminated successfully", params.ShellID)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 		},
-	)
+	), map[string]toolParameterSchema{"shell_id": {minLength: intPtr(1)}})
 }

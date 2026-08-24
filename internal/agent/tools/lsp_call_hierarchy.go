@@ -23,7 +23,7 @@ const CallHierarchyToolName = "lsp_call_hierarchy"
 var callHierarchyDescription string
 
 func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		CallHierarchyToolName,
 		callHierarchyDescription,
 		func(ctx context.Context, params CallHierarchyParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -92,5 +92,5 @@ func NewCallHierarchyTool(lspManager *lsp.Manager, workingDir string) fantasy.Ag
 
 			return fantasy.NewTextResponse(b.String()), nil
 		},
-	)
+	), map[string]toolParameterSchema{"symbol": {minLength: intPtr(1)}, "direction": {enum: []string{"incoming", "outgoing"}}})
 }

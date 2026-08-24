@@ -103,10 +103,12 @@ func TestCoordinatorBuiltToolParallelFlags(t *testing.T) {
 	agentTool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
 	require.NoError(t, err)
 	require.True(t, agentTool.Info().Parallel, "agent must retain its runtime parallel flag")
+	require.Equal(t, 1, agentTool.Info().InputSchema["properties"].(map[string]any)["prompt"].(map[string]any)["minLength"])
 
 	agenticFetchTool, err := coord.agenticFetchTool(t.Context(), nil)
 	require.NoError(t, err)
 	require.True(t, agenticFetchTool.Info().Parallel, "agentic_fetch must retain its runtime parallel flag")
+	require.Equal(t, 1, agenticFetchTool.Info().InputSchema["properties"].(map[string]any)["prompt"].(map[string]any)["minLength"])
 }
 
 func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {

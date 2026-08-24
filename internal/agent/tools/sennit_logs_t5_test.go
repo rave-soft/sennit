@@ -94,8 +94,8 @@ func TestSennitLogs_FilterByLevel(t *testing.T) {
 		entryLine("ERROR", "err", nil),
 		entryLine("WARNING", "warn2", nil),
 	)
-	// Only WARN (normalizes WARNING too).
-	lines := runText(t, path, SennitLogsParams{Level: "warn", Limit: 50})
+	// Only WARN (the parser normalizes WARNING entries too).
+	lines := runText(t, path, SennitLogsParams{Level: "WARN", Limit: 50})
 	require.Len(t, lines, 2)
 	joined := strings.Join(lines, "\n")
 	require.Contains(t, joined, "warn1")
@@ -198,7 +198,7 @@ func TestSennitLogs_CombinedFilters(t *testing.T) {
 		entryLine("ERROR", "db timeout", map[string]any{"session_id": "s2", "run_id": "r1"}),
 		entryLine("INFO", "db timeout", map[string]any{"session_id": "s1", "run_id": "r1"}),
 	)
-	lines := runText(t, path, SennitLogsParams{Level: "error", Contains: "timeout", SessionID: "s1", Limit: 50})
+	lines := runText(t, path, SennitLogsParams{Level: "ERROR", Contains: "timeout", SessionID: "s1", Limit: 50})
 	require.Len(t, lines, 1)
 	require.Contains(t, lines[0], "db timeout")
 }
@@ -304,7 +304,7 @@ func TestSennitLogs_PaginationRespectsFilter(t *testing.T) {
 	cursor := ""
 	matched := 0
 	for {
-		out, meta, err := runFull(t, path, SennitLogsParams{Level: "error", Limit: pageSize, Cursor: cursor})
+		out, meta, err := runFull(t, path, SennitLogsParams{Level: "ERROR", Limit: pageSize, Cursor: cursor})
 		require.NoError(t, err)
 		require.Equal(t, errCount, meta.MatchCount, "match_count must be the total filtered matches, stable across pages")
 		for _, l := range strings.Split(stripMetaFooter(out), "\n") {

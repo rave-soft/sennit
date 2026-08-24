@@ -36,7 +36,7 @@ func NewRenameTool(
 	filetracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		RenameToolName,
 		renameDescription,
 		func(ctx context.Context, params RenameParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -139,5 +139,5 @@ func NewRenameTool(
 
 			return fantasy.NewTextResponse(text), nil
 		},
-	)
+	), map[string]toolParameterSchema{"symbol": {minLength: intPtr(1)}, "new_name": {minLength: intPtr(1)}})
 }

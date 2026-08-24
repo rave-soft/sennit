@@ -34,7 +34,7 @@ func NewJobOutputTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool
 	if bgManager == nil {
 		panic("background shell manager is required")
 	}
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		JobOutputToolName,
 		jobOutputDescription,
 		func(ctx context.Context, params JobOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -90,5 +90,5 @@ func NewJobOutputTool(bgManager *shell.BackgroundShellManager) fantasy.AgentTool
 			result := fmt.Sprintf("Status: %s\n\n%s", status, output)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(result), metadata), nil
 		},
-	)
+	), map[string]toolParameterSchema{"shell_id": {minLength: intPtr(1)}})
 }

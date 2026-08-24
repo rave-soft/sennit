@@ -188,7 +188,14 @@ func NewSennitLogsTool(logFile string) fantasy.AgentTool {
 			parameter["maximum"] = maxLogLines
 		}
 	}
-	return toolInfoOverride{AgentTool: tool, info: info}
+	tool = withToolParameterSchema(toolInfoOverride{AgentTool: tool, info: info}, map[string]toolParameterSchema{"level": {enum: []string{"DEBUG", "INFO", "WARN", "ERROR"}}})
+	return withToolRootSchema(tool, map[string]any{
+		"if": map[string]any{"required": []string{"chain"}, "properties": map[string]any{"chain": map[string]any{"const": true}}},
+		"then": map[string]any{"anyOf": []any{
+			map[string]any{"required": []string{"session_id"}, "properties": map[string]any{"session_id": map[string]any{"type": "string", "pattern": `.*\S.*`}}},
+			map[string]any{"required": []string{"run_id"}, "properties": map[string]any{"run_id": map[string]any{"type": "string", "pattern": `.*\S.*`}}},
+		}},
+	})
 }
 
 // runSennitLogsText is the backward-compatible entry point that returns only
@@ -511,19 +518,18 @@ func newLogFilter(params SennitLogsParams) (*logFilter, error) {
 
 // normalizeLevelFilter maps a user level to the tool's canonical token. An
 // empty value means "no level filter" and returns "". A non-empty value that
-// is not one of DEBUG/INFO/WARN(WARNING)/ERROR is a caller mistake and is
-// returned as an error (block 6) rather than silently treated as "any level" -
-// that would hide a typo'd filter. It accepts the same variations extractLevel
-// normalizes, so the filter and the display agree.
+// is not one of DEBUG/INFO/WARN/ERROR is a caller mistake and is returned as
+// an error rather than silently treated as "any level". The accepted values
+// deliberately match the advertised enum exactly.
 func normalizeLevelFilter(level string) (string, error) {
-	switch strings.ToUpper(strings.TrimSpace(level)) {
+	switch strings.TrimSpace(level) {
 	case "":
 		return "", nil
 	case "DEBUG":
 		return "DEBUG", nil
 	case "INFO":
 		return "INFO", nil
-	case "WARN", "WARNING":
+	case "WARN":
 		return "WARN", nil
 	case "ERROR":
 		return "ERROR", nil

@@ -26,7 +26,7 @@ type ThreadStatusParams struct {
 // NewThreadStatusTool creates the thread_status tool. See
 // [NewThreadCreateTool] for the manager nil-safety note.
 func NewThreadStatusTool(manager ThreadManager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		ThreadStatusToolName,
 		renderToolDescription(threadStatusDescriptionTpl),
 		func(ctx context.Context, params ThreadStatusParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -57,5 +57,5 @@ func NewThreadStatusTool(manager ThreadManager) fantasy.AgentTool {
 			)
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text), st), nil
 		},
-	)
+	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}})
 }

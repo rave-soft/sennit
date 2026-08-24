@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -51,7 +52,7 @@ func NewReplaceSymbolTool(
 	filetracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	tool := withToolParameterSchema(fantasy.NewAgentTool(
 		ReplaceSymbolToolName,
 		replaceSymbolDescription,
 		func(ctx context.Context, params ReplaceSymbolParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -69,10 +70,7 @@ func NewReplaceSymbolTool(
 				return fantasy.ToolResponse{}, missingSessionID("replacing a symbol")
 			}
 
-			action := params.Action
-			if action == "" {
-				action = "replace"
-			}
+			action := cmp.Or(params.Action, "replace")
 			switch action {
 			case "replace", "add_before", "add_after", "delete":
 			default:
@@ -207,7 +205,12 @@ func NewReplaceSymbolTool(
 			})
 			return resp, nil
 		},
-	)
+	), map[string]toolParameterSchema{"symbol": {minLength: intPtr(1)}, "file_path": {minLength: intPtr(1)}, "action": {enum: []string{"replace", "add_before", "add_after", "delete"}}})
+	return withToolRootSchema(tool, map[string]any{"anyOf": []any{
+		map[string]any{"required": []string{"action"}, "properties": map[string]any{"action": map[string]any{"const": "delete"}}},
+		map[string]any{"required": []string{"action", "replacement"}, "properties": map[string]any{"action": map[string]any{"enum": []any{"replace", "add_before", "add_after"}}, "replacement": map[string]any{"type": "string", "minLength": 1}}},
+		map[string]any{"required": []string{"replacement"}, "not": map[string]any{"required": []string{"action"}}, "properties": map[string]any{"replacement": map[string]any{"type": "string", "minLength": 1}}},
+	}})
 }
 
 // findSymbolByName searches for a symbol by name in the document symbol tree.

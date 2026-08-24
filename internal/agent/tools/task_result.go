@@ -25,7 +25,7 @@ type TaskResultParams struct {
 // NewTaskResultTool creates the task_result tool. See [NewTaskListTool]
 // for the manager nil-safety note.
 func NewTaskResultTool(manager TaskManager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		TaskResultToolName,
 		renderToolDescription(taskResultDescriptionTpl),
 		func(ctx context.Context, params TaskResultParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -50,5 +50,5 @@ func NewTaskResultTool(manager TaskManager) fantasy.AgentTool {
 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(text), ti), nil
 		},
-	)
+	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}})
 }

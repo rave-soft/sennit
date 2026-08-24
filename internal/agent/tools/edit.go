@@ -59,7 +59,7 @@ func NewEditTool(
 	filetracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		EditToolName,
 		editDescription,
 		func(ctx context.Context, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -102,7 +102,7 @@ func NewEditTool(
 			response.Content = text
 			return response, nil
 		},
-	)
+	), map[string]toolParameterSchema{"file_path": {minLength: intPtr(1)}})
 }
 
 func createNewFile(edit editContext, filePath, content string, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

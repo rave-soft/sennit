@@ -32,7 +32,7 @@ type DefinitionResponseMetadata struct {
 }
 
 func NewDefinitionTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		DefinitionToolName,
 		definitionDescription,
 		func(ctx context.Context, params DefinitionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -71,7 +71,7 @@ func NewDefinitionTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			}
 			return resp, nil
 		},
-	)
+	), map[string]toolParameterSchema{"symbol": {minLength: intPtr(1)}})
 }
 
 func formatDefinitions(locations []protocol.Location) (string, *DefinitionResponseMetadata) {

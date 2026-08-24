@@ -27,12 +27,15 @@ type TaskOutputParams struct {
 // NewTaskOutputTool creates the task_output tool. See [NewTaskListTool]
 // for the manager nil-safety note.
 func NewTaskOutputTool(manager TaskManager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		TaskOutputToolName,
 		renderToolDescription(taskOutputDescriptionTpl),
 		func(ctx context.Context, params TaskOutputParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.ID == "" {
 				return invalidParam("id"), nil
+			}
+			if params.Limit < 0 || params.Limit > 100 {
+				return fantasy.NewTextErrorResponse("limit must be between 0 and 100"), nil
 			}
 
 			out, err := manager.Output(ctx, params.ID, params.Limit)
@@ -54,5 +57,5 @@ func NewTaskOutputTool(manager TaskManager) fantasy.AgentTool {
 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(strings.TrimSpace(sb.String())), out), nil
 		},
-	)
+	), map[string]toolParameterSchema{"id": {minLength: intPtr(1)}, "limit": intSchemaBounds(0, 100)})
 }

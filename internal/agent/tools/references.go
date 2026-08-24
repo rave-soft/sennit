@@ -28,7 +28,7 @@ const ReferencesToolName = "lsp_references"
 var referencesDescription string
 
 func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return withToolParameterSchema(fantasy.NewAgentTool(
 		ReferencesToolName,
 		referencesDescription,
 		func(ctx context.Context, params ReferencesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -77,7 +77,7 @@ func NewReferencesTool(lspManager *lsp.Manager, workingDir string) fantasy.Agent
 			}
 			return fantasy.NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
 		},
-	)
+	), map[string]toolParameterSchema{"symbol": {minLength: intPtr(1)}})
 }
 
 func groupByFilename(locations []protocol.Location) map[string][]protocol.Location {
