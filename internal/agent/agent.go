@@ -129,6 +129,9 @@ type SessionAgentCall struct {
 	// this lifecycle. It is preserved across queued continuations.
 	Runtime       *compiledRuntime
 	ActiveRuntime *activeRuntime
+	// streamRuntime is an internal, immutable per-run snapshot. Delegations
+	// create it after readiness and use it for both carry budgeting and Stream.
+	streamRuntime *streamRuntime
 	// Depth is this turn's background-delegation cascade depth: 0 for a
 	// real user turn (the zero value, so every ordinary caller gets this
 	// for free). For a Continuation call it starts at 0 too and is set by
@@ -598,36 +601,58 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 	return dispatchOutcome{steer: SteerRan, active: true, genCtx: genCtx, cancel: cancel, ac: ac}
 }
 
-// buildStreamAgent assembles this turn's snapshot of model, tools and
-// system prompt — from call.Runtime when a coordinator has pinned one, or
-// from the agent's own mutable fields otherwise — appends any connected MCP
-// server's instructions, and constructs the fantasy.Agent Stream runs on.
-//
-// Mutable fields are copied here, once, under their own locks (not the
-// dispatch mutex): model is read exactly once and used by value for the
-// rest of the turn, including queued continuations, so a concurrent
-// SetModel cannot change an in-flight run's identity.
-func (a *sessionAgent) buildStreamAgent(call SessionAgentCall) (streamAgent fantasy.Agent, model Model, agentTools []fantasy.AgentTool, promptPrefix string, disableAutoSummarize bool) {
-	agentTools = a.tools.Copy()
-	model = a.model.Get()
-	if call.Runtime != nil {
-		model = call.Runtime.model
-		agentTools = slices.Clone(call.Runtime.tools)
-	}
-	agentTools = withoutUnusableParentTool(agentTools, a.dispatch, call.SessionID)
-	systemPrompt := a.systemPrompt.Get()
-	promptPrefix = a.systemPromptPrefix.Get()
-	disableAutoSummarize = a.disableAutoSummarize
-	if call.Runtime != nil {
-		systemPrompt = call.Runtime.systemPrompt
-		promptPrefix = call.Runtime.systemPromptPrefix
-		disableAutoSummarize = call.Runtime.disableAutoSummarize
-	}
-	var instructions strings.Builder
+// buildStreamAgent constructs the fantasy agent from an already assembled
+// runtime. It deliberately does not read mutable agent or MCP state.
+func (a *sessionAgent) buildStreamAgent(runtime streamRuntime) (streamAgent fantasy.Agent, model Model, agentTools []fantasy.AgentTool, promptPrefix string, disableAutoSummarize bool) {
+	streamAgent = fantasy.NewAgent(
+		runtime.model.Model,
+		fantasy.WithSystemPrompt(runtime.systemPrompt),
+		fantasy.WithTools(runtime.tools...),
+		fantasy.WithUserAgent(userAgent),
+	)
+	return streamAgent, runtime.model, runtime.tools, runtime.systemPromptPrefix, runtime.disableAutoSummarize
+}
 
-	// a.mcp is nil for session agents built outside app.New (a handful of
-	// tests construct one directly); treat that as "no MCP servers" rather
-	// than panicking.
+type streamRuntime struct {
+	model                Model
+	tools                []fantasy.AgentTool
+	systemPrompt         string
+	systemPromptPrefix   string
+	disableAutoSummarize bool
+}
+
+// effectiveStreamRuntime is the single source of the per-turn prompt and tool
+// snapshot. Budgeting uses the same assembly so it cannot reserve for tools or
+// instructions that differ from the eventual Stream call.
+// snapshotStreamRuntime captures the immutable runtime after readiness.
+func (a *sessionAgent) snapshotStreamRuntime(call SessionAgentCall) streamRuntime {
+	return a.effectiveStreamRuntime(call)
+}
+
+func (a *sessionAgent) effectiveStreamRuntime(call SessionAgentCall) streamRuntime {
+	if call.streamRuntime != nil {
+		runtime := *call.streamRuntime
+		runtime.tools = slices.Clone(runtime.tools)
+		return runtime
+	}
+	runtime := streamRuntime{
+		model:                a.model.Get(),
+		tools:                a.tools.Copy(),
+		systemPrompt:         a.systemPrompt.Get(),
+		systemPromptPrefix:   a.systemPromptPrefix.Get(),
+		disableAutoSummarize: a.disableAutoSummarize,
+	}
+	if call.Runtime != nil {
+		runtime.model = call.Runtime.model
+		runtime.tools = slices.Clone(call.Runtime.tools)
+		runtime.systemPrompt = call.Runtime.systemPrompt
+		runtime.systemPromptPrefix = call.Runtime.systemPromptPrefix
+		runtime.disableAutoSummarize = call.Runtime.disableAutoSummarize
+	}
+	runtime.tools = withoutUnusableParentTool(runtime.tools, a.dispatch, call.SessionID)
+
+	var instructions strings.Builder
+	// a.mcp is nil for session agents built outside app.New; treat it as no MCP.
 	if a.mcp != nil {
 		for _, server := range a.mcp.GetStates() {
 			if server.State != mcp.StateConnected {
@@ -639,18 +664,10 @@ func (a *sessionAgent) buildStreamAgent(call SessionAgentCall) (streamAgent fant
 			}
 		}
 	}
-
 	if s := instructions.String(); s != "" {
-		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
+		runtime.systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
-
-	streamAgent = fantasy.NewAgent(
-		model.Model,
-		fantasy.WithSystemPrompt(systemPrompt),
-		fantasy.WithTools(agentTools...),
-		fantasy.WithUserAgent(userAgent),
-	)
-	return streamAgent, model, agentTools, promptPrefix, disableAutoSummarize
+	return runtime
 }
 
 // finishTurn concludes a turn whose Stream call returned without error: it
@@ -889,7 +906,8 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		reporter.publish(publishCtx, complete)
 	}()
 
-	streamAgent, model, agentTools, promptPrefix, disableAutoSummarize := a.buildStreamAgent(call)
+	runtime := a.effectiveStreamRuntime(call)
+	streamAgent, model, agentTools, promptPrefix, disableAutoSummarize := a.buildStreamAgent(runtime)
 
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
@@ -1019,6 +1037,13 @@ func (a *sessionAgent) run(ctx context.Context, call SessionAgentCall) (SteerOut
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 	_, result, err := a.run(ctx, call)
 	return result, err
+}
+
+// runWithStreamRuntime is the internal delegation entry point. The supplied
+// runtime was captured after readiness and is never reassembled by Run.
+func (a *sessionAgent) runWithStreamRuntime(ctx context.Context, call SessionAgentCall, runtime streamRuntime) (*fantasy.AgentResult, error) {
+	call.streamRuntime = &runtime
+	return a.Run(ctx, call)
 }
 
 // Steer gives interactive follow-ups an explicit entry point for the
@@ -1175,6 +1200,28 @@ func (a *sessionAgent) waitReady(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// runtimeSnapshot returns the system prompt and tool set the agent is
+// currently configured to run with, for callers that need their concrete
+// sizes before a turn starts. The carry-over budget is the main one: it
+// has to size the carried history against the *actual* prompt and schemas
+// this call will send, not against a guess, so it reads these after the
+// build has landed (waitReady) rather than before.
+//
+// It returns the agent's own fields, not a call.Runtime: a sub-agent
+// delegation is always run with the agent's own prompt and tools (its
+// SessionAgentCall has no Runtime pinned), so the agent's fields are
+// exactly what the next Run will send. A nil receiver yields empty values,
+// matching waitReady's nil-safety.
+func (a *sessionAgent) runtimeSnapshot(call SessionAgentCall) (systemPrompt string, tools []fantasy.AgentTool) {
+	if a == nil {
+		return "", nil
+	}
+	runtime := a.effectiveStreamRuntime(call)
+	// The prefix is sent as a separate system message during prompt preparation,
+	// but consumes the same context window as the base prompt.
+	return runtime.systemPrompt + runtime.systemPromptPrefix, runtime.tools
 }
 
 // callModel is the model this call actually runs on: the runtime the

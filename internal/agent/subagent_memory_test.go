@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
@@ -35,7 +36,21 @@ type recordingSubAgent struct {
 	prior []message.Message
 }
 
+// newRecordingSubAgent builds a recording delegate with the default
+// (zero) context window, so the carry-over budget falls back to the fixed
+// guard rail unless a test overrides the model.
 func newRecordingSubAgent(env fakeEnv, reply string) *recordingSubAgent {
+	return newRecordingSubAgentWithModel(env, reply, 0, 0)
+}
+
+// newRecordingSubAgentWithModel is like newRecordingSubAgent but lets the
+// test set the delegate's context window and output capacity, so the
+// budget the carry-over path computes is the model-aware one, not the
+// fallback. The delegate reports an empty system prompt and no tools from
+// its runtimeSnapshot: these tests exercise the model-driven part of the
+// budget, and the runtime-byte part is covered directly by
+// TestCarryOverBudget's runtime subtests.
+func newRecordingSubAgentWithModel(env fakeEnv, reply string, contextWindow, maxOut int64) *recordingSubAgent {
 	r := &recordingSubAgent{msgs: env.messages, reply: reply}
 	r.mockSessionAgent = newMockAgent(carryOverProviderCfg.ID, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 		r.prior = call.PriorMessages
@@ -53,6 +68,10 @@ func newRecordingSubAgent(env fakeEnv, reply string) *recordingSubAgent {
 		}
 		return agentResultWithText(r.reply), nil
 	})
+	r.model = Model{
+		CatalogCfg: catwalk.Model{ContextWindow: contextWindow, DefaultMaxTokens: maxOut},
+		ModelCfg:   config.SelectedModel{Provider: carryOverProviderCfg.ID},
+	}
 	return r
 }
 
@@ -336,10 +355,197 @@ func TestApplyCarryOverBudget(t *testing.T) {
 	})
 }
 
-// TestRunSubAgent_CarryOverStaysWithinBudget exercises the budget through
-// the real path: enough prior delegations to blow past
-// maxCarriedSubAgentChars must not hand the next one an unbounded
-// transcript.
+// TestCarryOverBudget pins the provider-independent conservative budget. A
+// token window of N permits at most N UTF-8 bytes across fixed input, history,
+// output reserve and framing margin; the result is then capped at 120k bytes.
+func TestCarryOverBudget(t *testing.T) {
+	t.Parallel()
+
+	modelWithWindow := func(contextWindow, defaultMaxTokens int64, provider string) Model {
+		return Model{
+			CatalogCfg: catwalk.Model{ContextWindow: contextWindow, DefaultMaxTokens: defaultMaxTokens},
+			ModelCfg:   config.SelectedModel{Provider: provider},
+		}
+	}
+	input := func(m Model, sys, tools, prompt int) carryOverBudgetInput {
+		return carryOverBudgetInput{
+			Model: m, SystemPromptBytes: sys, ToolSchemaBytes: tools, PromptBytes: prompt,
+		}
+	}
+
+	t.Run("unknown context window keeps the hard guard rail", func(t *testing.T) {
+		t.Parallel()
+		for _, maxOut := range []int64{0, 1_024, 32_768} {
+			got := carryOverBudget(input(modelWithWindow(0, maxOut, "openai"), 1_000, 2_000, 300))
+			assert.Equal(t, maxCarriedSubAgentChars, got)
+		}
+	})
+
+	t.Run("large window is capped", func(t *testing.T) {
+		t.Parallel()
+		got := carryOverBudget(input(modelWithWindow(300_000, 16_000, "openai"), 20_000, 30_000, 1_000))
+		assert.Equal(t, maxCarriedSubAgentChars, got)
+	})
+
+	t.Run("known window uses one byte per possible token", func(t *testing.T) {
+		t.Parallel()
+		const (
+			window = int64(64_000)
+			output = int64(12_000)
+			sys    = 7_000
+			tools  = 9_000
+			prompt = 1_000
+		)
+		got := carryOverBudget(input(modelWithWindow(window, output, "anthropic"), sys, tools, prompt))
+		want := int(window - output - sys - tools - prompt - carryOverSafetyMargin)
+		assert.Equal(t, want, got)
+		assert.LessOrEqual(t, int64(got+sys+tools+prompt)+output+carryOverSafetyMargin, window)
+	})
+
+	t.Run("dense code JSON and unicode are charged by UTF-8 bytes", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			name string
+			text string
+		}{
+			{name: "code", text: strings.Repeat("x:=[]byte{0xff};if x[0]&1==0{return}\n", 173)},
+			{name: "json", text: strings.Repeat(`{"k":[0,1,false,null,"\u0000"]}`, 211)},
+			{name: "unicode", text: strings.Repeat("界🙂é", 257)},
+		}
+		const window = int64(50_000)
+		const output = int64(9_000)
+		for _, test := range cases {
+			t.Run(test.name, func(t *testing.T) {
+				t.Parallel()
+				textBytes := len([]byte(test.text))
+				got := carryOverBudget(input(modelWithWindow(window, output, "openai"), textBytes, 0, 0))
+				assert.Equal(t, int(window)-int(output)-textBytes-carryOverSafetyMargin, got)
+				assert.LessOrEqual(t, int64(got+textBytes)+output+carryOverSafetyMargin, window)
+			})
+		}
+	})
+
+	t.Run("runtime bytes reduce history byte for byte", func(t *testing.T) {
+		t.Parallel()
+		m := modelWithWindow(80_000, 16_000, "openai")
+		base := carryOverBudget(input(m, 1_000, 2_000, 3_000))
+		assert.Equal(t, 19_000, base-carryOverBudget(input(m, 20_000, 2_000, 3_000)))
+		assert.Equal(t, 18_000, base-carryOverBudget(input(m, 1_000, 20_000, 3_000)))
+		assert.Equal(t, 9_000, base-carryOverBudget(input(m, 1_000, 2_000, 12_000)))
+	})
+
+	t.Run("known output over 4096 is fully reserved", func(t *testing.T) {
+		t.Parallel()
+		m4k := modelWithWindow(80_000, 4_096, "openai")
+		m32k := modelWithWindow(80_000, 32_768, "openai")
+		b4k := carryOverBudget(input(m4k, 0, 0, 0))
+		b32k := carryOverBudget(input(m32k, 0, 0, 0))
+		assert.Equal(t, 32_768-4_096, b4k-b32k)
+		assert.LessOrEqual(t, int64(b32k)+32_768+carryOverSafetyMargin, int64(80_000))
+	})
+
+	t.Run("unknown output reserves half the context", func(t *testing.T) {
+		t.Parallel()
+		const window = int64(80_000)
+		unknown := modelWithWindow(window, 0, "openai")
+		known4k := modelWithWindow(window, 4_096, "openai")
+		assert.Equal(t, window/2, outputCapacityTokens(unknown))
+		unknownBudget := carryOverBudget(input(unknown, 1_000, 2_000, 3_000))
+		assert.Equal(t, int(window-window/2-1_000-2_000-3_000-carryOverSafetyMargin), unknownBudget)
+		assert.Less(t, unknownBudget, carryOverBudget(input(known4k, 1_000, 2_000, 3_000)),
+			"unknown capacity must not be treated as a 4096-token reply")
+	})
+
+	t.Run("explicit max tokens overrides catalog output", func(t *testing.T) {
+		t.Parallel()
+		m := modelWithWindow(80_000, 4_096, "openai")
+		withoutPin := carryOverBudget(input(m, 0, 0, 0))
+		m.ModelCfg.MaxTokens = 24_000
+		withPin := carryOverBudget(input(m, 0, 0, 0))
+		assert.Equal(t, 24_000-4_096, withoutPin-withPin)
+	})
+
+	t.Run("provider does not affect the estimate", func(t *testing.T) {
+		t.Parallel()
+		base := carryOverBudget(input(modelWithWindow(90_000, 16_000, "openai"), 7_000, 8_000, 900))
+		for _, provider := range []string{"anthropic", "google", "openrouter", "ollama", "codex"} {
+			assert.Equal(t, base, carryOverBudget(input(modelWithWindow(90_000, 16_000, provider), 7_000, 8_000, 900)))
+		}
+	})
+
+	t.Run("extreme reserves saturate without wrapping", func(t *testing.T) {
+		t.Parallel()
+		const maxInt64 = int64(^uint64(0) >> 1)
+		m := modelWithWindow(maxInt64, maxInt64, "openai")
+		assert.Zero(t, carryOverBudget(input(m, maxInt, maxInt, maxInt)))
+		assert.Equal(t, maxInt64, saturatingAdd(maxInt64-1, 10))
+		assert.Zero(t, saturatingSub(1, maxInt64))
+	})
+}
+
+// TestToolSchemaBytes covers the helper that measures the serialized tool
+// schemas: it is the sum of each ToolInfo's JSON length, so a larger or
+// richer schema set yields a larger count, and the count is stable across
+// calls (no provider involvement).
+func TestToolSchemaBytes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("more tools means more bytes", func(t *testing.T) {
+		t.Parallel()
+		one := []fantasy.AgentTool{
+			fantasy.NewAgentTool("read", "read a file", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			}),
+		}
+		three := append(append([]fantasy.AgentTool{}, one...),
+			fantasy.NewAgentTool("glob", "glob files", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			}),
+			fantasy.NewAgentTool("grep", "grep files", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			}),
+		)
+		assert.Greater(t, toolSchemaBytes(three), toolSchemaBytes(one),
+			"three schemas must serialize to more bytes than one")
+		assert.Greater(t, toolSchemaBytes(one), 0, "a tool schema must serialize to a non-empty length")
+	})
+
+	t.Run("a larger description means more bytes", func(t *testing.T) {
+		t.Parallel()
+		short := fantasy.NewAgentTool("t", "short", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse("ok"), nil
+		})
+		long := fantasy.NewAgentTool("t", strings.Repeat("a very long description", 50), func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse("ok"), nil
+		})
+		assert.Greater(t, toolSchemaBytes([]fantasy.AgentTool{long}), toolSchemaBytes([]fantasy.AgentTool{short}),
+			"a larger description must serialize to more bytes")
+	})
+
+	t.Run("matches fantasy FunctionTool wire encoding", func(t *testing.T) {
+		t.Parallel()
+		tool := fantasy.NewAgentTool("read", "read a file", func(context.Context, struct {
+			Path string `json:"path"`
+		}, fantasy.ToolCall,
+		) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse("ok"), nil
+		})
+		// Keep the expected envelope independent from preparedFunctionTool so
+		// this catches a shared mapper mistake rather than merely comparing a
+		// helper with itself.
+		expected := `{"type":"function","data":{"name":"read","description":"read a file","input_schema":{"properties":{"path":{"type":"string"}},"required":["path"],"type":"object"}}}`
+		wire, err := json.Marshal(preparedFunctionTool(tool))
+		require.NoError(t, err)
+		assert.JSONEq(t, expected, string(wire))
+		assert.Equal(t, len(expected), toolSchemaBytes([]fantasy.AgentTool{tool}))
+	})
+
+	t.Run("an empty set is zero", func(t *testing.T) {
+		t.Parallel()
+		assert.Equal(t, 0, toolSchemaBytes(nil))
+	})
+}
+
 func TestRunSubAgent_CarryOverStaysWithinBudget(t *testing.T) {
 	t.Parallel()
 
@@ -362,6 +568,146 @@ func TestRunSubAgent_CarryOverStaysWithinBudget(t *testing.T) {
 		"the oldest delegations must be shed once the budget is exceeded")
 	assert.Contains(t, agent.priorText(), "task 3:",
 		"the most recent delegations must survive")
+}
+
+// TestRunSubAgent_CarryOverBudgetIsModelAware exercises the model-aware
+// budget through the real carryOverMessages path, with a model that
+// publishes a known context window. The same prior history must yield a
+// smaller carried transcript when the model's window is smaller, and the
+// carried history must stay within the model-aware budget (not the old
+// fixed one). No real provider call is made: the delegate is a mock that
+// records what it was handed.
+func TestRunSubAgent_CarryOverBudgetIsModelAware(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a small-window model carries less than the fixed budget would", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		coord := newTestCoordinator(t, env, carryOverProviderCfg)
+		parent, err := env.sessions.Create(t.Context(), "Parent")
+		require.NoError(t, err)
+
+		// The delegate reports a fixed system prompt and a fixed set of
+		// tools from its runtimeSnapshot; the budget the carry-over path
+		// computes is therefore the model-aware one sized from those actual
+		// byte sizes, not the fallback. The prompt and tool byte sizes are
+		// known so the expected budget is computed independently below.
+		const smallWindow int64 = 32_000
+		sysPrompt := strings.Repeat("s", 4_000)
+		tools := []fantasy.AgentTool{
+			fantasy.NewAgentTool("read", "read a file", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return fantasy.NewTextResponse("ok"), nil
+			}),
+		}
+		toolBytes := toolSchemaBytes(tools)
+
+		smallModel := Model{
+			CatalogCfg: catwalk.Model{ContextWindow: smallWindow, DefaultMaxTokens: 4_096},
+			ModelCfg:   config.SelectedModel{Provider: carryOverProviderCfg.ID},
+		}
+		// The delegation prompt is a fixed-size marker (see below), so its
+		// byte size is known when the budget is computed.
+		const promptLen = 64
+		smallBudget := carryOverBudget(carryOverBudgetInput{
+			Model:             smallModel,
+			SystemPromptBytes: len(sysPrompt),
+			ToolSchemaBytes:   toolBytes,
+			PromptBytes:       promptLen,
+		})
+		require.Less(t, smallBudget, maxCarriedSubAgentChars,
+			"the small-window budget must be smaller than the fixed cap for this test to be meaningful")
+
+		// Build enough prior history to exceed the small-window budget, so
+		// the budget actually binds. Each delegation leaves a small reply,
+		// so many of them are needed to fill the budget; that also lets the
+		// test confirm the budget sheds the oldest ones.
+		chunk := strings.Repeat("z", smallBudget/8)
+
+		// The scenario is run several times, each with a unique marker
+		// prefix, to catch any state, ordering or nondeterminism in the
+		// carry-over path. The env, coordinator and parent are shared
+		// across iterations: each iteration uses a fresh agent and fresh
+		// session nonces, and the unique markers keep one iteration's
+		// history from colliding with another's in a containment check. The
+		// test is otherwise stateless and uses a fresh env per run, so it
+		// also stays green under `go test -count=100`.
+		const iterations = 10
+		for run := range iterations {
+			agent := newRecordingSubAgentWithModel(env, chunk, smallWindow, 4_096)
+			agent.sysPrompt = sysPrompt
+			agent.tools = tools
+
+			// Unique marker per (run, delegation): the i-th delegation in
+			// run r carries a marker that no other delegation in any other
+			// run contains. Markers are delimited so a containment check is
+			// unambiguous (no "MARK-r-0-END" matches "MARK-r-01-END").
+			marker := func(i int) string { return fmt.Sprintf("MARK-%d-%d-END", run, i) }
+			promptFor := func(i int) string {
+				m := marker(i)
+				pad := promptLen - len(m) - 1
+				if pad < 0 {
+					pad = 0
+				}
+				return m + strings.Repeat(" ", pad) + "."
+			}
+			// Verify the prompt is exactly promptLen bytes so the budget's
+			// PromptBytes is honest, for every marker length used.
+			require.Len(t, promptFor(0), promptLen, "run %d: the test prompt must be exactly the budgeted length", run)
+			require.Len(t, promptFor(9), promptLen, "run %d: the test prompt must be exactly the budgeted length", run)
+
+			for i := range 12 {
+				delegate(t, coord, agent, parent.ID, "developer", fmt.Sprintf("r%d-%d", run, i), promptFor(i))
+			}
+
+			carried := agent.priorText()
+			// The budget drops whole sessions, so the carried history is the
+			// newest sessions that fit; it stays within the budget plus the
+			// room one kept session may overshoot. It must be strictly less
+			// than what the old fixed budget would have allowed.
+			assert.LessOrEqual(t, len(carried), smallBudget+smallBudget/8,
+				"run %d: carried history must respect the small-window budget, not the old fixed one", run)
+			assert.Less(t, len(carried), maxCarriedSubAgentChars,
+				"run %d: a small-window model must carry strictly less than the fixed cap", run)
+			// The oldest prior delegations must be shed once the budget is
+			// exceeded. (The newest session's own prompt may be trimmed to
+			// its tail by trimToBudget, so the test does not assert on which
+			// recent marker survives - only that the oldest ones do not.)
+			assert.NotContains(t, carried, marker(0),
+				"run %d: the oldest prior delegation must be shed once the budget is exceeded", run)
+			assert.NotContains(t, carried, marker(1),
+				"run %d: the second-oldest prior delegation must be shed once the budget is exceeded", run)
+		}
+	})
+
+	t.Run("the carried history fits the model's context window with reserves", func(t *testing.T) {
+		t.Parallel()
+		// Directly assert the acceptance criterion from the plan: the
+		// carried history, plus the actual runtime the budget subtracted,
+		// must fit the context window. This is the invariant that stops a
+		// delegation from dying on the provider's context limit.
+		const window = int64(64_000)
+		const (
+			sys    = 10_000
+			tools  = 20_000
+			prompt = 1_000
+		)
+		model := Model{
+			CatalogCfg: catwalk.Model{ContextWindow: window, DefaultMaxTokens: 4_096},
+			ModelCfg:   config.SelectedModel{Provider: carryOverProviderCfg.ID},
+		}
+		in := carryOverBudgetInput{
+			Model:             model,
+			SystemPromptBytes: sys,
+			ToolSchemaBytes:   tools,
+			PromptBytes:       prompt,
+		}
+		budget := carryOverBudget(in)
+		// One byte per possible token means every component can be summed
+		// directly against the token window without a prose-average divisor.
+		totalUpperBound := int64(budget+sys+tools+prompt) + 4_096 + carryOverSafetyMargin
+		assert.LessOrEqual(t, totalUpperBound, window,
+			"carried history plus the actual runtime and reserves must fit the context window")
+	})
 }
 
 // trimOrphanChecker reports whether a message slice has a tool result whose

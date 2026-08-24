@@ -41,12 +41,71 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
 	}
 
+	// The delegate is built with its system prompt and tools assembled on
+	// the build's own goroutines; a delegation dispatched before those
+	// land runs with an empty prompt and no tools at all. Sub-agents are
+	// rebuilt on every runtime invalidation, so a tool call arriving just
+	// after one is exactly when that happens.
+	//
+	// This wait happens *before* the carried history is assembled: the
+	// carry-over budget is sized from the delegate's actual system prompt,
+	// tool schemas and this delegation's prompt (see carryOverBudget), so
+	// those have to be final first. Waiting here rather than after the
+	// carry-over means the budget is computed from the real runtime, not
+	// from a guess, and the run still waits on the same readiness group it
+	// always did - nothing is waited on twice, because the group's Wait is
+	// idempotent and cheap once it has resolved.
+	if waiter, ok := params.Agent.(interface {
+		waitReady(context.Context) error
+	}); ok {
+		if err := waiter.waitReady(ctx); err != nil {
+			return fantasy.ToolResponse{}, fmt.Errorf("agent not ready: %w", err)
+		}
+	}
+
+	// Capture one immutable runtime after readiness. The same value sizes
+	// carry-over and drives Stream, so mutable agent/MCP state cannot drift
+	// between those two operations.
+	var runtime *streamRuntime
+	if snap, ok := params.Agent.(interface {
+		snapshotStreamRuntime(SessionAgentCall) streamRuntime
+	}); ok {
+		captured := snap.snapshotStreamRuntime(SessionAgentCall{SessionID: session.ID})
+		runtime = &captured
+	}
+
 	// What this named agent already knows, from its earlier delegations
 	// under the same parent. Collected after the session exists so the
 	// query can exclude it by id, and treated as best-effort: a
 	// delegation that has lost its memory is worse than one that
 	// remembers, but far better than one that refuses to run.
-	priorMessages, err := c.carryOverMessages(ctx, params.SessionID, params.AgentID, session.ID)
+	//
+	// The budget is sized from the model and the concrete runtime: the
+	// delegate's context window and output capacity, plus the actual byte
+	// sizes of the system prompt, tool schemas and this delegation's
+	// prompt, all read now that the build has landed.
+	model := params.Agent.Model()
+	if runtime != nil {
+		model = runtime.model
+	}
+	budgetIn := carryOverBudgetInput{
+		Model:             model,
+		SystemPromptBytes: 0,
+		ToolSchemaBytes:   0,
+		PromptBytes:       len(params.Prompt),
+	}
+	if runtime != nil {
+		budgetIn.SystemPromptBytes = len(runtime.systemPrompt) + len(runtime.systemPromptPrefix)
+		budgetIn.ToolSchemaBytes = toolSchemaBytes(runtime.tools)
+	} else if snap, ok := params.Agent.(interface {
+		runtimeSnapshot(SessionAgentCall) (string, []fantasy.AgentTool)
+	}); ok {
+		systemPrompt, tools := snap.runtimeSnapshot(SessionAgentCall{SessionID: session.ID})
+		budgetIn.SystemPromptBytes = len(systemPrompt)
+		budgetIn.ToolSchemaBytes = toolSchemaBytes(tools)
+	}
+
+	priorMessages, err := c.carryOverMessages(ctx, budgetIn, params.SessionID, params.AgentID, session.ID)
 	if err != nil {
 		slog.Warn(
 			"Failed to carry over sub-agent history; running without it",
@@ -62,21 +121,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		params.SessionSetup(session.ID)
 	}
 
-	// The delegate is built with its system prompt and tools assembled on
-	// the build's own goroutines; a delegation dispatched before those
-	// land runs with an empty prompt and no tools at all. Sub-agents are
-	// rebuilt on every runtime invalidation, so a tool call arriving just
-	// after one is exactly when that happens.
-	if waiter, ok := params.Agent.(interface {
-		waitReady(context.Context) error
-	}); ok {
-		if err := waiter.waitReady(ctx); err != nil {
-			return fantasy.ToolResponse{}, fmt.Errorf("agent not ready: %w", err)
-		}
-	}
-
 	// Get model configuration
-	model := params.Agent.Model()
 	maxTokens := modelMaxOutputTokens(model)
 
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
@@ -86,7 +131,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	// Run the agent
 	run := func() (*fantasy.AgentResult, error) {
-		return params.Agent.Run(ctx, SessionAgentCall{
+		call := SessionAgentCall{
 			SessionID:        session.ID,
 			Prompt:           params.Prompt,
 			PriorMessages:    priorMessages,
@@ -101,7 +146,13 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 			// Sub-agents don't track an active runtime of their own, so
 			// there's nothing for a refresh to update.
 			OnAuthRefresh: c.makeAuthRefreshCallback(providerCfg, nil),
-		})
+		}
+		if runtimeAgent, ok := params.Agent.(interface {
+			runWithStreamRuntime(context.Context, SessionAgentCall, streamRuntime) (*fantasy.AgentResult, error)
+		}); ok && runtime != nil {
+			return runtimeAgent.runWithStreamRuntime(ctx, call, *runtime)
+		}
+		return params.Agent.Run(ctx, call)
 	}
 	// Report the child session as busy for as long as it is running:
 	// nothing else can, since the delegate's dispatcher is not the one

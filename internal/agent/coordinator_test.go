@@ -22,6 +22,13 @@ type mockSessionAgent struct {
 	model     Model
 	runFunc   func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error)
 	cancelled []string
+
+	// sysPrompt and tools are what runtimeSnapshot reports: the concrete
+	// system prompt and tool set the mock delegate would send, so a test
+	// can drive the carry-over budget from known byte sizes the way
+	// runSubAgent reads them off a ready real agent.
+	sysPrompt string
+	tools     []fantasy.AgentTool
 }
 
 func (m *mockSessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -59,6 +66,14 @@ func (m *mockSessionAgent) DeliverTaskCompletion(ctx context.Context, sessionID 
 func (m *mockSessionAgent) RegisterDelegationParent(sessionID string, parent DelegationParent) {}
 func (m *mockSessionAgent) SendToParent(ctx context.Context, sessionID, message string) error {
 	return nil
+}
+
+// runtimeSnapshot mirrors the real sessionAgent's method of the same
+// name: it reports the concrete system prompt and tool set the delegate
+// would send, so runSubAgent's narrow-interface assertion can size the
+// carry-over budget from known byte sizes in a test.
+func (m *mockSessionAgent) runtimeSnapshot(SessionAgentCall) (string, []fantasy.AgentTool) {
+	return m.sysPrompt, m.tools
 }
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
