@@ -234,16 +234,29 @@ func (t *runTurn) foldCompletions(messages []fantasy.Message, stepNumber int) ([
 		return messages, nil
 	}
 	if t.call.Continuation && stepNumber == 0 {
-		// Only knowable now that we see what actually woke this turn:
-		// one level deeper than the deepest delegation in the batch -
-		// see maxTaskCascadeDepth.
+		// Only knowable now that we see what actually woke this turn.
+		// A completion reports the depth of the delegation that produced
+		// it, which is one level below the session that started it — and
+		// this session is that starter, reading its own delegation's
+		// answer. So it is back at its own level, not a deeper one: the
+		// deepest completion in the batch, minus one.
+		//
+		// This is the whole difference between bounding nesting and
+		// bounding iteration. Deepening here made a session's *n*th round
+		// of delegate-and-react run at depth n, so an ordinary iterative
+		// plan — implement, review, implement again — ran out of depth
+		// after three rounds and could never delegate again, while a
+		// genuinely nested chain of delegations was not counted at all
+		// (a delegation's own turn ran at depth 0). What bounds the
+		// unattended loop is UnattendedRounds, which counts rounds
+		// because rounds are what it is about.
 		depth := 0
 		for _, c := range completions {
 			if c.Depth > depth {
 				depth = c.Depth
 			}
 		}
-		t.call.Depth = depth + 1
+		t.call.Depth = max(0, depth-1)
 	}
 	return append(messages, taskCompletionsMessage(completions)), completions
 }
@@ -380,6 +393,7 @@ func (t *runTurn) createStepAssistant(callContext context.Context, messages []fa
 	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.model.CatalogCfg.SupportsImages)
 	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.model.CatalogCfg.Name)
 	callContext = context.WithValue(callContext, tools.DepthContextKey, t.call.Depth)
+	callContext = context.WithValue(callContext, tools.UnattendedRoundsContextKey, t.call.UnattendedRounds)
 	t.currentAssistant = &assistantMsg
 	return callContext, nil
 }

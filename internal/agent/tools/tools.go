@@ -30,6 +30,8 @@ type (
 	supportsImagesKey   string
 	modelNameKey        string
 	depthContextKey     string
+
+	unattendedRoundsContextKey string
 )
 
 const (
@@ -41,13 +43,22 @@ const (
 	SupportsImagesContextKey supportsImagesKey = "supports_images"
 	// ModelNameContextKey is the key for the model name in the context.
 	ModelNameContextKey modelNameKey = "model_name"
-	// DepthContextKey is the key for the current turn's background-
-	// delegation cascade depth (0 for a real user turn; N+1 for a
-	// continuation started from a depth-N completion). The "agent" tool's
-	// background mode reads this to refuse starting further background
-	// work once the cascade limit is reached — see
+	// DepthContextKey is the key for how many delegation levels below a
+	// person's own turn this turn is running: 0 for a session someone
+	// drives directly, 1 inside a delegation that session started, and so
+	// on. Reacting to a delegation's result does not deepen it — that is
+	// the same session at the same level — so a session may delegate as
+	// many times in a row as the work needs. The delegation tools read
+	// this to refuse nesting past the limit; see
 	// internal/agent/agent_tool.go.
 	DepthContextKey depthContextKey = "depth"
+	// UnattendedRoundsContextKey is the key for how many auto-woken
+	// continuation turns this session has run since a person last said
+	// anything to it. Unlike depth this counts *iteration*, not nesting:
+	// it is what bounds a session that delegates, wakes on the result,
+	// delegates again, forever, with nobody watching. Reset by any
+	// message a person sends. See internal/agent/agent_tool.go.
+	UnattendedRoundsContextKey unattendedRoundsContextKey = "unattended_rounds"
 )
 
 // getContextValue is a generic helper that retrieves a typed value from context.
@@ -83,10 +94,18 @@ func GetModelNameFromContext(ctx context.Context) string {
 	return getContextValue(ctx, ModelNameContextKey, "")
 }
 
-// GetDepthFromContext retrieves the current turn's background-delegation
-// cascade depth from the context. Absent (0) means a real user turn.
+// GetDepthFromContext retrieves how many delegation levels below a
+// person's own turn this turn runs. Absent (0) means a session someone
+// drives directly.
 func GetDepthFromContext(ctx context.Context) int {
 	return getContextValue(ctx, DepthContextKey, 0)
+}
+
+// GetUnattendedRoundsFromContext retrieves how many auto-woken
+// continuations this session has run since a person last spoke to it.
+// Absent (0) means this turn is a person's own.
+func GetUnattendedRoundsFromContext(ctx context.Context) int {
+	return getContextValue(ctx, UnattendedRoundsContextKey, 0)
 }
 
 // invalidParam returns the standard tool response for a missing or invalid

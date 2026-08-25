@@ -79,6 +79,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			if invalid != nil {
 				return fantasy.NewTextErrorResponse(invalid.Error()), nil
 			}
+			childDepth := delegationDepth(ctx)
 			return c.launchDelegation(ctx, tools.TaskCreateArgs{
 				Goal:            params.Prompt,
 				ParentSessionID: validation.SessionID,
@@ -147,7 +148,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 							tools.NewReadTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
 						},
 					})
-					return c.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent), cleanup, nil
+					return c.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent, childDepth), cleanup, nil
 				},
 			})
 		},

@@ -51,6 +51,7 @@ func (c *coordinator) buildCustomAgentTool(_ context.Context, id string, agentCf
 			if parentID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
+			childDepth := delegationDepth(ctx)
 			latest, ok := c.cfg.Config().Agents[id]
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("Agent %q is no longer configured.", id)), nil
@@ -74,7 +75,7 @@ func (c *coordinator) buildCustomAgentTool(_ context.Context, id string, agentCf
 					if err != nil {
 						return nil, nil, err
 					}
-					return c.subAgentTaskRun(parentID, childID, params.Prompt, agent), nil, nil
+					return c.subAgentTaskRun(parentID, childID, params.Prompt, agent, childDepth), nil, nil
 				},
 			})
 		},

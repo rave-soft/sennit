@@ -66,6 +66,16 @@ type sessionState struct {
 	// noteContinuationOutcome.
 	continuationFailures int
 
+	// unattendedRounds counts auto-woken continuation turns this session
+	// has actually run since a person last sent it anything. It is what
+	// bounds the loop depth cannot: a session that delegates, wakes on
+	// the completion and delegates again stays at the same nesting level
+	// forever, so only a count of rounds can tell "an iterative plan
+	// somebody asked for" from "a cascade nobody is watching". Reset by
+	// any non-continuation call (see dispatchDecision), read back by the
+	// delegation tools through the step's context. Guarded by mu.
+	unattendedRounds int
+
 	// acceptedRuns counts dispatched-but-not-yet-active runs for this
 	// session. Guarded by dispatcher.acceptedMu, not mu — see the
 	// struct doc comment.
@@ -87,15 +97,23 @@ type sessionState struct {
 
 // idle reports whether s carries nothing worth keeping once refs drops
 // to zero: an empty queue and completion inbox, no active run, no
-// cancellation the user is owed, and no accepted-but-not-active run in
-// flight. Called only from dispatcher's release, under both statesMu and
+// cancellation the user is owed, no accepted-but-not-active run in
+// flight, and no unattended rounds still counted against this session.
+//
+// That last one is what makes the round bound hold at all. A session
+// between rounds looks exactly like a finished one — nothing queued,
+// nothing running — so dropping the state there would forget the count on
+// every single round and the bound would never be reached. The entry
+// survives instead until a person's next message resets the count to zero
+// (see dispatchDecision), which is the same moment the count stops
+// meaning anything. Called only from dispatcher's release, under both statesMu and
 // acceptedMu, so the acceptedRuns/cancelMark read here is consistent;
 // the other fields are safe to read without mu at that point because
 // refs == 0 there means no other caller can be holding or about to lock
 // mu (see dispatcher.session).
 func (s *sessionState) idle() bool {
 	return len(s.messageQueue) == 0 && s.active == nil && len(s.completionInbox) == 0 &&
-		!s.cancelled && s.acceptedRuns == 0 && s.cancelMark == 0
+		!s.cancelled && s.acceptedRuns == 0 && s.cancelMark == 0 && s.unattendedRounds == 0
 }
 
 // dispatcher owns the "accept/queue/cancel" dispatch protocol shared by

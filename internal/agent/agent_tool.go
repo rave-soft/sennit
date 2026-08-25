@@ -52,6 +52,14 @@ func delegationSessionID(ctx context.Context, sessions interface {
 	return sessions.CreateAgentToolSessionID(messageID, toolCallID)
 }
 
+// delegationDepth is the depth a delegation started by ctx's turn runs
+// at: one level below that turn. The single place the +1 is spelled out,
+// so the task record, the delegate's own turns and the refusal check can
+// never drift apart on what "one level down" means.
+func delegationDepth(ctx context.Context) int {
+	return tools.GetDepthFromContext(ctx) + 1
+}
+
 func (c *coordinator) agentTool(_ context.Context, cfg agentConfig) (fantasy.AgentTool, error) {
 	if _, ok := cfg.Agents()[config.AgentTask]; !ok {
 		return nil, errors.New("task agent not configured")
@@ -67,7 +75,7 @@ func (c *coordinator) agentTool(_ context.Context, cfg agentConfig) (fantasy.Age
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
-			return c.runBackgroundAgent(ctx, sessionID, params.Prompt, delegationSessionID(ctx, c.sessions, call.ID))
+			return c.runBackgroundAgent(ctx, sessionID, params.Prompt, delegationSessionID(ctx, c.sessions, call.ID), delegationDepth(ctx))
 		},
 	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil
 }
@@ -81,13 +89,26 @@ func (c *coordinator) launchDelegation(ctx context.Context, args tools.TaskCreat
 	}
 	depth := tools.GetDepthFromContext(ctx)
 	if depth >= maxTaskCascadeDepth {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("Delegation depth limit (%d) reached; finish this work directly.", maxTaskCascadeDepth)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"Delegation nesting limit (%d levels below the person) reached; do this work here instead of delegating it further.",
+			maxTaskCascadeDepth,
+		)), nil
+	}
+	if rounds := tools.GetUnattendedRoundsFromContext(ctx); rounds >= maxUnattendedDelegationRounds {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"This session has run %d delegation rounds without a person in the loop. Stop delegating and report where the work stands; a reply from them resumes it.",
+			rounds,
+		)), nil
 	}
 	manager := c.tasksManager()
 	if manager == nil {
 		return fantasy.NewTextErrorResponse("Delegation is unavailable in this workspace."), nil
 	}
-	args.Depth = depth
+	// The depth the delegation itself runs at: one level below the turn
+	// starting it. Carried on the task record, handed to the delegation's
+	// own turns, and reported back on its completion — see
+	// TaskCompletion.Depth and runTurn.foldCompletions.
+	args.Depth = depth + 1
 	info, err := manager.Create(ctx, args)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to start delegation: %s", err)), nil
@@ -98,7 +119,7 @@ func (c *coordinator) launchDelegation(ctx context.Context, args tools.TaskCreat
 	), nil
 }
 
-func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, childSessionID string) (fantasy.ToolResponse, error) {
+func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, childSessionID string, childDepth int) (fantasy.ToolResponse, error) {
 	return c.launchDelegation(ctx, tools.TaskCreateArgs{
 		Goal:            delegatedPrompt,
 		ParentSessionID: sessionID,
@@ -117,7 +138,7 @@ func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, delegat
 			if err != nil {
 				return nil, nil, err
 			}
-			return c.subAgentTaskRun(sessionID, childSessionID, delegatedPrompt, agent), nil, nil
+			return c.subAgentTaskRun(sessionID, childSessionID, delegatedPrompt, agent, childDepth), nil, nil
 		},
 	})
 }

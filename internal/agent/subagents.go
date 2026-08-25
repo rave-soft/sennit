@@ -29,6 +29,11 @@ type subAgentParams struct {
 	// Left empty by the anonymous delegations - the built-in `agent` and
 	// `agentic_fetch` tools - which stay stateless, one call to the next.
 	AgentID string
+	// Depth is how many delegation levels below a person's own turn this
+	// delegation runs — one below the turn that started it. Carried onto
+	// the delegate's own call so a delegation that delegates again is
+	// counted as the nesting it is; see maxTaskCascadeDepth.
+	Depth int
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -144,6 +149,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	run := func(runCtx context.Context) (*fantasy.AgentResult, error) {
 		call := SessionAgentCall{
 			SessionID:        sessionID,
+			Depth:            params.Depth,
 			Prompt:           params.Prompt,
 			PriorMessages:    priorMessages,
 			MaxOutputTokens:  maxTokens,
@@ -184,13 +190,14 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	return c.finishSubAgent(subAgentOutcome{result: result, err: err}), nil
 }
 
-func (c *coordinator) subAgentTaskRun(parentSessionID, childSessionID, prompt string, agent SessionAgent) func(context.Context) (tools.TaskRunResult, error) {
+func (c *coordinator) subAgentTaskRun(parentSessionID, childSessionID, prompt string, agent SessionAgent, depth int) func(context.Context) (tools.TaskRunResult, error) {
 	return func(ctx context.Context) (tools.TaskRunResult, error) {
 		resp, err := c.runSubAgent(ctx, subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSessionID,
 			ChildSessionID: childSessionID,
 			Prompt:         prompt,
+			Depth:          depth,
 		})
 		if err != nil {
 			return tools.TaskRunResult{}, err

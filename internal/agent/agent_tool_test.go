@@ -191,7 +191,7 @@ func TestRunBackgroundAgent_RefusedWhenDisabledByConfig(t *testing.T) {
 	disabled := false
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "")
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", 1)
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "a disabled switch must refuse, not silently run in the foreground")
 	require.Contains(t, resp.Content, "background_agents")
@@ -208,7 +208,7 @@ func TestRunBackgroundAgent_AllowedWhenExplicitlyEnabled(t *testing.T) {
 	enabled := true
 	coord.cfg.Config().Options.BackgroundAgents = &enabled
 
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "")
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "", 1)
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Len(t, fake.created, 1)
@@ -230,7 +230,7 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 
 	// Dispatched while enabled - this is the "in-flight task" the reload
 	// below must leave alone.
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "do work", "")
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "do work", "", 1)
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Len(t, fake.created, 1)
@@ -239,7 +239,7 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
 	// New dispatch is refused from here on...
-	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "more work", "")
+	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "more work", "", 1)
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Len(t, fake.created, 1, "the refused call must never reach the task manager")

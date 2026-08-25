@@ -612,46 +612,75 @@ func TestPrepareStep_StampsCallDepthOntoContext(t *testing.T) {
 	require.Equal(t, []int{2}, observed, "the tool call must observe this turn's own Depth via context")
 }
 
-// TestRunBackgroundAgent_CascadeDepthLimit proves the cascade gate
-// itself: a turn at the hard limit (depth 3) still runs — refusing to
-// start further background work is the tool call's own failure, not the
-// turn's — but the "agent" tool's background mode declines with a clear
-// tool error instead of creating a task, at every depth from the limit
-// up; a turn below the limit (any real user turn is depth 0) still
-// creates one normally, proving a user turn resets the count rather than
-// carrying a stale depth forward.
-func TestRunBackgroundAgent_CascadeDepthLimit(t *testing.T) {
+// TestRunBackgroundAgent_NestingLimit proves the nesting gate: a turn at
+// the hard limit still runs — refusing to delegate further is the tool
+// call's own failure, not the turn's — but the delegation tools decline
+// with a clear tool error instead of creating a task. Below the limit the
+// task is created and stamped with its own depth: one level below the
+// turn that started it, which is what makes the *next* level count.
+func TestRunBackgroundAgent_NestingLimit(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
 	for depth := range maxTaskCascadeDepth {
 		ctx := context.WithValue(t.Context(), tools.DepthContextKey, depth)
-		resp, err := coord.runBackgroundAgent(ctx, "parent-sess", fmt.Sprintf("depth %d work", depth), "")
+		resp, err := coord.runBackgroundAgent(ctx, "parent-sess", fmt.Sprintf("depth %d work", depth), "", depth+1)
 		require.NoError(t, err)
 		require.False(t, resp.IsError, "depth %d is below the limit and must be allowed", depth)
 	}
 	require.Len(t, fake.created, maxTaskCascadeDepth)
 	for depth, args := range fake.created {
-		require.Equal(t, depth, args.Depth, "the task must inherit the creating turn's own depth, not depth+1")
+		require.Equal(t, depth+1, args.Depth,
+			"a delegation runs one level below the turn that started it")
 	}
 
 	// At the limit: the turn itself would still be running (this call
-	// simulates the tool invocation inside it), but starting further
-	// background work is refused.
+	// simulates the tool invocation inside it), but delegating further is
+	// refused.
 	limitCtx := context.WithValue(t.Context(), tools.DepthContextKey, maxTaskCascadeDepth)
-	resp, err := coord.runBackgroundAgent(limitCtx, "parent-sess", "one too many", "")
+	resp, err := coord.runBackgroundAgent(limitCtx, "parent-sess", "one too many", "", maxTaskCascadeDepth+1)
 	require.NoError(t, err)
-	require.True(t, resp.IsError, "a turn at the cascade limit must refuse to start further background work")
-	require.Contains(t, resp.Content, "depth limit")
+	require.True(t, resp.IsError, "a turn at the nesting limit must refuse to delegate further")
+	require.Contains(t, resp.Content, "nesting limit")
 	require.Len(t, fake.created, maxTaskCascadeDepth, "the refused call must never reach the task manager")
 
-	// A user turn - no DepthContextKey set, so GetDepthFromContext
-	// defaults to 0 - resets the count and is allowed again.
-	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "fresh user turn", "")
+	// A session someone drives — no DepthContextKey set, so
+	// GetDepthFromContext defaults to 0 — is at the top level and is
+	// allowed again.
+	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "fresh user turn", "", 1)
 	require.NoError(t, err)
-	require.False(t, resp.IsError, "a real user turn must reset the cascade depth to zero")
+	require.False(t, resp.IsError, "a turn a person drives is at the top level")
 	require.Len(t, fake.created, maxTaskCascadeDepth+1)
-	require.Equal(t, 0, fake.created[len(fake.created)-1].Depth)
+	require.Equal(t, 1, fake.created[len(fake.created)-1].Depth)
+}
+
+// TestRunBackgroundAgent_UnattendedRoundLimit proves the bound that
+// actually applies to a loop: rounds, not levels. A session at the top
+// level may delegate as many times in a row as it likes — that is an
+// iterative plan — until it has run maxUnattendedDelegationRounds of them
+// with nobody saying anything, at which point delegating is refused and
+// the model is told to report back instead.
+func TestRunBackgroundAgent_UnattendedRoundLimit(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+
+	// Round after round at depth 0: nesting never grows, so nothing here
+	// may be refused for depth. This is the case the old depth-counting
+	// gate killed after three rounds.
+	for round := range maxUnattendedDelegationRounds {
+		ctx := context.WithValue(t.Context(), tools.UnattendedRoundsContextKey, round)
+		resp, err := coord.runBackgroundAgent(ctx, "parent-sess", "another round", "", 1)
+		require.NoError(t, err)
+		require.False(t, resp.IsError, "round %d must be allowed", round)
+	}
+	require.Len(t, fake.created, maxUnattendedDelegationRounds)
+
+	atCap := context.WithValue(t.Context(), tools.UnattendedRoundsContextKey, maxUnattendedDelegationRounds)
+	resp, err := coord.runBackgroundAgent(atCap, "parent-sess", "one round too many", "", 1)
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "an unattended session must eventually be made to report back")
+	require.Contains(t, resp.Content, "without a person in the loop")
+	require.Len(t, fake.created, maxUnattendedDelegationRounds)
 }
 
 // TestTaskCompletionDelivery_SameContentBothPaths is the regression test
@@ -793,4 +822,82 @@ func completionMessageText(t *testing.T, prompt fantasy.Prompt, marker string) s
 	}
 	require.Equal(t, 1, n, "expected exactly one message part containing %q", marker)
 	return found
+}
+
+// TestUnattendedRounds_CountedPerContinuationAndResetByAPerson proves the
+// counter the loop bound rests on: each auto-woken continuation that
+// actually becomes the active run is one round, and anything a person
+// sends puts it back to zero — which is why a session someone is talking
+// to never runs out of rounds.
+//
+// Driven through dispatchDecision, the one place the counter moves, with
+// each decision's active slot released the way a finishing turn releases
+// it. Running whole turns instead would prove the same thing through a
+// fake model's streaming script, which is a lot of machinery between the
+// assertion and what it is about.
+func TestUnattendedRounds_CountedPerContinuationAndResetByAPerson(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	sa := testSessionAgent(env, &toolCallThenFinishModel{}, "system").(*sessionAgent)
+
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	run := func(call SessionAgentCall) int {
+		call.SessionID = sess.ID
+		decision := sa.dispatchDecision(t.Context(), call)
+		require.True(t, decision.active, "the session is idle, so every call here becomes the active run")
+		sa.clearActiveIfMatch(sess.ID, decision.ac)
+		decision.cancel()
+		return decision.unattendedRounds
+	}
+
+	require.Equal(t, 0, run(SessionAgentCall{Prompt: "do the thing"}),
+		"a person's own turn is not a round of unattended work")
+	require.Equal(t, 1, run(SessionAgentCall{Prompt: continuationPromptPlaceholder, Continuation: true}))
+	require.Equal(t, 2, run(SessionAgentCall{Prompt: continuationPromptPlaceholder, Continuation: true}))
+	require.Equal(t, 0, run(SessionAgentCall{Prompt: "carry on"}),
+		"a person spoke: the count starts over")
+	require.Equal(t, 1, run(SessionAgentCall{Prompt: continuationPromptPlaceholder, Continuation: true}))
+}
+
+// TestFoldCompletions_ContinuationStaysAtItsOwnLevel is the regression for
+// the loop that died after three rounds. Reacting to a delegation's result
+// is the same session at the same level: a completion reports the depth of
+// the delegation that produced it, so the session that started it — one
+// level up — is where the continuation runs. Deepening here instead made
+// an ordinary implement/review/implement plan run out of nesting budget
+// after three rounds.
+func TestFoldCompletions_ContinuationStaysAtItsOwnLevel(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		completion int
+		want       int
+	}{
+		{"a top-level session's own delegation", 1, 0},
+		{"a delegation reacting to its own delegation", 2, 1},
+		{"a completion carrying no depth at all", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			sa := testSessionAgent(env, &toolCallThenFinishModel{}, "system").(*sessionAgent)
+			sessionID := "session-" + tc.name
+
+			sa.enqueueCompletion(sessionID, TaskCompletion{
+				DelegationID: "d1",
+				Kind:         "task",
+				Status:       "completed",
+				Depth:        tc.completion,
+			})
+
+			turn := &runTurn{agent: sa, call: SessionAgentCall{SessionID: sessionID, Continuation: true}}
+			messages, folded := turn.foldCompletions(nil, 0)
+			require.Len(t, folded, 1)
+			require.Len(t, messages, 1, "the completion is reported to the model as one message")
+			require.Equal(t, tc.want, turn.call.Depth)
+		})
+	}
 }

@@ -12,19 +12,43 @@ import (
 	"github.com/rave-soft/sennit/internal/session"
 )
 
-// maxTaskCascadeDepth bounds how many auto-woken continuations may chain
-// before further background work is refused: a user turn is depth 0; a
-// task it creates inherits depth 0; the continuation that task's
-// completion wakes runs at depth 1; a task *that* continuation creates
-// inherits depth 1; its completion wakes a depth-2 continuation; and so
-// on. At depth 3 a continuation still runs (it still has real work - the
-// completion that woke it - to react to), but the "agent" tool's
-// background mode refuses to start a new task from it: without a bound,
-// a task that finishes and starts another task loops forever with no
-// human in it. This is a hard constant, not configurable — the failure
-// mode it guards against (an unattended cascade quietly burning tokens)
-// is not something a misconfigured value should be able to reopen.
+// maxTaskCascadeDepth bounds how deep delegations may nest: a session a
+// person drives is depth 0, a delegation it starts runs at depth 1, a
+// delegation started from inside that one at depth 2. A turn already at
+// depth 3 still runs — it has real work to do — but may not delegate
+// again, so no chain of agents-hiring-agents runs further from the person
+// than that.
+//
+// It bounds nesting only. A session reacting to its own delegation's
+// result is the same session at the same level, however many times it
+// does so, which is what an iterative plan looks like: implement, review,
+// implement again. Counting those rounds as depth (as this once did) shut
+// delegation off after three rounds of perfectly ordinary work, while
+// leaving real nesting unbounded — a delegation's own turn ran at depth 0
+// and could start another at depth 0 forever.
+//
+// What the loop needs bounding by is rounds, not levels — see
+// maxUnattendedDelegationRounds.
+//
+// Both are hard constants, not configuration: the failure mode they guard
+// against (work quietly multiplying with nobody watching) is not
+// something a misconfigured value should be able to reopen.
 const maxTaskCascadeDepth = 3
+
+// maxUnattendedDelegationRounds bounds how many times a session may
+// delegate, wake on the result and delegate again without a person saying
+// anything in between. Every round is real work someone asked for once,
+// so the number is generous — an unattended plan gets a long run at it —
+// but it is finite: without a bound, a session that reacts to each
+// completion by starting the next delegation never stops, and nothing
+// else in the system would notice.
+//
+// Reaching it does not interrupt anything. The turn that reached it runs
+// to its end, and the refusal (see the delegation tools) tells the model
+// to report where the work stands instead of starting more, which puts
+// the person back in the loop — where a single word from them resets the
+// count (see sessionState.unattendedRounds).
+const maxUnattendedDelegationRounds = 25
 
 // continuationPromptPlaceholder is the fantasy.Call.Prompt an auto-woken
 // continuation carries. It exists purely to satisfy fantasy's own
