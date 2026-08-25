@@ -113,6 +113,11 @@ func TestDocsReferenceToolsParity(t *testing.T) {
 	documented := map[string]DocsCategory{}
 	tool := regexp.MustCompile("`([a-z][a-z0-9_]*)`")
 	for _, line := range strings.Split(string(body), "\n") {
+		// Windows checks .md files out with CRLF, and the section name is
+		// used as a map key: without this the heading read as "Files\r",
+		// matched nothing in headings, and every single tool was reported
+		// missing from a file that documents all of them.
+		line = strings.TrimSuffix(line, "\r")
 		if strings.HasPrefix(line, "## ") {
 			section = strings.TrimPrefix(line, "## ")
 			continue

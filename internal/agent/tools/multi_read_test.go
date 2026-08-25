@@ -49,7 +49,15 @@ func TestMultiReadBudgetContinuationPreservesFileSequence(t *testing.T) {
 	require.NoError(t, os.WriteFile(next, []byte("next-file"), 0o644))
 
 	tool := newMultiReadToolForTest(dir)
-	params := MultiReadParams{Files: []MultiReadItem{{FilePath: large}, {FilePath: next}}, MaxBytes: 150}
+	// Relative paths, resolved against the tool's working directory.
+	// The budget below has to leave room for the per-file framing, and
+	// that framing embeds the path *as passed* — so absolute t.TempDir()
+	// paths made the test's arithmetic depend on how long the platform's
+	// temp directory happens to be. It fit under Linux's /tmp/... and did
+	// not under macOS's /var/folders/... or Windows' AppData path, where
+	// the framing alone overran 150 bytes and multi_read correctly
+	// refused the whole call with "budget too small for one line".
+	params := MultiReadParams{Files: []MultiReadItem{{FilePath: "large.txt"}, {FilePath: "next.txt"}}, MaxBytes: 150}
 	var all strings.Builder
 	for page := 0; ; page++ {
 		response, metadata := runMultiRead(t, tool, multiReadContext(), params)
