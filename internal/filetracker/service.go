@@ -64,15 +64,21 @@ func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
 // RecordPartialRead records a window of the file as read, merged into
 // whatever this session had already seen.
 func (s *service) RecordPartialRead(ctx context.Context, sessionID, path string, start, end int) {
-	s.record(ctx, sessionID, path, s.ReadCoverage(ctx, sessionID, path).Add(LineRange{Start: start, End: end}))
+	path = s.relpath(path)
+	s.update(ctx, sessionID, path, func(encoded string) string {
+		return encodeRanges(decodeRanges(encoded).Add(LineRange{Start: start, End: end}))
+	})
 }
 
 // RecordEdit records the span an edit replaced, renumbering the coverage
 // below it.
 func (s *service) RecordEdit(ctx context.Context, sessionID, path string, start, end, newEnd int) {
-	coverage := s.ReadCoverage(ctx, sessionID, path)
-	coverage = coverage.Shift(start, end, newEnd-end).Add(LineRange{Start: start, End: newEnd})
-	s.record(ctx, sessionID, path, coverage)
+	path = s.relpath(path)
+	s.update(ctx, sessionID, path, func(encoded string) string {
+		coverage := decodeRanges(encoded)
+		coverage = coverage.Shift(start, end, newEnd-end).Add(LineRange{Start: start, End: newEnd})
+		return encodeRanges(coverage)
+	})
 }
 
 // ReadCoverage returns which lines of the file this session has read.
@@ -85,6 +91,12 @@ func (s *service) ReadCoverage(ctx context.Context, sessionID, path string) Cove
 		return Coverage{}
 	}
 	return decodeRanges(readFile.ReadRanges)
+}
+
+func (s *service) update(ctx context.Context, sessionID, path string, update func(string) string) {
+	if err := s.q.UpdateFileRead(ctx, sessionID, path, update); err != nil {
+		slog.Error("Error recording file read", "error", err, "file", path)
+	}
 }
 
 func (s *service) record(ctx context.Context, sessionID, path string, coverage Coverage) {

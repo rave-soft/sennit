@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -45,6 +46,62 @@ func (e *testEnv) createSession(t *testing.T, sessionID string) {
 		Title: "Test Session",
 	})
 	require.NoError(t, err)
+}
+
+func TestService_ConcurrentCoverageUpdatesAcrossConnections(t *testing.T) {
+	dataDir := t.TempDir()
+	setup, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	q := db.New(setup)
+	_, err = q.CreateSession(t.Context(), db.CreateSessionParams{ID: "concurrent", Title: "Concurrent"})
+	require.NoError(t, err)
+	require.NoError(t, db.Release(dataDir))
+
+	for iteration := range 50 {
+		first, err := db.OpenDB(t.Context(), filepath.Join(dataDir, "sennit.db"))
+		require.NoError(t, err)
+		second, err := db.OpenDB(t.Context(), filepath.Join(dataDir, "sennit.db"))
+		require.NoError(t, err)
+
+		firstQueries := db.New(first)
+		firstService := NewService(firstQueries, "/")
+		secondService := NewService(db.New(second), "/")
+		require.NoError(t, firstQueries.RecordFileRead(t.Context(), db.RecordFileReadParams{
+			SessionID:  "concurrent",
+			Path:       "file.go",
+			ReadRanges: "[[201,210]]",
+		}))
+
+		ready := make(chan struct{}, 2)
+		start := make(chan struct{})
+		var wait sync.WaitGroup
+		wait.Add(2)
+		go func() {
+			defer wait.Done()
+			ready <- struct{}{}
+			<-start
+			firstService.RecordPartialRead(t.Context(), "concurrent", "/file.go", 200, 210)
+		}()
+		go func() {
+			defer wait.Done()
+			ready <- struct{}{}
+			<-start
+			secondService.RecordEdit(t.Context(), "concurrent", "/file.go", 100, 100, 101)
+		}()
+		<-ready
+		<-ready
+		close(start)
+		wait.Wait()
+
+		coverage := firstService.ReadCoverage(t.Context(), "concurrent", "/file.go")
+		allowed := []Coverage{
+			{Ranges: []LineRange{{Start: 100, End: 101}, {Start: 201, End: 211}}},
+			{Ranges: []LineRange{{Start: 100, End: 101}, {Start: 200, End: 211}}},
+		}
+		require.Containsf(t, allowed, coverage, "iteration %d: non-canonical coverage", iteration)
+		require.NoError(t, first.Close())
+		require.NoError(t, second.Close())
+	}
 }
 
 func TestService_RecordRead(t *testing.T) {
