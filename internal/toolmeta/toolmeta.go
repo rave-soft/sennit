@@ -118,11 +118,11 @@ var descriptors = []Descriptor{
 	{Name: "thread_send", Access: AccessWrite, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "thread_merge", Access: AccessWrite, Writes: true, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "thread_remove", Access: AccessWrite, Writes: true, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
-	{Name: "task_list", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Docs: DocsDelegation},
-	{Name: "task_result", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Docs: DocsDelegation},
-	{Name: "task_cancel", Access: AccessWrite, DefaultAllowed: true, Gate: GateTasks, Docs: DocsDelegation},
-	{Name: "task_send", Access: AccessWrite, DefaultAllowed: true, Gate: GateTasks, Docs: DocsDelegation},
-	{Name: "task_output", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Docs: DocsDelegation},
+	{Name: "task_list", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "task_result", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "task_cancel", Access: AccessWrite, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "task_send", Access: AccessWrite, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
+	{Name: "task_output", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Renderer: RendererDedicated, Docs: DocsDelegation},
 	{Name: "ask_parent", Access: AccessWrite, DefaultAllowed: true, Gate: GateNotSubAgent, Docs: DocsDelegation},
 }
 

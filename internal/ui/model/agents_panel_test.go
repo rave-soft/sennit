@@ -11,11 +11,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
-	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
-	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -299,35 +297,4 @@ func TestSessionPanelPlan_TodosCapBeatsTheInProgressFloor(t *testing.T) {
 	u.panel.expanded = true
 
 	require.Equal(t, maxPanelTodosRows, u.sessionPanelPlan(100).todosViewportRows)
-}
-
-// TestSessionEvent_SyncsDelegationPanelOwnedWithPanelVisibility is the
-// delegation half of the panel/chat handoff todos already have (see
-// TestUpdate_SessionEvent_SyncsTodosCompactWithPanelVisibility): an
-// end-to-end check that the session-update handler actually wires
-// SetDelegationsPanelOwned to panelShowsLiveDelegations, so a running
-// delegation's status line lives in exactly one of the two places.
-func TestSessionEvent_SyncsDelegationPanelOwnedWithPanelVisibility(t *testing.T) {
-	t.Parallel()
-
-	u := sessionUI()
-	u.dialog = dialog.NewOverlay()
-	u.chat.SetSize(80, 40)
-
-	item := chat.NewAgentToolMessageItem(u.com.Styles,
-		message.ToolCall{ID: "call-1", Name: "agent", Input: `{"prompt":"look into the flaky test"}`, Finished: false},
-		nil, false, nil)
-	u.chat.SetMessages(item)
-
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$call-1")}
-	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
-	require.NotContains(t, item.Render(80), "step 0",
-		"the panel's agents block is showing this delegation: the transcript must not repeat its status line")
-
-	// The delegation finished: it leaves the panel, so the transcript is
-	// the only thing left that can say what it is doing.
-	u.agentList.cache.value = nil
-	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
-	require.Contains(t, item.Render(80), "step 0",
-		"nothing else is showing it now: the transcript carries the live detail again")
 }

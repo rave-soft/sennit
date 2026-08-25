@@ -53,6 +53,7 @@ func registerToolRenderers() {
 	registerSearchToolRenderers()
 	registerFetchToolRenderers()
 	registerAgentToolRenderers()
+	registerTaskToolRenderers()
 	registerLSPToolRenderers()
 	registerMiscToolRenderers()
 }

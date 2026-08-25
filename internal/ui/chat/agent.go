@@ -77,19 +77,6 @@ type delegationToolMessageItem struct {
 	// never shows todos (see ToggleExpanded).
 	todos []session.Todo
 
-	// panelOwnsLiveDetail records that the session panel is currently
-	// showing this session's live delegations in its agents section, where
-	// each one already gets a block with its name, goal and running
-	// status. While that holds, a still-pending block here draws the stub
-	// alone and lets the panel carry the live detail, so the same elapsed
-	// time and step count are not written twice on one screen. This is the
-	// todos handoff applied to delegations — see Chat.SetDelegationsPanelOwned.
-	//
-	// It applies only while pending. A finished delegation is gone from
-	// the panel, and its block is then the only record of what happened,
-	// so nothing here ever suppresses a result.
-	panelOwnsLiveDetail bool
-
 	// duration is frozen the first time SetResult observes a non-nil
 	// result (see SetResult below) — i.e. only for a delegation that
 	// finishes while this item is live in the UI. An item reconstructed
@@ -127,16 +114,6 @@ func (a *delegationToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
 		return
 	}
 	a.todos = todos
-	a.clearCache()
-	a.Bump()
-}
-
-// SetPanelOwnsLiveDetail implements [DelegationPanelAware].
-func (a *delegationToolMessageItem) SetPanelOwnsLiveDetail(owned bool) {
-	if a.panelOwnsLiveDetail == owned {
-		return
-	}
-	a.panelOwnsLiveDetail = owned
 	a.clearCache()
 	a.Bump()
 }
@@ -452,8 +429,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		// call — so what the task is doing is visible without opening
 		// the panel.
 		content := pendingDelegation(sty, r.agent.displayName, opts, width,
-			r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens,
-			r.agent.panelOwnsLiveDetail)
+			r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
@@ -473,7 +449,8 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if opts.Result != nil {
 		var bgMeta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &bgMeta); err == nil && bgMeta.TaskID != "" {
-			content := renderBackgroundDispatch(sty, width, r.agent.displayName, opts, prompt)
+			content := renderBackgroundDispatch(sty, width, r.agent.displayName, opts, prompt,
+				r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
 			return clickableItemHover(sty, content, width, opts.Hovered)
 		}
 	}
@@ -584,8 +561,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		// See AgentToolRenderContext.RenderTool's matching change: pending
 		// stub plus a current-activity status line underneath.
 		content := pendingDelegation(sty, agenticFetchDisplayName, opts, width,
-			r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens,
-			r.fetch.panelOwnsLiveDetail)
+			r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens)
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
@@ -597,7 +573,8 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	if opts.Result != nil {
 		var meta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.TaskID != "" {
-			content := renderBackgroundDispatch(sty, width, agenticFetchDisplayName, opts, prompt)
+			content := renderBackgroundDispatch(sty, width, agenticFetchDisplayName, opts, prompt,
+				r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens)
 			return clickableItemHover(sty, content, width, opts.Hovered)
 		}
 	}
@@ -679,26 +656,57 @@ func renderCollapsedDelegation(
 
 // renderBackgroundDispatch renders a background agent-tool dispatch: the
 // tool call itself is finished (it returned an acknowledgment), but the
-// background task it started has barely begun — unlike a normal finished
-// delegation (renderCollapsedDelegation), there is no real duration to
-// report yet and the ack text is not a result worth previewing. So it
-// renders as a single header line naming the agent and what it was asked
-// to do, with no spinner (see AgentToolMessageItem's spinningFunc) and
-// none of the finished shape's outcome or result preview.
+// work it started is still going — unlike a finished delegation
+// (renderCollapsedDelegation) there is no result to preview, and unlike a
+// pending one there is no spinner (see AgentToolMessageItem's
+// spinningFunc), because the tool call really did finish.
 //
-// It used to carry a second line — a "background" badge and the task's
-// uuid. Neither survived the question of who reads it: "background" says
-// what the absence of a spinner already says, and a raw uuid is not how
-// anyone finds a task, the tasks panel being right there and listing them
-// by goal.
+// Two lines, the same two a running delegation shows: who was asked and
+// what for, then how long it has been at it and what it has spent. The
+// second line is what makes the block worth having on screen — a block
+// that only ever says "started" answers nothing about a task that has been
+// running for four minutes.
+//
+// It used to carry a different second line: a "background" badge and the
+// task's uuid. Neither survived the question of who reads it — "background"
+// says what the absent spinner already says, and nobody finds a task by
+// its uuid.
 func renderBackgroundDispatch(
 	sty *styles.Styles,
 	width int,
 	name string,
 	opts *ToolRenderOpts,
 	prompt string,
+	startTime time.Time,
+	nestedTools []ToolMessageItem,
+	promptTokens, completionTokens int64,
 ) string {
-	return toolHeader(sty, opts.Status, name, width, opts, delegationHeadline(name, prompt))
+	header := toolHeader(sty, opts.Status, name, width, opts, delegationHeadline(name, prompt))
+	if opts.Compact {
+		return header
+	}
+	return appendDelegationLiveLine(sty, header, width, startTime, nestedTools, promptTokens, completionTokens)
+}
+
+// appendDelegationLiveLine puts a running delegation's live line under
+// header: elapsed, steps, what it is doing right now, tokens. Indented by
+// two cells so it sits under the name rather than under the status icon.
+// Returns header unchanged when the line comes back empty (see
+// renderAgentStatusLine) — an empty second line is worse than one line.
+func appendDelegationLiveLine(
+	sty *styles.Styles,
+	header string,
+	width int,
+	startTime time.Time,
+	nestedTools []ToolMessageItem,
+	promptTokens, completionTokens int64,
+) string {
+	const indent = "  "
+	status := renderAgentStatusLine(sty, max(0, width-len(indent)), startTime, nestedTools, promptTokens, completionTokens)
+	if status == "" {
+		return header
+	}
+	return header + "\n" + indent + status
 }
 
 // renderDelegationOutcomeLine renders the collapsed block's second line,
@@ -764,19 +772,12 @@ func pendingDelegation(
 	startTime time.Time,
 	nestedTools []ToolMessageItem,
 	promptTokens, completionTokens int64,
-	panelOwnsLiveDetail bool,
 ) string {
 	head := pendingTool(sty, name, opts)
-	if opts.Compact || panelOwnsLiveDetail {
+	if opts.Compact {
 		return head
 	}
-	// The "● " icon prefix is 2 cells wide; indent the status line to sit
-	// under the name.
-	const indent = "  "
-	if status := renderAgentStatusLine(sty, max(0, width-len(indent)), startTime, nestedTools, promptTokens, completionTokens); status != "" {
-		head += "\n" + indent + status
-	}
-	return head
+	return appendDelegationLiveLine(sty, head, width, startTime, nestedTools, promptTokens, completionTokens)
 }
 
 // renderAgentStatusLine renders the compact "still running" status line,

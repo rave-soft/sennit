@@ -73,20 +73,6 @@ func (m *UI) panelSpinnerWanted() bool {
 	return false
 }
 
-// panelShowsLiveDelegations reports whether the panel's agents section is
-// currently drawing this session's live delegations — the same two
-// conditions sessionPanelPlan uses to fill plan.agents, asked in one place
-// so the panel and the transcript cannot disagree about who is showing
-// what. Collapsing the section is deliberately not one of them: it hides
-// the blocks without ending the panel's claim on them, exactly as a
-// collapsed todos panel still owns the todo list.
-func (m *UI) panelShowsLiveDelegations() bool {
-	if !m.hasSession() || !m.panelSurfacesThreads() {
-		return false
-	}
-	return len(sessionDelegations(m.agentList.cache.value, m.sess.current.ID)) > 0
-}
-
 // syncPanelSpinner reconciles the shared panel spinner with
 // panelSpinnerWanted: on a stopped→spinning transition it returns the
 // initial Tick command that starts the tick loop (nil otherwise), and it

@@ -47,13 +47,6 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.ThreadSendToolName,
 	tools.ThreadMergeToolName,
 	tools.ThreadRemoveToolName,
-	// Task tools (domain/agent/tools/task_*.go), same story: no
-	// dedicated renderer yet.
-	tools.TaskListToolName,
-	tools.TaskResultToolName,
-	tools.TaskCancelToolName,
-	tools.TaskSendToolName,
-	tools.TaskOutputToolName,
 	// ask_parent (domain/agent/tools/ask_parent.go), same story: no
 	// dedicated renderer yet.
 	tools.AskParentToolName,

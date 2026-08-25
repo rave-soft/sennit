@@ -236,10 +236,6 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			// is completed and the panel disappears, the transcript
 			// becomes the permanent record again.
 			m.chat.SetTodosCompact(hasIncompleteTodos(m.sess.current.Todos))
-			// Same handoff for delegations: while the panel's agents
-			// section is listing them, a running block in the transcript
-			// stops repeating its status line.
-			m.chat.SetDelegationsPanelOwned(m.panelShowsLiveDelegations())
 			// A brand new list (0 -> N todos) always opens the panel,
 			// unconditionally — distinct from autoExpandTodosIfReasonable
 			// below, which is a gentler one-shot-per-session, tall-enough-

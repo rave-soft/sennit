@@ -407,23 +407,19 @@ func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
 
 	out := ansi.Strip(item.Render(120))
 
-	// One line: the agent and what it was asked to do.
+	// Two lines: the agent and what it was asked to do, then how long it
+	// has been at it.
 	require.Contains(t, out, "scan the repo for TODOs")
-	require.Len(t, strings.Split(strings.TrimRight(out, "\n"), "\n"), 1)
+	require.Len(t, strings.Split(strings.TrimRight(out, " \n"), "\n"), 2)
 	// No badge and no task uuid — see renderBackgroundDispatch on why
 	// neither earned its line.
 	require.NotContains(t, out, "background")
 	require.NotContains(t, out, "t1")
 	// ...and the ack text is not shown as if it were a finished result
-	// preview.
+	// preview, which is what renderCollapsedDelegation would have made of
+	// it. The live second line reports the work still going; it is not
+	// that block's outcome-and-result shape.
 	require.NotContains(t, out, "It is running independently")
-	// ...nor a fabricated duration: r.agent.duration is near-zero here
-	// (SetResult freezes it at construction), so renderDelegationOutcomeLine
-	// would never have shown one anyway, but confirm the "step N" outcome
-	// line renderCollapsedDelegation would have produced is absent too —
-	// this block never calls renderCollapsedDelegation for a background
-	// dispatch.
-	require.NotContains(t, out, "step 0")
 
 	// The tool call itself is genuinely finished — never mistaken for
 	// still streaming.
@@ -431,32 +427,25 @@ func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
 	require.True(t, item.Finished())
 }
 
-// TestAgentToolRenderPending_PanelOwnsLiveDetail covers the panel/chat
-// handoff for a running delegation, the same one todos already have: while
-// the session panel's agents section is drawing this delegation's block,
-// the transcript's pending render is the stub alone — the elapsed time and
-// step count are the panel's to show, and showing them in both places puts
-// the same sentence on screen twice. Clearing it hands the live detail back
-// to the transcript, which is where it belongs when no panel is carrying it.
-func TestAgentToolRenderPending_PanelOwnsLiveDetail(t *testing.T) {
+// TestAgentToolRenderPending_ShowsElapsedAndTokens pins the shape of a
+// running delegation in the transcript: two lines, the second saying how
+// long it has been going and what it has spent. A block that only names
+// the agent answers nothing about a task four minutes in, and the session
+// panel is not always on screen to answer it instead.
+func TestAgentToolRenderPending_ShowsElapsedAndTokens(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.SennitDark()
 	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
 	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
 	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-1", "bash", `{"command":"echo hi"}`))
+	item.SetChildSessionTokens(120_000, 3_000)
 
-	item.SetPanelOwnsLiveDetail(true)
-	owned := ansi.Strip(item.Render(120))
-	require.Len(t, strings.Split(strings.TrimRight(owned, " \n"), "\n"), 1,
-		"the panel is drawing this delegation; the transcript shows the stub alone")
-	require.NotContains(t, owned, "step 1")
-
-	item.SetPanelOwnsLiveDetail(false)
-	unowned := ansi.Strip(item.Render(120))
-	require.Len(t, strings.Split(strings.TrimRight(unowned, " \n"), "\n"), 2,
-		"nothing else is showing it, so the transcript carries the live detail again")
-	require.Contains(t, unowned, "step 1")
+	out := ansi.Strip(item.Render(120))
+	lines := strings.Split(strings.TrimRight(out, " \n"), "\n")
+	require.Len(t, lines, 2, "a running delegation is stub plus one live line")
+	require.Contains(t, lines[1], "step 1")
+	require.Contains(t, lines[1], "tok", "the live line must say what the delegation has spent")
 }
 
 // TestDelegationHeadline covers the header line a delegation shows beside
