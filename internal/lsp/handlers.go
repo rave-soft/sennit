@@ -100,22 +100,36 @@ func HandleServerMessage(_ context.Context, method string, params json.RawMessag
 
 // HandleDiagnostics handles diagnostic notifications from the LSP server
 func HandleDiagnostics(client *Client, params json.RawMessage) {
+	client.handleDiagnostics(client.currentGeneration(), params)
+}
+
+func (c *Client) handleDiagnostics(gen *clientGeneration, params json.RawMessage) {
 	var diagParams protocol.PublishDiagnosticsParams
 	if err := json.Unmarshal(params, &diagParams); err != nil {
 		slog.Error("Error unmarshaling diagnostics params", "error", err)
 		return
 	}
+	c.applyDiagnostics(gen, diagParams, nil)
+}
 
-	client.diagnostics.Set(diagParams.URI, diagParams.Diagnostics)
-
-	// Calculate total diagnostic count
-	totalCount := 0
-	for _, diagnostics := range client.diagnostics.Seq2() {
-		totalCount += len(diagnostics)
-	}
-
-	// Trigger callback if set
-	if client.onDiagnosticsChanged != nil {
-		client.onDiagnosticsChanged(client.name, totalCount)
-	}
+func (c *Client) applyDiagnostics(
+	gen *clientGeneration,
+	diagParams protocol.PublishDiagnosticsParams,
+	beforeCallback func(),
+) {
+	c.dispatchDiagnosticEvent(diagnosticEvent{generation: gen, prepare: func() func() {
+		c.diagnosticsMu.Lock()
+		c.diagnostics.Set(diagParams.URI, diagParams.Diagnostics)
+		totalCount := 0
+		for _, diagnostics := range c.diagnostics.Seq2() {
+			totalCount += len(diagnostics)
+		}
+		c.diagnosticsMu.Unlock()
+		return func() {
+			if beforeCallback != nil {
+				beforeCallback()
+			}
+			c.invokeDiagnosticsCallback(totalCount)
+		}
+	}})
 }

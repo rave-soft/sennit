@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,10 +30,27 @@ type DiagnosticCounts struct {
 	Hint        int
 }
 
-type Client struct {
+type clientGeneration struct {
 	client *powernap.Client
-	name   string
-	debug  bool
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+type diagnosticEvent struct {
+	generation *clientGeneration
+	prepare    func() func()
+	run        func()
+	terminal   bool
+}
+
+var errClientShutdown = errors.New("lsp client is shut down")
+
+type Client struct {
+	generation  atomic.Pointer[clientGeneration]
+	lifecycleMu sync.Mutex
+	shutdown    bool
+	name        string
+	debug       bool
 
 	// Working directory this LSP is scoped to.
 	cwd string
@@ -43,18 +61,22 @@ type Client struct {
 	// Configuration for this LSP client
 	config config.LSPConfig
 
-	// Long-lived context for the client's lifetime, independent of any
-	// request-scoped context. Used for restart and other operations that
-	// must survive beyond the initial tool call that created the client.
-	ctx       context.Context
-	cancelCtx context.CancelFunc
-	resolver  config.VariableResolver
+	resolver config.VariableResolver
 
 	// Diagnostic change callback
-	onDiagnosticsChanged func(name string, count int)
+	onDiagnosticsChanged        func(name string, count int)
+	diagnosticsCallbackMu       sync.RWMutex
+	diagnosticEventsMu          sync.Mutex
+	diagnosticEventsCond        *sync.Cond
+	diagnosticEvents            []diagnosticEvent
+	diagnosticEventsDone        chan struct{}
+	diagnosticEventsStop        bool
+	diagnosticGeneration        *clientGeneration
+	beforeDiagnosticEventCommit func()
 
 	// Diagnostic cache
-	diagnostics *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
+	diagnosticsMu sync.RWMutex
+	diagnostics   *csync.VersionedMap[protocol.DocumentURI, []protocol.Diagnostic]
 
 	// Cached diagnostic counts to avoid map copy on every UI render.
 	diagCountsCache   DiagnosticCounts
@@ -86,36 +108,42 @@ func New(
 		diagnostics: csync.NewVersionedMap[protocol.DocumentURI, []protocol.Diagnostic](),
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 		config:      cfg,
-		ctx:         clientCtx,
-		cancelCtx:   cancelCtx,
 		debug:       debug,
 		resolver:    resolver,
 		cwd:         cwd,
 	}
 	client.serverState.Store(StateStopped)
 
-	if err := client.createPowernapClient(); err != nil {
+	gen, err := client.createGeneration(clientCtx, cancelCtx)
+	if err != nil {
+		cancelCtx()
 		return nil, err
 	}
+	client.generation.Store(gen)
+	client.diagnosticGeneration = gen
+	client.startDiagnosticDispatcher()
 
 	return client, nil
 }
 
 // Initialize initializes the LSP client and returns the server capabilities.
 func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol.InitializeResult, error) {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	gen := c.currentGeneration()
 	// Register handlers for requests the server may send during the
 	// initialize handshake itself (e.g. typescript-language-server issuing
 	// window/workDoneProgress/create while loading the project, before
 	// initialize has returned). Registering after client.Initialize() is too
 	// late for those — the server treats an unhandled response as fatal.
-	c.registerHandlers()
+	c.registerHandlers(gen)
 
-	if err := c.client.Initialize(ctx, false); err != nil {
+	if err := gen.client.Initialize(ctx, false); err != nil {
 		return nil, fmt.Errorf("failed to initialize the lsp client: %w", err)
 	}
 
 	// Keep the complete server capability payload, including union providers.
-	result := &protocol.InitializeResult{Capabilities: c.client.GetCapabilities()}
+	result := &protocol.InitializeResult{Capabilities: gen.client.GetCapabilities()}
 
 	return result, nil
 }
@@ -124,25 +152,44 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 const closeTimeout = 5 * time.Second
 
 // Kill kills the client without doing anything else.
-func (c *Client) Kill() { c.client.Kill() }
+func (c *Client) Kill() {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	c.currentGeneration().client.Kill()
+}
 
 // Shutdown permanently cancels the client's long-lived context and kills the
 // underlying process. Unlike Restart, this is terminal: the client cannot be
 // reused after Shutdown.
 func (c *Client) Shutdown() {
-	c.cancelCtx()
-	c.client.Kill()
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.shutdown {
+		return
+	}
+	c.shutdown = true
+	c.publishShutdown()
+	gen := c.currentGeneration()
+	gen.cancel()
+	gen.client.Kill()
 }
 
 // GetOffsetEncoding returns the negotiated offset encoding for this client.
 func (c *Client) GetOffsetEncoding() powernap.OffsetEncoding {
-	return c.client.GetOffsetEncoding()
+	return c.currentGeneration().client.GetOffsetEncoding()
 }
 
 // Close closes all open files in the client, then shuts down gracefully.
 // If shutdown takes longer than closeTimeout, it falls back to Kill().
 func (c *Client) Close(ctx context.Context) error {
-	c.CloseAllFiles(ctx)
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	gen := c.currentGeneration()
+	return c.close(ctx, gen)
+}
+
+func (c *Client) close(ctx context.Context, gen *clientGeneration) error {
+	c.closeAllFiles(ctx, gen)
 
 	// Use a timeout to prevent hanging on unresponsive LSP servers.
 	// jsonrpc2's send lock doesn't respect context cancellation, so we
@@ -152,38 +199,38 @@ func (c *Client) Close(ctx context.Context) error {
 
 	done := make(chan error, 1)
 	go func() {
-		if err := c.client.Shutdown(closeCtx); err != nil {
+		if err := gen.client.Shutdown(closeCtx); err != nil {
 			slog.Warn("Failed to shutdown LSP client", "error", err)
 		}
-		done <- c.client.Exit()
+		done <- gen.client.Exit()
 	}()
 
 	select {
 	case err := <-done:
 		return err
 	case <-closeCtx.Done():
-		c.client.Kill()
+		gen.client.Kill()
 		return closeCtx.Err()
 	}
 }
 
-// createPowernapClient creates a new powernap client with the current configuration.
-func (c *Client) createPowernapClient() error {
+// createGeneration creates an unpublished LSP runtime generation.
+func (c *Client) createGeneration(ctx context.Context, cancel context.CancelFunc) (*clientGeneration, error) {
 	rootURI := string(protocol.URIFromPath(c.cwd))
 
 	command, err := c.resolver.ResolveValue(c.config.Command)
 	if err != nil {
-		return fmt.Errorf("invalid lsp command: %w", err)
+		return nil, fmt.Errorf("invalid lsp command: %w", err)
 	}
 
 	args, err := c.config.ResolvedArgs(c.resolver)
 	if err != nil {
-		return fmt.Errorf("invalid lsp args: %w", err)
+		return nil, fmt.Errorf("invalid lsp args: %w", err)
 	}
 
 	envs, err := c.config.ResolvedEnv(c.resolver)
 	if err != nil {
-		return fmt.Errorf("invalid lsp env: %w", err)
+		return nil, fmt.Errorf("invalid lsp env: %w", err)
 	}
 
 	clientConfig := powernap.ClientConfig{
@@ -203,73 +250,154 @@ func (c *Client) createPowernapClient() error {
 
 	powernapClient, err := powernap.NewClient(clientConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create lsp client: %w", err)
+		return nil, fmt.Errorf("failed to create lsp client: %w", err)
 	}
 
-	c.client = powernapClient
-	return nil
+	return &clientGeneration{client: powernapClient, ctx: ctx, cancel: cancel}, nil
+}
+
+func (c *Client) currentGeneration() *clientGeneration {
+	return c.generation.Load()
+}
+
+func (c *Client) startDiagnosticDispatcher() {
+	c.diagnosticEventsCond = sync.NewCond(&c.diagnosticEventsMu)
+	c.diagnosticEventsDone = make(chan struct{})
+	go func() {
+		defer close(c.diagnosticEventsDone)
+		for {
+			c.diagnosticEventsMu.Lock()
+			for len(c.diagnosticEvents) == 0 {
+				c.diagnosticEventsCond.Wait()
+			}
+			event := c.diagnosticEvents[0]
+			c.diagnosticEvents = c.diagnosticEvents[1:]
+			hook := c.beforeDiagnosticEventCommit
+			c.diagnosticEventsMu.Unlock()
+			if hook != nil {
+				hook()
+			}
+			c.diagnosticEventsMu.Lock()
+			if event.generation != nil && c.diagnosticGeneration != event.generation {
+				c.diagnosticEventsMu.Unlock()
+				continue
+			}
+			run := event.run
+			if event.prepare != nil {
+				run = event.prepare()
+			}
+			c.diagnosticEventsMu.Unlock()
+			if run != nil {
+				run()
+			}
+			if event.terminal {
+				return
+			}
+		}
+	}()
+}
+
+func (c *Client) dispatchDiagnosticEvent(event diagnosticEvent) bool {
+	c.diagnosticEventsMu.Lock()
+	defer c.diagnosticEventsMu.Unlock()
+	if c.diagnosticEventsStop || event.generation != nil && c.diagnosticGeneration != event.generation {
+		return false
+	}
+	c.diagnosticEvents = append(c.diagnosticEvents, event)
+	c.diagnosticEventsCond.Signal()
+	return true
+}
+
+func (c *Client) waitForDiagnosticEvents() {
+	done := make(chan struct{})
+	if !c.dispatchDiagnosticEvent(diagnosticEvent{run: func() { close(done) }}) {
+		return
+	}
+	select {
+	case <-done:
+	case <-c.diagnosticEventsDone:
+	}
+}
+
+func (c *Client) invokeDiagnosticsCallback(count int) {
+	c.diagnosticsCallbackMu.RLock()
+	callback := c.onDiagnosticsChanged
+	c.diagnosticsCallbackMu.RUnlock()
+	if callback != nil {
+		callback(c.name, count)
+	}
 }
 
 // registerHandlers registers the standard LSP notification and request handlers.
-func (c *Client) registerHandlers() {
-	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.client.GetOffsetEncoding))
-	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
-	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
-	c.RegisterServerRequestHandler("window/workDoneProgress/create", HandleWorkDoneProgressCreate)
-	c.RegisterNotificationHandler("window/showMessage", func(ctx context.Context, method string, params json.RawMessage) {
+func (c *Client) registerHandlers(gen *clientGeneration) {
+	gen.client.RegisterHandler("workspace/applyEdit", HandleApplyEdit(gen.client.GetOffsetEncoding))
+	gen.client.RegisterHandler("workspace/configuration", HandleWorkspaceConfiguration)
+	gen.client.RegisterHandler("client/registerCapability", HandleRegisterCapability)
+	gen.client.RegisterHandler("window/workDoneProgress/create", HandleWorkDoneProgressCreate)
+	gen.client.RegisterNotificationHandler("window/showMessage", func(ctx context.Context, method string, params json.RawMessage) {
 		if c.debug {
 			HandleServerMessage(ctx, method, params)
 		}
 	})
-	c.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
-		HandleDiagnostics(c, params)
+	gen.client.RegisterNotificationHandler("textDocument/publishDiagnostics", func(_ context.Context, _ string, params json.RawMessage) {
+		c.handleDiagnostics(gen, params)
 	})
 }
 
 // Restart closes the current LSP client and creates a new one with the same configuration.
 func (c *Client) Restart() error {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.shutdown {
+		return errClientShutdown
+	}
+
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
 		openFiles = append(openFiles, uri)
 	}
 
-	// Cancel the old long-lived context and create a fresh one so that
-	// reinitialization is not affected by any prior cancellation.
-	c.cancelCtx()
-	c.ctx, c.cancelCtx = context.WithCancel(context.Background())
+	oldGen := c.currentGeneration()
+	oldGen.cancel()
 
-	closeCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
-	defer cancel()
+	closeCtx, cancelClose := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelClose()
 
-	if err := c.Close(closeCtx); err != nil {
+	if err := c.close(closeCtx, oldGen); err != nil {
 		slog.Warn("Error closing client during restart", "name", c.name, "error", err)
 	}
 
 	c.SetServerState(StateStopped)
 
-	c.diagCountsCache = DiagnosticCounts{}
-	c.diagCountsVersion = 0
-
-	if err := c.createPowernapClient(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	gen, err := c.createGeneration(ctx, cancel)
+	if err != nil {
+		cancel()
 		return err
 	}
 
-	initCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
-	defer cancel()
+	c.publishGeneration(gen)
+
+	initCtx, cancelInit := context.WithTimeout(gen.ctx, 30*time.Second)
+	defer cancelInit()
 
 	c.SetServerState(StateStarting)
 
 	// Register handlers before Initialize so servers that send
 	// requests during the handshake (e.g. window/workDoneProgress/create)
 	// don't crash on an unhandled response.
-	c.registerHandlers()
+	c.registerHandlers(gen)
 
-	if err := c.client.Initialize(initCtx, false); err != nil {
+	if err := gen.client.Initialize(initCtx, false); err != nil {
+		gen.cancel()
+		gen.client.Kill()
 		c.SetServerState(StateError)
 		return fmt.Errorf("failed to initialize lsp client: %w", err)
 	}
 
-	if err := c.WaitForServerReady(initCtx); err != nil {
+	if err := c.waitForServerReady(initCtx, gen); err != nil {
+		gen.cancel()
+		gen.client.Kill()
 		slog.Error("Server failed to become ready after restart", "name", c.name, "error", err)
 		c.SetServerState(StateError)
 		return err
@@ -329,11 +457,17 @@ func (c *Client) FileTypes() []string {
 
 // SetDiagnosticsCallback sets the callback function for diagnostic changes
 func (c *Client) SetDiagnosticsCallback(callback func(name string, count int)) {
+	c.diagnosticsCallbackMu.Lock()
+	defer c.diagnosticsCallbackMu.Unlock()
 	c.onDiagnosticsChanged = callback
 }
 
 // WaitForServerReady waits for the server to be ready
 func (c *Client) WaitForServerReady(ctx context.Context) error {
+	return c.waitForServerReady(ctx, c.currentGeneration())
+}
+
+func (c *Client) waitForServerReady(ctx context.Context, gen *clientGeneration) error {
 	// Set initial state
 	c.SetServerState(StateStarting)
 
@@ -354,7 +488,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 			return fmt.Errorf("timeout waiting for LSP server to be ready")
 		case <-ticker.C:
 			// Check if client is running
-			if !c.client.IsRunning() {
+			if !gen.client.IsRunning() {
 				if c.debug {
 					slog.Debug("LSP server not ready yet", "server", c.name)
 				}
@@ -413,7 +547,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Notify the server about the opened document
-	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
+	if err = c.currentGeneration().client.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
 		return err
 	}
 
@@ -455,7 +589,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		},
 	}
 
-	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(newVersion), changes)
+	return c.currentGeneration().client.NotifyDidChangeTextDocument(ctx, uri, int(newVersion), changes)
 }
 
 // IsFileOpen checks if a file is currently open.
@@ -475,11 +609,15 @@ func (c *Client) IsFileOpen(filepath string) bool {
 // OpenFile treats a URI still in the map as already open, and the fresh
 // server received not one didOpen.
 func (c *Client) CloseAllFiles(ctx context.Context) {
+	c.closeAllFiles(ctx, c.currentGeneration())
+}
+
+func (c *Client) closeAllFiles(ctx context.Context, gen *clientGeneration) {
 	for uri := range c.openFiles.Seq2() {
 		if c.debug {
 			slog.Debug("Closing file", "file", uri)
 		}
-		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+		if err := gen.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
 			slog.Warn("Error closing file", "uri", uri, "error", err)
 		}
 		c.openFiles.Del(uri)
@@ -488,6 +626,8 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 
 // GetFileDiagnostics returns diagnostics for a specific file.
 func (c *Client) GetFileDiagnostics(uri protocol.DocumentURI) []protocol.Diagnostic {
+	c.diagnosticsMu.RLock()
+	defer c.diagnosticsMu.RUnlock()
 	diags, _ := c.diagnostics.Get(uri)
 	return diags
 }
@@ -497,15 +637,81 @@ func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic
 	if c == nil {
 		return nil
 	}
+	c.diagnosticsMu.RLock()
+	defer c.diagnosticsMu.RUnlock()
 	return c.diagnostics.Copy()
 }
 
 // GetDiagnosticCounts returns cached diagnostic counts by severity.
 // Uses the VersionedMap version to avoid recomputing on every call.
+func (c *Client) resetDiagnostics() {
+	c.diagnosticEventsMu.Lock()
+	c.diagnosticsMu.Lock()
+	c.resetDiagnosticsLocked()
+	c.diagnosticsMu.Unlock()
+	c.diagnosticEventsMu.Unlock()
+}
+
+func (c *Client) publishGeneration(gen *clientGeneration) {
+	c.diagnosticEventsMu.Lock()
+	c.diagnosticsMu.Lock()
+	hadDiagnostics := c.diagnostics.Version() != 0
+	c.resetDiagnosticsLocked()
+	c.generation.Store(gen)
+	c.diagnosticGeneration = gen
+	c.diagnosticsMu.Unlock()
+	c.purgeDiagnosticEventsLocked()
+	if hadDiagnostics {
+		c.diagnosticEvents = append(c.diagnosticEvents, diagnosticEvent{run: func() {
+			c.invokeDiagnosticsCallback(0)
+		}})
+		c.diagnosticEventsCond.Signal()
+	}
+	c.diagnosticEventsMu.Unlock()
+}
+
+func (c *Client) publishShutdown() {
+	c.diagnosticEventsMu.Lock()
+	c.diagnosticsMu.Lock()
+	hadDiagnostics := c.diagnostics.Version() != 0
+	c.resetDiagnosticsLocked()
+	c.diagnosticsMu.Unlock()
+	c.diagnosticGeneration = nil
+	c.diagnosticEventsStop = true
+	c.purgeDiagnosticEventsLocked()
+	c.diagnosticEvents = append(c.diagnosticEvents, diagnosticEvent{terminal: true, run: func() {
+		if hadDiagnostics {
+			c.invokeDiagnosticsCallback(0)
+		}
+	}})
+	c.diagnosticEventsCond.Signal()
+	c.diagnosticEventsMu.Unlock()
+}
+
+func (c *Client) purgeDiagnosticEventsLocked() {
+	kept := c.diagnosticEvents[:0]
+	for _, event := range c.diagnosticEvents {
+		if event.generation == nil {
+			kept = append(kept, event)
+		}
+	}
+	c.diagnosticEvents = kept
+}
+
+func (c *Client) resetDiagnosticsLocked() {
+	c.diagCountsMu.Lock()
+	defer c.diagCountsMu.Unlock()
+	c.diagnostics = csync.NewVersionedMap[protocol.DocumentURI, []protocol.Diagnostic]()
+	c.diagCountsCache = DiagnosticCounts{}
+	c.diagCountsVersion = 0
+}
+
 func (c *Client) GetDiagnosticCounts() DiagnosticCounts {
 	if c == nil {
 		return DiagnosticCounts{}
 	}
+	c.diagnosticsMu.RLock()
+	defer c.diagnosticsMu.RUnlock()
 	currentVersion := c.diagnostics.Version()
 
 	c.diagCountsMu.Lock()
@@ -553,12 +759,12 @@ func (c *Client) OpenFileOnDemand(ctx context.Context, filepath string) error {
 
 // RegisterNotificationHandler registers a notification handler.
 func (c *Client) RegisterNotificationHandler(method string, handler transport.NotificationHandler) {
-	c.client.RegisterNotificationHandler(method, handler)
+	c.currentGeneration().client.RegisterNotificationHandler(method, handler)
 }
 
 // RegisterServerRequestHandler handles server requests.
 func (c *Client) RegisterServerRequestHandler(method string, handler transport.Handler) {
-	c.client.RegisterHandler(method, handler)
+	c.currentGeneration().client.RegisterHandler(method, handler)
 }
 
 // openKeyConfigFiles opens important configuration files that help initialize the server.
@@ -585,7 +791,7 @@ func (c *Client) NotifyWorkspaceChange(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	return c.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
+	return c.currentGeneration().client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
 		{URI: protocol.URIFromPath(c.cwd), Type: protocol.Changed},
 	})
 }
@@ -615,7 +821,7 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 				},
 			},
 		}
-		if err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(newVersion), changes); err != nil {
+		if err := c.currentGeneration().client.NotifyDidChangeTextDocument(ctx, uri, int(newVersion), changes); err != nil {
 			slog.Warn("Failed to notify file change", "uri", uri, "error", err)
 		}
 	}
@@ -627,6 +833,12 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 // server likely isn't going to republish.
 func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) {
 	c.waitForDiagnostics(ctx, timeout, time.Second, 300*time.Millisecond, 100*time.Millisecond)
+}
+
+func (c *Client) diagnosticVersion() uint64 {
+	c.diagnosticsMu.RLock()
+	defer c.diagnosticsMu.RUnlock()
+	return c.diagnostics.Version()
 }
 
 func (c *Client) waitForDiagnostics(
@@ -641,7 +853,7 @@ func (c *Client) waitForDiagnostics(
 	defer deadline.Stop()
 	firstChangeTimer := time.NewTimer(min(timeout, firstChangeDuration))
 	defer firstChangeTimer.Stop()
-	previousVersion := c.diagnostics.Version()
+	previousVersion := c.diagnosticVersion()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
@@ -655,7 +867,7 @@ func (c *Client) waitForDiagnostics(
 			// No change arrived quickly — server isn't republishing.
 			return
 		case <-ticker.C:
-			currentVersion := c.diagnostics.Version()
+			currentVersion := c.diagnosticVersion()
 			if currentVersion != previousVersion {
 				// Diagnostics changed — now wait for them to settle.
 				c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration, pollInterval/2)
@@ -672,7 +884,7 @@ func (c *Client) waitForDiagnosticsToSettle(
 	deadline <-chan time.Time,
 	settleDuration, pollInterval time.Duration,
 ) {
-	lastVersion := c.diagnostics.Version()
+	lastVersion := c.diagnosticVersion()
 	settleTicker := time.NewTicker(pollInterval)
 	defer settleTicker.Stop()
 
@@ -686,7 +898,7 @@ func (c *Client) waitForDiagnosticsToSettle(
 		case <-deadline:
 			return
 		case <-settleTicker.C:
-			currentVersion := c.diagnostics.Version()
+			currentVersion := c.diagnosticVersion()
 			if currentVersion != lastVersion {
 				// New change detected — reset the stable timer.
 				lastVersion = currentVersion
@@ -711,7 +923,7 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
-	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
+	return c.currentGeneration().client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
 }
 
 // Rename renames the symbol at the given position across all files.
@@ -723,12 +935,13 @@ func (c *Client) Rename(ctx context.Context, filepath string, line, character in
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
+	return c.currentGeneration().client.RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
 }
 
 // Hover returns hover information at a file position.
 func (c *Client) Hover(ctx context.Context, filepath string, line, character int) (*protocol.Hover, error) {
-	return c.client.RequestHover(ctx, filepath, protocol.Position{Line: uint32(line), Character: uint32(character)}) //nolint:wrapcheck
+	gen := c.currentGeneration()
+	return gen.client.RequestHover(ctx, filepath, protocol.Position{Line: uint32(line), Character: uint32(character)}) //nolint:wrapcheck
 }
 
 type WorkspaceSymbol struct {
@@ -742,7 +955,7 @@ type WorkspaceSymbol struct {
 // WorkspaceSymbolResults normalizes the legacy SymbolInformation and modern
 // WorkspaceSymbol workspace/symbol result variants.
 func (c *Client) WorkspaceSymbolResults(ctx context.Context, query string) ([]WorkspaceSymbol, error) {
-	raw, err := c.client.RequestWorkspaceSymbols(ctx, query)
+	raw, err := c.currentGeneration().client.RequestWorkspaceSymbols(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -775,11 +988,13 @@ func normalizeWorkspaceSymbolResults(raw protocol.Or_Result_workspace_symbol) ([
 
 // SupportsWorkspaceSymbols reports whether the initialized server advertises workspace symbols.
 func (c *Client) SupportsWorkspaceSymbols() bool {
-	return c.client.GetCapabilities().WorkspaceSymbolProvider != nil
+	return c.currentGeneration().client.GetCapabilities().WorkspaceSymbolProvider != nil
 }
 
 // SupportsHover reports whether the initialized server advertises hover support.
-func (c *Client) SupportsHover() bool { return c.client.GetCapabilities().HoverProvider != nil }
+func (c *Client) SupportsHover() bool {
+	return c.currentGeneration().client.GetCapabilities().HoverProvider != nil
+}
 
 // DocumentSymbols returns the document symbols for the given file.
 func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protocol.DocumentSymbolResult, error) {
@@ -790,7 +1005,7 @@ func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protoc
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.RequestDocumentSymbols(ctx, filepath) //nolint:wrapcheck
+	return c.currentGeneration().client.RequestDocumentSymbols(ctx, filepath) //nolint:wrapcheck
 }
 
 // Definition finds the definition of the symbol at the given position.
@@ -802,7 +1017,7 @@ func (c *Client) Definition(ctx context.Context, filepath string, line, characte
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.RequestDefinition(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	return c.currentGeneration().client.RequestDefinition(ctx, filepath, line-1, character-1) //nolint:wrapcheck
 }
 
 // PrepareCallHierarchy prepares a call hierarchy item at the given position.
@@ -814,7 +1029,7 @@ func (c *Client) PrepareCallHierarchy(ctx context.Context, filepath string, line
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.PrepareCallHierarchy(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	return c.currentGeneration().client.PrepareCallHierarchy(ctx, filepath, line-1, character-1) //nolint:wrapcheck
 }
 
 // IncomingCalls returns all callers of the given call hierarchy item.
@@ -822,7 +1037,7 @@ func (c *Client) IncomingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.IncomingCalls(ctx, item) //nolint:wrapcheck
+	return c.currentGeneration().client.IncomingCalls(ctx, item) //nolint:wrapcheck
 }
 
 // OutgoingCalls returns all callees of the given call hierarchy item.
@@ -830,5 +1045,5 @@ func (c *Client) OutgoingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.OutgoingCalls(ctx, item) //nolint:wrapcheck
+	return c.currentGeneration().client.OutgoingCalls(ctx, item) //nolint:wrapcheck
 }

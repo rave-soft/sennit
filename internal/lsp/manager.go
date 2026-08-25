@@ -455,7 +455,7 @@ func (s *Manager) StopAll(ctx context.Context) {
 				!processKilledBySignal(err) {
 				slog.Warn("Failed to stop LSP client", "name", name, "error", err)
 			}
-			client.cancelCtx()
+			client.Shutdown()
 			client.SetServerState(StateStopped)
 			s.clients.Del(name)
 			slog.Debug("Stopped LSP client", "name", name)

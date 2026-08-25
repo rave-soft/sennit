@@ -151,8 +151,14 @@ func TestClient_Restart_ReopensPreviouslyOpenFiles(t *testing.T) {
 	require.NoError(t, client.OpenFile(ctx, filePath))
 	require.True(t, client.IsFileOpen(filePath), "file should be open before restart")
 
+	oldGen := client.currentGeneration()
+	client.handleDiagnostics(oldGen, []byte(`{"uri":"file:///stale.go","diagnostics":[{"message":"stale"}]}`))
+	client.waitForDiagnosticEvents()
+	require.NotEmpty(t, client.GetDiagnostics())
+
 	require.NoError(t, client.Restart())
 	require.True(t, client.IsFileOpen(filePath), "file should be reopened after restart")
+	require.Empty(t, client.GetDiagnostics())
 }
 
 // TestClient_ConcurrentVersionBumpsDoNotRace exercises NotifyChange and
@@ -160,6 +166,108 @@ func TestClient_Restart_ReopensPreviouslyOpenFiles(t *testing.T) {
 // a debounced edit notification racing a workspace-wide refresh). Both read
 // then write *OpenFileInfo.Version through the same shared pointer, so a
 // plain int32 field is a data race; run with -race.
+func TestClient_ShutdownPreventsRestart(t *testing.T) {
+	client := newFakeRuntimeClient(t, "test-shutdown-restart")
+	gen := client.currentGeneration()
+
+	client.Shutdown()
+
+	require.ErrorIs(t, client.Restart(), errClientShutdown)
+	require.Same(t, gen, client.currentGeneration())
+}
+
+func TestClient_RestartThenShutdownIsTerminal(t *testing.T) {
+	client := newFakeRuntimeClient(t, "test-restart-shutdown")
+	oldGen := client.currentGeneration()
+
+	require.NoError(t, client.Restart())
+	newGen := client.currentGeneration()
+	require.NotSame(t, oldGen, newGen)
+
+	client.Shutdown()
+	require.ErrorIs(t, client.Restart(), errClientShutdown)
+	require.Same(t, newGen, client.currentGeneration())
+	require.Error(t, newGen.ctx.Err())
+}
+
+func newFakeRuntimeClient(t *testing.T, name string) *Client {
+	t.Helper()
+	exe, err := os.Executable()
+	require.NoError(t, err)
+	dir := t.TempDir()
+	cfg := config.LSPConfig{
+		Command: exe,
+		Env:     map[string]string{fakeLSPServerEnv: "1"},
+	}
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
+	client, err := New(name, cfg, resolver, dir, false)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+	_, err = client.Initialize(ctx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(ctx))
+	return client
+}
+
+func TestClient_LifecycleConcurrentRequests(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "main.go")
+	require.NoError(t, os.WriteFile(filePath, []byte("package main\n"), 0o644))
+	cfg := config.LSPConfig{
+		Command:   exe,
+		FileTypes: []string{"go"},
+		Env: map[string]string{
+			fakeLSPServerEnv:           "1",
+			"SENNIT_LSP_FAKE_SCENARIO": "symbols",
+		},
+	}
+	resolver := config.NewShellVariableResolver(testenv.New(map[string]string{}))
+	client, err := New("test-lifecycle-race", cfg, resolver, dir, false)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	_, err = client.Initialize(ctx, dir)
+	require.NoError(t, err)
+	require.NoError(t, client.WaitForServerReady(ctx))
+	oldGen := client.currentGeneration()
+
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		for range 20 {
+			_, _ = client.Hover(ctx, filePath, 0, 0)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 100 {
+			client.handleDiagnostics(oldGen, []byte(`{"uri":"file:///stale.go","diagnostics":[{"message":"stale"}]}`))
+		}
+	}()
+	restarted := make(chan struct{})
+	go func() {
+		defer wg.Done()
+		require.NoError(t, client.Restart())
+		close(restarted)
+	}()
+	go func() {
+		defer wg.Done()
+		<-restarted
+		client.Shutdown()
+	}()
+	wg.Wait()
+
+	require.NotSame(t, oldGen, client.currentGeneration())
+	require.ErrorIs(t, client.Restart(), errClientShutdown)
+	require.Empty(t, client.GetDiagnostics())
+}
+
 func TestClient_ConcurrentVersionBumpsDoNotRace(t *testing.T) {
 	t.Parallel()
 
@@ -234,7 +342,294 @@ func newTestClient() *Client {
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 	}
 	c.serverState.Store(StateStopped)
+	gen := &clientGeneration{}
+	c.generation.Store(gen)
+	c.diagnosticGeneration = gen
+	c.startDiagnosticDispatcher()
 	return c
+}
+
+func TestClient_DiagnosticsResetConcurrent(t *testing.T) {
+	c := newTestClient()
+	const iterations = 1000
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			HandleDiagnostics(c, []byte(`{"uri":"file:///test.go","diagnostics":[]}`))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			c.resetDiagnostics()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			_ = c.GetDiagnostics()
+			_ = c.GetDiagnosticCounts()
+		}
+	}()
+	wg.Wait()
+}
+
+func TestClient_StaleDiagnosticsBlockedAcrossGenerationPublication(t *testing.T) {
+	c := newTestClient()
+	oldGen := c.currentGeneration()
+	newGen := &clientGeneration{}
+	entered := make(chan struct{})
+	proceed := make(chan struct{})
+	finished := make(chan struct{})
+	counts := make(chan int, 2)
+	c.SetDiagnosticsCallback(func(_ string, count int) {
+		counts <- count
+	})
+
+	go func() {
+		defer close(finished)
+		c.applyDiagnostics(oldGen, protocol.PublishDiagnosticsParams{
+			URI:         protocol.DocumentURI("file:///stale.go"),
+			Diagnostics: []protocol.Diagnostic{{Message: "stale"}},
+		}, func() {
+			close(entered)
+			<-proceed
+		})
+	}()
+
+	<-entered
+	published := make(chan struct{})
+	go func() {
+		c.publishGeneration(newGen)
+		close(published)
+	}()
+	<-published
+	close(proceed)
+	<-finished
+
+	require.Empty(t, c.GetDiagnostics())
+	require.Equal(t, []int{1, 0}, []int{<-counts, <-counts})
+	require.Same(t, newGen, c.currentGeneration())
+}
+
+func TestClient_DiagnosticsPublicationWinsBeforeEventStartCommit(t *testing.T) {
+	c := newTestClient()
+	oldGen := c.currentGeneration()
+	newGen := &clientGeneration{}
+	popped := make(chan struct{})
+	proceed := make(chan struct{})
+	counts := make(chan int, 1)
+	var once sync.Once
+	c.beforeDiagnosticEventCommit = func() {
+		once.Do(func() {
+			close(popped)
+			<-proceed
+		})
+	}
+	c.SetDiagnosticsCallback(func(_ string, count int) {
+		counts <- count
+	})
+
+	c.handleDiagnostics(oldGen, []byte(`{"uri":"file:///test.go","diagnostics":[{"message":"old"}]}`))
+	<-popped
+	c.publishGeneration(newGen)
+	close(proceed)
+
+	c.waitForDiagnosticEvents()
+	require.Empty(t, c.GetDiagnostics())
+	select {
+	case count := <-counts:
+		t.Fatalf("callback started after publication with count %d", count)
+	default:
+	}
+}
+
+func TestClient_DiagnosticsPublicationOrdersResetAfterRunningCallback(t *testing.T) {
+	c := newTestClient()
+	oldGen := c.currentGeneration()
+	newGen := &clientGeneration{}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	counts := make(chan int, 2)
+	c.SetDiagnosticsCallback(func(_ string, count int) {
+		if count != 0 {
+			close(started)
+			<-release
+		}
+		counts <- count
+	})
+
+	c.handleDiagnostics(oldGen, []byte(`{"uri":"file:///test.go","diagnostics":[{"message":"old"}]}`))
+	<-started
+	c.publishGeneration(newGen)
+
+	require.Same(t, newGen, c.currentGeneration())
+	require.Empty(t, c.GetDiagnostics())
+	close(release)
+	require.Equal(t, []int{1, 0}, []int{<-counts, <-counts})
+}
+
+func TestClient_DiagnosticsQueuedBeforePublicationAreDropped(t *testing.T) {
+	c := newTestClient()
+	oldGen := c.currentGeneration()
+	newGen := &clientGeneration{}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	counts := make(chan int, 2)
+	c.SetDiagnosticsCallback(func(_ string, count int) {
+		if count != 0 {
+			close(started)
+			<-release
+		}
+		counts <- count
+	})
+
+	c.handleDiagnostics(oldGen, []byte(`{"uri":"file:///first.go","diagnostics":[{"message":"first"}]}`))
+	<-started
+	c.handleDiagnostics(oldGen, []byte(`{"uri":"file:///queued.go","diagnostics":[{"message":"queued"}]}`))
+	c.publishGeneration(newGen)
+	close(release)
+
+	require.Equal(t, []int{1, 0}, []int{<-counts, <-counts})
+	c.waitForDiagnosticEvents()
+	select {
+	case count := <-counts:
+		t.Fatalf("queued stale callback delivered count %d", count)
+	default:
+	}
+}
+
+func TestClient_ShutdownPurgesQueuedDiagnosticsAndStopsDispatcher(t *testing.T) {
+	client := newFakeRuntimeClient(t, "test-shutdown-queue")
+	gen := client.currentGeneration()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	counts := make(chan int, 3)
+	client.SetDiagnosticsCallback(func(_ string, count int) {
+		if count != 0 {
+			select {
+			case <-started:
+			default:
+				close(started)
+				<-release
+			}
+		}
+		counts <- count
+	})
+
+	client.handleDiagnostics(gen, []byte(`{"uri":"file:///running.go","diagnostics":[{"message":"running"}]}`))
+	<-started
+	client.handleDiagnostics(gen, []byte(`{"uri":"file:///queued.go","diagnostics":[{"message":"queued"}]}`))
+	shutdownDone := make(chan struct{})
+	go func() {
+		client.Shutdown()
+		close(shutdownDone)
+	}()
+	select {
+	case <-shutdownDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown waited for running diagnostics callback")
+	}
+	close(release)
+	<-client.diagnosticEventsDone
+
+	require.Empty(t, client.GetDiagnostics())
+	require.Equal(t, []int{1, 0}, []int{<-counts, <-counts})
+	select {
+	case count := <-counts:
+		t.Fatalf("queued diagnostic callback delivered count %d", count)
+	default:
+	}
+}
+
+func TestClient_DiagnosticsCallbackCanRestart(t *testing.T) {
+	client := newFakeRuntimeClient(t, "test-callback-restart")
+	oldGen := client.currentGeneration()
+	finished := make(chan error, 1)
+	client.SetDiagnosticsCallback(func(_ string, count int) {
+		if count != 0 {
+			finished <- client.Restart()
+		}
+	})
+
+	go client.handleDiagnostics(oldGen, []byte(`{"uri":"file:///test.go","diagnostics":[{"message":"restart"}]}`))
+
+	select {
+	case err := <-finished:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("diagnostics callback deadlocked while restarting")
+	}
+	require.NotSame(t, oldGen, client.currentGeneration())
+	require.Empty(t, client.GetDiagnostics())
+	client.Shutdown()
+}
+
+func TestClient_DiagnosticsCallbackCanShutdown(t *testing.T) {
+	client := newFakeRuntimeClient(t, "test-callback-shutdown")
+	gen := client.currentGeneration()
+	finished := make(chan struct{}, 1)
+	client.SetDiagnosticsCallback(func(_ string, count int) {
+		if count != 0 {
+			client.Shutdown()
+			finished <- struct{}{}
+		}
+	})
+
+	client.handleDiagnostics(gen, []byte(`{"uri":"file:///test.go","diagnostics":[{"message":"shutdown"}]}`))
+
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("diagnostics callback deadlocked while shutting down")
+	}
+	require.ErrorIs(t, client.Restart(), errClientShutdown)
+	require.Error(t, gen.ctx.Err())
+}
+
+func TestClient_DiagnosticsCallbackConcurrent(t *testing.T) {
+	c := newTestClient()
+	const iterations = 1000
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			c.SetDiagnosticsCallback(func(string, int) {})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			HandleDiagnostics(c, []byte(`{"uri":"file:///test.go","diagnostics":[]}`))
+		}
+	}()
+	wg.Wait()
+}
+
+func TestWaitForDiagnostics_ConcurrentReset(t *testing.T) {
+	c := newTestClient()
+	const iterations = 1000
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			c.waitForDiagnostics(t.Context(), time.Millisecond, time.Millisecond, time.Millisecond, time.Millisecond)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range iterations {
+			c.resetDiagnostics()
+		}
+	}()
+	wg.Wait()
 }
 
 func TestWaitForDiagnostics_NoChange(t *testing.T) {
