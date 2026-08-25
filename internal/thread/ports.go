@@ -176,6 +176,9 @@ type TaskCompletion struct {
 	Error          string
 	Depth          int
 	TerminalAt     time.Time
+	// Acknowledge clears the durable outbox only after the parent turn has
+	// successfully folded this completion into a model step.
+	Acknowledge func(context.Context) error
 }
 
 // Attachment is the domain's view of a file the person attached to a

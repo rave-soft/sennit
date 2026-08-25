@@ -35,7 +35,6 @@ const (
 	ThreadListToolName       = "thread_list"
 	ThreadStatusToolName     = "thread_status"
 	ThreadSendToolName       = "thread_send"
-	ThreadWaitToolName       = "thread_wait"
 	ThreadMergeToolName      = "thread_merge"
 	ThreadRemoveToolName     = "thread_remove"
 	TaskListToolName         = "task_list"
@@ -48,8 +47,7 @@ const (
 )
 
 type AgentParams struct {
-	Prompt     string `json:"prompt"`
-	Background bool   `json:"background,omitempty"`
+	Prompt string `json:"prompt"`
 }
 
 type AgentBackgroundResponseMetadata struct {

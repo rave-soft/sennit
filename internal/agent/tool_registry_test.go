@@ -23,7 +23,7 @@ var pinTestAllowedTools = []string{
 	tools.WebSearchToolName, tools.GlobToolName, tools.GrepToolName, tools.RipgrepToolName, tools.LSToolName,
 	tools.TodosToolName, tools.ReadToolName, tools.WriteToolName,
 	tools.ThreadCreateToolName, tools.ThreadListToolName, tools.ThreadStatusToolName, tools.ThreadSendToolName,
-	tools.ThreadWaitToolName, tools.ThreadMergeToolName, tools.ThreadRemoveToolName,
+	tools.ThreadMergeToolName, tools.ThreadRemoveToolName,
 	tools.TaskListToolName, tools.TaskResultToolName, tools.TaskCancelToolName, tools.TaskSendToolName, tools.TaskOutputToolName,
 	tools.AskParentToolName, tools.QuestionToolName,
 	tools.DiagnosticsToolName, tools.ReferencesToolName, tools.LSPRestartToolName, tools.SymbolsToolName,

@@ -41,13 +41,9 @@ func WithUserInput(ctx context.Context, fn UserInputFunc) context.Context {
 // for reports itself later.
 //
 // It says nothing about tools that are busy working: interrupting those
-// would throw away the work, which is not what a new message asks for. A
-// detachable foreground delegation (coordinator.runSubAgent, gated
-// behind subAgentParams.Detachable) is the one exception: the work is
-// not thrown away, it is detached — the child run keeps going on its
-// own recovered context, and this signal only tells the parent's tool
-// call to stop blocking on it and hand the turn back, with the result
-// delivered later through the completion inbox.
+// would throw away the work, which is not what a new message asks for.
+// Delegations do not need this signal because their tool calls acknowledge
+// immediately and the task lifecycle delivers their results later.
 func WaitForUserInput(ctx context.Context) <-chan struct{} {
 	fn := getContextValue[UserInputFunc](ctx, UserInputContextKey, nil)
 	if fn == nil {

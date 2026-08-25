@@ -573,7 +573,7 @@
         },
         "background_agents": {
           "type": "boolean",
-          "description": "Allow the agent tool's background mode and the task_* tools, letting the model delegate work to background tasks in this workspace. Turning this off only blocks new dispatch — a task already running keeps running to completion. Does not affect threads.",
+          "description": "Allow asynchronous subagent delegation and the task_* tools, letting the model delegate work to background tasks in this workspace. Turning this off only blocks new dispatch — a task already running keeps running to completion. Does not affect threads.",
           "default": true
         },
         "history_retention_days": {

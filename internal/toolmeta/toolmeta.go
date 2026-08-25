@@ -116,7 +116,6 @@ var descriptors = []Descriptor{
 	{Name: "thread_list", Access: AccessRead, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "thread_status", Access: AccessRead, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "thread_send", Access: AccessWrite, Gate: GateThreads, Docs: DocsThreads},
-	{Name: "thread_wait", Access: AccessRead, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "thread_merge", Access: AccessWrite, Writes: true, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "thread_remove", Access: AccessWrite, Writes: true, DefaultAllowed: true, Gate: GateThreads, Docs: DocsThreads},
 	{Name: "task_list", Access: AccessRead, DefaultAllowed: true, Gate: GateTasks, Docs: DocsDelegation},

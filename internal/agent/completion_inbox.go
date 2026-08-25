@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -63,6 +64,8 @@ type TaskCompletion struct {
 	// to BuiltAt so every existing terminal-completion call site (all of
 	// internal/thread's lifecycle.deliverCompletion) needs no change.
 	TerminalAt time.Time
+	// Acknowledge clears durable outbox state after successful model delivery.
+	Acknowledge func(context.Context) error
 	// IsMessage distinguishes a mid-run ask (SendToParent) from a
 	// terminal completion. False (the zero value) for every existing
 	// call site, so this inbox's established behavior for a completion

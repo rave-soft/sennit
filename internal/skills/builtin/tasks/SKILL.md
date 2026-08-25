@@ -1,6 +1,6 @@
 ---
 name: tasks
-description: Use when deciding whether a request should run as a background task, be handed off to a thread, or just happen directly in the current turn — including whenever a task_* tool (task_list, task_result, task_send, task_cancel, task_output) is available and background work might apply. A background task is the agent tool's background=true parameter — cheap, no isolation, suited to read-only/research work. Do NOT reach for one just because work could run concurrently — most requests should run directly in the current turn. See the threads skill instead when the work needs real isolation (its own worktree and branch).
+description: Use when deciding whether a request should run as an asynchronous task, be handed off to a thread, or just happen directly in the current turn — including whenever a task_* tool (task_list, task_result, task_send, task_cancel, task_output) is available and delegated work might apply. Every agent call starts an asynchronous task — cheap, no isolation, suited to read-only/research work. Do NOT reach for one just because work could run concurrently — most requests should run directly in the current turn. See the threads skill instead when the work needs real isolation (its own worktree and branch).
 ---
 
 # Background tasks
@@ -13,8 +13,8 @@ competes for the same files and the same permission prompts as everything
 else in the workspace, so it is not a way to get real parallelism on work
 that edits files.
 
-Start one with the `agent` tool's `background: true` parameter — there is no
-separate task-creation tool.
+Start one with the `agent` tool — delegation is always asynchronous and there
+is no separate task-creation tool.
 
 ## Choosing: steering, a task, or a thread
 
@@ -42,14 +42,15 @@ refining work already in flight → steering (say it, don't dispatch anything).
 - Do not poll for the result. A task's outcome — completed, failed, or
   cancelled, with its result or error — is delivered into your own context
   automatically once it finishes, arriving as a system-generated report at
-  your next step. `task_result` is for checking in on one that hasn't
+  your next step. Correlate by task and child-session id; sibling completions
+  may arrive in any order. `task_result` is for checking in on one that hasn't
   reported back yet, not the normal way to receive it.
 
 ## Limits
 
 - At most 4 tasks may be active in a workspace at once, and at most 2 of
   those may belong to the turn doing the dispatching. Past either limit, a
-  `background: true` call is refused with the current count and the limit in
+  new delegation is refused with the current count and the limit in
   the message — wait for one to finish, or do the work directly instead of
   retrying immediately.
 - A task's completion may wake a follow-up turn that starts another task, but
@@ -57,9 +58,8 @@ refining work already in flight → steering (say it, don't dispatch anything).
   further background dispatch from that chain; finish the work directly
   instead of trying to delegate again.
 - A workspace can have this feature turned off entirely
-  (`options.background_agents`). When it is, `background: true` is refused
-  and the task_* tools are not offered at all — ask to run the work in the
-  foreground instead.
+  (`options.background_agents`). When it is, new delegation is refused and the
+  task_* tools are not offered at all — do the work directly instead.
 
 ## Monitoring and follow-up
 

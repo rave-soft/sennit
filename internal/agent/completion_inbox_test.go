@@ -302,6 +302,43 @@ func (m *promptRecordingModel) occurrences(substr string) int {
 // prevent loss in principle; the completion is actually, automatically
 // redelivered, and exactly once - not replayed a second time on top of
 // an earlier partial delivery.
+func TestCompletionAckWaitsForSuccessfulProviderStep(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	failed := &failFirstStreamModel{err: errors.New("provider failed")}
+	sa := testSessionAgent(env, failed, "system").(*sessionAgent)
+	sess, err := env.sessions.Create(t.Context(), "session")
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	acks := 0
+	sa.enqueueCompletion(sess.ID, TaskCompletion{
+		DelegationID: "durable-task", Kind: "task", Status: "completed", ResultText: "durable-result",
+		Acknowledge: func(context.Context) error {
+			mu.Lock()
+			defer mu.Unlock()
+			acks++
+			return nil
+		},
+	})
+	_, runErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "main"})
+	require.Error(t, runErr)
+	mu.Lock()
+	require.Zero(t, acks, "provider failure must not acknowledge durable completion")
+	mu.Unlock()
+	restored := sa.drainCompletionsForStep(sess.ID)
+	require.Len(t, restored, 1, "provider failure must restore the folded completion")
+	sa.requeueCompletions(sess.ID, restored)
+
+	model := &promptRecordingModel{text: "done"}
+	sa.SetModel(Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}})
+	_, runErr = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "retry"})
+	require.NoError(t, runErr)
+	mu.Lock()
+	require.Equal(t, 1, acks, "the replay is acknowledged only after the successful provider step")
+	mu.Unlock()
+}
+
 func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {
 	t.Parallel()
 

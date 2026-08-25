@@ -45,7 +45,6 @@ var toolsWithoutDedicatedRenderer = []string{
 	tools.ThreadListToolName,
 	tools.ThreadStatusToolName,
 	tools.ThreadSendToolName,
-	tools.ThreadWaitToolName,
 	tools.ThreadMergeToolName,
 	tools.ThreadRemoveToolName,
 	// Task tools (domain/agent/tools/task_*.go), same story: no

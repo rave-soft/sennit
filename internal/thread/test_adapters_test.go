@@ -154,3 +154,11 @@ func (s *testSessionService) CreateTaskSession(ctx context.Context, toolCallID, 
 	}
 	return thread.Session{ID: sess.ID, Title: sess.Title}, nil
 }
+
+func (s *testSessionService) CreateSubAgentSession(ctx context.Context, toolCallID, parentSessionID, title, agentID string) (thread.Session, error) {
+	sess, err := s.full.CreateSubAgentSession(ctx, toolCallID, parentSessionID, title, agentID)
+	if err != nil {
+		return thread.Session{}, err
+	}
+	return thread.Session{ID: sess.ID, Title: sess.Title}, nil
+}

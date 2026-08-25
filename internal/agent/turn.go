@@ -104,6 +104,11 @@ type runTurn struct {
 	// PrepareStep (re)assigns it once per streaming step. It's the turn's
 	// final assistant message once streaming ends.
 	currentAssistant *message.Message
+
+	// pendingCompletions is the batch folded into the current provider step.
+	// It remains owned by the turn until OnStepFinish proves that the provider
+	// step completed and all local persistence for it succeeded.
+	pendingCompletions []TaskCompletion
 }
 
 // newRunTurn returns a runTurn ready to be wired into a
@@ -180,26 +185,16 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 		}
 	}
 
-	// rollback undoes a drain that only becomes "delivered" once this
-	// step actually reaches the model - currently just foldCompletions'.
-	// It runs in reverse registration order against the step's final
-	// err, whichever stage produced it: a completions drain must go back
-	// even when the failure comes from a later stage (foldSteering,
-	// applyCacheControl, createStepAssistant) rather than from
-	// foldCompletions itself, since nothing later can tell the model
-	// "actually, forget that" once it has been sent.
-	var rollback []func(error)
+	// A batch folded here is only accepted after the provider step and its
+	// local persistence complete in onStepFinish. Preparation failures put it
+	// back immediately; provider/stream failures are handled by Run's outer
+	// cleanup through requeuePendingCompletions.
+	prepared.Messages, t.pendingCompletions = t.foldCompletions(prepared.Messages, options.StepNumber)
 	defer func() {
-		for i := len(rollback) - 1; i >= 0; i-- {
-			rollback[i](err)
+		if err != nil {
+			t.requeuePendingCompletions()
 		}
 	}()
-
-	var finishCompletions func(error)
-	prepared.Messages, finishCompletions = t.foldCompletions(callContext, prepared.Messages, options.StepNumber)
-	if finishCompletions != nil {
-		rollback = append(rollback, finishCompletions)
-	}
 
 	// foldSteering owns its own rollback: a follow-up it successfully
 	// persists via createUserMessage is durable session history the
@@ -233,7 +228,7 @@ func (t *runTurn) prepareStep(callContext context.Context, options fantasy.Prepa
 // means it never did, and finish(err) puts the drained batch back rather
 // than losing it. On success, finish logs delivery latency (ids, statuses,
 // and durations only, never Goal/ResultText/Error).
-func (t *runTurn) foldCompletions(callContext context.Context, messages []fantasy.Message, stepNumber int) (_ []fantasy.Message, finish func(error)) {
+func (t *runTurn) foldCompletions(messages []fantasy.Message, stepNumber int) ([]fantasy.Message, []TaskCompletion) {
 	completions := t.agent.drainCompletionsForStep(t.call.SessionID)
 	if len(completions) == 0 {
 		return messages, nil
@@ -250,22 +245,37 @@ func (t *runTurn) foldCompletions(callContext context.Context, messages []fantas
 		}
 		t.call.Depth = depth + 1
 	}
-	finish = func(err error) {
-		if err != nil {
-			t.agent.requeueCompletions(t.call.SessionID, completions)
-			return
-		}
-		ids := make([]string, len(completions))
-		waitedMS := make([]int64, len(completions))
-		now := time.Now()
-		for i, c := range completions {
-			ids[i] = c.DelegationID
-			waitedMS[i] = now.Sub(c.TerminalAt).Milliseconds()
-			t.agent.recordLatency(callContext, latency.KindCompletionDelivery, t.call.SessionID, now.Sub(c.TerminalAt))
-		}
-		slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions), "waited_ms", waitedMS)
+	return append(messages, taskCompletionsMessage(completions)), completions
+}
+
+func (t *runTurn) requeuePendingCompletions() {
+	if len(t.pendingCompletions) == 0 {
+		return
 	}
-	return append(messages, taskCompletionsMessage(completions)), finish
+	t.agent.requeueCompletions(t.call.SessionID, t.pendingCompletions)
+	t.pendingCompletions = nil
+}
+
+func (t *runTurn) acknowledgePendingCompletions() {
+	completions := t.pendingCompletions
+	if len(completions) == 0 {
+		return
+	}
+	ids := make([]string, len(completions))
+	waitedMS := make([]int64, len(completions))
+	now := time.Now()
+	for i, c := range completions {
+		ids[i] = c.DelegationID
+		waitedMS[i] = now.Sub(c.TerminalAt).Milliseconds()
+		t.agent.recordLatency(t.ctx, latency.KindCompletionDelivery, t.call.SessionID, now.Sub(c.TerminalAt))
+		if c.Acknowledge != nil {
+			if err := c.Acknowledge(context.WithoutCancel(t.ctx)); err != nil {
+				slog.Error("Failed to acknowledge completion delivery", "delegation", c.DelegationID, "error", err)
+			}
+		}
+	}
+	t.pendingCompletions = nil
+	slog.Info("Completion delivered", "session", t.call.SessionID, "delegations", ids, "count", len(completions), "waited_ms", waitedMS)
 }
 
 // foldSteering drains queued follow-up prompts for this step and appends
@@ -679,7 +689,11 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 		return sessionErr
 	}
 	t.currentSession = updatedSession
-	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
+	if err := t.agent.messages.Update(t.genCtx, *t.currentAssistant); err != nil {
+		return err
+	}
+	t.acknowledgePendingCompletions()
+	return nil
 }
 
 // maxOutputTokens is the largest reply this turn's model may produce. Zero

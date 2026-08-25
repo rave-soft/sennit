@@ -11,7 +11,7 @@ in git). A request that merely splits into independent chunks is not a
 reason to create threads — do the work yourself or use subagents.
 
 The thread's agent starts on `goal` immediately in the background; use
-`thread_status`/`thread_wait` to check on it, `thread_send` for follow-up
+`thread_status` to check on it, `thread_send` for follow-up
 instructions, and `thread_merge` to fold its branch back in once done.
 
 Parameters:

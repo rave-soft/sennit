@@ -88,7 +88,6 @@ returns, and the threads were going to reach you without it.
 
 ### When to block instead
 
-`thread_wait` (with the returned IDs, or no `ids` for all of them) blocks
 until every named thread leaves pending/running/merging. It is for the one
 case the arriving-outcome path does not cover: **you cannot do anything
 useful until several threads have all settled together** — comparing their

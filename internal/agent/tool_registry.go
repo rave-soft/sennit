@@ -163,13 +163,12 @@ func toolSpecs() []toolSpec {
 		// Thread tools: top-level agent of the workspace owning the thread
 		// manager only — sub-agents nesting workspace ownership isn't
 		// supported, and non-git/thread-spawned workspaces have no manager.
-		{[]string{"thread_create", "thread_list", "thread_status", "thread_send", "thread_wait", "thread_merge", "thread_remove"}, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
+		{[]string{"thread_create", "thread_list", "thread_status", "thread_send", "thread_merge", "thread_remove"}, func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
 				tools.NewThreadCreateTool(b.threads, c.permissions),
 				tools.NewThreadListTool(b.threads),
 				tools.NewThreadStatusTool(b.threads),
 				tools.NewThreadSendTool(b.threads),
-				tools.NewThreadWaitTool(b.threads),
 				tools.NewThreadMergeTool(b.threads, c.permissions),
 				tools.NewThreadRemoveTool(b.threads, c.permissions),
 			}, nil

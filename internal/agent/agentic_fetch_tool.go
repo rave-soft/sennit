@@ -66,151 +66,88 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 		transport.MaxIdleConns = 100
 		transport.MaxIdleConnsPerHost = 10
 		transport.IdleConnTimeout = 90 * time.Second
-
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
-		}
+		client = &http.Client{Timeout: 30 * time.Second, Transport: transport}
 	}
-
 	return tools.WithToolSchemaConstraints(fantasy.NewParallelAgentTool(
 		tools.AgenticFetchToolName,
 		agenticFetchToolDescription,
 		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			validationResult, invalid, err := validateAgenticFetchParams(ctx, params)
+			validation, invalid, err := validateAgenticFetchParams(ctx, params)
 			if err != nil {
 				return fantasy.ToolResponse{}, err
 			}
 			if invalid != nil {
 				return fantasy.NewTextErrorResponse(invalid.Error()), nil
 			}
-
-			// Determine description based on mode.
-			var description string
-			if params.URL != "" {
-				description = fmt.Sprintf("Fetch and analyze content from URL: %s", params.URL)
-			} else {
-				description = "Search the web and analyze results"
-			}
-
-			p, err := c.permissions.Request(
-				ctx,
-				permission.CreatePermissionRequest{
-					SessionID:   validationResult.SessionID,
-					Path:        c.cfg.WorkingDir(),
-					ToolCallID:  call.ID,
-					ToolName:    tools.AgenticFetchToolName,
-					Action:      "fetch",
-					Description: description,
-					Params:      tools.AgenticFetchPermissionsParams(params),
+			return c.launchDelegation(ctx, tools.TaskCreateArgs{
+				Goal:            params.Prompt,
+				ParentSessionID: validation.SessionID,
+				SessionTitle:    "Fetch Analysis",
+				Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
+					description := "Search the web and analyze results"
+					if params.URL != "" {
+						description = fmt.Sprintf("Fetch and analyze content from URL: %s", params.URL)
+					}
+					allowed, err := c.permissions.Request(ctx, permission.CreatePermissionRequest{
+						SessionID: validation.SessionID, Path: c.cfg.WorkingDir(), ToolCallID: call.ID,
+						ToolName: tools.AgenticFetchToolName, Action: "fetch", Description: description,
+						Params: tools.AgenticFetchPermissionsParams(params),
+					})
+					if err != nil {
+						return nil, nil, err
+					}
+					if !allowed {
+						return nil, nil, errors.New("permission denied for agentic fetch")
+					}
+					tmpDir, err := os.MkdirTemp(c.cfg.Config().Options.DataDirectory, brand.Slug+"-fetch-*")
+					if err != nil {
+						return nil, nil, fmt.Errorf("create temporary directory: %w", err)
+					}
+					cleanup := func() { _ = os.RemoveAll(tmpDir) }
+					fullPrompt := params.Prompt + "\n\nUse web_search and web_fetch to research this request."
+					if params.URL != "" {
+						content, filePath, err := tools.FetchLargeContent(ctx, client, tmpDir, params.URL)
+						if err != nil {
+							return nil, cleanup, fmt.Errorf("fetch URL: %w", err)
+						}
+						if filePath != "" {
+							fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s is saved at %s. Analyze it with read and grep.", params.Prompt, params.URL, filePath)
+						} else {
+							fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
+						}
+					}
+					promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), prompt.WithWorkingDir(tmpDir))
+					if err != nil {
+						return nil, cleanup, err
+					}
+					model, err := c.buildAgentModel(ctx, true)
+					if err != nil {
+						return nil, cleanup, err
+					}
+					systemPrompt, err := promptTemplate.Build(ctx, model.Model.Provider(), model.Model.Model(), c.cfg)
+					if err != nil {
+						return nil, cleanup, err
+					}
+					providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
+					if !ok {
+						return nil, cleanup, errors.New("model provider not configured")
+					}
+					searchBackend, err := c.webSearchBackend()
+					if err != nil {
+						return nil, cleanup, fmt.Errorf("web_search: %w", err)
+					}
+					agent := NewSessionAgent(SessionAgentOptions{
+						Model: model, SystemPromptPrefix: providerCfg.SystemPromptPrefix, SystemPrompt: systemPrompt,
+						DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+						Sessions:             c.sessions, Messages: c.messages,
+						Tools: []fantasy.AgentTool{
+							tools.NewWebFetchTool(nil, tmpDir, client), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend),
+							tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, c.cfg.Config().Tools.Grep),
+							tools.NewReadTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
+						},
+					})
+					return c.subAgentTaskRun(validation.SessionID, childID, fullPrompt, agent), cleanup, nil
 				},
-			)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-			if !p {
-				return tools.NewPermissionDeniedResponse(), nil
-			}
-
-			tmpDir, err := os.MkdirTemp(c.cfg.Config().Options.DataDirectory, brand.Slug+"-fetch-*")
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create temporary directory: %s", err)), nil
-			}
-			defer func() { _ = os.RemoveAll(tmpDir) }() // best-effort temp dir cleanup
-
-			var fullPrompt string
-
-			if params.URL != "" {
-				// URL mode: fetch the URL content first.
-				content, filePath, err := tools.FetchLargeContent(ctx, client, tmpDir, params.URL)
-				if err != nil {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
-				}
-
-				if filePath != "" {
-					fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the read and grep tools to analyze this file and extract the requested information.", params.Prompt, params.URL, filePath)
-				} else {
-					fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
-				}
-			} else {
-				// Search mode: let the sub-agent search and fetch as needed.
-				fullPrompt = fmt.Sprintf("%s\n\nUse the web_search tool to find relevant information. Break down the question into smaller, focused searches if needed. After searching, use web_fetch to get detailed content from the most relevant results.", params.Prompt)
-			}
-
-			promptOpts := []prompt.Option{
-				prompt.WithWorkingDir(tmpDir),
-			}
-
-			promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), promptOpts...)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %w", err)
-			}
-
-			model, err := c.buildAgentModel(ctx, true)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %w", err)
-			}
-
-			systemPrompt, err := promptTemplate.Build(ctx, model.Model.Provider(), model.Model.Model(), c.cfg)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %w", err)
-			}
-
-			providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
-			if !ok {
-				return fantasy.ToolResponse{}, errors.New("model provider not configured")
-			}
-
-			searchBackend, err := c.webSearchBackend()
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("web_search: %w", err)
-			}
-
-			// nil permissions: this sub-agent's parent agentic_fetch call is
-			// already permission-gated above, so its own fetch/search tools
-			// run unauthenticated.
-			webFetchTool := tools.NewWebFetchTool(nil, tmpDir, client)
-			webSearchTool := tools.NewWebSearchTool(nil, tmpDir, client, searchBackend)
-			fetchTools := []fantasy.AgentTool{
-				webFetchTool,
-				webSearchTool,
-				tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob),
-				tools.NewSearchTool(tmpDir, c.cfg.Config().Tools.Grep),
-				tools.NewReadTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
-			}
-
-			// Sub-agent tools run without hook interception. The top-level
-			// `agentic_fetch` call itself is already wrapped from the coder's
-			// side; firing hooks again for every inner tool call would run
-			// the user's hooks N times per delegated turn.
-
-			agent := NewSessionAgent(SessionAgentOptions{
-				Model:                model,
-				SystemPromptPrefix:   providerCfg.SystemPromptPrefix,
-				SystemPrompt:         systemPrompt,
-				DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
-				Sessions:             c.sessions,
-				Messages:             c.messages,
-				Tools:                fetchTools,
-			})
-
-			// The child session is NOT auto-approved: the fetch/search/glob/
-			// grep tools above don't touch permissions at all, but
-			// NewReadTool does when asked to read a path outside tmpDir.
-			// The top-level `agentic_fetch` call already required
-			// permission (above); auto-approving the child session on top
-			// of that used to let the sub-agent read arbitrary files
-			// anywhere on disk without ever prompting the user. Leaving
-			// SessionSetup unset routes those read requests through the
-			// normal per-session permission flow, same as any other
-			// agent-as-tool sub-agent (see coordinator.buildTools).
-			return c.runSubAgent(ctx, subAgentParams{
-				Agent:          agent,
-				SessionID:      validationResult.SessionID,
-				AgentMessageID: validationResult.AgentMessageID,
-				ToolCallID:     call.ID,
-				Prompt:         fullPrompt,
-				SessionTitle:   "Fetch Analysis",
 			})
 		},
 	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil

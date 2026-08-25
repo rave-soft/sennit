@@ -8,12 +8,29 @@ import "context"
 type TaskCreateArgs struct {
 	Goal            string
 	ParentSessionID string
+	// SessionTitle and AgentID preserve the child session identity of a
+	// specialized delegation. Empty values retain the built-in task defaults.
+	SessionTitle string
+	AgentID      string
+	// Factory performs all potentially blocking preparation after Create has
+	// returned its acknowledgement. Cleanup is owned by the task lifecycle and
+	// is called exactly once, including when preparation fails.
+	Factory TaskRunFactory
 	// Depth is the cascade depth of the turn creating this task (0 for a
 	// real user turn; see internal/agent's DepthContextKey/completion
 	// continuation depth). The task inherits it as-is — a continuation
 	// created from this task's completion runs one level deeper.
 	Depth int
 }
+
+// TaskRunResult is the terminal output of a specialized delegation.
+type TaskRunResult struct {
+	Text string
+}
+
+// TaskRunFactory prepares a specialized delegation. Cleanup may be non-nil
+// together with an error when preparation acquired resources before failing.
+type TaskRunFactory func(ctx context.Context, childSessionID string) (run func(context.Context) (TaskRunResult, error), cleanup func(), err error)
 
 // TaskInfo mirrors the fields of internal/thread.Thread the task_* tools
 // need: enough to list, report on, and reference a task later, but none
@@ -46,10 +63,9 @@ type TaskOutput struct {
 }
 
 // TaskManager is the subset of internal/thread.TaskManager's API the
-// built-in agent tool's background mode and the task_* tools need.
+// asynchronous delegation launcher and the task_* tools need.
 type TaskManager interface {
-	// Create starts a new task, as the "agent" tool's background mode
-	// uses.
+	// Create starts a new asynchronous delegation.
 	Create(ctx context.Context, args TaskCreateArgs) (TaskInfo, error)
 	// List returns every task in the workspace, for task_list.
 	List(ctx context.Context) ([]TaskInfo, error)

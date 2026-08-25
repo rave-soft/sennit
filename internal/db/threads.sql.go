@@ -10,6 +10,37 @@ import (
 	"database/sql"
 )
 
+const attributeTaskCostOnce = `-- name: AttributeTaskCostOnce :execrows
+UPDATE sessions
+SET cost = sessions.cost + COALESCE((SELECT child.cost FROM sessions child WHERE child.id = ?1), 0)
+WHERE sessions.id = ?2
+  AND EXISTS (
+      SELECT 1 FROM threads
+      WHERE threads.id = ?3
+        AND threads.kind = 'task'
+        AND threads.status = 'running'
+        AND threads.session_id = ?1
+        AND threads.parent_session_id = ?2
+        AND threads.cost_attributed = 0
+  )
+`
+
+type AttributeTaskCostOnceParams struct {
+	SessionID       string `json:"session_id"`
+	ParentSessionID string `json:"parent_session_id"`
+	ID              string `json:"id"`
+}
+
+// Called in the same transaction as FinalizeTask. A failed transaction rolls
+// this increment back, while the running/marker predicates make retries safe.
+func (q *Queries) AttributeTaskCostOnce(ctx context.Context, arg AttributeTaskCostOnceParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, attributeTaskCostOnce, arg.SessionID, arg.ParentSessionID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const createThread = `-- name: CreateThread :one
 INSERT INTO threads (
     id,
@@ -41,7 +72,7 @@ INSERT INTO threads (
     ?,
     strftime('%s', 'now'),
     strftime('%s', 'now')
-) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
+) RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
 `
 
 type CreateThreadParams struct {
@@ -101,6 +132,10 @@ func (q *Queries) CreateThread(ctx context.Context, arg CreateThreadParams) (Thr
 		&i.CompletedAt,
 		&i.Kind,
 		&i.ParentSessionID,
+		&i.CompletionPending,
+		&i.CompletionDepth,
+		&i.TerminalAt,
+		&i.CostAttributed,
 	)
 	return i, err
 }
@@ -115,8 +150,80 @@ func (q *Queries) DeleteThread(ctx context.Context, id string) error {
 	return err
 }
 
+const finalizeTask = `-- name: FinalizeTask :one
+UPDATE threads
+SET
+    status = ?1,
+    error = ?2,
+    result_summary = ?3,
+    completed_at = ?4,
+    terminal_at = ?5,
+    completion_depth = ?6,
+    completion_pending = 1,
+    cost_attributed = 1
+WHERE threads.id = ?7
+  AND threads.kind = 'task'
+  AND threads.status = 'running'
+  AND threads.session_id = ?8
+  AND threads.parent_session_id = ?9
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
+`
+
+type FinalizeTaskParams struct {
+	Status          string        `json:"status"`
+	Error           string        `json:"error"`
+	ResultSummary   string        `json:"result_summary"`
+	CompletedAt     sql.NullInt64 `json:"completed_at"`
+	TerminalAt      sql.NullInt64 `json:"terminal_at"`
+	CompletionDepth int64         `json:"completion_depth"`
+	ID              string        `json:"id"`
+	SessionID       string        `json:"session_id"`
+	ParentSessionID string        `json:"parent_session_id"`
+}
+
+// This follows AttributeTaskCostOnce in one transaction, so terminal state,
+// attribution and the durable completion outbox become visible together.
+func (q *Queries) FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thread, error) {
+	row := q.db.QueryRowContext(ctx, finalizeTask,
+		arg.Status,
+		arg.Error,
+		arg.ResultSummary,
+		arg.CompletedAt,
+		arg.TerminalAt,
+		arg.CompletionDepth,
+		arg.ID,
+		arg.SessionID,
+		arg.ParentSessionID,
+	)
+	var i Thread
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ProjectPath,
+		&i.Goal,
+		&i.BaseBranch,
+		&i.Branch,
+		&i.WorktreePath,
+		&i.SessionID,
+		&i.Status,
+		&i.MergePolicy,
+		&i.ResultSummary,
+		&i.Error,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CompletedAt,
+		&i.Kind,
+		&i.ParentSessionID,
+		&i.CompletionPending,
+		&i.CompletionDepth,
+		&i.TerminalAt,
+		&i.CostAttributed,
+	)
+	return i, err
+}
+
 const getThread = `-- name: GetThread :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE id = ? LIMIT 1
 `
@@ -146,12 +253,16 @@ func (q *Queries) GetThread(ctx context.Context, id string) (Thread, error) {
 		&i.CompletedAt,
 		&i.Kind,
 		&i.ParentSessionID,
+		&i.CompletionPending,
+		&i.CompletionDepth,
+		&i.TerminalAt,
+		&i.CostAttributed,
 	)
 	return i, err
 }
 
 const getThreadByName = `-- name: GetThreadByName :one
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE name = ? AND project_path = ? AND kind = 'thread' LIMIT 1
 `
@@ -182,12 +293,67 @@ func (q *Queries) GetThreadByName(ctx context.Context, arg GetThreadByNameParams
 		&i.CompletedAt,
 		&i.Kind,
 		&i.ParentSessionID,
+		&i.CompletionPending,
+		&i.CompletionDepth,
+		&i.TerminalAt,
+		&i.CostAttributed,
 	)
 	return i, err
 }
 
+const listPendingTaskCompletions = `-- name: ListPendingTaskCompletions :many
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed FROM threads
+WHERE project_path = ? AND kind = 'task' AND completion_pending = 1
+ORDER BY terminal_at, created_at, id
+`
+
+func (q *Queries) ListPendingTaskCompletions(ctx context.Context, projectPath string) ([]Thread, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingTaskCompletions, projectPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Thread{}
+	for rows.Next() {
+		var i Thread
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ProjectPath,
+			&i.Goal,
+			&i.BaseBranch,
+			&i.Branch,
+			&i.WorktreePath,
+			&i.SessionID,
+			&i.Status,
+			&i.MergePolicy,
+			&i.ResultSummary,
+			&i.Error,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CompletedAt,
+			&i.Kind,
+			&i.ParentSessionID,
+			&i.CompletionPending,
+			&i.CompletionDepth,
+			&i.TerminalAt,
+			&i.CostAttributed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listThreads = `-- name: ListThreads :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE project_path = ? AND kind = 'thread'
 ORDER BY created_at
@@ -225,6 +391,10 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 			&i.CompletedAt,
 			&i.Kind,
 			&i.ParentSessionID,
+			&i.CompletionPending,
+			&i.CompletionDepth,
+			&i.TerminalAt,
+			&i.CostAttributed,
 		); err != nil {
 			return nil, err
 		}
@@ -240,7 +410,7 @@ func (q *Queries) ListThreads(ctx context.Context, projectPath string) ([]Thread
 }
 
 const listThreadsAll = `-- name: ListThreadsAll :many
-SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
+SELECT id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
 FROM threads
 WHERE project_path = ?
 ORDER BY created_at
@@ -280,6 +450,10 @@ func (q *Queries) ListThreadsAll(ctx context.Context, projectPath string) ([]Thr
 			&i.CompletedAt,
 			&i.Kind,
 			&i.ParentSessionID,
+			&i.CompletionPending,
+			&i.CompletionDepth,
+			&i.TerminalAt,
+			&i.CostAttributed,
 		); err != nil {
 			return nil, err
 		}
@@ -356,12 +530,26 @@ func (q *Queries) ListThreadsForGC(ctx context.Context) ([]ListThreadsForGCRow, 
 	return items, nil
 }
 
+const markTaskCompletionDelivered = `-- name: MarkTaskCompletionDelivered :execrows
+UPDATE threads
+SET completion_pending = 0
+WHERE id = ? AND kind = 'task' AND completion_pending = 1
+`
+
+func (q *Queries) MarkTaskCompletionDelivered(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markTaskCompletionDelivered, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateThreadSession = `-- name: UpdateThreadSession :one
 UPDATE threads
 SET
     session_id = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
 `
 
 type UpdateThreadSessionParams struct {
@@ -390,6 +578,10 @@ func (q *Queries) UpdateThreadSession(ctx context.Context, arg UpdateThreadSessi
 		&i.CompletedAt,
 		&i.Kind,
 		&i.ParentSessionID,
+		&i.CompletionPending,
+		&i.CompletionDepth,
+		&i.TerminalAt,
+		&i.CostAttributed,
 	)
 	return i, err
 }
@@ -402,7 +594,7 @@ SET
     result_summary = ?,
     completed_at = ?
 WHERE id = ?
-RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id
+RETURNING id, name, project_path, goal, base_branch, branch, worktree_path, session_id, status, merge_policy, result_summary, error, created_at, updated_at, completed_at, kind, parent_session_id, completion_pending, completion_depth, terminal_at, cost_attributed
 `
 
 type UpdateThreadStatusParams struct {
@@ -440,6 +632,10 @@ func (q *Queries) UpdateThreadStatus(ctx context.Context, arg UpdateThreadStatus
 		&i.CompletedAt,
 		&i.Kind,
 		&i.ParentSessionID,
+		&i.CompletionPending,
+		&i.CompletionDepth,
+		&i.TerminalAt,
+		&i.CostAttributed,
 	)
 	return i, err
 }

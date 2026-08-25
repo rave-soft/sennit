@@ -32,6 +32,7 @@ type runtimeState struct {
 	handle      Handle
 	spawner     Spawner
 	watchCancel context.CancelFunc
+	runCancel   context.CancelFunc
 	runID       string
 	// person marks runID as a turn the person is driving by hand, rather
 	// than one this package dispatched on a delegation's behalf. The two
@@ -354,6 +355,38 @@ func (l *lifecycle) startRun(ctx context.Context, handle Handle, spawner Spawner
 // This is the state an idle entity rests in — a live workspace with no
 // run of its own in flight — and the first half of what startRun does.
 // Callers must hold the entity's opMu, for the reason startRun documents.
+func (l *lifecycle) startFactoryRun(ctx context.Context, handle Handle, spawner Spawner, id, sessionID string, factory TaskRunFactory) {
+	rt := l.installRuntime(ctx, handle, spawner, id)
+	c := l.control(id)
+	runID := uuid.NewString()
+	runCtx, runCancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	rt.runID = runID
+	rt.runCancel = runCancel
+	c.mu.Unlock()
+
+	l.goWorker(func() {
+		run, cleanup, err := factory(runCtx, sessionID)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		var result TaskRunResult
+		if err == nil {
+			if run == nil {
+				err = errors.New("task run factory returned no runner")
+			} else {
+				result, err = run(runCtx)
+			}
+		}
+		rc := RunComplete{SessionID: sessionID, RunID: runID, Text: result.Text}
+		if err != nil {
+			rc.Error = err.Error()
+			rc.Cancelled = errors.Is(err, context.Canceled)
+		}
+		l.handleRunComplete(runCtx, id, rc)
+	})
+}
+
 func (l *lifecycle) installRuntime(ctx context.Context, handle Handle, spawner Spawner, id string) *runtimeState {
 	c := l.control(id)
 	watchCtx, cancel := context.WithCancel(ctx)
@@ -790,6 +823,9 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	}
 
 	rt.watchCancel()
+	if rt.runCancel != nil {
+		rt.runCancel()
+	}
 	if a := rt.handle.Workspace(); a != nil && a.Coordinator() != nil {
 		a.Coordinator().Cancel(st.SessionID)
 	}
@@ -800,10 +836,22 @@ func (l *lifecycle) cancel(ctx context.Context, st Thread, reason string) error 
 	if reason == "" {
 		reason = "cancelled"
 	}
-	if _, err := l.setStatus(ctx, st.ID, StatusCancelled, reason, "", 0); err != nil {
-		return err
+	var final Thread
+	var err error
+	if st.Kind == KindTask {
+		c.mu.Lock()
+		depth := c.depth
+		c.mu.Unlock()
+		final, err = l.finalizeTask(ctx, st, StatusCancelled, reason, "", 0, depth)
+	} else {
+		final, err = l.setStatus(ctx, st.ID, StatusCancelled, reason, "", 0)
 	}
-	slog.Info("Delegation reached terminal status", "id", st.ID, "kind", st.Kind, "status", StatusCancelled)
+	if err != nil {
+		return fmt.Errorf("cancel finalization: %w", err)
+	}
+	if final.ID != "" {
+		slog.Info("Delegation reached terminal status", "id", st.ID, "kind", st.Kind, "status", StatusCancelled)
+	}
 	return nil
 }
 
@@ -877,6 +925,9 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 	depth := c.depth
 	c.mu.Unlock()
 	rt.watchCancel()
+	if rt.runCancel != nil {
+		rt.runCancel()
+	}
 	if err := rt.spawner.Release(ctx, rt.handle.ID()); err != nil {
 		slog.Error("Failed to release completed workspace", "component", "thread", "thread", id, "error", err)
 	}
@@ -902,29 +953,30 @@ func (l *lifecycle) handleRunComplete(ctx context.Context, id string, rc RunComp
 		return
 	}
 
-	var finalSt Thread
+	status, errText, result, completedAt := StatusCompleted, "", rc.Text, time.Now().Unix()
 	switch {
 	case rc.Cancelled:
-		finalSt, err = l.setStatus(ctx, id, StatusInterrupted, "", "", 0)
-		if err != nil {
-			slog.Error("Failed to record run cancellation", "component", "thread", "thread", id, "error", err)
-			return
-		}
+		status, result, completedAt = StatusInterrupted, "", 0
 	case rc.Error != "":
-		finalSt, err = l.setStatus(ctx, id, StatusFailed, rc.Error, "", 0)
-		if err != nil {
-			slog.Error("Failed to record run failure", "component", "thread", "thread", id, "error", err)
-			return
-		}
+		status, errText, result, completedAt = StatusFailed, rc.Error, "", 0
 	default:
 		if l.onRunSuccess != nil && l.onRunSuccess(followUpCtx, c, st, rc.Text) {
 			return
 		}
-		finalSt, err = l.setStatus(ctx, id, StatusCompleted, "", rc.Text, time.Now().Unix())
-		if err != nil {
-			slog.Error("Failed to record run completion", "component", "thread", "thread", id, "error", err)
-			return
-		}
+	}
+
+	var finalSt Thread
+	if st.Kind == KindTask {
+		finalSt, err = l.finalizeTask(ctx, st, status, errText, result, completedAt, depth)
+	} else {
+		finalSt, err = l.setStatus(ctx, id, status, errText, result, completedAt)
+	}
+	if err != nil {
+		slog.Error("Failed to finalize delegation", "component", "thread", "id", id, "error", err)
+		return
+	}
+	if finalSt.ID == "" {
+		return
 	}
 
 	slog.Info("Delegation reached terminal status", "id", id, "kind", finalSt.Kind, "status", finalSt.Status)
@@ -977,7 +1029,31 @@ func (l *lifecycle) restIdleAfterPersonTurn(ctx context.Context, id string, rc R
 // is reached (see agent.TaskCompletion.Depth and the "agent" tool's
 // background mode). Always 0 for a thread today: the cascade limiter
 // only ever applies to tasks created through the "agent" tool.
+func (l *lifecycle) finalizeTask(ctx context.Context, st Thread, status Status, errText, result string, completedAt int64, depth int) (Thread, error) {
+	store, ok := l.store.(TaskFinalizationStore)
+	if !ok {
+		return l.setStatus(ctx, st.ID, status, errText, result, completedAt)
+	}
+	terminalAt := time.Now().UnixNano()
+	final, won, err := store.FinalizeTask(ctx, st.ID, FinalizeTaskParams{
+		Status: status, Error: errText, ResultSummary: result, CompletedAt: completedAt,
+		CompletionDepth: depth, TerminalAt: terminalAt,
+	})
+	if err != nil {
+		return Thread{}, err
+	}
+	if !won {
+		return Thread{}, nil
+	}
+	l.publish(EventStatusChanged, final)
+	return final, nil
+}
+
 func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thread, depth int) {
+	l.deliverStoredCompletion(ctx, handle, st, depth)
+}
+
+func (l *lifecycle) deliverStoredCompletion(ctx context.Context, handle Handle, st Thread, depth int) {
 	if l.resolveDelivery == nil {
 		return
 	}
@@ -989,6 +1065,10 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 	if target == nil || target.Coordinator() == nil {
 		slog.Info("Delivery skipped: no delivery target", "id", st.ID, "kind", st.Kind)
 		return
+	}
+	terminalAt := time.Now()
+	if st.TerminalAt != 0 {
+		terminalAt = time.Unix(0, st.TerminalAt)
 	}
 	target.Coordinator().DeliverTaskCompletion(ctx, parentSessionID, TaskCompletion{
 		DelegationID:   st.ID,
@@ -1005,7 +1085,17 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 		// TaskCompletion — so prepareStep's own "Completion delivered"
 		// log can report how long the completion sat before reaching
 		// the model without a second clock reading anywhere else.
-		TerminalAt: time.Now(),
+		TerminalAt: terminalAt,
+		Acknowledge: func(ackCtx context.Context) error {
+			if st.Kind != KindTask || !st.CompletionPending {
+				return nil
+			}
+			store, ok := l.store.(TaskFinalizationStore)
+			if !ok {
+				return nil
+			}
+			return store.MarkTaskCompletionDelivered(ackCtx, st.ID)
+		},
 	})
 }
 
@@ -1022,6 +1112,15 @@ func (l *lifecycle) deliverCompletion(ctx context.Context, handle Handle, st Thr
 // the "left displayed as running forever" state recovery exists to
 // prevent.
 func (l *lifecycle) recover(ctx context.Context) error {
+	if store, ok := l.store.(TaskFinalizationStore); ok {
+		pending, err := store.ListPendingTaskCompletions(ctx)
+		if err != nil {
+			return err
+		}
+		for _, st := range pending {
+			l.deliverStoredCompletion(ctx, nil, st, st.CompletionDepth)
+		}
+	}
 	threads, err := l.store.ListAll(ctx)
 	if err != nil {
 		return err
@@ -1037,6 +1136,16 @@ func (l *lifecycle) recover(ctx context.Context) error {
 			}
 		}
 		if st.Status.Active() {
+			if st.Kind == KindTask {
+				final, err := l.finalizeTask(ctx, st, StatusInterrupted, "", "", 0, st.CompletionDepth)
+				if err != nil {
+					return err
+				}
+				if final.ID != "" {
+					l.deliverStoredCompletion(ctx, nil, final, final.CompletionDepth)
+				}
+				continue
+			}
 			if _, err := l.setStatus(ctx, st.ID, StatusInterrupted, "", "", 0); err != nil {
 				return err
 			}

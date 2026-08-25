@@ -1291,11 +1291,15 @@ func (m *Manager) resolveDeliveryTarget(ctx context.Context, handle Handle, st T
 		if st.ParentSessionID == "" {
 			return nil, "", false
 		}
-		a := handle.Workspace()
-		if a == nil {
+		// Recovery has no runtime handle; live delivery keeps supporting test
+		// and alternate managers that do not configure ParentApp explicitly.
+		if m.parentApp != nil {
+			return m.parentApp, st.ParentSessionID, true
+		}
+		if handle == nil || handle.Workspace() == nil {
 			return nil, "", false
 		}
-		return a, st.ParentSessionID, true
+		return handle.Workspace(), st.ParentSessionID, true
 	case KindThread:
 		if m.parentApp == nil {
 			return nil, "", false

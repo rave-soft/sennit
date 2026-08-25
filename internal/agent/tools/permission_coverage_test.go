@@ -225,7 +225,6 @@ func toolClassifications() []toolClassification {
 		{name: ThreadListToolName, writes: false},
 		{name: ThreadStatusToolName, writes: false},
 		{name: ThreadSendToolName, writes: false},
-		{name: ThreadWaitToolName, writes: false},
 		{
 			name: ThreadMergeToolName, writes: true,
 			run: func(t *testing.T, perms permission.Service, _, _ string) fantasy.ToolResponse {

@@ -94,6 +94,52 @@ SET
 WHERE id = ?
 RETURNING *;
 
+-- name: AttributeTaskCostOnce :execrows
+-- Called in the same transaction as FinalizeTask. A failed transaction rolls
+-- this increment back, while the running/marker predicates make retries safe.
+UPDATE sessions
+SET cost = sessions.cost + COALESCE((SELECT child.cost FROM sessions child WHERE child.id = sqlc.arg(session_id)), 0)
+WHERE sessions.id = sqlc.arg(parent_session_id)
+  AND EXISTS (
+      SELECT 1 FROM threads
+      WHERE threads.id = sqlc.arg(id)
+        AND threads.kind = 'task'
+        AND threads.status = 'running'
+        AND threads.session_id = sqlc.arg(session_id)
+        AND threads.parent_session_id = sqlc.arg(parent_session_id)
+        AND threads.cost_attributed = 0
+  );
+
+-- name: FinalizeTask :one
+-- This follows AttributeTaskCostOnce in one transaction, so terminal state,
+-- attribution and the durable completion outbox become visible together.
+UPDATE threads
+SET
+    status = sqlc.arg(status),
+    error = sqlc.arg(error),
+    result_summary = sqlc.arg(result_summary),
+    completed_at = sqlc.narg(completed_at),
+    terminal_at = sqlc.arg(terminal_at),
+    completion_depth = sqlc.arg(completion_depth),
+    completion_pending = 1,
+    cost_attributed = 1
+WHERE threads.id = sqlc.arg(id)
+  AND threads.kind = 'task'
+  AND threads.status = 'running'
+  AND threads.session_id = sqlc.arg(session_id)
+  AND threads.parent_session_id = sqlc.arg(parent_session_id)
+RETURNING *;
+
+-- name: ListPendingTaskCompletions :many
+SELECT * FROM threads
+WHERE project_path = ? AND kind = 'task' AND completion_pending = 1
+ORDER BY terminal_at, created_at, id;
+
+-- name: MarkTaskCompletionDelivered :execrows
+UPDATE threads
+SET completion_pending = 0
+WHERE id = ? AND kind = 'task' AND completion_pending = 1;
+
 -- name: DeleteThread :exec
 DELETE FROM threads
 WHERE id = ?;

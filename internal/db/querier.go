@@ -14,6 +14,9 @@ type Querier interface {
 	// (a turn saving usage, the todo tool saving todos), and two children
 	// finishing together dropped one of the two deltas.
 	AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error)
+	// Called in the same transaction as FinalizeTask. A failed transaction rolls
+	// this increment back, while the running/marker predicates make retries safe.
+	AttributeTaskCostOnce(ctx context.Context, arg AttributeTaskCostOnceParams) (int64, error)
 	BatchValidateSessionIDsInTree(ctx context.Context, arg BatchValidateSessionIDsInTreeParams) ([]string, error)
 	// gc's dependent-row count for a batch of sessions it is about to delete;
 	// see CountMessagesForSessionIDs for why json_each replaces an IN-list.
@@ -48,6 +51,9 @@ type Querier interface {
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	DeleteSessionReadFiles(ctx context.Context, sessionID string) error
 	DeleteThread(ctx context.Context, id string) error
+	// This follows AttributeTaskCostOnce in one transaction, so terminal state,
+	// attribution and the durable completion outbox become visible together.
+	FinalizeTask(ctx context.Context, arg FinalizeTaskParams) (Thread, error)
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
@@ -93,6 +99,7 @@ type Querier interface {
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionIDs(ctx context.Context, sessionIdsJson string) ([]Message, error)
+	ListPendingTaskCompletions(ctx context.Context, projectPath string) ([]Thread, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessionTreeAssistantMessages(ctx context.Context, id string) ([]ListSessionTreeAssistantMessagesRow, error)
 	// A session and every descendant of it (agent-tool sub-sessions, title
@@ -174,6 +181,7 @@ type Querier interface {
 	// order it happened.
 	ListUnfinishedAssistantMessages(ctx context.Context, projectPath string) ([]ListUnfinishedAssistantMessagesRow, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
+	MarkTaskCompletionDelivered(ctx context.Context, id string) (int64, error)
 	// Version numbers are allocated per path across every session, which is
 	// what makes ListFilesBySessionTree's cross-session ordering and the
 	// UI's first-to-latest diff meaningful. UNIQUE(path, version) is the key

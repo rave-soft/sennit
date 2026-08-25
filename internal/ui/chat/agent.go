@@ -437,7 +437,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	prompt := params.Prompt
 
-	// runBackgroundAgent (internal/agent/agent_tool.go) returns synchronously
+	// Every delegation tool returns synchronously
 	// with an acknowledgment, not the delegation's actual answer — HasResult
 	// is already true the moment this block first renders, well before the
 	// background task has done any real work. Detect that case via the
@@ -567,6 +567,14 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
+
+	if opts.Result != nil {
+		var meta tools.AgentBackgroundResponseMetadata
+		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.TaskID != "" {
+			content := renderBackgroundDispatch(sty, width, agenticFetchDisplayName, opts, prompt, meta)
+			return clickableItemHover(sty, content, width, opts.Hovered)
+		}
+	}
 
 	// A finished (or canceled) top-level delegation collapses to a compact
 	// summary — see AgentToolRenderContext.RenderTool above for the

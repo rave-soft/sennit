@@ -172,7 +172,7 @@ type dispatcher struct {
 
 	// userInput holds, per session, a channel closed when a prompt from
 	// the person is queued while a turn is already running. Tools that
-	// spend a turn waiting on something else (thread_wait) select on it
+	// spend a turn waiting on something else select on it
 	// so they can cut the wait short and let the person be answered —
 	// see tools.WaitForUserInput. Only a prompt with PromptOrigin !=
 	// message.OriginAgent closes it: interrupting a wait already in

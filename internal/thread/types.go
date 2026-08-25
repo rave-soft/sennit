@@ -111,6 +111,12 @@ type Delegation struct {
 	// parent, exactly as before: resolveDeliveryTarget and SendToParent
 	// both treat "" as nobody to deliver/ask.
 	ParentSessionID string
+	// CompletionPending is the durable outbox bit for a task terminal event.
+	CompletionPending bool
+	// CompletionDepth and TerminalAt are persisted with the event so replay
+	// after restart is byte-for-byte equivalent to immediate delivery.
+	CompletionDepth int
+	TerminalAt      int64
 }
 
 // MergePolicy controls how a completed thread's branch is merged back into

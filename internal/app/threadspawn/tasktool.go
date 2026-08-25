@@ -27,11 +27,30 @@ func (a *agentToolTaskManager) Create(ctx context.Context, args tools.TaskCreate
 		Goal:            args.Goal,
 		ParentSessionID: args.ParentSessionID,
 		Depth:           args.Depth,
+		SessionTitle:    args.SessionTitle,
+		AgentID:         args.AgentID,
+		Factory:         adaptTaskFactory(args.Factory),
 	})
 	if err != nil {
 		return tools.TaskInfo{}, err
 	}
 	return toTaskInfo(st), nil
+}
+
+func adaptTaskFactory(factory tools.TaskRunFactory) thread.TaskRunFactory {
+	if factory == nil {
+		return nil
+	}
+	return func(ctx context.Context, childSessionID string) (func(context.Context) (thread.TaskRunResult, error), func(), error) {
+		run, cleanup, err := factory(ctx, childSessionID)
+		if run == nil {
+			return nil, cleanup, err
+		}
+		return func(ctx context.Context) (thread.TaskRunResult, error) {
+			result, err := run(ctx)
+			return thread.TaskRunResult{Text: result.Text}, err
+		}, cleanup, err
+	}
 }
 
 func (a *agentToolTaskManager) List(ctx context.Context) ([]tools.TaskInfo, error) {

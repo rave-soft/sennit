@@ -63,7 +63,22 @@ type TaskCreateArgs struct {
 	// completion event this task ever produces, to compute the depth of
 	// an auto-woken continuation (see agent.TaskCompletion.Depth).
 	Depth int
+	// SessionTitle and AgentID preserve specialized delegation history.
+	SessionTitle string
+	AgentID      string
+	// Factory, when set, owns preparation and execution instead of the coder
+	// dispatcher. It is invoked asynchronously only after Create returns.
+	Factory TaskRunFactory
 }
+
+// TaskRunResult is the terminal output of a specialized task run.
+type TaskRunResult struct {
+	Text string
+}
+
+// TaskRunFactory performs potentially blocking preparation. cleanup may be
+// returned with an error and is called exactly once by the lifecycle.
+type TaskRunFactory func(context.Context, string) (run func(context.Context) (TaskRunResult, error), cleanup func(), err error)
 
 // TaskManager drives the task delegation kind: the same admission,
 // per-entity serialization, run dispatch, status transitions, recovery,
@@ -201,7 +216,16 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		}
 	}()
 
-	sess, err := handle.Workspace().Sessions().CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, args.Goal)
+	title := args.SessionTitle
+	if title == "" {
+		title = args.Goal
+	}
+	var sess Session
+	if args.AgentID == "" {
+		sess, err = handle.Workspace().Sessions().CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, title)
+	} else {
+		sess, err = handle.Workspace().Sessions().CreateSubAgentSession(ctx, uuid.NewString(), args.ParentSessionID, title, args.AgentID)
+	}
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)
 	}
@@ -248,7 +272,11 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 		Name: st.Name,
 		Kind: string(st.Kind),
 	})
-	t.lc.startRun(WithAgentDispatch(runCtx), handle, t.spawner, st.ID, st.SessionID, args.Goal)
+	if args.Factory == nil {
+		t.lc.startRun(WithAgentDispatch(runCtx), handle, t.spawner, st.ID, st.SessionID, args.Goal)
+	} else {
+		t.lc.startFactoryRun(runCtx, handle, t.spawner, st.ID, st.SessionID, args.Factory)
+	}
 	owned = false // Ownership transferred to the shared runtime state.
 
 	// ids and depth only — args.Goal is the user's prompt and never
@@ -308,13 +336,13 @@ func (t *TaskManager) checkActiveCaps(ctx context.Context, parentSessionID strin
 
 	if total >= maxActiveTasksPerWorkspace {
 		return fmt.Errorf(
-			"thread: %d background tasks already running in this workspace (limit %d); wait for one to finish or run this in the foreground",
+			"thread: %d background tasks already running in this workspace (limit %d); wait for one to finish",
 			total, maxActiveTasksPerWorkspace,
 		)
 	}
 	if forParent >= maxActiveTasksPerParentTurn {
 		return fmt.Errorf(
-			"thread: this turn already has %d background tasks running (limit %d); wait for one to finish or run this in the foreground",
+			"thread: this turn already has %d background tasks running (limit %d); wait for one to finish",
 			forParent, maxActiveTasksPerParentTurn,
 		)
 	}

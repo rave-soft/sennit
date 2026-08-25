@@ -568,7 +568,7 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 		// only now that the lock is released.
 		a.notifyQueueChanged(call.SessionID)
 		// Release anything in the active turn that is only waiting (a
-		// thread_wait, say) - but only for the person's own words. An
+		// say) - but only for the person's own words. An
 		// agent-originated prompt (a delegation follow-up queued behind
 		// a turn already in flight) still stays queued; it just must
 		// not cut short whatever the active turn is waiting on, or one
@@ -987,6 +987,11 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	if call.OnAuthRefresh != nil {
 		turnOnAuthRefresh = t.onAuthRefresh
 	}
+	defer func() {
+		if t != nil {
+			t.requeuePendingCompletions()
+		}
+	}()
 	result, err = streamAgent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
 		Files:            files,

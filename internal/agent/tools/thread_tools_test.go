@@ -443,15 +443,6 @@ func TestThreadMergeTool_RefusesAThreadWithATurnInFlight(t *testing.T) {
 	require.Contains(t, resp.Content, "active")
 }
 
-func TestThreadWaitTool_ReturnsImmediatelyWhenNothingActive(t *testing.T) {
-	repo := initRepo(t)
-	mgr := newTestThreadManager(t, repo)
-
-	tool := tools.NewThreadWaitTool(mgr)
-	resp := callTool(t, tool, tools.ThreadWaitParams{TimeoutSeconds: 1})
-	require.False(t, resp.IsError)
-}
-
 // TestThreadStatusTool_MissingThreadExplainsItself: asking about a thread
 // that merged is now an ordinary thing to do, because merging removes it.
 // The tool used to hand the model the store's own "sql: no rows in result

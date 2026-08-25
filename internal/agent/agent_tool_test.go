@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -119,7 +120,7 @@ func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
-	input, err := json.Marshal(AgentParams{Prompt: "look into X", Background: true})
+	input, err := json.Marshal(AgentParams{Prompt: "look into X"})
 	require.NoError(t, err)
 
 	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
@@ -127,7 +128,10 @@ func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	require.False(t, resp.IsError, "background call should not be a tool error: %s", resp.Content)
 
 	require.Len(t, fake.created, 1)
-	require.Equal(t, tools.TaskCreateArgs{Goal: "look into X", ParentSessionID: "parent-sess"}, fake.created[0])
+	require.Equal(t, "look into X", fake.created[0].Goal)
+	require.Equal(t, "parent-sess", fake.created[0].ParentSessionID)
+	require.Equal(t, "New Agent Session", fake.created[0].SessionTitle)
+	require.NotNil(t, fake.created[0].Factory)
 
 	var meta AgentBackgroundResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
@@ -136,14 +140,9 @@ func TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately(t *testing.T) {
 	require.Equal(t, "running", meta.Status)
 }
 
-// TestAgentTool_ForegroundUnchanged proves background absent still takes
-// today's path byte-for-byte: it reaches the exact same
-// agent-message-id-missing guard runSubAgent's callers have always hit
-// (no MessageIDContextKey set here), and never touches the task manager.
-// If background had silently taken over regardless of the flag, this
-// would fail differently — either succeeding unexpectedly, or failing
-// with a task-related error instead of this one.
-func TestAgentTool_ForegroundUnchanged(t *testing.T) {
+// TestAgentTool_AlwaysCreatesTask proves delegation no longer has a
+// foreground path: background's legacy value cannot change the acknowledgement.
+func TestAgentTool_AlwaysCreatesTask(t *testing.T) {
 	fake := &fakeTaskManager{}
 	coord := newAgentToolTestCoordinator(t, fake)
 
@@ -154,11 +153,10 @@ func TestAgentTool_ForegroundUnchanged(t *testing.T) {
 	input, err := json.Marshal(AgentParams{Prompt: "look into X"})
 	require.NoError(t, err)
 
-	_, err = tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "agent message id missing from context")
-
-	require.Empty(t, fake.created, "foreground path must never touch the task manager")
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Len(t, fake.created, 1)
 }
 
 // TestAgentTool_BackgroundUnavailableReturnsClearError proves a
@@ -173,13 +171,13 @@ func TestAgentTool_BackgroundUnavailableReturnsClearError(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
-	input, err := json.Marshal(AgentParams{Prompt: "look into X", Background: true})
+	input, err := json.Marshal(AgentParams{Prompt: "look into X"})
 	require.NoError(t, err)
 
 	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "unavailable background must be a clear tool error, not a silent foreground fallback")
-	require.Contains(t, resp.Content, "background unset")
+	require.Contains(t, strings.ToLower(resp.Content), "delegation")
 }
 
 // TestRunBackgroundAgent_RefusedWhenDisabledByConfig proves
@@ -197,7 +195,7 @@ func TestRunBackgroundAgent_RefusedWhenDisabledByConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "a disabled switch must refuse, not silently run in the foreground")
 	require.Contains(t, resp.Content, "background_agents")
-	require.Contains(t, resp.Content, "background unset")
+	require.Contains(t, strings.ToLower(resp.Content), "delegation")
 	require.Empty(t, fake.created, "a refused dispatch must never reach the task manager")
 }
 

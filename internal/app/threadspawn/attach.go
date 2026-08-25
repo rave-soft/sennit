@@ -87,17 +87,23 @@ func Attach(ctx context.Context, a *app.App, path string, spawner thread.Spawner
 }
 
 func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread.Spawner, deps attachDeps) {
-	top, err := deps.topLevel(ctx, path)
+	top, gitErr := deps.topLevel(ctx, path)
+	isGitWorkspace := gitErr == nil && fsext.Canonical(top) == fsext.Canonical(path)
+	if gitErr == nil && !isGitWorkspace {
+		return
+	}
+	if !isGitWorkspace {
+		// Tasks are workspace delegations, not git worktree operations. Keep
+		// their lifecycle available in directories that are not repositories;
+		// only the thread/worktree overlay below is repository-specific.
+		top = path
+	}
 	// git and the caller can spell the same directory differently — git
 	// prints its own resolved form, while path may come from t.TempDir (an
 	// 8.3 short name on Windows) or an unresolved symlink. A raw string
 	// compare would then say "not the root" for a directory that is,
 	// which silently drops the thread manager for a workspace that should
 	// have one. Compare canonical spellings instead.
-	if err != nil || fsext.Canonical(top) != fsext.Canonical(path) {
-		return
-	}
-
 	dbDir := deps.globalDBDir()
 	conn, err := deps.connect(ctx, dbDir)
 	if err != nil {
@@ -110,7 +116,7 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	}
 	parentWorkspace := NewAppWorkspaceAdapter(a)
 	mgr := deps.newManager(thread.ManagerOptions{
-		Store:       NewStore(db.New(conn), a.Store().WorkingDir()),
+		Store:       NewTransactionalStore(conn, a.Store().WorkingDir()),
 		Spawner:     spawner,
 		RepoRoot:    top,
 		WorktreeDir: worktreeDir,
@@ -136,7 +142,9 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	if err := deps.recover(mgr, ctx); err != nil {
 		slog.Warn("Failed to recover thread state", "error", err)
 	}
-	deps.finalizeTurns(ctx, a, mgr)
+	if isGitWorkspace {
+		deps.finalizeTurns(ctx, a, mgr)
+	}
 
 	// TaskManager shares mgr's own lifecycle and context (both unexported,
 	// so only constructible from inside the thread package) rather than
@@ -150,14 +158,18 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 
 	// Publish only once shutdown and database cleanup are both registered:
 	// consumers must never observe a manager whose dependencies can leak.
-	a.SetThreads(AsAgentToolManager(mgr))
-	a.SetThreadManager(mgr)
+	if isGitWorkspace {
+		a.SetThreads(AsAgentToolManager(mgr))
+		a.SetThreadManager(mgr)
+		deps.forwardEvents(a, mgr)
+	}
 	a.SetTaskManager(tasks)
 	a.SetTasks(AsAgentToolTaskManager(tasks))
-	deps.forwardEvents(a, mgr)
-	if local, ok := spawner.(*LocalSpawner); ok {
-		go forwardSkillsToThreads(ctx, a, local)
-		go forwardAgentsToThreads(ctx, a, local)
+	if isGitWorkspace {
+		if local, ok := spawner.(*LocalSpawner); ok {
+			go forwardSkillsToThreads(ctx, a, local)
+			go forwardAgentsToThreads(ctx, a, local)
+		}
 	}
 }
 

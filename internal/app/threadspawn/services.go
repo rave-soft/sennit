@@ -96,6 +96,14 @@ func (a *SessionAdapter) CreateTaskSession(ctx context.Context, toolCallID, pare
 	return thread.Session{ID: s.ID, Title: s.Title}, nil
 }
 
+func (a *SessionAdapter) CreateSubAgentSession(ctx context.Context, toolCallID, parentSessionID, title, agentID string) (thread.Session, error) {
+	s, err := a.full.CreateSubAgentSession(ctx, toolCallID, parentSessionID, title, agentID)
+	if err != nil {
+		return thread.Session{}, err
+	}
+	return thread.Session{ID: s.ID, Title: s.Title}, nil
+}
+
 // messageAdapter wraps a workspace's real message service so it satisfies
 // the thread domain's narrow thread.MessageService, for the same
 // seam-reason as [sessionAdapter] (the domain must not import

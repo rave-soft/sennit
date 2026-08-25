@@ -291,13 +291,13 @@ type Options struct {
 	// switch exists for the person who wants to rule out unattended
 	// concurrent work entirely, not as a safety net for a first run.
 	//
-	// Turning this off only stops *new* dispatch: the "agent" tool's
-	// background parameter is refused and the task_* tools are not
-	// registered. A task already running when the config is reloaded is not
+	// Turning this off only stops *new* delegation dispatch (built-in,
+	// custom, and fetch tools), and task_* tools are not registered. A task
+	// already running when the config is reloaded is not
 	// killed — it runs to completion and its result is still delivered.
 	// Threads (the git-worktree feature) are a separate, older feature and
 	// are not affected by this switch.
-	BackgroundAgents *bool `json:"background_agents,omitempty" jsonschema:"description=Allow the agent tool's background mode and the task_* tools\\, letting the model delegate work to background tasks in this workspace. Turning this off only blocks new dispatch — a task already running keeps running to completion. Does not affect threads.,default=true"`
+	BackgroundAgents *bool `json:"background_agents,omitempty" jsonschema:"description=Allow asynchronous subagent delegation and the task_* tools\\, letting the model delegate work to background tasks in this workspace. Turning this off only blocks new dispatch — a task already running keeps running to completion. Does not affect threads.,default=true"`
 	// HistoryRetentionDays is read by `sennit gc`, not enforced automatically:
 	// nothing purges history on its own. A pointer distinguishes "unset"
 	// (defaults to 90) from an explicit 0, which means keep history forever.

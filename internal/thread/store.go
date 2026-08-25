@@ -31,6 +31,17 @@ type SetStatusParams struct {
 	CompletedAt int64
 }
 
+// FinalizeTaskParams is the immutable terminal payload committed together
+// with cost attribution and the durable completion outbox.
+type FinalizeTaskParams struct {
+	Status          Status
+	Error           string
+	ResultSummary   string
+	CompletedAt     int64
+	CompletionDepth int
+	TerminalAt      int64
+}
+
 // Store persists threads. It is a thin persistence contract with no
 // pub/sub of its own — the thread manager owns lifecycle events built on
 // top of these operations. The sqlc-backed implementation lives in
@@ -53,4 +64,13 @@ type Store interface {
 	SetStatus(ctx context.Context, id string, params SetStatusParams) (Thread, error)
 	SetSession(ctx context.Context, id, sessionID string) (Thread, error)
 	Delete(ctx context.Context, id string) error
+}
+
+// TaskFinalizationStore is the transactional extension required by task
+// lifecycle finalization. It is separate from Store so lightweight thread
+// stores and test doubles that never finalize tasks remain valid.
+type TaskFinalizationStore interface {
+	FinalizeTask(ctx context.Context, id string, params FinalizeTaskParams) (st Thread, finalized bool, err error)
+	ListPendingTaskCompletions(ctx context.Context) ([]Thread, error)
+	MarkTaskCompletionDelivered(ctx context.Context, id string) error
 }

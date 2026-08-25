@@ -135,7 +135,6 @@ var sequentialDenyList = []struct {
 	{ThreadListToolName, "thread manager state"},
 	{ThreadStatusToolName, "thread manager state"},
 	{ThreadCreateToolName, "starts a thread"},
-	{ThreadWaitToolName, "blocks on thread manager state"},
 	{ThreadMergeToolName, "merges a thread, git worktree"},
 	{ThreadRemoveToolName, "removes a thread"},
 	{TaskListToolName, "task manager state"},
@@ -152,7 +151,7 @@ var sequentialDenyList = []struct {
 //
 //   - thread_send is deliberately absent from the default set (see the
 //     comment in config.allToolNames) but is still a real tool any agent
-//     config can enable, so it is pinned to sequential like thread_wait.
+//     config can enable, so it is pinned to sequential.
 var optionalToolNames = []struct {
 	name     string
 	parallel bool
@@ -328,8 +327,6 @@ func buildForInfo(t *testing.T, name string) fantasy.AgentTool {
 		return NewThreadCreateTool(panicThreadManager{}, nil)
 	case ThreadSendToolName:
 		return NewThreadSendTool(panicThreadManager{})
-	case ThreadWaitToolName:
-		return NewThreadWaitTool(panicThreadManager{})
 	case ThreadMergeToolName:
 		return NewThreadMergeTool(panicThreadManager{}, nil)
 	case ThreadRemoveToolName:

@@ -58,7 +58,6 @@ var threadToolNames = []string{
 	tools.ThreadCreateToolName,
 	tools.ThreadListToolName,
 	tools.ThreadStatusToolName,
-	tools.ThreadWaitToolName,
 	tools.ThreadMergeToolName,
 	tools.ThreadRemoveToolName,
 }

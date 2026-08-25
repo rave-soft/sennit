@@ -14,9 +14,11 @@ import "context"
 type SessionService interface {
 	// Create creates a top-level session titled title.
 	Create(ctx context.Context, title string) (Session, error)
-	// CreateTaskSession creates a session nested under parentSessionID,
-	// keyed by toolCallID.
+	// CreateTaskSession creates an anonymous session nested under parentSessionID.
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
+	// CreateSubAgentSession additionally stamps a named agent id; an empty id
+	// has the same semantics as CreateTaskSession.
+	CreateSubAgentSession(ctx context.Context, toolCallID, parentSessionID, title, agentID string) (Session, error)
 }
 
 // Session is the domain's view of a session as this package consumes it:
