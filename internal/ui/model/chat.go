@@ -1055,27 +1055,36 @@ func (m *Chat) SetTodosCompact(compact bool) {
 	}
 }
 
-// SetDelegationsHidden tells every top-level delegation item whether the
-// session panel is currently showing this session's live delegations, in
-// which case they have no row in the transcript at all.
+// SetDelegationsHidden hides exactly those delegations the session panel is
+// currently showing, named by the id of the tool call that started each —
+// panelled holds those ids, and every other delegation is shown.
 //
 // This is the todos handoff (see SetTodosCompact) with the harder half of
 // the bargain: a delegation goes into the panel when it starts and leaves
 // it when it finishes, so the transcript is where it lands afterwards, not
-// somewhere it also appears meanwhile. Clearing it — which happens the
-// moment the panel has nothing live left — is what makes the finished
-// blocks appear.
+// somewhere it also appears meanwhile.
+//
+// The set has to be per delegation, which is where todos are no guide at
+// all: a session has one todo list, and it has as many delegations as it
+// likes, at every stage at once. Asking the single question todos ask —
+// "is the panel showing anything live?" — and answering it for all of them
+// hid every finished delegation for as long as any other one was still
+// running, which in a session that delegates continuously is forever.
 //
 // Only top-level items are reached, so a nested delegation inside a
 // parent's tool tree is unaffected: it belongs to a child session the panel
 // is not reporting on.
-func (m *Chat) SetDelegationsHidden(hidden bool) {
+func (m *Chat) SetDelegationsHidden(panelled map[string]bool) {
 	for i := range m.list.Len() {
-		item, ok := m.list.ItemAt(i).(interface{ SetHiddenWhilePanelled(bool) })
+		toolItem, ok := m.list.ItemAt(i).(chat.ToolMessageItem)
 		if !ok {
 			continue
 		}
-		item.SetHiddenWhilePanelled(hidden)
+		hideable, ok := toolItem.(interface{ SetHiddenWhilePanelled(bool) })
+		if !ok {
+			continue
+		}
+		hideable.SetHiddenWhilePanelled(panelled[toolItem.ToolCall().ID])
 	}
 }
 

@@ -311,19 +311,29 @@ func TestSessionEvent_HidesPanelledDelegationsFromTranscript(t *testing.T) {
 
 	u := sessionUI()
 	u.dialog = dialog.NewOverlay()
+	u.com.Workspace = agentsPanelWorkspace{}
 	u.chat.SetSize(80, 40)
 
-	item := chat.NewAgentToolMessageItem(u.com.Styles,
-		message.ToolCall{ID: "call-1", Name: "agent", Input: `{"prompt":"look into the flaky test"}`, Finished: false},
-		nil, false, nil)
-	u.chat.SetMessages(item)
+	newItem := func(toolCallID, prompt string) chat.ToolMessageItem {
+		return chat.NewAgentToolMessageItem(u.com.Styles,
+			message.ToolCall{ID: toolCallID, Name: "agent", Input: `{"prompt":"` + prompt + `"}`, Finished: false},
+			nil, false, nil)
+	}
+	running := newItem("call-1", "look into the flaky test")
+	// A second delegation that has already finished: it is not in the
+	// panel, and it must not be hidden just because its sibling is. Asking
+	// the todos question — "is anything live?" — and answering it for
+	// every delegation hid this one for as long as the other ran.
+	done := newItem("call-2", "split the C4 packages")
+	u.chat.SetMessages(running, done)
 
-	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$call-1")}
+	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "msg-7$$call-1")}
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
-	require.Empty(t, item.Render(80), "the panel has it: no row in the transcript")
+	require.Empty(t, running.Render(80), "the panel has it: no row in the transcript")
+	require.NotEmpty(t, done.Render(80), "the one the panel never had must stay in the transcript")
 
 	// It finished and left the panel, so the transcript is where it lands.
 	u.agentList.cache.value = nil
 	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
-	require.NotEmpty(t, item.Render(80), "the panel let go: the block appears")
+	require.NotEmpty(t, running.Render(80), "the panel let go: the block appears")
 }

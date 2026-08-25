@@ -238,7 +238,7 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			m.chat.SetTodosCompact(hasIncompleteTodos(m.sess.current.Todos))
 			// And the same handoff for delegations: while the panel's
 			// agents section has them, they have no row in the transcript.
-			m.chat.SetDelegationsHidden(m.panelShowsLiveDelegations())
+			m.chat.SetDelegationsHidden(m.panelledDelegations())
 			// A brand new list (0 -> N todos) always opens the panel,
 			// unconditionally — distinct from autoExpandTodosIfReasonable
 			// below, which is a gentler one-shot-per-session, tall-enough-

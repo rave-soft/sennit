@@ -73,20 +73,34 @@ func (m *UI) panelSpinnerWanted() bool {
 	return false
 }
 
-// panelShowsLiveDelegations reports whether the panel's agents section is
-// currently carrying this session's live delegations — the same two
-// conditions sessionPanelPlan uses to fill plan.agents, asked in one place
-// so the panel and the transcript cannot disagree about who is showing
-// what.
+// panelledDelegations names the delegations the panel's agents section is
+// currently carrying, by the id of the tool call that started each — the
+// same identity the transcript files its blocks under, so the two cannot
+// disagree about which delegation is which. Built from the same source and
+// the same two conditions sessionPanelPlan uses to fill plan.agents.
 //
 // Collapsing the section is deliberately not one of them: it hides the
 // blocks without ending the panel's claim on them, exactly as a collapsed
 // todos panel still owns the todo list.
-func (m *UI) panelShowsLiveDelegations() bool {
-	if !m.hasSession() || !m.panelSurfacesThreads() {
-		return false
+//
+// A delegation drops out of here the moment it reaches a terminal status,
+// since sessionDelegations keeps only live ones — which is exactly when the
+// transcript has a finished block to show.
+func (m *UI) panelledDelegations() map[string]bool {
+	if !m.hasSession() || !m.panelSurfacesThreads() || m.com == nil || m.com.Workspace == nil {
+		return nil
 	}
-	return len(sessionDelegations(m.agentList.cache.value, m.sess.current.ID)) > 0
+	live := sessionDelegations(m.agentList.cache.value, m.sess.current.ID)
+	if len(live) == 0 {
+		return nil
+	}
+	ids := make(map[string]bool, len(live))
+	for _, delegation := range live {
+		if _, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(delegation.SessionID); ok {
+			ids[toolCallID] = true
+		}
+	}
+	return ids
 }
 
 // syncPanelSpinner reconciles the shared panel spinner with

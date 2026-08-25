@@ -74,7 +74,7 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// A delegation just started or finished, which is exactly when it
 		// enters or leaves the panel — and so when the transcript has to
 		// stop or start showing it. See Chat.SetDelegationsHidden.
-		m.chat.SetDelegationsHidden(m.panelShowsLiveDelegations())
+		m.chat.SetDelegationsHidden(m.panelledDelegations())
 	case threadDockActivityLoadedMsg:
 		m.threadsDock.applyThreadActivityLoaded(msg)
 	}
