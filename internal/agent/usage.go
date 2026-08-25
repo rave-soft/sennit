@@ -234,10 +234,10 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 			}
 			if active != nil {
 				if activeRuntime := active.load(); activeRuntime != nil && activeRuntime.model.ModelCfg.Provider == model.ModelCfg.Provider && activeRuntime.model.ModelCfg.Model == model.ModelCfg.Model {
-					return newInstrumentedModel(activeRuntime.model.Model, corr)
+					return newInstrumentedModel(activeRuntime.model.Model, corr, activeRuntime.model.ModelCfg.Provider)
 				}
 			}
-			return newInstrumentedModel(model.Model, corr)
+			return newInstrumentedModel(model.Model, corr, model.ModelCfg.Provider)
 		},
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
 			prepared.Messages = options.Messages

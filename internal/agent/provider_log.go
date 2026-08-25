@@ -10,6 +10,8 @@ import (
 	"charm.land/fantasy"
 
 	"github.com/google/uuid"
+
+	"github.com/rave-soft/sennit/internal/oauth/codex"
 )
 
 // Provider request log vocabulary.
@@ -139,14 +141,26 @@ type instrumentedModel struct {
 	inner     fantasy.LanguageModel
 	corr      providerCorrelation
 	startedAt time.Time
+	// codex records that this model runs on the Codex provider, the only
+	// one that quotes the account's remaining allowance back on every
+	// response. The snapshot those responses feed is process-global (see
+	// codex.LatestUsage), so without knowing whose request this is, a
+	// local model's line would happily carry a Codex figure it had
+	// nothing to do with.
+	codex bool
 }
 
 // newInstrumentedModel wraps inner so its Stream is logged. startedAt is taken
 // at wrap time, which is the instant the attempt begins (right before Stream
 // is called by fantasy's retry loop); latency on the finished line is
 // measured from it.
-func newInstrumentedModel(inner fantasy.LanguageModel, corr providerCorrelation) *instrumentedModel {
-	return &instrumentedModel{inner: inner, corr: corr, startedAt: time.Now()}
+func newInstrumentedModel(inner fantasy.LanguageModel, corr providerCorrelation, providerID string) *instrumentedModel {
+	return &instrumentedModel{
+		inner:     inner,
+		corr:      corr,
+		startedAt: time.Now(),
+		codex:     providerID == codex.ProviderID,
+	}
 }
 
 // Stream implements fantasy.LanguageModel.Stream. It logs the attempt started
@@ -306,7 +320,57 @@ func (m *instrumentedModel) logFinished(outcome, category string, finishReason f
 		fields = append(fields, "finish_reason", string(finishReason))
 	}
 	fields = append(fields, providerUsageLogFields(usage)...)
+	if m.codex {
+		fields = append(fields, codexPlanLogFields(m.startedAt)...)
+	}
 	slog.Info("Provider request finished", fields...)
+}
+
+// codexPlanLogFields reports what this request cost the account's plan, so
+// the question "why is the allowance gone" can be answered by measurement
+// rather than inferred from token counts. Codex quotes the plan and its
+// rate-limit windows on every response (see internal/oauth/codex), which is
+// where the numbers come from; nothing extra is fetched to log them.
+//
+// Only a snapshot from this request's own lifetime is reported. An older one
+// belongs to some earlier request and would read as this one's price. A
+// concurrent Codex request's snapshot can land in the window instead, which
+// is harmless: the two share one account and one allowance, so the figure is
+// true either way — it is the allowance that is being reported, not a
+// per-request charge.
+//
+// Nothing is logged for a request that made it no further than a transport
+// error, since no response carried headers to read.
+func codexPlanLogFields(startedAt time.Time) []any {
+	usage, ok := codex.LatestUsage()
+	if !ok || usage.CapturedAt.Before(startedAt) {
+		return nil
+	}
+	var fields []any
+	if usage.Plan != "" {
+		fields = append(fields, "codex_plan", usage.Plan)
+	}
+	fields = append(fields, codexWindowLogFields("codex_primary", usage.Primary)...)
+	fields = append(fields, codexWindowLogFields("codex_secondary", usage.Secondary)...)
+	return fields
+}
+
+// codexWindowLogFields renders one rate-limit window. A window the account
+// does not have is left off entirely rather than logged as zeros, which
+// would read as "a window with nothing used yet" - the same distinction
+// providerUsageLogFields draws for tokens a provider never reported.
+func codexWindowLogFields(prefix string, window codex.UsageWindow) []any {
+	if !window.Known() {
+		return nil
+	}
+	fields := []any{
+		prefix + "_used_percent", window.UsedPercent,
+		prefix + "_window_minutes", window.WindowMinutes,
+	}
+	if !window.ResetsAt.IsZero() {
+		fields = append(fields, prefix+"_resets_at", window.ResetsAt.UTC().Format(time.RFC3339))
+	}
+	return fields
 }
 
 // errorCategory maps an error to a closed, safe set of tokens without ever

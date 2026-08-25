@@ -282,7 +282,7 @@ func TestInstrumentedModel_Success(t *testing.T) {
 		{Type: fantasy.StreamPartTypeTextDelta, Delta: "hello"},
 		{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop, Usage: fantasy.Usage{InputTokens: 42, OutputTokens: 7, CacheReadTokens: 15}},
 	}}}
-	model := newInstrumentedModel(inner, corr)
+	model := newInstrumentedModel(inner, corr, "openai")
 
 	stream, err := model.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
@@ -326,7 +326,7 @@ func TestInstrumentedModel_StreamCreationError(t *testing.T) {
 
 	corr := providerCorrelation{sessionID: "sess-err", runID: "run-err", turnID: "turn-err", step: 0, attempt: 1, reason: reasonTurn}
 	inner := &fakeStreamModel{script: streamScript{createErr: &fantasy.ProviderError{StatusCode: 503, Message: "unavailable"}}}
-	model := newInstrumentedModel(inner, corr)
+	model := newInstrumentedModel(inner, corr, "openai")
 
 	_, err := model.Stream(t.Context(), fantasy.Call{})
 	require.Error(t, err, "the creation error must propagate to the caller (fantasy retry)")
@@ -359,7 +359,7 @@ func TestInstrumentedModel_StreamErrorPart(t *testing.T) {
 		{Type: fantasy.StreamPartTypeTextDelta, Delta: "partial"},
 		{Type: fantasy.StreamPartTypeError, Error: sentinel},
 	}}}
-	model := newInstrumentedModel(inner, corr)
+	model := newInstrumentedModel(inner, corr, "openai")
 
 	stream, err := model.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err, "an error part does not fail the Stream call itself")
@@ -410,7 +410,7 @@ func TestInstrumentedModel_StreamCanceledErrorPart(t *testing.T) {
 				Error: tc.err,
 			}}}}
 
-			stream, err := newInstrumentedModel(inner, corr).Stream(t.Context(), fantasy.Call{})
+			stream, err := newInstrumentedModel(inner, corr, "openai").Stream(t.Context(), fantasy.Call{})
 			require.NoError(t, err)
 			consumeStream(stream)
 
@@ -430,7 +430,7 @@ func TestInstrumentedModel_Cancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	corr := providerCorrelation{sessionID: "sess-cxl", runID: "run-cxl", turnID: "turn-cxl", step: 0, attempt: 1, reason: reasonTurn}
 	inner := &fakeStreamModel{script: streamScript{block: true}}
-	model := newInstrumentedModel(inner, corr)
+	model := newInstrumentedModel(inner, corr, "openai")
 
 	stream, err := model.Stream(ctx, fantasy.Call{})
 	require.NoError(t, err)
@@ -476,7 +476,7 @@ func TestInstrumentedModel_StreamCreationCanceled(t *testing.T) {
 	// A model whose Stream returns the context's error (the way a transport
 	// aborts a request that was canceled before it left the process).
 	inner := &fakeStreamModel{script: streamScript{createErr: ctx.Err()}}
-	model := newInstrumentedModel(inner, corr)
+	model := newInstrumentedModel(inner, corr, "openai")
 
 	_, err := model.Stream(ctx, fantasy.Call{})
 	require.Error(t, err, "the creation error must propagate to the caller")
@@ -500,7 +500,7 @@ func TestInstrumentedModel_StreamCreationWrappedCanceled(t *testing.T) {
 
 	corr := providerCorrelation{sessionID: "sess-cxl3", runID: "run-cxl3", turnID: "turn-cxl3", step: 0, attempt: 1, reason: reasonTurn}
 	inner := &fakeStreamModel{script: streamScript{createErr: fmt.Errorf("transport stopped: %w", context.Canceled)}}
-	model := newInstrumentedModel(inner, corr)
+	model := newInstrumentedModel(inner, corr, "openai")
 
 	_, err := model.Stream(t.Context(), fantasy.Call{})
 	require.ErrorIs(t, err, context.Canceled)
@@ -526,7 +526,7 @@ func TestInstrumentedModel_AbortedWithoutFinish(t *testing.T) {
 	inner := &fakeStreamModel{script: streamScript{parts: []fantasy.StreamPart{
 		{Type: fantasy.StreamPartTypeTextDelta, Delta: "partial"},
 	}}}
-	model := newInstrumentedModel(inner, corr)
+	model := newInstrumentedModel(inner, corr, "openai")
 
 	stream, err := model.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
@@ -559,7 +559,7 @@ func TestInstrumentedModel_ConsumerStopsBeforeFinish(t *testing.T) {
 		{Type: fantasy.StreamPartTypeTextDelta, Delta: "partial"},
 		{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop},
 	}}}
-	model := newInstrumentedModel(inner, corr)
+	model := newInstrumentedModel(inner, corr, "openai")
 
 	stream, err := model.Stream(t.Context(), fantasy.Call{})
 	require.NoError(t, err)
@@ -645,7 +645,7 @@ func TestInstrumentedModel_ExactPairCount(t *testing.T) {
 		} else {
 			corr.reason = reasonTurn
 		}
-		model := newInstrumentedModel(&fakeStreamModel{script: script}, corr)
+		model := newInstrumentedModel(&fakeStreamModel{script: script}, corr, "openai")
 		stream, err := model.Stream(t.Context(), fantasy.Call{})
 		if err != nil {
 			require.Equal(t, outcomeError, outcomes[i])

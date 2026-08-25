@@ -572,7 +572,7 @@ func (t *runTurn) modelProvider() fantasy.LanguageModel {
 		attempt:   t.attempt,
 		reason:    t.requestStartReason(),
 	}
-	return newInstrumentedModel(m.Model, corr)
+	return newInstrumentedModel(m.Model, corr, m.ModelCfg.Provider)
 }
 
 // requestStartReason labels the request about to be made. It prefers a
