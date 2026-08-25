@@ -1,11 +1,19 @@
 package herdr
 
 import (
+	"os"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestMain(m *testing.M) {
+	for _, key := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"} {
+		_ = os.Unsetenv(key)
+	}
+	os.Exit(m.Run())
+}
 
 // recordingSender captures state transitions without connecting to a
 // real Unix socket.
@@ -197,15 +205,17 @@ func TestUnixSender_SendDuringClose(t *testing.T) {
 	wg.Wait()
 }
 
-// TestInitDisabledUnderTest guards the critical safety property that
-// herdr never attaches to a real pane from a test binary. Test
-// processes inherit the developer's HERDR_* environment, so a missing
-// guard would release the live pane's agent on teardown. Because this
-// test itself runs under `go test`, Init must return nil even with a
-// complete, valid-looking environment.
-func TestInitDisabledUnderTest(t *testing.T) {
-	t.Setenv("HERDR_ENV", "1")
-	t.Setenv("HERDR_SOCKET_PATH", "/tmp/does-not-matter.sock")
-	t.Setenv("HERDR_PANE_ID", "test:pane")
-	assert.Nil(t, newFromEnv())
+func TestNewFromEnvInitializesWithInjectedSender(t *testing.T) {
+	values := map[string]string{
+		"HERDR_ENV":         "1",
+		"HERDR_SOCKET_PATH": "/tmp/herdr.sock",
+		"HERDR_PANE_ID":     "test:pane",
+	}
+	recorder := &recordingSender{}
+	client := newFromEnv(func(key string) string { return values[key] }, func(string) sender { return recorder })
+
+	assert.Equal(t, "/tmp/herdr.sock", client.socketPath)
+	assert.Equal(t, "test:pane", client.paneID)
+	assert.Equal(t, []string{stateIdle}, recorder.states)
+	assert.Equal(t, []string{"pane.report_agent"}, recorder.methods)
 }

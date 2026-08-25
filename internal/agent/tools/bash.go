@@ -146,7 +146,7 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution, modelID string) string {
+func bashDescription(attribution *config.Attribution, modelID string, availability toolAvailability) string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
@@ -155,7 +155,7 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 		Attribution:     *attribution,
 		ModelID:         modelID,
 		RgAvailable:     getRg() != "",
-		GhAvailable:     ghAvailable,
+		GhAvailable:     availability.ghAvailable,
 	}); err != nil {
 		// this should never happen.
 		panic("failed to execute bash description template: " + err.Error())
@@ -200,10 +200,11 @@ func blockFuncs() []shell.BlockFunc {
 // tool is built (see NewCoordinator's errBackgroundShellsRequired check), so
 // this path is unreachable in production and callers no longer need a panic
 // guard here.
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, bgManager *shell.BackgroundShellManager) fantasy.AgentTool {
+func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, bgManager *shell.BackgroundShellManager, options ...toolAvailabilityOption) fantasy.AgentTool {
+	availability := applyToolAvailability(options)
 	return withToolParameterSchema(fantasy.NewAgentTool(
 		BashToolName,
-		bashDescription(attribution, modelID),
+		bashDescription(attribution, modelID, availability),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Command == "" {
 				return invalidParam("command"), nil

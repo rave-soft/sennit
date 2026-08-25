@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/clipboard"
@@ -260,23 +259,11 @@ func doctorPermissionsBypass(cfg *Config) []Problem {
 // It is deliberately not part of [Doctor], which answers "is this config
 // right?" from the config alone and stays reproducible anywhere. Callers
 // merge this in the same way they merge MCP state and SkillProblems.
-//
-// It answers empty under test, because the machine is the input here: every
-// test that asserts a clean problem list through a caller (`sennit doctor`,
-// the TUI dialog, sennit_info) would otherwise pass or fail on whether the
-// machine running it happens to have a clipboard helper — CI images do not.
-// The check itself is exercised directly via environmentProblems.
 func EnvironmentProblems() []Problem {
-	if testing.Testing() {
-		return nil
-	}
-	return environmentProblems()
+	return environmentProblems(clipboard.MissingHTMLHelpers())
 }
 
-// environmentProblems is the check itself, split out so the package's own
-// tests reach it without the testing.Testing guard above.
-func environmentProblems() []Problem {
-	missing := clipboard.MissingHTMLHelpers()
+func environmentProblems(missing []string) []Problem {
 	if len(missing) == 0 {
 		return nil
 	}

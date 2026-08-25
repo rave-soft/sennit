@@ -608,7 +608,7 @@ func TestSennitInfo_Problems_MCPError(t *testing.T) {
 	})
 
 	var b strings.Builder
-	writeProblems(&b, cfg, states, nil)
+	writeProblems(&b, cfg, states, nil, func() []config.Problem { return nil })
 	output := b.String()
 	require.Contains(t, output, "[problems]")
 	require.Contains(t, output, "mcp.filesystem")
@@ -633,7 +633,7 @@ func TestSennitInfo_Problems_BrokenSkill(t *testing.T) {
 	}}
 
 	var b strings.Builder
-	writeProblems(&b, cfg, nil, states)
+	writeProblems(&b, cfg, nil, states, func() []config.Problem { return nil })
 	output := b.String()
 	require.Contains(t, output, "[problems]")
 	// Named after its directory: a skill whose frontmatter did not parse

@@ -35,21 +35,22 @@ type fetchDescriptionData struct {
 	MaxFetchSizeKB int
 }
 
-func fetchDescription() string {
+func fetchDescription(availability toolAvailability) string {
 	return renderTemplate(fetchDescriptionTpl, fetchDescriptionData{
-		GhAvailable:    ghAvailable,
+		GhAvailable:    availability.ghAvailable,
 		MaxFetchSizeKB: MaxFetchSize / 1024,
 	})
 }
 
-func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
+func NewFetchTool(permissions permission.Service, workingDir string, client *http.Client, options ...toolAvailabilityOption) fantasy.AgentTool {
+	availability := applyToolAvailability(options)
 	if client == nil {
 		client = newHTTPClient(30 * time.Second)
 	}
 
 	return withToolParameterSchema(fantasy.NewParallelAgentTool(
 		FetchToolName,
-		fetchDescription(),
+		fetchDescription(availability),
 		func(ctx context.Context, params FetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.URL == "" {
 				return invalidParam("url"), nil

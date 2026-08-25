@@ -10,10 +10,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Check the loaded configuration for problems",
-	Long: `Check the loaded configuration for problems: agents pinned to a
+var doctorCmd = newDoctorCmd(config.EnvironmentProblems)
+
+func newDoctorCmd(environmentProblems func() []config.Problem) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Check the loaded configuration for problems",
+		Long: `Check the loaded configuration for problems: agents pinned to a
 model that doesn't resolve to a provider, a reasoning_effort set on a model
 that can't reason, providers dropped for a missing api key, a main model
 that fell back to a default, and disabled_tools/allowed_tools typos.
@@ -27,40 +30,43 @@ sennit_info tool for that.
 
 Exit code is 1 if any problem is severity "error", 0 otherwise (including
 when only warnings were found).`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		debug, _ := cmd.Flags().GetBool("debug")
-		jsonOut, _ := cmd.Flags().GetBool("json")
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			debug, _ := cmd.Flags().GetBool("debug")
+			jsonOut, _ := cmd.Flags().GetBool("json")
 
-		_, cfg, err := initConfig(cmd, debug)
-		if err != nil {
-			return err
-		}
-
-		problems := config.Doctor(cfg.Config())
-		problems = append(problems, config.EnvironmentProblems()...)
-
-		if jsonOut {
-			bts, err := json.MarshalIndent(problems, "", "  ")
+			_, cfg, err := initConfig(cmd, debug)
 			if err != nil {
-				return fmt.Errorf("failed to marshal problems: %w", err)
+				return err
 			}
-			cmd.Println(string(bts))
-		} else {
-			printDoctorProblems(cmd, problems)
-		}
 
-		errCount := 0
-		for _, p := range problems {
-			if p.Severity == config.SeverityError {
-				errCount++
+			problems := config.Doctor(cfg.Config())
+			problems = append(problems, environmentProblems()...)
+
+			if jsonOut {
+				bts, err := json.MarshalIndent(problems, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal problems: %w", err)
+				}
+				cmd.Println(string(bts))
+			} else {
+				printDoctorProblems(cmd, problems)
 			}
-		}
-		if errCount > 0 {
-			return fmt.Errorf("%d config problem(s), %d blocking", len(problems), errCount)
-		}
-		return nil
-	},
+
+			errCount := 0
+			for _, p := range problems {
+				if p.Severity == config.SeverityError {
+					errCount++
+				}
+			}
+			if errCount > 0 {
+				return fmt.Errorf("%d config problem(s), %d blocking", len(problems), errCount)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().Bool("json", false, "output problems as JSON")
+	return cmd
 }
 
 // printDoctorProblems renders problems grouped by area, in a stable order,
@@ -96,6 +102,5 @@ func printDoctorProblems(cmd *cobra.Command, problems []config.Problem) {
 }
 
 func init() {
-	doctorCmd.Flags().Bool("json", false, "output problems as JSON")
 	rootCmd.AddCommand(doctorCmd)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
 	gitpkg "github.com/rave-soft/sennit/internal/git"
+	"github.com/rave-soft/sennit/internal/herdr"
 	"github.com/rave-soft/sennit/internal/skills"
 )
 
@@ -81,6 +82,7 @@ type BootstrapOptions struct {
 	// fails. The top-level workspace uses this to log the failure; a
 	// spawned thread's workspace reports it to its caller instead.
 	OnAppInitFailure func(err error)
+	HerdrClient      func() *herdr.Client
 
 	newApp func(context.Context, *sql.DB, *config.ConfigStore, *skills.Manager) (*App, error)
 }
@@ -190,7 +192,13 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 
 	newApp := opts.newApp
 	if newApp == nil {
-		newApp = New
+		herdrClient := opts.HerdrClient
+		if herdrClient == nil {
+			herdrClient = herdr.Init
+		}
+		newApp = func(ctx context.Context, conn *sql.DB, store *config.ConfigStore, manager *skills.Manager) (*App, error) {
+			return New(ctx, conn, store, manager, WithHerdrClient(herdrClient))
+		}
 	}
 	appInstance, err := newApp(ctx, conn, cfg, skillsMgr)
 	if err != nil {

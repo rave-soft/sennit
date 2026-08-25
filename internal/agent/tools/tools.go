@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 
 	"charm.land/fantasy"
@@ -268,14 +267,38 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-// ghAvailable indicates whether the `gh` CLI is available on PATH.
-var ghAvailable = func() bool {
-	if testing.Testing() {
-		return false
+type toolAvailabilityOption func(*toolAvailability)
+
+type ToolAvailabilityOption = toolAvailabilityOption
+
+type toolAvailability struct {
+	ghAvailable bool
+}
+
+func withGHAvailability(available bool) toolAvailabilityOption {
+	return func(availability *toolAvailability) {
+		availability.ghAvailable = available
 	}
-	_, err := exec.LookPath("gh")
+}
+
+func ResolveSystemToolAvailability() toolAvailabilityOption {
+	return withGHAvailability(commandAvailable(exec.LookPath, "gh"))
+}
+
+func applyToolAvailability(options []toolAvailabilityOption) toolAvailability {
+	var availability toolAvailability
+	for _, option := range options {
+		if option != nil {
+			option(&availability)
+		}
+	}
+	return availability
+}
+
+func commandAvailable(lookup func(string) (string, error), name string) bool {
+	_, err := lookup(name)
 	return err == nil
-}()
+}
 
 // toolDescriptionData is the common data structure for tool description templates.
 type toolDescriptionData struct {
@@ -284,9 +307,11 @@ type toolDescriptionData struct {
 
 // renderToolDescription renders a tool description template with the given data.
 func renderToolDescription(tmpl *template.Template) string {
-	data := toolDescriptionData{
-		GhAvailable: ghAvailable,
-	}
+	return renderToolDescriptionWithAvailability(tmpl, toolAvailability{})
+}
+
+func renderToolDescriptionWithAvailability(tmpl *template.Template, availability toolAvailability) string {
+	data := toolDescriptionData{GhAvailable: availability.ghAvailable}
 	var out bytes.Buffer
 	if err := tmpl.Execute(&out, data); err != nil {
 		panic("failed to execute tool description template: " + err.Error())

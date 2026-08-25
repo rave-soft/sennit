@@ -77,10 +77,11 @@ type RuntimeOverrides struct {
 // another is already in flight skips instead of running redundant disk
 // I/O and HTTP calls concurrently with it.
 type ConfigStore struct {
-	config         *Config
-	workingDir     string
-	resolver       VariableResolver
-	globalDataPath string // ~/.local/share/sennit/sennit.json
+	config          *Config
+	workingDir      string
+	resolver        VariableResolver
+	globalDataPath  string // ~/.local/share/sennit/sennit.json
+	credentialsFile credentialsFileDependency
 	// workspacePath (.sennit/sennit.json) is read from paths that hold
 	// writeMu (updateLocked's staleness refresh) and from paths that hold
 	// nothing (ConfigPath's public callers), while reloadFromDisk

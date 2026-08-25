@@ -29,6 +29,7 @@ type buildToolsCtx struct {
 	threads            tools.ThreadManager
 	taskManager        tools.TaskManager
 	backgroundAgentsOn bool
+	toolAvailability   tools.ToolAvailabilityOption
 }
 
 // toolSpec lists the exact static tool names built by a row. Their gate is
@@ -135,7 +136,7 @@ func toolSpecs() []toolSpec {
 		// gets each one via the uniform filter in buildTools.
 		{coreToolNames(), func(_ context.Context, c *coordinator, b *buildToolsCtx) ([]fantasy.AgentTool, error) {
 			return []fantasy.AgentTool{
-				tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), b.cfg.Attribution(), b.modelID, c.background),
+				tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), b.cfg.Attribution(), b.modelID, c.background, b.toolAvailability),
 				tools.NewGitStatusTool(c.cfg.WorkingDir()),
 				tools.NewGitDiffTool(c.cfg.WorkingDir()),
 				tools.NewGitLogTool(c.cfg.WorkingDir()),
@@ -147,9 +148,9 @@ func toolSpecs() []toolSpec {
 				tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
 				tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
 				tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-				tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-				tools.NewWebFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
-				tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil, b.searchBackend),
+				tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil, b.toolAvailability),
+				tools.NewWebFetchTool(c.permissions, c.cfg.WorkingDir(), nil, b.toolAvailability),
+				tools.NewWebSearchTool(c.permissions, c.cfg.WorkingDir(), nil, b.searchBackend, b.toolAvailability),
 				tools.NewGlobTool(c.cfg.WorkingDir(), b.cfg.Glob()),
 				tools.NewSearchTool(c.cfg.WorkingDir(), b.cfg.Grep()),
 				tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), b.cfg.Ls()),

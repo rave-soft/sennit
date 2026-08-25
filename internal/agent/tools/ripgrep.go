@@ -53,10 +53,20 @@ func ripgrepDescription() string {
 // system: ripgrep when the rg binary is installed, otherwise the pure-Go
 // grep fallback.
 func NewSearchTool(workingDir string, cfg config.ToolGrep) fantasy.AgentTool {
-	if HasRipgrep() {
-		return NewRipgrepTool(workingDir, cfg)
+	return newSearchTool(workingDir, cfg, getRg())
+}
+
+func newSearchTool(workingDir string, cfg config.ToolGrep, ripgrepPath string) fantasy.AgentTool {
+	if ripgrepPath != "" {
+		return NewRipgrepTool(workingDir, cfg, withRipgrepCommand(ripgrepSearchCommand(ripgrepPath)))
 	}
 	return NewGrepTool(workingDir, cfg)
+}
+
+func ripgrepSearchCommand(name string) func(context.Context, string, string, string, bool) *exec.Cmd {
+	return func(ctx context.Context, pattern, path, include string, caseInsensitive bool) *exec.Cmd {
+		return newRgSearchCmd(ctx, name, pattern, path, include, caseInsensitive)
+	}
 }
 
 // ripgrepToolOption supplies a controlled command backend for tests. Production

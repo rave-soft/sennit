@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"os"
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
@@ -10,8 +11,13 @@ import (
 func TestNewSearchToolFallsBackToGrep(t *testing.T) {
 	t.Parallel()
 
-	// Under `go test`, getRg is disabled, so the search slot must resolve
-	// to the pure-Go grep tool.
-	tool := NewSearchTool(t.TempDir(), config.ToolGrep{})
+	tool := newSearchTool(t.TempDir(), config.ToolGrep{}, "")
 	require.Equal(t, GrepToolName, tool.Info().Name)
+}
+
+func TestLookupRipgrep(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "/tools/rg", lookupRipgrep(func(string) (string, error) { return "/tools/rg", nil }))
+	require.Empty(t, lookupRipgrep(func(string) (string, error) { return "", os.ErrNotExist }))
 }

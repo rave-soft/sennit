@@ -12,6 +12,9 @@ import (
 // test that forgets to isolate writes sessions into the developer's real
 // profile, which is exactly what used to happen.
 func TestMain(m *testing.M) {
+	for _, key := range []string{"HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_PANE_ID"} {
+		_ = os.Unsetenv(key)
+	}
 	cleanup := testenv.IsolateGlobalProfile()
 	code := m.Run()
 	cleanup()

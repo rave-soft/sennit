@@ -10,6 +10,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/home"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -34,7 +35,7 @@ import (
 // HTTP-performing phase out this way also lets callers (Load,
 // reloadFromDisk) run it before taking writeMu — see those call sites for
 // why that matters.
-func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider, dependencies ...credentialsFileDependency) error {
 	restore := PushPopEnvOverrides()
 
 	// When disable_default_providers is enabled, skip all default/embedded
@@ -45,7 +46,11 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		knownProviders = nil
 	}
 
-	knownProviderNames, actions, err := c.mergeCatalogProviders(env, resolver, knownProviders)
+	credentialsFile := credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}
+	if len(dependencies) > 0 {
+		credentialsFile = dependencies[0]
+	}
+	knownProviderNames, actions, err := c.mergeCatalogProviders(env, resolver, knownProviders, credentialsFile)
 	if err != nil {
 		restore()
 		return err
@@ -203,7 +208,7 @@ func applyPendingDiskActions(store *ConfigStore, actions []pendingDiskAction) {
 // and tests on its own: mergeProviderOverride (user overrides onto the
 // catalog entry), applyProviderVendorSetup (OAuth wiring), and
 // applyProviderCredentials (the checks that decide whether it loads).
-func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) (map[string]bool, []pendingDiskAction, error) {
+func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider, credentialsFile credentialsFileDependency) (map[string]bool, []pendingDiskAction, error) {
 	knownProviderNames := make(map[string]bool)
 	var actions []pendingDiskAction
 
@@ -253,7 +258,7 @@ func (c *Config) mergeCatalogProviders(env env.Env, resolver VariableResolver, k
 			continue
 		}
 
-		prepared, ok := c.applyProviderCredentials(env, resolver, p, configExists, prepared)
+		prepared, ok := c.applyProviderCredentials(env, resolver, p, configExists, prepared, credentialsFile)
 		if !ok {
 			continue
 		}
@@ -339,7 +344,7 @@ func (c *Config) applyProviderVendorSetup(prepared ProviderConfig, p catwalk.Pro
 // the whole embedded catalog on every load, and warning about every
 // catalog entry the user never configured would be noise. A provider the
 // user did configure gets a slog.Warn and a doctor Problem.
-func (c *Config) applyProviderCredentials(env env.Env, resolver VariableResolver, p catwalk.Provider, configExists bool, prepared ProviderConfig) (ProviderConfig, bool) {
+func (c *Config) applyProviderCredentials(env env.Env, resolver VariableResolver, p catwalk.Provider, configExists bool, prepared ProviderConfig, credentialsFile credentialsFileDependency) (ProviderConfig, bool) {
 	switch p.ID {
 	// Handle specific providers that require additional configuration
 	case catwalk.InferenceProviderVertexAI:
@@ -368,7 +373,7 @@ func (c *Config) applyProviderCredentials(env env.Env, resolver VariableResolver
 		prepared.BaseURL = endpoint
 		prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
 	case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
-		if p.APIKey == "" && !hasAWSCredentials(env) {
+		if p.APIKey == "" && !hasAWSCredentialsWithFiles(env, credentialsFile.homeDir, credentialsFile.stat) {
 			if configExists {
 				problem := providerDropProblem(string(p.ID), "no api_key and no AWS credentials found", "static check only; set api_key or AWS credentials and reload")
 				c.dropProvider(string(p.ID), slog.Warn, "Skipping Bedrock provider due to missing AWS credentials", nil, &problem)

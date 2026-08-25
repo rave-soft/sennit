@@ -63,7 +63,7 @@ func TestDoctorProblems_StaticConfigCheck(t *testing.T) {
 	}
 
 	com := newDoctorTestCommon(t, cfg, nil)
-	problems := DoctorProblems(com)
+	problems := doctorProblemsWithEnvironment(com, func() []config.Problem { return nil })
 
 	require.Len(t, problems, 1)
 	require.Equal(t, config.AreaAgent, problems[0].Area)
@@ -83,12 +83,23 @@ func TestDoctorProblems_MCPFailedState(t *testing.T) {
 	}
 
 	com := newDoctorTestCommon(t, cfg, states)
-	problems := DoctorProblems(com)
+	problems := doctorProblemsWithEnvironment(com, func() []config.Problem { return nil })
 
 	require.Len(t, problems, 1)
 	require.Equal(t, config.AreaMCP, problems[0].Area)
 	require.Equal(t, "github", problems[0].Subject)
 	require.Contains(t, problems[0].Message, "connection refused")
+}
+
+func TestDoctorProblems_UsesInjectedEnvironmentProblems(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{Options: &config.Options{}, Providers: csync.NewMap[string, config.ProviderConfig]()}
+	com := newDoctorTestCommon(t, cfg, nil)
+	injected := config.Problem{Severity: config.SeverityWarn, Area: config.AreaEnvironment, Subject: "clipboard", Message: "injected environment problem"}
+
+	problems := doctorProblemsWithEnvironment(com, func() []config.Problem { return []config.Problem{injected} })
+	require.Equal(t, []config.Problem{injected}, problems)
 }
 
 func TestDoctorProblems_Clean(t *testing.T) {
@@ -97,7 +108,7 @@ func TestDoctorProblems_Clean(t *testing.T) {
 	cfg := &config.Config{Options: &config.Options{}, Providers: csync.NewMap[string, config.ProviderConfig]()}
 	com := newDoctorTestCommon(t, cfg, nil)
 
-	require.Empty(t, DoctorProblems(com))
+	require.Empty(t, doctorProblemsWithEnvironment(com, func() []config.Problem { return nil }))
 }
 
 // TestNewDoctor_ListsProblems checks the dialog's item list reflects
@@ -118,10 +129,10 @@ func TestNewDoctor_ListsProblems(t *testing.T) {
 	}
 	com := newDoctorTestCommon(t, cfg, nil)
 
-	d := NewDoctor(com)
+	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
 	require.Equal(t, DoctorID, d.ID())
 
-	items, _, err := doctorItemsFrom(com, DoctorProblems(com))
+	items, _, err := doctorItemsFrom(com, doctorProblemsWithEnvironment(com, func() []config.Problem { return nil }))
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 
@@ -148,7 +159,7 @@ func TestDoctor_EnterOpensDetail(t *testing.T) {
 		},
 	}
 	com := newDoctorTestCommon(t, cfg, nil)
-	d := NewDoctor(com)
+	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
 
 	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	require.Nil(t, action, "Enter must not silently close the dialog anymore")
@@ -174,7 +185,7 @@ func TestDoctor_EscFromList_Closes(t *testing.T) {
 		},
 	}
 	com := newDoctorTestCommon(t, cfg, nil)
-	d := NewDoctor(com)
+	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
 
 	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.IsType(t, ActionClose{}, action)
@@ -194,7 +205,7 @@ func TestDoctor_EscFromDetail_GoesBackToList(t *testing.T) {
 		},
 	}
 	com := newDoctorTestCommon(t, cfg, nil)
-	d := NewDoctor(com)
+	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
 
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	require.Equal(t, doctorModeDetail, d.mode)
@@ -218,7 +229,7 @@ func TestDoctor_ProviderDetail_POpensProviders(t *testing.T) {
 		},
 	}
 	com := newDoctorTestCommon(t, cfg, nil)
-	d := NewDoctor(com)
+	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
 
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	require.Equal(t, doctorModeDetail, d.mode)
@@ -240,7 +251,7 @@ func TestDoctor_ModelDetail_MOpensModels(t *testing.T) {
 		},
 	}
 	com := newDoctorTestCommon(t, cfg, nil)
-	d := NewDoctor(com)
+	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
 
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	require.Equal(t, doctorModeDetail, d.mode)
@@ -262,7 +273,7 @@ func TestDoctor_AgentDetail_NoFixShortcut(t *testing.T) {
 		},
 	}
 	com := newDoctorTestCommon(t, cfg, nil)
-	d := NewDoctor(com)
+	d := newDoctorWithEnvironment(com, func() []config.Problem { return nil })
 
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter}))
 	require.Nil(t, d.HandleMsg(tea.KeyPressMsg{Code: 'p', Text: "p"}))

@@ -25,7 +25,6 @@ import (
 	"net"
 	"os"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/rave-soft/sennit/internal/brand"
@@ -112,24 +111,17 @@ var (
 // running inside a herdr pane. Safe to call from any goroutine.
 func Init() *Client {
 	initOnce.Do(func() {
-		defaultClient = newFromEnv()
+		defaultClient = newFromEnv(os.Getenv, func(socketPath string) sender { return newUnixSender(socketPath) })
 	})
 	return defaultClient
 }
 
-func newFromEnv() *Client {
-	if os.Getenv("HERDR_ENV") != "1" {
+func newFromEnv(getenv func(string) string, senderFactory func(string) sender) *Client {
+	if getenv("HERDR_ENV") != "1" {
 		return nil
 	}
-	// A test binary inherits the launching shell's HERDR_* env, so
-	// without this it would attach to the developer's live pane and
-	// release its agent on teardown. Skip herdr entirely under test.
-	if testing.Testing() {
-		slog.Debug("Herdr integration disabled: running under go test")
-		return nil
-	}
-	socketPath := os.Getenv("HERDR_SOCKET_PATH")
-	paneID := os.Getenv("HERDR_PANE_ID")
+	socketPath := getenv("HERDR_SOCKET_PATH")
+	paneID := getenv("HERDR_PANE_ID")
 	if socketPath == "" || paneID == "" {
 		slog.Debug(
 			"Herdr integration disabled: incomplete environment",
@@ -143,7 +135,7 @@ func newFromEnv() *Client {
 		paneID:     paneID,
 		state:      stateIdle,
 		seq:        uint64(time.Now().UnixNano()),
-		snd:        newUnixSender(socketPath),
+		snd:        senderFactory(socketPath),
 	}
 	c.registerInitial()
 	return c

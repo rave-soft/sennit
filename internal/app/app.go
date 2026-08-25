@@ -64,7 +64,23 @@ type App struct {
 // per-workspace skill discovery results computed by the caller; the
 // caller is responsible for constructing it (typically via
 // skills.NewManager + skills.DiscoverFromConfig).
-func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager) (*App, error) {
+type Option func(*appOptions)
+
+type appOptions struct {
+	herdrClient func() *herdr.Client
+}
+
+func WithHerdrClient(client func() *herdr.Client) Option {
+	return func(options *appOptions) {
+		options.herdrClient = client
+	}
+}
+
+func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, options ...Option) (*App, error) {
+	appOpts := appOptions{herdrClient: func() *herdr.Client { return nil }}
+	for _, option := range options {
+		option(&appOpts)
+	}
 	q := db.New(conn)
 	cfg := store.Config()
 
@@ -110,7 +126,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// (see its doc) rather than left to outlive ctx unconditionally.
 	var herdrCtx context.Context
 	herdrCtx, app.herdrCancel = context.WithCancel(ctx)
-	app.herdrClient = herdr.Init()
+	app.herdrClient = appOpts.herdrClient()
 	herdr.BridgeLocal(herdrCtx, app.herdrClient, herdr.BridgeSources{
 		PermRequests:      app.Permissions(),
 		PermNotifications: app.Permissions(),

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"testing"
 
 	"github.com/pressly/goose/v3"
 	"github.com/rave-soft/sennit/internal/brand"
@@ -36,10 +35,6 @@ var FS embed.FS
 
 func init() {
 	goose.SetBaseFS(FS)
-
-	if testing.Testing() {
-		goose.SetLogger(goose.NopLogger())
-	}
 }
 
 // connEntry holds a shared database connection and its reference

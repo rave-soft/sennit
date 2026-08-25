@@ -7,9 +7,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pressly/goose/v3"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/stretchr/testify/require"
 )
+
+func init() {
+	goose.SetLogger(goose.NopLogger())
+}
 
 func TestConnect_SharesConnectionForSameDataDir(t *testing.T) {
 	dataDir := t.TempDir()

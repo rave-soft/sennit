@@ -115,6 +115,19 @@ func TestWriteFileWithHistoryCreatesNewFile(t *testing.T) {
 	require.Equal(t, "hello", string(content))
 }
 
+func TestCommandAvailable(t *testing.T) {
+	require.True(t, commandAvailable(func(string) (string, error) { return "/tools/gh", nil }, "gh"))
+	require.False(t, commandAvailable(func(string) (string, error) { return "", os.ErrNotExist }, "gh"))
+}
+
+func TestToolAvailabilityIsPerInstance(t *testing.T) {
+	unavailable := NewFetchTool(nil, t.TempDir(), nil, withGHAvailability(false))
+	available := NewFetchTool(nil, t.TempDir(), nil, withGHAvailability(true))
+
+	require.NotContains(t, unavailable.Info().Description, "use `gh` CLI")
+	require.Contains(t, available.Info().Description, "use `gh` CLI")
+}
+
 func TestNewHTTPClientAppliesTimeout(t *testing.T) {
 	client := newHTTPClient(5 * time.Second)
 	require.Equal(t, 5*time.Second, client.Timeout)

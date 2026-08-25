@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/qjebbs/go-jsons"
@@ -26,7 +25,16 @@ import (
 
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
+type credentialsFileDependency struct {
+	homeDir string
+	stat    func(string) (os.FileInfo, error)
+}
+
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat})
+}
+
+func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFileDependency) (*ConfigStore, error) {
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 
@@ -35,6 +43,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		globalDataPath:             GlobalConfigData(),
 		externalChangePollInterval: externalChangePollInterval,
 		debugOverride:              debug,
+		credentialsFile:            credentialsFile,
 	}
 
 	built, err := buildConfig(store, buildConfigOptions{
@@ -43,6 +52,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		dataDir:           dataDir,
 		migrateModelCache: true,
 		persistFallback:   true,
+		credentialsFile:   credentialsFile,
 	})
 	if err != nil {
 		return nil, err
@@ -479,7 +489,7 @@ func loadFromBytes(configs [][]byte) (*Config, error) {
 	return &config, nil
 }
 
-func hasAWSCredentials(env env.Env) bool {
+func hasAWSCredentialsWithFiles(env env.Env, homeDir string, stat func(string) (os.FileInfo, error)) bool {
 	if env.Get("AWS_BEARER_TOKEN_BEDROCK") != "" {
 		return true
 	}
@@ -501,18 +511,10 @@ func hasAWSCredentials(env env.Env) bool {
 		return true
 	}
 
-	// File-based credential discovery requires filesystem stats, so do it
-	// last and skip it under test. Checking testing.Testing() before the
-	// os.Stat call (rather than after, in the && tail) ensures the syscall
-	// is never issued during tests, where it otherwise ran unconditionally
-	// and only had its result discarded.
-	if testing.Testing() {
-		return false
-	}
-	if _, err := os.Stat(filepath.Join(home.Dir(), ".aws/credentials")); err == nil {
+	if _, err := stat(filepath.Join(homeDir, ".aws/credentials")); err == nil {
 		return true
 	}
-	if _, err := os.Stat(filepath.Join(home.Dir(), ".aws/login")); err == nil {
+	if _, err := stat(filepath.Join(homeDir, ".aws/login")); err == nil {
 		return true
 	}
 

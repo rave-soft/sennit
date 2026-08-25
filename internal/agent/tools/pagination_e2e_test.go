@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -108,21 +109,23 @@ func TestGrepHandlerPaginationSortContextAndGeneration(t *testing.T) {
 }
 
 func TestRipgrepHandlerPaginationAndGoRegexDifference(t *testing.T) {
-	if getRg() == "" {
-		t.Skip("ripgrep executable is unavailable")
-	}
 	dir := t.TempDir()
-	path := filepath.Join(dir, "data.txt")
+	fixtureDir := filepath.Join(dir, "fixtures")
+	require.NoError(t, os.Mkdir(fixtureDir, 0o700))
+	path := filepath.Join(fixtureDir, "data.txt")
 	var content strings.Builder
 	for i := range 230 {
-		fmt.Fprintf(&content, "needle %03d\n", i)
+		fmt.Fprintf(&content, " needle %03d\n", i)
 	}
 	require.NoError(t, os.WriteFile(path, []byte(content.String()), 0o600))
-	tool := NewRipgrepTool(dir, config.ToolGrep{})
+	command := func(ctx context.Context, pattern, searchPath, include string, caseInsensitive bool) *exec.Cmd {
+		return exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRipgrepFixtureHelper$", "--", pattern, searchPath, include, strconv.FormatBool(caseInsensitive))
+	}
+	tool := NewRipgrepTool(dir, config.ToolGrep{}, withRipgrepCommand(command))
 	cursor := ""
 	var got []string
 	for _, size := range []int{37, 71, 100, 100} {
-		response := runToolWith(t, tool, t.Context(), RipgrepToolName, RipgrepParams{Pattern: "needle", Sort: "path", MaxResults: size, Cursor: cursor})
+		response := runToolWith(t, tool, t.Context(), RipgrepToolName, RipgrepParams{Pattern: "needle", Path: "fixtures", Include: "*.txt", Sort: "path", MaxResults: size, Cursor: cursor})
 		require.False(t, response.IsError, response.Content)
 		metadata := responseMetadata[GrepResponseMetadata](t, response.Metadata)
 		require.Equal(t, 230, metadata.TotalMatches)
@@ -137,10 +140,50 @@ func TestRipgrepHandlerPaginationAndGoRegexDifference(t *testing.T) {
 		require.Equal(t, strconv.Itoa(i+1), line)
 	}
 
-	goRegex := runToolWith(t, NewGrepTool(dir, config.ToolGrep{}), t.Context(), GrepToolName, GrepParams{Pattern: `\Aneedle`})
+	goRegex := runToolWith(t, NewGrepTool(dir, config.ToolGrep{}), t.Context(), GrepToolName, GrepParams{Pattern: `\hneedle`})
 	require.True(t, goRegex.IsError)
-	rustRegex := runToolWith(t, tool, t.Context(), RipgrepToolName, RipgrepParams{Pattern: `\Aneedle`, MaxResults: 1})
+	rustRegex := runToolWith(t, tool, t.Context(), RipgrepToolName, RipgrepParams{Pattern: `\hneedle`, Path: "fixtures", Include: "*.txt", MaxResults: 1})
 	require.False(t, rustRegex.IsError, rustRegex.Content)
+	require.Contains(t, rustRegex.Content, "Line 1, Char 1")
+}
+
+func TestRipgrepFixtureHelper(t *testing.T) {
+	separator := slices.Index(os.Args, "--")
+	if separator < 0 {
+		return
+	}
+	require.Len(t, os.Args[separator+1:], 4)
+	pattern, searchPath, include, caseInsensitive := os.Args[separator+1], os.Args[separator+2], os.Args[separator+3], os.Args[separator+4]
+	require.NotEmpty(t, pattern)
+	require.Equal(t, "*.txt", include)
+	ignoreCase, err := strconv.ParseBool(caseInsensitive)
+	require.NoError(t, err)
+
+	fixturePattern := strings.ReplaceAll(pattern, `\h`, `[\t ]`)
+	if ignoreCase {
+		fixturePattern = "(?i)" + fixturePattern
+	}
+	expression, err := regexp.Compile(fixturePattern)
+	require.NoError(t, err)
+
+	path := filepath.Join(searchPath, "data.txt")
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	for lineNumber, line := range strings.Split(strings.TrimSuffix(string(content), "\n"), "\n") {
+		match := expression.FindStringIndex(line)
+		if match == nil {
+			continue
+		}
+		record := ripgrepMatch{Type: "match"}
+		record.Data.Path.Text = path
+		record.Data.Lines.Text = line + "\n"
+		record.Data.LineNumber = lineNumber + 1
+		record.Data.Submatches = append(record.Data.Submatches, struct {
+			Start int `json:"start"`
+		}{Start: match[0]})
+		require.NoError(t, json.NewEncoder(os.Stdout).Encode(record))
+	}
+	os.Exit(0)
 }
 
 func TestGlobAndLSHandlerPaginationNoGapsAndStaleGeneration(t *testing.T) {

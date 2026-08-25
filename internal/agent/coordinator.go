@@ -815,6 +815,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		threads:            c.threadsManager(),
 		taskManager:        c.tasksManager(),
 		backgroundAgentsOn: c.backgroundAgentsEnabled(),
+		toolAvailability:   tools.ResolveSystemToolAvailability(),
 	}
 
 	var allTools []fantasy.AgentTool

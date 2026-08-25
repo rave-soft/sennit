@@ -35,9 +35,9 @@ type webSearchDescriptionData struct {
 	IncludesContent bool
 }
 
-func renderWebSearchDescription(backend SearchBackend) string {
+func renderWebSearchDescription(backend SearchBackend, availability toolAvailability) string {
 	data := webSearchDescriptionData{
-		toolDescriptionData: toolDescriptionData{GhAvailable: ghAvailable},
+		toolDescriptionData: toolDescriptionData{GhAvailable: availability.ghAvailable},
 	}
 	switch backend.(type) {
 	case *duckDuckGoBackend:
@@ -71,7 +71,8 @@ func defaultSearchHTTPClient() *http.Client {
 // selects the search implementation (DuckDuckGo, Tavily, ...); a nil
 // backend defaults to DuckDuckGo, built from client (or a fresh client if
 // client is also nil).
-func NewWebSearchTool(permissions permission.Service, workingDir string, client *http.Client, backend SearchBackend) fantasy.AgentTool {
+func NewWebSearchTool(permissions permission.Service, workingDir string, client *http.Client, backend SearchBackend, options ...toolAvailabilityOption) fantasy.AgentTool {
+	availability := applyToolAvailability(options)
 	if backend == nil {
 		if client == nil {
 			client = defaultSearchHTTPClient()
@@ -81,7 +82,7 @@ func NewWebSearchTool(permissions permission.Service, workingDir string, client 
 
 	return withToolParameterSchema(fantasy.NewParallelAgentTool(
 		WebSearchToolName,
-		renderWebSearchDescription(backend),
+		renderWebSearchDescription(backend, availability),
 		func(ctx context.Context, params WebSearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Query == "" {
 				return invalidParam("query"), nil

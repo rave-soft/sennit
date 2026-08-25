@@ -45,7 +45,12 @@ func NewSennitInfoTool(
 	activeSkills []*skills.Skill,
 	skillTracker *skills.Tracker,
 	skillStates []*skills.SkillState,
+	environmentProblems ...func() []config.Problem,
 ) fantasy.AgentTool {
+	collectEnvironmentProblems := config.EnvironmentProblems
+	if len(environmentProblems) > 0 {
+		collectEnvironmentProblems = environmentProblems[0]
+	}
 	return fantasy.NewParallelAgentTool(
 		SennitInfoToolName,
 		sennitInfoDescription,
@@ -53,7 +58,7 @@ func NewSennitInfoTool(
 			if params.ModelsFor != "" {
 				return fantasy.NewTextResponse(buildModelsFor(cfg, params.ModelsFor)), nil
 			}
-			return fantasy.NewTextResponse(buildSennitInfo(cfg, reg, lspManager, allSkills, activeSkills, skillTracker, skillStates)), nil
+			return fantasy.NewTextResponse(buildSennitInfo(cfg, reg, lspManager, allSkills, activeSkills, skillTracker, skillStates, collectEnvironmentProblems)), nil
 		},
 	)
 }
@@ -105,7 +110,11 @@ func buildModelsFor(cfg SennitInfoConfig, providerID string) string {
 	return b.String()
 }
 
-func buildSennitInfo(cfg SennitInfoConfig, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker, skillStates []*skills.SkillState) string {
+func buildSennitInfo(cfg SennitInfoConfig, reg *mcp.Registry, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker, skillStates []*skills.SkillState, environmentProblems ...func() []config.Problem) string {
+	collectEnvironmentProblems := config.EnvironmentProblems
+	if len(environmentProblems) > 0 {
+		collectEnvironmentProblems = environmentProblems[0]
+	}
 	var b strings.Builder
 
 	var mcpStates map[string]mcp.ClientInfo
@@ -115,7 +124,7 @@ func buildSennitInfo(cfg SennitInfoConfig, reg *mcp.Registry, lspManager *lsp.Ma
 
 	writeConfigFiles(&b, cfg)
 	writeConfigStaleness(&b, cfg)
-	writeProblems(&b, cfg, mcpStates, skillStates)
+	writeProblems(&b, cfg, mcpStates, skillStates, collectEnvironmentProblems)
 	writeModels(&b, cfg)
 	writeProviders(&b, cfg)
 	writeLSP(&b, lspManager, cfg)
@@ -175,9 +184,13 @@ func writeConfigStaleness(b *strings.Builder, cfg SennitInfoConfig) {
 // model?" (or "why can't I use that MCP tool?", or "why did the skill I
 // was told to follow do nothing?") can answer from its own sennit_info
 // output instead of a log file it never sees.
-func writeProblems(b *strings.Builder, cfg SennitInfoConfig, mcpStates map[string]mcp.ClientInfo, skillStates []*skills.SkillState) {
+func writeProblems(b *strings.Builder, cfg SennitInfoConfig, mcpStates map[string]mcp.ClientInfo, skillStates []*skills.SkillState, environmentProblems ...func() []config.Problem) {
+	collectEnvironmentProblems := config.EnvironmentProblems
+	if len(environmentProblems) > 0 {
+		collectEnvironmentProblems = environmentProblems[0]
+	}
 	problems := config.Doctor(cfg.Config())
-	problems = append(problems, config.EnvironmentProblems()...)
+	problems = append(problems, collectEnvironmentProblems()...)
 	problems = append(problems, config.SkillProblems(skillStates)...)
 	for name, info := range mcpStates {
 		if info.State != mcp.StateError && info.State != mcp.StateNeedsAuth {

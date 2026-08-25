@@ -333,15 +333,8 @@ func TestDoctorMainModelFallback(t *testing.T) {
 	require.Contains(t, problems[0].Message, "does-not-exist")
 }
 
-// TestEnvironmentProblemsFlagsMissingClipboardHelper covers the check that
-// keeps a rich paste from silently degrading to a text-only one. It calls
-// environmentProblems rather than the exported wrapper, which answers empty
-// under test so that callers asserting a clean problem list do not depend on
-// what the machine running them has installed.
 func TestEnvironmentProblemsFlagsMissingClipboardHelper(t *testing.T) {
-	t.Setenv("PATH", "")
-
-	problems := environmentProblems()
+	problems := environmentProblems([]string{"xclip"})
 
 	require.Len(t, problems, 1)
 	require.Equal(t, AreaEnvironment, problems[0].Area)

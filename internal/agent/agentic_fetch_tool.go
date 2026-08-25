@@ -138,12 +138,13 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 					if err != nil {
 						return nil, cleanup, fmt.Errorf("web_search: %w", err)
 					}
+					availability := tools.ResolveSystemToolAvailability()
 					agent := NewSessionAgent(SessionAgentOptions{
 						Model: model, SystemPromptPrefix: providerCfg.SystemPromptPrefix, SystemPrompt: systemPrompt,
 						DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
 						Sessions:             c.sessions, Messages: c.messages,
 						Tools: []fantasy.AgentTool{
-							tools.NewWebFetchTool(nil, tmpDir, client), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend),
+							tools.NewWebFetchTool(nil, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),
 							tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob), tools.NewSearchTool(tmpDir, c.cfg.Config().Tools.Grep),
 							tools.NewReadTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
 						},

@@ -106,6 +106,7 @@ func (s *ConfigStore) reloadFromDisk(ctx context.Context) error {
 		dataDir:         dataDir,
 		presetModel:     presetModel,
 		persistFallback: false, // see buildConfigOptions.persistFallback
+		credentialsFile: s.credentialsFile,
 	})
 	if err != nil {
 		return err

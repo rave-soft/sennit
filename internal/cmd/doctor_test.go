@@ -6,8 +6,22 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDoctorCmd_UsesInjectedEnvironmentProblems(t *testing.T) {
+	seed := `{"providers": {"openai": {"api_key": "key", "models": [{"id": "gpt-4o-mini"}]}}}`
+	setupHermeticConfigEnv(t, seed)
+
+	testCmd, stdout, _ := newRefreshTestCmd(t)
+	setCwdFlag(t, testCmd, t.TempDir())
+	injected := config.Problem{Severity: config.SeverityWarn, Area: config.AreaEnvironment, Subject: "clipboard", Message: "injected environment problem"}
+
+	err := newDoctorCmd(func() []config.Problem { return []config.Problem{injected} }).RunE(testCmd, nil)
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "injected environment problem")
+}
 
 func TestDoctorCmd_CleanConfig(t *testing.T) {
 	seed := `{"providers": {"openai": {"api_key": "key", "models": [{"id": "gpt-4o-mini"}]}}}`
@@ -16,7 +30,7 @@ func TestDoctorCmd_CleanConfig(t *testing.T) {
 	testCmd, stdout, _ := newRefreshTestCmd(t)
 	setCwdFlag(t, testCmd, t.TempDir())
 
-	err := doctorCmd.RunE(testCmd, nil)
+	err := newDoctorCmd(func() []config.Problem { return nil }).RunE(testCmd, nil)
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "No config problems found.")
 }
@@ -35,7 +49,7 @@ func TestDoctorCmd_ReportsIgnoredJSONAgentsBlock(t *testing.T) {
 
 	// Only warnings (an ignored agents block does not block anything), so
 	// exit is still clean.
-	err := doctorCmd.RunE(testCmd, nil)
+	err := newDoctorCmd(func() []config.Problem { return nil }).RunE(testCmd, nil)
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "[agent]")
 	require.Contains(t, stdout.String(), "agents in sennit.json are ignored — define agents as .sennit/agents/*.md files")
@@ -63,7 +77,7 @@ func TestDoctorCmd_MarkdownAgentClean(t *testing.T) {
 	testCmd, stdout, _ := newRefreshTestCmd(t)
 	setCwdFlag(t, testCmd, cwd)
 
-	err := doctorCmd.RunE(testCmd, nil)
+	err := newDoctorCmd(func() []config.Problem { return nil }).RunE(testCmd, nil)
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "No config problems found.")
 }
@@ -79,7 +93,7 @@ func TestDoctorCmd_JSON(t *testing.T) {
 	// now (not a package-level var), so it must be registered here too.
 	testCmd.Flags().Bool("json", true, "")
 
-	err := doctorCmd.RunE(testCmd, nil)
+	err := newDoctorCmd(func() []config.Problem { return nil }).RunE(testCmd, nil)
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), `"area": "agent"`)
 	require.Contains(t, stdout.String(), `"severity": "warn"`)
@@ -93,7 +107,7 @@ func TestDoctorCmd_MainModelFallbackIsBlocking(t *testing.T) {
 	testCmd, stdout, _ := newRefreshTestCmd(t)
 	setCwdFlag(t, testCmd, t.TempDir())
 
-	err := doctorCmd.RunE(testCmd, nil)
+	err := newDoctorCmd(func() []config.Problem { return nil }).RunE(testCmd, nil)
 	require.Error(t, err, "an error-severity problem must fail the command")
 	require.Contains(t, stdout.String(), "[model]")
 	require.Contains(t, fmt.Sprint(err), "blocking")

@@ -8,6 +8,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/env"
+	"github.com/rave-soft/sennit/internal/home"
 )
 
 // buildConfigOptions parameterizes buildConfig, the pipeline shared by Load
@@ -32,6 +33,7 @@ type buildConfigOptions struct {
 	// would need its own failure handling, unlike Load discarding the whole
 	// store on error). The one explicitly-known behavioral divergence here.
 	persistFallback bool
+	credentialsFile credentialsFileDependency
 }
 
 // builtConfig is the result of one buildConfig run. configured mirrors
@@ -72,6 +74,9 @@ func hasProjectConfig(paths []string, workspacePath string) bool {
 }
 
 func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, error) {
+	if opts.credentialsFile.stat == nil {
+		opts.credentialsFile = credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}
+	}
 	configPaths := lookupConfigs(opts.workingDir)
 
 	trusted := IsTrusted(opts.workingDir)
@@ -132,7 +137,7 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 	// configureProviders may run model-discovery HTTP calls for custom
 	// providers. It runs here, without writeMu held, so a slow discovery
 	// round trip never blocks a concurrent mutator; see the callers.
-	if err := cfg.configureProviders(opts.ctx, store, envInst, resolver, providers); err != nil {
+	if err := cfg.configureProviders(opts.ctx, store, envInst, resolver, providers, opts.credentialsFile); err != nil {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 

@@ -69,7 +69,11 @@ var _ Dialog = (*Doctor)(nil)
 
 // NewDoctor creates the /doctor problems dialog.
 func NewDoctor(com *common.Common) *Doctor {
-	problems := DoctorProblems(com)
+	return newDoctorWithEnvironment(com, config.EnvironmentProblems)
+}
+
+func newDoctorWithEnvironment(com *common.Common, environmentProblems func() []config.Problem) *Doctor {
+	problems := doctorProblemsWithEnvironment(com, environmentProblems)
 
 	d := &Doctor{Base: NewBase(com, doctorDialogMaxWidth), com: com, problems: problems}
 
@@ -231,8 +235,12 @@ func (d *Doctor) FullHelp() [][]key.Binding {
 // the UI side of the workspace.Workspace boundary since internal/config
 // cannot import the MCP client package.
 func DoctorProblems(com *common.Common) []config.Problem {
+	return doctorProblemsWithEnvironment(com, config.EnvironmentProblems)
+}
+
+func doctorProblemsWithEnvironment(com *common.Common, environmentProblems func() []config.Problem) []config.Problem {
 	problems := config.Doctor(com.Config())
-	problems = append(problems, config.EnvironmentProblems()...)
+	problems = append(problems, environmentProblems()...)
 	problems = append(problems, config.SkillProblems(skills.GetLatestStates())...)
 	// Sorted, because map iteration is random and this list is rendered:
 	// the MCP problems shuffled on every open, so the row under the

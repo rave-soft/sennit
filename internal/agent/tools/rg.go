@@ -6,17 +6,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
-	"testing"
 
 	"github.com/rave-soft/sennit/internal/log"
 )
 
-var getRg = sync.OnceValue(func() string {
-	if testing.Testing() {
-		return ""
-	}
-	path, err := exec.LookPath("rg")
+func getRg() string {
+	return lookupRipgrep(exec.LookPath)
+}
+
+func lookupRipgrep(lookup func(string) (string, error)) string {
+	path, err := lookup("rg")
 	if err != nil {
 		if log.Initialized() {
 			slog.Warn("Ripgrep (rg) not found in $PATH. Some grep features might be limited or slower.")
@@ -24,7 +23,7 @@ var getRg = sync.OnceValue(func() string {
 		return ""
 	}
 	return path
-})
+}
 
 // HasRipgrep reports whether the rg binary is available on this system.
 func HasRipgrep() bool {
@@ -56,6 +55,10 @@ func getRgSearchCmd(ctx context.Context, pattern, path, include string, caseInse
 	if name == "" {
 		return nil
 	}
+	return newRgSearchCmd(ctx, name, pattern, path, include, caseInsensitive)
+}
+
+func newRgSearchCmd(ctx context.Context, name, pattern, path, include string, caseInsensitive bool) *exec.Cmd {
 	// Use -n to show line numbers, -0 for null separation to handle Windows paths
 	args := []string{"--json", "-H", "-n", "-0"}
 	if caseInsensitive {
