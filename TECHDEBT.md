@@ -83,6 +83,124 @@ deleted, and the history stays in git.
   landlock; до тех пор динамические пути в треде держит только
   permission-промпт.
 
+- **Хвосты ревью-раунда 3 (2026-08-23).** `REFACTORING-2026-08-23-r3.md`
+  закрыт и удалён: разделы 1.1–1.3 (баги) и 5 (дрейф документации) сделаны
+  целиком, фазы 4–7 (границы слоёв, SRP, DRY/KISS, мёртвый код) — нет.
+  Проверено против кода на 2026-08-25; ниже только то, что осталось
+  открытым, с местом и следующим шагом. Номера строк не приводятся: они
+  уже сдвинулись один раз, ориентир — имя символа.
+
+  Закрытые баги перечислять смысла нет, история в git. Открытыми остались
+  шесть:
+
+  - `internal/agent/tools/lsp_replace_symbol.go` пишет файл собственным
+    конвейером (`os.WriteFile` + ручной `CreateVersion`) мимо
+    `applyFileMutation` из `filemutation.go`, поэтому не получает
+    freshness-проверки и сохранения CRLF, которые есть у `write`/`edit`.
+    Следующий шаг: провести запись через `applyFileMutation`.
+  - `internal/lsp/client.go`, `Restart` — переприсваивает `c.client`,
+    `c.ctx`, `c.diagCountsCache` и `c.diagCountsVersion` без
+    `diagCountsMu`, под которым их читает `GetDiagnosticCounts` (в UI —
+    каждый кадр), и не чистит `c.diagnostics`: после рестарта показываются
+    диагностики мёртвого сервера. Следующий шаг: взять `diagCountsMu` на
+    сброс кэша, `c.diagnostics` очистить, доступ к `client`/`ctx` увести
+    под мьютекс или атомик.
+  - Проектный конфиг исполняется без trust-гейта: `sennitrc` проекта
+    запускается при открытии каталога, `sennit.json` проекта может ставить
+    `env`, stdio `mcp`/`lsp` и `hooks` (`internal/config/load.go`,
+    `paths.go`). Это дизайн-решение, а не однострочный фикс. Следующий
+    шаг: обсудить отдельно — минимум `options.trust_project_config` плюс
+    предупреждение при первом запуске в новом проекте.
+  - `internal/shellconfig/{provider,mcp,lsp}.go`, `*Remove` — `delete` по
+    секции своего слоя, поэтому запись из нижнего слоя остаётся видимой и
+    команда молча не делает то, что обещает. Следующий шаг: tombstone
+    (`disable: true`) вместо удаления ключа.
+  - `internal/filetracker/service.go` — `RecordPartialRead`/`RecordEdit`
+    делают `ReadCoverage` и следом `record` без транзакции; два
+    параллельных инструмента в одной сессии теряют покрытие друг друга.
+    Следующий шаг: один SQL-апдейт или явная транзакция вокруг пары.
+  - `internal/ui/common/timer.go` — `turnTimer` package-global, один на
+    процесс. Главный UI и встроенный тред делят один таймер хода, и чей
+    ход показан — вопрос того, кто последним позвал `StartTurn`.
+    Следующий шаг: таймер на владельца (session ID), а не на процесс.
+
+  **Границы слоёв.** Закрыто: `hooks ↛ config` (L2), `threadspawn.AppOf`
+  (L8), листовой `internal/proxyhttp` (L11), тест паритета
+  `proto.Thread*Status` ↔ `thread.Status` (L12), `thread/store_testing.go`
+  → `store_export_test.go` (половина L1). Открыто:
+
+  - L1(остаток) `internal/config/store_testing.go` — production-файл,
+    импортирующий `testing`. Следующий шаг: `store_export_test.go`.
+  - L3 `internal/message` — доменная модель и SQLite-сервис в одном
+    пакете, поэтому каждый потребитель `message.Message` (весь UI) линкует
+    sqlc и sqlite. Самая крупная правка из оставшихся, отдельным PR.
+    Следующий шаг: `internal/message` — модель, `internal/message/store` —
+    сервис.
+  - L4 `config → clipboard | skills | db | oauth/{codex,copilot}`.
+    Следующий шаг: `EnvironmentProblems`/`SkillProblems` — в вызывающий
+    слой, `SetupGitHubCopilot`/`SetupCodex`/`applyProviderVendorSetup` — к
+    построению провайдера или в `credentials`, modelcache — в листовой
+    пакет.
+  - L5 `(*Config).configureProviders(ctx, store, …)` в
+    `internal/config/providers_merge.go` — чистый тип данных получает
+    store, чтобы писать на диск. Следующий шаг: передавать
+    `globalDataPath`, возвращать список stale-ключей.
+  - L6 `internal/app/services.go` — `Threads tools.ThreadManager` и
+    `threadManager atomic.Pointer[thread.Manager]` держат один и тот же
+    менеджер в двух полях. Комментарии уже исправлены, поля — нет.
+    Следующий шаг: одно типизированное поле, адаптеры строятся в `Attach`.
+  - L7 `workspace.Workspace` — 94 метода, `ui/common.Common` отдаёт
+    интерфейс целиком каждому компоненту; `AgentQueuedPrompts` и
+    `SetCurrentSession` не вызываются из production-кода. Следующий шаг:
+    `Common` отдаёт ролевые срезы, неиспользуемые методы удалить.
+  - L9 UI мимо workspace. depguard закрыл `agent`, `thread`, `db`, `app`,
+    но `internal/ui/**` по-прежнему импортирует `commands`, `config`,
+    `diff`, `discover`, `git`, `history`, `hooks`, `lsp`, `message`,
+    `oauth/{codex,copilot}`, `permission`, `question`, `session`, `shell`,
+    `skills`, `stats`. Следующий шаг: по списку из плана — `diff`/`git`/
+    `fsext` в `session.go`, `commands.LoadCustomCommands`, LSP-состояния,
+    `hooks.HookMetadata` → proto DTO, OAuth-флоу из диалогов; затем
+    расширить depguard.
+  - L10 `internal/session` шлёт телеметрию (`event.SessionCreated/Deleted`),
+    `internal/db/datadirlock.go` держит flock рабочего каталога в
+    DB-пакете, `internal/gc` импортирует `thread` ради `Status.Terminal()`.
+    Следующий шаг: три мелкие перестановки, разблокируют depguard-правила.
+
+  **Божественные объекты.** Закрыто: walker вынесен в
+  `agent/tools/confinement.go`, `ProviderConfig` — в
+  `config/provider.go`. Открыто: `Coordinator` (интерфейс из 21 метода
+  плюс построение провайдеров, OAuth-refresh и cost под-агентов),
+  `ConfigStore` (69 методов), `internal/ui/model` (17.2k строк
+  non-test в 50 файлах), `lsp.Client` (834 строки: lifecycle + file-sync +
+  кэш диагностик + фасад запросов), `sennit import` в пакете `config`
+  (→ `internal/importer`). Каждый — отдельный PR; порядок значения не
+  имеет, они независимы.
+
+  **KISS / перформанс.** Закрыто: индекс `(session_id, created_at)` и
+  снятие триггера `update_messages_updated_at`, сигнатурный пропуск
+  перерисовки сайдбара. Открыто: `applyWorkspaceConfig`
+  (`internal/config/load.go`) на каждый reload маршалит весь `Config` в
+  JSON, мержит и заново зовёт `setDefaults` ради `data_directory`;
+  `PushPopEnvOverrides` держится через `configureProviders`, включая до
+  трёх секунд discovery-HTTP, и блокирует второй workspace;
+  `testing.Testing()` остаётся в production-коде семи пакетов.
+
+  **YAGNI и мёртвый код.** `internal/event` из списка снят: no-op'ы —
+  задокументированное решение, а не долг. `internal/diffdetect` и
+  `version.BuildID` удалены. Осталось: `deadcode ./...` даёт 81 символ
+  (было 106) — крупнейшие гнёзда `internal/proto` (мёртвые
+  `Marshal/UnmarshalJSON` у `Message`, `Attachment`, `AgentEvent`,
+  `PermissionRequest`), package-level API `agent/tools/mcp/registry.go`
+  (`ArmInit`, `WaitForInit`, `Close`, `SubscribeEvents`, `GetState`,
+  `BeginAuth`) и `internal/testenv`. Следующий шаг: удалять пакетами, с
+  `grep -rn` перед каждым; цель — 0 non-test символов или
+  задокументированные исключения.
+
+  **Системные меры из плана**, которые стоило бы завести вместе с
+  правками: тест «каждая команда из `safeCommands` не может быть обёрткой
+  другой», тест round-trip для каждого `ContentPart`, grep-lint на `m.com.`
+  внутри `func() tea.Msg`.
+
 ## Decisions deferred pending confirmation
 
 ### GitHub Copilot
