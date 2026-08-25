@@ -27,6 +27,29 @@ const (
 	summarizeOutputHeadroom = 0.25
 )
 
+// summarizePolicy is what a turn was told about summarizing itself: the
+// switch that turns it off entirely, and the ceiling a session may work up
+// to when the model's own window is more room than anyone wants to pay
+// for. Both come from config (see config.Options), captured with the rest
+// of the runtime so a reload cannot change the answer mid-turn.
+type summarizePolicy struct {
+	disabled bool
+	at       int64
+}
+
+// window returns the context window this policy wants a session judged
+// against: the model's own, or the configured ceiling when that is lower.
+// A ceiling at or above the model's window is not a ceiling, and one on a
+// model with no declared window (0) has nothing to cap — the caller skips
+// auto-summarize there anyway, and inventing a window would make it
+// summarize a local model on its first step.
+func (p summarizePolicy) window(modelWindow int64) int64 {
+	if modelWindow <= 0 || p.at <= 0 || p.at >= modelWindow {
+		return modelWindow
+	}
+	return p.at
+}
+
 // summarizeBuffer is how much of the context window must stay free before
 // a turn stops to summarize.
 //

@@ -77,10 +77,10 @@ type runTurn struct {
 	// model is the turn's snapshot of the run's model, taken once in Run
 	// and never re-read, so a concurrent SetModel or config reload cannot
 	// change this turn's identity mid-stream.
-	model                Model
-	tools                []fantasy.AgentTool
-	promptPrefix         string
-	disableAutoSummarize bool
+	model        Model
+	tools        []fantasy.AgentTool
+	promptPrefix string
+	summarize    summarizePolicy
 
 	// userMsgCreated records whether Run already created the turn's user
 	// message before entering Stream, for the error path's
@@ -120,23 +120,23 @@ func newRunTurn(
 	model Model,
 	tools []fantasy.AgentTool,
 	promptPrefix string,
-	disableAutoSummarize bool,
+	summarize summarizePolicy,
 	currentSession session.Session,
 	userMsgCreated bool,
 ) *runTurn {
 	return &runTurn{
-		agent:                a,
-		call:                 call,
-		turnID:               newTurnID(),
-		ctx:                  ctx,
-		genCtx:               genCtx,
-		model:                model,
-		tools:                tools,
-		promptPrefix:         promptPrefix,
-		disableAutoSummarize: disableAutoSummarize,
-		userMsgCreated:       userMsgCreated,
-		currentSession:       currentSession,
-		sanitizedToolCalls:   make(map[string]bool),
+		agent:              a,
+		call:               call,
+		turnID:             newTurnID(),
+		ctx:                ctx,
+		genCtx:             genCtx,
+		model:              model,
+		tools:              tools,
+		promptPrefix:       promptPrefix,
+		summarize:          summarize,
+		userMsgCreated:     userMsgCreated,
+		currentSession:     currentSession,
+		sanitizedToolCalls: make(map[string]bool),
 	}
 }
 
@@ -717,7 +717,11 @@ func (t *runTurn) maxOutputTokens() int64 {
 // the turn once the session's token usage crosses the context-window
 // threshold, so Run's tail can kick off a summarize pass.
 func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
-	cw := t.model.CatalogCfg.ContextWindow
+	// Not always the model's window: a session may be held to a lower
+	// ceiling, because every step re-sends the whole conversation and a
+	// window measured in hundreds of thousands of tokens is a bill, not a
+	// budget. See summarizePolicy.window.
+	cw := t.summarize.window(t.model.CatalogCfg.ContextWindow)
 	// If context window is unknown (0), skip auto-summarize
 	// to avoid immediately truncating custom/local models.
 	if cw == 0 {
@@ -726,7 +730,7 @@ func (t *runTurn) stopOnContextWindow(_ []fantasy.StepResult) bool {
 	tokens := t.currentSession.CompletionTokens + t.currentSession.PromptTokens
 	remaining := cw - tokens
 	threshold := summarizeBuffer(cw, t.maxOutputTokens())
-	if remaining > threshold || t.disableAutoSummarize {
+	if remaining > threshold || t.summarize.disabled {
 		return false
 	}
 	// Summarizing only helps if what it reclaims is big enough to matter.

@@ -659,6 +659,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		SystemPrompt:         "",
 		IsSubAgent:           isSubAgent,
 		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+		AutoSummarizeAt:      c.cfg.Config().Options.AutoSummarizeAt,
 		Sessions:             c.sessions,
 		Messages:             c.messages,
 		Tools:                nil,
@@ -1342,6 +1343,7 @@ func (c *coordinator) runtimeFor(ctx context.Context) (*compiledRuntime, error) 
 			maxOutputTokens:      maxTokens,
 			systemPromptPrefix:   providerCfg.SystemPromptPrefix,
 			disableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+			autoSummarizeAt:      c.cfg.Config().Options.AutoSummarizeAt,
 		}, nil
 	})
 }

@@ -261,6 +261,18 @@ type Options struct {
 	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	// AutoSummarizeAt caps the context a session is allowed to work in
+	// before it summarizes, in tokens, for models whose own window is
+	// larger than anyone wants to pay for. Every step of a turn re-sends
+	// the whole conversation, so a session left to fill a 872k window
+	// spends the rest of its life carrying 872k; summarizing once at a
+	// self-imposed ceiling is cheaper than a hundred steps above it.
+	//
+	// 0 (unset) means the model's own window is the only limit, which is
+	// the behaviour this had before the setting existed. A value at or
+	// above the model's window has no effect. Ignored entirely when
+	// DisableAutoSummarize is set — that switch still wins.
+	AutoSummarizeAt int64 `json:"auto_summarize_at,omitempty" jsonschema:"description=Summarize once a session's context reaches this many tokens even when the model's own window is larger - 0 means no cap,default=0"`
 	// DataDirectory is a project-local directory (".sennit" by default) for
 	// workspace-scoped state that is NOT part of the shared global database:
 	// the single-instance lock file, workspace config overrides, and (until

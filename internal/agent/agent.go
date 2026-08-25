@@ -285,6 +285,7 @@ type sessionAgent struct {
 	sessions             session.Service
 	messages             MessageService
 	disableAutoSummarize bool
+	autoSummarizeAt      int64
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
 	mcp                  *mcp.Registry
@@ -324,6 +325,7 @@ type SessionAgentOptions struct {
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	AutoSummarizeAt      int64
 	Sessions             session.Service
 	Messages             MessageService
 	Tools                []fantasy.AgentTool
@@ -350,6 +352,7 @@ func NewSessionAgent(
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		autoSummarizeAt:      opts.AutoSummarizeAt,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
@@ -611,14 +614,15 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 
 // buildStreamAgent constructs the fantasy agent from an already assembled
 // runtime. It deliberately does not read mutable agent or MCP state.
-func (a *sessionAgent) buildStreamAgent(runtime streamRuntime) (streamAgent fantasy.Agent, model Model, agentTools []fantasy.AgentTool, promptPrefix string, disableAutoSummarize bool) {
+func (a *sessionAgent) buildStreamAgent(runtime streamRuntime) (streamAgent fantasy.Agent, model Model, agentTools []fantasy.AgentTool, promptPrefix string, summarize summarizePolicy) {
 	streamAgent = fantasy.NewAgent(
 		runtime.model.Model,
 		fantasy.WithSystemPrompt(runtime.systemPrompt),
 		fantasy.WithTools(runtime.tools...),
 		fantasy.WithUserAgent(userAgent),
 	)
-	return streamAgent, runtime.model, runtime.tools, runtime.systemPromptPrefix, runtime.disableAutoSummarize
+	return streamAgent, runtime.model, runtime.tools, runtime.systemPromptPrefix,
+		summarizePolicy{disabled: runtime.disableAutoSummarize, at: runtime.autoSummarizeAt}
 }
 
 type streamRuntime struct {
@@ -627,6 +631,7 @@ type streamRuntime struct {
 	systemPrompt         string
 	systemPromptPrefix   string
 	disableAutoSummarize bool
+	autoSummarizeAt      int64
 }
 
 // effectiveStreamRuntime is the single source of the per-turn prompt and tool
@@ -649,6 +654,7 @@ func (a *sessionAgent) effectiveStreamRuntime(call SessionAgentCall) streamRunti
 		systemPrompt:         a.systemPrompt.Get(),
 		systemPromptPrefix:   a.systemPromptPrefix.Get(),
 		disableAutoSummarize: a.disableAutoSummarize,
+		autoSummarizeAt:      a.autoSummarizeAt,
 	}
 	if call.Runtime != nil {
 		runtime.model = call.Runtime.model
@@ -656,6 +662,7 @@ func (a *sessionAgent) effectiveStreamRuntime(call SessionAgentCall) streamRunti
 		runtime.systemPrompt = call.Runtime.systemPrompt
 		runtime.systemPromptPrefix = call.Runtime.systemPromptPrefix
 		runtime.disableAutoSummarize = call.Runtime.disableAutoSummarize
+		runtime.autoSummarizeAt = call.Runtime.autoSummarizeAt
 	}
 	runtime.tools = withoutUnusableParentTool(runtime.tools, a.dispatch, call.SessionID)
 
@@ -922,7 +929,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	}()
 
 	runtime := a.effectiveStreamRuntime(call)
-	streamAgent, model, agentTools, promptPrefix, disableAutoSummarize := a.buildStreamAgent(runtime)
+	streamAgent, model, agentTools, promptPrefix, summarize := a.buildStreamAgent(runtime)
 
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
@@ -949,7 +956,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 	}
 
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	t = newRunTurn(a, call, ctx, genCtx, model, agentTools, promptPrefix, disableAutoSummarize, currentSession, userMsgCreated)
+	t = newRunTurn(a, call, ctx, genCtx, model, agentTools, promptPrefix, summarize, currentSession, userMsgCreated)
 
 	// Carried-over history goes in front of this session's own
 	// messages.

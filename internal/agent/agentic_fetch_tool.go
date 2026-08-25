@@ -142,6 +142,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 					agent := NewSessionAgent(SessionAgentOptions{
 						Model: model, SystemPromptPrefix: providerCfg.SystemPromptPrefix, SystemPrompt: systemPrompt,
 						DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
+						AutoSummarizeAt:      c.cfg.Config().Options.AutoSummarizeAt,
 						Sessions:             c.sessions, Messages: c.messages,
 						Tools: []fantasy.AgentTool{
 							tools.NewWebFetchTool(nil, tmpDir, client, availability), tools.NewWebSearchTool(nil, tmpDir, client, searchBackend, availability),

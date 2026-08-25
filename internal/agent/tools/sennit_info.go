@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/fantasy"
@@ -521,6 +522,9 @@ func writeOptions(b *strings.Builder, cfg SennitInfoConfig) {
 	opts = append(opts, kv{"auto_lsp", fmt.Sprintf("%v", autoLSP)})
 	autoSummarize := !c.Options.DisableAutoSummarize
 	opts = append(opts, kv{"auto_summarize", fmt.Sprintf("%v", autoSummarize)})
+	if autoSummarize && c.Options.AutoSummarizeAt > 0 {
+		opts = append(opts, kv{"auto_summarize_at", strconv.FormatInt(c.Options.AutoSummarizeAt, 10)})
+	}
 
 	slices.SortFunc(opts, func(a, b kv) int { return strings.Compare(a.key, b.key) })
 	b.WriteString("[options]\n")

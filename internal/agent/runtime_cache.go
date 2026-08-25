@@ -40,6 +40,7 @@ type compiledRuntime struct {
 	maxOutputTokens      int64
 	systemPromptPrefix   string
 	disableAutoSummarize bool
+	autoSummarizeAt      int64
 }
 
 type activeRuntime struct {

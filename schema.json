@@ -487,6 +487,11 @@
           "description": "Disable automatic conversation summarization",
           "default": false
         },
+        "auto_summarize_at": {
+          "type": "integer",
+          "description": "Summarize once a session's context reaches this many tokens even when the model's own window is larger - 0 means no cap",
+          "default": 0
+        },
         "data_directory": {
           "type": "string",
           "description": "Project-local directory for workspace-scoped state (lock file, config overrides, legacy pre-migration database) — not the shared session/message database. Relative paths are resolved against the working directory; absolute paths are used as-is.",
