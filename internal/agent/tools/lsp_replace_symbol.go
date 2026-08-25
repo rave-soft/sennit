@@ -5,14 +5,13 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log/slog"
-	"os"
 	"strings"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/filetracker"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -105,84 +104,53 @@ func NewReplaceSymbolTool(
 
 			rng := target.GetRange()
 
-			content, err := os.ReadFile(filePath)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
-			}
-
-			lines := strings.Split(string(content), "\n")
 			startLine := int(rng.Start.Line)
 			endLine := int(rng.End.Line)
-			if startLine >= len(lines) || endLine >= len(lines) {
-				return fantasy.NewTextErrorResponse("symbol range exceeds file length"), nil
+			resp, err := applyFileMutation(fileMutationRequest{
+				editContext: editContext{ctx, permissions, files, filetracker, workingDir}, call: call,
+				filePath: filePath, sessionID: sessionID, toolName: ReplaceSymbolToolName,
+				prepare: func(snapshot fileSnapshot) (preparedFileMutation, error) {
+					if !snapshot.exists {
+						return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)))
+					}
+					lines := strings.Split(snapshot.content, "\n")
+					if startLine >= len(lines) || endLine >= len(lines) {
+						return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse("symbol range exceeds file length"))
+					}
+					var newLines []string
+					switch action {
+					case "replace":
+						newLines = append(append(append([]string{}, lines[:startLine]...), strings.Split(params.Replacement, "\n")...), lines[endLine+1:]...)
+					case "add_before":
+						newLines = append(append(append([]string{}, lines[:startLine]...), strings.Split(params.Replacement, "\n")...), lines[startLine:]...)
+					case "add_after":
+						newLines = append(append(append([]string{}, lines[:endLine+1]...), strings.Split(params.Replacement, "\n")...), lines[endLine+1:]...)
+					case "delete":
+						newLines = append(append([]string{}, lines[:startLine]...), lines[endLine+1:]...)
+					}
+					newContent := strings.Join(newLines, "\n")
+					writeContent := newContent
+					if snapshot.isCRLF {
+						writeContent, _ = fsext.ToWindowsLineEndings(newContent)
+					}
+					return preparedFileMutation{
+						diffContent: newContent, writeContent: writeContent, wholeFileRead: true,
+						description:    fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
+						permParams:     ReplaceSymbolPermissionsParams{FilePath: filePath, OldContent: snapshot.content, NewContent: newContent},
+						successMessage: fmt.Sprintf("Updated symbol '%s' in %s", params.Symbol, params.FilePath),
+						metadata: func(_, _ string, _, _ int) any {
+							return ReplaceSymbolResponseMetadata{FilePath: filePath, OldContent: snapshot.content, NewContent: newContent, Action: action}
+						},
+					}, nil
+				},
+			})
+			if err != nil && !mutationCommitted(err) || resp.IsError {
+				return resp, err
 			}
-
-			// Compute new content before permission so the dialog can show a diff.
-			var newLines []string
-			switch action {
-			case "replace":
-				newLines = make([]string, 0, len(lines))
-				newLines = append(newLines, lines[:startLine]...)
-				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
-				newLines = append(newLines, lines[endLine+1:]...)
-			case "add_before":
-				newLines = make([]string, 0, len(lines)+strings.Count(params.Replacement, "\n")+1)
-				newLines = append(newLines, lines[:startLine]...)
-				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
-				newLines = append(newLines, lines[startLine:]...)
-			case "add_after":
-				newLines = make([]string, 0, len(lines)+strings.Count(params.Replacement, "\n")+1)
-				newLines = append(newLines, lines[:endLine+1]...)
-				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
-				newLines = append(newLines, lines[endLine+1:]...)
-			case "delete":
-				newLines = make([]string, 0, len(lines))
-				newLines = append(newLines, lines[:startLine]...)
-				newLines = append(newLines, lines[endLine+1:]...)
-			}
-
-			newContent := strings.Join(newLines, "\n")
-
-			if msg, refused := confinementRefusal(permissions, filePath); refused {
-				return fantasy.NewTextErrorResponse(msg), nil
-			}
-
-			if permissions != nil {
-				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					ToolCallID:  call.ID,
-					Path:        filePath,
-					ToolName:    ReplaceSymbolToolName,
-					Description: fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
-					Params: ReplaceSymbolPermissionsParams{
-						FilePath:   filePath,
-						OldContent: string(content),
-						NewContent: newContent,
-					},
-				})
-				if err != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
-				}
-				if denied {
-					return resp, nil
-				}
-			}
-
-			if files != nil && sessionID != "" {
-				if _, err := files.CreateVersion(ctx, sessionID, filePath, string(content)); err != nil {
-					slog.Warn("Failed to create file version before replace", "path", filePath, "error", err)
-				}
-			}
-
-			if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
-			}
-
-			if filetracker != nil && sessionID != "" {
-				filetracker.RecordRead(ctx, sessionID, filePath)
-			}
-
 			notifyLSPs(ctx, lspManager, filePath)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 
 			var summary string
 			switch action {
@@ -196,13 +164,7 @@ func NewReplaceSymbolTool(
 				summary = fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
 			}
 
-			resp := fantasy.NewTextResponse(summary + "\n" + getDiagnostics(filePath, lspManager))
-			resp = fantasy.WithResponseMetadata(resp, ReplaceSymbolResponseMetadata{
-				FilePath:   filePath,
-				OldContent: string(content),
-				NewContent: newContent,
-				Action:     action,
-			})
+			resp.Content = summary + "\n" + getDiagnostics(filePath, lspManager)
 			return resp, nil
 		},
 	), map[string]toolParameterSchema{"symbol": {minLength: intPtr(1)}, "file_path": {minLength: intPtr(1)}, "action": {enum: []string{"replace", "add_before", "add_after", "delete"}}})

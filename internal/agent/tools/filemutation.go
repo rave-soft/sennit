@@ -2,6 +2,10 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -12,25 +16,18 @@ import (
 	"github.com/rave-soft/sennit/internal/permission"
 )
 
-// fileFreshness classifies a file's on-disk state against what this
-// session has recorded reading of it.
 type fileFreshness int
 
 const (
-	fileFresh     fileFreshness = iota // read, and unmodified since
-	fileNeverRead                      // no read recorded for this session
-	fileStale                          // modified on disk after the last read
+	fileFresh fileFreshness = iota
+	fileNeverRead
+	fileStale
 )
 
-// checkFileFreshness is the "did this file change out from under the
-// model" comparison behind write/edit/multiedit's staleness refusals. It
-// used to be implemented twice — inline in write.go, and in edit.go's
-// loadExistingFile — and had drifted: only edit.go separated "never read"
-// from "modified after read"; write.go compared mtime against a zero
-// time.Time either way, so a never-read file got told it was "modified" at
-// "0001-01-01T00:00:00Z". Both outcomes still refused, so unifying only
-// fixes the message.
 func checkFileFreshness(ctx context.Context, ft filetracker.Service, sessionID, filePath string, modTime time.Time) (state fileFreshness, lastRead time.Time) {
+	if ft == nil {
+		return fileFresh, time.Time{}
+	}
 	lastRead = ft.LastReadTime(ctx, sessionID, filePath)
 	switch {
 	case lastRead.IsZero():
@@ -42,11 +39,6 @@ func checkFileFreshness(ctx context.Context, ft filetracker.Service, sessionID, 
 	}
 }
 
-// mutationStop is the error a precondition check returns to mean "stop and
-// return this response", not a real failure — replacing the old
-// loadExistingFile shape, which returned a sentinel zero-value
-// fantasy.ToolResponse a caller could forget to check. Callers unwrap it
-// with errors.As.
 type mutationStop struct {
 	Response fantasy.ToolResponse
 }
@@ -55,84 +47,124 @@ func (e *mutationStop) Error() string { return "file mutation stopped: " + e.Res
 
 func stopWith(resp fantasy.ToolResponse) error { return &mutationStop{Response: resp} }
 
-// fileMutationRequest is the shared commit-phase input for write, edit, and
-// multiedit once each has resolved its own preconditions (confinement,
-// existence, staleness — these stay with each tool, since their messages
-// and existence rules differ; see checkFileFreshness for the piece they
-// share) and has old/new content in hand. It embeds editContext for the
-// service dependencies every caller already has one of in scope.
-type fileMutationRequest struct {
-	editContext
-	call fantasy.ToolCall
-
-	filePath  string
-	sessionID string
-
-	oldContent string // content on disk before the mutation; "" when creating
-	// diffContent is compared against oldContent for the diff and the
-	// permission dialog; writeContent is what lands on disk. They differ
-	// only for CRLF files, diffed in normalized LF form but written back
-	// with CRLF restored.
-	diffContent  string
-	writeContent string
-	// wholeFileRead marks the entire file as read after the write (Write,
-	// and file creation through Edit/MultiEdit: the caller supplied the
-	// whole file). Otherwise only the changed span is recorded.
-	wholeFileRead bool
-
-	toolName       string
-	description    string
-	permParams     any
-	successMessage string // tool response text once the file is written
-
-	// metadata builds the tool's own response-metadata type (Write/Edit/
-	// MultiEdit each have a different shape, so the type stays with the
-	// caller). It runs either way: on denial with content == diffContent
-	// (nothing written), on success with content == writeContent (what
-	// landed on disk) — the two differ only for CRLF files.
-	metadata func(content, diffText string, additions, removals int) any
+type fileSnapshot struct {
+	raw     []byte
+	content string
+	mode    os.FileMode
+	modTime time.Time
+	exists  bool
+	isDir   bool
+	isCRLF  bool
 }
 
-// applyFileMutation runs the sequence write/edit/multiedit all shared once
-// content is ready to commit: diff, permission request, file write with
-// history, filetracker recording, and — either way — the tool's response.
-// A denial short-circuits before the write, metadata built against
-// diffContent; success writes and records first, then builds it against
-// writeContent.
-func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
-	diffText, additions, removals := diff.GenerateDiff(
-		req.oldContent,
-		req.diffContent,
-		strings.TrimPrefix(req.filePath, req.workingDir),
-	)
+type preparedFileMutation struct {
+	diffContent    string
+	writeContent   string
+	wholeFileRead  bool
+	description    string
+	permParams     any
+	successMessage string
+	metadata       func(content, diffText string, additions, removals int) any
+}
 
+type fileMutationRequest struct {
+	editContext
+	call      fantasy.ToolCall
+	filePath  string
+	sessionID string
+	toolName  string
+	prepare   func(fileSnapshot) (preparedFileMutation, error)
+}
+
+func readFileSnapshot(filePath string) (fileSnapshot, error) {
+	file, err := os.Open(filePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return fileSnapshot{}, nil
+	}
+	if err != nil {
+		return fileSnapshot{}, fmt.Errorf("open file snapshot: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return fileSnapshot{}, fmt.Errorf("stat file snapshot: %w", err)
+	}
+	if info.IsDir() {
+		return fileSnapshot{mode: info.Mode(), modTime: info.ModTime(), exists: true, isDir: true}, nil
+	}
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		return fileSnapshot{}, fmt.Errorf("read file snapshot: %w", err)
+	}
+	content, isCRLF := fsext.ToUnixLineEndings(string(raw))
+	return fileSnapshot{raw: raw, content: content, mode: info.Mode(), modTime: info.ModTime(), exists: true, isCRLF: isCRLF}, nil
+}
+
+type committedMutationError struct {
+	err error
+}
+
+func (e *committedMutationError) Error() string { return e.err.Error() }
+func (e *committedMutationError) Unwrap() error { return e.err }
+
+func mutationCommitted(err error) bool {
+	var committed *committedMutationError
+	return errors.As(err, &committed)
+}
+
+func applyFileMutation(req fileMutationRequest) (fantasy.ToolResponse, error) {
+	if msg, refused := confinementRefusal(req.permissions, req.filePath); refused {
+		return fantasy.NewTextErrorResponse(msg), nil
+	}
+	snapshot, err := readFileSnapshot(req.filePath)
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+	prepared, err := req.prepare(snapshot)
+	if err != nil {
+		var stop *mutationStop
+		if errors.As(err, &stop) {
+			return stop.Response, nil
+		}
+		return fantasy.ToolResponse{}, err
+	}
+	diffText, additions, removals := diff.GenerateDiff(snapshot.content, prepared.diffContent, strings.TrimPrefix(req.filePath, req.workingDir))
 	resp, denied, err := requirePermission(req.ctx, req.permissions, permission.CreatePermissionRequest{
-		SessionID:   req.sessionID,
-		Path:        fsext.PathOrPrefix(req.filePath, req.workingDir),
-		ToolCallID:  req.call.ID,
-		ToolName:    req.toolName,
-		Action:      "write",
-		Description: req.description,
-		Params:      req.permParams,
+		SessionID: req.sessionID, Path: fsext.PathOrPrefix(req.filePath, req.workingDir), ToolCallID: req.call.ID,
+		ToolName: req.toolName, Action: "write", Description: prepared.description, Params: prepared.permParams,
 	})
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
 	if denied {
-		return fantasy.WithResponseMetadata(resp, req.metadata(req.diffContent, diffText, additions, removals)), nil
+		return fantasy.WithResponseMetadata(resp, prepared.metadata(prepared.diffContent, diffText, additions, removals)), nil
 	}
-
-	if err := writeFileWithHistory(req.ctx, req.files, req.sessionID, req.filePath, req.oldContent, req.writeContent); err != nil {
-		return fantasy.ToolResponse{}, err
+	if !snapshot.exists {
+		if err := ensureParentDir(req.filePath); err != nil {
+			return fantasy.ToolResponse{}, err
+		}
 	}
-	if req.wholeFileRead {
-		recordWholeFileRead(req.ctx, req.filetracker, req.sessionID, req.filePath)
-	} else {
-		recordEditedSpan(req.ctx, req.filetracker, req.sessionID, req.filePath, req.oldContent, req.diffContent)
+	mode := snapshot.mode
+	if !snapshot.exists {
+		mode = 0o644
 	}
-
-	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(req.successMessage),
-		req.metadata(req.writeContent, diffText, additions, removals),
-	), nil
+	err = fsext.AtomicWriteFileIfUnchanged(req.filePath, snapshot.raw, []byte(prepared.writeContent), mode, snapshot.exists)
+	if err != nil {
+		if errors.Is(err, fsext.ErrFileChanged) {
+			return fantasy.NewTextErrorResponse("file changed on disk after approval; retry after reading the current file"), nil
+		}
+		return fantasy.ToolResponse{}, fmt.Errorf("failed to atomically write file: %w", err)
+	}
+	historyErr := recordFileHistory(req.ctx, req.files, req.sessionID, req.filePath, string(snapshot.raw), prepared.writeContent)
+	if req.filetracker != nil {
+		if prepared.wholeFileRead {
+			recordWholeFileRead(req.ctx, req.filetracker, req.sessionID, req.filePath)
+		} else {
+			recordEditedSpan(req.ctx, req.filetracker, req.sessionID, req.filePath, snapshot.content, prepared.diffContent)
+		}
+	}
+	if historyErr != nil {
+		return fantasy.ToolResponse{}, &committedMutationError{err: fmt.Errorf("file committed but history update failed: %w", historyErr)}
+	}
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(prepared.successMessage), prepared.metadata(prepared.writeContent, diffText, additions, removals)), nil
 }

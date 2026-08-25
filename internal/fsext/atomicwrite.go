@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -9,6 +10,50 @@ import (
 // AtomicWriteFile writes data to a file atomically by writing to a unique
 // temporary file in the same directory and renaming it into place. This
 // prevents concurrent readers from observing a partially-written file.
+var ErrFileChanged = errors.New("file changed")
+
+func AtomicWriteFileIfUnchanged(path string, expected, data []byte, mode os.FileMode, exists bool) error {
+	if exists {
+		return conditionalReplaceExisting(filepath.Clean(path), expected, data, mode)
+	}
+	if err := AtomicCreateFile(path, data, mode); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return ErrFileChanged
+		}
+		return err
+	}
+	return nil
+}
+
+func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
+	path = filepath.Clean(path)
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	cleanup := func() { _ = f.Close(); _ = os.Remove(tmp) }
+	if _, err := f.Write(data); err != nil {
+		cleanup()
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		cleanup()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Link(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	_ = os.Remove(tmp)
+	return nil
+}
+
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	path = filepath.Clean(path)
 	dir := filepath.Dir(path)

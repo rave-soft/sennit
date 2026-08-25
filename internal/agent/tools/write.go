@@ -10,6 +10,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/filepathext"
 	"github.com/rave-soft/sennit/internal/filetracker"
+	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/history"
 
 	"github.com/rave-soft/sennit/internal/lsp"
@@ -120,27 +121,28 @@ func NewWriteTool(
 			}
 
 			resp, err := applyFileMutation(fileMutationRequest{
-				editContext:    editContext{ctx, permissions, files, filetracker, workingDir},
-				call:           call,
-				filePath:       filePath,
-				sessionID:      sessionID,
-				oldContent:     oldContent,
-				diffContent:    params.Content,
-				writeContent:   params.Content,
-				wholeFileRead:  true,
-				toolName:       WriteToolName,
-				description:    fmt.Sprintf("Create file %s", filePath),
-				successMessage: fmt.Sprintf("File successfully written: %s", filePath),
-				permParams: WritePermissionsParams{
-					FilePath:   filePath,
-					OldContent: oldContent,
-					NewContent: params.Content,
-				},
-				metadata: func(_, diffText string, additions, removals int) any {
-					return WriteResponseMetadata{Diff: diffText, Additions: additions, Removals: removals}
+				editContext: editContext{ctx, permissions, files, filetracker, workingDir},
+				call:        call, filePath: filePath, sessionID: sessionID, toolName: WriteToolName,
+				prepare: func(snapshot fileSnapshot) (preparedFileMutation, error) {
+					if snapshot.isDir {
+						return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)))
+					}
+					writeContent := params.Content
+					if snapshot.isCRLF {
+						writeContent, _ = fsext.ToWindowsLineEndings(params.Content)
+					}
+					return preparedFileMutation{
+						diffContent: params.Content, writeContent: writeContent, wholeFileRead: true,
+						description:    fmt.Sprintf("Create file %s", filePath),
+						successMessage: fmt.Sprintf("File successfully written: %s", filePath),
+						permParams:     WritePermissionsParams{FilePath: filePath, OldContent: snapshot.content, NewContent: params.Content},
+						metadata: func(_, diffText string, additions, removals int) any {
+							return WriteResponseMetadata{Diff: diffText, Additions: additions, Removals: removals}
+						},
+					}, nil
 				},
 			})
-			if err != nil {
+			if err != nil && !mutationCommitted(err) {
 				return fantasy.ToolResponse{}, err
 			}
 			if resp.IsError {
@@ -153,6 +155,9 @@ func NewWriteTool(
 			// diagnostics for the old content. getDiagnostics on the next
 			// line already used the resolved form.
 			notifyLSPs(ctx, lspManager, filePath)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 			resp.Content = fmt.Sprintf("<result>\n%s\n</result>", resp.Content) + getDiagnostics(filePath, lspManager)
 			return resp, nil
 		},

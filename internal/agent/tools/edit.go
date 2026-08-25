@@ -86,7 +86,7 @@ func NewEditTool(
 				response, err = replaceContent(editCtx, params.FilePath, params.OldString, params.NewString, params.ReplaceAll, call)
 			}
 
-			if err != nil {
+			if err != nil && !mutationCommitted(err) {
 				return response, err
 			}
 			if response.IsError {
@@ -96,6 +96,9 @@ func NewEditTool(
 			}
 
 			notifyLSPs(ctx, lspManager, params.FilePath)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
 			text += getDiagnostics(params.FilePath, lspManager)
@@ -126,24 +129,19 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 	}
 
 	return applyFileMutation(fileMutationRequest{
-		editContext:    edit,
-		call:           call,
-		filePath:       filePath,
-		sessionID:      sessionID,
-		oldContent:     "",
-		diffContent:    content,
-		writeContent:   content,
-		wholeFileRead:  true,
-		toolName:       EditToolName,
-		description:    fmt.Sprintf("Create file %s", filePath),
-		successMessage: "File created: " + filePath,
-		permParams: EditPermissionsParams{
-			FilePath:   filePath,
-			OldContent: "",
-			NewContent: content,
-		},
-		metadata: func(content, _ string, additions, removals int) any {
-			return EditResponseMetadata{OldContent: "", NewContent: content, Additions: additions, Removals: removals}
+		editContext: edit, call: call, filePath: filePath, sessionID: sessionID, toolName: EditToolName,
+		prepare: func(snapshot fileSnapshot) (preparedFileMutation, error) {
+			if snapshot.exists {
+				return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("file already exists: %s", filePath)))
+			}
+			return preparedFileMutation{
+				diffContent: content, writeContent: content, wholeFileRead: true,
+				description: fmt.Sprintf("Create file %s", filePath), successMessage: "File created: " + filePath,
+				permParams: EditPermissionsParams{FilePath: filePath, NewContent: content},
+				metadata: func(content, _ string, additions, removals int) any {
+					return EditResponseMetadata{NewContent: content, Additions: additions, Removals: removals}
+				},
+			}, nil
 		},
 	})
 }
@@ -380,9 +378,9 @@ func applyStringMutation(edit editContext, m stringMutation, call fantasy.ToolCa
 		}
 		return fantasy.ToolResponse{}, err
 	}
-	sessionID, oldContent, isCrlf := existing.sessionID, existing.oldContent, existing.isCrlf
+	sessionID, oldContent := existing.sessionID, existing.oldContent
 
-	newContent, whitespaceCorrected, err := findAndReplace(oldContent, m.oldString, m.newString, m.replaceAll)
+	newContent, _, err := findAndReplace(oldContent, m.oldString, m.newString, m.replaceAll)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -393,29 +391,31 @@ func applyStringMutation(edit editContext, m stringMutation, call fantasy.ToolCa
 		return resp, nil
 	}
 
-	writeContent := newContent
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
-
 	return applyFileMutation(fileMutationRequest{
-		editContext:    edit,
-		call:           call,
-		filePath:       filePath,
-		sessionID:      sessionID,
-		oldContent:     oldContent,
-		diffContent:    newContent,
-		writeContent:   writeContent,
-		toolName:       EditToolName,
-		description:    m.description,
-		successMessage: withWhitespaceNote(m.successMessage, whitespaceCorrected),
-		permParams: EditPermissionsParams{
-			FilePath:   filePath,
-			OldContent: oldContent,
-			NewContent: newContent,
-		},
-		metadata: func(content, _ string, additions, removals int) any {
-			return EditResponseMetadata{OldContent: oldContent, NewContent: content, Additions: additions, Removals: removals}
+		editContext: edit, call: call, filePath: filePath, sessionID: sessionID, toolName: EditToolName,
+		prepare: func(snapshot fileSnapshot) (preparedFileMutation, error) {
+			if !snapshot.exists {
+				return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)))
+			}
+			preparedContent, corrected, err := findAndReplace(snapshot.content, m.oldString, m.newString, m.replaceAll)
+			if err != nil {
+				return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(err.Error()))
+			}
+			if m.rejectNoOp && preparedContent == snapshot.content {
+				return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."))
+			}
+			preparedWrite := preparedContent
+			if snapshot.isCRLF {
+				preparedWrite, _ = fsext.ToWindowsLineEndings(preparedWrite)
+			}
+			return preparedFileMutation{
+				diffContent: preparedContent, writeContent: preparedWrite,
+				description: m.description, successMessage: withWhitespaceNote(m.successMessage, corrected),
+				permParams: EditPermissionsParams{FilePath: filePath, OldContent: snapshot.content, NewContent: preparedContent},
+				metadata: func(content, _ string, additions, removals int) any {
+					return EditResponseMetadata{OldContent: snapshot.content, NewContent: content, Additions: additions, Removals: removals}
+				},
+			}, nil
 		},
 	})
 }

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -139,6 +138,9 @@ func NewPermissionDeniedResponse() fantasy.ToolResponse {
 // metadata (e.g. a diff) can pass through fantasy.WithResponseMetadata
 // before returning it.
 func requirePermission(ctx context.Context, perms permission.Service, req permission.CreatePermissionRequest) (resp fantasy.ToolResponse, denied bool, err error) {
+	if perms == nil {
+		return fantasy.ToolResponse{}, false, nil
+	}
 	granted, err := perms.Request(ctx, req)
 	if err != nil {
 		return fantasy.ToolResponse{}, false, err
@@ -187,7 +189,13 @@ func writeFileWithHistory(ctx context.Context, files history.Service, sessionID,
 	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
+	return recordFileHistory(ctx, files, sessionID, filePath, oldContent, newContent)
+}
 
+func recordFileHistory(ctx context.Context, files history.Service, sessionID, filePath, oldContent, newContent string) error {
+	if files == nil || sessionID == "" {
+		return nil
+	}
 	file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
 	switch {
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
@@ -208,11 +216,11 @@ func writeFileWithHistory(ctx context.Context, files history.Service, sessionID,
 	case file.Content != oldContent:
 		// User manually changed the content; store an intermediate version.
 		if _, err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
-			slog.Error("Error creating file history version", "error", err)
+			return fmt.Errorf("create intermediate file history: %w", err)
 		}
 	}
 	if _, err := files.CreateVersion(ctx, sessionID, filePath, newContent); err != nil {
-		slog.Error("Error creating file history version", "error", err)
+		return fmt.Errorf("create committed file history: %w", err)
 	}
 
 	return nil

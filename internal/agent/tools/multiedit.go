@@ -94,7 +94,7 @@ func NewMultiEditTool(
 				response, err = processMultiEditExistingFile(editCtx, params, call)
 			}
 
-			if err != nil {
+			if err != nil && !mutationCommitted(err) {
 				return response, err
 			}
 
@@ -104,6 +104,9 @@ func NewMultiEditTool(
 
 			// Notify LSP clients about the change
 			notifyLSPs(ctx, lspManager, params.FilePath)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
 
 			// Wait for LSP diagnostics and add them to the response
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
@@ -190,27 +193,19 @@ func processMultiEditWithCreation(edit editContext, params MultiEditParams, call
 	message = withWhitespaceNote(message, whitespaceCorrected)
 
 	return applyFileMutation(fileMutationRequest{
-		editContext:    edit,
-		call:           call,
-		filePath:       params.FilePath,
-		sessionID:      sessionID,
-		oldContent:     "",
-		diffContent:    currentContent,
-		writeContent:   currentContent,
-		wholeFileRead:  true,
-		toolName:       MultiEditToolName,
-		description:    description,
-		successMessage: message,
-		permParams: MultiEditPermissionsParams{
-			FilePath:   params.FilePath,
-			OldContent: "",
-			NewContent: currentContent,
-		},
-		metadata: func(_, _ string, additions, removals int) any {
-			return MultiEditResponseMetadata{
-				OldContent: "", NewContent: currentContent, Additions: additions, Removals: removals,
-				EditsApplied: editsApplied, EditsFailed: failedEdits,
+		editContext: edit, call: call, filePath: params.FilePath, sessionID: sessionID, toolName: MultiEditToolName,
+		prepare: func(snapshot fileSnapshot) (preparedFileMutation, error) {
+			if snapshot.exists {
+				return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("file already exists: %s", params.FilePath)))
 			}
+			return preparedFileMutation{
+				diffContent: currentContent, writeContent: currentContent, wholeFileRead: true,
+				description: description, successMessage: message,
+				permParams: MultiEditPermissionsParams{FilePath: params.FilePath, NewContent: currentContent},
+				metadata: func(_, _ string, additions, removals int) any {
+					return MultiEditResponseMetadata{NewContent: currentContent, Additions: additions, Removals: removals, EditsApplied: editsApplied, EditsFailed: failedEdits}
+				},
+			}, nil
 		},
 	})
 }
@@ -224,9 +219,9 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		}
 		return fantasy.ToolResponse{}, err
 	}
-	sessionID, oldContent, isCrlf := existing.sessionID, existing.oldContent, existing.isCrlf
+	sessionID, oldContent := existing.sessionID, existing.oldContent
 
-	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(oldContent, params.Edits, 0)
+	currentContent, failedEdits, _ := applyEditsToContent(oldContent, params.Edits, 0)
 
 	if resp, ok := requireReadCoverage(edit, sessionID, params.FilePath, oldContent, currentContent); !ok {
 		return resp, nil
@@ -247,48 +242,34 @@ func processMultiEditExistingFile(edit editContext, params MultiEditParams, call
 		return fantasy.NewTextErrorResponse("no changes made - all edits resulted in identical content"), nil
 	}
 
-	editsApplied := len(params.Edits) - len(failedEdits)
-	var description string
-	if len(failedEdits) > 0 {
-		description = fmt.Sprintf("Apply %d of %d edits to file %s (%d failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))
-	} else {
-		description = fmt.Sprintf("Apply %d edits to file %s", editsApplied, params.FilePath)
-	}
-
-	writeContent := currentContent
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
-
-	var message string
-	if len(failedEdits) > 0 {
-		message = fmt.Sprintf("Applied %d of %d edits to file: %s (%d edit(s) failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))
-	} else {
-		message = fmt.Sprintf("Applied %d edits to file: %s", len(params.Edits), params.FilePath)
-	}
-	message = withWhitespaceNote(message, whitespaceCorrected)
-
 	return applyFileMutation(fileMutationRequest{
-		editContext:    edit,
-		call:           call,
-		filePath:       params.FilePath,
-		sessionID:      sessionID,
-		oldContent:     oldContent,
-		diffContent:    currentContent,
-		writeContent:   writeContent,
-		toolName:       MultiEditToolName,
-		description:    description,
-		successMessage: message,
-		permParams: MultiEditPermissionsParams{
-			FilePath:   params.FilePath,
-			OldContent: oldContent,
-			NewContent: currentContent,
-		},
-		metadata: func(_, _ string, additions, removals int) any {
-			return MultiEditResponseMetadata{
-				OldContent: oldContent, NewContent: currentContent, Additions: additions, Removals: removals,
-				EditsApplied: editsApplied, EditsFailed: failedEdits,
+		editContext: edit, call: call, filePath: params.FilePath, sessionID: sessionID, toolName: MultiEditToolName,
+		prepare: func(snapshot fileSnapshot) (preparedFileMutation, error) {
+			if !snapshot.exists || snapshot.isDir {
+				return preparedFileMutation{}, stopWith(fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", params.FilePath)))
 			}
+			preparedContent, preparedFailures, preparedCorrected := applyEditsToContent(snapshot.content, params.Edits, 0)
+			preparedApplied := len(params.Edits) - len(preparedFailures)
+			var preparedDescription, preparedMessage string
+			if len(preparedFailures) > 0 {
+				preparedDescription = fmt.Sprintf("Apply %d of %d edits to file %s (%d failed)", preparedApplied, len(params.Edits), params.FilePath, len(preparedFailures))
+				preparedMessage = fmt.Sprintf("Applied %d of %d edits to file: %s (%d edit(s) failed)", preparedApplied, len(params.Edits), params.FilePath, len(preparedFailures))
+			} else {
+				preparedDescription = fmt.Sprintf("Apply %d edits to file %s", preparedApplied, params.FilePath)
+				preparedMessage = fmt.Sprintf("Applied %d edits to file: %s", preparedApplied, params.FilePath)
+			}
+			preparedWrite := preparedContent
+			if snapshot.isCRLF {
+				preparedWrite, _ = fsext.ToWindowsLineEndings(preparedContent)
+			}
+			return preparedFileMutation{
+				diffContent: preparedContent, writeContent: preparedWrite,
+				description: preparedDescription, successMessage: withWhitespaceNote(preparedMessage, preparedCorrected),
+				permParams: MultiEditPermissionsParams{FilePath: params.FilePath, OldContent: snapshot.content, NewContent: preparedContent},
+				metadata: func(_, _ string, additions, removals int) any {
+					return MultiEditResponseMetadata{OldContent: snapshot.content, NewContent: preparedContent, Additions: additions, Removals: removals, EditsApplied: len(params.Edits) - len(preparedFailures), EditsFailed: preparedFailures}
+				},
+			}, nil
 		},
 	})
 }
