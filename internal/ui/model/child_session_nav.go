@@ -137,6 +137,36 @@ func (m *UI) enterChildSession(messageID, toolCallID string) tea.Cmd {
 	return m.requestSessionLoad(childID)
 }
 
+// abandonChildSessionEntry undoes an entry into sessionID that turned out
+// to have nothing behind it, and reports whether it did.
+//
+// enterChildSession pushes its frame and moves focus before the load it
+// asks for has resolved — it has to, because the load is asynchronous and
+// the frame is what the arriving result is matched against. So a load
+// that fails leaves the UI *inside* a child session that does not exist:
+// the editor stays blurred and replaced by the delegation panel, the chat
+// stays read-only, and the content on screen is still the parent's. The
+// only way out was alt+up, which reads as the app having hung.
+//
+// Unlike exitChildSession this asks for no load on the way back. Nothing
+// was ever replaced — the failed load returned before it could — so the
+// parent is already what is on screen, and re-fetching it would throw
+// away the person's scroll position to redraw what is already there.
+func (m *UI) abandonChildSessionEntry(sessionID string) bool {
+	if len(m.sess.navStack) == 0 {
+		return false
+	}
+	if m.sess.navStack[len(m.sess.navStack)-1].childSessionID != sessionID {
+		return false
+	}
+	m.sess.navStack = m.sess.navStack[:len(m.sess.navStack)-1]
+	if len(m.sess.navStack) == 0 {
+		m.focus = uiFocusEditor
+		m.chat.Blur()
+	}
+	return true
+}
+
 // exitChildSession pops the top navigation frame and returns a tea.Cmd
 // that loads the session it points back to. No-op if the stack is empty
 // (e.g. alt+up pressed on a top-level session).

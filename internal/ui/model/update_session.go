@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
@@ -61,6 +63,26 @@ func (m *UI) updateSession(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			m.editor.pendingSendQueue = nil
 			m.editor.pendingSendGen = 0
 			m.editor.pendingSendLoading = false
+			// A delegation the person opened before it had begun. The
+			// sub-session row is written at the top of runSubAgent, so
+			// between the model emitting the tool call and that call
+			// getting its turn to execute — queued behind its siblings,
+			// or waiting on the delegate's prompt and tools to finish
+			// building — there is a window, sometimes seconds long,
+			// where the delegation is on screen and its session does not
+			// exist yet. Opening it there produced a raw
+			// `session: no such session: "<uuid>$$call_..."` in the
+			// status bar and left the UI stuck inside a child view of
+			// nothing.
+			//
+			// Every failed entry rolls back, whatever went wrong; only
+			// the not-found case gets the gentler wording, since that is
+			// the one that is not really an error at all.
+			abandoned := m.abandonChildSessionEntry(msg.sessionID)
+			if abandoned && errors.Is(msg.err, session.ErrNotFound) {
+				cmds = append(cmds, util.ReportWarn("This delegation has not started yet"))
+				break
+			}
 			cmds = append(cmds, util.ReportError(msg.err))
 			break
 		}
