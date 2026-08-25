@@ -382,7 +382,15 @@ func (l *List) renderItemEntry(idx int) *listCacheEntry {
 
 	rendered := item.Render(l.width)
 	rendered = strings.TrimRight(rendered, "\n")
-	lines := strings.Split(rendered, "\n")
+	// A hidden item takes no room at all. strings.Split reports one empty
+	// line for an empty render, which is right for an item that draws a
+	// blank line on purpose (a spacer) and wrong for one that is not there
+	// — hence [Hideable] rather than a bare emptiness check, which would
+	// silently close up every deliberate blank line in every list.
+	var lines []string
+	if !itemHidden(rawItem) || rendered != "" {
+		lines = strings.Split(rendered, "\n")
+	}
 	height := len(lines)
 
 	// Re-read the version after Render so that any version bumps

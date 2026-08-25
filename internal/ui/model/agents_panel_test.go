@@ -11,9 +11,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/dialog"
 	"github.com/rave-soft/sennit/internal/workspace"
 )
@@ -297,4 +299,31 @@ func TestSessionPanelPlan_TodosCapBeatsTheInProgressFloor(t *testing.T) {
 	u.panel.expanded = true
 
 	require.Equal(t, maxPanelTodosRows, u.sessionPanelPlan(100).todosViewportRows)
+}
+
+// TestSessionEvent_HidesPanelledDelegationsFromTranscript is the end-to-end
+// half of the handoff: a delegation goes into the panel when it starts and
+// leaves it when it finishes, so the transcript must have no row for it
+// while the panel does, and its block must appear the moment the panel is
+// done with it.
+func TestSessionEvent_HidesPanelledDelegationsFromTranscript(t *testing.T) {
+	t.Parallel()
+
+	u := sessionUI()
+	u.dialog = dialog.NewOverlay()
+	u.chat.SetSize(80, 40)
+
+	item := chat.NewAgentToolMessageItem(u.com.Styles,
+		message.ToolCall{ID: "call-1", Name: "agent", Input: `{"prompt":"look into the flaky test"}`, Finished: false},
+		nil, false, nil)
+	u.chat.SetMessages(item)
+
+	u.agentList.cache.value = []proto.Thread{liveDelegation("d1", "m$$call-1")}
+	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
+	require.Empty(t, item.Render(80), "the panel has it: no row in the transcript")
+
+	// It finished and left the panel, so the transcript is where it lands.
+	u.agentList.cache.value = nil
+	u.Update(pubsub.Event[session.Session]{Type: pubsub.UpdatedEvent, Payload: *u.sess.current})
+	require.NotEmpty(t, item.Render(80), "the panel let go: the block appears")
 }

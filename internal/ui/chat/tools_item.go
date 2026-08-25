@@ -7,6 +7,7 @@ import (
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/ui/anim"
 	"github.com/rave-soft/sennit/internal/ui/common"
+	"github.com/rave-soft/sennit/internal/ui/list"
 	"github.com/rave-soft/sennit/internal/ui/styles"
 )
 
@@ -131,6 +132,11 @@ func (t *baseToolMessageItem) syncAnimLabel() {
 
 // Render renders the tool message item at the given width.
 func (t *baseToolMessageItem) Render(width int) string {
+	// A hidden item draws nothing — not an empty prefixed line, which is
+	// what prefixLines would make of an empty body. See [Hideable].
+	if hideable, ok := t.toolRenderer.(list.Hideable); ok && hideable.Hidden() {
+		return ""
+	}
 	// Cache the prefixed output keyed by (width, prefix variant).
 	// Bypass the cache while spinning (RawRender output is
 	// frame-dependent) or while a highlight range is active.

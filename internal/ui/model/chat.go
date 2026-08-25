@@ -752,6 +752,13 @@ func (m *Chat) isSelectable(index int) bool {
 	if item == nil {
 		return false
 	}
+	// Nothing drawn, nothing to land on: a delegation the session panel is
+	// showing has no row here, and stopping the cursor on it would read as
+	// a dead keypress. Every selection path below loops past whatever this
+	// rejects.
+	if hideable, ok := item.(list.Hideable); ok && hideable.Hidden() {
+		return false
+	}
 	_, ok := item.(list.Focusable)
 	return ok
 }
@@ -1045,6 +1052,30 @@ func (m *Chat) SetTodosCompact(compact bool) {
 		if compactable, ok := toolItem.(chat.Compactable); ok {
 			compactable.SetCompact(compact)
 		}
+	}
+}
+
+// SetDelegationsHidden tells every top-level delegation item whether the
+// session panel is currently showing this session's live delegations, in
+// which case they have no row in the transcript at all.
+//
+// This is the todos handoff (see SetTodosCompact) with the harder half of
+// the bargain: a delegation goes into the panel when it starts and leaves
+// it when it finishes, so the transcript is where it lands afterwards, not
+// somewhere it also appears meanwhile. Clearing it — which happens the
+// moment the panel has nothing live left — is what makes the finished
+// blocks appear.
+//
+// Only top-level items are reached, so a nested delegation inside a
+// parent's tool tree is unaffected: it belongs to a child session the panel
+// is not reporting on.
+func (m *Chat) SetDelegationsHidden(hidden bool) {
+	for i := range m.list.Len() {
+		item, ok := m.list.ItemAt(i).(interface{ SetHiddenWhilePanelled(bool) })
+		if !ok {
+			continue
+		}
+		item.SetHiddenWhilePanelled(hidden)
 	}
 }
 

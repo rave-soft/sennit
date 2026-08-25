@@ -956,3 +956,48 @@ func TestExtractMessageItems_IgnoresMissingCreatedAt(t *testing.T) {
 	_, _, _, gotStart, _ := provider.DelegationInfo()
 	require.WithinDuration(t, time.Now(), gotStart, time.Minute)
 }
+
+// TestAgentToolRender_HiddenWhilePanelled covers the handoff a delegation
+// makes with the session panel: it goes into the panel when it starts and
+// leaves it when it finishes, so while the panel has it there is no row for
+// it here at all — not a stub, not a blank line. Clearing the flag is what
+// makes the transcript's own block appear, which is the moment the
+// delegation is finished and the panel has let go of it.
+func TestAgentToolRender_HiddenWhilePanelled(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-1", "bash", `{"command":"echo hi"}`))
+
+	item.SetHiddenWhilePanelled(true)
+	require.True(t, item.Hidden())
+	require.Empty(t, item.Render(120),
+		"the panel is showing this delegation; the transcript must draw nothing, so the list gives it no row")
+
+	item.SetHiddenWhilePanelled(false)
+	out := ansi.Strip(item.Render(120))
+	require.NotEmpty(t, out, "and letting go of it is what puts the block back")
+	require.Contains(t, out, "step 1")
+	require.Len(t, strings.Split(strings.TrimRight(out, " \n"), "\n"), 2)
+}
+
+// TestAgentToolRender_HiddenBumpsVersion pins the part the list depends on:
+// the item's rendered output just changed, so its version must move or the
+// list will keep serving the row it cached before.
+func TestAgentToolRender_HiddenBumpsVersion(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	item := NewAgentToolMessageItem(&sty,
+		message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"go"}`, Finished: false}, nil, false, nil)
+
+	before := item.Version()
+	item.SetHiddenWhilePanelled(true)
+	require.Greater(t, item.Version(), before)
+
+	steady := item.Version()
+	item.SetHiddenWhilePanelled(true)
+	require.Equal(t, steady, item.Version(), "setting it to what it already is must not churn the list cache")
+}

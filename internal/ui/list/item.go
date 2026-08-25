@@ -20,6 +20,25 @@ import (
 //     entries are emitted verbatim — no Render call — until either
 //     Version() bumps, the viewport width changes, or the list
 //     explicitly invalidates the entry.
+//
+// Hideable is implemented by an item that can have nothing to draw at all,
+// as opposed to something small or blank. A hidden item's empty render
+// occupies no rows, where any other item's empty render still occupies the
+// one row it drew.
+//
+// Owners of a hidden item are responsible for keeping it out of selection
+// as well; the list has no opinion on which of its items a caller considers
+// reachable (see Chat.isSelectable for the chat's).
+type Hideable interface {
+	Hidden() bool
+}
+
+// itemHidden reports whether item declares itself hidden.
+func itemHidden(item Item) bool {
+	hideable, ok := item.(Hideable)
+	return ok && hideable.Hidden()
+}
+
 type Item interface {
 	// Render returns the string representation of the item for the given
 	// width.

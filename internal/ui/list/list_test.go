@@ -911,3 +911,59 @@ func TestList_GapAt_AlwaysSpacedKeepsGap(t *testing.T) {
 	out := l.Render()
 	require.Equal(t, "a:0\n\ns:0", out, "AlwaysSpaced neighbor must keep the gap despite both items being one line")
 }
+
+// hideableItem is an item whose emptiness is deliberate — it declares
+// itself hidden, which is what separates "not there" from "a blank line I
+// drew on purpose".
+type hideableItem struct {
+	*multiLineItem
+	hidden bool
+}
+
+func newHideableItem(id string, height int) *hideableItem {
+	return &hideableItem{multiLineItem: newMultiLineItem(id, height)}
+}
+
+func (h *hideableItem) Hidden() bool { return h.hidden }
+
+func (h *hideableItem) Render(width int) string {
+	if h.hidden {
+		return ""
+	}
+	return h.multiLineItem.Render(width)
+}
+
+// TestList_HiddenItemTakesNoRows covers the distinction the list has to
+// draw between an item with nothing to show and an item showing nothing: a
+// hidden item must not push the rest of the list down by a row, while an
+// ordinary item rendering "" keeps the blank line it asked for.
+func TestList_HiddenItemTakesNoRows(t *testing.T) {
+	t.Parallel()
+
+	hidden := newHideableItem("gone", 2)
+	hidden.hidden = true
+	shown := newMultiLineItem("here", 1)
+
+	l := NewList(hidden, shown)
+	l.SetGap(0)
+	l.SetSize(40, 100)
+	require.Equal(t, 1, l.TotalHeight(), "the hidden item must contribute no rows at all")
+
+	hidden.hidden = false
+	hidden.Bump()
+	require.Equal(t, 2+1, l.TotalHeight(), "and showing it must give its rows back")
+}
+
+// TestList_EmptyRenderStillTakesItsRow is the other side of that line: an
+// item that is simply blank has not declared itself hidden, and the row it
+// drew is a row it meant to draw. Closing it up would quietly reflow every
+// list that uses a blank item as a spacer.
+func TestList_EmptyRenderStillTakesItsRow(t *testing.T) {
+	t.Parallel()
+
+	blank := newMultiLineItem("", 0)
+	l := NewList(blank, newMultiLineItem("here", 1))
+	l.SetGap(0)
+	l.SetSize(40, 100)
+	require.Equal(t, 1+1, l.TotalHeight())
+}
