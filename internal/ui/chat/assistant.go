@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -448,7 +449,7 @@ func (a *AssistantMessageItem) thinkingKey() (uint64, uint64) {
 	showFooter := !a.message.IsThinking() || len(a.message.ToolCalls()) > 0
 	var durationStr string
 	if showFooter {
-		duration := a.message.ThinkingDuration()
+		duration := time.Duration(a.message.ThinkingDurationSeconds(time.Now().Unix())) * time.Second
 		if duration.String() != "0s" {
 			durationStr = duration.String()
 		}
@@ -632,7 +633,7 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	var footer string
 	// if thinking is done add the thought for footer
 	if !a.message.IsThinking() || len(a.message.ToolCalls()) > 0 {
-		duration := a.message.ThinkingDuration()
+		duration := time.Duration(a.message.ThinkingDurationSeconds(time.Now().Unix())) * time.Second
 		if duration.String() != "0s" {
 			footer = a.sty.Messages.ThinkingFooterTitle.Render("Thought for ") +
 				a.sty.Messages.ThinkingFooterDuration.Render(duration.String())

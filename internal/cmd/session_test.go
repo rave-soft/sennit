@@ -15,6 +15,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	sennitdb "github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/spf13/cobra"
@@ -78,7 +79,7 @@ func sessionFixture(t *testing.T, dataDir, projectPath string) sessionFixtureIDs
 	ctx := t.Context()
 
 	sessSvc := session.NewService(q, conn, projectPath)
-	msgSvc := message.NewService(q)
+	msgSvc := messagestore.NewService(q)
 
 	older, err := sessSvc.Create(ctx, "Session Alpha")
 	require.NoError(t, err)

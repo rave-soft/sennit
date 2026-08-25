@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 )
 
 // persistShellOutput stores a bang-mode shell command result as a user
@@ -17,7 +18,7 @@ import (
 // rather than in internal/shell.
 func persistShellOutput(
 	ctx context.Context,
-	messages message.Service,
+	messages messagestore.Service,
 	sessionID, command, output string,
 	exitCode int,
 ) error {

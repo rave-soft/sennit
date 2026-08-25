@@ -6,6 +6,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +31,7 @@ func TestOnToolInputDeltaPersistsArgumentsMidStream(t *testing.T) {
 	q := db.New(conn)
 	// No debounce: this asserts on what a reader sees mid-stream, which
 	// the coalescing window would otherwise hide behind a timer.
-	messages := message.NewService(q, message.WithDebounce(0))
+	messages := messagestore.NewService(q, messagestore.WithDebounce(0))
 	sessions := session.NewService(q, conn, "/test/project")
 
 	sess, err := sessions.Create(ctx, "streaming arguments")
@@ -76,7 +77,7 @@ func TestOnToolInputDeltaKeepsTheCallItGrows(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	q := db.New(conn)
-	messages := message.NewService(q, message.WithDebounce(0))
+	messages := messagestore.NewService(q, messagestore.WithDebounce(0))
 	sessions := session.NewService(q, conn, "/test/project")
 
 	sess, err := sessions.Create(ctx, "parallel calls")

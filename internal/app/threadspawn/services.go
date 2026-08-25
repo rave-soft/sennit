@@ -6,6 +6,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/thread"
@@ -111,7 +112,7 @@ func (a *SessionAdapter) CreateSubAgentSession(ctx context.Context, toolCallID, 
 // onto the real service's at this seam, and its List results are reduced
 // to the Role/Text fields the domain reads.
 type MessageAdapter struct {
-	full message.Service
+	full messagestore.Service
 }
 
 func (a *MessageAdapter) Create(ctx context.Context, sessionID string, role thread.MessageRole, parts []thread.ContentPart) error {
@@ -148,7 +149,7 @@ func (a *MessageAdapter) List(ctx context.Context, sessionID string) ([]thread.M
 
 // NewMessageService adapts a real message service to the thread domain's
 // narrow [thread.MessageService].
-func NewMessageService(full message.Service) thread.MessageService {
+func NewMessageService(full messagestore.Service) thread.MessageService {
 	return &MessageAdapter{full: full}
 }
 

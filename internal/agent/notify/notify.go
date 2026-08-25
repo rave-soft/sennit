@@ -62,7 +62,7 @@ type Notification struct {
 // It is published exactly once per top-level agent run (per
 // [sessionAgent.Run] invocation that actually executed) after all
 // message updates for the turn have been flushed via
-// message.Service.FlushAll. Carries the final assistant text and
+// the message store FlushAll operation. Carries the final assistant text and
 // message ID so non-interactive clients can reconcile stdout even if
 // SSE events arrive out of order or are dropped by the broker. Error
 // is non-empty when the run terminated with an error; Cancelled is

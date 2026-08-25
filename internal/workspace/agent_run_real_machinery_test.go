@@ -16,6 +16,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/stretchr/testify/require"
@@ -24,14 +25,14 @@ import (
 // -- real session/message services, mirroring internal/agent's own
 // testEnv helper. --
 
-func newRealSessionAgentEnv(t *testing.T) (session.Service, message.Service) {
+func newRealSessionAgentEnv(t *testing.T) (session.Service, messagestore.Service) {
 	t.Helper()
 	conn, err := db.Connect(t.Context(), t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { conn.Close() })
 
 	q := db.New(conn)
-	return session.NewService(q, conn, "/test/project"), message.NewService(q)
+	return session.NewService(q, conn, "/test/project"), messagestore.NewService(q)
 }
 
 // -- coordinatorOverSessionAgent adapts a real agent.SessionAgent (built

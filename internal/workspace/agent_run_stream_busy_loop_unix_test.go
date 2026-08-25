@@ -18,6 +18,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/stretchr/testify/require"
 )
@@ -41,13 +42,13 @@ func (c *blockingStreamCoordinator) Run(ctx context.Context, sessionID, prompt s
 	return &fantasy.AgentResult{}, nil
 }
 
-// controlledMessagesService is a message.Service double whose Subscribe
+// controlledMessagesService is a messagestore.Service double whose Subscribe
 // always returns the same test-controlled channel, so the test can close
 // it independently of AgentRunStream's own context — the scenario the
 // broker's real Shutdown() produces, but without needing a second app or
 // racing the derived ctx's own cancellation.
 type controlledMessagesService struct {
-	message.Service
+	messagestore.Service
 	ch chan pubsub.Event[message.Message]
 }
 

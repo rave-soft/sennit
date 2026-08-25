@@ -120,7 +120,7 @@ type coordinator struct {
 	cfg         *config.ConfigStore
 	credentials *credentials.Manager
 	sessions    session.Service
-	messages    message.Service
+	messages    MessageService
 	permissions permission.Service
 	questions   question.Service
 	history     history.Service
@@ -306,7 +306,7 @@ type CoordinatorOptions struct {
 	// retry handling.
 	Credentials *credentials.Manager
 	Sessions    session.Service
-	Messages    message.Service
+	Messages    MessageService
 	Permissions permission.Service
 	Questions   question.Service
 	History     history.Service

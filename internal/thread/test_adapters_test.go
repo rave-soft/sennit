@@ -7,6 +7,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/session"
 )
@@ -97,12 +98,12 @@ func (w *parentAppTestWorkspace) SendEvent(msg any) {
 // NewTestMessageService adapts a real message service to the domain's
 // narrow [MessageService] view, as the composition seam does in
 // production (see threadspawn.NewMessageService).
-func NewTestMessageService(full message.Service) thread.MessageService {
+func NewTestMessageService(full messagestore.Service) thread.MessageService {
 	return &testMessageService{full: full}
 }
 
 type testMessageService struct {
-	full message.Service
+	full messagestore.Service
 }
 
 func (m *testMessageService) Create(ctx context.Context, sessionID string, role thread.MessageRole, parts []thread.ContentPart) error {

@@ -1,4 +1,4 @@
-package message
+package store
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/db"
+	. "github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )

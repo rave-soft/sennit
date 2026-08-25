@@ -293,7 +293,7 @@ func (d *dispatcher) wakeEligibleLocked(s *sessionState) bool {
 // same path this rides now. The plan's constraint was that a completion
 // must not be *queued as a user prompt* or attributed to the user in
 // history - not that fantasy.MessageRoleUser can never carry it on the
-// wire. This never goes through createUserMessage/message.Service (it is
+// wire. This never goes through createUserMessage/message store (it is
 // folded directly into prepared.Messages, not persisted) whether it is
 // reached from the mid-turn fold or from a continuation's own step 0
 // (runTurn.prepareStep's Continuation branch calls this exact function

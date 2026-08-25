@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 )
 
 // interruptedToolResult is what a tool call that never came back gets
@@ -46,7 +48,7 @@ const interruptedFinishMessage = "Interrupted: sennit exited before this turn fi
 // repairs the record of work already over, and refusing to start because
 // it could not be tidied would trade a stale spinner for no session at
 // all.
-func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages message.Service) error {
+func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages messagestore.Service) error {
 	unfinished, err := messages.ListUnfinishedAssistantMessages(ctx, projectPath)
 	if err != nil {
 		return err
@@ -98,7 +100,7 @@ func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages 
 		// The Finish is what takes the message out of this query's reach,
 		// so it is written last: an error above leaves the message to be
 		// retried on the next start rather than sealed half-repaired.
-		msg.AddFinish(message.FinishReasonCanceled, interruptedFinishMessage, "")
+		msg.AddFinish(message.FinishReasonCanceled, time.Now().Unix(), interruptedFinishMessage, "")
 		if updateErr := messages.Update(ctx, msg); updateErr != nil {
 			slog.Error("Failed to close out an interrupted turn",
 				"component", "app", "session_id", msg.SessionID, "message_id", msg.ID, "error", updateErr)
@@ -114,7 +116,7 @@ func finalizeInterruptedTurns(ctx context.Context, projectPath string, messages 
 // already has a result, so a repair only writes the ones genuinely
 // missing. Parallel tool calls make this necessary: a turn can be killed
 // with one call answered and another not.
-func answeredToolCalls(ctx context.Context, messages message.Service, sessionID string) (map[string]struct{}, error) {
+func answeredToolCalls(ctx context.Context, messages messagestore.Service, sessionID string) (map[string]struct{}, error) {
 	msgs, err := messages.List(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -140,6 +142,6 @@ func answeredToolCalls(ctx context.Context, messages message.Service, sessionID 
 // The caller owns the judgement this rests on — that no turn of
 // projectPath's is running anywhere. Read that argument in
 // finalizeInterruptedTurns before adding a second caller.
-func FinalizeInterruptedTurns(ctx context.Context, projectPath string, messages message.Service) error {
+func FinalizeInterruptedTurns(ctx context.Context, projectPath string, messages messagestore.Service) error {
 	return finalizeInterruptedTurns(ctx, projectPath, messages)
 }

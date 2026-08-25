@@ -2,7 +2,7 @@ package app
 
 import (
 	"github.com/rave-soft/sennit/internal/agent"
-	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/session"
 )
@@ -40,7 +40,7 @@ func (app *App) Coordinator() agent.Coordinator { return app.AgentCoordinator }
 func (app *App) Sessions() session.Service { return app.sessions }
 
 // Messages returns this workspace's message service.
-func (app *App) Messages() message.Service { return app.messages }
+func (app *App) Messages() messagestore.Service { return app.messages }
 
 // Permissions returns this workspace's permission service.
 func (app *App) Permissions() permission.Service { return app.permissions }

@@ -247,7 +247,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 			return callContext, prepared, nil
 		},
 		OnReasoningDelta: func(id string, text string) error {
-			summaryMessage.AppendReasoningContent(text)
+			summaryMessage.AppendReasoningContent(text, time.Now().Unix())
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
@@ -257,7 +257,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 					summaryMessage.AppendReasoningSignature(signature.Signature)
 				}
 			}
-			summaryMessage.FinishThinking()
+			summaryMessage.FinishThinking(time.Now().Unix())
 			return a.messages.Update(genCtx, summaryMessage)
 		},
 		OnTextDelta: func(id, text string) error {
@@ -293,14 +293,14 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		}
 		// Mark the summary message as finished with an error so the UI
 		// stops spinning.
-		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
+		summaryMessage.AddFinish(message.FinishReasonError, time.Now().Unix(), "Summarization Error", err.Error())
 		if updateErr := a.messages.Update(cleanupCtx, summaryMessage); updateErr != nil {
 			return updateErr
 		}
 		return err
 	}
 
-	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
+	summaryMessage.AddFinish(message.FinishReasonEndTurn, time.Now().Unix(), "", "")
 	err = a.messages.Update(genCtx, summaryMessage)
 	if err != nil {
 		return err

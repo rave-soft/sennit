@@ -22,16 +22,16 @@ func TestReasoningWritersPreserveProviderBookkeeping(t *testing.T) {
 	data := &ResponsesReasoningMetadata{ItemID: "item_1", EncryptedContent: &encrypted, Summary: []string{"line"}}
 
 	m := &Message{}
-	m.AppendReasoningContent("first ")
+	m.AppendReasoningContent("first ", 100)
 	m.AppendReasoningSignature("sig")
 	m.AppendThoughtSignature("thought", "call-1")
 	m.SetReasoningResponsesData(data)
 
 	// Each of these runs after every field above is set, so any writer
 	// that rebuilds from a field list loses something here.
-	m.AppendReasoningContent("second")
+	m.AppendReasoningContent("second", 101)
 	m.AppendReasoningSignature("-more")
-	m.FinishThinking()
+	m.FinishThinking(102)
 
 	got := m.ReasoningContent()
 	require.Equal(t, "first second", got.Thinking)
@@ -49,9 +49,9 @@ func TestFinishThinkingKeepsResponsesData(t *testing.T) {
 	t.Parallel()
 
 	m := &Message{}
-	m.AppendReasoningContent("thinking")
+	m.AppendReasoningContent("thinking", 200)
 	m.SetReasoningResponsesData(&ResponsesReasoningMetadata{ItemID: "item_2"})
-	m.FinishThinking()
+	m.FinishThinking(102)
 
 	require.NotNil(t, m.ReasoningContent().ResponsesData)
 	require.Equal(t, "item_2", m.ReasoningContent().ResponsesData.ItemID)

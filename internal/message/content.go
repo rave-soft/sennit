@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
 )
@@ -410,7 +409,7 @@ func (m *Message) AppendContent(delta string) {
 // metadata and a thought signature and then calls FinishThinking on the
 // same part, so the rebuild erased them before the first flush. This is
 // the mistake FinishToolCall's own comment warns about.
-func (m *Message) AppendReasoningContent(delta string) {
+func (m *Message) AppendReasoningContent(delta string, startedAt int64) {
 	found := false
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
@@ -422,7 +421,7 @@ func (m *Message) AppendReasoningContent(delta string) {
 	if !found {
 		m.Parts = append(m.Parts, ReasoningContent{
 			Thinking:  delta,
-			StartedAt: time.Now().Unix(),
+			StartedAt: startedAt,
 		})
 	}
 }
@@ -460,11 +459,11 @@ func (m *Message) SetReasoningResponsesData(data *ResponsesReasoningMetadata) {
 	}
 }
 
-func (m *Message) FinishThinking() {
+func (m *Message) FinishThinking(finishedAt int64) {
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
 			if c.FinishedAt == 0 {
-				c.FinishedAt = time.Now().Unix()
+				c.FinishedAt = finishedAt
 				m.Parts[i] = c
 			}
 			return
@@ -472,7 +471,7 @@ func (m *Message) FinishThinking() {
 	}
 }
 
-func (m *Message) ThinkingDuration() time.Duration {
+func (m *Message) ThinkingDurationSeconds(currentTime int64) int64 {
 	reasoning := m.ReasoningContent()
 	if reasoning.StartedAt == 0 {
 		return 0
@@ -480,10 +479,10 @@ func (m *Message) ThinkingDuration() time.Duration {
 
 	endTime := reasoning.FinishedAt
 	if endTime == 0 {
-		endTime = time.Now().Unix()
+		endTime = currentTime
 	}
 
-	return time.Duration(endTime-reasoning.StartedAt) * time.Second
+	return endTime - reasoning.StartedAt
 }
 
 func (m *Message) FinishToolCall(toolCallID string) {
@@ -584,7 +583,7 @@ func (m *Message) ResetStreamedContent() {
 	m.Parts = kept
 }
 
-func (m *Message) AddFinish(reason FinishReason, message, details string) {
+func (m *Message) AddFinish(reason FinishReason, finishedAt int64, message, details string) {
 	// remove any existing finish part
 	for i, part := range m.Parts {
 		if _, ok := part.(Finish); ok {
@@ -592,7 +591,7 @@ func (m *Message) AddFinish(reason FinishReason, message, details string) {
 			break
 		}
 	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix(), Message: message, Details: details})
+	m.Parts = append(m.Parts, Finish{Reason: reason, Time: finishedAt, Message: message, Details: details})
 }
 
 func (m *Message) AddImageURL(url, detail string) {

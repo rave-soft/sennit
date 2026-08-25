@@ -22,7 +22,7 @@ import (
 	"github.com/rave-soft/sennit/internal/filetracker"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/lsp"
-	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -39,7 +39,7 @@ import (
 type fakeEnv struct {
 	workingDir  string
 	sessions    session.Service
-	messages    message.Service
+	messages    messagestore.Service
 	permissions permission.Service
 	history     history.Service
 	filetracker *filetracker.Service
@@ -103,7 +103,7 @@ func testEnvAt(t *testing.T, workingDir string) fakeEnv {
 
 	q := db.New(conn)
 	sessions := session.NewService(q, conn, "/test/project")
-	messages := message.NewService(q)
+	messages := messagestore.NewService(q)
 
 	permissions := permission.NewPermissionService(workingDir, true, []string{})
 	history := history.NewService(q, conn)

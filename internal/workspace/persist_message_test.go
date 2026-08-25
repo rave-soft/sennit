@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +18,7 @@ func TestPersistShellOutput_SkipsMissingSession(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { conn.Close() })
 
-	messages := message.NewService(db.New(conn))
+	messages := messagestore.NewService(db.New(conn))
 
 	missingID := uuid.New().String()
 	err = persistShellOutput(t.Context(), messages, missingID, "cat file.txt", "hello", 0)
@@ -35,7 +36,7 @@ func TestPersistShellOutput_NoOpForEmptySessionID(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { conn.Close() })
 
-	messages := message.NewService(db.New(conn))
+	messages := messagestore.NewService(db.New(conn))
 
 	require.NoError(t, persistShellOutput(t.Context(), messages, "", "echo hi", "hi", 0))
 }
@@ -49,7 +50,7 @@ func TestPersistShellOutput_PersistsForExistingSession(t *testing.T) {
 
 	q := db.New(conn)
 	sessions := session.NewService(q, conn, "/test/project")
-	messages := message.NewService(q)
+	messages := messagestore.NewService(q)
 
 	sess, err := sessions.Create(t.Context(), "shell test")
 	require.NoError(t, err)

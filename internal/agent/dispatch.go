@@ -1050,7 +1050,7 @@ func (a *sessionAgent) persistCanceledTurn(ctx context.Context, call SessionAgen
 	if err != nil {
 		return err
 	}
-	assistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+	assistant.AddFinish(message.FinishReasonCanceled, time.Now().Unix(), "User canceled request", "")
 	return a.messages.Update(writeCtx, assistant)
 }
 

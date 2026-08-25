@@ -129,7 +129,7 @@ type TaskManager struct {
 // cancellation never reaches a task's in-flight run. spawner should be a
 // threadspawn ParentAppSpawner wrapping the workspace's own App, and
 // messages that
-// same App's own message.Service — a task's child session lives in the
+// same App's own message store — a task's child session lives in the
 // parent's own message store, not a separate one, so [TaskManager.Output]
 // reads it directly rather than through any task-specific plumbing.
 func NewTaskManager(store Store, spawner Spawner, messages MessageService, lc *lifecycle, ctx context.Context) *TaskManager {

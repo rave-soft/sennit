@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,7 @@ import (
 // tests force createUserMessage to fail partway through PrepareStep's
 // fold loop without needing a broken DB connection.
 type failNthCreate struct {
-	message.Service
+	messagestore.Service
 	failOn int
 
 	mu    sync.Mutex

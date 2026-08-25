@@ -18,7 +18,7 @@ import (
 // input, and internal/ui/chat's synthetic-looking items (e.g. ShellItem
 // for bang-mode results) are UI-list-only: constructed straight into
 // m.chat from local UI state, never round-tripped through
-// message.Service/the DB, so they don't survive a session reload or
+// the message store/the DB, so they don't survive a session reload or
 // appear if the user is looking at a different session than the one that
 // owns the thread. Fabricating a fake message.Message row here to force a
 // persisted entry would be exactly the kind of workaround the "don't

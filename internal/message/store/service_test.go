@@ -1,8 +1,7 @@
-package message
+package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/db"
+	. "github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
@@ -262,7 +262,7 @@ func TestUpdate_TerminalUpdatesFlushSynchronously(t *testing.T) {
 	// AddFinish makes the message terminal; Update must flush
 	// synchronously even with a 1-hour debounce.
 	msg.AppendContent("done")
-	msg.AddFinish(FinishReasonEndTurn, "", "")
+	msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
 	require.NoError(t, svc.Update(t.Context(), msg))
 
 	require.Eventually(t, func() bool {
@@ -286,7 +286,7 @@ func TestUpdate_FinishedFlushEvictsPendingState(t *testing.T) {
 	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
 	require.NoError(t, err)
 	msg.AppendContent("done")
-	msg.AddFinish(FinishReasonEndTurn, "", "")
+	msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
 
 	require.NoError(t, svc.Update(t.Context(), msg))
 
@@ -312,7 +312,7 @@ func TestUpdate_StructuralFlushRetainsPendingUntilFinished(t *testing.T) {
 	impl.mu.Unlock()
 	require.True(t, ok, "tool-call structural flush is not a final message flush")
 
-	msg.AddFinish(FinishReasonEndTurn, "", "")
+	msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
 	require.NoError(t, svc.Update(t.Context(), msg))
 	impl.mu.Lock()
 	_, ok = impl.pending[msg.ID]
@@ -337,7 +337,7 @@ func TestFlush_WriteErrorRetainsPendingStateForRetry(t *testing.T) {
 
 	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
 	require.NoError(t, err)
-	msg.AddFinish(FinishReasonEndTurn, "", "")
+	msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
 	require.Error(t, svc.Update(t.Context(), msg))
 	impl.mu.Lock()
 	p := impl.pending[msg.ID]
@@ -375,7 +375,7 @@ func TestUpdate_ConcurrentFinalDeltaIsNotLostDuringFinalWrite(t *testing.T) {
 	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
 	require.NoError(t, err)
 	msg.AppendContent("first")
-	msg.AddFinish(FinishReasonEndTurn, "", "")
+	msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
 	firstDone := make(chan error, 1)
 	go func() { firstDone <- svc.Update(t.Context(), msg) }()
 	select {
@@ -441,14 +441,14 @@ func TestUpdate_ReasoningEndFlushes(t *testing.T) {
 	require.NoError(t, err)
 
 	// Reasoning deltas alone debounce.
-	msg.AppendReasoningContent("hmm")
+	msg.AppendReasoningContent("hmm", time.Now().Unix())
 	require.NoError(t, svc.Update(t.Context(), msg))
 	got, err := svc.Get(t.Context(), msg.ID)
 	require.NoError(t, err)
 	require.Empty(t, got.ReasoningContent().Thinking, "reasoning delta should still be in the debounce buffer")
 
 	// FinishThinking sets FinishedAt → terminal flush.
-	msg.FinishThinking()
+	msg.FinishThinking(time.Now().Unix())
 	require.NoError(t, svc.Update(t.Context(), msg))
 
 	got, err = svc.Get(t.Context(), msg.ID)
@@ -515,11 +515,11 @@ func TestUpdate_OrderingMatchesNonCoalesced(t *testing.T) {
 	build := func(svc Service, sessionID string) Message {
 		msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
 		require.NoError(t, err)
-		msg.AppendReasoningContent("thinking 1 ")
+		msg.AppendReasoningContent("thinking 1 ", time.Now().Unix())
 		require.NoError(t, svc.Update(t.Context(), msg))
-		msg.AppendReasoningContent("thinking 2")
+		msg.AppendReasoningContent("thinking 2", time.Now().Unix())
 		require.NoError(t, svc.Update(t.Context(), msg))
-		msg.FinishThinking()
+		msg.FinishThinking(time.Now().Unix())
 		require.NoError(t, svc.Update(t.Context(), msg))
 		msg.AppendContent("hello ")
 		require.NoError(t, svc.Update(t.Context(), msg))
@@ -529,7 +529,7 @@ func TestUpdate_OrderingMatchesNonCoalesced(t *testing.T) {
 		require.NoError(t, svc.Update(t.Context(), msg))
 		msg.AddToolCall(ToolCall{ID: "tc", Name: "x", Input: "{}", Finished: true})
 		require.NoError(t, svc.Update(t.Context(), msg))
-		msg.AddFinish(FinishReasonEndTurn, "", "")
+		msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
 		require.NoError(t, svc.Update(t.Context(), msg))
 		return msg
 	}
@@ -689,7 +689,7 @@ func TestUpdate_TerminalEventUsesMustDeliver(t *testing.T) {
 	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
 	require.NoError(t, err)
 	msg.AppendContent("final")
-	msg.AddFinish(FinishReasonEndTurn, "", "")
+	msg.AddFinish(FinishReasonEndTurn, time.Now().Unix(), "", "")
 	require.NoError(t, svc.Update(t.Context(), msg))
 
 	require.Eventually(t, func() bool { return seenFinish.Load() },
@@ -869,8 +869,8 @@ func TestUpdate_StructuralFlushUsesMustDeliver(t *testing.T) {
 		{
 			name: "reasoning end",
 			mut: func(m *Message) {
-				m.AppendReasoningContent("hmm")
-				m.FinishThinking()
+				m.AppendReasoningContent("hmm", time.Now().Unix())
+				m.FinishThinking(time.Now().Unix())
 			},
 		},
 	}
@@ -935,104 +935,6 @@ func TestUpdate_StructuralFlushUsesMustDeliver(t *testing.T) {
 // part type in the middle of the array is dropped rather than failing
 // the whole message, so a session written by a newer binary stays
 // readable on this one.
-func TestUnmarshalParts_UnknownTypeSkipped(t *testing.T) {
-	t.Parallel()
-
-	raw := `[
-		{"type":"text","data":{"text":"before"}},
-		{"type":"some_future_type","data":{"whatever":true}},
-		{"type":"text","data":{"text":"after"}}
-	]`
-
-	parts, err := UnmarshalParts([]byte(raw), "msg-1")
-	require.NoError(t, err)
-	require.Equal(t, []ContentPart{
-		TextContent{Text: "before"},
-		TextContent{Text: "after"},
-	}, parts)
-}
-
-// TestUnmarshalParts_Empty verifies an empty array unmarshals cleanly.
-func TestUnmarshalParts_Empty(t *testing.T) {
-	t.Parallel()
-
-	parts, err := UnmarshalParts([]byte(`[]`), "msg-1")
-	require.NoError(t, err)
-	require.Empty(t, parts)
-}
-
-// TestUnmarshalParts_OldFormatNoMeta verifies a blob written before the
-// "_meta" version marker existed (a plain array of part wrappers) is
-// still read correctly with zero data migration.
-func TestUnmarshalParts_OldFormatNoMeta(t *testing.T) {
-	t.Parallel()
-
-	raw := `[{"type":"text","data":{"text":"hello"}}]`
-
-	parts, err := UnmarshalParts([]byte(raw), "msg-1")
-	require.NoError(t, err)
-	require.Equal(t, []ContentPart{TextContent{Text: "hello"}}, parts)
-}
-
-// TestMarshalUnmarshalParts_RoundTrip verifies a blob produced by the
-// new marshalParts round-trips through unmarshalParts, and that the
-// synthetic "_meta" element never surfaces as a ContentPart.
-func TestMarshalUnmarshalParts_RoundTrip(t *testing.T) {
-	t.Parallel()
-
-	original := []ContentPart{
-		TextContent{Text: "hi"},
-		ToolCall{ID: "call1", Name: "bash", Input: "{}"},
-		Finish{Reason: FinishReasonEndTurn, Time: 42},
-	}
-
-	data, err := MarshalParts(original)
-	require.NoError(t, err)
-
-	// The wrapper array must carry the "_meta" marker as element 0.
-	var raw []json.RawMessage
-	require.NoError(t, json.Unmarshal(data, &raw))
-	require.Len(t, raw, len(original)+1)
-	var firstWrapper struct {
-		Type string `json:"type"`
-	}
-	require.NoError(t, json.Unmarshal(raw[0], &firstWrapper))
-	require.Equal(t, "_meta", firstWrapper.Type)
-
-	parts, err := UnmarshalParts(data, "msg-1")
-	require.NoError(t, err)
-	require.Equal(t, original, parts)
-}
-
-// TestUnmarshalParts_MalformedNotSwallowed verifies that real
-// corruption (broken JSON, or a known type whose payload doesn't
-// match its struct) still returns an error and is not accidentally
-// treated as an unrecognized-type skip.
-func TestUnmarshalParts_MalformedNotSwallowed(t *testing.T) {
-	t.Parallel()
-
-	t.Run("broken JSON syntax", func(t *testing.T) {
-		t.Parallel()
-		_, err := UnmarshalParts([]byte(`[{"type":"text","data":`), "msg-1")
-		require.Error(t, err)
-	})
-
-	t.Run("known type with mismatched payload", func(t *testing.T) {
-		t.Parallel()
-		// finish's Time field is int64; a string payload must fail
-		// to unmarshal rather than being silently dropped.
-		raw := `[{"type":"finish","data":{"time":"not-a-number"}}]`
-		_, err := UnmarshalParts([]byte(raw), "msg-1")
-		require.Error(t, err)
-	})
-}
-
-// TestUpdate_ConcurrentUpdateAndFlushDoesNotLoseData drives a stream of
-// updates from one goroutine while another repeatedly calls Flush and
-// Get concurrently. This exercises flushOne's channel-based wait for
-// an in-flight write (rather than the old sleep-and-poll loop) under
-// real contention: neither goroutine should ever observe a lost
-// delta, a panic, or a stuck Flush.
 func TestUpdate_ConcurrentUpdateAndFlushDoesNotLoseData(t *testing.T) {
 	t.Parallel()
 

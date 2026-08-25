@@ -28,6 +28,7 @@ import (
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/event"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
 
 	// ui/chat is imported so `session show` (human output) renders messages
@@ -104,7 +105,7 @@ func init() {
 
 type sessionServices struct {
 	sessions session.Service
-	messages message.Service
+	messages messagestore.Service
 	cfg      *config.ConfigStore
 }
 
@@ -126,7 +127,7 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 
 	svc := &sessionServices{
 		sessions: session.NewService(queries, conn, cfg.WorkingDir()),
-		messages: message.NewService(queries),
+		messages: messagestore.NewService(queries),
 		cfg:      cfg,
 	}
 	return ctx, svc, cleanup, nil

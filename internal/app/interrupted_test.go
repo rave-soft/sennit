@@ -2,9 +2,11 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +17,7 @@ import (
 // fake would be testing the fake.
 type interruptedEnv struct {
 	sessions session.Service
-	messages message.Service
+	messages messagestore.Service
 }
 
 // interruptedTestProject is the project every session in these tests
@@ -40,7 +42,7 @@ func newInterruptedEnv(t *testing.T) interruptedEnv {
 	q := db.New(conn)
 	return interruptedEnv{
 		sessions: session.NewService(q, conn, projectPath),
-		messages: message.NewService(q),
+		messages: messagestore.NewService(q),
 	}
 }
 
@@ -107,7 +109,7 @@ func TestFinalizeInterruptedTurns_AnswersDanglingToolCall(t *testing.T) {
 func TestFinalizeInterruptedTurns_LeavesFinishedTurnsAlone(t *testing.T) {
 	env := newInterruptedEnv(t)
 	sess, msg := env.assistantWithToolCall(t)
-	msg.AddFinish(message.FinishReasonEndTurn, "", "")
+	msg.AddFinish(message.FinishReasonEndTurn, time.Now().Unix(), "", "")
 	require.NoError(t, env.messages.Update(t.Context(), msg))
 	require.NoError(t, env.messages.FlushAll(t.Context()))
 

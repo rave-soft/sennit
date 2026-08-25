@@ -396,12 +396,12 @@ func (t *runTurn) createStepAssistant(callContext context.Context, messages []fa
 }
 
 func (t *runTurn) onReasoningStart(id string, reasoning fantasy.ReasoningContent) error {
-	t.currentAssistant.AppendReasoningContent(reasoning.Text)
+	t.currentAssistant.AppendReasoningContent(reasoning.Text, time.Now().Unix())
 	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
 }
 
 func (t *runTurn) onReasoningDelta(id string, text string) error {
-	t.currentAssistant.AppendReasoningContent(text)
+	t.currentAssistant.AppendReasoningContent(text, time.Now().Unix())
 	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
 }
 
@@ -429,7 +429,7 @@ func (t *runTurn) onReasoningEnd(id string, reasoning fantasy.ReasoningContent) 
 			})
 		}
 	}
-	t.currentAssistant.FinishThinking()
+	t.currentAssistant.FinishThinking(time.Now().Unix())
 	return t.agent.messages.Update(t.genCtx, *t.currentAssistant)
 }
 
@@ -679,7 +679,7 @@ func (t *runTurn) onStepFinish(stepResult fantasy.StepResult) error {
 			}
 		}
 	}
-	t.currentAssistant.AddFinish(finishReason, "", "")
+	t.currentAssistant.AddFinish(finishReason, time.Now().Unix(), "", "")
 	// The provider request's "finished" line is logged by the instrumented
 	// model that performed this step's Stream (it is the 1:1 counterpart of
 	// the "started" line, and it is what carries finish_reason + usage). We
@@ -797,7 +797,7 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(t.ctx), 5*time.Second)
 	defer cleanupCancel()
 	// Ensure we finish thinking on error to close the reasoning state.
-	t.currentAssistant.FinishThinking()
+	t.currentAssistant.FinishThinking(time.Now().Unix())
 	toolCalls := t.currentAssistant.ToolCalls()
 	// INFO: we use the cleanup context here because the genCtx has been cancelled.
 	//
@@ -879,7 +879,7 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 	var providerErr *fantasy.ProviderError
 	const defaultTitle = "Provider Error"
 	if isCancelErr {
-		t.currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+		t.currentAssistant.AddFinish(message.FinishReasonCanceled, time.Now().Unix(), "User canceled request", "")
 	} else if errors.As(err, &providerErr) {
 		// classModelNotEnabled is a generic "model not enabled" signal
 		// from classifyStreamError; only Copilot's rejection actually
@@ -898,20 +898,21 @@ func (t *runTurn) handleStreamError(err error) (*fantasy.AgentResult, error) {
 			}
 			t.currentAssistant.AddFinish(
 				message.FinishReasonError,
+				time.Now().Unix(),
 				"Copilot model not enabled",
 				fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", quotaErr.Model, quotaErr.SettingsURL),
 			)
 			err = quotaErr
 		} else {
-			t.currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+			t.currentAssistant.AddFinish(message.FinishReasonError, time.Now().Unix(), cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
 		}
 	} else if errors.As(err, &fantasyErr) {
-		t.currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+		t.currentAssistant.AddFinish(message.FinishReasonError, time.Now().Unix(), cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
 	} else if fantasy.IsTransportError(err) {
 		wrapped := fantasy.NewTransportError(err)
-		t.currentAssistant.AddFinish(message.FinishReasonError, stringext.Capitalize(wrapped.Title), wrapped.Message)
+		t.currentAssistant.AddFinish(message.FinishReasonError, time.Now().Unix(), stringext.Capitalize(wrapped.Title), wrapped.Message)
 	} else {
-		t.currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
+		t.currentAssistant.AddFinish(message.FinishReasonError, time.Now().Unix(), defaultTitle, err.Error())
 	}
 	// Note: we use the cleanup context here because the genCtx has been
 	// cancelled.

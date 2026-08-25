@@ -18,7 +18,7 @@ import (
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/latency"
 	"github.com/rave-soft/sennit/internal/lsp"
-	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/question"
@@ -43,7 +43,7 @@ type appServices struct {
 	// through requires method accessors. Read them through the
 	// Sessions()/Messages()/Permissions() accessors, not as fields.
 	sessions    session.Service
-	messages    message.Service
+	messages    messagestore.Service
 	History     history.Service
 	permissions permission.Service
 	Questions   question.Service
@@ -172,7 +172,7 @@ func newAppServices(q *db.Queries, conn *sql.DB, store *config.ConfigStore, skil
 	}
 	return &appServices{
 		sessions:         session.NewService(q, conn, store.WorkingDir()),
-		messages:         message.NewService(q),
+		messages:         messagestore.NewService(q),
 		queries:          q,
 		History:          history.NewService(q, conn),
 		permissions:      permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),

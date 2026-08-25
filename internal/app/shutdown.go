@@ -303,7 +303,7 @@ func (p *shutdownPhases) Shutdown() {
 	}
 
 	// 3. Flush any debounced message updates before the DB-close cleanup
-	// runs. message.Service buffers streaming deltas and we must land
+	// runs. The message store buffers streaming deltas and we must land
 	// them while the connection is still open.
 	//
 	// Close rather than FlushAll: a drain alone leaves the service free

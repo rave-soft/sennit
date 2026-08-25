@@ -283,7 +283,7 @@ type sessionAgent struct {
 
 	isSubAgent           bool
 	sessions             session.Service
-	messages             message.Service
+	messages             MessageService
 	disableAutoSummarize bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -325,7 +325,7 @@ type SessionAgentOptions struct {
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	Sessions             session.Service
-	Messages             message.Service
+	Messages             MessageService
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
@@ -871,7 +871,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		a.clearActiveIfMatch(call.SessionID, ac)
 		a.wakeFromInboxIfIdle(context.WithoutCancel(ctx), call.SessionID)
 	}()
-	// message.Service already flushes synchronously on terminal updates;
+	// MessageService already flushes synchronously on terminal updates;
 	// the defer guarantees it at every runTurn exit without callers
 	// needing to know, and publishes the authoritative RunComplete for
 	// this turn after the flush. reporter's Once makes this the fallback

@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +30,7 @@ var carryOverProviderCfg = config.ProviderConfig{ID: "test-provider"}
 type recordingSubAgent struct {
 	*mockSessionAgent
 
-	msgs  message.Service
+	msgs  messagestore.Service
 	reply string
 
 	// prior is what the most recent call carried in PriorMessages.

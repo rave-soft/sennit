@@ -13,6 +13,7 @@ import (
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
+	messagestore "github.com/rave-soft/sennit/internal/message/store"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/session"
@@ -42,7 +43,7 @@ func newTestParentApp(t *testing.T) *app.App {
 // inserts real message rows, and the messages table has a FK to
 // sessions that fakeSessions (which fabricates a Session value without
 // persisting it) would violate.
-func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app.App, session.Service, message.Service) {
+func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app.App, session.Service, messagestore.Service) {
 	t.Helper()
 	store := thread.NewStoreForTest(t)
 	mgr := thread.NewManager(thread.ManagerOptions{
@@ -60,7 +61,7 @@ func newTestTaskManagerWithRealMessages(t *testing.T) (*thread.TaskManager, *app
 	require.NoError(t, err)
 	q := db.New(conn)
 	sessions := session.NewService(q, conn, "/test/project")
-	messages := message.NewService(q)
+	messages := messagestore.NewService(q)
 
 	parentApp := app.NewForTest(context.Background())
 	t.Cleanup(parentApp.ShutdownForTest)
@@ -786,7 +787,7 @@ func TestTaskManager_SendRejectsThreadID(t *testing.T) {
 // seedMessage inserts a real message row for sessionID, satisfying the
 // messages table's FK to sessions — see
 // newTestTaskManagerWithRealMessages for why this needs a real session.
-func seedMessage(t *testing.T, messages message.Service, sessionID string, role message.MessageRole, text string) {
+func seedMessage(t *testing.T, messages messagestore.Service, sessionID string, role message.MessageRole, text string) {
 	t.Helper()
 	_, err := messages.Create(t.Context(), sessionID, message.CreateMessageParams{
 		Role:  role,
