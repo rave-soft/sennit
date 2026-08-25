@@ -20,12 +20,7 @@ const (
 	Tool      MessageRole = "tool"
 )
 
-// MarshalText implements the [encoding.TextMarshaler] interface. It
-// lives here (rather than only in internal/proto, where it originated)
-// because [github.com/rave-soft/sennit/internal/proto.MessageRole] is
-// now a type alias for MessageRole, and Go requires methods on an
-// aliased type to be defined in the package that declares the
-// underlying type.
+// MarshalText implements the [encoding.TextMarshaler] interface.
 func (r MessageRole) MarshalText() ([]byte, error) {
 	return []byte(r), nil
 }

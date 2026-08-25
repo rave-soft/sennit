@@ -7,7 +7,6 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
-	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/pubsub"
 )
 
@@ -29,25 +28,6 @@ func Translate(ev any) Event {
 		return PermissionRequested{}
 	case pubsub.Event[permission.PermissionNotification]:
 		return PermissionResolved{}
-
-	// Proto types (workspace/UI boundary events).
-	case pubsub.Event[proto.Message]:
-		return translateMessage(
-			e.Payload.Role == proto.Assistant,
-			e.Payload.SessionID,
-			false,
-		)
-	case pubsub.Event[proto.RunComplete]:
-		return RunComplete{SessionID: e.Payload.SessionID}
-	case pubsub.Event[proto.PermissionRequest]:
-		return PermissionRequested{}
-	case pubsub.Event[proto.PermissionNotification]:
-		return PermissionResolved{}
-	case pubsub.Event[proto.AgentEvent]:
-		if e.Payload.Type == proto.AgentEventTypeSummarize && !e.Payload.Done {
-			return Summarizing{}
-		}
-		return nil
 
 	default:
 		return nil

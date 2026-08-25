@@ -8,8 +8,6 @@ import (
 
 // ClientInfo holds the state of an LSP client. Client is runtime-only and is
 // deliberately excluded from wire representations.
-//
-// @name proto.LSPClientInfo
 type ClientInfo struct {
 	Name            string      `json:"name"`
 	State           ServerState `json:"state"`
