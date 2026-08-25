@@ -3,6 +3,8 @@ package threadspawn
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +52,29 @@ func TestLocalSpawnerInheritsParentYOLO(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, lh.app.Store().Overrides().SkipPermissionRequests)
 	require.True(t, lh.app.Permissions().SkipRequests())
+}
+
+func TestLocalSpawnerDoesNotInheritProjectTrust(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Cleanup(func() { db.ResetPool() })
+
+	parent := t.TempDir()
+	child := t.TempDir()
+	require.NoError(t, config.Trust(parent))
+	require.NoError(t, os.WriteFile(filepath.Join(child, "sennit.json"), []byte(`{"env":{"SENNIT_THREAD_UNTRUSTED":"active"}}`), 0o600))
+
+	spawner := NewLocalSpawner(nil, nil, nil, nil)
+	handle, err := spawner.Spawn(t.Context(), child)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, spawner.Release(context.Background(), handle.ID())) })
+
+	local := handle.(*localHandle)
+	require.Empty(t, local.app.Store().Config().Env)
+	_, set := os.LookupEnv("SENNIT_THREAD_UNTRUSTED")
+	require.False(t, set)
 }
 
 func TestLocalSpawnerConfinesWritesToWorktree(t *testing.T) {

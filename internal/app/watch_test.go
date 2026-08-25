@@ -28,7 +28,8 @@ func TestStartExternalChangeWatchers_LocalModePicksUpMCPWithoutBackend(t *testin
 	dataDir := t.TempDir()
 
 	result, err := Bootstrap(context.Background(), cwd, BootstrapOptions{
-		DataDir: dataDir,
+		DataDir:      dataDir,
+		TrustProject: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(result.App.Shutdown)

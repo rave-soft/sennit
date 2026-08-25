@@ -3,6 +3,8 @@ package config
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/env"
@@ -57,10 +59,23 @@ type builtConfig struct {
 // before a reload's writeMu swap. Callers own everything after: creating or
 // updating the ConfigStore, pinning/persisting the model,
 // SetupAgents(WithInherited), and the staleness snapshot.
+func hasProjectConfig(paths []string, workspacePath string) bool {
+	for _, path := range paths {
+		if !isGlobalConfigPath(path) {
+			if _, err := os.Stat(path); err == nil {
+				return true
+			}
+		}
+	}
+	_, err := os.Stat(workspacePath)
+	return err == nil
+}
+
 func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, error) {
 	configPaths := lookupConfigs(opts.workingDir)
 
-	cfg, loadedPaths, err := loadFromConfigPaths(opts.ctx, configPaths)
+	trusted := IsTrusted(opts.workingDir)
+	cfg, loadedPaths, err := loadFromConfigPaths(opts.ctx, configPaths, trusted)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
@@ -75,9 +90,18 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 		cfg.Options.Debug = true
 	}
 
-	// Load workspace config last so it has highest priority.
-	if err := applyWorkspaceConfig(cfg, opts.workingDir, &loadedPaths); err != nil {
-		return nil, err
+	if trusted {
+		if err := applyWorkspaceConfig(cfg, opts.workingDir, &loadedPaths); err != nil {
+			return nil, err
+		}
+	} else if hasProjectConfig(configPaths, filepath.Join(cfg.Options.DataDirectory, appName+".json")) {
+		cfg.addProblem(Problem{
+			Severity: SeverityWarn,
+			Area:     AreaEnvironment,
+			Subject:  opts.workingDir,
+			Message:  "project configuration is disabled because this project is not trusted",
+			Hint:     "Review the project, then restart with --trust-project to enable its configuration.",
+		})
 	}
 
 	// Validate hooks after all config merging is complete so workspace

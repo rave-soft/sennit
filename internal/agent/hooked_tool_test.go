@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"charm.land/fantasy"
@@ -44,6 +46,32 @@ func newRunner(t *testing.T, cmd string) *hooks.Runner {
 	}
 	require.NoError(t, cfg.ValidateHooks())
 	return hooks.NewRunner(cfg.Hooks[hooks.EventPreToolUse], t.TempDir(), t.TempDir())
+}
+
+func TestHookedTool_ProjectHookRequiresTrust(t *testing.T) {
+	globalDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", globalDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", t.TempDir())
+	project := t.TempDir()
+	sideEffect := filepath.Join(t.TempDir(), "hook-ran")
+	require.NoError(t, os.WriteFile(filepath.Join(project, "sennit.json"), []byte(`{"hooks":{"PreToolUse":[{"command":"touch `+sideEffect+`"}]}}`), 0o600))
+
+	store, err := config.Load(project, t.TempDir(), false)
+	require.NoError(t, err)
+	inner := &fakeTool{name: "read", resp: fantasy.NewTextResponse("ok")}
+	runner := hooks.NewRunner(store.Config().Hooks[hooks.EventPreToolUse], project, project)
+	_, err = newHookedTool(inner, runner).Run(t.Context(), fantasy.ToolCall{ID: "untrusted", Name: "read"})
+	require.NoError(t, err)
+	require.NoFileExists(t, sideEffect)
+
+	require.NoError(t, config.Trust(project))
+	store, err = config.Load(project, t.TempDir(), false)
+	require.NoError(t, err)
+	inner = &fakeTool{name: "read", resp: fantasy.NewTextResponse("ok")}
+	runner = hooks.NewRunner(store.Config().Hooks[hooks.EventPreToolUse], project, project)
+	_, err = newHookedTool(inner, runner).Run(t.Context(), fantasy.ToolCall{ID: "trusted", Name: "read"})
+	require.NoError(t, err)
+	require.FileExists(t, sideEffect)
 }
 
 func TestHookedTool_AllowStampsHookApproval(t *testing.T) {

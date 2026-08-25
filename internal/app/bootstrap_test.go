@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	gitpkg "github.com/rave-soft/sennit/internal/git"
+	"github.com/rave-soft/sennit/internal/hooks"
 
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
@@ -86,6 +87,39 @@ func TestBootstrap_Success(t *testing.T) {
 // TestBootstrap_GlobalSkillsMirror confirms the GlobalSkillsMirror option
 // is actually threaded into the skills manager: with it set, discovery
 // updates the package-level globals; without it, they are left alone.
+func TestBootstrap_ProjectRuntimeActivationRequiresTrust(t *testing.T) {
+	setBootstrapTestEnv(t)
+	cwd := t.TempDir()
+	sideEffect := filepath.Join(t.TempDir(), "hook-ran")
+	require.NoError(t, os.WriteFile(filepath.Join(cwd, "sennit.json"), []byte(`{
+		"hooks":{"PreToolUse":[{"command":"touch `+sideEffect+`"}]},
+		"mcp":{"project":{"type":"stdio","command":"false"}},
+		"lsp":{"project":{"command":"false"}}
+	}`), 0o600))
+
+	untrusted, err := Bootstrap(context.Background(), cwd, BootstrapOptions{DataDir: t.TempDir()})
+	require.NoError(t, err)
+	untrusted.App.Shutdown()
+	require.Empty(t, untrusted.Config.Config().Hooks)
+	require.NotContains(t, untrusted.Config.Config().MCP, "project")
+	require.NotContains(t, untrusted.Config.Config().LSP, "project")
+	runner := hooks.NewRunner(untrusted.Config.Config().Hooks[hooks.EventPreToolUse], cwd, cwd)
+	_, err = runner.Run(t.Context(), hooks.EventPreToolUse, "session", "read", `{}`)
+	require.NoError(t, err)
+	_, err = os.Stat(sideEffect)
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	trusted, err := Bootstrap(context.Background(), cwd, BootstrapOptions{DataDir: t.TempDir(), TrustProject: true})
+	require.NoError(t, err)
+	t.Cleanup(trusted.App.Shutdown)
+	require.Contains(t, trusted.Config.Config().MCP, "project")
+	require.Contains(t, trusted.Config.Config().LSP, "project")
+	runner = hooks.NewRunner(trusted.Config.Config().Hooks[hooks.EventPreToolUse], cwd, cwd)
+	_, err = runner.Run(t.Context(), hooks.EventPreToolUse, "session", "read", `{}`)
+	require.NoError(t, err)
+	require.FileExists(t, sideEffect)
+}
+
 func TestBootstrap_GlobalSkillsMirror(t *testing.T) {
 	setBootstrapTestEnv(t)
 

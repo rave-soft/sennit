@@ -218,6 +218,7 @@ func TestLoad_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *testing.T) {
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"recent_models":{"large":[]},"options":{"debug":true}}`), 0o644))
+	require.NoError(t, Trust(workingDir))
 
 	store, err := Load(workingDir, "", false)
 	require.NoError(t, err)
@@ -253,7 +254,7 @@ func TestConfig_LoadFromConfigPaths_DeprecatedStrandsAlias(t *testing.T) {
 		0o644,
 	))
 
-	cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{path})
+	cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{path}, true)
 
 	require.NoError(t, err)
 	require.Contains(t, loaded, path)
@@ -394,7 +395,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennit.json"),
 			[]byte(`{"options":{"data_directory":"from-sennit-subdir"}}`), 0o644))
 
-		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project))
+		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project), true)
 		require.NoError(t, err)
 		require.Equal(t, "from-sennit-subdir", cfg.Options.DataDirectory)
 	})
@@ -411,7 +412,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(project, ".sennit", "sennitrc"),
 			[]byte("option data-directory from-sennit-subdir-rc\n"), 0o644))
 
-		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project))
+		cfg, _, err := loadFromConfigPaths(context.Background(), lookupConfigs(project), true)
 		require.NoError(t, err)
 		require.Equal(t, "from-sennit-subdir-rc", cfg.Options.DataDirectory)
 	})
@@ -440,7 +441,7 @@ func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
 		require.NoError(t, os.WriteFile(good, []byte(`{"providers":{}}`), 0o644))
 		require.NoError(t, os.WriteFile(bad, []byte(`{not valid json}`), 0o644))
 
-		_, _, err := loadFromConfigPaths(context.Background(), []string{good, bad})
+		_, _, err := loadFromConfigPaths(context.Background(), []string{good, bad}, true)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid JSON in config file")
 		require.Contains(t, err.Error(), "bad.json")
@@ -455,7 +456,7 @@ func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
 		cfg, _, err := loadFromConfigPaths(context.Background(), []string{
 			filepath.Join(tmpDir, "nonexistent.json"),
 			empty,
-		})
+		}, true)
 		require.NoError(t, err)
 		require.NotNil(t, cfg)
 	})
@@ -483,7 +484,7 @@ func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 		require.NoError(t, os.WriteFile(jsonPath, []byte(`{"options":{"debug":true},"providers":{}}`), 0o644))
 		require.NoError(t, os.WriteFile(rcPath, []byte("option debug true\n"), 0o644))
 
-		_, _, err := loadFromConfigPaths(context.Background(), []string{jsonPath, rcPath})
+		_, _, err := loadFromConfigPaths(context.Background(), []string{jsonPath, rcPath}, true)
 		require.NoError(t, err)
 		require.Contains(t, buf.String(), "sennitrc taking precedence")
 		require.Contains(t, buf.String(), `"conflicting_keys":"options"`)
@@ -497,7 +498,7 @@ func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 		require.NoError(t, os.WriteFile(jsonPath, []byte(`{"providers":{}}`), 0o644))
 		require.NoError(t, os.WriteFile(rcPath, []byte("option debug true\n"), 0o644))
 
-		_, _, err := loadFromConfigPaths(context.Background(), []string{jsonPath, rcPath})
+		_, _, err := loadFromConfigPaths(context.Background(), []string{jsonPath, rcPath}, true)
 		require.NoError(t, err)
 		require.NotContains(t, buf.String(), "sennitrc taking precedence",
 			"disjoint coexistence should not warn")
@@ -625,6 +626,7 @@ func TestConfig_Load_ProjectProvidersIgnored(t *testing.T) {
 	projectSeed := `{"providers": {"custom": {"models": [{"id": "project-model", "name": "project-model"}]}}}`
 	projectPath := filepath.Join(workingDir, "sennit.json")
 	require.NoError(t, os.WriteFile(projectPath, []byte(projectSeed), 0o644))
+	require.NoError(t, Trust(workingDir))
 
 	store, err := Load(workingDir, "", false)
 	require.NoError(t, err)

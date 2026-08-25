@@ -41,6 +41,12 @@ func initConfig(cmd *cobra.Command, debug bool) (cwd string, cfg *config.ConfigS
 		return "", nil, err
 	}
 	dataDir, _ := cmd.Flags().GetString("data-dir")
+	trustProject, _ := cmd.Flags().GetBool("trust-project")
+	if trustProject {
+		if err := config.Trust(cwd); err != nil {
+			return "", nil, fmt.Errorf("failed to trust project: %w", err)
+		}
+	}
 	cfg, err = config.Load(cwd, dataDir, debug)
 	if err != nil {
 		return "", nil, err

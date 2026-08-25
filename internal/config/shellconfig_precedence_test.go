@@ -27,6 +27,7 @@ func TestShellConfigDotSennitrcTakesPrecedence(t *testing.T) {
 		filepath.Join(workDir, ".sennitrc"),
 		[]byte("option notifications osc\n"), 0o644,
 	))
+	require.NoError(t, config.Trust(workDir))
 
 	store, err := config.Load(workDir, dataDir, false)
 	require.NoError(t, err)

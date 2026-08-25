@@ -283,7 +283,7 @@ func TestDoctorReportsJSONAgentsBlock(t *testing.T) {
 	path := filepath.Join(root, "sennit.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{"agents":{"reviewer":{"prompt":"You review code."}}}`), 0o644))
 
-	cfg, _, err := loadFromConfigPaths(context.Background(), []string{path})
+	cfg, _, err := loadFromConfigPaths(context.Background(), []string{path}, true)
 	require.NoError(t, err)
 	cfg.Options = &Options{}
 	cfg.workingDir = root

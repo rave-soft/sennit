@@ -175,7 +175,7 @@ func TestSetupAgentsIgnoresJSONAgentsBlock(t *testing.T) {
 	writeAgent(t, root, ".sennit/agents", "dba.md", "---\nname: dba\ndescription: dba file\n---\ndba body")
 	writeConfigFile(t, root, "sennit.json", `{"agents":{"reviewer":{"description":"from json","prompt":"json body"}}}`)
 
-	cfg, _, err := loadFromConfigPaths(context.Background(), []string{filepath.Join(root, "sennit.json")})
+	cfg, _, err := loadFromConfigPaths(context.Background(), []string{filepath.Join(root, "sennit.json")}, true)
 	require.NoError(t, err)
 	require.True(t, cfg.jsonAgentsBlockDetected, "loadFromBytes must record a top-level agents key")
 

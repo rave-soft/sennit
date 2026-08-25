@@ -38,6 +38,7 @@ func TestReloadFromDisk_CompilesHookMatchers(t *testing.T) {
         }
     }`
 	require.NoError(t, os.WriteFile(configPath, []byte(cfgJSON), 0o600))
+	require.NoError(t, config.Trust(workDir))
 
 	store, err := config.Load(workDir, dataDir, false)
 	require.NoError(t, err)
@@ -91,6 +92,7 @@ func TestSetConfigField_AutoReload_PreservesHookMatcherFiltering(t *testing.T) {
         }
     }`
 	require.NoError(t, os.WriteFile(configPath, []byte(cfgJSON), 0o600))
+	require.NoError(t, config.Trust(workDir))
 
 	store, err := config.Load(workDir, dataDir, false)
 	require.NoError(t, err)

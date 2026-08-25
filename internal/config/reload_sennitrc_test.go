@@ -22,7 +22,9 @@ func isolateReloadEnv(t *testing.T) (workDir, dataDir string) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
 	t.Setenv("SENNIT_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "sennit"))
 	t.Setenv("SENNIT_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "sennit"))
-	return t.TempDir(), t.TempDir()
+	workDir, dataDir = t.TempDir(), t.TempDir()
+	require.NoError(t, config.Trust(workDir))
+	return workDir, dataDir
 }
 
 // TestReloadFromDisk_PicksUpEditedSennitrc verifies that a sennitrc edit on

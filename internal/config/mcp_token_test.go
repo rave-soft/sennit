@@ -27,6 +27,7 @@ func TestSetMCPToken_ProjectScopedServerPersistsToWorkspace(t *testing.T) {
 	workingDir := t.TempDir()
 	projectSeed := `{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true}}}`
 	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "sennit.json"), []byte(projectSeed), 0o644))
+	require.NoError(t, Trust(workingDir))
 
 	store, err := Load(workingDir, "", false)
 	require.NoError(t, err)

@@ -26,6 +26,7 @@ func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"mcp":{}}`), 0o600))
+	require.NoError(t, Trust(dir))
 
 	store, err := Load(dir, "", false)
 	require.NoError(t, err)

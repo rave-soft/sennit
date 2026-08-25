@@ -22,10 +22,11 @@ import (
 type BootstrapOptions struct {
 	// DataDir, Debug, YOLO and Channels feed config.Init and the
 	// resulting store's overrides.
-	DataDir  string
-	Debug    bool
-	YOLO     bool
-	Channels []string
+	DataDir      string
+	Debug        bool
+	YOLO         bool
+	Channels     []string
+	TrustProject bool
 
 	// InheritedAgents supplies user-defined agents from a parent workspace.
 	// The child workspace's own definitions take precedence.
@@ -99,6 +100,11 @@ type BootstrapResult struct {
 // discover its skills, then construct the App. Callers differ only in
 // the details captured by BootstrapOptions; see its field comments.
 func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*BootstrapResult, error) {
+	if opts.TrustProject {
+		if err := config.Trust(path); err != nil {
+			return nil, fmt.Errorf("failed to trust project: %w", err)
+		}
+	}
 	cfg, err := config.Load(path, opts.DataDir, opts.Debug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize config: %w", err)

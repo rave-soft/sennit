@@ -400,6 +400,7 @@ func TestReloadFromDisk_WorkspaceMergeErrorKeepsPublishedConfig(t *testing.T) {
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":true}}`), 0o644))
+	require.NoError(t, Trust(workingDir))
 
 	store, err := Load(workingDir, "", false)
 	require.NoError(t, err)
@@ -433,6 +434,7 @@ func TestReloadFromDisk_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *tes
 	workspacePath := filepath.Join(workspaceDir, appName+".json")
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":false}}`), 0o644))
+	require.NoError(t, Trust(workingDir))
 
 	store, err := Load(workingDir, "", false)
 	require.NoError(t, err)

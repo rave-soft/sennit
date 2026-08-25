@@ -29,7 +29,8 @@ func TestNew_ConfigBypassSkipsPermissionsAtStartup(t *testing.T) {
 		[]byte(`{"permissions":{"bypass":true}}`), 0o600))
 
 	result, err := Bootstrap(context.Background(), cwd, BootstrapOptions{
-		DataDir: dataDir,
+		DataDir:      dataDir,
+		TrustProject: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(result.App.Shutdown)

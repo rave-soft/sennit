@@ -38,6 +38,7 @@ func init() {
 	rootCmd.PersistentFlags().StringP("cwd", "c", "", "Current working directory")
 	rootCmd.PersistentFlags().StringP("data-dir", "D", "", "Custom sennit data directory")
 	rootCmd.PersistentFlags().BoolP("debug", "d", false, "Debug")
+	rootCmd.PersistentFlags().Bool("trust-project", false, "Trust and enable configuration from the current project")
 	rootCmd.Flags().BoolP("help", "h", false, "Help")
 	rootCmd.Flags().BoolP("yolo", "y", false, "Automatically accept all permissions (dangerous mode)")
 	rootCmd.PersistentFlags().StringSlice("channels", nil, "MCP servers to enable as channels (repeatable), e.g. --channels server:webhook")
@@ -223,6 +224,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	yolo, _ := cmd.Flags().GetBool("yolo")
 	channels, _ := cmd.Flags().GetStringSlice("channels")
 	dataDir, _ := cmd.Flags().GetString("data-dir")
+	trustProject, _ := cmd.Flags().GetBool("trust-project")
 	ctx := cmd.Context()
 
 	cwd, err := ResolveCwd(cmd)
@@ -238,6 +240,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		Debug:              debug,
 		YOLO:               yolo,
 		Channels:           channels,
+		TrustProject:       trustProject,
 		WorkspaceLock:      true,
 		GlobalSkillsMirror: true,
 		PostDataDir: func(cfg *config.ConfigStore) error {

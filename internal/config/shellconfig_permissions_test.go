@@ -30,6 +30,7 @@ func loadSennitShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "sennitrc"), []byte(script), 0o644))
+	require.NoError(t, config.Trust(workDir))
 
 	return config.Load(workDir, dataDir, false)
 }

@@ -238,7 +238,8 @@ func (c *Config) applyEnv(resolver VariableResolver) {
 	}
 }
 
-func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []string, error) {
+func loadFromConfigPaths(ctx context.Context, configPaths []string, projectTrusted bool) (*Config, []string, error) {
+	allowProject := projectTrusted
 	var configs [][]byte
 	var loaded []string
 
@@ -255,6 +256,9 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 
 	for _, path := range configPaths {
 		if path == "" {
+			continue
+		}
+		if !allowProject && !isGlobalConfigPath(path) {
 			continue
 		}
 		data, err := os.ReadFile(path)

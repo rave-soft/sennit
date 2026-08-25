@@ -96,7 +96,7 @@ func TestLoadFromConfigPaths_GlobalOnlyKeysOnlyFromGlobal(t *testing.T) {
 	), 0o644))
 
 	// Project path last, i.e. highest merge priority — it still loses.
-	cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{globalPath, projectPath})
+	cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{globalPath, projectPath}, true)
 	require.NoError(t, err)
 	require.Contains(t, loaded, projectPath)
 
