@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -26,6 +27,8 @@ const awsSSORefreshTimeout = 5 * time.Minute
 // awsSSOURLRe matches the https verification URL that `aws sso login` and
 // related commands print to stdout or stderr.
 var awsSSOURLRe = regexp.MustCompile(`https://[^\s]+`)
+
+const awsSSOOutputLineLimit = 1024 * 1024
 
 // extractAWSSSOURL returns the first HTTPS URL in the given command output
 // line, or empty if none is present.
@@ -136,23 +139,33 @@ func (c *coordinator) runAWSAuthRefresh(ctx context.Context, providerCfg config.
 	}
 
 	var wg sync.WaitGroup
-	scan := func(r io.Reader) {
+	var scanErrs [2]error
+	scan := func(index int, name string, r io.Reader) {
 		defer wg.Done()
 		scanner := bufio.NewScanner(r)
+		scanner.Buffer(nil, awsSSOOutputLineLimit)
 		for scanner.Scan() {
 			publishURL(scanner.Text())
 		}
+		if err := scanner.Err(); err != nil {
+			scanErrs[index] = fmt.Errorf("read AWS auth refresh %s: %w", name, err)
+			_, _ = io.Copy(io.Discard, r)
+		}
 	}
 	wg.Add(2)
-	go scan(stdout)
-	go scan(io.TeeReader(stderrPipe, &stderrBuf))
+	go scan(0, "stdout", stdout)
+	go scan(1, "stderr", io.TeeReader(stderrPipe, &stderrBuf))
 	wg.Wait()
 
-	if err := cmd.Wait(); err != nil {
-		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
-			return fmt.Errorf("%w: %s", err, stderr)
-		}
-		return err
+	waitErr := cmd.Wait()
+	var stderrErr error
+	if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" && waitErr != nil {
+		stderrErr = fmt.Errorf("%w: %s", waitErr, stderr)
+		waitErr = nil
 	}
-	return nil
+	var scanErr error
+	for _, err := range scanErrs {
+		scanErr = errors.Join(scanErr, err)
+	}
+	return errors.Join(waitErr, stderrErr, scanErr)
 }

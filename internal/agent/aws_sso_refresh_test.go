@@ -172,3 +172,20 @@ func TestRunAWSAuthRefresh_NonZeroExit_ReturnsErrorWithStderr(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "boom")
 }
+
+func TestRunAWSAuthRefresh_OversizedLine_ReturnsScannerError(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		command string
+	}{
+		{name: "stdout", command: "python3 -c 'print(\"x\" * 1048577)'"},
+		{name: "stderr", command: "python3 -c 'import sys; print(\"x\" * 1048577, file=sys.stderr)'"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			co := authTestCoordinator(t, withNotify(&recordingNotifier{}))
+			err := co.runAWSAuthRefresh(t.Context(), config.ProviderConfig{ID: "bedrock", AWSAuthRefresh: tt.command})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "token too long")
+		})
+	}
+}
