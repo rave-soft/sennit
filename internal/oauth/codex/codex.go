@@ -71,7 +71,7 @@ const (
 	// request without. It gates which models are offered, so it wants
 	// bumping when the backend starts publishing models a newer client
 	// knows about.
-	clientVersion = "0.147.0"
+	clientVersion = "0.149.1"
 )
 
 // callbackPort is the port a flow binds. It is defaultCallbackPort in every
