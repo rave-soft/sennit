@@ -984,3 +984,28 @@ func TestTaskManager_RunCompleteSurvivesTransientStoreGetFailure(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond,
 		"a transient store.Get failure right after run completion must not strand the task in StatusRunning")
 }
+
+// TestTaskManager_CreateHonorsCallerSuppliedSessionID proves a caller can
+// name the task's child session. Delegations launched from a tool call
+// pass the "<messageID>$$<toolCallID>" identity the transcript derives for
+// that call, which is the only reason opening the delegation from the
+// parent's chat resolves to anything at all.
+func TestTaskManager_CreateHonorsCallerSuppliedSessionID(t *testing.T) {
+	store := thread.NewStoreForTest(t)
+	_, tasks, parentApp := newTestTaskManager(t, store)
+
+	st, err := tasks.Create(t.Context(), thread.TaskCreateArgs{
+		Goal:            "do the thing",
+		ParentSessionID: "parent-sess",
+		SessionID:       "msg-7$$call-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "msg-7$$call-1", st.SessionID)
+
+	sessions := parentApp.SessionsForTest().(*fakeSessions)
+	sessions.mu.Lock()
+	created := sessions.createdSession
+	sessions.mu.Unlock()
+	require.Equal(t, "msg-7$$call-1", created.ID)
+	require.Equal(t, "parent-sess", created.ParentSessionID)
+}

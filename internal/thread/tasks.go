@@ -66,6 +66,13 @@ type TaskCreateArgs struct {
 	// SessionTitle and AgentID preserve specialized delegation history.
 	SessionTitle string
 	AgentID      string
+	// SessionID, when set, is used verbatim as the child session's id
+	// instead of a generated one. A delegation launched from a tool call
+	// passes the "<messageID>$$<toolCallID>" identity the transcript
+	// derives for that call, which is what makes the delegation openable
+	// from the parent's chat; callers with no such identity leave it
+	// empty and get a generated id.
+	SessionID string
 	// Factory, when set, owns preparation and execution instead of the coder
 	// dispatcher. It is invoked asynchronously only after Create returns.
 	Factory TaskRunFactory
@@ -220,11 +227,15 @@ func (t *TaskManager) Create(ctx context.Context, args TaskCreateArgs) (Thread, 
 	if title == "" {
 		title = args.Goal
 	}
+	childSessionID := args.SessionID
+	if childSessionID == "" {
+		childSessionID = uuid.NewString()
+	}
 	var sess Session
 	if args.AgentID == "" {
-		sess, err = handle.Workspace().Sessions().CreateTaskSession(ctx, uuid.NewString(), args.ParentSessionID, title)
+		sess, err = handle.Workspace().Sessions().CreateTaskSession(ctx, childSessionID, args.ParentSessionID, title)
 	} else {
-		sess, err = handle.Workspace().Sessions().CreateSubAgentSession(ctx, uuid.NewString(), args.ParentSessionID, title, args.AgentID)
+		sess, err = handle.Workspace().Sessions().CreateSubAgentSession(ctx, childSessionID, args.ParentSessionID, title, args.AgentID)
 	}
 	if err != nil {
 		return Thread{}, t.failCreate(ctx, st, err)

@@ -83,6 +83,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				Goal:            params.Prompt,
 				ParentSessionID: validation.SessionID,
 				SessionTitle:    "Fetch Analysis",
+				SessionID:       c.sessions.CreateAgentToolSessionID(validation.AgentMessageID, call.ID),
 				Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
 					description := "Search the web and analyze results"
 					if params.URL != "" {

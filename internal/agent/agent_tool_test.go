@@ -191,7 +191,7 @@ func TestRunBackgroundAgent_RefusedWhenDisabledByConfig(t *testing.T) {
 	disabled := false
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X")
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "")
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "a disabled switch must refuse, not silently run in the foreground")
 	require.Contains(t, resp.Content, "background_agents")
@@ -208,7 +208,7 @@ func TestRunBackgroundAgent_AllowedWhenExplicitlyEnabled(t *testing.T) {
 	enabled := true
 	coord.cfg.Config().Options.BackgroundAgents = &enabled
 
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X")
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "look into X", "")
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Len(t, fake.created, 1)
@@ -230,7 +230,7 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 
 	// Dispatched while enabled - this is the "in-flight task" the reload
 	// below must leave alone.
-	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "do work")
+	resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "do work", "")
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Len(t, fake.created, 1)
@@ -239,7 +239,7 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 	coord.cfg.Config().Options.BackgroundAgents = &disabled
 
 	// New dispatch is refused from here on...
-	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "more work")
+	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "more work", "")
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Len(t, fake.created, 1, "the refused call must never reach the task manager")
@@ -247,4 +247,57 @@ func TestBackgroundAgents_ToggleOffDoesNotTouchInFlightTask(t *testing.T) {
 	// ...but nothing about the toggle itself reaches into the task
 	// manager: no Cancel call was ever made as a side effect of it.
 	require.False(t, fake.cancelCalled, "toggling the option off must not cancel a task already running")
+}
+
+// TestAgentTool_ChildSessionKeepsToolCallIdentity is the regression for
+// delegations that could not be opened from the transcript. The chat
+// derives a delegation's child session id from the tool call itself
+// (workspace.CreateAgentToolSessionID(messageID, toolCallID)), so routing
+// every delegation through the task manager - which names its child
+// session with a fresh uuid - made every drill-in resolve to a session
+// that does not exist, reporting "This delegation has not started yet"
+// for the entire life of the delegation, not just the window before it
+// began.
+func TestAgentTool_ChildSessionKeepsToolCallIdentity(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+
+	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-7")
+	input, err := json.Marshal(AgentParams{Prompt: "look into X"})
+	require.NoError(t, err)
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "delegation should launch: %s", resp.Content)
+
+	require.Len(t, fake.created, 1)
+	require.Equal(t, "msg-7$$call-1", fake.created[0].SessionID,
+		"the child session must carry the identity the transcript derives for this tool call")
+}
+
+// TestAgentTool_ChildSessionIdentityOptional proves a turn with no
+// message id in context still launches: an unopenable delegation is worse
+// than an openable one, but a delegation that refuses to start is worse
+// than both. The task manager names the session itself when the id is
+// empty.
+func TestAgentTool_ChildSessionIdentityOptional(t *testing.T) {
+	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
+	coord := newAgentToolTestCoordinator(t, fake)
+
+	tool, err := coord.agentTool(t.Context(), newAgentConfig(coord.cfg.Config()))
+	require.NoError(t, err)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "parent-sess")
+	input, err := json.Marshal(AgentParams{Prompt: "look into X"})
+	require.NoError(t, err)
+
+	resp, err := tool.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.False(t, resp.IsError)
+	require.Len(t, fake.created, 1)
+	require.Empty(t, fake.created[0].SessionID)
 }

@@ -626,7 +626,7 @@ func TestRunBackgroundAgent_CascadeDepthLimit(t *testing.T) {
 
 	for depth := range maxTaskCascadeDepth {
 		ctx := context.WithValue(t.Context(), tools.DepthContextKey, depth)
-		resp, err := coord.runBackgroundAgent(ctx, "parent-sess", fmt.Sprintf("depth %d work", depth))
+		resp, err := coord.runBackgroundAgent(ctx, "parent-sess", fmt.Sprintf("depth %d work", depth), "")
 		require.NoError(t, err)
 		require.False(t, resp.IsError, "depth %d is below the limit and must be allowed", depth)
 	}
@@ -639,7 +639,7 @@ func TestRunBackgroundAgent_CascadeDepthLimit(t *testing.T) {
 	// simulates the tool invocation inside it), but starting further
 	// background work is refused.
 	limitCtx := context.WithValue(t.Context(), tools.DepthContextKey, maxTaskCascadeDepth)
-	resp, err := coord.runBackgroundAgent(limitCtx, "parent-sess", "one too many")
+	resp, err := coord.runBackgroundAgent(limitCtx, "parent-sess", "one too many", "")
 	require.NoError(t, err)
 	require.True(t, resp.IsError, "a turn at the cascade limit must refuse to start further background work")
 	require.Contains(t, resp.Content, "depth limit")
@@ -647,7 +647,7 @@ func TestRunBackgroundAgent_CascadeDepthLimit(t *testing.T) {
 
 	// A user turn - no DepthContextKey set, so GetDepthFromContext
 	// defaults to 0 - resets the count and is allowed again.
-	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "fresh user turn")
+	resp, err = coord.runBackgroundAgent(t.Context(), "parent-sess", "fresh user turn", "")
 	require.NoError(t, err)
 	require.False(t, resp.IsError, "a real user turn must reset the cascade depth to zero")
 	require.Len(t, fake.created, maxTaskCascadeDepth+1)

@@ -34,6 +34,24 @@ type AgentBackgroundResponseMetadata struct {
 	Status    string `json:"status"`
 }
 
+// delegationSessionID is the id a delegation launched by toolCallID gives
+// its child session: the same "<messageID>$$<toolCallID>" identity the
+// transcript derives for that tool call, so opening the delegation in the
+// UI finds the session it points at. Returns "" when the turn has no
+// message id in context, leaving the task manager to generate one — an
+// unopenable delegation is worse than a blocked one, but a delegation that
+// refuses to start is worse than both.
+func delegationSessionID(ctx context.Context, sessions interface {
+	CreateAgentToolSessionID(messageID, toolCallID string) string
+}, toolCallID string,
+) string {
+	messageID := tools.GetMessageFromContext(ctx)
+	if messageID == "" || toolCallID == "" {
+		return ""
+	}
+	return sessions.CreateAgentToolSessionID(messageID, toolCallID)
+}
+
 func (c *coordinator) agentTool(_ context.Context, cfg agentConfig) (fantasy.AgentTool, error) {
 	if _, ok := cfg.Agents()[config.AgentTask]; !ok {
 		return nil, errors.New("task agent not configured")
@@ -41,7 +59,7 @@ func (c *coordinator) agentTool(_ context.Context, cfg agentConfig) (fantasy.Age
 	return tools.WithToolSchemaConstraints(fantasy.NewParallelAgentTool(
 		AgentToolName,
 		agentToolDescription,
-		func(ctx context.Context, params AgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		func(ctx context.Context, params AgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
@@ -49,7 +67,7 @@ func (c *coordinator) agentTool(_ context.Context, cfg agentConfig) (fantasy.Age
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, errors.New("session id missing from context")
 			}
-			return c.runBackgroundAgent(ctx, sessionID, params.Prompt)
+			return c.runBackgroundAgent(ctx, sessionID, params.Prompt, delegationSessionID(ctx, c.sessions, call.ID))
 		},
 	), map[string]tools.ToolSchemaConstraint{"prompt": {MinLength: intPointer(1)}}), nil
 }
@@ -80,11 +98,12 @@ func (c *coordinator) launchDelegation(ctx context.Context, args tools.TaskCreat
 	), nil
 }
 
-func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt string) (fantasy.ToolResponse, error) {
+func (c *coordinator) runBackgroundAgent(ctx context.Context, sessionID, delegatedPrompt, childSessionID string) (fantasy.ToolResponse, error) {
 	return c.launchDelegation(ctx, tools.TaskCreateArgs{
 		Goal:            delegatedPrompt,
 		ParentSessionID: sessionID,
 		SessionTitle:    "New Agent Session",
+		SessionID:       childSessionID,
 		Factory: func(ctx context.Context, childSessionID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
 			agentCfg, ok := c.cfg.Config().Agents[config.AgentTask]
 			if !ok {

@@ -29,6 +29,7 @@ func (a *agentToolTaskManager) Create(ctx context.Context, args tools.TaskCreate
 		Depth:           args.Depth,
 		SessionTitle:    args.SessionTitle,
 		AgentID:         args.AgentID,
+		SessionID:       args.SessionID,
 		Factory:         adaptTaskFactory(args.Factory),
 	})
 	if err != nil {

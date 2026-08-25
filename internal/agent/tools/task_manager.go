@@ -12,6 +12,11 @@ type TaskCreateArgs struct {
 	// specialized delegation. Empty values retain the built-in task defaults.
 	SessionTitle string
 	AgentID      string
+	// SessionID is the id to give the task's child session. Delegations
+	// launched from a tool call pass the "<messageID>$$<toolCallID>"
+	// identity the UI derives from the call itself, so the delegation can
+	// be opened from the transcript. Empty leaves the id generated.
+	SessionID string
 	// Factory performs all potentially blocking preparation after Create has
 	// returned its acknowledgement. Cleanup is owned by the task lifecycle and
 	// is called exactly once, including when preparation fails.

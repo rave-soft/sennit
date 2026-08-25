@@ -43,7 +43,7 @@ func (c *coordinator) buildCustomAgentTool(_ context.Context, id string, agentCf
 	return fantasy.NewParallelAgentTool(
 		id,
 		customAgentDescription(id, agentCfg)+" The call returns immediately; correlate its later completion by task and child session id.",
-		func(ctx context.Context, params CustomAgentParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		func(ctx context.Context, params CustomAgentParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.Prompt == "" {
 				return fantasy.NewTextErrorResponse("prompt is required"), nil
 			}
@@ -60,6 +60,7 @@ func (c *coordinator) buildCustomAgentTool(_ context.Context, id string, agentCf
 				ParentSessionID: parentID,
 				SessionTitle:    latest.Name,
 				AgentID:         id,
+				SessionID:       delegationSessionID(ctx, c.sessions, call.ID),
 				Factory: func(ctx context.Context, childID string) (func(context.Context) (tools.TaskRunResult, error), func(), error) {
 					definition, ok := c.cfg.Config().Agents[id]
 					if !ok {
