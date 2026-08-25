@@ -135,6 +135,7 @@ type baseToolMessageItem struct {
 	result       *message.ToolResult
 	messageID    string
 	status       ToolStatus
+	animLabel    string // last label pushed into anim; see syncAnimLabel
 	// hasCappedWidth controls whether RawRender caps this tool's content
 	// width at maxTextWidth for readability (bash, read, etc.) or gives
 	// it the full available width (Edit/MultiEdit, which need it for
@@ -209,6 +210,9 @@ func (t *baseToolMessageItem) newAnim() *anim.Anim {
 // Restyle implements [Restylable]. See [AssistantMessageItem.Restyle].
 func (t *baseToolMessageItem) Restyle() tea.Cmd {
 	t.anim = t.newAnim()
+	// The rebuilt animation carries no label; forget which one it had so
+	// syncAnimLabel pushes the current one back in.
+	t.animLabel = ""
 	t.Bump()
 	return t.StartAnimation()
 }

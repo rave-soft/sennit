@@ -181,6 +181,7 @@ type AssistantMessageItem struct {
 	message           *message.Message
 	sty               *styles.Styles
 	anim              *anim.Anim
+	animLabel         string // last label pushed into anim; see renderSpinning
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 	hovered           bool
@@ -259,6 +260,9 @@ func (a *AssistantMessageItem) newAnim() *anim.Anim {
 // re-armed if it was running) rather than restyled in place.
 func (a *AssistantMessageItem) Restyle() tea.Cmd {
 	a.anim = a.newAnim()
+	// The rebuilt animation has no label; forget which one it had so
+	// renderSpinning pushes the current phase back into it.
+	a.animLabel = ""
 	a.Bump()
 	return a.StartAnimation()
 }
@@ -656,11 +660,21 @@ func (a *AssistantMessageItem) renderMarkdown(content string, width int) string 
 	return a.streamingContent.Render(content, width, renderer)
 }
 
+// renderSpinning draws the working animation under the phase the message
+// is actually in. The label used to be set only while thinking or
+// summarizing, which left the most common case — request sent, nothing
+// back yet — as a bare band of glyphs and a timer that said how long
+// something unnamed had been taking. [message.Working] is the single
+// reading of that state; PhaseWorking's "Working" is the floor, so the
+// label is never empty while the animation is up.
+//
+// SetLabel re-renders the label rune by rune and recomputes the animation
+// width, so it is called only when the wording actually changes rather
+// than on all twenty frames a second.
 func (a *AssistantMessageItem) renderSpinning() string {
-	if a.message.IsThinking() {
-		a.anim.SetLabel("Thinking")
-	} else if a.message.IsSummaryMessage {
-		a.anim.SetLabel("Summarizing")
+	if label := a.message.Working().Label(); label != "" && label != a.animLabel {
+		a.animLabel = label
+		a.anim.SetLabel(label)
 	}
 	return a.anim.Render()
 }

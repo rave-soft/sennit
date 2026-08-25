@@ -71,6 +71,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	content, height, ok := t.getCachedRender(toolItemWidth)
 	// if we are spinning or there is no cache rerender
 	if !ok || t.isSpinning() {
+		t.syncAnimLabel()
 		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
 			ToolCall:   t.toolCall,
 			Result:     t.result,
@@ -95,6 +96,37 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	}
 
 	return t.renderHighlighted(content, toolItemWidth, height)
+}
+
+// syncAnimLabel gives the pending animation a word for what the call is
+// doing, so a running tool is not just an unlabeled band of glyphs next
+// to its name.
+//
+// Only the arguments-still-streaming case is labeled. That is the wait a
+// reader cannot otherwise account for: the call is known, nothing is
+// executing yet, and on a long argument stream (a file written in one go)
+// the line would otherwise sit unchanged for minutes. Once the call is
+// finished the spinner belongs to a tool that is actually executing, and
+// the two kinds that keep spinning there — the delegations — already
+// print a status line saying elapsed, step and last nested tool
+// underneath; a second, vaguer "Running" beside the name would only
+// compete with it.
+//
+// SetLabel re-renders the label and recomputes the animation width, so it
+// runs on a change of wording rather than on every frame.
+func (t *baseToolMessageItem) syncAnimLabel() {
+	if t.anim == nil {
+		return
+	}
+	var label string
+	if !t.toolCall.Finished {
+		label = "Preparing"
+	}
+	if label == t.animLabel {
+		return
+	}
+	t.animLabel = label
+	t.anim.SetLabel(label)
 }
 
 // Render renders the tool message item at the given width.

@@ -191,7 +191,10 @@ func runAgent(
 		spinnerMode, _ := ws.Config().SpinnerMode()
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
-			Size:        10,
+			Size: 10,
+			// Starting label only: AgentRunEvent.Status replaces it with
+			// what the agent is actually doing as soon as the turn says
+			// anything about itself.
 			Label:       "Generating",
 			GradColorA:  t.WorkingGradFromColor,
 			GradColorB:  t.WorkingGradToColor,
@@ -234,6 +237,9 @@ func runAgent(
 		case ev, ok := <-events:
 			if !ok {
 				return nil
+			}
+			if ev.Status != "" && spinner != nil {
+				spinner.SetLabel(ev.Status)
 			}
 			if ev.TextDelta != "" {
 				stopSpinner()

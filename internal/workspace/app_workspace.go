@@ -424,13 +424,28 @@ func (w *AppWorkspace) AgentRunStream(ctx context.Context, sessionID, prompt str
 
 		readBytes := make(map[string]int)
 		var printed bool
+		var lastStatus string
 
-		// emit turns one message event into a text delta, or reports that
-		// the stream must end. Shared by the live loop and the drain after
-		// the run finishes, so both produce identical output.
+		// emit turns one message event into a text delta and/or a status
+		// change, or reports that the stream must end. Shared by the live
+		// loop and the drain after the run finishes, so both produce
+		// identical output.
 		emit := func(ev pubsub.Event[message.Message]) (stop bool, fail error) {
 			msg := ev.Payload
-			if msg.SessionID != sessionID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
+			if msg.SessionID != sessionID || msg.Role != message.Assistant {
+				return false, nil
+			}
+			// Status is derived before the empty-parts check on purpose:
+			// the interesting status is exactly the one a message carries
+			// before it has any content — request sent, nothing back yet,
+			// or a tool call whose arguments are still streaming. A caller
+			// showing a spinner would otherwise have nothing to say during
+			// the longest silence of the turn.
+			if status := msg.Working().Label(); status != "" && status != lastStatus {
+				lastStatus = status
+				out <- AgentRunEvent{Status: status}
+			}
+			if len(msg.Parts) == 0 {
 				return false, nil
 			}
 			content := msg.Content().String()

@@ -484,8 +484,14 @@ type UsageReporter interface {
 // server-side run was cancelled); a caller-driven ctx cancellation
 // still surfaces ctx.Err(), matching the pre-refactor behavior of
 // `sennit run`'s select-on-ctx.Done() branch.
+//
+// Status names what the agent is currently doing (see
+// [message.Working.Label]), and is emitted only when that wording
+// changes. It carries no output — a caller that has no place to show it
+// can ignore Status events entirely.
 type AgentRunEvent struct {
 	TextDelta string
+	Status    string
 	Done      bool
 	Err       error
 }
