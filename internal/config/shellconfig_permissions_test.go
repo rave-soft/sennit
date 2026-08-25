@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +33,7 @@ func loadSennitShErr(t *testing.T, script string) (*config.ConfigStore, error) {
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "sennitrc"), []byte(script), 0o644))
 	require.NoError(t, config.Trust(workDir))
 
-	return config.Load(workDir, dataDir, false)
+	return configruntime.Load(workDir, dataDir, false)
 }
 
 // loadSennitShGlobal is loadSennitSh for scripts that configure providers or
@@ -46,7 +47,7 @@ func loadSennitShGlobal(t *testing.T, script string) *config.ConfigStore {
 	require.NoError(t, os.MkdirAll(globalDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "sennitrc"), []byte(script), 0o644))
 
-	store, err := config.Load(t.TempDir(), t.TempDir(), false)
+	store, err := configruntime.Load(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)
 	return store
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	sennitdb "github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/message"
 	messagestore "github.com/rave-soft/sennit/internal/message/store"
@@ -574,7 +575,7 @@ func TestOutputSessionJSON_MapsAllMetaAndMessageFields(t *testing.T) {
 
 func TestOutputSessionHuman_ContainsTitleAndID(t *testing.T) {
 	cwd := t.TempDir()
-	cfg, err := config.Load(cwd, cwd, false)
+	cfg, err := configruntime.Load(cwd, cwd, false)
 	require.NoError(t, err)
 
 	sess := session.Session{ID: "sess-1", Title: "Demo Session", CreatedAt: time.Now().Unix()}

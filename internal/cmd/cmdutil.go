@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/workspace"
@@ -47,7 +48,7 @@ func initConfig(cmd *cobra.Command, debug bool) (cwd string, cfg *config.ConfigS
 			return "", nil, fmt.Errorf("failed to trust project: %w", err)
 		}
 	}
-	cfg, err = config.Load(cwd, dataDir, debug)
+	cfg, err = configruntime.Load(cwd, dataDir, debug)
 	if err != nil {
 		return "", nil, err
 	}

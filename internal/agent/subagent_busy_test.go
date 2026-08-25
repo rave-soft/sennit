@@ -7,6 +7,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -110,7 +111,7 @@ func newSubAgentBusyTestCoordinator(t *testing.T) *coordinator {
              "small": {"provider": "mock", "model": "mock-model"}}
 }`)
 
-	cfg, err := config.Load(env.workingDir, "", false)
+	cfg, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.SetupAgents()
 

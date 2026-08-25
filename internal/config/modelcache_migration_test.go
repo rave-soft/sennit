@@ -13,8 +13,8 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/catwalk/pkg/embedded"
 	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/csync"
-	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -60,7 +60,7 @@ func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 	require.NoError(t, os.WriteFile(dataConfigPath, []byte(seed), 0o644))
 
 	workingDir := t.TempDir()
-	_, err := Load(workingDir, "", false)
+	_, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 
 	// The on-disk data-dir file no longer carries the bloated models array.
@@ -69,7 +69,7 @@ func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 	require.False(t, gjson.GetBytes(after, "providers.omniroute.models").Exists())
 
 	// The models moved into the cache.
-	cached, ok := loadCachedModels(dataConfigPath, "omniroute")
+	cached, ok := modelcache.New(dataConfigPath).Load("omniroute")
 	require.True(t, ok)
 	require.Len(t, cached, seedCount)
 	require.Equal(t, "model-0", cached[0].ID)
@@ -77,7 +77,7 @@ func TestConfig_Load_MigratesBloatedModelCache(t *testing.T) {
 	// A second, independent Load sees the migrated models via the cache
 	// without needing to touch the (unreachable) network.
 	workingDir2 := t.TempDir()
-	store2, err := Load(workingDir2, "", false)
+	store2, err := loadRuntimeForTest(workingDir2, "", false)
 	require.NoError(t, err)
 	pc, ok := store2.config.Providers.Get("omniroute")
 	require.True(t, ok)
@@ -117,7 +117,7 @@ func TestConfig_Load_SmallManualModelListIsNotMigrated(t *testing.T) {
 	require.NoError(t, os.WriteFile(dataConfigPath, []byte(seed), 0o644))
 
 	workingDir := t.TempDir()
-	store, err := Load(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 
 	// Still on disk, untouched — migration must be a no-op below the
@@ -128,7 +128,7 @@ func TestConfig_Load_SmallManualModelListIsNotMigrated(t *testing.T) {
 	require.Len(t, gjson.GetBytes(after, "providers.qwen36-local.models").Array(), 3)
 
 	// Never copied into the cache either — there is nothing to migrate.
-	_, ok := loadCachedModels(dataConfigPath, "qwen36-local")
+	_, ok := modelcache.New(dataConfigPath).Load("qwen36-local")
 	require.False(t, ok)
 
 	// The manual list is what the provider actually loaded with, marked as
@@ -166,10 +166,9 @@ func TestConfig_Load_DiscoverModelsFalseNeverDiscovers(t *testing.T) {
 	}
 	cfg.setDefaults(t.TempDir(), "")
 
-	testEnv := testenv.New(map[string]string{})
-	resolver := NewShellVariableResolver(testEnv)
-	err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), testEnv, resolver, []catwalk.Provider{})
+	result, err := testRuntimeProcessor{}.Process(context.Background(), RuntimeInput{Config: cfg})
 	require.NoError(t, err)
+	require.NotNil(t, result.Resolver)
 
 	pc, ok := cfg.Providers.Get("qwen36-local")
 	require.True(t, ok, "provider must survive: it already has an explicit model and discovery is opted out")
@@ -208,13 +207,13 @@ func TestConfig_Load_MigrationLeavesKnownProviderModelsUntouched(t *testing.T) {
 	require.NoError(t, err)
 
 	workingDir := t.TempDir()
-	_, err = Load(workingDir, "", false)
+	_, err = loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 
 	after, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
 	require.Equal(t, string(before), string(after), "known catalog provider's models override must not be migrated")
 
-	_, ok := loadCachedModels(dataConfigPath, knownID)
+	_, ok := modelcache.New(dataConfigPath).Load(knownID)
 	require.False(t, ok, "known catalog provider's models must not be cached as a discovery result")
 }

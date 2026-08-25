@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/qjebbs/go-jsons"
 	"github.com/rave-soft/sennit/internal/brand"
 	"github.com/rave-soft/sennit/internal/config/migrate"
@@ -23,18 +22,24 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// Load loads the configuration from the default paths and returns a
-// ConfigStore that owns both the pure-data Config and all runtime state.
 type credentialsFileDependency struct {
 	homeDir string
 	stat    func(string) (os.FileInfo, error)
 }
 
-func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
-	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat})
+// LoadData loads configuration without provider runtime orchestration.
+func LoadData(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
+	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, nil)
 }
 
-func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFileDependency) (*ConfigStore, error) {
+func LoadWithProcessor(workingDir, dataDir string, debug bool, processor RuntimeProcessor) (*ConfigStore, error) {
+	if processor == nil {
+		return nil, fmt.Errorf("runtime processor is required")
+	}
+	return load(workingDir, dataDir, debug, credentialsFileDependency{homeDir: home.Dir(), stat: os.Stat}, processor)
+}
+
+func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFileDependency, processor RuntimeProcessor) (*ConfigStore, error) {
 	// Migrate deprecated disable_notifications before loading config.
 	migrateDisableNotifications()
 
@@ -44,6 +49,7 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 		externalChangePollInterval: externalChangePollInterval,
 		debugOverride:              debug,
 		credentialsFile:            credentialsFile,
+		processor:                  processor,
 	}
 
 	built, err := buildConfig(store, buildConfigOptions{
@@ -53,6 +59,7 @@ func load(workingDir, dataDir string, debug bool, credentialsFile credentialsFil
 		migrateModelCache: true,
 		persistFallback:   true,
 		credentialsFile:   credentialsFile,
+		processor:         processor,
 	})
 	if err != nil {
 		return nil, err
@@ -371,16 +378,6 @@ func addTopLevelKeys(m map[string]map[string]bool, dir string, data []byte) {
 		keys[key.String()] = true
 		return true
 	})
-}
-
-// migrateBloatedModelCache is a one-time, idempotent migration that moves
-// auto-discovered models still sitting in the data-dir config file (from
-// before the model-discovery cache existed) into the cache, and strips them
-// out of the JSON. The actual migration logic lives in the config/migrate
-// package; this wrapper wires in config's model-cache persistence
-// (saveCachedModelsWithError) and atomic file writer.
-func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Provider) {
-	migrate.BloatedModelCache(globalDataPath, knownProviders, saveCachedModelsWithError, fsext.AtomicWriteFile)
 }
 
 // loadFromBytes is the single choke point every JSON config layer passes

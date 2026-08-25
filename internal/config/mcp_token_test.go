@@ -29,7 +29,7 @@ func TestSetMCPToken_ProjectScopedServerPersistsToWorkspace(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(workingDir, "sennit.json"), []byte(projectSeed), 0o644))
 	require.NoError(t, Trust(workingDir))
 
-	store, err := Load(workingDir, "", false)
+	store, err := LoadData(workingDir, "", false)
 	require.NoError(t, err)
 
 	mcp, ok := store.Config().MCP["server"]
@@ -101,7 +101,7 @@ func TestSetMCPToken_GloballyDeclaredServerStillWritesGlobal(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(dataConfigPath), 0o755))
 	require.NoError(t, os.WriteFile(dataConfigPath, []byte(globalSeed), 0o644))
 
-	store, err := Load(workingDir, "", false)
+	store, err := LoadData(workingDir, "", false)
 	require.NoError(t, err)
 
 	mcp, ok := store.Config().MCP["server"]

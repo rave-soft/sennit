@@ -46,7 +46,7 @@ func TestNew_ConfigBypassSkipsPermissionsAtStartup(t *testing.T) {
 func TestApplyConfigPermissionsBypass_AppliesChange(t *testing.T) {
 	setBootstrapTestEnv(t)
 
-	store, err := config.Load(t.TempDir(), t.TempDir(), false)
+	store, err := config.LoadData(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)
 
 	app := &App{
@@ -72,7 +72,7 @@ func TestApplyConfigPermissionsBypass_AppliesChange(t *testing.T) {
 func TestApplyConfigPermissionsBypass_DoesNotClobberManualToggle(t *testing.T) {
 	setBootstrapTestEnv(t)
 
-	store, err := config.Load(t.TempDir(), t.TempDir(), false)
+	store, err := config.LoadData(t.TempDir(), t.TempDir(), false)
 	require.NoError(t, err)
 
 	app := &App{

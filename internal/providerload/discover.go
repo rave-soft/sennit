@@ -1,4 +1,4 @@
-package config
+package providerload
 
 import (
 	"cmp"
@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/discover"
 )
@@ -15,7 +17,7 @@ import (
 // resolveCustomProviderModels does two things for every custom provider,
 // before discovery runs:
 //
-//  1. Marks ModelsSource — ModelsSourceConfig for a provider that already
+//  1. Marks ModelsSource — config.ModelsSourceConfig for a provider that already
 //     has a non-empty, hand-written Models list, so later code (`sennit
 //     models refresh`'s explicit-config guard, in internal/cmd/models.go)
 //     can tell "the user wrote these" apart from "these came from
@@ -23,29 +25,29 @@ import (
 //     fill below, since that fill only ever touches providers with an
 //     empty list.
 //  2. Fills in Models for a provider whose config has none, from the
-//     global model-discovery cache (see saveCachedModels), marking it
-//     ModelsSourceCache. This lets a restart skip runDiscoveryRequests'
+//     global model-discovery cache, marking it
+//     config.ModelsSourceCache. This lets a restart skip runDiscoveryRequests'
 //     HTTP round trip for an empty models list — the cache, not
 //     providers.<id>.models in sennit.json, is where auto-discovered
 //     models live now. A provider with discover_models: true explicitly
 //     still refreshes over HTTP regardless (resolveDiscoveryRequests'
 //     wantsDiscovery branch doesn't check Models length).
-func resolveCustomProviderModels(providers *csync.Map[string, ProviderConfig], knownProviderNames map[string]bool, globalDataPath string) {
+func resolveCustomProviderModels(providers *csync.Map[string, config.ProviderConfig], knownProviderNames map[string]bool, globalDataPath string) {
 	for id, pc := range providers.Seq2() {
 		if knownProviderNames[id] {
 			continue
 		}
 		if len(pc.Models) > 0 {
-			pc.ModelsSource = ModelsSourceConfig
+			pc.ModelsSource = config.ModelsSourceConfig
 			providers.Set(id, pc)
 			continue
 		}
 		if pc.Disable || pc.BaseURL == "" {
 			continue
 		}
-		if models, ok := loadCachedModels(globalDataPath, id); ok {
+		if models, ok := modelcache.New(globalDataPath).Load(id); ok {
 			pc.Models = models
-			pc.ModelsSource = ModelsSourceCache
+			pc.ModelsSource = config.ModelsSourceCache
 			providers.Set(id, pc)
 		}
 	}
@@ -84,7 +86,7 @@ type discoveryRequest struct {
 // the same failure inside doRequest, so validateCustomProviders sees the
 // identical outcome either way. A header resolution failure is not fatal,
 // matching doRequest: that header is just dropped.
-func resolveDiscoveryRequests(providers *csync.Map[string, ProviderConfig], knownProviderNames map[string]bool, resolver VariableResolver) ([]discoveryRequest, map[string]discoveryResult) {
+func resolveDiscoveryRequests(providers *csync.Map[string, config.ProviderConfig], knownProviderNames map[string]bool, resolver config.VariableResolver) ([]discoveryRequest, map[string]discoveryResult) {
 	var requests []discoveryRequest
 	results := make(map[string]discoveryResult)
 
@@ -165,10 +167,10 @@ func runDiscoveryRequests(ctx context.Context, requests []discoveryRequest) map[
 	defer discoverCancel()
 	for _, req := range requests {
 		wg.Go(func() {
-			models, err := discover.DiscoverModels(discoverCtx, req.cfg, IdentityResolver())
+			models, err := discover.DiscoverModels(discoverCtx, req.cfg, config.IdentityResolver())
 			if err == nil && len(models) > 0 {
 				if enricher := discover.GetEnricher(string(req.providerType)); enricher != nil {
-					models = enricher.EnrichModels(discoverCtx, req.cfg, IdentityResolver(), models)
+					models = enricher.EnrichModels(discoverCtx, req.cfg, config.IdentityResolver(), models)
 				}
 			}
 			mu.Lock()

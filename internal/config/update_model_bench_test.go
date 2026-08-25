@@ -44,7 +44,7 @@ func BenchmarkUpdatePreferredModel(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	store, err := Load(dir, dir, false)
+	store, err := LoadData(dir, dir, false)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func BenchmarkReloadFromDisk(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	store, err := Load(dir, dir, false)
+	store, err := LoadData(dir, dir, false)
 	if err != nil {
 		b.Fatal(err)
 	}

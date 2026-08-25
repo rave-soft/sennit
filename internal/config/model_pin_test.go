@@ -41,7 +41,7 @@ func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -79,7 +79,7 @@ func TestModelSelectionSurvivesPeerWriteWhenUnchosen(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -104,14 +104,14 @@ func TestModelSelectionFollowsDiskOnNextStart(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
-	first, err := Load(dir, dir, false)
+	first, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	require.Equal(t, "openai", first.Config().Model.Provider)
 
 	// A sibling instance switches the default and writes it out.
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("anthropic", "claude-3")), 0o600))
 
-	second, err := Load(dir, dir, false)
+	second, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	require.Equal(t, "anthropic", second.Config().Model.Provider, "a fresh start reads the file")
 	require.Equal(t, "claude-3", second.Config().Model.Model)
@@ -132,7 +132,7 @@ func TestModelSelectionStillFollowsOwnChoice(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -164,7 +164,7 @@ func TestReloadFromDisk_DoesNotPersistFallbackCorrection(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("anthropic", "claude-3")), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})

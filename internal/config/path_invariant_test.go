@@ -25,9 +25,9 @@ func TestConfigPathInvariant_MatchesReloadReadSet(t *testing.T) {
 		t.Setenv("SENNIT_GLOBAL_CONFIG", envDir)
 		t.Setenv("SENNIT_GLOBAL_DATA", envDir)
 
-		store, err := Load(workingDir, "", false)
+		store, err := LoadData(workingDir, "", false)
 		if err != nil {
-			t.Fatalf("Load(%q): %v", workingDir, err)
+			t.Fatalf("LoadData(%q): %v", workingDir, err)
 		}
 
 		// reloadFromDisk's read set: lookupConfigs(workingDir), plus the
@@ -84,9 +84,9 @@ func TestConfigPathInvariant_WorkspaceScopeReadableViaLookupConfigs(t *testing.T
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	store, err := Load(workingDir, "", false)
+	store, err := LoadData(workingDir, "", false)
 	if err != nil {
-		t.Fatalf("Load(%q): %v", workingDir, err)
+		t.Fatalf("LoadData(%q): %v", workingDir, err)
 	}
 
 	path, err := store.ConfigPath(ScopeWorkspace)

@@ -104,7 +104,7 @@ func TestConfigureProviders_DiscoveryDoesNotHoldProcessEnvMu(t *testing.T) {
 
 	loadDone := make(chan error, 1)
 	go func() {
-		_, err := Load(dir, dir, false)
+		_, err := loadRuntimeForTest(dir, dir, false)
 		loadDone <- err
 	}()
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,7 +30,7 @@ func TestShellConfigDotSennitrcTakesPrecedence(t *testing.T) {
 	))
 	require.NoError(t, config.Trust(workDir))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 	require.Equal(t, "osc", store.Config().Options.Notifications,
 		".sennitrc should win over sennitrc")

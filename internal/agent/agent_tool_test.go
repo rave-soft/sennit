@@ -9,7 +9,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
-	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -76,7 +76,7 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
 }`
 	writeGlobalConfig(t, sennitJSON)
 
-	cfg, err := config.Load(env.workingDir, "", false)
+	cfg, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.SetupAgents()
 

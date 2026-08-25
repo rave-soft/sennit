@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,7 +41,7 @@ func TestModelsRefreshCmd_CodexSkippedInTheSweepWhenSignedOut(t *testing.T) {
 func TestCodexConfigured(t *testing.T) {
 	setupHermeticConfigEnv(t, `{"providers": {"codex": {"proxy_url": "http://localhost:8080"}}}`)
 
-	cfg, err := config.Load(t.TempDir(), "", false)
+	cfg, err := configruntime.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 	require.False(t, codexConfigured(cfg))
 }

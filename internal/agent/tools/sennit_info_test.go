@@ -14,6 +14,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/lsp"
 	"github.com/rave-soft/sennit/internal/skills"
@@ -668,12 +669,12 @@ func TestSennitInfo_Providers_CachedCustomProviderModels(t *testing.T) {
 
 	// First load discovers over HTTP and populates the cache as a side
 	// effect (internal/config.validateCustomProviders).
-	_, err := config.Load(t.TempDir(), "", false)
+	_, err := configruntime.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 
 	// Second, independent load must pick the models up from the cache, with
 	// no models array left in sennit.json to source them from.
-	store, err := config.Load(t.TempDir(), "", false)
+	store, err := configruntime.Load(t.TempDir(), "", false)
 	require.NoError(t, err)
 
 	output := buildSennitInfo(store, nil, nil, nil, nil, nil, nil)

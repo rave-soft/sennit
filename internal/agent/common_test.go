@@ -17,6 +17,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/prompt"
 	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/csync"
 	"github.com/rave-soft/sennit/internal/db"
 	"github.com/rave-soft/sennit/internal/filetracker"
@@ -241,7 +242,7 @@ func coderAgent(client *http.Client, env fakeEnv, model fantasy.LanguageModel) (
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := config.Load(env.workingDir, "", false)
+	cfg, err := configruntime.Load(env.workingDir, "", false)
 	if err != nil {
 		return nil, err
 	}

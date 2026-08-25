@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/shellconfig"
 	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
@@ -295,7 +296,7 @@ func TestLoad_WorkspaceMergePreservesAgentsMarker(t *testing.T) {
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":true}}`), 0o644))
 
-	store, err := Load(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 	require.True(t, store.Config().jsonAgentsBlockDetected)
 }
@@ -313,7 +314,7 @@ func TestLoad_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *testing.T) {
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"recent_models":{"large":[]},"options":{"debug":true}}`), 0o644))
 	require.NoError(t, Trust(workingDir))
 
-	store, err := Load(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 	require.True(t, store.Config().Options.Debug)
 	require.Empty(t, store.Config().RecentModels)
@@ -624,7 +625,7 @@ func TestConfig_Load_DiscoveredModelsPersistAcrossReload(t *testing.T) {
 	require.NoError(t, os.WriteFile(dataConfigPath, []byte(seed), 0o644))
 
 	workingDir1 := t.TempDir()
-	store1, err := Load(workingDir1, "", false)
+	store1, err := loadRuntimeForTest(workingDir1, "", false)
 	require.NoError(t, err)
 	pc, ok := store1.config.Providers.Get("custom")
 	require.True(t, ok)
@@ -637,7 +638,7 @@ func TestConfig_Load_DiscoveredModelsPersistAcrossReload(t *testing.T) {
 	persisted, err := os.ReadFile(dataConfigPath)
 	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(persisted, "providers.custom.models").Exists())
-	cached, ok := loadCachedModels(dataConfigPath, "custom")
+	cached, ok := modelcache.New(dataConfigPath).Load("custom")
 	require.True(t, ok)
 	require.Len(t, cached, 1)
 	require.Equal(t, "auto-model", cached[0].ID)
@@ -646,7 +647,7 @@ func TestConfig_Load_DiscoveredModelsPersistAcrossReload(t *testing.T) {
 	// models already populated (from the cache) and skip discovery
 	// entirely.
 	workingDir2 := t.TempDir()
-	store2, err := Load(workingDir2, "", false)
+	store2, err := loadRuntimeForTest(workingDir2, "", false)
 	require.NoError(t, err)
 	pc2, ok := store2.config.Providers.Get("custom")
 	require.True(t, ok)
@@ -672,7 +673,7 @@ func TestConfig_Load_FailedDiscoveryLeavesDiskUntouched(t *testing.T) {
 	require.NoError(t, err)
 
 	workingDir := t.TempDir()
-	store, err := Load(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 	_, exists := store.config.Providers.Get("custom")
 	require.False(t, exists, "provider with failed discovery and no models must be dropped")
@@ -721,7 +722,7 @@ func TestConfig_Load_ProjectProvidersIgnored(t *testing.T) {
 	require.NoError(t, os.WriteFile(projectPath, []byte(projectSeed), 0o644))
 	require.NoError(t, Trust(workingDir))
 
-	store, err := Load(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 	pc, ok := store.config.Providers.Get("custom")
 	require.True(t, ok)

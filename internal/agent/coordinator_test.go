@@ -13,6 +13,7 @@ import (
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,7 +79,7 @@ func (m *mockSessionAgent) runtimeSnapshot(SessionAgentCall) (string, []fantasy.
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerCfg config.ProviderConfig) *coordinator {
-	cfg, err := config.Load(env.workingDir, "", false)
+	cfg, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
 	return &coordinator{
@@ -410,7 +411,7 @@ func TestRunSubAgent(t *testing.T) {
 func TestUpdateParentSessionCost(t *testing.T) {
 	t.Run("accumulates cost correctly", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Load(env.workingDir, "", false)
+		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -435,7 +436,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("accumulates multiple child costs", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Load(env.workingDir, "", false)
+		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -466,7 +467,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("child session not found", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Load(env.workingDir, "", false)
+		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -480,7 +481,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("parent session not found", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Load(env.workingDir, "", false)
+		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -503,7 +504,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		// read the same starting cost and each save their own delta on
 		// top of it, silently dropping one of the two deltas.
 		env := testEnv(t)
-		cfg, err := config.Load(env.workingDir, "", false)
+		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 
@@ -542,7 +543,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 
 	t.Run("zero cost handled correctly", func(t *testing.T) {
 		env := testEnv(t)
-		cfg, err := config.Load(env.workingDir, "", false)
+		cfg, err := configruntime.Load(env.workingDir, "", false)
 		require.NoError(t, err)
 		coord := &coordinator{cfg: cfg, sessions: env.sessions}
 

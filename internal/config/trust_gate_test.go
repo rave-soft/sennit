@@ -20,7 +20,7 @@ func TestLoad_ProjectTrustGate(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(project, "sennit.json"), []byte(`{"env":{"SENNIT_PROJECT_JSON":"json"},"options":{"notifications":"bell"}}`), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(project, "sennitrc"), []byte("touch "+sideEffect+"\noption notifications osc\n"), 0o600))
 
-	store, err := Load(project, "", false)
+	store, err := LoadData(project, "", false)
 	require.NoError(t, err)
 	require.True(t, store.Config().Options.Debug)
 	require.Empty(t, store.Config().Env)
@@ -30,7 +30,7 @@ func TestLoad_ProjectTrustGate(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	require.NoError(t, Trust(project))
-	store, err = Load(project, "", false)
+	store, err = LoadData(project, "", false)
 	require.NoError(t, err)
 	require.True(t, store.Config().Options.Debug)
 	require.Equal(t, "json", store.Config().Env["SENNIT_PROJECT_JSON"])
@@ -53,7 +53,7 @@ func TestLoad_UntrustedProjectConfigDiagnosticUsesDataDirectory(t *testing.T) {
 			require.NoError(t, os.MkdirAll(workspaceDir, 0o700))
 			require.NoError(t, os.WriteFile(filepath.Join(workspaceDir, appName+".json"), []byte(`{"env":{"SENNIT_PROJECT_WORKSPACE":"enabled"}}`), 0o600))
 
-			store, err := Load(project, dataDir, false)
+			store, err := LoadData(project, dataDir, false)
 			require.NoError(t, err)
 			require.Empty(t, store.Config().Env)
 			require.Contains(t, store.Config().Problems, Problem{

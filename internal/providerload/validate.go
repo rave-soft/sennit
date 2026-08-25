@@ -1,4 +1,4 @@
-package config
+package providerload
 
 import (
 	"cmp"
@@ -7,6 +7,8 @@ import (
 	"slices"
 
 	"charm.land/catwalk/pkg/catwalk"
+	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/discover"
 )
 
@@ -23,10 +25,10 @@ const (
 // catalog, applies any discovery results computed for it, and drops
 // providers that end up unusable (unsupported type, disabled, no models, no
 // endpoint). Providers whose models were freshly discovered are written to
-// the global model-discovery cache (see saveCachedModels), so a later load
+// the global model-discovery cache, so a later load
 // can skip the HTTP round trip.
-func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, resolver VariableResolver, discoveryResults map[string]discoveryResult, globalDataPath string) error {
-	for id, providerConfig := range c.Providers.Seq2() {
+func (l *Loader) validateCustomProviders(cfg *config.Config, knownProviderNames map[string]bool, resolver config.VariableResolver, discoveryResults map[string]discoveryResult, globalDataPath string) error {
+	for id, providerConfig := range cfg.Providers.Seq2() {
 		if knownProviderNames[id] {
 			continue
 		}
@@ -39,7 +41,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
 			problem := providerDropProblem(id, fmt.Sprintf("unsupported type %q", providerConfig.Type), "")
-			c.dropProvider(id, slog.Warn, "Skipping custom provider due to unsupported provider type", []any{"provider", id}, &problem)
+			l.dropProvider(cfg, id, problem.Message, problem.Hint)
 			continue
 		}
 
@@ -47,12 +49,12 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 			// Deliberately quiet: the user asked for this provider to be
 			// off, so unlike the drops below, this is not something
 			// `sennit doctor` should flag as a problem.
-			c.dropProvider(id, slog.Debug, "Skipping custom provider due to disable flag", []any{"provider", id}, nil)
+			cfg.Providers.Del(id)
 			continue
 		}
 		if providerConfig.BaseURL == "" {
 			problem := providerDropProblem(id, "missing base_url", hintMissingBaseURL)
-			c.dropProvider(id, slog.Warn, "Skipping custom provider due to missing API endpoint", []any{"provider", id}, &problem)
+			l.dropProvider(cfg, id, problem.Message, problem.Hint)
 			continue
 		}
 
@@ -66,7 +68,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 					// treatment and Hint — previously this branch dropped
 					// silently while the other recorded a Problem.
 					problem := providerDropProblem(id, "no models after failed discovery", hintNoModels)
-					c.dropProvider(id, slog.Warn, "Skipping provider with no models after failed discovery", []any{"provider", id}, &problem)
+					l.dropProvider(cfg, id, problem.Message, problem.Hint)
 					continue
 				}
 			} else if len(result.models) > 0 {
@@ -92,9 +94,9 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 					// identity as "has hand-written models" doesn't change
 					// just because discover_models: true also ran
 					// discovery.
-					providerConfig.ModelsSource = ModelsSourceConfig
+					providerConfig.ModelsSource = config.ModelsSourceConfig
 				} else {
-					providerConfig.ModelsSource = ModelsSourceCache
+					providerConfig.ModelsSource = config.ModelsSourceCache
 				}
 				if len(freshlyDiscovered) > 0 {
 					// Persist only the freshly discovered models to the
@@ -105,27 +107,27 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 					// provider already had. A failed discovery (the branch
 					// above) must never reach here, so a down endpoint
 					// never touches the cache.
-					saveCachedModels(globalDataPath, id, freshlyDiscovered)
+					modelcache.New(globalDataPath).SaveBestEffort(id, freshlyDiscovered)
 				}
 			}
 		}
 
 		if len(providerConfig.Models) == 0 {
 			problem := providerDropProblem(id, "no models configured or discovered", hintNoModels)
-			c.dropProvider(id, slog.Warn, "Skipping custom provider because the provider has no models", []any{"provider", id}, &problem)
+			l.dropProvider(cfg, id, problem.Message, problem.Hint)
 			continue
 		}
 
 		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
-			c.addProblem(providerProblem(id, fmt.Sprintf("provider %s has no api_key", id),
+			cfg.AddRuntimeProblem(providerProblem(id, fmt.Sprintf("provider %s has no api_key", id),
 				"this is expected for local providers (Ollama, LM Studio, ...); ignore if intentional"))
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)
 		if baseURL == "" || err != nil {
 			problem := providerDropProblem(id, "missing base_url", hintMissingBaseURL)
-			c.dropProvider(id, slog.Warn, "Skipping custom provider due to missing API endpoint", []any{"provider", id, "error", err}, &problem)
+			l.dropProvider(cfg, id, problem.Message, problem.Hint)
 			continue
 		}
 
@@ -137,7 +139,7 @@ func (c *Config) validateCustomProviders(knownProviderNames map[string]bool, res
 
 		providerConfig.ProxyURL = resolveOptionalProxy(providerConfig.ProxyURL, resolver, id)
 
-		c.Providers.Set(id, providerConfig)
+		cfg.Providers.Set(id, providerConfig)
 	}
 
 	return nil

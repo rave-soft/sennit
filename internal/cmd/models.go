@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2/tree"
 	"github.com/mattn/go-isatty"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/discover"
 	"github.com/rave-soft/sennit/internal/oauth/codex"
 	"github.com/spf13/cobra"
@@ -292,7 +293,13 @@ sennit models refresh codex`,
 			// Discovered models live in the global model-discovery cache,
 			// not providers.<id>.models in sennit.json — see
 			// validateCustomProviders in internal/config/load.go.
-			if err := cfg.SaveCachedProviderModels(id, models); err != nil {
+			globalDataPath, err := cfg.ConfigPath(config.ScopeGlobal)
+			if err != nil {
+				hadFailure = true
+				cmd.PrintErrf("%s: refresh failed: %v\n", id, err)
+				continue
+			}
+			if err := modelcache.New(globalDataPath).Save(id, models); err != nil {
 				hadFailure = true
 				cmd.PrintErrf("%s: refresh failed: %v\n", id, err)
 				continue

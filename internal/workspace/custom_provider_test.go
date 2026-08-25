@@ -11,6 +11,7 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -88,7 +89,7 @@ func newTestConfigAccessor(t *testing.T) (accessor *testConfigAccessor, globalDa
 	configPath := filepath.Join(globalDataDir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 	return &testConfigAccessor{store: store, credentials: credentials.New(store)}, configPath
 }
@@ -215,7 +216,7 @@ func TestConfigureCustomProvider_FullCycle_SurvivesRestartWithEndpointDown(t *te
 	// dropping it for want of a fresh (and now-impossible) discovery call.
 	server.Close()
 
-	store2, err := config.Load(ws.WorkingDir(), ws.store.Config().Options.DataDirectory, false)
+	store2, err := configruntime.Load(ws.WorkingDir(), ws.store.Config().Options.DataDirectory, false)
 	require.NoError(t, err)
 
 	pc2, ok := store2.Config().Providers.Get("restart-test")

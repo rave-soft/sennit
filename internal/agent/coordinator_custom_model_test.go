@@ -5,6 +5,7 @@ import (
 
 	"github.com/rave-soft/sennit/internal/agent/prompt"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/shell"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,7 @@ func buildCustomModelCoordinator(t *testing.T) (*coordinator, *prompt.Prompt) {
 }`
 	writeGlobalConfig(t, sennitJSON)
 
-	cfg, err := config.Load(env.workingDir, "", false)
+	cfg, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 	cfg.SetupAgents()
 

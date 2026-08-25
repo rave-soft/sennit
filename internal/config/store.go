@@ -82,6 +82,7 @@ type ConfigStore struct {
 	resolver        VariableResolver
 	globalDataPath  string // ~/.local/share/sennit/sennit.json
 	credentialsFile credentialsFileDependency
+	processor       RuntimeProcessor
 	// workspacePath (.sennit/sennit.json) is read from paths that hold
 	// writeMu (updateLocked's staleness refresh) and from paths that hold
 	// nothing (ConfigPath's public callers), while reloadFromDisk
@@ -358,6 +359,36 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 }
 
 // ConfigPath returns the file path for the given scope.
+func (s *ConfigStore) RemoveRuntimeConfigField(scope Scope, key string) {
+	paths := []string{s.globalDataPath}
+	if scope == ScopeGlobal {
+		paths = globalConfigPaths()
+	}
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if err := s.file.atomicWrite(path, func(data []byte) ([]byte, error) {
+			if !gjson.GetBytes(data, key).Exists() {
+				return nil, errAtomicWriteNoop
+			}
+			value, err := sjson.Delete(string(data), key)
+			if err != nil {
+				return nil, fmt.Errorf("failed to delete config field %s: %w", key, err)
+			}
+			return []byte(value), nil
+		}); err != nil {
+			slog.Warn("Failed to remove runtime config field", "key", key, "path", path, "error", err)
+		}
+	}
+}
+
+func (s *ConfigStore) WriteRuntimeConfigFields(scope Scope, fields map[string]any) {
+	if err := s.writeConfigFields(scope, fields); err != nil {
+		slog.Warn("Failed to write runtime config fields", "error", err)
+	}
+}
+
 func (s *ConfigStore) ConfigPath(scope Scope) (string, error) {
 	switch scope {
 	case ScopeWorkspace:

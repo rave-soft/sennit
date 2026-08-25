@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,7 +36,7 @@ func TestReloadFromDisk_PicksUpEditedSennitrc(t *testing.T) {
 	rcPath := filepath.Join(workDir, "sennitrc")
 	require.NoError(t, os.WriteFile(rcPath, []byte("option notifications bell\n"), 0o644))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 	require.Equal(t, "bell", store.Config().Options.Notifications)
 
@@ -54,7 +55,7 @@ func TestReloadFromDisk_FailingSennitrcKeepsOldConfig(t *testing.T) {
 	rcPath := filepath.Join(workDir, "sennitrc")
 	require.NoError(t, os.WriteFile(rcPath, []byte("option notifications bell\n"), 0o644))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 	require.Equal(t, "bell", store.Config().Options.Notifications)
 
@@ -85,7 +86,7 @@ func TestReloadFromDisk_TombstoneSurvivesWorkspaceTokenOverlay(t *testing.T) {
 	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"mcp":{"server":{"oauth_token":{"access_token":"stale"}}}}`), 0o644))
 
-	store, err := config.Load(workDir, workspaceDir, false)
+	store, err := configruntime.Load(workDir, workspaceDir, false)
 	require.NoError(t, err)
 	require.NotContains(t, store.Config().MCP, "server")
 	require.NoError(t, store.ReloadFromDisk(context.Background()))
@@ -97,7 +98,7 @@ func TestReloadFromDisk_MalformedTombstoneKeepsPublishedConfig(t *testing.T) {
 	rcPath := filepath.Join(workDir, "sennitrc")
 	require.NoError(t, os.WriteFile(rcPath, []byte("mcp add server --command node\n"), 0o644))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 	published := store.Config()
 	require.Equal(t, "node", published.MCP["server"].Command)
@@ -116,7 +117,7 @@ func TestReloadFromDisk_HangingSennitrcIsInterruptible(t *testing.T) {
 	rcPath := filepath.Join(workDir, "sennitrc")
 	require.NoError(t, os.WriteFile(rcPath, []byte("option notifications bell\n"), 0o644))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 	require.Equal(t, "bell", store.Config().Options.Notifications)
 
@@ -164,7 +165,7 @@ func TestLoad_TracksNotYetCreatedGlobalSennitrc(t *testing.T) {
 	))
 
 	// Load with no global sennitrc present.
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 	require.False(t, store.ConfigStaleness().Dirty, "fresh load should be clean")
 

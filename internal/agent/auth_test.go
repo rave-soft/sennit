@@ -11,6 +11,7 @@ import (
 	"github.com/rave-soft/sennit/internal/agent/notify"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/oauth"
 	"github.com/rave-soft/sennit/internal/pubsub"
 	"github.com/rave-soft/sennit/internal/shell"
@@ -81,7 +82,7 @@ func authTestCoordinator(t *testing.T, opts ...authCoordOpt) *coordinator {
 	writeGlobalConfig(t, "{}")
 	env := testEnv(t)
 
-	cfg, err := config.Load(env.workingDir, "", false)
+	cfg, err := configruntime.Load(env.workingDir, "", false)
 	require.NoError(t, err)
 
 	providerCfg := config.ProviderConfig{

@@ -28,7 +28,7 @@ func TestWatchForExternalChanges_DetectsEditOfExistingFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"mcp":{}}`), 0o600))
 	require.NoError(t, Trust(dir))
 
-	store, err := Load(dir, "", false)
+	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	require.Empty(t, store.Config().MCP)
 	store.externalChangePollInterval = 100 * time.Millisecond
@@ -79,7 +79,7 @@ func TestWatchForExternalChanges_IgnoresOwnWrites_TightPoll(t *testing.T) {
 		t.Setenv("SENNIT_GLOBAL_DATA", dir)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{}`), 0o600))
 
-		store, err := Load(dir, "", false)
+		store, err := loadRuntimeForTest(dir, "", false)
 		require.NoError(t, err)
 		store.externalChangePollInterval = 10 * time.Millisecond
 
@@ -119,7 +119,7 @@ func TestWatchForExternalChanges_IgnoresOwnWrites(t *testing.T) {
 	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
-	store, err := Load(dir, "", false)
+	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	const pollInterval = 100 * time.Millisecond
 	store.externalChangePollInterval = pollInterval
@@ -159,7 +159,7 @@ func TestWatchForExternalChanges_IgnoresOwnRemoveConfigField_TightPoll(t *testin
 		t.Setenv("SENNIT_GLOBAL_DATA", dir)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{"options": {"debug": true}}`), 0o600))
 
-		store, err := Load(dir, "", false)
+		store, err := loadRuntimeForTest(dir, "", false)
 		require.NoError(t, err)
 		store.externalChangePollInterval = 10 * time.Millisecond
 
@@ -204,7 +204,7 @@ func TestWatchForExternalChanges_IgnoresOwnRemoveConfigField(t *testing.T) {
 	configPath := filepath.Join(dir, "sennit.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"options": {"debug": true}}`), 0o600))
 
-	store, err := Load(dir, "", false)
+	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	const pollInterval = 100 * time.Millisecond
 	store.externalChangePollInterval = pollInterval
@@ -275,7 +275,7 @@ func TestExternalChangeDetected_NewCandidateFile(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
 	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
-	store, err := Load(dir, "", false)
+	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	require.False(t, store.externalChangeDetected(),
 		"a freshly loaded store reports an external change before anything changed:%s",
@@ -308,7 +308,7 @@ func TestHasUntrackedCandidate_EmptyPathIgnored(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
 	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
-	store, err := Load(dir, "", false)
+	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 
 	require.False(t, store.hasUntrackedCandidate([]string{""}),
@@ -350,7 +350,7 @@ func TestWatchForExternalChanges_DetectsAgentFileChanges(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{}`), 0o600))
 
-	store, err := Load(dir, "", false)
+	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	require.NotContains(t, store.Config().Agents, "dev")
 	store.externalChangePollInterval = 100 * time.Millisecond
@@ -413,7 +413,7 @@ func TestWatchForExternalChanges_DetectsAgentDirCreatedLater(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "sennit.json"), []byte(`{}`), 0o600))
 
-	store, err := Load(dir, "", false)
+	store, err := loadRuntimeForTest(dir, "", false)
 	require.NoError(t, err)
 	store.externalChangePollInterval = 100 * time.Millisecond
 

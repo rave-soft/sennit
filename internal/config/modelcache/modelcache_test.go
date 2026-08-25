@@ -1,4 +1,4 @@
-package config
+package modelcache
 
 import (
 	"path/filepath"
@@ -20,9 +20,9 @@ func TestModelCache_SaveLoadRoundTrip(t *testing.T) {
 		{ID: "model-a", Name: "Model A"},
 		{ID: "model-b", Name: "Model B"},
 	}
-	saveCachedModels(globalDataPath, "custom", models)
+	New(globalDataPath).SaveBestEffort("custom", models)
 
-	got, ok := loadCachedModels(globalDataPath, "custom")
+	got, ok := New(globalDataPath).Load("custom")
 	require.True(t, ok)
 	require.Equal(t, models, got)
 }
@@ -35,13 +35,13 @@ func TestModelCache_LoadMissingProvider(t *testing.T) {
 	globalDataPath := filepath.Join(dir, "sennit.json")
 
 	// No models.db has been created yet.
-	got, ok := loadCachedModels(globalDataPath, "nope")
+	got, ok := New(globalDataPath).Load("nope")
 	require.False(t, ok)
 	require.Nil(t, got)
 
 	// models.db exists (another provider was saved) but "nope" was not.
-	saveCachedModels(globalDataPath, "other", []catwalk.Model{{ID: "m"}})
-	got, ok = loadCachedModels(globalDataPath, "nope")
+	New(globalDataPath).SaveBestEffort("other", []catwalk.Model{{ID: "m"}})
+	got, ok = New(globalDataPath).Load("nope")
 	require.False(t, ok)
 	require.Nil(t, got)
 }
@@ -58,14 +58,14 @@ func TestModelCache_ConcurrentAccess(t *testing.T) {
 		wg.Go(func() {
 			providerID := "provider"
 			models := []catwalk.Model{{ID: "model", Name: "Model"}}
-			saveCachedModels(globalDataPath, providerID, models)
-			_, _ = loadCachedModels(globalDataPath, providerID)
+			New(globalDataPath).SaveBestEffort(providerID, models)
+			_, _ = New(globalDataPath).Load(providerID)
 			_ = i
 		})
 	}
 	wg.Wait()
 
-	got, ok := loadCachedModels(globalDataPath, "provider")
+	got, ok := New(globalDataPath).Load("provider")
 	require.True(t, ok)
 	require.Len(t, got, 1)
 	require.Equal(t, "model", got[0].ID)
@@ -83,14 +83,14 @@ func TestModelCache_SchemaAppliedPerDatabaseFile(t *testing.T) {
 	path1 := filepath.Join(t.TempDir(), "sennit.json")
 	path2 := filepath.Join(t.TempDir(), "sennit.json")
 
-	saveCachedModels(path1, "p", []catwalk.Model{{ID: "from-dir-1"}})
-	saveCachedModels(path2, "p", []catwalk.Model{{ID: "from-dir-2"}})
+	New(path1).SaveBestEffort("p", []catwalk.Model{{ID: "from-dir-1"}})
+	New(path2).SaveBestEffort("p", []catwalk.Model{{ID: "from-dir-2"}})
 
-	got1, ok := loadCachedModels(path1, "p")
+	got1, ok := New(path1).Load("p")
 	require.True(t, ok)
 	require.Equal(t, "from-dir-1", got1[0].ID)
 
-	got2, ok := loadCachedModels(path2, "p")
+	got2, ok := New(path2).Load("p")
 	require.True(t, ok)
 	require.Equal(t, "from-dir-2", got2[0].ID)
 }
@@ -100,7 +100,7 @@ func TestModelCache_RefreshKeepsContextWindow(t *testing.T) {
 	dir := t.TempDir()
 	globalDataPath := filepath.Join(dir, "sennit.json")
 
-	saveCachedModels(globalDataPath, "custom", []catwalk.Model{
+	New(globalDataPath).SaveBestEffort("custom", []catwalk.Model{
 		{ID: "gpt-x", ContextWindow: 1050000, DefaultMaxTokens: 128000, CostPer1MIn: 2, CostPer1MOut: 8},
 		{ID: "gone", ContextWindow: 4096},
 	})
@@ -108,12 +108,12 @@ func TestModelCache_RefreshKeepsContextWindow(t *testing.T) {
 	// A refresh from a plain /models endpoint carries no metadata: cached
 	// context window, token limits, and pricing must survive; a non-zero
 	// fresh value wins over the cached one.
-	saveCachedModels(globalDataPath, "custom", []catwalk.Model{
+	New(globalDataPath).SaveBestEffort("custom", []catwalk.Model{
 		{ID: "gpt-x", CostPer1MIn: 3},
 		{ID: "gpt-y", ContextWindow: 8192},
 	})
 
-	got, ok := loadCachedModels(globalDataPath, "custom")
+	got, ok := New(globalDataPath).Load("custom")
 	require.True(t, ok)
 	require.Len(t, got, 2)
 	require.Equal(t, "gpt-x", got[0].ID)

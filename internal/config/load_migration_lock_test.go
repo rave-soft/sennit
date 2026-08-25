@@ -11,6 +11,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/config/modelcache"
 	"github.com/rave-soft/sennit/internal/fsext"
 	"github.com/rave-soft/sennit/internal/lock"
 	"github.com/stretchr/testify/require"
@@ -54,7 +55,7 @@ func TestMigrateBloatedModelCache_RereadsAfterLockAndIsIdempotent(t *testing.T) 
 	require.NoError(t, err)
 	require.True(t, gjson.GetBytes(data, "concurrent").Bool())
 	require.False(t, gjson.GetBytes(data, "providers.custom.models").Exists())
-	cached, ok := loadCachedModels(path, "custom")
+	cached, ok := modelcache.New(path).Load("custom")
 	require.True(t, ok)
 	require.Len(t, cached, migrate.ModelCacheMigrationThreshold+1)
 
@@ -79,7 +80,7 @@ func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing
 		if providerID == "failed" {
 			return failure
 		}
-		return saveCachedModelsWithError(globalDataPath, providerID, models)
+		return modelcache.New(globalDataPath).Save(providerID, models)
 	}, fsext.AtomicWriteFile)
 
 	data, err := os.ReadFile(path)
@@ -89,9 +90,9 @@ func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing
 	require.True(t, gjson.GetBytes(data, "providers.failed.models").Exists())
 	require.Equal(t, "openai", gjson.GetBytes(data, "providers.saved.type").String())
 	require.False(t, gjson.GetBytes(data, "providers.saved.models").Exists())
-	_, ok := loadCachedModels(path, "failed")
+	_, ok := modelcache.New(path).Load("failed")
 	require.False(t, ok)
-	saved, ok := loadCachedModels(path, "saved")
+	saved, ok := modelcache.New(path).Load("saved")
 	require.True(t, ok)
 	require.Len(t, saved, migrate.ModelCacheMigrationThreshold+1)
 
@@ -104,7 +105,7 @@ func TestMigrateBloatedModelCache_CacheWriteFailureRetriesPerProvider(t *testing
 	require.False(t, gjson.GetBytes(data, "providers.failed.models").Exists())
 	require.Equal(t, "openai", gjson.GetBytes(data, "providers.saved.type").String())
 	require.False(t, gjson.GetBytes(data, "providers.saved.models").Exists())
-	failed, ok := loadCachedModels(path, "failed")
+	failed, ok := modelcache.New(path).Load("failed")
 	require.True(t, ok)
 	require.Len(t, failed, migrate.ModelCacheMigrationThreshold+1)
 }

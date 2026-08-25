@@ -1,4 +1,4 @@
-package config
+package modelcache
 
 import (
 	"context"
@@ -16,11 +16,15 @@ import (
 	"github.com/rave-soft/sennit/internal/db"
 )
 
-// modelCacheDBPath returns the path to the global model-discovery cache,
+type Cache struct{ globalDataPath string }
+
+func New(globalDataPath string) *Cache { return &Cache{globalDataPath: globalDataPath} }
+
+// dbPath returns the path to the global model-discovery cache,
 // which lives next to the global data-dir config rather than inside any
 // per-project .sennit/sennit.db (that one is per-project user data, uses
 // goose migrations, and is a different concern entirely).
-func modelCacheDBPath(globalDataPath string) string {
+func dbPath(globalDataPath string) string {
 	return filepath.Join(filepath.Dir(globalDataPath), "models.db")
 }
 
@@ -91,18 +95,19 @@ func withModelCache(dbPath string, fn func(*sql.DB) error) error {
 	return fn(conn)
 }
 
-// loadCachedModels returns the models cached for providerID, and whether a
+// Load returns the models cached for providerID, and whether a
 // usable cache entry was found. A missing db/dir, a missing row, or corrupt
 // JSON all report ok=false rather than an error: the cache is a best-effort
 // optimization, never a hard dependency for config loading.
-func loadCachedModels(globalDataPath, providerID string) ([]catwalk.Model, bool) {
+func (c *Cache) Load(providerID string) ([]catwalk.Model, bool) {
+	globalDataPath := c.globalDataPath
 	if globalDataPath == "" {
 		// No data-dir config path to anchor the cache to (e.g. a
 		// hand-built *ConfigStore in a unit test); treat as "no cache"
 		// rather than falling back to a relative "models.db" in cwd.
 		return nil, false
 	}
-	dbPath := modelCacheDBPath(globalDataPath)
+	dbPath := dbPath(globalDataPath)
 	if _, err := os.Stat(dbPath); err != nil {
 		return nil, false
 	}
@@ -132,14 +137,14 @@ func loadCachedModels(globalDataPath, providerID string) ([]catwalk.Model, bool)
 	return models, found
 }
 
-// mergeCachedModelMetadata fills metadata gaps in freshly discovered models
+// MergeMetadata fills metadata gaps in freshly discovered models
 // from a previously cached list. A plain OpenAI-compatible /models response
 // carries no context window, token limits, or pricing, so a refresh would
 // otherwise wipe values that were enriched earlier or set by hand in the
 // cache. For each fresh model whose numeric metadata is zero, the cached
 // entry with the same ID (when present) supplies the value; a non-zero
 // fresh value always wins.
-func mergeCachedModelMetadata(cached, fresh []catwalk.Model) []catwalk.Model {
+func MergeMetadata(cached, fresh []catwalk.Model) []catwalk.Model {
 	if len(cached) == 0 {
 		return fresh
 	}
@@ -174,33 +179,35 @@ func mergeCachedModelMetadata(cached, fresh []catwalk.Model) []catwalk.Model {
 	return fresh
 }
 
-// saveCachedModels upserts the discovered models for providerID into the
+// SaveBestEffort upserts the discovered models for providerID into the
 // global model-discovery cache. This is best-effort persistence, matching
 // how applyPendingDiskActions treats config writes: a failure is logged and
 // otherwise ignored rather than propagated, since discovery having
 // succeeded is the part that matters.
-func saveCachedModels(globalDataPath, providerID string, models []catwalk.Model) {
+func (c *Cache) SaveBestEffort(providerID string, models []catwalk.Model) {
+	globalDataPath := c.globalDataPath
 	if globalDataPath == "" {
 		return
 	}
-	if err := saveCachedModelsWithError(globalDataPath, providerID, models); err != nil {
+	if err := c.Save(providerID, models); err != nil {
 		slog.Warn("Failed to save models to cache", "provider", providerID, "error", err)
 	}
 }
 
-func saveCachedModelsWithError(globalDataPath, providerID string, models []catwalk.Model) error {
+func (c *Cache) Save(providerID string, models []catwalk.Model) error {
+	globalDataPath := c.globalDataPath
 	if globalDataPath == "" {
 		return errors.New("no global data path configured")
 	}
-	if cached, ok := loadCachedModels(globalDataPath, providerID); ok {
-		models = mergeCachedModelMetadata(cached, models)
+	if cached, ok := c.Load(providerID); ok {
+		models = MergeMetadata(cached, models)
 	}
 	modelsJSON, err := json.Marshal(models)
 	if err != nil {
 		return fmt.Errorf("marshal models: %w", err)
 	}
 
-	dbPath := modelCacheDBPath(globalDataPath)
+	dbPath := dbPath(globalDataPath)
 	if err := withModelCache(dbPath, func(conn *sql.DB) error {
 		_, err := conn.ExecContext(context.Background(), `
 			INSERT INTO provider_models (provider_id, models_json, fetched_at)
@@ -214,15 +221,4 @@ func saveCachedModelsWithError(globalDataPath, providerID string, models []catwa
 		return fmt.Errorf("write model cache: %w", err)
 	}
 	return nil
-}
-
-// SaveCachedProviderModels writes freshly discovered models for providerID
-// into the global model-discovery cache. Unlike saveCachedModels (used from
-// the best-effort background load path), this returns an error so callers
-// like `sennit models refresh` can report a failure to the user.
-func (s *ConfigStore) SaveCachedProviderModels(providerID string, models []catwalk.Model) error {
-	if s.globalDataPath == "" {
-		return errors.New("no global data path configured for this store")
-	}
-	return saveCachedModelsWithError(s.globalDataPath, providerID, models)
 }

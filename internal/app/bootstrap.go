@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/db"
 	gitpkg "github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/herdr"
@@ -107,7 +108,7 @@ func Bootstrap(ctx context.Context, path string, opts BootstrapOptions) (*Bootst
 			return nil, fmt.Errorf("failed to trust project: %w", err)
 		}
 	}
-	cfg, err := config.Load(path, opts.DataDir, opts.Debug)
+	cfg, err := configruntime.Load(path, opts.DataDir, opts.Debug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize config: %w", err)
 	}

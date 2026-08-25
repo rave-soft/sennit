@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/log"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +17,7 @@ import (
 // different (env/providerCfg-based) purpose.
 func newProxyTestCoordinator(t *testing.T, debug bool) *coordinator {
 	t.Helper()
-	cfg, err := config.Load(t.TempDir(), t.TempDir(), debug)
+	cfg, err := configruntime.Load(t.TempDir(), t.TempDir(), debug)
 	require.NoError(t, err)
 	return &coordinator{cfg: cfg}
 }

@@ -402,7 +402,7 @@ func TestReloadFromDisk_WorkspaceMergeErrorKeepsPublishedConfig(t *testing.T) {
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":true}}`), 0o644))
 	require.NoError(t, Trust(workingDir))
 
-	store, err := Load(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 	published := store.Config()
 	require.True(t, published.Options.Debug)
@@ -436,7 +436,7 @@ func TestReloadFromDisk_WorkspaceLegacyRecentModelsPreservesSiblingFields(t *tes
 	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"options":{"debug":false}}`), 0o644))
 	require.NoError(t, Trust(workingDir))
 
-	store, err := Load(workingDir, "", false)
+	store, err := loadRuntimeForTest(workingDir, "", false)
 	require.NoError(t, err)
 	require.False(t, store.Config().Options.Debug)
 
@@ -474,7 +474,7 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config properly
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath for the test (Load doesn't set this directly)
@@ -546,7 +546,7 @@ func TestReloadFromDisk_PreservesDebugFlag(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load with --debug on and no "debug" key in the file.
-	store, err := Load(dir, dir, true)
+	store, err := loadRuntimeForTest(dir, dir, true)
 	require.NoError(t, err)
 	require.True(t, store.config.Options.Debug, "Load must apply --debug")
 
@@ -580,7 +580,7 @@ func TestSetConfigField_AutoReloads(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 
 	// Verify initial state
@@ -618,7 +618,7 @@ func TestRemoveConfigField_AutoReloads(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath and capture snapshot
@@ -664,6 +664,31 @@ func TestSetConfigField_AutoReloadSkipsWhenNoWorkingDir(t *testing.T) {
 
 // TestAutoReloadDisabledDuringReload verifies that auto-reload is suppressed
 // during ReloadFromDisk to prevent re-entrant/nested reload calls.
+func TestRemoveRuntimeConfigFieldDoesNotRewriteUnchangedGlobalFiles(t *testing.T) {
+	userDir := t.TempDir()
+	dataDir := t.TempDir()
+	t.Setenv("SENNIT_GLOBAL_CONFIG", userDir)
+	t.Setenv("SENNIT_GLOBAL_DATA", dataDir)
+
+	userPath := GlobalConfig()
+	dataPath := GlobalConfigData()
+	require.NoError(t, os.MkdirAll(filepath.Dir(userPath), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataPath), 0o755))
+	require.NoError(t, os.WriteFile(userPath, []byte(`{"providers":{"anthropic":{"oauth":{"access_token":"stale"}}}}`), 0o600))
+	require.NoError(t, os.WriteFile(dataPath, []byte(`{"options":{"debug":true}}`), 0o600))
+
+	before, err := os.Stat(dataPath)
+	require.NoError(t, err)
+	store := &ConfigStore{globalDataPath: dataPath, file: configFile{}}
+	store.RemoveRuntimeConfigField(ScopeGlobal, "providers.anthropic")
+	after, err := os.Stat(dataPath)
+	require.NoError(t, err)
+	require.Equal(t, before.ModTime(), after.ModTime())
+	userData, err := os.ReadFile(userPath)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(userData, "providers.anthropic").Exists())
+}
+
 func TestAutoReloadDisabledDuringReload(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "sennit.json")
@@ -687,7 +712,7 @@ func TestAutoReloadDisabledDuringReload(t *testing.T) {
 
 	// Load will trigger configureProviders which removes anthropic OAuth config.
 	// This should NOT cause infinite recursion — writeMu prevents re-entrant reloads.
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 
 	// Capture snapshot and verify reload also works without recursion
@@ -719,7 +744,7 @@ func TestSetConfigFields_AutoReloadsAtomically(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
 	// Load initial config.
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 
 	// Set globalDataPath and capture snapshot.
@@ -819,7 +844,7 @@ func TestSetProviderAPIKey_CustomOAuthProviderSurvivesReload(t *testing.T) {
 	}`
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -869,7 +894,7 @@ func TestSetProviderAPIKey_CatalogProviderOmitsBaseURL(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -907,7 +932,7 @@ func TestSetProviderAPIKey_UnknownProviderLeavesNoDiskTrace(t *testing.T) {
 	const initialConfig = `{"options": {"debug": false}}`
 	require.NoError(t, os.WriteFile(configPath, []byte(initialConfig), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -955,7 +980,7 @@ func TestReloadFromDiskLocked_DiscoveryDoesNotBlockWriteMu(t *testing.T) {
 	// to discover.
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -1038,7 +1063,7 @@ func TestReloadFromDisk_ConcurrentOverrideSurvives(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -1100,7 +1125,7 @@ func TestReloadFromDisk_ConcurrentWriteDuringReloadIsNotAbsorbed(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -1166,7 +1191,7 @@ func TestLoad_AppleTerminalDefaultSurvivesReload(t *testing.T) {
 	// than provider setup.
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 
 	require.NotNil(t, store.config.Options.TUI.Transparent)
@@ -1209,7 +1234,7 @@ func TestReloadFromDisk_PublishedConfigNotMutated(t *testing.T) {
 		}
 	}`), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -1258,7 +1283,7 @@ func TestOnboarding_FirstCredentialBuildsAgents(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_CONFIG", dir)
 	t.Setenv("SENNIT_GLOBAL_DATA", dir)
 
-	store, err := Load(dir, dir, false)
+	store, err := loadRuntimeForTest(dir, dir, false)
 	require.NoError(t, err)
 
 	preCfg := store.Config()

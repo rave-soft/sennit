@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +41,7 @@ func TestReloadFromDisk_CompilesHookMatchers(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(cfgJSON), 0o600))
 	require.NoError(t, config.Trust(workDir))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 
 	// Sanity: hook filtering works immediately after Load.
@@ -94,7 +95,7 @@ func TestSetConfigField_AutoReload_PreservesHookMatcherFiltering(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(cfgJSON), 0o600))
 	require.NoError(t, config.Trust(workDir))
 
-	store, err := config.Load(workDir, dataDir, false)
+	store, err := configruntime.Load(workDir, dataDir, false)
 	require.NoError(t, err)
 	assertHookFilters(t, store)
 

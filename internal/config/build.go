@@ -34,6 +34,7 @@ type buildConfigOptions struct {
 	// store on error). The one explicitly-known behavioral divergence here.
 	persistFallback bool
 	credentialsFile credentialsFileDependency
+	processor       RuntimeProcessor
 }
 
 // builtConfig is the result of one buildConfig run. configured mirrors
@@ -61,6 +62,14 @@ type builtConfig struct {
 // before a reload's writeMu swap. Callers own everything after: creating or
 // updating the ConfigStore, pinning/persisting the model,
 // SetupAgents(WithInherited), and the staleness snapshot.
+func providersFromConfig(cfg *Config) []catwalk.Provider {
+	providers := make([]catwalk.Provider, 0, cfg.Providers.Len())
+	for _, provider := range cfg.Providers.Seq2() {
+		providers = append(providers, provider.ToProvider())
+	}
+	return providers
+}
+
 func hasProjectConfig(paths []string, workspacePath string) bool {
 	for _, path := range paths {
 		if !isGlobalConfigPath(path) {
@@ -122,23 +131,25 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 	}
 
 	providers := Providers(cfg)
-
-	if opts.migrateModelCache {
-		migrateBloatedModelCache(store.globalDataPath, providers)
-	}
-
-	envInst := env.New()
-	resolver := NewShellVariableResolver(envInst)
-
-	// Apply top-level env vars before configuring providers so variables
-	// like AWS_PROFILE are visible to the AWS SDK credential chain.
-	cfg.applyEnv(resolver)
-
-	// configureProviders may run model-discovery HTTP calls for custom
-	// providers. It runs here, without writeMu held, so a slow discovery
-	// round trip never blocks a concurrent mutator; see the callers.
-	if err := cfg.configureProviders(opts.ctx, store, envInst, resolver, providers, opts.credentialsFile); err != nil {
-		return nil, fmt.Errorf("failed to configure providers: %w", err)
+	resolver := NewShellVariableResolver(env.New())
+	if opts.processor != nil {
+		result, err := opts.processor.Process(opts.ctx, RuntimeInput{
+			Config:          cfg,
+			Store:           store,
+			GlobalDataPath:  store.globalDataPath,
+			CredentialsHome: opts.credentialsFile.homeDir,
+			Stat:            opts.credentialsFile.stat,
+			Initial:         opts.migrateModelCache,
+			KnownProviders:  providers,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to configure providers: %w", err)
+		}
+		providers = result.KnownProviders
+		resolver = result.Resolver
+	} else {
+		cfg.applyEnv(resolver)
+		providers = providersFromConfig(cfg)
 	}
 
 	built := &builtConfig{
@@ -149,7 +160,7 @@ func buildConfig(store *ConfigStore, opts buildConfigOptions) (*builtConfig, err
 		resolver:    resolver,
 	}
 
-	built.configured = cfg.IsConfigured()
+	built.configured = opts.processor != nil && cfg.IsConfigured()
 	if !built.configured {
 		return built, nil
 	}

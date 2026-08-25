@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/config"
+	"github.com/rave-soft/sennit/internal/configruntime"
 	"github.com/rave-soft/sennit/internal/hooks"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
@@ -56,7 +57,7 @@ func TestHookedTool_ProjectHookRequiresTrust(t *testing.T) {
 	sideEffect := filepath.Join(t.TempDir(), "hook-ran")
 	require.NoError(t, os.WriteFile(filepath.Join(project, "sennit.json"), []byte(`{"hooks":{"PreToolUse":[{"command":"touch `+sideEffect+`"}]}}`), 0o600))
 
-	store, err := config.Load(project, t.TempDir(), false)
+	store, err := configruntime.Load(project, t.TempDir(), false)
 	require.NoError(t, err)
 	inner := &fakeTool{name: "read", resp: fantasy.NewTextResponse("ok")}
 	runner := hooks.NewRunner(store.Config().Hooks[hooks.EventPreToolUse], project, project)
@@ -65,7 +66,7 @@ func TestHookedTool_ProjectHookRequiresTrust(t *testing.T) {
 	require.NoFileExists(t, sideEffect)
 
 	require.NoError(t, config.Trust(project))
-	store, err = config.Load(project, t.TempDir(), false)
+	store, err = configruntime.Load(project, t.TempDir(), false)
 	require.NoError(t, err)
 	inner = &fakeTool{name: "read", resp: fantasy.NewTextResponse("ok")}
 	runner = hooks.NewRunner(store.Config().Hooks[hooks.EventPreToolUse], project, project)

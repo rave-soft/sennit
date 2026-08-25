@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +11,32 @@ import (
 	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
 )
+
+func configureProvidersForSelection(cfg *Config, resolver VariableResolver, knownProviders []catwalk.Provider) {
+	for _, provider := range knownProviders {
+		apiKey, err := resolver.ResolveValue(provider.APIKey)
+		if err != nil || apiKey == "" {
+			cfg.Providers.Del(string(provider.ID))
+			continue
+		}
+		prepared := ProviderConfig{
+			ID:      string(provider.ID),
+			Name:    provider.Name,
+			APIKey:  provider.APIKey,
+			BaseURL: provider.APIEndpoint,
+			Type:    provider.Type,
+			Models:  provider.Models,
+		}
+		cfg.Providers.Set(prepared.ID, prepared)
+	}
+	for id, provider := range cfg.Providers.Seq2() {
+		provider.ID = id
+		if len(provider.Models) > 0 && provider.ModelsSource == "" {
+			provider.ModelsSource = ModelsSourceConfig
+		}
+		cfg.Providers.Set(id, provider)
+	}
+}
 
 func TestConfig_defaultModelSelection(t *testing.T) {
 	t.Run("default behavior uses the default models for given provider", func(t *testing.T) {
@@ -38,8 +63,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 
 		model, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
@@ -71,10 +95,9 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 
-		_, err = cfg.defaultModelSelection(knownProviders)
+		_, err := cfg.defaultModelSelection(knownProviders)
 		require.Error(t, err)
 	})
 	t.Run("should not error if model is missing", func(t *testing.T) {
@@ -101,9 +124,8 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
-		_, err = cfg.defaultModelSelection(knownProviders)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
+		_, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
 	})
 
@@ -144,8 +166,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 		model, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
 		require.Equal(t, "model", model.Model)
@@ -185,9 +206,8 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
-		_, err = cfg.defaultModelSelection(knownProviders)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
+		_, err := cfg.defaultModelSelection(knownProviders)
 		require.Error(t, err)
 	})
 	t.Run("should use the default provider first", func(t *testing.T) {
@@ -227,8 +247,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 		model, err := cfg.defaultModelSelection(knownProviders)
 		require.NoError(t, err)
 		require.Equal(t, "large-model", model.Model)
@@ -258,11 +277,9 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 			Model: SelectedModel{Provider: "ghost", Model: "missing"},
 		}
 		cfg.setDefaults(dir, "")
-		store := &ConfigStore{config: cfg, globalDataPath: globalPath}
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), store, env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 
 		resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 		require.NoError(t, resolveErr)
@@ -304,8 +321,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 
 		resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 		require.NoError(t, resolveErr)
@@ -350,8 +366,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 
 		resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 		require.NoError(t, resolveErr)
@@ -382,8 +397,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		cfg.setDefaults("/tmp", "")
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), NewTestStore(t, cfg), env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 
 		resolved, resolveErr := resolveSelectedModel(cfg, knownProviders)
 		require.NoError(t, resolveErr)
@@ -415,8 +429,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		store := &ConfigStore{config: cfg, globalDataPath: globalPath}
 		env := testenv.New(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), store, env, resolver, knownProviders)
-		require.NoError(t, err)
+		configureProvidersForSelection(cfg, resolver, knownProviders)
 
 		// Simulate the Load path: resolve (pure), then persist the fallback
 		// under writeMu using updateLocked. Before the refactor, the

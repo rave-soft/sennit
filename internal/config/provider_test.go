@@ -56,14 +56,14 @@ func TestConfigStore_KnownProvidersPerStore(t *testing.T) {
 	t.Setenv("SENNIT_GLOBAL_CONFIG", dirEnabled)
 	t.Setenv("SENNIT_GLOBAL_DATA", dirEnabled)
 
-	storeEnabled, err := Load(dirEnabled, dirEnabled, false)
+	storeEnabled, err := loadRuntimeForTest(dirEnabled, dirEnabled, false)
 	require.NoError(t, err)
 	require.NotEmpty(t, storeEnabled.KnownProviders(), "embedded catalog should load for the first store")
 
 	t.Setenv("SENNIT_GLOBAL_CONFIG", dirDisabled)
 	t.Setenv("SENNIT_GLOBAL_DATA", dirDisabled)
 
-	storeDisabled, err := Load(dirDisabled, dirDisabled, false)
+	storeDisabled, err := loadRuntimeForTest(dirDisabled, dirDisabled, false)
 	require.NoError(t, err)
 	require.Empty(t, storeDisabled.KnownProviders(), "the second store's DisableDefaultProviders must not be overridden by the first store's catalog")
 

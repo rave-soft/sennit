@@ -31,7 +31,7 @@ func TestConfigStore_ConcurrentReadDuringReload(t *testing.T) {
 	}`
 	require.NoError(t, os.WriteFile(configPath, []byte(cfg), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := LoadData(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
@@ -86,7 +86,7 @@ func TestConfigStore_StalenessSnapshotRacesWrite(t *testing.T) {
 	t.Setenv(brand.EnvPrefix+"GLOBAL_DATA", dir)
 	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0o600))
 
-	store, err := Load(dir, dir, false)
+	store, err := LoadData(dir, dir, false)
 	require.NoError(t, err)
 	store.globalDataPath = configPath
 	store.CaptureStalenessSnapshot([]string{configPath})
