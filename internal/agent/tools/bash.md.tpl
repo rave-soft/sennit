@@ -70,10 +70,10 @@ Assisted-by: Sennit:{{ .ModelID }}
 {{ end }}
 EOF
 )"
-6. If pre-commit hook fails, retry ONCE; if it fails again, the hook is preventing the commit. If it succeeds but modifies files, you MUST amend.
+6. If a pre-commit hook fails, it has told you the commit is not ready — read what it reported and fix that. Re-running the same commit unchanged is not a fix. If the failure is in code you did not touch (a dirty tree, another agent's work in flight), say so and leave the commit unmade rather than working around the hook. Never pass --no-verify: a hook you bypass is a check the user asked for and did not get. If the hook succeeds but modifies files, you MUST amend.
 7. Run git status to verify.
 
-Notes: prefer "git commit -am" when possible, don't stage unrelated files, NEVER update config, don't push, no -i flags, no empty commits, return an empty response, always use -m when rebasing.
+Notes: prefer "git commit -am" when possible, don't stage unrelated files, NEVER update config, don't push, no -i flags, no --no-verify, no empty commits, return an empty response, always use -m when rebasing.
 </git_commits>
 
 <pull_requests>
