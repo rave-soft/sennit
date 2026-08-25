@@ -381,14 +381,87 @@ func migrateBloatedModelCache(globalDataPath string, knownProviders []catwalk.Pr
 // as .sennit/agents/*.md files now, so the block is simply discarded, with
 // jsonAgentsBlockDetected left behind for SetupAgents to turn into a doctor
 // Problem instead of silently ignoring it forever.
+func applyLayerTombstones(accumulated, incoming map[string]any, masked map[string]map[string]bool) error {
+	for _, sectionName := range []string{"mcp", "lsp"} {
+		section, ok := incoming[sectionName].(map[string]any)
+		if !ok {
+			continue
+		}
+		for name, entry := range section {
+			tombstone, isTombstone, err := shellconfig.ParseTombstone(entry, sectionName, name)
+			if err != nil {
+				return err
+			}
+			if isTombstone {
+				if current, ok := accumulated[sectionName].(map[string]any); ok {
+					delete(current, name)
+				}
+				if tombstone.Replacement == nil {
+					delete(section, name)
+					masked[sectionName][name] = true
+				} else {
+					section[name] = tombstone.Replacement
+					delete(masked[sectionName], name)
+				}
+				continue
+			}
+			if !masked[sectionName][name] {
+				continue
+			}
+			if sectionName == "mcp" && isMCPTokenOverlay(entry) {
+				delete(section, name)
+				continue
+			}
+			delete(masked[sectionName], name)
+		}
+	}
+	return nil
+}
+
+func isMCPTokenOverlay(value any) bool {
+	entry, ok := value.(map[string]any)
+	if !ok || len(entry) != 1 {
+		return false
+	}
+	_, ok = entry["oauth_token"]
+	return ok
+}
+
 func loadFromBytes(configs [][]byte) (*Config, error) {
 	if len(configs) == 0 {
 		return &Config{}, nil
 	}
 
-	data, err := jsons.Merge(configs)
-	if err != nil {
+	if _, err := jsons.Merge(configs); err != nil {
 		return nil, err
+	}
+
+	data := []byte(`{}`)
+	masked := map[string]map[string]bool{"mcp": {}, "lsp": {}}
+	for _, layer := range configs {
+		var accumulated map[string]any
+		if err := json.Unmarshal(data, &accumulated); err != nil {
+			return nil, err
+		}
+		var incoming map[string]any
+		if err := json.Unmarshal(layer, &incoming); err != nil {
+			return nil, err
+		}
+		if err := applyLayerTombstones(accumulated, incoming, masked); err != nil {
+			return nil, err
+		}
+		base, err := json.Marshal(accumulated)
+		if err != nil {
+			return nil, err
+		}
+		next, err := json.Marshal(incoming)
+		if err != nil {
+			return nil, err
+		}
+		data, err = jsons.Merge([][]byte{base, next})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	hadAgentsBlock := gjson.GetBytes(data, "agents").Exists()

@@ -73,6 +73,44 @@ func TestReloadFromDisk_FailingSennitrcKeepsOldConfig(t *testing.T) {
 // must be interruptible via the reload context rather than wedging the store
 // forever. A cancelled reload must return an error and leave the old config
 // in place. The test bounds its own wait so a regression can't hang CI.
+func TestReloadFromDisk_TombstoneSurvivesWorkspaceTokenOverlay(t *testing.T) {
+	workDir, dataDir := isolateReloadEnv(t)
+	jsonPath := filepath.Join(workDir, "sennit.json")
+	rcPath := filepath.Join(workDir, "sennitrc")
+	require.NoError(t, os.WriteFile(jsonPath, []byte(`{"mcp":{"server":{"type":"http","url":"https://example.test","oauth":true}}}`), 0o644))
+	require.NoError(t, os.WriteFile(rcPath, []byte("mcp remove server\n"), 0o644))
+
+	workspaceDir := filepath.Join(dataDir, "workspace")
+	workspacePath := filepath.Join(workspaceDir, "sennit.json")
+	require.NoError(t, os.MkdirAll(workspaceDir, 0o755))
+	require.NoError(t, os.WriteFile(workspacePath, []byte(`{"mcp":{"server":{"oauth_token":{"access_token":"stale"}}}}`), 0o644))
+
+	store, err := config.Load(workDir, workspaceDir, false)
+	require.NoError(t, err)
+	require.NotContains(t, store.Config().MCP, "server")
+	require.NoError(t, store.ReloadFromDisk(context.Background()))
+	require.NotContains(t, store.Config().MCP, "server")
+}
+
+func TestReloadFromDisk_MalformedTombstoneKeepsPublishedConfig(t *testing.T) {
+	workDir, dataDir := isolateReloadEnv(t)
+	rcPath := filepath.Join(workDir, "sennitrc")
+	require.NoError(t, os.WriteFile(rcPath, []byte("mcp add server --command node\n"), 0o644))
+
+	store, err := config.Load(workDir, dataDir, false)
+	require.NoError(t, err)
+	published := store.Config()
+	require.Equal(t, "node", published.MCP["server"].Command)
+
+	require.NoError(t, os.WriteFile(rcPath, []byte("mcp remove server\n"), 0o644))
+	jsonPath := filepath.Join(workDir, "sennit.json")
+	require.NoError(t, os.WriteFile(jsonPath, []byte(`{"mcp":{"server":{"__sennit_tombstone":{"section":"mcp","name":"server"},"command":"bad"}}}`), 0o644))
+
+	require.Error(t, store.ReloadFromDisk(context.Background()))
+	require.Same(t, published, store.Config())
+	require.Equal(t, "node", store.Config().MCP["server"].Command)
+}
+
 func TestReloadFromDisk_HangingSennitrcIsInterruptible(t *testing.T) {
 	workDir, dataDir := isolateReloadEnv(t)
 	rcPath := filepath.Join(workDir, "sennitrc")

@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/rave-soft/sennit/internal/config/migrate"
+	"github.com/rave-soft/sennit/internal/shellconfig"
 	"github.com/rave-soft/sennit/internal/testenv"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -48,6 +49,59 @@ func TestConfig_LoadFromBytes(t *testing.T) {
 	pc, _ := loadedConfig.Providers.Get("openai")
 	require.Equal(t, "key2", pc.APIKey)
 	require.Equal(t, "https://api.openai.com/v2", pc.BaseURL)
+}
+
+func TestConfig_LoadFromBytes_Tombstones(t *testing.T) {
+	marker := func(section, name string) []byte {
+		return []byte(`{"` + section + `":{"` + name + `":{"` + shellconfig.TombstoneKey + `":{"section":"` + section + `","name":"` + name + `"}}}}`)
+	}
+
+	t.Run("higher shell layer replaces a removed MCP entry without inheritance", func(t *testing.T) {
+		lower := []byte(`{"mcp":{"server":{"type":"http","command":"old","args":["old"],"env":{"OLD":"1"},"url":"https://old.test","headers":{"Old":"value"},"oauth":true,"oauth_client_id":"old-client","timeout":99,"disabled":true}}}`)
+		path := filepath.Join(t.TempDir(), "sennitrc")
+		fresh, err := shellconfig.LoadShellConfig(t.Context(), path, []byte("mcp remove server\nmcp add server --command new"))
+		require.NoError(t, err)
+		cfg, err := loadFromBytes([][]byte{lower, fresh})
+		require.NoError(t, err)
+		server := cfg.MCP["server"]
+		require.Equal(t, MCPStdio, server.Type)
+		require.Equal(t, "new", server.Command)
+		require.Empty(t, server.Args)
+		require.Empty(t, server.Env)
+		require.Empty(t, server.URL)
+		require.Empty(t, server.Headers)
+		require.False(t, server.OAuth)
+		require.Empty(t, server.OAuthClientID)
+		require.Zero(t, server.Timeout)
+		require.False(t, server.Disabled)
+	})
+
+	t.Run("shell layers remove lower MCP and LSP entries", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "sennitrc")
+		lower, err := shellconfig.LoadShellConfig(t.Context(), path, []byte("mcp add server --command node --args old --env OLD 1\nlsp add language --command gopls"))
+		require.NoError(t, err)
+		higher, err := shellconfig.LoadShellConfig(t.Context(), path, []byte("mcp remove server\nlsp remove language"))
+		require.NoError(t, err)
+		cfg, err := loadFromBytes([][]byte{lower, higher})
+		require.NoError(t, err)
+		require.NotContains(t, cfg.MCP, "server")
+		require.NotContains(t, cfg.LSP, "language")
+	})
+
+	t.Run("MCP and LSP tombstones remain section-scoped", func(t *testing.T) {
+		lower := []byte(`{"mcp":{"server":{"type":"stdio","command":"node"}},"lsp":{"server":{"command":"gopls"}}}`)
+		cfg, err := loadFromBytes([][]byte{lower, marker("mcp", "server")})
+		require.NoError(t, err)
+		require.NotContains(t, cfg.MCP, "server")
+		require.Equal(t, "gopls", cfg.LSP["server"].Command)
+	})
+
+	t.Run("malformed markers cannot silently delete entries", func(t *testing.T) {
+		lower := []byte(`{"mcp":{"server":{"type":"stdio","command":"node"}}}`)
+		malformed := []byte(`{"mcp":{"server":{"` + shellconfig.TombstoneKey + `":{"section":"mcp","name":"server"},"command":"bad"}}}`)
+		_, err := loadFromBytes([][]byte{lower, malformed})
+		require.Error(t, err)
+	})
 }
 
 func TestConfig_LoadFromBytes_ThreadsWorktreeDir(t *testing.T) {
@@ -644,6 +698,45 @@ func TestConfig_Load_ProjectProvidersIgnored(t *testing.T) {
 	require.True(t, slices.ContainsFunc(Doctor(store.Config()), func(p Problem) bool {
 		return p.Area == AreaProvider && p.Subject == projectPath
 	}), "the ignored project providers block must show up in the doctor")
+}
+
+func TestConfig_LoadFromBytes_LayeredTombstones(t *testing.T) {
+	marker := func(section, name string) []byte {
+		return []byte(fmt.Sprintf(`{"%s":{"%s":{"%s":{"section":"%s","name":"%s"}}}}`, section, name, shellconfig.TombstoneKey, section, name))
+	}
+
+	t.Run("MCP deletion survives token overlay and upper declaration restores fresh entry", func(t *testing.T) {
+		lower := []byte(`{"mcp":{"server":{"type":"stdio","command":"old","args":["old"],"env":{"OLD":"1"}}}}`)
+		token := []byte(`{"mcp":{"server":{"oauth_token":{"access_token":"ignored"}}}}`)
+		upper := []byte(`{"mcp":{"server":{"type":"stdio","command":"new"}}}`)
+
+		removed, err := loadFromBytes([][]byte{lower, marker("mcp", "server"), token})
+		require.NoError(t, err)
+		require.NotContains(t, removed.MCP, "server")
+
+		restored, err := loadFromBytes([][]byte{lower, marker("mcp", "server"), token, upper})
+		require.NoError(t, err)
+		require.Equal(t, "new", restored.MCP["server"].Command)
+		require.Empty(t, restored.MCP["server"].Args)
+		require.Empty(t, restored.MCP["server"].Env)
+	})
+
+	t.Run("LSP deletion is section scoped", func(t *testing.T) {
+		lower := []byte(`{"mcp":{"gopls":{"type":"stdio","command":"mcp"}},"lsp":{"gopls":{"command":"gopls","args":["serve"],"env":{"OLD":"1"}}}}`)
+		cfg, err := loadFromBytes([][]byte{lower, marker("lsp", "gopls")})
+		require.NoError(t, err)
+		require.NotContains(t, cfg.LSP, "gopls")
+		require.Contains(t, cfg.MCP, "gopls")
+	})
+
+	t.Run("Malformed and misplaced markers fail or remain ordinary data", func(t *testing.T) {
+		_, err := loadFromBytes([][]byte{[]byte(`{"mcp":{"server":{"__sennit_tombstone":{"section":"mcp","name":"server"},"command":"bad"}}}`)})
+		require.ErrorContains(t, err, "must not contain other fields")
+
+		cfg, err := loadFromBytes([][]byte{[]byte(`{"options":{"tombstone":{"__sennit_tombstone":{"section":"mcp","name":"server"}}}}`)})
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Options)
+	})
 }
 
 func TestConfig_LoadFromBytes_Env(t *testing.T) {

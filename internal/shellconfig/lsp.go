@@ -57,7 +57,7 @@ func lspAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 	name := args[2]
 	slog.Info("LSP server defined in shell config", "name", name)
-	l := childMap(b.section("lsp"), name)
+	l := b.addLocal(b.section("lsp"), "lsp", name)
 
 	if err := applyFlags(lspAddFlags, args, 3, l, "lsp add", stderr); err != nil {
 		return err
@@ -72,7 +72,7 @@ func lspRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 		return usage(stderr, "usage: lsp remove <name>")
 	}
 	name := args[2]
-	delete(b.section("lsp"), name)
+	b.removeLocal(b.section("lsp"), "lsp", name)
 	slog.Info("LSP server removed in shell config", "name", name)
 	return nil
 }

@@ -64,7 +64,7 @@ func mcpAdd(b *ConfigBuilder, args []string, stderr io.Writer) error {
 	}
 	name := args[2]
 	slog.Info("MCP server defined in shell config", "name", name)
-	m := childMap(b.section("mcp"), name)
+	m := b.addLocal(b.section("mcp"), "mcp", name)
 
 	// Default type is stdio.
 	if _, ok := m["type"]; !ok {
@@ -84,7 +84,7 @@ func mcpRemove(b *ConfigBuilder, args []string, stderr io.Writer) error {
 		return usage(stderr, "usage: mcp remove <name>")
 	}
 	name := args[2]
-	delete(b.section("mcp"), name)
+	b.removeLocal(b.section("mcp"), "mcp", name)
 	slog.Info("MCP server removed in shell config", "name", name)
 	return nil
 }

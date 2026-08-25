@@ -15,8 +15,79 @@ import (
 //
 // At the end of a script the builder marshals to a single JSON object, which
 // the config loader merges with any other config files.
+const TombstoneKey = "__sennit_tombstone"
+
+type Tombstone struct {
+	Section     string         `json:"section"`
+	Name        string         `json:"name"`
+	Replacement map[string]any `json:"replacement,omitempty"`
+}
+
+func ParseTombstone(value any, section, name string) (Tombstone, bool, error) {
+	entry, ok := value.(map[string]any)
+	if !ok {
+		return Tombstone{}, false, nil
+	}
+	marker, hasMarker := entry[TombstoneKey]
+	if !hasMarker {
+		return Tombstone{}, false, nil
+	}
+	if len(entry) != 1 {
+		return Tombstone{}, false, fmt.Errorf("tombstone for %s.%s must not contain other fields", section, name)
+	}
+	fields, ok := marker.(map[string]any)
+	if !ok || (len(fields) != 2 && len(fields) != 3) {
+		return Tombstone{}, false, fmt.Errorf("invalid tombstone for %s.%s", section, name)
+	}
+	markerSection, sectionOK := fields["section"].(string)
+	markerName, nameOK := fields["name"].(string)
+	if !sectionOK || !nameOK || markerSection != section || markerName != name {
+		return Tombstone{}, false, fmt.Errorf("invalid tombstone for %s.%s", section, name)
+	}
+	var replacement map[string]any
+	if raw, exists := fields["replacement"]; exists {
+		replacement, ok = raw.(map[string]any)
+		if !ok {
+			return Tombstone{}, false, fmt.Errorf("invalid tombstone for %s.%s", section, name)
+		}
+	}
+	return Tombstone{Section: markerSection, Name: markerName, Replacement: replacement}, true, nil
+}
+
 type ConfigBuilder struct {
-	root map[string]any
+	root  map[string]any
+	local map[string]map[string]bool
+}
+
+func (b *ConfigBuilder) addLocal(section map[string]any, kind, name string) map[string]any {
+	if b.local == nil {
+		b.local = make(map[string]map[string]bool)
+	}
+	if b.local[kind] == nil {
+		b.local[kind] = make(map[string]bool)
+	}
+	if b.local[kind][name] {
+		return childMap(section, name)
+	}
+	if marker, ok := section[name].(map[string]any); ok {
+		if tombstone, markerOK := marker[TombstoneKey].(Tombstone); markerOK {
+			replacement := make(map[string]any)
+			tombstone.Replacement = replacement
+			marker[TombstoneKey] = tombstone
+			b.local[kind][name] = true
+			return replacement
+		}
+	}
+	delete(section, name)
+	b.local[kind][name] = true
+	return childMap(section, name)
+}
+
+func (b *ConfigBuilder) removeLocal(section map[string]any, kind, name string) {
+	section[name] = map[string]any{TombstoneKey: Tombstone{Section: kind, Name: name}}
+	if b.local != nil && b.local[kind] != nil {
+		delete(b.local[kind], name)
+	}
 }
 
 // newConfigBuilder returns an empty builder.

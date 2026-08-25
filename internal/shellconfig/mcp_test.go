@@ -14,7 +14,8 @@ mcp add local --type http --url "http://localhost:3000/mcp"
 mcp remove github`)
 
 	mcps := result["mcp"].(map[string]any)
-	require.NotContains(t, mcps, "github")
+	github := mcps["github"].(map[string]any)
+	require.Equal(t, map[string]any{"section": "mcp", "name": "github"}, github[TombstoneKey])
 	require.Contains(t, mcps, "local")
 }
 
@@ -24,7 +25,28 @@ func TestMCPRemoveAlias(t *testing.T) {
 	result := loadScript(t, `mcp add github --command npx
 mcp rm github`)
 
-	require.NotContains(t, result["mcp"].(map[string]any), "github")
+	github := result["mcp"].(map[string]any)["github"].(map[string]any)
+	require.Equal(t, map[string]any{"section": "mcp", "name": "github"}, github[TombstoneKey])
+}
+
+func TestMCPRemoveAbsentProducesTombstone(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `mcp remove github`)
+	entry := result["mcp"].(map[string]any)["github"].(map[string]any)
+	require.Equal(t, map[string]any{"section": "mcp", "name": "github"}, entry[TombstoneKey])
+}
+
+func TestMCPRemoveThenAddIsFresh(t *testing.T) {
+	t.Parallel()
+
+	result := loadScript(t, `mcp remove github
+mcp add github --command node`)
+	entry := result["mcp"].(map[string]any)["github"].(map[string]any)
+	marker := entry[TombstoneKey].(map[string]any)
+	replacement := marker["replacement"].(map[string]any)
+	require.Equal(t, "node", replacement["command"])
+	require.NotContains(t, replacement, TombstoneKey)
 }
 
 func TestMCPOAuthFlags(t *testing.T) {
