@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,16 @@ type confinedTestPermissions struct {
 
 func (p *confinedTestPermissions) Request(context.Context, permission.CreatePermissionRequest) (bool, error) {
 	return true, nil
+}
+
+type recordingConfinedPermissions struct {
+	*confinedTestPermissions
+	requests []permission.CreatePermissionRequest
+}
+
+func (p *recordingConfinedPermissions) Request(_ context.Context, request permission.CreatePermissionRequest) (bool, error) {
+	p.requests = append(p.requests, request)
+	return false, nil
 }
 func (p *confinedTestPermissions) ConfinedDir() string  { return p.dir }
 func (p *confinedTestPermissions) ConfineToWorkingDir() {}
@@ -354,28 +365,62 @@ func TestBashTool_ConfinedWorkspaceAllowsLegitimateCommandInsideBoundary(t *test
 	require.Equal(t, "hello\n", string(onDisk))
 }
 
-// TestBashTool_ConfinedWorkspaceDoesNotCatchDynamicPaths pins the
-// documented blind spot rather than leaving it as an unverified claim in a
-// comment: a path built from a variable is opaque to a static parse, so
-// this is not refused. It is not a sandbox — see bashConfinementRefusal's
-// doc comment for the full list of what it cannot see.
-func TestBashTool_ConfinedWorkspaceDoesNotCatchDynamicPaths(t *testing.T) {
+func TestBashTool_ConfinedWorkspaceDynamicPathsRequirePermission(t *testing.T) {
 	t.Parallel()
 
-	workdir, outside, perms := writeOutsideAttempt(t)
-	tool := NewBashTool(perms, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+	workdir, outside, basePermissions := writeOutsideAttempt(t)
+	permissions := &recordingConfinedPermissions{confinedTestPermissions: basePermissions}
+	tool := NewBashTool(permissions, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
 
-	resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
-		ID:    "call-1",
-		Name:  BashToolName,
-		Input: mustJSONInput(t, BashParams{Command: "OUT=" + outside + "; echo overwritten > \"$OUT\""}),
-	})
-	require.NoError(t, err)
-	require.False(t, resp.IsError, "a variable-built path is not statically resolvable and must not be refused")
+	commands := []string{
+		"echo $OUT",
+		"echo ${OUT}",
+		"echo $(pwd)",
+		"echo `pwd`",
+		"echo *.go",
+		"echo value > $OUT",
+		"echo value > *.txt",
+		"echo value > \"$(pwd)/out.txt\"",
+		"echo value 3>$OUT",
+	}
+	for index, command := range commands {
+		resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+			ID:    fmt.Sprintf("call-%d", index),
+			Name:  BashToolName,
+			Input: mustJSONInput(t, BashParams{Command: command}),
+		})
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+		require.NotContains(t, resp.Content, "outside this workspace")
+	}
 
+	require.Len(t, permissions.requests, len(commands))
+	for _, request := range permissions.requests {
+		require.Contains(t, request.Description, "best-effort")
+	}
 	onDisk, err := os.ReadFile(outside)
 	require.NoError(t, err)
-	require.Equal(t, "overwritten\n", string(onDisk), "the write went through — this is the documented gap, not a sandbox")
+	require.Equal(t, "original\n", string(onDisk))
+}
+
+func TestBashTool_ConfinedWorkspaceLiteralGlobCharactersDoNotRequirePermission(t *testing.T) {
+	t.Parallel()
+
+	workdir, _, basePermissions := writeOutsideAttempt(t)
+	permissions := &recordingConfinedPermissions{confinedTestPermissions: basePermissions}
+	tool := NewBashTool(permissions, workdir, &config.Attribution{TrailerStyle: config.TrailerStyleNone}, "test-model", shell.NewBackgroundShellManager())
+
+	for index, command := range []string{"echo '*'", `echo "?"`, `echo \*`, `echo "["`, `echo "prefix"suffix`} {
+		resp, err := tool.Run(confinedTestCtx(t), fantasy.ToolCall{
+			ID:    fmt.Sprintf("call-%d", index),
+			Name:  BashToolName,
+			Input: mustJSONInput(t, BashParams{Command: command}),
+		})
+		require.NoError(t, err)
+		require.False(t, resp.IsError)
+	}
+
+	require.Empty(t, permissions.requests)
 }
 
 // TestBashTool_ConfinedWorkspaceAllowsReadOnlyCommandsToReadOutside: the

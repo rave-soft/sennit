@@ -53,23 +53,24 @@ import (
 //
 // None of that is a gap in this function so much as the reason it exists
 // instead of a sandbox — see the bash entry in TECHDEBT.md.
-func bashConfinementRefusal(permissions permission.Service, command string) (message string, ok bool) {
+func bashConfinementRefusal(permissions permission.Service, command string) (message string, refused, permissionRequired bool) {
 	if permissions == nil {
-		return "", false
+		return "", false, false
 	}
 	boundary := permissions.ConfinedDir()
 	if boundary == "" {
-		return "", false
+		return "", false, false
 	}
 	file, err := syntax.NewParser().Parse(strings.NewReader(command), "")
 	if err != nil {
-		// An unparseable command will also fail once the shell actually
-		// tries to run it; nothing further to check here.
-		return "", false
+		return "", false, true
 	}
 
 	var outsidePath string
 	syntax.Walk(file, func(node syntax.Node) bool {
+		if word, ok := node.(*syntax.Word); ok && wordRequiresPermission(word, command) {
+			permissionRequired = true
+		}
 		if outsidePath != "" {
 			return false
 		}
@@ -101,7 +102,7 @@ func bashConfinementRefusal(permissions permission.Service, command string) (mes
 		return true
 	})
 	if outsidePath == "" {
-		return "", false
+		return "", false, permissionRequired
 	}
 	return fmt.Sprintf(
 		"refusing to run: %s is outside this workspace. "+
@@ -112,7 +113,7 @@ func bashConfinementRefusal(permissions permission.Service, command string) (mes
 			"To show a whole file as a diff use `git diff --no-index /dev/null <file>`; "+
 			"to read a file outside the workspace use the view tool.",
 		outsidePath, boundary,
-	), true
+	), true, permissionRequired
 }
 
 // readOnlyCommands are commands whose arguments are only ever read —
@@ -182,6 +183,42 @@ func readsOnlyFromArgs(args []*syntax.Word) bool {
 // literalAbsPathOutside reports the absolute path w statically evaluates
 // to, if any, when it resolves outside boundary. See
 // bashConfinementRefusal for what this deliberately does not attempt.
+func wordRequiresPermission(word *syntax.Word, command string) bool {
+	if _, literal := literalWordValue(word); !literal {
+		return true
+	}
+	start, end := int(word.Pos().Offset()), int(word.End().Offset())
+	if start < 0 || end > len(command) || start >= end {
+		return true
+	}
+	quoted := byte(0)
+	escaped := false
+	for index := start; index < end; index++ {
+		char := command[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if char == '\\' && quoted != '\'' {
+			escaped = true
+			continue
+		}
+		if char == '\'' || char == '"' {
+			switch quoted {
+			case 0:
+				quoted = char
+			case char:
+				quoted = 0
+			}
+			continue
+		}
+		if quoted == 0 && (char == '*' || char == '?' || char == '[') {
+			return true
+		}
+	}
+	return false
+}
+
 func literalAbsPathOutside(w *syntax.Word, boundary string) (path string, found bool) {
 	lit, ok := literalWordValue(w)
 	if !ok || lit == "" {

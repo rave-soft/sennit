@@ -230,7 +230,8 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			// boundary. Catch what a static AST parse can see and refuse
 			// outright — see bashConfinementRefusal's doc comment for
 			// exactly what this does and does not catch.
-			if msg, refused := bashConfinementRefusal(permissions, params.Command); refused {
+			msg, refused, permissionRequired := bashConfinementRefusal(permissions, params.Command)
+			if refused {
 				return fantasy.NewTextErrorResponse(msg), nil
 			}
 
@@ -252,14 +253,18 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, missingSessionID("executing shell command")
 			}
-			if !isSafeReadOnly {
+			if !isSafeReadOnly || permissionRequired {
+				description := fmt.Sprintf("Execute command: %s", params.Command)
+				if permissionRequired {
+					description += " (workspace path check is best-effort; dynamic shell expansion requires approval)"
+				}
 				resp, denied, err := requirePermission(ctx, permissions, permission.CreatePermissionRequest{
 					SessionID:   sessionID,
 					Path:        execWorkingDir,
 					ToolCallID:  call.ID,
 					ToolName:    BashToolName,
 					Action:      "execute",
-					Description: fmt.Sprintf("Execute command: %s", params.Command),
+					Description: description,
 					Params:      BashPermissionsParams(params),
 				})
 				if err != nil {
