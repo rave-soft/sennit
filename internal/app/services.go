@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 
 	"github.com/rave-soft/sennit/internal/agent"
-	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/agent/tools/mcp"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/config/credentials"
@@ -27,6 +26,18 @@ import (
 	"github.com/rave-soft/sennit/internal/skills"
 	"github.com/rave-soft/sennit/internal/thread"
 )
+
+// delegationManagerSnapshot is the single ownership representation of this
+// workspace's delegation managers: the concrete thread manager (nil for
+// non-git workspaces) and the concrete task manager. It is published
+// atomically as one value, so a reader never observes a thread manager and
+// a task manager from different attach generations. The tool-facing
+// adapters derived from this pair are not stored here: Attach builds them
+// and hands them to the agent coordinator at attachment time.
+type delegationManagerSnapshot struct {
+	thread *thread.Manager
+	task   *thread.TaskManager
+}
 
 // appServices groups the domain services and workspace-scoped resources
 // New wires together: session/message/permission/etc. services, the agent
@@ -78,48 +89,15 @@ type appServices struct {
 	// Everything that mutates state still goes through a service.
 	queries *db.Queries
 
-	// Threads is the thread manager owning this workspace's parallel
-	// agent work streams, wired in post-bootstrap by the caller (see
-	// internal/app/app.go and internal/app/threadspawn/attach.go) via
-	// SetThreads. Declared as the tool-facing interface, not
-	// *thread.Manager, because internal/thread imports this package —
-	// see internal/agent/tools/thread_manager.go for the seam. Nil for
-	// workspaces that don't own a thread manager: non-git workspaces and
-	// thread workspaces themselves (nesting is not supported).
-	Threads tools.ThreadManager
-
-	// threadManager holds the same thread manager as Threads, but typed
-	// *thread.Manager instead of tools.ThreadManager: internal/workspace
-	// needs the concrete type (Subscribe, full-arg Merge/Remove, etc.),
-	// which is richer than the tools.ThreadManager seam built for the
-	// agent-tool wiring. Nil until wired post-bootstrap by the caller (see
-	// internal/app/threadspawn/attach.go) via SetThreadManager, independent
-	// of SetThreads/Threads — both are set from the same manager, but this
-	// field is additive and neither replaces nor is replaced by the other.
-	//
-	// The two fields are not a workaround for an import restriction: this
-	// package imports internal/thread for exactly this type. They are two
-	// different interfaces onto one manager — a deliberately narrow one
-	// for the agent tools, the concrete one for the composition layer.
-	// Held atomically: it is set on the main goroutine post-bootstrap and
-	// read from others — SetPermissionsSkip runs on the config-watcher
-	// goroutine, and internal/workspace reads it from wherever it is
-	// called. A plain field made that a data race.
-	threadManager atomic.Pointer[thread.Manager]
-
-	// Tasks is the task delegation manager's tool-facing counterpart to
-	// Threads, wired in post-bootstrap alongside it (see attach.go) via
-	// SetTasks. Declared as tools.TaskManager for the same import-cycle
-	// reason Threads is tools.ThreadManager. Nil for workspaces that
-	// don't own a task manager, same as Threads.
-	Tasks tools.TaskManager
-
-	// taskManager holds the same task manager as Tasks, but typed
-	// *thread.TaskManager instead of tools.TaskManager, for the same reason
-	// threadManager is concretely typed relative to Threads. Set via
-	// SetTaskManager, independent of SetTasks/Tasks.
-	// Held atomically for the same reason as threadManager.
-	taskManager atomic.Pointer[thread.TaskManager]
+	// delegationManagers is the single atomic ownership snapshot of this
+	// workspace's delegation managers (concrete thread and task pair).
+	// Nil until wired post-bootstrap by the caller (see
+	// internal/app/threadspawn/attach.go) via SetDelegationManagers. The
+	// thread manager is nil for workspaces that don't own one: non-git
+	// workspaces and thread workspaces themselves (nesting is not
+	// supported). Set on the main goroutine and read from others (see
+	// SetPermissionsSkip), hence atomic.
+	delegationManagers atomic.Pointer[delegationManagerSnapshot]
 
 	// lastConfigBypass is the permissions.bypass value from config as of
 	// the last time it was applied to Permissions.SetSkipRequests —
@@ -221,32 +199,42 @@ func (app *App) Credentials() *credentials.Manager {
 	return app.credentials
 }
 
-// SetThreads wires the thread manager owning this workspace's parallel
-// agent work streams, forwarding it to the coder agent so the thread_*
-// tools become available. Safe to call with nil to clear it. The caller
-// (see internal/app/threadspawn/attach.go) is responsible for deciding
-// whether this workspace should own one at all.
-func (app *App) SetThreads(threads tools.ThreadManager) {
-	app.Threads = threads
-	if app.AgentCoordinator != nil {
-		app.AgentCoordinator.SetThreads(threads)
-	}
+// SetDelegationManagers publishes one consistent concrete delegation pair.
+// Tool adapters are deliberately not accepted or stored here: Attach derives
+// them from this same pair and publishes them to the coordinator separately.
+func (app *App) SetDelegationManagers(threadMgr *thread.Manager, taskMgr *thread.TaskManager) {
+	app.delegationManagers.Store(&delegationManagerSnapshot{thread: threadMgr, task: taskMgr})
 }
 
-// SetThreadManager wires the concrete thread manager for callers (see
-// internal/workspace) that need more than the tools.ThreadManager seam
-// exposes. Kept separate from SetThreads/Threads, which exist purely for
-// the agent-tool wiring; both are set from the same manager by the caller
-// (see internal/app/threadspawn/attach.go), but this accessor is
-// additive and neither replaces nor is replaced by the other.
-func (app *App) SetThreadManager(m *thread.Manager) {
-	app.threadManager.Store(m)
-}
-
-// ThreadManager returns the value passed to SetThreadManager, or nil if
-// unset.
+// ThreadManager returns this workspace's concrete thread manager from the
+// delegation snapshot, or nil if unset or if this workspace owns no
+// thread manager (non-git, nested thread workspace).
 func (app *App) ThreadManager() *thread.Manager {
-	return app.threadManager.Load()
+	s := app.delegationManagers.Load()
+	if s == nil {
+		return nil
+	}
+	return s.thread
+}
+
+// TaskManager returns this workspace's concrete task manager from the
+// delegation snapshot, or nil if unset.
+func (app *App) TaskManager() *thread.TaskManager {
+	s := app.delegationManagers.Load()
+	if s == nil {
+		return nil
+	}
+	return s.task
+}
+
+// delegationManagersForTest returns the current snapshot as a value, for
+// consistency tests that must observe one attach generation atomically
+// rather than as two separate accessor reads.
+func (app *App) delegationManagersForTest() delegationManagerSnapshot {
+	if s := app.delegationManagers.Load(); s != nil {
+		return *s
+	}
+	return delegationManagerSnapshot{}
 }
 
 // PermissionsSkipFunc returns an accessor for this workspace's live
@@ -273,30 +261,9 @@ func (app *App) PermissionsSkipFunc() func() bool {
 // on whatever state they were spawned with.
 func (app *App) SetPermissionsSkip(skip bool) {
 	app.Permissions().SetSkipRequests(skip)
-	if mgr := app.threadManager.Load(); mgr != nil {
+	if mgr := app.ThreadManager(); mgr != nil {
 		mgr.SetPermissionsSkip(skip)
 	}
-}
-
-// SetTasks wires the task delegation manager, forwarding it to the coder
-// agent so the built-in agent tool's background mode becomes available.
-// Mirrors SetThreads; safe to call with nil to clear it.
-func (app *App) SetTasks(tasks tools.TaskManager) {
-	app.Tasks = tasks
-	if app.AgentCoordinator != nil {
-		app.AgentCoordinator.SetTasks(tasks)
-	}
-}
-
-// SetTaskManager wires the concrete task manager for callers that need it,
-// mirroring SetThreadManager.
-func (app *App) SetTaskManager(m *thread.TaskManager) {
-	app.taskManager.Store(m)
-}
-
-// TaskManager returns the value passed to SetTaskManager, or nil if unset.
-func (app *App) TaskManager() *thread.TaskManager {
-	return app.taskManager.Load()
 }
 
 // ReportCurrentSession tells herdr which session the user is now

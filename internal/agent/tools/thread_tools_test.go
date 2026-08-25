@@ -97,9 +97,9 @@ func (f *fakeCoordinator) RunAccepted(ctx context.Context, _ *agent.AcceptedRun,
 	return f.Run(ctx, sessionID, prompt, attachments...)
 }
 
-func (f *fakeCoordinator) CancelAll()                     {}
-func (f *fakeCoordinator) Cancel(sessionID string)        {}
-func (f *fakeCoordinator) SetThreads(tools.ThreadManager) {}
+func (f *fakeCoordinator) CancelAll()                                                {}
+func (f *fakeCoordinator) Cancel(sessionID string)                                   {}
+func (f *fakeCoordinator) SetDelegationTools(tools.ThreadManager, tools.TaskManager) {}
 
 // The send path reads these to report whether a message lands as the next
 // turn or waits behind one in flight (see tools.SendOutcome). This fake

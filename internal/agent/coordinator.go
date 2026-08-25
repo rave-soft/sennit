@@ -76,19 +76,12 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
-	// SetThreads wires (or clears, with nil) the thread manager the
-	// thread_* tools are built against. It takes effect on the next
-	// UpdateModels/buildTools pass, which every run performs, so callers
-	// don't need to trigger a rebuild themselves. See buildTools: thread
-	// tools are only ever offered to the top-level agent of the
-	// workspace the manager belongs to, never to sub-agents.
-	SetThreads(threads tools.ThreadManager)
-	// SetTasks wires (or clears, with nil) the task manager the built-in
-	// agent tool's background mode uses. Unlike SetThreads, this does not
-	// change the tool list (the agent tool is always offered when
-	// configured; only its background branch's availability depends on
-	// this), so it takes effect immediately with no rebuild needed.
-	SetTasks(tasks tools.TaskManager)
+	// SetDelegationTools atomically publishes the thread and task tool
+	// adapters derived by threadspawn.Attach. Readers always receive one
+	// complete adapter generation. A changed thread adapter invalidates the
+	// runtime because it changes the thread_* tool set; task adapters take
+	// effect immediately for background delegation.
+	SetDelegationTools(threads tools.ThreadManager, tasks tools.TaskManager)
 	// DeliverTaskCompletion enqueues completion into sessionID's
 	// completion inbox for delivery on that session's next step (see
 	// runTurn.prepareStep), or starts a continuation turn immediately if
@@ -114,6 +107,12 @@ type Coordinator interface {
 	// active rather than resetting it, so a skill already read earlier in
 	// the session does not appear to forget itself.
 	RefreshSkills(allSkills, activeSkills []*skills.Skill)
+}
+
+type delegationToolsSnapshot struct {
+	threads         tools.ThreadManager
+	tasks           tools.TaskManager
+	threadsIdentity managerIdentity
 }
 
 type coordinator struct {
@@ -159,25 +158,15 @@ type coordinator struct {
 	subSessionsMu sync.Mutex
 	subSessions   map[string]int
 
-	// threadsMu guards threads, which SetThreads may set after
-	// construction (thread managers are wired in post-bootstrap; see
-	// internal/app/app.go and internal/app/threadspawn/attach.go) and
-	// buildTools reads on every run via UpdateModels.
-	threadsMu       sync.RWMutex
-	threads         tools.ThreadManager
-	threadsIdentity managerIdentity
+	// delegationTools holds the thread/task adapters as one immutable
+	// generation. Attach can publish a new generation while runs build or
+	// invoke tools, but a reader always receives a complete pair.
+	delegationTools atomic.Pointer[delegationToolsSnapshot]
 
 	// runtimeInvalidationMu serializes runtime-affecting state mutation and
 	// publication of each local generation with its exact invalidation reason.
 	// Runtime builds never hold it.
 	runtimeInvalidationMu sync.Mutex
-
-	// tasksMu guards tasks, wired the same way and for the same reason as
-	// threads above, but read by the "agent" tool's background branch at
-	// call time rather than by buildTools — see SetTasks's doc comment on
-	// the Coordinator interface for why no rebuild is needed.
-	tasksMu sync.RWMutex
-	tasks   tools.TaskManager
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -323,7 +312,7 @@ type CoordinatorOptions struct {
 	MCP *mcp.Registry
 	// Threads is nil-safe: when nil, the thread_* tools are simply
 	// omitted from the top-level agent's tool list. It is normally wired
-	// after construction via [Coordinator.SetThreads] instead of here,
+	// after construction via [Coordinator.SetDelegationTools] instead of here,
 	// since the thread manager is set up post-bootstrap; this field
 	// exists mainly so tests and other in-process callers can supply one
 	// up front.
@@ -331,7 +320,7 @@ type CoordinatorOptions struct {
 	// Tasks is nil-safe the same way Threads is: when nil, the built-in
 	// agent tool's background branch reports background delegation as
 	// unavailable rather than silently running in the foreground. Wired
-	// after construction via [Coordinator.SetTasks] in production, same
+	// after construction via [Coordinator.SetDelegationTools] in production, same
 	// as Threads.
 	Tasks            tools.TaskManager
 	BackgroundShells *shell.BackgroundShellManager
@@ -377,13 +366,14 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		skillsMgr:       opts.Skills,
 		interactive:     opts.Interactive,
 		mcp:             opts.MCP,
-		threads:         opts.Threads,
-		threadsIdentity: managerIdentityOf(opts.Threads),
-		tasks:           opts.Tasks,
+		delegationTools: atomic.Pointer[delegationToolsSnapshot]{},
 		background:      opts.BackgroundShells,
 		latency:         opts.Latency,
 		runtime:         newRuntimeCache(),
 	}
+	c.delegationTools.Store(&delegationToolsSnapshot{
+		threads: opts.Threads, tasks: opts.Tasks, threadsIdentity: managerIdentityOf(opts.Threads),
+	})
 
 	agentCfg, ok := opts.Config.Config().Agents[config.AgentCoder]
 	if !ok {
@@ -802,6 +792,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allSkillsSnapshot, activeSkillsSnapshot, skillTrackerSnapshot := c.skillsSnapshot()
 
+	delegationTools := c.delegationToolsForRead()
 	b := &buildToolsCtx{
 		agent:              agent,
 		isSubAgent:         isSubAgent,
@@ -813,8 +804,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allSkills:          allSkillsSnapshot,
 		activeSkills:       activeSkillsSnapshot,
 		skillTracker:       skillTrackerSnapshot,
-		threads:            c.threadsManager(),
-		taskManager:        c.tasksManager(),
+		threads:            delegationTools.threads,
+		taskManager:        delegationTools.tasks,
 		backgroundAgentsOn: c.backgroundAgentsEnabled(),
 		toolAvailability:   tools.ResolveSystemToolAvailability(),
 	}
@@ -1053,28 +1044,17 @@ func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent.ClearQueue(sessionID)
 }
 
-// SetThreads implements Coordinator.
-func (c *coordinator) SetThreads(threads tools.ThreadManager) {
+// SetDelegationTools implements Coordinator. One immutable snapshot makes
+// mixed adapter generations impossible, including while publications race.
+func (c *coordinator) SetDelegationTools(threads tools.ThreadManager, tasks tools.TaskManager) {
+	identity := managerIdentityOf(threads)
 	c.invalidateRuntime(context.Background(), "threads_changed", func() bool {
-		identity := managerIdentityOf(threads)
-		c.threadsMu.Lock()
-		defer c.threadsMu.Unlock()
-		if c.threadsIdentity.same(identity) {
-			return false
-		}
-		c.threads, c.threadsIdentity = threads, identity
-		return true
+		current := c.delegationTools.Load()
+		c.delegationTools.Store(&delegationToolsSnapshot{
+			threads: threads, tasks: tasks, threadsIdentity: identity,
+		})
+		return current == nil || !current.threadsIdentity.same(identity)
 	})
-}
-
-// SetTasks implements Coordinator. No invalidateRuntime call: unlike
-// SetThreads, this never changes which tools are offered (the agent tool
-// is always present when configured), so there is no cached tool list to
-// rebuild — tasksManager is read fresh on every background call instead.
-func (c *coordinator) SetTasks(tasks tools.TaskManager) {
-	c.tasksMu.Lock()
-	c.tasks = tasks
-	c.tasksMu.Unlock()
 }
 
 // DeliverTaskCompletion implements Coordinator.
@@ -1203,18 +1183,22 @@ func (c *coordinator) skillsSnapshot() (allSkills, activeSkills []*skills.Skill,
 	return c.allSkills, c.activeSkills, c.skillTracker
 }
 
-// threadsManager returns the currently wired thread manager, or nil.
-func (c *coordinator) threadsManager() tools.ThreadManager {
-	c.threadsMu.RLock()
-	defer c.threadsMu.RUnlock()
-	return c.threads
+// delegationToolsForRead returns a complete adapter generation.
+func (c *coordinator) delegationToolsForRead() delegationToolsSnapshot {
+	if snapshot := c.delegationTools.Load(); snapshot != nil {
+		return *snapshot
+	}
+	return delegationToolsSnapshot{}
 }
 
-// tasksManager returns the currently wired task manager, or nil.
+// threadsManager returns the thread adapter from one delegation generation.
+func (c *coordinator) threadsManager() tools.ThreadManager {
+	return c.delegationToolsForRead().threads
+}
+
+// tasksManager returns the task adapter from one delegation generation.
 func (c *coordinator) tasksManager() tools.TaskManager {
-	c.tasksMu.RLock()
-	defer c.tasksMu.RUnlock()
-	return c.tasks
+	return c.delegationToolsForRead().tasks
 }
 
 // backgroundAgentsEnabled reports whether options.background_agents allows

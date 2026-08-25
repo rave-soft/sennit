@@ -126,7 +126,7 @@ func setupSubscriber[T any](
 
 // ForwardEvents subscribes to an event source attached to app after
 // construction (e.g. the thread manager, wired in post-bootstrap by
-// SetThreadManager — see internal/app/threadspawn/attach.go) and
+// SetDelegationManagers — see internal/app/threadspawn/attach.go) and
 // forwards its events into app's own event fan-in (app.events), so
 // app.Subscribe consumers see them exactly like every source wired in
 // at New() time by setupEvents.

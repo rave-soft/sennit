@@ -16,8 +16,7 @@ type agentToolTaskManager struct {
 }
 
 // AsAgentToolTaskManager returns t adapted to tools.TaskManager, for
-// wiring into agent.CoordinatorOptions (or app.SetTasks, which forwards
-// to it).
+// handing to the agent coordinator at attachment time (see Attach).
 func AsAgentToolTaskManager(t *thread.TaskManager) tools.TaskManager {
 	return &agentToolTaskManager{t: t}
 }

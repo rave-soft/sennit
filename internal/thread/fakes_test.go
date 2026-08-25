@@ -517,12 +517,13 @@ func (f *fakeCoordinator) cancelAllWasCalled() bool {
 	return f.cancelAllCalled
 }
 
-// SetThreads / SetTasks / IsBusy are no-ops: a fakeCoordinator assigned as
-// an App's AgentCoordinator goes through the real App.SetThreads/App.Shutdown
-// paths, which call both — the embedded nil agent.Coordinator would panic.
-func (f *fakeCoordinator) SetThreads(tools.ThreadManager) {}
-func (f *fakeCoordinator) SetTasks(tools.TaskManager)     {}
-func (f *fakeCoordinator) IsBusy() bool                   { return false }
+// SetDelegationTools / IsBusy are no-ops: a fakeCoordinator assigned as
+// an App's AgentCoordinator goes through the real
+// App.SetDelegationManagers/App.Shutdown paths, which call both — the
+// embedded nil agent.Coordinator would panic.
+func (f *fakeCoordinator) SetDelegationTools(tools.ThreadManager, tools.TaskManager) {}
+
+func (f *fakeCoordinator) IsBusy() bool { return false }
 
 // The remaining Coordinator methods are not exercised by the thread tests;
 // they exist only so the fake satisfies the interface without the embedded

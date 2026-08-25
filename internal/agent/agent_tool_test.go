@@ -80,7 +80,7 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
 	require.NoError(t, err)
 	cfg.SetupAgents()
 
-	return &coordinator{
+	coord := &coordinator{
 		cfg:         cfg,
 		sessions:    env.sessions,
 		messages:    env.messages,
@@ -88,9 +88,10 @@ func newAgentToolTestCoordinator(t *testing.T, tasks tools.TaskManager) *coordin
 		history:     env.history,
 		filetracker: *env.filetracker,
 		mcp:         mcp.NewRegistry(),
-		tasks:       tasks,
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.SetDelegationTools(nil, tasks)
+	return coord
 }
 
 // TestAgentTool_BackgroundCreatesTaskAndReturnsImmediately proves

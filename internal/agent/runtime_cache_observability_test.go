@@ -141,26 +141,26 @@ func (sliceThreadManager) Remove(context.Context, string, bool, bool) error { re
 func TestSetThreadsManagerIdentity(t *testing.T) {
 	coordinator := &coordinator{runtime: newRuntimeCache()}
 	first := mapThreadManager{"id": "one"}
-	coordinator.SetThreads(first)
+	coordinator.SetDelegationTools(first, nil)
 	require.Equal(t, uint64(1), coordinator.localVersion.Load())
-	coordinator.SetThreads(first)
+	coordinator.SetDelegationTools(first, nil)
 	require.Equal(t, uint64(1), coordinator.localVersion.Load(), "same map identity is a no-op")
-	coordinator.SetThreads(mapThreadManager{"id": "one"})
+	coordinator.SetDelegationTools(mapThreadManager{"id": "one"}, nil)
 	require.Equal(t, uint64(2), coordinator.localVersion.Load(), "different maps rebuild")
 
 	slice := sliceThreadManager{"one"}
-	coordinator.SetThreads(slice)
-	coordinator.SetThreads(slice)
+	coordinator.SetDelegationTools(slice, nil)
+	coordinator.SetDelegationTools(slice, nil)
 	require.Equal(t, uint64(4), coordinator.localVersion.Load(), "slices conservatively rebuild")
 
 	unknown := structThreadManager{mapThreadManager: mapThreadManager{"id": "one"}, values: []string{"one"}}
-	coordinator.SetThreads(unknown)
-	coordinator.SetThreads(unknown)
+	coordinator.SetDelegationTools(unknown, nil)
+	coordinator.SetDelegationTools(unknown, nil)
 	require.Equal(t, uint64(6), coordinator.localVersion.Load(), "unknown non-comparable structs rebuild")
 
 	closure := closureThreadManager(func() {})
-	coordinator.SetThreads(closure)
-	coordinator.SetThreads(closure)
+	coordinator.SetDelegationTools(closure, nil)
+	coordinator.SetDelegationTools(closure, nil)
 	require.Equal(t, uint64(8), coordinator.localVersion.Load(), "function managers conservatively rebuild even when the closure pointer matches")
 }
 

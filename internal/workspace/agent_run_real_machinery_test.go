@@ -103,9 +103,7 @@ func (c *coordinatorOverSessionAgent) UpdateModels(context.Context) error { retu
 // forwarding here would just trigger a second, redundant title call.
 func (c *coordinatorOverSessionAgent) GenerateTitle(context.Context, string, string) {}
 
-func (c *coordinatorOverSessionAgent) SetThreads(tools.ThreadManager) {}
-
-func (c *coordinatorOverSessionAgent) SetTasks(tools.TaskManager) {}
+func (c *coordinatorOverSessionAgent) SetDelegationTools(tools.ThreadManager, tools.TaskManager) {}
 func (c *coordinatorOverSessionAgent) DeliverTaskCompletion(context.Context, string, agent.TaskCompletion) {
 }
 

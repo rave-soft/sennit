@@ -86,18 +86,21 @@ func (f *attachFakeSessions) Get(_ context.Context, id string) (session.Session,
 	return session.Session{}, fmt.Errorf("threadspawn: attachFakeSessions: session %q not found", id)
 }
 
-// attachFakeCoordinator records dispatched runs; it never publishes
-// RunComplete itself, so tests control when a run finishes.
+// attachFakeCoordinator records dispatched runs and the delegation tool
+// adapters Attach hands it; it never publishes RunComplete itself, so
+// tests control when a run finishes.
 type attachFakeCoordinator struct {
 	agent.Coordinator
 
-	mu         sync.Mutex
-	runs       []attachFakeRun
-	cancelAll  bool
-	canceled   []string
-	runErr     error
-	delivered  []agent.TaskCompletion
-	registered []agent.DelegationParent
+	mu             sync.Mutex
+	runs           []attachFakeRun
+	cancelAll      bool
+	canceled       []string
+	runErr         error
+	delivered      []agent.TaskCompletion
+	registered     []agent.DelegationParent
+	threadsAdapter tools.ThreadManager
+	tasksAdapter   tools.TaskManager
 }
 
 type attachFakeRun struct {
@@ -155,11 +158,21 @@ func (f *attachFakeCoordinator) runCount() int {
 	return len(f.runs)
 }
 
-// SetThreads / SetTasks / IsBusy are no-ops: App.Shutdown and Attach call
-// them on the coordinator; the embedded nil agent.Coordinator would panic.
-func (f *attachFakeCoordinator) SetThreads(tools.ThreadManager) {}
-func (f *attachFakeCoordinator) SetTasks(tools.TaskManager)     {}
-func (f *attachFakeCoordinator) IsBusy() bool                   { return false }
+// SetDelegationTools records the one adapter pair Attach publishes.
+func (f *attachFakeCoordinator) SetDelegationTools(threads tools.ThreadManager, tasks tools.TaskManager) {
+	f.mu.Lock()
+	f.threadsAdapter = threads
+	f.tasksAdapter = tasks
+	f.mu.Unlock()
+}
+
+func (f *attachFakeCoordinator) IsBusy() bool { return false }
+
+func (f *attachFakeCoordinator) adapters() (tools.ThreadManager, tools.TaskManager) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.threadsAdapter, f.tasksAdapter
+}
 
 func (f *attachFakeCoordinator) RegisterDelegationParent(_ string, parent agent.DelegationParent) {
 	f.mu.Lock()

@@ -162,9 +162,7 @@ func (f *fakeThreadCoordinator) Cancel(sessionID string) {}
 
 func (f *fakeThreadCoordinator) IsBusy() bool { return false }
 
-func (f *fakeThreadCoordinator) SetThreads(tools.ThreadManager) {}
-
-func (f *fakeThreadCoordinator) SetTasks(tools.TaskManager) {}
+func (f *fakeThreadCoordinator) SetDelegationTools(tools.ThreadManager, tools.TaskManager) {}
 
 func (f *fakeThreadCoordinator) RegisterDelegationParent(string, agent.DelegationParent) {}
 
@@ -218,8 +216,9 @@ func (s *fakeThreadSpawner) Release(ctx context.Context, id string) error {
 // A Manager owns background goroutines (auto-merge, delivery, worktree
 // removal) that keep touching a thread's worktree - and the
 // repo's own .git directory - after the test body returns; App.Shutdown/
-// ShutdownForTest does NOT join these, since SetThreadManager registers no
-// App-owned cleanup for the manager it is handed. Without this, a
+// ShutdownForTest does NOT join these, since publishing the manager
+// through SetDelegationManagers registers no App-owned cleanup for it.
+// Without this, a
 // t.TempDir() RemoveAll can race one of those goroutines and fail with
 // "directory not empty". Call this AFTER every t.TempDir() call the
 // manager's worktrees live under: t.Cleanup runs LIFO, so it must be the
@@ -249,7 +248,7 @@ func newTestThreadAppWorkspace(t *testing.T) (*AppWorkspace, *thread.Manager) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetThreadManager(mgr)
+	a.SetDelegationManagers(mgr, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	store := config.NewTestStore(t, &config.Config{}, config.WithLoadedPaths(repo))
@@ -355,7 +354,7 @@ func TestAppWorkspace_AttachThread_CompletedThread(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetThreadManager(mgr)
+	a.SetDelegationManagers(mgr, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	// Pre-populate the fake session store so the attached workspace
@@ -421,7 +420,7 @@ func TestAppWorkspace_AttachThread_LiveThread(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetThreadManager(mgr)
+	a.SetDelegationManagers(mgr, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	// Create via manager to get a real handle.
@@ -512,7 +511,7 @@ func TestAppWorkspace_AttachThread_MergedThread_ReadMessages(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetThreadManager(mgr)
+	a.SetDelegationManagers(mgr, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	// Pre-populate the fake session store.
@@ -574,7 +573,7 @@ func TestAppWorkspace_AttachThread_MergedThread_IsReadOnly(t *testing.T) {
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetThreadManager(mgr)
+	a.SetDelegationManagers(mgr, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	_, err := fs.Create(t.Context(), "readonly-check")
@@ -634,7 +633,7 @@ func TestAppWorkspace_AttachThread_ReadOnlyRefusalNamesWhyItIsReadOnly(t *testin
 		RepoRoot:    repo,
 		WorktreeDir: t.TempDir(),
 	})
-	a.SetThreadManager(mgr)
+	a.SetDelegationManagers(mgr, nil)
 	shutdownManagerOnCleanup(t, mgr)
 
 	_, err := fs.Create(t.Context(), "reason-check")

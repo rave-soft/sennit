@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"runtime"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -96,9 +99,9 @@ func newThreadsTestCoordinator(t *testing.T, threads tools.ThreadManager) (*coor
 		history:     env.history,
 		filetracker: *env.filetracker,
 		mcp:         mcp.NewRegistry(),
-		threads:     threads,
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.SetDelegationTools(threads, nil)
 	return coord, cfg.Config().Agents[config.AgentCoder]
 }
 
@@ -175,16 +178,150 @@ func TestBuildTools_ThreadSendAbsentByDefaultButAvailableWhenExplicitlyAllowed(t
 		"thread_send must still be constructible/registerable when an agent config explicitly allows it")
 }
 
-func TestCoordinator_SetThreadsTakesEffectOnNextBuild(t *testing.T) {
+func TestCoordinator_SetDelegationToolsThreadTakesEffectOnNextBuild(t *testing.T) {
 	coord, agentCfg := newThreadsTestCoordinator(t, nil)
 
 	built, err := coord.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 	require.NotContains(t, toolNames(t, built), tools.ThreadCreateToolName)
 
-	coord.SetThreads(noopThreadManager{})
+	coord.SetDelegationTools(noopThreadManager{}, nil)
 
 	built, err = coord.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(t, built), tools.ThreadCreateToolName)
+}
+
+// TestCoordinator_SetDelegationToolsPublishesOneAdapterGeneration verifies
+// readers never observe a thread adapter from a different generation than the
+// task adapter, even while concurrent publishers replace the pair.
+func TestCoordinator_SetDelegationToolsPublishesOneAdapterGeneration(t *testing.T) {
+	coord := &coordinator{runtime: newRuntimeCache()}
+	const (
+		generations = 64
+		readers     = 4
+		writers     = 2
+	)
+	threads := make([]tools.ThreadManager, generations)
+	tasks := make([]tools.TaskManager, generations)
+	pairs := make(map[tools.ThreadManager]tools.TaskManager, generations)
+	for i := range generations {
+		threads[i] = &fakeSnapshotThreadManager{id: i}
+		tasks[i] = &fakeSnapshotTaskManager{id: i}
+		pairs[threads[i]] = tasks[i]
+	}
+
+	// Start every worker together. Publishers keep their publication phase
+	// active until a reader has checked a snapshot, guaranteeing that this
+	// test exercises reader/publisher overlap rather than merely a sequence
+	// of completed writes followed by a read.
+	start := make(chan struct{})
+	publishersDone := make(chan struct{})
+	var ready, publisherWG, readerWG sync.WaitGroup
+	ready.Add(readers + writers)
+	publisherWG.Add(writers)
+	readerWG.Add(readers)
+
+	var activePublishers atomic.Int64
+	var checkedReads atomic.Int64
+	var mismatchReported atomic.Bool
+	mismatches := make(chan struct{}, 1)
+
+	for writer := range writers {
+		go func() {
+			defer publisherWG.Done()
+			ready.Done()
+			<-start
+			for i := writer; i < generations; i += writers {
+				readsBefore := checkedReads.Load()
+				activePublishers.Add(1)
+				coord.SetDelegationTools(threads[i], tasks[i])
+				for checkedReads.Load() == readsBefore {
+					runtime.Gosched()
+				}
+				activePublishers.Add(-1)
+			}
+		}()
+	}
+	go func() {
+		publisherWG.Wait()
+		close(publishersDone)
+	}()
+
+	for range readers {
+		go func() {
+			defer readerWG.Done()
+			ready.Done()
+			<-start
+			for {
+				if activePublishers.Load() == 0 {
+					select {
+					case <-publishersDone:
+						return
+					default:
+						runtime.Gosched()
+						continue
+					}
+				}
+
+				snapshot := coord.delegationToolsForRead()
+				if snapshot.threads != nil && pairs[snapshot.threads] != snapshot.tasks && mismatchReported.CompareAndSwap(false, true) {
+					mismatches <- struct{}{}
+				}
+				checkedReads.Add(1)
+			}
+		}()
+	}
+
+	ready.Wait()
+	close(start)
+	readerWG.Wait()
+
+	require.Positive(t, checkedReads.Load(), "concurrent readers must check at least one published generation")
+	select {
+	case <-mismatches:
+		t.Fatal("reader observed thread and task adapters from different generations")
+	default:
+	}
+}
+
+type fakeSnapshotThreadManager struct{ id int }
+
+func (*fakeSnapshotThreadManager) Create(context.Context, tools.ThreadCreateArgs) (tools.ThreadInfo, error) {
+	return tools.ThreadInfo{}, nil
+}
+
+func (*fakeSnapshotThreadManager) List(context.Context) ([]tools.ThreadInfo, error) { return nil, nil }
+
+func (*fakeSnapshotThreadManager) Get(context.Context, string) (tools.ThreadInfo, error) {
+	return tools.ThreadInfo{}, nil
+}
+
+func (*fakeSnapshotThreadManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
+	return tools.SendOutcome{}, nil
+}
+
+func (*fakeSnapshotThreadManager) Wait(context.Context, []string, time.Duration) error { return nil }
+
+func (*fakeSnapshotThreadManager) Merge(context.Context, string) (tools.ThreadInfo, error) {
+	return tools.ThreadInfo{}, nil
+}
+func (*fakeSnapshotThreadManager) Remove(context.Context, string, bool, bool) error { return nil }
+
+type fakeSnapshotTaskManager struct{ id int }
+
+func (*fakeSnapshotTaskManager) Create(context.Context, tools.TaskCreateArgs) (tools.TaskInfo, error) {
+	return tools.TaskInfo{}, nil
+}
+func (*fakeSnapshotTaskManager) List(context.Context) ([]tools.TaskInfo, error) { return nil, nil }
+func (*fakeSnapshotTaskManager) Get(context.Context, string) (tools.TaskInfo, error) {
+	return tools.TaskInfo{}, nil
+}
+func (*fakeSnapshotTaskManager) Cancel(context.Context, string, string) error { return nil }
+func (*fakeSnapshotTaskManager) Send(context.Context, string, string) (tools.SendOutcome, error) {
+	return tools.SendOutcome{}, nil
+}
+
+func (*fakeSnapshotTaskManager) Output(context.Context, string, int) (tools.TaskOutput, error) {
+	return tools.TaskOutput{}, nil
 }

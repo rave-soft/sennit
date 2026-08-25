@@ -906,7 +906,7 @@ func (w *AppWorkspace) Subscribe(send func(any)) {
 // translateEvent adapts a message from app's event fan-in into the shape
 // the TUI's Update() expects. Every source app.setupEvents wires in at
 // construction already arrives pre-shaped; the one exception is thread
-// events, forwarded raw by app.ForwardEvents (see SetThreadManager in
+// events, forwarded raw by app.ForwardEvents (see
 // internal/app/threadspawn/attach.go) as the
 // pubsub.Event[thread.Event] the Manager itself publishes, because
 // ForwardEvents is generic over T and has no way to convert on the way

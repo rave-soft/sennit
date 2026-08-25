@@ -39,14 +39,12 @@ func TestAttachOnlyAtRepositoryRoot(t *testing.T) {
 
 	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
 	require.NotNil(t, a.ThreadManager())
-	require.NotNil(t, a.Threads)
 
 	subdir := filepath.Join(repo, "subdir")
 	require.NoError(t, os.Mkdir(subdir, 0o755))
 	nested := newAttachTestApp(t, subdir)
 	Attach(t.Context(), nested, subdir, newAttachTestSpawner(t))
 	require.Nil(t, nested.ThreadManager())
-	require.Nil(t, nested.Threads)
 }
 
 // TestAttachOnlyAtRepositoryRoot_SymlinkedAlias simulates, with a symlink,
@@ -65,7 +63,6 @@ func TestAttachOnlyAtRepositoryRoot_SymlinkedAlias(t *testing.T) {
 	a := newAttachTestApp(t, alias)
 	Attach(t.Context(), a, alias, newAttachTestSpawner(t))
 	require.NotNil(t, a.ThreadManager())
-	require.NotNil(t, a.Threads)
 }
 
 func TestAttachDoesNotPublishWhenConnectFails(t *testing.T) {
@@ -77,7 +74,6 @@ func TestAttachDoesNotPublishWhenConnectFails(t *testing.T) {
 	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
 	require.Nil(t, a.ThreadManager())
-	require.Nil(t, a.Threads)
 }
 
 func TestAttachRecoversBestEffortAndPublishes(t *testing.T) {
@@ -89,7 +85,6 @@ func TestAttachRecoversBestEffortAndPublishes(t *testing.T) {
 	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
 	require.NotNil(t, a.ThreadManager())
-	require.NotNil(t, a.Threads)
 }
 
 func TestAttachShutdownHookFailureReleasesDatabaseWithoutPublishing(t *testing.T) {
@@ -107,7 +102,6 @@ func TestAttachShutdownHookFailureReleasesDatabaseWithoutPublishing(t *testing.T
 
 	require.Equal(t, 1, releases)
 	require.Nil(t, a.ThreadManager())
-	require.Nil(t, a.Threads)
 }
 
 func TestAttachCriticalCleanupFailureShutsDownThenReleasesWithoutPublishing(t *testing.T) {
@@ -129,7 +123,6 @@ func TestAttachCriticalCleanupFailureShutsDownThenReleasesWithoutPublishing(t *t
 
 	require.Equal(t, []string{"shutdown", "release"}, calls)
 	require.Nil(t, a.ThreadManager())
-	require.Nil(t, a.Threads)
 }
 
 func testAttachDeps() attachDeps { return ProductionAttachDeps() }
@@ -160,7 +153,6 @@ func TestAttachCleanupShutsDownManagerBeforeReleasingDatabase(t *testing.T) {
 	AttachWithDeps(t.Context(), a, repo, newAttachTestSpawner(t), deps)
 
 	require.NotNil(t, a.ThreadManager())
-	require.NotNil(t, a.Threads)
 	require.NotNil(t, shutdownHook)
 	require.NotNil(t, criticalCleanup)
 	require.NoError(t, shutdownHook(t.Context()))
@@ -383,11 +375,11 @@ func TestAttach_ClosesOutInterruptedTurnsInThreadWorktrees(t *testing.T) {
 }
 
 // TestAttach_SetPermissionsSkipReachesLiveThread pins the wiring
-// App.SetPermissionsSkip depends on: Attach must call SetThreadManager so
-// app.threadManager is non-nil by the time a toggle happens, or the
-// propagation App.SetPermissionsSkip performs (see its doc comment in
-// internal/app/app.go) silently does nothing and a running thread is left
-// on whatever bypass state it was spawned with. internal/thread's own
+// App.SetPermissionsSkip depends on: Attach must publish the thread
+// manager to the App so ThreadManager() is non-nil by the time a toggle
+// happens, or the propagation App.SetPermissionsSkip performs (see its
+// doc comment) silently does nothing and a running thread is left on
+// whatever bypass state it was spawned with. internal/thread's own
 // TestManager_SetPermissionsSkipReachesLiveThreads covers the propagation
 // itself; this covers that Attach actually wires the manager it propagates
 // through.
@@ -421,4 +413,77 @@ func TestAttach_SetPermissionsSkipReachesLiveThread(t *testing.T) {
 	a.SetPermissionsSkip(false)
 	require.False(t, handle.App().Permissions().SkipRequests(),
 		"turning bypass off must reach it too")
+}
+
+// TestAttachNonGitWorkspacesGetTaskManagerWithoutThreadManager pins the
+// non-git ownership split: a directory outside any repository gets the
+// task manager (tasks are workspace delegations, not git worktree
+// operations) but no thread manager, and the coordinator is handed a nil
+// thread adapter alongside the live task adapter.
+func TestAttachNonGitWorkspacesGetTaskManagerWithoutThreadManager(t *testing.T) {
+	dir := t.TempDir()
+	a := newAttachTestApp(t, dir)
+	a.SetSessionsForTest(&attachFakeSessions{})
+	coord := &attachFakeCoordinator{}
+	a.AgentCoordinator = coord
+
+	Attach(t.Context(), a, dir, newAttachTestSpawner(t))
+
+	require.Nil(t, a.ThreadManager(), "a non-git workspace must not own a thread manager")
+	require.NotNil(t, a.TaskManager(), "a non-git workspace must still own a task manager")
+	threadsAdapter, tasksAdapter := coord.adapters()
+	require.Nil(t, threadsAdapter)
+	require.NotNil(t, tasksAdapter)
+}
+
+// TestAttachNestedGitSubdirectoryAttachesNothing covers the case easily
+// confused with the one above: a subdirectory inside a repository is not
+// the repository root, so Attach performs no attachment at all — no task
+// manager either, unlike a directory outside git.
+func TestAttachNestedGitSubdirectoryAttachesNothing(t *testing.T) {
+	repo := initRepo(t)
+	subdir := filepath.Join(repo, "nested")
+	require.NoError(t, os.Mkdir(subdir, 0o755))
+
+	a := newAttachTestApp(t, subdir)
+	coord := &attachFakeCoordinator{}
+	a.AgentCoordinator = coord
+
+	Attach(t.Context(), a, subdir, newAttachTestSpawner(t))
+
+	require.Nil(t, a.ThreadManager())
+	require.Nil(t, a.TaskManager(), "a nested directory is not an attachment point at all")
+	threadsAdapter, tasksAdapter := coord.adapters()
+	require.Nil(t, threadsAdapter)
+	require.Nil(t, tasksAdapter)
+}
+
+// TestAttachGitRootHandsCoordinatorAdaptersFromPublishedPair proves the
+// coordinator wiring: the adapters Attach hands the agent coordinator are
+// the tool-facing views of the very managers it publishes on the App, so
+// a thread created through the adapter is the one the App's concrete
+// manager sees.
+func TestAttachGitRootHandsCoordinatorAdaptersFromPublishedPair(t *testing.T) {
+	repo := initRepo(t)
+	a := newAttachTestApp(t, repo)
+	a.SetSessionsForTest(&attachFakeSessions{})
+	coord := &attachFakeCoordinator{}
+	a.AgentCoordinator = coord
+
+	Attach(t.Context(), a, repo, newAttachTestSpawner(t))
+
+	require.NotNil(t, a.ThreadManager())
+	require.NotNil(t, a.TaskManager())
+
+	threadsAdapter, tasksAdapter := coord.adapters()
+	require.NotNil(t, threadsAdapter)
+	require.NotNil(t, tasksAdapter)
+
+	st, err := threadsAdapter.List(t.Context())
+	require.NoError(t, err)
+	got, err := a.ThreadManager().List(t.Context())
+	require.NoError(t, err)
+	require.Len(t, st, len(got))
+	_, err = tasksAdapter.List(t.Context())
+	require.NoError(t, err)
 }

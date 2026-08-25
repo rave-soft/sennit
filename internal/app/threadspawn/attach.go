@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"reflect"
 
+	"github.com/rave-soft/sennit/internal/agent/tools"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/db"
@@ -159,12 +160,18 @@ func attachWithDeps(ctx context.Context, a *app.App, path string, spawner thread
 	// Publish only once shutdown and database cleanup are both registered:
 	// consumers must never observe a manager whose dependencies can leak.
 	if isGitWorkspace {
-		a.SetThreads(AsAgentToolManager(mgr))
-		a.SetThreadManager(mgr)
 		deps.forwardEvents(a, mgr)
 	}
-	a.SetTaskManager(tasks)
-	a.SetTasks(AsAgentToolTaskManager(tasks))
+	var threadMgr *thread.Manager
+	var threadTools tools.ThreadManager
+	if isGitWorkspace {
+		threadMgr = mgr
+		threadTools = AsAgentToolManager(mgr)
+	}
+	a.SetDelegationManagers(threadMgr, tasks)
+	if a.AgentCoordinator != nil {
+		a.AgentCoordinator.SetDelegationTools(threadTools, AsAgentToolTaskManager(tasks))
+	}
 	if isGitWorkspace {
 		if local, ok := spawner.(*LocalSpawner); ok {
 			go forwardSkillsToThreads(ctx, a, local)

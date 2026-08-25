@@ -27,7 +27,7 @@ var expectedGateByName = map[toolmeta.Gate][]string{
 
 func TestToolSpecsMatchFrozenGateMatrixAndBuildNames(t *testing.T) {
 	coord, _ := newThreadsTestCoordinator(t, noopThreadManager{})
-	coord.tasks = noopTaskManager{}
+	coord.SetDelegationTools(coord.threadsManager(), noopTaskManager{})
 	b := &buildToolsCtx{
 		agent:              config.Agent{AllowedTools: toolmeta.NamesAll()},
 		interactive:        true,
@@ -142,7 +142,7 @@ func TestBuildToolsMatchesFrozenGateScenarios(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			coord, _ := newThreadsTestCoordinator(t, noopThreadManager{})
-			coord.tasks = noopTaskManager{}
+			coord.SetDelegationTools(coord.threadsManager(), noopTaskManager{})
 			coord.interactive = true
 			cfg := coord.cfg.Config()
 			cfg.MCP["test"] = config.MCPConfig{Type: config.MCPStdio, Command: "unused"}

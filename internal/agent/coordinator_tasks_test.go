@@ -79,9 +79,9 @@ func newTasksTestCoordinator(t *testing.T, taskManager tools.TaskManager) (*coor
 		history:     env.history,
 		filetracker: *env.filetracker,
 		mcp:         mcp.NewRegistry(),
-		tasks:       taskManager,
 		background:  shell.NewBackgroundShellManager(),
 	}
+	coord.SetDelegationTools(nil, taskManager)
 	return coord, cfg.Config().Agents[config.AgentCoder]
 }
 
@@ -156,14 +156,14 @@ func TestBuildTools_TaskToolsPresentWhenBackgroundAgentsExplicitlyEnabled(t *tes
 	}
 }
 
-func TestCoordinator_SetTasksTakesEffectImmediately(t *testing.T) {
+func TestCoordinator_SetDelegationToolsTaskTakesEffectImmediately(t *testing.T) {
 	coord, agentCfg := newTasksTestCoordinator(t, nil)
 
 	built, err := coord.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
 	require.NotContains(t, toolNames(t, built), tools.TaskListToolName)
 
-	coord.SetTasks(noopTaskManager{})
+	coord.SetDelegationTools(nil, noopTaskManager{})
 
 	built, err = coord.buildTools(t.Context(), agentCfg, false)
 	require.NoError(t, err)
