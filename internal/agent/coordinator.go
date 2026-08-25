@@ -454,7 +454,7 @@ func (c *coordinator) runContinuation(ctx context.Context, sessionID string) err
 		Prompt:           continuationPromptPlaceholder,
 		Continuation:     true,
 		MaxOutputTokens:  runtime.maxOutputTokens,
-		ProviderOptions:  runtime.providerOptions,
+		ProviderOptions:  withPromptCacheKey(runtime.providerOptions, runtime.model, runtime.providerCfg, sessionID),
 		Temperature:      runtime.temperature,
 		TopP:             runtime.topP,
 		TopK:             runtime.topK,
@@ -560,7 +560,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 			OnDispatch:       onDispatch,
 			Attachments:      attachments,
 			MaxOutputTokens:  runtime.maxOutputTokens,
-			ProviderOptions:  runtime.providerOptions,
+			ProviderOptions:  withPromptCacheKey(runtime.providerOptions, runtime.model, runtime.providerCfg, sessionID),
 			Temperature:      runtime.temperature,
 			TopP:             runtime.topP,
 			TopK:             runtime.topK,
@@ -1383,10 +1383,15 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 	}
 	active := newActiveRuntime(runtime)
 
+	// The summary request replays the same conversation prefix the turns
+	// did, so it wants the same routing (see withPromptCacheKey) — and it
+	// is the single most expensive request a session makes, since a
+	// summary is only asked for once the context is full.
+	summaryOptions := withPromptCacheKey(runtime.providerOptions, runtime.model, runtime.providerCfg, sessionID)
 	if agent, ok := c.currentAgent.(*sessionAgent); ok {
-		return agent.summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active), runtime.model, runtime.systemPromptPrefix, active, nil)
+		return agent.summarize(ctx, sessionID, summaryOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active), runtime.model, runtime.systemPromptPrefix, active, nil)
 	}
-	return c.currentAgent.Summarize(ctx, sessionID, runtime.providerOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active))
+	return c.currentAgent.Summarize(ctx, sessionID, summaryOptions, c.makeAuthRefreshCallback(runtime.providerCfg, active))
 }
 
 // GenerateTitle generates a session title using the current agent.

@@ -148,12 +148,15 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	// context that can outlive ctx.
 	run := func(runCtx context.Context) (*fantasy.AgentResult, error) {
 		call := SessionAgentCall{
-			SessionID:        sessionID,
-			Depth:            params.Depth,
-			Prompt:           params.Prompt,
-			PriorMessages:    priorMessages,
-			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  getProviderOptions(model, providerCfg),
+			SessionID:       sessionID,
+			Depth:           params.Depth,
+			Prompt:          params.Prompt,
+			PriorMessages:   priorMessages,
+			MaxOutputTokens: maxTokens,
+			// Keyed on the child session: a delegation's ~90 steps all
+			// replay its own growing prefix, which is exactly the run of
+			// requests prompt_cache_key exists to keep together.
+			ProviderOptions:  withPromptCacheKey(getProviderOptions(model, providerCfg), model, providerCfg, sessionID),
 			Temperature:      model.ModelCfg.Temperature,
 			TopP:             model.ModelCfg.TopP,
 			TopK:             model.ModelCfg.TopK,
