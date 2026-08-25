@@ -334,9 +334,11 @@ func TestCompletionAckWaitsForSuccessfulProviderStep(t *testing.T) {
 	sa.SetModel(Model{Model: model, CatalogCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}})
 	_, runErr = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "retry"})
 	require.NoError(t, runErr)
-	mu.Lock()
-	require.Equal(t, 1, acks, "the replay is acknowledged only after the successful provider step")
-	mu.Unlock()
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return acks == 1
+	}, 2*time.Second, 5*time.Millisecond, "the replay is acknowledged only after the successful provider step")
 }
 
 func TestPrepareStep_CompletionRequeuedOnStepFailure(t *testing.T) {
