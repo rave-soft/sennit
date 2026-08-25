@@ -69,23 +69,6 @@ nav:
   - Troubleshooting: troubleshooting.md
   - Contributing: contributing.md
 
-# Engineering decision records are kept out of the published site. They
-# live under docs/ so they sit with the rest of the written material and
-# are reviewed alongside it, but they are measurement notes addressed to
-# whoever picks the question up next, and they cite plan item IDs ("T15
-# r1", the "T0 parallel-tool allow-list") from a working document that has
-# since been closed and deleted. A reader arriving at sennit's docs has
-# nothing to resolve those against.
-#
-# exclude_docs rather than not_in_nav: the latter only drops them from the
-# navigation, leaving the pages built and reachable by URL, which is the
-# same publication with the signpost removed. Either one satisfies
-# `mkdocs build --strict`, which fails on a page under docs/ that no nav
-# entry mentions — rightly, so that leaving a page out is a decision
-# someone writes down instead of an oversight.
-exclude_docs: |
-  decisions/
-
 markdown_extensions:
   - admonition
   - attr_list
