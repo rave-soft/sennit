@@ -654,33 +654,23 @@ func TestRunBackgroundAgent_NestingLimit(t *testing.T) {
 	require.Equal(t, 1, fake.created[len(fake.created)-1].Depth)
 }
 
-// TestRunBackgroundAgent_UnattendedRoundLimit proves the bound that
-// actually applies to a loop: rounds, not levels. A session at the top
-// level may delegate as many times in a row as it likes — that is an
-// iterative plan — until it has run maxUnattendedDelegationRounds of them
-// with nobody saying anything, at which point delegating is refused and
-// the model is told to report back instead.
-func TestRunBackgroundAgent_UnattendedRoundLimit(t *testing.T) {
+// TestRunBackgroundAgent_RepeatedRoundsAtTopLevelAllowed pins the other
+// half of "depth counts nesting": a session at the top level may delegate
+// as many times in a row as the work needs. That is what an iterative
+// plan looks like — implement, review, implement again — and it is what
+// the old depth-counting gate killed after three rounds. Nothing bounds
+// how many such rounds a session runs.
+func TestRunBackgroundAgent_RepeatedRoundsAtTopLevelAllowed(t *testing.T) {
 	fake := &fakeTaskManager{info: tools.TaskInfo{ID: "task-1", SessionID: "child-sess", Status: "running"}}
 	coord := newAgentToolTestCoordinator(t, fake)
 
-	// Round after round at depth 0: nesting never grows, so nothing here
-	// may be refused for depth. This is the case the old depth-counting
-	// gate killed after three rounds.
-	for round := range maxUnattendedDelegationRounds {
-		ctx := context.WithValue(t.Context(), tools.UnattendedRoundsContextKey, round)
-		resp, err := coord.runBackgroundAgent(ctx, "parent-sess", "another round", "", 1)
+	const rounds = maxTaskCascadeDepth * 10
+	for round := range rounds {
+		resp, err := coord.runBackgroundAgent(t.Context(), "parent-sess", "another round", "", 1)
 		require.NoError(t, err)
 		require.False(t, resp.IsError, "round %d must be allowed", round)
 	}
-	require.Len(t, fake.created, maxUnattendedDelegationRounds)
-
-	atCap := context.WithValue(t.Context(), tools.UnattendedRoundsContextKey, maxUnattendedDelegationRounds)
-	resp, err := coord.runBackgroundAgent(atCap, "parent-sess", "one round too many", "", 1)
-	require.NoError(t, err)
-	require.True(t, resp.IsError, "an unattended session must eventually be made to report back")
-	require.Contains(t, resp.Content, "without a person in the loop")
-	require.Len(t, fake.created, maxUnattendedDelegationRounds)
+	require.Len(t, fake.created, rounds)
 }
 
 // TestTaskCompletionDelivery_SameContentBothPaths is the regression test
@@ -822,43 +812,6 @@ func completionMessageText(t *testing.T, prompt fantasy.Prompt, marker string) s
 	}
 	require.Equal(t, 1, n, "expected exactly one message part containing %q", marker)
 	return found
-}
-
-// TestUnattendedRounds_CountedPerContinuationAndResetByAPerson proves the
-// counter the loop bound rests on: each auto-woken continuation that
-// actually becomes the active run is one round, and anything a person
-// sends puts it back to zero — which is why a session someone is talking
-// to never runs out of rounds.
-//
-// Driven through dispatchDecision, the one place the counter moves, with
-// each decision's active slot released the way a finishing turn releases
-// it. Running whole turns instead would prove the same thing through a
-// fake model's streaming script, which is a lot of machinery between the
-// assertion and what it is about.
-func TestUnattendedRounds_CountedPerContinuationAndResetByAPerson(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	sa := testSessionAgent(env, &toolCallThenFinishModel{}, "system").(*sessionAgent)
-
-	sess, err := env.sessions.Create(t.Context(), "session")
-	require.NoError(t, err)
-
-	run := func(call SessionAgentCall) int {
-		call.SessionID = sess.ID
-		decision := sa.dispatchDecision(t.Context(), call)
-		require.True(t, decision.active, "the session is idle, so every call here becomes the active run")
-		sa.clearActiveIfMatch(sess.ID, decision.ac)
-		decision.cancel()
-		return decision.unattendedRounds
-	}
-
-	require.Equal(t, 0, run(SessionAgentCall{Prompt: "do the thing"}),
-		"a person's own turn is not a round of unattended work")
-	require.Equal(t, 1, run(SessionAgentCall{Prompt: continuationPromptPlaceholder, Continuation: true}))
-	require.Equal(t, 2, run(SessionAgentCall{Prompt: continuationPromptPlaceholder, Continuation: true}))
-	require.Equal(t, 0, run(SessionAgentCall{Prompt: "carry on"}),
-		"a person spoke: the count starts over")
-	require.Equal(t, 1, run(SessionAgentCall{Prompt: continuationPromptPlaceholder, Continuation: true}))
 }
 
 // TestFoldCompletions_ContinuationStaysAtItsOwnLevel is the regression for

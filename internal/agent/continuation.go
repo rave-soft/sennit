@@ -25,30 +25,13 @@ import (
 // implement again. Counting those rounds as depth (as this once did) shut
 // delegation off after three rounds of perfectly ordinary work, while
 // leaving real nesting unbounded — a delegation's own turn ran at depth 0
-// and could start another at depth 0 forever.
+// and could start another at depth 0 forever. How many such rounds a
+// session runs is not bounded here or anywhere else.
 //
-// What the loop needs bounding by is rounds, not levels — see
-// maxUnattendedDelegationRounds.
-//
-// Both are hard constants, not configuration: the failure mode they guard
-// against (work quietly multiplying with nobody watching) is not
-// something a misconfigured value should be able to reopen.
+// This is a hard constant, not configuration: the failure mode it guards
+// against (agents hiring agents further and further from the person who
+// asked) is not something a misconfigured value should be able to reopen.
 const maxTaskCascadeDepth = 3
-
-// maxUnattendedDelegationRounds bounds how many times a session may
-// delegate, wake on the result and delegate again without a person saying
-// anything in between. Every round is real work someone asked for once,
-// so the number is generous — an unattended plan gets a long run at it —
-// but it is finite: without a bound, a session that reacts to each
-// completion by starting the next delegation never stops, and nothing
-// else in the system would notice.
-//
-// Reaching it does not interrupt anything. The turn that reached it runs
-// to its end, and the refusal (see the delegation tools) tells the model
-// to report where the work stands instead of starting more, which puts
-// the person back in the loop — where a single word from them resets the
-// count (see sessionState.unattendedRounds).
-const maxUnattendedDelegationRounds = 25
 
 // continuationPromptPlaceholder is the fantasy.Call.Prompt an auto-woken
 // continuation carries. It exists purely to satisfy fantasy's own

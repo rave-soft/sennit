@@ -247,9 +247,7 @@ func (t *runTurn) foldCompletions(messages []fantasy.Message, stepNumber int) ([
 		// plan — implement, review, implement again — ran out of depth
 		// after three rounds and could never delegate again, while a
 		// genuinely nested chain of delegations was not counted at all
-		// (a delegation's own turn ran at depth 0). What bounds the
-		// unattended loop is UnattendedRounds, which counts rounds
-		// because rounds are what it is about.
+		// (a delegation's own turn ran at depth 0).
 		depth := 0
 		for _, c := range completions {
 			if c.Depth > depth {
@@ -393,7 +391,6 @@ func (t *runTurn) createStepAssistant(callContext context.Context, messages []fa
 	callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, t.model.CatalogCfg.SupportsImages)
 	callContext = context.WithValue(callContext, tools.ModelNameContextKey, t.model.CatalogCfg.Name)
 	callContext = context.WithValue(callContext, tools.DepthContextKey, t.call.Depth)
-	callContext = context.WithValue(callContext, tools.UnattendedRoundsContextKey, t.call.UnattendedRounds)
 	t.currentAssistant = &assistantMsg
 	return callContext, nil
 }

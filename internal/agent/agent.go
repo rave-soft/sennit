@@ -144,13 +144,6 @@ type SessionAgentCall struct {
 	// the final value onto the step's context (tools.DepthContextKey) so
 	// the delegation tools can refuse to nest past maxTaskCascadeDepth.
 	Depth int
-	// UnattendedRounds is how many auto-woken continuations this session
-	// has run since a person last said anything to it, stamped by
-	// dispatchDecision from the session's own counter. Depth bounds
-	// nesting; this bounds iteration - a session delegating, waking on
-	// the result and delegating again with nobody watching. Stamped onto
-	// the step's context as tools.UnattendedRoundsContextKey.
-	UnattendedRounds int
 	// Steering marks a follow-up the person typed at a session that may
 	// already be mid-turn, asking for it to reach that turn rather than
 	// wait for it: when run's dispatch decision finds the session busy,
@@ -438,16 +431,11 @@ func ValidateCall(call SessionAgentCall) error {
 type dispatchOutcome struct {
 	steer  SteerOutcome
 	active bool
-	// unattendedRounds is the session's round counter as of the moment
-	// this call became the active run — read under the dispatch mutex,
-	// where it is also updated, and handed back because the decision
-	// works on its own copy of call. Meaningful only when active.
-	unattendedRounds int
-	genCtx           context.Context
-	cancel           context.CancelFunc
-	ac               *activeCancel
-	result           *fantasy.AgentResult
-	err              error
+	genCtx context.Context
+	cancel context.CancelFunc
+	ac     *activeCancel
+	result *fantasy.AgentResult
+	err    error
 }
 
 // dispatchDecision makes the atomic cancel-on-entry / enqueue / become-active
@@ -484,15 +472,6 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 	s, release := a.session(call.SessionID)
 	defer release()
 	s.mu.Lock()
-
-	// A person just said something: whatever chain of delegate-and-wake
-	// ran before this, someone is back in the loop and the round counter
-	// starts over. Every non-continuation call reaches this point,
-	// including one enqueued behind a busy turn — the counter is about
-	// attention, not about which turn ends up carrying the words.
-	if !call.Continuation {
-		s.unattendedRounds = 0
-	}
 
 	if call.Accepted != nil && a.canceledBySeq(s, call.Accepted.seq) {
 		// Cancel-on-entry: a cancel arrived while this accepted run was
@@ -621,21 +600,13 @@ func (a *sessionAgent) dispatchDecision(ctx context.Context, call SessionAgentCa
 	// enqueueCompletionAndDrainForWake) - so any earlier "user canceled
 	// this session" marker is now stale.
 	s.cancelled = false
-	// Counted here rather than at the wake attempt: an attempt that never
-	// becomes the active run (dropped, enqueued, canceled on entry) is not
-	// a round of unattended work, and counting it would retire a session's
-	// budget for something that never ran.
-	if call.Continuation {
-		s.unattendedRounds++
-	}
-	rounds := s.unattendedRounds
 	if call.Accepted != nil {
 		call.Accepted.Close()
 	}
 	dispatched(SteerRan)
 	s.mu.Unlock()
 
-	return dispatchOutcome{steer: SteerRan, active: true, genCtx: genCtx, cancel: cancel, ac: ac, unattendedRounds: rounds}
+	return dispatchOutcome{steer: SteerRan, active: true, genCtx: genCtx, cancel: cancel, ac: ac}
 }
 
 // buildStreamAgent constructs the fantasy agent from an already assembled
@@ -850,7 +821,6 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (outc
 		return decision.steer, decision.result, nil, decision.err
 	}
 	genCtx, cancel, ac := decision.genCtx, decision.cancel, decision.ac
-	call.UnattendedRounds = decision.unattendedRounds
 
 	// Record the model this turn is about to run on, so restoring the
 	// session later restores the model it was working with rather than

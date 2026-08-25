@@ -94,12 +94,6 @@ func (c *coordinator) launchDelegation(ctx context.Context, args tools.TaskCreat
 			maxTaskCascadeDepth,
 		)), nil
 	}
-	if rounds := tools.GetUnattendedRoundsFromContext(ctx); rounds >= maxUnattendedDelegationRounds {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf(
-			"This session has run %d delegation rounds without a person in the loop. Stop delegating and report where the work stands; a reply from them resumes it.",
-			rounds,
-		)), nil
-	}
 	manager := c.tasksManager()
 	if manager == nil {
 		return fantasy.NewTextErrorResponse("Delegation is unavailable in this workspace."), nil
