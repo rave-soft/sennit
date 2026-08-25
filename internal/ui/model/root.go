@@ -55,7 +55,7 @@ const (
 // so a thread's own event stream can be torn down on detach without
 // disturbing the main one.
 type threadEventSubscriber interface {
-	SubscribeWith(send func(tea.Msg)) func()
+	SubscribeWith(send func(any)) func()
 }
 
 // threadAttachment holds everything tied to the thread currently attached
@@ -551,7 +551,7 @@ func (r *Root) handleThreadAttached(msg threadAttachedMsg) (tea.Model, tea.Cmd) 
 	stop := func() {}
 	if sub, ok := msg.ws.(threadEventSubscriber); ok {
 		id := msg.id
-		stop = sub.SubscribeWith(func(m tea.Msg) {
+		stop = sub.SubscribeWith(func(m any) {
 			if r.send != nil {
 				r.send(threadEventMsg{threadID: id, inner: m})
 			}

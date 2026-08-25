@@ -442,8 +442,8 @@ func (w *cmdDrivingWorkspace) QuestionCancel() bool {
 	w.questionCancelCalls++
 	return false
 }
-func (w *cmdDrivingWorkspace) Subscribe(*tea.Program) {}
-func (w *cmdDrivingWorkspace) Shutdown()              {}
+func (w *cmdDrivingWorkspace) Subscribe(func(any)) {}
+func (w *cmdDrivingWorkspace) Shutdown()           {}
 
 // ---------------------------------------------------------------------------
 // cmdDrivenUI builds a UI over cmdDrivingWorkspace with all caches warm.

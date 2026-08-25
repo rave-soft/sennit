@@ -54,6 +54,27 @@ func (w *rootTestWorkspace) ListThreads(context.Context) ([]proto.Thread, error)
 	return nil, nil
 }
 
+type neutralSubscriberWorkspace struct {
+	rootTestWorkspace
+	send      func(any)
+	stopped   bool
+	stopCalls int
+}
+
+func (w *neutralSubscriberWorkspace) SubscribeWith(send func(any)) func() {
+	w.send = send
+	return func() {
+		w.stopped = true
+		w.stopCalls++
+	}
+}
+
+func (w *neutralSubscriberWorkspace) emit(msg any) {
+	if !w.stopped && w.send != nil {
+		w.send(msg)
+	}
+}
+
 // newTestRoot builds a Root over rootTestWorkspace, configured so New()
 // lands in uiLanding/uiFocusEditor where the global key switch (and
 // therefore the threads key) is reachable.
@@ -216,6 +237,50 @@ func TestThreadEventMsgReachesAttachedThread(t *testing.T) {
 
 	require.Equal(t, 80, threadUI.lay.width)
 	require.Equal(t, 24, threadUI.lay.height)
+}
+
+func TestHandleThreadAttachedAdaptsNeutralSubscriber(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRoot(t, true)
+	ws := &neutralSubscriberWorkspace{}
+	r.pendingAttach = "thread-1"
+	detachCalls := 0
+	delivered := make([]tea.Msg, 0, 1)
+	r.SetSend(func(msg tea.Msg) {
+		delivered = append(delivered, msg)
+		model, _ := r.Update(msg)
+		r = model.(*Root)
+	})
+
+	model, _ := r.handleThreadAttached(threadAttachedMsg{
+		id:        "thread-1",
+		sessionID: "session-1",
+		name:      "thread",
+		ws:        ws,
+		detach:    func() { detachCalls++ },
+	})
+	r = model.(*Root)
+	require.NotNil(t, ws.send)
+
+	inner := tea.WindowSizeMsg{Width: 91, Height: 37}
+	ws.emit(inner)
+	require.Len(t, delivered, 1)
+	event, ok := delivered[0].(threadEventMsg)
+	require.True(t, ok)
+	require.Equal(t, "thread-1", event.threadID)
+	require.Equal(t, inner, event.inner)
+	require.Equal(t, 91, r.thread.ui.lay.width)
+	require.Equal(t, 37, r.thread.ui.lay.height)
+
+	stop := r.detachThread()
+	require.NotNil(t, stop)
+	stop()
+	require.Equal(t, 1, ws.stopCalls)
+	require.Equal(t, 1, detachCalls)
+
+	ws.emit(tea.WindowSizeMsg{Width: 12, Height: 8})
+	require.Len(t, delivered, 1)
 }
 
 // TestAltUpAtThreadTopLevelReturnsToMain covers the new handleKeyPress

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/app"
 	"github.com/rave-soft/sennit/internal/app/threadspawn"
 	"github.com/rave-soft/sennit/internal/log"
@@ -260,11 +259,11 @@ func reactivate(ctx context.Context, mgr *thread.Manager, id string) (*app.App, 
 // SubscribeWith runs a second, independently stoppable event subscription
 // against this workspace's App, for callers (e.g. the TUI attaching to a
 // thread's own workspace via Workspace.AttachThread) that need a plain
-// send callback and an explicit stop rather than the *tea.Program-bound
+// send callback and an explicit stop rather than a UI-bound
 // Subscribe. Unlike Subscribe (which rides app.globalCtx/app.Shutdown),
 // this owns its own context so it can be torn down independently of the
 // underlying App's lifetime.
-func (w *AppWorkspace) SubscribeWith(send func(tea.Msg)) func() {
+func (w *AppWorkspace) SubscribeWith(send func(any)) func() {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

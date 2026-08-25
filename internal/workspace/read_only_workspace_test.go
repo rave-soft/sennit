@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/commands"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/git"
@@ -636,8 +635,8 @@ func (s *stubWorkspace) CancelTask(context.Context, string, string) error {
 }
 
 // EventSubscriber
-func (s *stubWorkspace) Subscribe(program *tea.Program) { s.track("Subscribe") }
-func (s *stubWorkspace) Shutdown()                      { s.track("Shutdown") }
+func (s *stubWorkspace) Subscribe(send func(any)) { s.track("Subscribe") }
+func (s *stubWorkspace) Shutdown()                { s.track("Shutdown") }
 
 func (s *stubWorkspace) ListMessagesBySessionIDs(_ context.Context, rootSessionID string, _ uint64, sessionIDs []string) (map[string][]message.Message, error) {
 	s.batchRoots = append(s.batchRoots, rootSessionID)

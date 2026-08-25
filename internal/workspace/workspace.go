@@ -10,7 +10,6 @@ import (
 	"errors"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 
 	"github.com/rave-soft/sennit/internal/agent"
@@ -428,7 +427,7 @@ type BackgroundJobs interface {
 }
 
 type EventSubscriber interface {
-	Subscribe(program *tea.Program)
+	Subscribe(send func(any))
 	Shutdown()
 }
 

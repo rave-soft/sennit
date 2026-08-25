@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/rave-soft/sennit/internal/agent"
@@ -877,12 +876,8 @@ func (w *AppWorkspace) MCPAuthURL(name string) string {
 
 // -- Lifecycle --
 
-func (w *AppWorkspace) Subscribe(program *tea.Program) {
-	// app.App.Subscribe is decoupled from bubbletea's concrete
-	// *tea.Program (the app package is core and must not import UI
-	// frameworks); adapt it to a *tea.Program here at the workspace
-	// boundary, which is where UI-facing types are allowed to appear.
-	w.app.Subscribe(func(msg any) { program.Send(w.translateEvent(msg)) }, program.Quit)
+func (w *AppWorkspace) Subscribe(send func(any)) {
+	w.app.Subscribe(func(msg any) { send(w.translateEvent(msg)) }, w.app.Shutdown)
 }
 
 // translateEvent adapts a message from app's event fan-in into the shape

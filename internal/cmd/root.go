@@ -123,7 +123,7 @@ sennit --continue
 			tea.WithFilter(inputFilter.Filter),
 		)
 		model.SetSend(program.Send)
-		go ws.Subscribe(program)
+		go ws.Subscribe(func(msg any) { program.Send(msg) })
 
 		_, err = program.Run()
 		model.Cleanup()

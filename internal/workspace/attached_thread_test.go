@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +14,7 @@ import (
 // another package, it is silent when it fails, and what it costs when it
 // fails is every live event on the thread's screen.
 type threadEventSubscriber interface {
-	SubscribeWith(send func(tea.Msg)) func()
+	SubscribeWith(send func(any)) func()
 }
 
 // The wrapper AttachThread returns must still offer the subscription.
@@ -33,7 +32,7 @@ func TestAttachedThreadWorkspace_StillOffersSubscribeWith(t *testing.T) {
 	require.True(t, ok,
 		"the attached-thread wrapper must satisfy the subscriber interface the router asserts for")
 
-	stop := sub.SubscribeWith(func(tea.Msg) {})
+	stop := sub.SubscribeWith(func(any) {})
 	require.NotNil(t, stop)
 	stop()
 }
@@ -43,7 +42,7 @@ func TestAttachedThreadWorkspace_StillOffersSubscribeWith(t *testing.T) {
 func TestAttachedThreadWorkspace_SubscribeWithoutSupportIsANoop(t *testing.T) {
 	ws := &attachedThreadWorkspace{Workspace: &plainStubWorkspace{}}
 
-	stop := ws.SubscribeWith(func(tea.Msg) {})
+	stop := ws.SubscribeWith(func(any) {})
 	require.NotNil(t, stop)
 	stop()
 }
@@ -55,7 +54,7 @@ type subscribeStubWorkspace struct {
 	stopped bool
 }
 
-func (s *subscribeStubWorkspace) SubscribeWith(func(tea.Msg)) func() {
+func (s *subscribeStubWorkspace) SubscribeWith(func(any)) func() {
 	return func() { s.stopped = true }
 }
 

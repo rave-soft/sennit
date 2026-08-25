@@ -3,7 +3,6 @@ package workspace
 import (
 	"context"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/rave-soft/sennit/internal/thread"
@@ -104,9 +103,9 @@ func (w *attachedThreadWorkspace) parentAttempt(answer func(*AppWorkspace) bool)
 // interface for the reason SubscribeWith is not on it: this is a second,
 // independently stoppable subscription that only a workspace backed by a
 // real App can offer.
-func (w *attachedThreadWorkspace) SubscribeWith(send func(tea.Msg)) func() {
+func (w *attachedThreadWorkspace) SubscribeWith(send func(any)) func() {
 	sub, ok := w.Workspace.(interface {
-		SubscribeWith(func(tea.Msg)) func()
+		SubscribeWith(func(any)) func()
 	})
 	if !ok {
 		return func() {}

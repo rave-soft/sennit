@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/rave-soft/sennit/internal/config"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
@@ -463,7 +462,7 @@ func (w *readOnlyWorkspace) CancelTask(ctx context.Context, id, reason string) e
 
 // -- EventSubscriber --
 
-func (w *readOnlyWorkspace) Subscribe(program *tea.Program) {
+func (w *readOnlyWorkspace) Subscribe(send func(any)) {
 	// No-op: subscribing to a read-only workspace's events is safe
 	// but not meaningful for a completed thread.
 }
