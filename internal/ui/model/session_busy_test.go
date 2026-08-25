@@ -84,6 +84,10 @@ func (w *countingWorkspace) SetConfigField(_ config.Scope, _ string, _ any) erro
 
 func (w *countingWorkspace) SupportsThreads() bool { return w.threadsSupported }
 
+// SupportsTasks answers for the delegation list behind the panel's
+// agents section; no test here drives one.
+func (w *countingWorkspace) SupportsTasks() bool { return false }
+
 func (w *countingWorkspace) ListThreads(context.Context) ([]proto.Thread, error) {
 	w.listThreadsCalls++
 	return w.threads, nil

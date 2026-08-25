@@ -39,9 +39,13 @@ func (w *rootTestWorkspace) Config() *config.Config {
 	}
 }
 
-func (w *rootTestWorkspace) PermissionSkipRequests() bool              { return false }
-func (w *rootTestWorkspace) AgentIsReady() bool                        { return false }
-func (w *rootTestWorkspace) SupportsThreads() bool                     { return w.supportsThreads }
+func (w *rootTestWorkspace) PermissionSkipRequests() bool { return false }
+func (w *rootTestWorkspace) AgentIsReady() bool           { return false }
+func (w *rootTestWorkspace) SupportsThreads() bool        { return w.supportsThreads }
+
+// SupportsTasks answers for the delegation list behind the panel's
+// agents section; no test here drives one.
+func (w *rootTestWorkspace) SupportsTasks() bool                       { return false }
 func (w *rootTestWorkspace) WorkingDir() string                        { return "/tmp" }
 func (w *rootTestWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }
 

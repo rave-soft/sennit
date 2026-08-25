@@ -320,6 +320,7 @@ func (m *UI) staleWorkspaceRefreshCmds() []tea.Cmd {
 	// runs continuously, so their TTLs act as a real backstop and the
 	// "what is this thread doing" line stays fresh between events.
 	cmds = append(cmds, m.threadViewsRefreshCmds()...)
+	cmds = append(cmds, m.agentViewsRefreshCmds()...)
 	return cmds
 }
 
@@ -348,6 +349,26 @@ func (m *UI) threadViewsRefreshCmds() []tea.Cmd {
 		cmds = append(cmds, m.threadsDock.staleThreadActivityRefreshCmds(m.com, visible)...)
 	}
 	return cmds
+}
+
+// agentViewsRefreshCmds re-probes the delegation list behind the session
+// panel's agents section wherever its TTL has expired or an invalidation
+// demands it. Like threadViewsRefreshCmds it never does IO itself.
+//
+// Narrower than its threads counterpart in two ways, both because a
+// delegation has exactly one consumer — the panel of the session that
+// started it. It is gated on uiChat, since no other screen shows one; and
+// once the list has come back empty it stops re-polling until an event
+// invalidates it (see agentListCache.staleRefreshCmd), so a session that
+// never delegates anything costs a single round trip in total.
+func (m *UI) agentViewsRefreshCmds() []tea.Cmd {
+	if !m.panelSurfacesThreads() || m.state != uiChat || !m.hasSession() {
+		return nil
+	}
+	if cmd := m.agentList.staleRefreshCmd(m.com, true); cmd != nil {
+		return []tea.Cmd{cmd}
+	}
+	return nil
 }
 
 func (m *UI) toggleYoloMode() tea.Cmd {

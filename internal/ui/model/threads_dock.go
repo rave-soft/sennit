@@ -117,10 +117,18 @@ func activeDockThreads(threads []proto.Thread) []proto.Thread {
 			active = append(active, t)
 		}
 	}
-	sort.SliceStable(active, func(i, j int) bool {
-		return active[i].CreatedAt < active[j].CreatedAt
-	})
+	sortThreadsByCreation(active)
 	return active
+}
+
+// sortThreadsByCreation orders delegations oldest-first, in place and
+// stably, so the first one started leads and the order does not shuffle
+// under a refresh. Shared with the panel's agents section (see
+// sessionDelegations), which wants the same guarantee for the same reason.
+func sortThreadsByCreation(items []proto.Thread) {
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].CreatedAt < items[j].CreatedAt
+	})
 }
 
 // threadDockActivityLoadedMsg delivers the result of an off-thread

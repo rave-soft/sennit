@@ -3,8 +3,11 @@ package model
 // The session panel is the merged strip between chat and the editor that
 // replaces the old, separately-wired "pills" (todo progress + queued-prompt
 // pills) and "threads dock" (active background threads). It paints, top to
-// bottom: one block per active thread, a collapsible todos section, and an
-// always-visible queued-prompts list.
+// bottom: one block per live delegation of this session (the agents
+// section), one block per active thread, a collapsible todos section, and
+// an always-visible queued-prompts list. Agents lead because they are the
+// work of the conversation right above them — a delegation reports back
+// into this very transcript, while a thread runs off in its own worktree.
 //
 // sessionPanelPlan is the single source of truth for how many rows each
 // section gets and what it contains. sessionPanelHeight and drawSessionPanel
@@ -24,9 +27,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/rave-soft/sennit/internal/proto"
 	"github.com/rave-soft/sennit/internal/session"
+	"github.com/rave-soft/sennit/internal/ui/chat"
 	"github.com/rave-soft/sennit/internal/ui/common"
 	"github.com/rave-soft/sennit/internal/ui/presentation"
 	"github.com/rave-soft/sennit/internal/ui/styles"
+	"github.com/rave-soft/sennit/internal/ui/util"
 )
 
 // threadDockStatusText builds one thread's live status text for its
@@ -42,10 +47,11 @@ func threadDockStatusText(t proto.Thread, activity threadDockActivity) string {
 
 // panelSpinnerWanted reports whether the panel currently shows any live
 // work worth animating: an in-progress todo while the local agent is busy
-// (the original todo-spinner condition), or an active background thread.
-// The spinner used to belong to the todos list alone; the thread blocks
-// now share it, so it must keep ticking even when the local agent is idle
-// and only background threads are working.
+// (the original todo-spinner condition), an active background thread, or a
+// running delegation of this session. The spinner used to belong to the
+// todos list alone; the thread and agent blocks now share it, so it must
+// keep ticking even when the local agent is idle and only delegated work is
+// moving.
 func (m *UI) panelSpinnerWanted() bool {
 	if !m.hasSession() {
 		return false
@@ -56,6 +62,11 @@ func (m *UI) panelSpinnerWanted() bool {
 	for _, t := range m.threadList.cache.value {
 		switch proto.ThreadStatus(t.Status) {
 		case proto.ThreadStatusRunning, proto.ThreadStatusMerging:
+			return true
+		}
+	}
+	for _, a := range m.agentList.cache.value {
+		if a.ParentSessionID == m.sess.current.ID && proto.ThreadStatus(a.Status) == proto.ThreadStatusRunning {
 			return true
 		}
 	}
@@ -91,6 +102,14 @@ func (m *UI) panelActivityIcon() string {
 	}
 	return m.com.Styles.Tool.TodoInProgressIcon.Render(styles.SpinnerIcon)
 }
+
+// maxPanelTodosRows caps how tall the expanded todos section may grow, in
+// rows. A long todo list is a list to scroll, not a wall to read: past a
+// dozen or so rows the section stops being a status strip and starts being
+// the screen, pushing the chat it is supposed to annotate out of view. The
+// rows beyond the cap are never dropped — the section scrolls (see
+// todosScrollable / todosScrollOffset), so nothing becomes unreachable.
+const maxPanelTodosRows = 10
 
 // maxQueueDisplayLength is the maximum length of a queue item in the list.
 const maxQueueDisplayLength = 60
@@ -128,12 +147,26 @@ type sessionPanelState struct {
 	// todosHover / todosHeaderRect mirror childPanelHover /
 	// childPanelButtonRect for the todos header row's click-to-toggle
 	// affordance.
+	// agentsCollapsed mirrors threadsCollapsed for the agents section: it
+	// hides the delegation blocks and leaves the header, which still
+	// reports how many are live.
+	agentsCollapsed bool
+	// hoveredAgent, agentRects and agents mirror the hoveredThread /
+	// threadRects / threads trio for the agents section.
+	hoveredAgent int
+	agentRects   []uv.Rectangle
+	agents       []proto.Thread
+
 	todosHover      bool
 	todosHeaderRect uv.Rectangle
 	// threadsHover / threadsHeaderRect mirror the todos pair for
 	// the threads section's own collapse header.
 	threadsHover      bool
 	threadsHeaderRect uv.Rectangle
+	// agentsHover / agentsHeaderRect are the same pair for the agents
+	// section's collapse header.
+	agentsHover      bool
+	agentsHeaderRect uv.Rectangle
 	// todosListRect is the on-screen area of the (possibly scrollable)
 	// todo rows below the header, rebuilt on every drawSessionPanel call —
 	// the mouse-wheel handler in Update hit-tests against this to decide
@@ -210,13 +243,13 @@ func sessionPanelTodosHeaderText(completed, total int, expanded bool) string {
 	return fmt.Sprintf("todos %d/%d %s", completed, total, chevron)
 }
 
-// shedThreadBlocks drops whole two-row thread blocks until the plan fits
+// shedPanelBlocks drops whole two-row blocks until the plan fits
 // the budget, returning the surviving blocks, the updated hidden count,
 // and the rows they occupy. Blocks are dropped from the end, so the
 // oldest (first-created) threads are the ones that stay visible, and
 // every dropped block is added to the "…and N more" count rather than
 // disappearing unannounced.
-func shedThreadBlocks(threads []proto.Thread, more, over int) ([]proto.Thread, int, int) {
+func shedPanelBlocks(threads []proto.Thread, more, over int) ([]proto.Thread, int, int) {
 	drop := (over + 1) / 2 // round up: one row over still costs a block
 	if drop > len(threads) {
 		drop = len(threads)
@@ -247,6 +280,62 @@ func sessionPanelThreadsHeaderText(active int, expanded bool) string {
 		chevron = "▾"
 	}
 	return fmt.Sprintf("threads %d %s", active, chevron)
+}
+
+// delegationBlockStatusText builds one delegation's status text for its
+// block's second row: its status word plus how long it has been going,
+// measured from CreatedAt — the same shape (and the same helper) as a
+// thread's line, minus the live activity. A task has no per-entity activity
+// probe behind it the way a thread does (threadsDockState.activity, paid
+// for with an AttachThread round trip into the thread's own workspace); a
+// delegation's own transcript is one drill-in away in this very workspace,
+// which is what the block's click is for.
+func delegationBlockStatusText(t proto.Thread) string {
+	elapsed := time.Since(time.Unix(t.CreatedAt, 0))
+	return threadDockStatusLine(proto.ThreadStatus(t.Status), threadDockActivity{}, elapsed)
+}
+
+// delegationBlockName is the name a delegation's block carries. A task's
+// own Name is generated ("task-<uuid>", see thread.TaskManager.Create) and
+// says nothing, so this resolves the agent's real display name through the
+// transcript instead: the delegation's child session is named for the tool
+// call that started it (see delegationSessionID in internal/agent), so the
+// id parses straight back to the chat item that has the name on it.
+//
+// Falls back to "agent" for a delegation with no stub to resolve — one
+// started before this session was reloaded far enough back to hold it, or
+// by a delegation of its own rather than by this transcript.
+func (m *UI) delegationBlockName(t proto.Thread) string {
+	if m.com == nil || m.com.Workspace == nil {
+		return defaultDelegationBlockName
+	}
+	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(t.SessionID)
+	if !ok {
+		return defaultDelegationBlockName
+	}
+	item, ok := m.chat.MessageItem(toolCallID).(chat.ToolMessageItem)
+	if !ok {
+		return defaultDelegationBlockName
+	}
+	if name, _, _, _, _ := delegationInfo(item); name != "" {
+		return name
+	}
+	return defaultDelegationBlockName
+}
+
+// defaultDelegationBlockName is what a delegation block is called when its
+// agent's own name cannot be resolved — see delegationBlockName.
+const defaultDelegationBlockName = "agent"
+
+// sessionPanelAgentsHeaderText renders the agents header row's plain text:
+// "agents <live>" plus the same disclosure triangle the other section
+// headers use — ▸ collapsed, ▾ expanded.
+func sessionPanelAgentsHeaderText(live int, expanded bool) string {
+	chevron := "▸"
+	if expanded {
+		chevron = "▾"
+	}
+	return fmt.Sprintf("agents %d %s", live, chevron)
 }
 
 // renderSessionQueueLines renders one truncated line per queued prompt,
@@ -290,6 +379,24 @@ type sessionPanelPlan struct {
 	// the visible cap or the collapse state — what the header reports.
 	threadsActive int
 
+	// agents are this session's live delegations (internal/thread's
+	// KindTask: the `agent` tool, the custom agent tools, agentic_fetch),
+	// drawn with the same two-line block shape as threads. Delegation is
+	// asynchronous, so the transcript's stub for one is finished the
+	// instant it is created — these blocks are the only live view of a
+	// delegation there is.
+	agents     []proto.Thread
+	agentsMore int
+	agentsRows int
+	// agentsHeaderRows mirrors threadsHeaderRows for the "agents" header.
+	agentsHeaderRows int
+	// agentsExpanded is m.panel.agentsCollapsed inverted; when false the
+	// section keeps its header (and its count) but paints no blocks.
+	agentsExpanded bool
+	// agentsLive is how many delegations this session has in flight
+	// regardless of the collapse state — what the header reports.
+	agentsLive int
+
 	todosVisible    bool // at least one incomplete todo exists
 	todosExpanded   bool // m.panel.expanded, verbatim — budget shedding never forces this false anymore
 	todosCompleted  int  // for the header ratio — independent of what's dropped below
@@ -301,11 +408,12 @@ type sessionPanelPlan struct {
 	// todosContentRows is the expanded todos section's full row count
 	// (todosInProgress+todosPending+todosDone concatenated in that order;
 	// zero while collapsed — collapsed is header-only and never scrolls).
-	// todosViewportRows is how many of those rows the budget actually
-	// grants for painting; when it's less than todosContentRows the
-	// section is scrollable (todosScrollable) and drawSessionPanel windows
-	// the list by m.panel.todosScrollOffset instead of truncating it — see
-	// the sessionPanelPlan doc comment.
+	// todosViewportRows is how many of those rows are actually painted:
+	// the lesser of the content, maxPanelTodosRows, and what the row
+	// budget grants. When it's less than todosContentRows the section is
+	// scrollable (todosScrollable) and drawSessionPanel windows the list by
+	// m.panel.todosScrollOffset instead of truncating it — see the
+	// sessionPanelPlan doc comment.
 	todosContentRows  int
 	todosViewportRows int
 	todosScrollable   bool
@@ -363,11 +471,25 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 			// panel is the live view of what is running right now, and a
 			// running thread the panel refuses to name is exactly the one a
 			// user goes looking for. Fitting the list on screen is the row
-			// budget's job: shedThreadBlocks below sheds thread blocks (and
+			// budget's job: shedPanelBlocks below sheds thread blocks (and
 			// sets plan.threadsMore) only after todos and the queue, i.e.
 			// only in a genuinely short terminal.
 			plan.threads = active
 			plan.threadsRows = len(active) * 2
+		}
+	}
+
+	if m.panelSurfacesThreads() {
+		live := sessionDelegations(m.agentList.cache.value, m.sess.current.ID)
+		plan.agentsLive = len(live)
+		plan.agentsExpanded = !m.panel.agentsCollapsed
+		if plan.agentsExpanded {
+			// Every live delegation, uncapped, for the same reason threads
+			// are uncapped: the one the panel refuses to name is the one
+			// somebody goes looking for. The row budget below sheds blocks
+			// if the terminal is genuinely too short.
+			plan.agents = live
+			plan.agentsRows = len(live) * 2
 		}
 	}
 
@@ -395,7 +517,9 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 			plan.todosDone = completed
 		}
 		plan.todosContentRows = len(plan.todosInProgress) + len(plan.todosPending) + len(plan.todosDone)
-		plan.todosViewportRows = plan.todosContentRows
+		// The natural viewport is the whole list, up to the cap; a longer
+		// list scrolls inside those rows rather than growing the panel.
+		plan.todosViewportRows = min(plan.todosContentRows, maxPanelTodosRows)
 	}
 
 	plan.queue = m.wsCache.promptQueueCache.value
@@ -421,6 +545,15 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		}
 		return 0
 	}
+	agentsHeaderRows := func() int {
+		// Same rule as the threads header: a section collapsed by hand
+		// keeps the row that says so and lets it back, a section shed to
+		// zero by the budget does not.
+		if plan.agentsRows > 0 || (!plan.agentsExpanded && plan.agentsLive > 0) {
+			return 1
+		}
+		return 0
+	}
 	queueHeaderRows := func() int {
 		if len(plan.queue) > 0 {
 			return 1
@@ -429,20 +562,28 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 	}
 	over := func() int {
 		return threadsHeaderRows() + plan.threadsRows +
+			agentsHeaderRows() + plan.agentsRows +
 			headerRows() + plan.todosViewportRows +
 			queueHeaderRows() + len(plan.queue) - budget
 	}
 
-	// Shedding priority, highest to lowest: threads >
+	// Shedding priority, highest to lowest: threads and agents >
 	// todos-in-progress (never touched — see the floor below) > todos
 	// pending/done (display-windowed via todosViewportRows, but never
-	// dropped from the plan) > queue tail > threads row budget. The viewport
+	// dropped from the plan) > queue tail > agents row budget > threads row
+	// budget. Agents give way before threads: a delegation is minutes of
+	// work whose result comes back into this very transcript, a thread is a
+	// whole parallel worktree whose only status is the one shown here. The viewport
 	// never shrinks below len(todosInProgress): once the section is open,
 	// the default (unscrolled) viewport always shows every in-progress row
 	// — only pending/done ever have to be reached by scrolling.
 	if plan.todosExpanded {
 		if o := over(); o > 0 {
-			floor := len(plan.todosInProgress)
+			// The floor is capped too: with more in-progress todos than the
+			// section is ever allowed to be tall, "always show every
+			// in-progress row" is not a promise the panel can keep, and the
+			// height cap is the one that wins — the rest are one scroll away.
+			floor := min(len(plan.todosInProgress), maxPanelTodosRows)
 			reducible := max(0, plan.todosViewportRows-floor)
 			plan.todosViewportRows -= min(o, reducible)
 		}
@@ -452,12 +593,15 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 		plan.queue = plan.queue[:keep]
 	}
 	if o := over(); o > 0 {
+		plan.agents, plan.agentsMore, plan.agentsRows = shedPanelBlocks(plan.agents, plan.agentsMore, o)
+	}
+	if o := over(); o > 0 {
 		// Shed whole blocks, not rows. A thread block is two rows, so
 		// subtracting an odd count used to leave half a block painted —
 		// a name with no status line under it — and the hidden threads
 		// vanished silently, with the "…and N more" footer still
 		// reporting only what the visible cap had dropped.
-		plan.threads, plan.threadsMore, plan.threadsRows = shedThreadBlocks(plan.threads, plan.threadsMore, o)
+		plan.threads, plan.threadsMore, plan.threadsRows = shedPanelBlocks(plan.threads, plan.threadsMore, o)
 	}
 	if over() > 0 {
 		// budget < 1: even the one-line todos header doesn't fit. The todo
@@ -469,8 +613,10 @@ func (m *UI) sessionPanelPlan(budget int) sessionPanelPlan {
 
 	plan.todosScrollable = plan.todosExpanded && plan.todosVisible && plan.todosViewportRows < plan.todosContentRows
 	plan.threadsHeaderRows = threadsHeaderRows()
+	plan.agentsHeaderRows = agentsHeaderRows()
 	plan.queueHeaderRows = queueHeaderRows()
 	plan.totalRows = plan.threadsHeaderRows + plan.threadsRows +
+		plan.agentsHeaderRows + plan.agentsRows +
 		headerRows() + plan.todosViewportRows +
 		plan.queueHeaderRows + len(plan.queue)
 	return plan
@@ -520,11 +666,19 @@ func panelBlockGeometry(area uv.Rectangle, n int) []uv.Rectangle {
 	return rects
 }
 
-// threadBlockGeometry is panelBlockGeometry specialized to a thread slice
-// — kept as a thin named wrapper since existing callers/tests spell it out
-// by thread count implicitly via the slice.
-func threadBlockGeometry(area uv.Rectangle, threads []proto.Thread) []uv.Rectangle {
-	return panelBlockGeometry(area, len(threads))
+// panelRowLayout is where every hit-testable row of the session panel
+// lands for one (area, plan) pair. Returned as a struct rather than the
+// five loose rectangles this used to be: the sections that can carry blocks
+// come in pairs (header, blocks) and grow, and a positional return list is
+// exactly the shape that quietly transposes two rects the day a section is
+// added between two others.
+type panelRowLayout struct {
+	threadsHeader uv.Rectangle
+	threadBlocks  []uv.Rectangle
+	agentsHeader  uv.Rectangle
+	agentBlocks   []uv.Rectangle
+	todosHeader   uv.Rectangle
+	todosList     uv.Rectangle
 }
 
 // sessionPanelRowLayout is the single source of truth for where each
@@ -536,9 +690,9 @@ func threadBlockGeometry(area uv.Rectangle, threads []proto.Thread) []uv.Rectang
 // call this instead of duplicating the row-advancing math. todosListRect is
 // the area of the (possibly scrollable) todo rows below the header, for the
 // mouse-wheel hit-test that adjusts m.panel.todosScrollOffset.
-func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBlockRects []uv.Rectangle, todosHeaderRect, todosListRect, threadsHeaderRect uv.Rectangle) {
+func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (layout panelRowLayout) {
 	if area.Dy() <= 0 || area.Dx() <= 0 {
-		return nil, uv.Rectangle{}, uv.Rectangle{}, uv.Rectangle{}
+		return panelRowLayout{}
 	}
 
 	row := area
@@ -547,32 +701,48 @@ func sessionPanelRowLayout(area uv.Rectangle, plan sessionPanelPlan) (threadBloc
 	// The header is laid out independently of the blocks: a collapsed
 	// section has no blocks but still owns its header row, and that row
 	// is the only hit target left for expanding it again.
-	if plan.threadsHeaderRows > 0 {
-		threadsHeaderRect = row
-		threadsHeaderRect.Min.Y = row.Min.Y
-		threadsHeaderRect.Max.Y = min(row.Min.Y+1, area.Max.Y)
+	if plan.agentsHeaderRows > 0 && row.Min.Y < area.Max.Y {
+		layout.agentsHeader = row
+		layout.agentsHeader.Min.Y = row.Min.Y
+		layout.agentsHeader.Max.Y = min(row.Min.Y+1, area.Max.Y)
+		row.Min.Y = min(row.Min.Y+plan.agentsHeaderRows, area.Max.Y)
+		row.Max.Y = row.Min.Y
+	}
+	if plan.agentsRows > 0 && row.Min.Y < area.Max.Y {
+		agentsArea := area
+		agentsArea.Min.Y = row.Min.Y
+		agentsArea.Max.Y = min(row.Min.Y+plan.agentsRows, area.Max.Y)
+		layout.agentBlocks = panelBlockGeometry(agentsArea, len(plan.agents))
+		row.Min.Y = agentsArea.Max.Y
+		row.Max.Y = row.Min.Y
+	}
+
+	if plan.threadsHeaderRows > 0 && row.Min.Y < area.Max.Y {
+		layout.threadsHeader = row
+		layout.threadsHeader.Min.Y = row.Min.Y
+		layout.threadsHeader.Max.Y = min(row.Min.Y+1, area.Max.Y)
 		row.Min.Y = min(row.Min.Y+plan.threadsHeaderRows, area.Max.Y)
 		row.Max.Y = row.Min.Y
 	}
-	if plan.threadsRows > 0 {
+	if plan.threadsRows > 0 && row.Min.Y < area.Max.Y {
 		threadsArea := area
 		threadsArea.Min.Y = row.Min.Y
 		threadsArea.Max.Y = min(row.Min.Y+plan.threadsRows, area.Max.Y)
-		threadBlockRects = threadBlockGeometry(threadsArea, plan.threads)
+		layout.threadBlocks = panelBlockGeometry(threadsArea, len(plan.threads))
 		row.Min.Y = threadsArea.Max.Y
 		row.Max.Y = row.Min.Y
 	}
 
 	if plan.todosVisible && row.Min.Y < area.Max.Y {
-		todosHeaderRect = row
-		todosHeaderRect.Max.Y = todosHeaderRect.Min.Y + 1
+		layout.todosHeader = row
+		layout.todosHeader.Max.Y = layout.todosHeader.Min.Y + 1
 
-		todosListRect = area
-		todosListRect.Min.Y = todosHeaderRect.Max.Y
-		todosListRect.Max.Y = min(todosListRect.Min.Y+plan.todosViewportRows, area.Max.Y)
+		layout.todosList = area
+		layout.todosList.Min.Y = layout.todosHeader.Max.Y
+		layout.todosList.Max.Y = min(layout.todosList.Min.Y+plan.todosViewportRows, area.Max.Y)
 	}
 
-	return threadBlockRects, todosHeaderRect, todosListRect, threadsHeaderRect
+	return layout
 }
 
 // panelHit is what panelHitTest reports for a screen point against the
@@ -583,9 +753,12 @@ type panelHit struct {
 	plan            sessionPanelPlan
 	inTodosHeader   bool
 	inThreadsHeader bool
+	inAgentsHeader  bool
 	inTodosList     bool
-	// ThreadIndex is -1 when pt isn't over a thread block.
+	// threadIndex is -1 when pt isn't over a thread block.
 	threadIndex int
+	// agentIndex is -1 when pt isn't over a delegation block.
+	agentIndex int
 }
 
 // panelHitTest computes the session panel's plan and row layout once and
@@ -599,18 +772,26 @@ type panelHit struct {
 // arrive before drawSessionPanel has painted the current layout.
 func (m *UI) panelHitTest(pt image.Point) panelHit {
 	plan := m.sessionPanelPlan(m.lay.layout.panel.Dy())
-	threadBlockRects, todosHeaderRect, todosListRect, threadsHeaderRect := sessionPanelRowLayout(m.lay.layout.panel, plan)
+	layout := sessionPanelRowLayout(m.lay.layout.panel, plan)
 
 	hit := panelHit{
 		plan:            plan,
-		inTodosHeader:   pt.In(todosHeaderRect),
-		inThreadsHeader: pt.In(threadsHeaderRect),
-		inTodosList:     pt.In(todosListRect),
+		inTodosHeader:   pt.In(layout.todosHeader),
+		inThreadsHeader: pt.In(layout.threadsHeader),
+		inAgentsHeader:  pt.In(layout.agentsHeader),
+		inTodosList:     pt.In(layout.todosList),
 		threadIndex:     -1,
+		agentIndex:      -1,
 	}
-	for i, rect := range threadBlockRects {
+	for i, rect := range layout.threadBlocks {
 		if pt.In(rect) {
 			hit.threadIndex = i
+			break
+		}
+	}
+	for i, rect := range layout.agentBlocks {
+		if pt.In(rect) {
+			hit.agentIndex = i
 			break
 		}
 	}
@@ -715,8 +896,11 @@ func clampPanelTodosScrollOffset(offset int, plan sessionPanelPlan) int {
 func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	m.panel.threadRects = nil
 	m.panel.threads = nil
+	m.panel.agentRects = nil
+	m.panel.agents = nil
 	m.panel.todosHeaderRect = uv.Rectangle{}
 	m.panel.threadsHeaderRect = uv.Rectangle{}
+	m.panel.agentsHeaderRect = uv.Rectangle{}
 	m.panel.todosListRect = uv.Rectangle{}
 	if area.Dy() <= 0 || area.Dx() <= 0 {
 		return
@@ -725,9 +909,45 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	plan := m.sessionPanelPlan(area.Dy())
 	t := m.com.Styles
 	width := area.Dx()
-	_, todosHeaderRect, todosListRect, _ := sessionPanelRowLayout(area, plan)
+	layout := sessionPanelRowLayout(area, plan)
 	row := area
 	row.Max.Y = row.Min.Y
+
+	if plan.agentsHeaderRows > 0 || plan.agentsRows > 0 {
+		if plan.agentsHeaderRows > 0 {
+			headerView := common.SectionStyled(t, t.Section.Title,
+				sessionPanelAgentsHeaderText(plan.agentsLive, plan.agentsExpanded), width)
+			if m.panel.agentsHover {
+				headerView = common.BlockBackground(headerView, width, t.Tool.ClickableHoverBg)
+			}
+			headerRow := area
+			headerRow.Min.Y = row.Min.Y
+			headerRow.Max.Y = row.Min.Y + 1
+			uv.NewStyledString(headerView).Draw(scr, headerRow)
+			m.panel.agentsHeaderRect = headerRow
+			row.Min.Y++
+			row.Max.Y = row.Min.Y
+		}
+		agentsArea := area
+		agentsArea.Min.Y = row.Min.Y
+		agentsArea.Max.Y = min(row.Min.Y+plan.agentsRows, area.Max.Y)
+		m.panel.agentRects = m.drawPanelBlocks(scr, agentsArea, m.panel.hoveredAgent, panelBlockDrawSpec{
+			count: len(plan.agents), more: plan.agentsMore, footer: "…and %d more agents",
+			name: func(i int) string { return m.delegationBlockName(plan.agents[i]) },
+			task: func(i int) string { return threadDockGoalFirstLine(plan.agents[i].Goal) },
+			line2: func(i int) string {
+				item := plan.agents[i]
+				icon := m.com.Styles.ChildBanner.Base.Render("→")
+				if proto.ThreadStatus(item.Status) == proto.ThreadStatusRunning {
+					icon = m.panelActivityIcon()
+				}
+				return "  " + icon + " " + m.com.Styles.ChildBanner.Base.Render(delegationBlockStatusText(item))
+			},
+		})
+		m.panel.agents = plan.agents
+		row.Min.Y = agentsArea.Max.Y
+		row.Max.Y = row.Min.Y
+	}
 
 	if plan.threadsHeaderRows > 0 || plan.threadsRows > 0 {
 		if plan.threadsHeaderRows > 0 {
@@ -783,7 +1003,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	if plan.todosVisible && row.Min.Y < area.Max.Y {
-		headerRow := todosHeaderRect
+		headerRow := layout.todosHeader
 		header := sessionPanelTodosHeaderText(plan.todosCompleted, plan.todosTotal, plan.todosExpanded)
 		// The todos header is the same section-separator style as
 		// threads/agents/queue. Its full row is clickable, so hover paints the
@@ -795,7 +1015,7 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 		}
 		uv.NewStyledString(headerView).Draw(scr, headerRow)
 		m.panel.todosHeaderRect = headerRow
-		m.panel.todosListRect = todosListRect
+		m.panel.todosListRect = layout.todosList
 		row.Min.Y++
 		row.Max.Y = row.Min.Y
 
@@ -829,8 +1049,8 @@ func (m *UI) drawSessionPanel(scr uv.Screen, area uv.Rectangle) {
 			sb := common.Scrollbar(t, plan.todosViewportRows, plan.todosContentRows, plan.todosViewportRows, offset)
 			if sb != "" {
 				scrollbarArea := uv.Rectangle{
-					Min: uv.Position{X: area.Max.X - 1, Y: todosListRect.Min.Y},
-					Max: uv.Position{X: area.Max.X, Y: todosListRect.Min.Y + plan.todosViewportRows},
+					Min: uv.Position{X: area.Max.X - 1, Y: layout.todosList.Min.Y},
+					Max: uv.Position{X: area.Max.X, Y: layout.todosList.Min.Y + plan.todosViewportRows},
 				}
 				uv.NewStyledString(sb).Draw(scr, scrollbarArea)
 			}
@@ -928,4 +1148,29 @@ func (m *UI) toggleTodosExpanded() tea.Cmd {
 // the plan on the next draw, and the plan reads this flag directly.
 func (m *UI) toggleThreadsCollapsed() {
 	m.panel.threadsCollapsed = !m.panel.threadsCollapsed
+}
+
+// toggleAgentsCollapsed is toggleThreadsCollapsed for the agents section.
+func (m *UI) toggleAgentsCollapsed() {
+	m.panel.agentsCollapsed = !m.panel.agentsCollapsed
+}
+
+// enterDelegation opens a delegation's own transcript from its panel
+// block. The child session is named for the tool call that started it (see
+// delegationSessionID in internal/agent), so the nav machinery the
+// transcript's own drill-in uses works unchanged here — enterChildSession
+// wants that pair, not a session id.
+//
+// A delegation whose session id does not parse (one created without a tool
+// call identity to carry) has nothing to push a nav frame for; say so
+// rather than opening an empty child view.
+func (m *UI) enterDelegation(t proto.Thread) tea.Cmd {
+	if m.com == nil || m.com.Workspace == nil {
+		return nil
+	}
+	messageID, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(t.SessionID)
+	if !ok {
+		return util.ReportWarn("This delegation has no transcript to open")
+	}
+	return m.enterChildSession(messageID, toolCallID)
 }

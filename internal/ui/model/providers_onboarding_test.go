@@ -134,6 +134,10 @@ func (w *onboardingTestWorkspace) AgentIsReady() bool { return false }
 
 func (w *onboardingTestWorkspace) SupportsThreads() bool { return false }
 
+// SupportsTasks answers for the delegation list behind the panel's
+// agents section; no test here drives one.
+func (w *onboardingTestWorkspace) SupportsTasks() bool { return false }
+
 func (w *onboardingTestWorkspace) AgentModel() workspace.AgentModel { return workspace.AgentModel{} }
 
 func (w *onboardingTestWorkspace) ProjectNeedsInitialization() (bool, error) { return false, nil }

@@ -194,6 +194,10 @@ type UI struct {
 	// trip serves all three. See threads_cache.go.
 	threadList threadListCache
 
+	// agentList holds the memoized delegation (task) list behind the
+	// session panel's agents section. See agents_cache.go.
+	agentList agentListCache
+
 	// threadsDock holds the session panel's per-thread live activity
 	// (in-progress todo, message count). See threads_dock.go /
 	// session_panel.go.
@@ -314,6 +318,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool, opts ..
 		panel: sessionPanelState{
 			spinner:       panelSpinner,
 			hoveredThread: -1,
+			hoveredAgent:  -1,
 		},
 		lsp: lspState{
 			states: make(map[string]workspace.LSPClientInfo),

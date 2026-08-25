@@ -125,9 +125,23 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 				m.toggleThreadsCollapsed()
 				return cmds, true
 			}
+			if hit.inAgentsHeader {
+				m.toggleAgentsCollapsed()
+				return cmds, true
+			}
 			if hit.threadIndex >= 0 {
 				th := hit.plan.threads[hit.threadIndex]
 				cmds = append(cmds, util.CmdHandler(enterThreadMsg{id: th.ID, sessionID: th.SessionID, name: th.Name}))
+				return cmds, true
+			}
+			// A click on a delegation block drills into its child session:
+			// a plain navStack push (enterChildSession), not a thread's
+			// AttachThread — a delegation's session already lives in this
+			// workspace.
+			if hit.agentIndex >= 0 {
+				if cmd := m.enterDelegation(hit.plan.agents[hit.agentIndex]); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				return cmds, true
 			}
 		}
@@ -186,6 +200,8 @@ func (m *UI) updateMouse(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			m.panel.todosHover = hit.inTodosHeader
 			m.panel.threadsHover = hit.inThreadsHeader
 			m.panel.hoveredThread = hit.threadIndex
+			m.panel.agentsHover = hit.inAgentsHeader
+			m.panel.hoveredAgent = hit.agentIndex
 		}
 
 		// Track hover position for inline editors.

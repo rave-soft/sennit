@@ -26,6 +26,10 @@ type slashCommandsTestWorkspace struct {
 
 func (w *slashCommandsTestWorkspace) SupportsThreads() bool { return false }
 
+// SupportsTasks answers for the delegation list behind the panel's
+// agents section; no test here drives one.
+func (w *slashCommandsTestWorkspace) SupportsTasks() bool { return false }
+
 func (w *slashCommandsTestWorkspace) Config() *config.Config {
 	return w.cfg
 }

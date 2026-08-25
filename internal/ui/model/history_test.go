@@ -30,6 +30,10 @@ func (historyWorkspace) SupportsThreads() bool {
 	return false
 }
 
+// SupportsTasks answers for the delegation list behind the panel's
+// agents section; no test here drives one.
+func (historyWorkspace) SupportsTasks() bool { return false }
+
 // historyLoadRecordingWorkspace records which of ListUserMessages /
 // ListAllUserMessages loadPromptHistory's returned tea.Cmd actually calls,
 // and with what session ID, so a test can tell which session's history it

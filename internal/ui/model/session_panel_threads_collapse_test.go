@@ -64,7 +64,7 @@ func TestDrawSessionPanel_CollapsedThreadsHeaderIsClickable(t *testing.T) {
 	area := uv.Rect(0, 0, 60, 6)
 	u.lay.layout.panel = area
 	plan := u.sessionPanelPlan(area.Dy())
-	_, _, _, threadsHeaderRect := sessionPanelRowLayout(area, plan)
+	threadsHeaderRect := sessionPanelRowLayout(area, plan).threadsHeader
 	require.False(t, threadsHeaderRect.Empty(), "a collapsed section still needs a hit target")
 
 	scr := uv.NewScreenBuffer(area.Dx(), area.Dy())

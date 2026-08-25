@@ -227,6 +227,10 @@ type drillInWorkspace struct {
 
 func (drillInWorkspace) SupportsThreads() bool { return false }
 
+// SupportsTasks answers for the delegation list behind the panel's
+// agents section; no test here drives one.
+func (drillInWorkspace) SupportsTasks() bool { return false }
+
 func (drillInWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
 	return messageID + "$$" + toolCallID
 }

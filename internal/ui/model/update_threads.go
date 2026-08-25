@@ -26,11 +26,15 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 		// only cares about keeping the shared list (and the header badge
 		// it feeds) current.
 		m.threadList.applyEvent(msg)
+		// Tasks ride the same event stream as threads; each cache keeps
+		// only its own kind (see agentListCache.applyEvent).
+		m.agentList.applyEvent(msg)
 		if msg.Type == pubsub.DeletedEvent {
 			m.threadsDock.dropActivity(msg.Payload.ID)
 			delete(m.threadLastStatus, msg.Payload.ID)
 		}
 		cmds = append(cmds, m.threadViewsRefreshCmds()...)
+		cmds = append(cmds, m.agentViewsRefreshCmds()...)
 		// A thread's edge transition into a terminal status (merged,
 		// failed, ...) gets a toast — see thread_completion.go for why a
 		// toast rather than a persisted chat entry. Skipped for a deleted
@@ -56,6 +60,14 @@ func (m *UI) updateThreads(msg tea.Msg, cmds []tea.Cmd) ([]tea.Cmd, bool) {
 			m.threadsDock.activityGen++
 		}
 		// The freshly listed threads may introduce (or retire) live work.
+		if cmd := m.syncPanelSpinner(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case agentsLoadedMsg:
+		loadCmds, _ := m.agentList.applyLoaded(m.com, msg)
+		cmds = append(cmds, loadCmds...)
+		// The freshly listed delegations may introduce (or retire) live
+		// work for the panel's spinner to animate.
 		if cmd := m.syncPanelSpinner(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}

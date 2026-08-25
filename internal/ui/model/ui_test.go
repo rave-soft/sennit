@@ -104,6 +104,10 @@ type testWorkspace struct {
 
 func (w *testWorkspace) SupportsThreads() bool { return false }
 
+// SupportsTasks answers for the delegation list behind the panel's
+// agents section; no test here drives one.
+func (w *testWorkspace) SupportsTasks() bool { return false }
+
 func (w *testWorkspace) Config() *config.Config {
 	return w.cfg
 }
