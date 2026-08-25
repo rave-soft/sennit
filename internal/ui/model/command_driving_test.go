@@ -432,6 +432,14 @@ func (w *cmdDrivingWorkspace) ListSessionHistory(ctx context.Context, sessionID 
 	return w.historyBySessionID[sessionID], nil
 }
 
+func (w *cmdDrivingWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]workspace.SessionFile, error) {
+	files, err := w.ListSessionHistory(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return workspace.AggregateSessionFiles(files), nil
+}
+
 func (w *cmdDrivingWorkspace) QuestionAnswer(responses []question.Answer) bool {
 	w.questionAnswerCalls++
 	w.questionAnswerResponse = responses

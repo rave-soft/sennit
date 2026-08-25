@@ -8,7 +8,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/session"
 	"github.com/rave-soft/sennit/internal/ui/common"
@@ -125,28 +124,6 @@ func TestModifiedFileAdditionsUseGreen(t *testing.T) {
 	require.Equal(t, styles.BrandSuccess, st.Files.Additions.GetForeground())
 }
 
-func TestUncommittedSessionFiles(t *testing.T) {
-	t.Parallel()
-
-	sessionFiles := []SessionFile{
-		{FirstVersion: history.File{Path: "/repo/changed.go"}, Additions: 2, Deletions: 1},
-		{FirstVersion: history.File{Path: "/repo/committed.go"}, Additions: 4},
-	}
-	gitFiles := []git.FileChange{
-		{Path: "/repo/preexisting.go", Additions: 20},
-		{Path: "/repo/changed.go", Additions: 12, Deletions: 3},
-	}
-
-	got := uncommittedSessionFiles(sessionFiles, gitFiles)
-
-	require.Equal(t, []SessionFile{{
-		FirstVersion: history.File{Path: "/repo/changed.go"},
-		Additions:    2,
-		Deletions:    1,
-		Uncommitted:  true,
-	}}, got)
-}
-
 func minimalFileStyles() *styles.Styles {
 	st := styles.SennitDark()
 	st.Files.Path = lipgloss.NewStyle()
@@ -158,17 +135,13 @@ func minimalFileStyles() *styles.Styles {
 	return &st
 }
 
-// fileHistoryWorkspace stubs just enough of workspace.Workspace for
-// loadModifiedFiles: the two calls handleFileEvent's returned cmd makes.
+// fileHistoryWorkspace stubs the workspace and session-change role used by
+// handleFileEvent's returned command.
 type fileHistoryWorkspace struct {
 	workspace.Workspace
 }
 
-func (fileHistoryWorkspace) ListSessionHistory(context.Context, string) ([]history.File, error) {
-	return nil, nil
-}
-
-func (fileHistoryWorkspace) UncommittedFiles(context.Context) ([]git.FileChange, error) {
+func (fileHistoryWorkspace) PrepareSessionChanges(context.Context, string) ([]workspace.SessionFile, error) {
 	return nil, nil
 }
 

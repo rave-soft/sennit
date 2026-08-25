@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/permission"
 	"github.com/stretchr/testify/require"
 )
@@ -60,6 +61,33 @@ func (s *subscribeStubWorkspace) SubscribeWith(func(any)) func() {
 
 // plainStubWorkspace is a Workspace with no subscription of its own.
 type plainStubWorkspace struct{ Workspace }
+
+func TestAttachedThreadWorkspace_PreparesSessionChanges(t *testing.T) {
+	inner := &sessionChangeStubWorkspace{}
+	ws := &attachedThreadWorkspace{Workspace: inner, sessionID: "thread-session"}
+
+	files, err := ws.PrepareSessionChanges(t.Context(), "thread-session")
+	require.NoError(t, err)
+	require.Equal(t, []SessionFile{{FirstVersion: history.File{Path: "thread-session"}}}, files)
+	require.Equal(t, []string{"thread-session"}, inner.sessions)
+}
+
+func TestAttachedThreadWorkspace_SessionChangesUnavailable(t *testing.T) {
+	ws := &attachedThreadWorkspace{Workspace: &plainStubWorkspace{}, sessionID: "thread-session"}
+
+	_, err := ws.PrepareSessionChanges(t.Context(), "thread-session")
+	require.EqualError(t, err, "session change preparer is unavailable")
+}
+
+type sessionChangeStubWorkspace struct {
+	Workspace
+	sessions []string
+}
+
+func (s *sessionChangeStubWorkspace) PrepareSessionChanges(_ context.Context, sessionID string) ([]SessionFile, error) {
+	s.sessions = append(s.sessions, sessionID)
+	return []SessionFile{{FirstVersion: history.File{Path: sessionID}}}, nil
+}
 
 // The thread's own session must not drag the thread back onto the model it
 // used to run on: it runs whatever its parent runs, handed down at spawn.

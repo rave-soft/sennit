@@ -26,8 +26,9 @@ var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 
 // Common defines common UI options and configurations.
 type Common struct {
-	Workspace workspace.Workspace
-	Styles    *styles.Styles
+	Workspace      workspace.Workspace
+	SessionChanges workspace.SessionChangePreparer
+	Styles         *styles.Styles
 	// Ctx is the process lifecycle context (typically the cobra command's
 	// context, cancelled on interrupt/shutdown). The model and dialogs use
 	// it for workspace calls issued from a tea.Cmd instead of
@@ -57,10 +58,12 @@ func (c *Common) Context() context.Context {
 // unset or unknown theme resolves to Sennit's default palette.
 func DefaultCommon(ctx context.Context, ws workspace.Workspace) *Common {
 	s := styles.Theme(ThemeID(ws)).WithSpinner(SpinnerMode(ws))
+	sessionChanges, _ := ws.(workspace.SessionChangePreparer)
 	return &Common{
-		Workspace: ws,
-		Styles:    &s,
-		Ctx:       ctx,
+		Workspace:      ws,
+		SessionChanges: sessionChanges,
+		Styles:         &s,
+		Ctx:            ctx,
 	}
 }
 

@@ -5,15 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/rave-soft/sennit/internal/config"
-	"github.com/rave-soft/sennit/internal/diff"
 	"github.com/rave-soft/sennit/internal/fsext"
-	"github.com/rave-soft/sennit/internal/git"
 	"github.com/rave-soft/sennit/internal/history"
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/session"
@@ -27,6 +24,8 @@ import (
 
 // sessionState holds the active session and the bookkeeping around loading,
 // continuing, and navigating between sessions.
+type SessionFile = workspace.SessionFile
+
 type sessionState struct {
 	current *session.Session
 	files   []SessionFile
@@ -99,6 +98,7 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 	generation := m.sess.loadGen
 	ctx := m.com.Context()
 	workspace := m.com.Workspace
+	sessionChanges := m.com.SessionChanges
 	styles := m.com.Styles
 	// Read here, on the Update goroutine, rather than inside the command:
 	// both enterChildSession and exitChildSession adjust the nav stack
@@ -108,12 +108,13 @@ func (m *UI) beginSessionLoad(sessionID string) tea.Cmd {
 	owner := m
 	return func() tea.Msg {
 		loader := sessionLoadResolver{
-			ctx:       ctx,
-			workspace: workspace,
-			styles:    styles,
-			config:    workspace.Config(),
-			resumable: resumable,
-			owner:     owner,
+			ctx:            ctx,
+			workspace:      workspace,
+			sessionChanges: sessionChanges,
+			styles:         styles,
+			config:         workspace.Config(),
+			resumable:      resumable,
+			owner:          owner,
 		}
 		return loader.resolve(sessionID, generation)
 	}
@@ -167,38 +168,12 @@ func (msg loadSessionMsg) lspFilePaths() []string {
 	return paths
 }
 
-// SessionFile tracks the first and latest versions of a file in a session,
-// along with the total additions and deletions.
-type SessionFile struct {
-	FirstVersion  history.File
-	LatestVersion history.File
-	Additions     int
-	Deletions     int
-	Uncommitted   bool
-}
-
-func uncommittedSessionFiles(sessionFiles []SessionFile, files []git.FileChange) []SessionFile {
-	uncommitted := make(map[string]struct{}, len(files))
-	for _, file := range files {
-		uncommitted[filepath.Clean(file.Path)] = struct{}{}
-	}
-
-	result := make([]SessionFile, 0, len(sessionFiles))
-	for _, file := range sessionFiles {
-		if _, ok := uncommitted[filepath.Clean(file.FirstVersion.Path)]; !ok {
-			continue
-		}
-		file.Uncommitted = true
-		result = append(result, file)
-	}
-	return result
-}
-
 type sessionLoadResolver struct {
-	ctx       context.Context
-	workspace workspace.Workspace
-	styles    *styles.Styles
-	config    *config.Config
+	ctx            context.Context
+	workspace      workspace.Workspace
+	sessionChanges workspace.SessionChangePreparer
+	styles         *styles.Styles
+	config         *config.Config
 	// resumable marks a load the user can go on to type into: a top-level
 	// session, not a sub-agent's transcript they drilled into. Only such a
 	// load restores the session's pinned model, because only such a load
@@ -239,7 +214,7 @@ func (r sessionLoadResolver) resolve(sessionID string, gen uint64) tea.Msg {
 			slog.Debug("Failed to restore the session's model", "session_id", sessionID, "error", err)
 		}
 	}
-	sessionFiles, err := loadModifiedFiles(r.ctx, r.workspace, sessionID)
+	sessionFiles, err := loadModifiedFiles(r.ctx, r.sessionChanges, sessionID)
 	if err != nil {
 		return loadSessionMsg{uiOwned: uiOwned{owner: r.owner}, gen: gen, sessionID: sessionID, err: err}
 	}
@@ -287,64 +262,11 @@ func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	}
 }
 
-func sessionFilesFromHistory(files []history.File) []SessionFile {
-	filesByPath := make(map[string][]history.File)
-	for _, f := range files {
-		filesByPath[f.Path] = append(filesByPath[f.Path], f)
+func loadModifiedFiles(ctx context.Context, preparer workspace.SessionChangePreparer, sessionID string) ([]SessionFile, error) {
+	if preparer == nil {
+		return nil, fmt.Errorf("session change preparer is unavailable")
 	}
-	sessionFiles := make([]SessionFile, 0, len(filesByPath))
-	for _, versions := range filesByPath {
-		if len(versions) == 0 {
-			continue
-		}
-
-		first := versions[0]
-		last := versions[0]
-		for _, v := range versions {
-			if v.Version < first.Version {
-				first = v
-			}
-			if v.Version > last.Version {
-				last = v
-			}
-		}
-
-		_, additions, deletions := diff.GenerateDiff(first.Content, last.Content, first.Path)
-
-		sessionFiles = append(sessionFiles, SessionFile{
-			FirstVersion:  first,
-			LatestVersion: last,
-			Additions:     additions,
-			Deletions:     deletions,
-		})
-	}
-
-	slices.SortFunc(sessionFiles, func(a, b SessionFile) int {
-		if a.LatestVersion.UpdatedAt > b.LatestVersion.UpdatedAt {
-			return -1
-		}
-		if a.LatestVersion.UpdatedAt < b.LatestVersion.UpdatedAt {
-			return 1
-		}
-		return 0
-	})
-	return sessionFiles
-}
-
-func loadModifiedFiles(ctx context.Context, ws workspace.Workspace, sessionID string) ([]SessionFile, error) {
-	files, err := ws.ListSessionHistory(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	sessionFiles := sessionFilesFromHistory(files)
-	uncommittedFiles, err := ws.UncommittedFiles(ctx)
-	if err != nil {
-		slog.Error("Failed to load uncommitted files", "error", err)
-	}
-	if uncommittedFiles != nil {
-		return uncommittedSessionFiles(sessionFiles, uncommittedFiles), nil
-	}
-	return sessionFiles, nil
+	return preparer.PrepareSessionChanges(ctx, sessionID)
 }
 
 // handleFileEvent processes file change events and updates the session file
@@ -355,9 +277,9 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 	}
 
 	sessionID := m.sess.current.ID
-	ctx, ws := m.com.Context(), m.com.Workspace
+	ctx, preparer := m.com.Context(), m.com.SessionChanges
 	return func() tea.Msg {
-		sessionFiles, err := loadModifiedFiles(ctx, ws, sessionID)
+		sessionFiles, err := loadModifiedFiles(ctx, preparer, sessionID)
 		// could not load session files
 		if err != nil {
 			return util.NewErrorMsg(err)
@@ -374,9 +296,9 @@ func (m *UI) refreshModifiedFiles() tea.Cmd {
 		return nil
 	}
 	sessionID := m.sess.current.ID
-	ctx, ws := m.com.Context(), m.com.Workspace
+	ctx, preparer := m.com.Context(), m.com.SessionChanges
 	return func() tea.Msg {
-		files, err := loadModifiedFiles(ctx, ws, sessionID)
+		files, err := loadModifiedFiles(ctx, preparer, sessionID)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}

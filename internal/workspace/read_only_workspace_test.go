@@ -150,6 +150,8 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	require.Error(t, err)
 	_, err = ro.ListSessionHistory(t.Context(), "other-session")
 	require.Error(t, err)
+	_, err = ro.PrepareSessionChanges(t.Context(), "other-session")
+	require.Error(t, err)
 
 	// Config reads pass through.
 	cfg := ro.Config()
@@ -178,9 +180,13 @@ func TestReadOnlyWorkspace_AllowsReads(t *testing.T) {
 	require.Empty(t, files)
 
 	// History passes through.
-	history, err := ro.ListSessionHistory(t.Context(), "sess-1")
+	historyFiles, err := ro.ListSessionHistory(t.Context(), "sess-1")
 	require.NoError(t, err)
-	require.Empty(t, history)
+	require.Empty(t, historyFiles)
+	changes, err := ro.PrepareSessionChanges(t.Context(), "sess-1")
+	require.NoError(t, err)
+	require.Equal(t, []SessionFile{{FirstVersion: history.File{Path: "sess-1"}}}, changes)
+	require.Contains(t, stub.calls, "PrepareSessionChanges")
 
 	// Project lifecycle reads pass through.
 	needs, err := ro.ProjectNeedsInitialization()
@@ -476,6 +482,11 @@ func (s *stubWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID 
 // History
 func (s *stubWorkspace) ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error) {
 	return nil, nil
+}
+
+func (s *stubWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]SessionFile, error) {
+	s.track("PrepareSessionChanges")
+	return []SessionFile{{FirstVersion: history.File{Path: sessionID}}}, nil
 }
 
 // LSP

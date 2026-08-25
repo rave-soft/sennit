@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 
 	"github.com/rave-soft/sennit/internal/message"
 	"github.com/rave-soft/sennit/internal/permission"
@@ -111,6 +112,14 @@ func (w *attachedThreadWorkspace) SubscribeWith(send func(any)) func() {
 		return func() {}
 	}
 	return sub.SubscribeWith(send)
+}
+
+func (w *attachedThreadWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]SessionFile, error) {
+	preparer, ok := w.Workspace.(SessionChangePreparer)
+	if !ok {
+		return nil, errors.New("session change preparer is unavailable")
+	}
+	return preparer.PrepareSessionChanges(ctx, sessionID)
 }
 
 // ApplySessionModel is refused for the thread's own session: a thread runs

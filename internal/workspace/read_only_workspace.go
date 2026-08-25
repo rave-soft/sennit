@@ -278,6 +278,21 @@ func (w *readOnlyWorkspace) QuestionCancel() bool {
 	return false
 }
 
+func (w *readOnlyWorkspace) PrepareSessionChanges(ctx context.Context, sessionID string) ([]SessionFile, error) {
+	allowed, err := w.allowsSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, w.scopeError(sessionID)
+	}
+	preparer, ok := w.Workspace.(SessionChangePreparer)
+	if !ok {
+		return nil, errors.New("session change preparer is unavailable")
+	}
+	return preparer.PrepareSessionChanges(ctx, sessionID)
+}
+
 // -- FileTracker --
 
 func (w *readOnlyWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
