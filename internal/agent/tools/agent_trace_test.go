@@ -12,12 +12,12 @@ import (
 func TestAgentTraceFixturePaginationAndSafety(t *testing.T) {
 	file := t.TempDir() + "/trace.jsonl"
 	lines := []string{
-		`{"time":"2024-01-01T00:00:00Z","msg":"tool lifecycle","session_id":"s","run_id":"r","event":"tool_call","tool_call_id":"call-1","tool_name":"read","tool_outcome":"started","arguments":"TOP-SECRET"}`,
-		`{"time":"2024-01-01T00:00:01Z","msg":"provider request started","session_id":"s","run_id":"r","request_reason":"turn","attempt":1,"prompt":"TOP-SECRET"}`,
-		`{"time":"2024-01-01T00:00:02Z","msg":"provider request failed, retrying","session_id":"s","run_id":"r","retry_reason":"server_error","error":"TOP-SECRET"}`,
-		`{"time":"2024-01-01T00:00:03Z","msg":"provider request finished","session_id":"s","run_id":"r","outcome":"success","input_tokens":12,"output_tokens":3,"cache_read_tokens":4,"cache_creation_tokens":5,"latency_ms":42}`,
-		`{"time":"2024-01-01T00:00:04Z","msg":"tool lifecycle","session_id":"s","run_id":"r","event":"tool_result","tool_call_id":"call-1","tool_name":"read","tool_outcome":"error","result":"TOP-SECRET"}`,
-		`{"time":"2024-01-01T00:00:05Z","msg":"tool lifecycle","session_id":"s","run_id":"r","event":"tool_call","tool_call_id":"call-unpaired","tool_name":"write"}`,
+		`{"time":"2024-01-01T00:00:00Z","msg":"Tool lifecycle","session_id":"s","run_id":"r","event":"tool_call","tool_call_id":"call-1","tool_name":"read","tool_outcome":"started","arguments":"TOP-SECRET"}`,
+		`{"time":"2024-01-01T00:00:01Z","msg":"Provider request started","session_id":"s","run_id":"r","request_reason":"turn","attempt":1,"prompt":"TOP-SECRET"}`,
+		`{"time":"2024-01-01T00:00:02Z","msg":"Provider request failed, retrying","session_id":"s","run_id":"r","retry_reason":"server_error","error":"TOP-SECRET"}`,
+		`{"time":"2024-01-01T00:00:03Z","msg":"Provider request finished","session_id":"s","run_id":"r","outcome":"success","input_tokens":12,"output_tokens":3,"cache_read_tokens":4,"cache_creation_tokens":5,"latency_ms":42}`,
+		`{"time":"2024-01-01T00:00:04Z","msg":"Tool lifecycle","session_id":"s","run_id":"r","event":"tool_result","tool_call_id":"call-1","tool_name":"read","tool_outcome":"error","result":"TOP-SECRET"}`,
+		`{"time":"2024-01-01T00:00:05Z","msg":"Tool lifecycle","session_id":"s","run_id":"r","event":"tool_call","tool_call_id":"call-unpaired","tool_name":"write"}`,
 		`{"time":"2024-01-01T00:00:06Z","msg":"ordinary diagnostic","session_id":"s","run_id":"r","secret":"TOP-SECRET"}`,
 		`not json`,
 	}
@@ -78,14 +78,14 @@ func TestAgentTraceFixturePaginationAndSafety(t *testing.T) {
 
 func TestAgentTraceRejectsStaleCursor(t *testing.T) {
 	file := t.TempDir() + "/trace.jsonl"
-	require.NoError(t, os.WriteFile(file, []byte(`{"msg":"provider request started","session_id":"s"}`+"\n"+`{"msg":"provider request finished","session_id":"s","outcome":"success"}`+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(file, []byte(`{"msg":"Provider request started","session_id":"s"}`+"\n"+`{"msg":"Provider request finished","session_id":"s","outcome":"success"}`+"\n"), 0o600))
 	text, err := runAgentTrace(file, AgentTraceParams{SessionID: "s", Limit: 1})
 	require.NoError(t, err)
 	var page agentTraceResponse
 	require.NoError(t, json.Unmarshal([]byte(text), &page))
 	require.NotEmpty(t, page.NextCursor)
 	require.NoError(t, os.Remove(file))
-	require.NoError(t, os.WriteFile(file, []byte(`{"msg":"provider request started","session_id":"s"}`+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(file, []byte(`{"msg":"Provider request started","session_id":"s"}`+"\n"), 0o600))
 	stale, err := runAgentTrace(file, AgentTraceParams{SessionID: "s", Limit: 1, Cursor: page.NextCursor})
 	require.NoError(t, err)
 	require.JSONEq(t, `{"events":[],"page_summary":{"attempts":0,"success":0,"errors":0,"canceled":0,"aborted":0,"retries":0,"summaries":0,"trims":0,"orphan_repairs":0,"tool_calls":0,"tool_results":0,"unpaired_calls":0,"unpaired_results":0},"summary_exact":false,"truncated":false}`, stale)

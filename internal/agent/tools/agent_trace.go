@@ -187,13 +187,13 @@ func makeTraceEvent(r map[string]any) (agentTraceEvent, bool) {
 	msg := fmt.Sprint(r["msg"])
 	kind := ""
 	switch msg {
-	case "provider request started":
+	case "Provider request started":
 		kind = "attempt_started"
-	case "provider request finished":
+	case "Provider request finished":
 		kind = "attempt_finished"
-	case "provider request failed, retrying":
+	case "Provider request failed, retrying":
 		kind = "retry"
-	case "tool lifecycle":
+	case "Tool lifecycle":
 		switch stringField(r, "event") {
 		case "tool_call":
 			kind = "tool_call"

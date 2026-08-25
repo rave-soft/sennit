@@ -594,19 +594,19 @@ func chainFixture(t *testing.T) string {
 	}
 	lines := []string{
 		// Chain anchors for this run.
-		mk("provider request started", "INFO", map[string]any{"step": 1, "attempt": 1, "request_reason": "turn"}),
-		mk("provider request failed, retrying", "WARN", map[string]any{"step": 1, "attempt": 1, "retry_reason": "rate_limited"}),
-		mk("provider request started", "INFO", map[string]any{"step": 1, "attempt": 2, "request_reason": "retry"}),
-		mk("provider request finished", "INFO", map[string]any{"step": 1, "attempt": 2, "outcome": "success"}),
+		mk("Provider request started", "INFO", map[string]any{"step": 1, "attempt": 1, "request_reason": "turn"}),
+		mk("Provider request failed, retrying", "WARN", map[string]any{"step": 1, "attempt": 1, "retry_reason": "rate_limited"}),
+		mk("Provider request started", "INFO", map[string]any{"step": 1, "attempt": 2, "request_reason": "retry"}),
+		mk("Provider request finished", "INFO", map[string]any{"step": 1, "attempt": 2, "outcome": "success"}),
 		mk("Trimmed the carried sub-agent session to the budget", "INFO", map[string]any{"dropped_messages": 3}),
 		mk("Injecting synthetic tool result for orphaned tool call", "WARN", map[string]any{"tool_call_id": "call_1"}),
 		// Noise: same session/run but not an anchor.
 		mk("Completion enqueued", "INFO", nil),
 		mk("Steering folded into turn", "INFO", nil),
 		// Noise: a different run in the same session.
-		mk("provider request started", "INFO", map[string]any{"run_id": "run-2"}),
+		mk("Provider request started", "INFO", map[string]any{"run_id": "run-2"}),
 		// Noise: a different session.
-		mk("provider request started", "INFO", map[string]any{"session_id": "sess-2"}),
+		mk("Provider request started", "INFO", map[string]any{"session_id": "sess-2"}),
 	}
 	return writeRawLog(t, lines...)
 }
@@ -629,8 +629,8 @@ func TestSennitLogs_ChainModeReturnsOnlyAnchors(t *testing.T) {
 	require.Len(t, entryLines, 6)
 	joined := strings.Join(entryLines, "\n")
 	// Only anchors, no noise.
-	require.Contains(t, joined, "provider request started")
-	require.Contains(t, joined, "provider request failed, retrying")
+	require.Contains(t, joined, "Provider request started")
+	require.Contains(t, joined, "Provider request failed, retrying")
 	require.Contains(t, joined, "Trimmed the carried")
 	require.Contains(t, joined, "Injecting synthetic")
 	require.NotContains(t, joined, "Completion enqueued", "non-anchor noise must be excluded")

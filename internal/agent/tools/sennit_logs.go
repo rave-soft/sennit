@@ -101,29 +101,29 @@ var sensitiveKeys = []string{
 // repair correlation; the carried-history trim line also carries them since T5),
 // so a chain can filter them by one session_id/run_id:
 //
-//   - provider request started / provider request finished: one pair per
+//   - Provider request started / Provider request finished: one pair per
 //     provider attempt (T3), the attempt and outcome.
-//   - provider request failed, retrying: the retry warning between attempts
+//   - Provider request failed, retrying: the retry warning between attempts
 //     (T3), tying the failed attempt to the one that re-runs.
 //   - Trimmed the carried sub-agent session to the budget: the carried-history
 //     trim for a delegation (T1, correlated by session/run since T5).
 //   - Dropping orphaned tool result with no matching tool call / Injecting
 //     synthetic tool result for orphaned tool call: the orphan-exchange repairs
 //     (T4).
-//   - tool lifecycle: the actual tool-call and tool-result callbacks, correlated
+//   - Tool lifecycle: the actual tool-call and tool-result callbacks, correlated
 //     without recording tool arguments or result content.
 //
-// A chain is a minimal, cheap trace of a run's provider calls, tool lifecycle,
+// A chain is a minimal, cheap trace of a run's provider calls, Tool lifecycle,
 // and history handling; a reader that needs every routine INFO line drops the
 // chain and uses the filters.
 var chainAnchorMsgs = map[string]bool{
-	"provider request started":                                 true,
-	"provider request finished":                                true,
-	"provider request failed, retrying":                        true,
+	"Provider request started":                                 true,
+	"Provider request finished":                                true,
+	"Provider request failed, retrying":                        true,
 	"Trimmed the carried sub-agent session to the budget":      true,
 	"Dropping orphaned tool result with no matching tool call": true,
 	"Injecting synthetic tool result for orphaned tool call":   true,
-	"tool lifecycle": true,
+	"Tool lifecycle": true,
 }
 
 type SennitLogsParams struct {

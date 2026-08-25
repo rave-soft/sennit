@@ -48,7 +48,7 @@ const (
 	reasonAuthRefresh = "auth_refresh"
 )
 
-// Request outcomes for the "provider request finished" line. outcome is a
+// Request outcomes for the "Provider request finished" line. outcome is a
 // closed, safe set: it says *what happened* to the attempt, never *why* in
 // words. error_category is a closed set too, present only when the outcome is
 // an error, and is derived from the error's type - never its message - so no
@@ -114,7 +114,7 @@ func providerRequestLogFields(sessionID, runID, turnID string, step, attempt int
 }
 
 // instrumentedModel wraps a fantasy.LanguageModel and logs one
-// "provider request started" / "provider request finished" pair for every
+// "Provider request started" / "Provider request finished" pair for every
 // model.Stream call.
 //
 // fantasy's per-step retry loop (agent.go) calls the ModelProvider - which
@@ -177,7 +177,7 @@ func newInstrumentedModel(inner fantasy.LanguageModel, corr providerCorrelation)
 // abandons it) must not be logged as success just because the ranging loop
 // ended.
 func (m *instrumentedModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	slog.Info("provider request started", append(m.corr.fields(),
+	slog.Info("Provider request started", append(m.corr.fields(),
 		"provider", m.inner.Provider(),
 		"model", m.inner.Model(),
 	)...)
@@ -285,7 +285,7 @@ func (m *instrumentedModel) StreamObject(ctx context.Context, call fantasy.Objec
 func (m *instrumentedModel) Provider() string { return m.inner.Provider() }
 func (m *instrumentedModel) Model() string    { return m.inner.Model() }
 
-// logFinished emits the "provider request finished" line, the counterpart of
+// logFinished emits the "Provider request finished" line, the counterpart of
 // the started line logged in Stream. latency is measured from the attempt's
 // start (wrap time). finishReason and usage are empty/zero when the attempt
 // never reached a terminal finish part. It logs no content - the correlation
@@ -306,7 +306,7 @@ func (m *instrumentedModel) logFinished(outcome, category string, finishReason f
 		fields = append(fields, "finish_reason", string(finishReason))
 	}
 	fields = append(fields, providerUsageLogFields(usage)...)
-	slog.Info("provider request finished", fields...)
+	slog.Info("Provider request finished", fields...)
 }
 
 // errorCategory maps an error to a closed, safe set of tokens without ever

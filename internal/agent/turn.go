@@ -474,7 +474,7 @@ func (t *runTurn) onRetry(err *fantasy.ProviderError, delay time.Duration) {
 	fields := providerRequestLogFields(t.call.SessionID, t.call.RunID, t.turnID, t.stepNumber, t.attempt, reasonRetry)
 	fields = append(fields, "retry_reason", t.pendingRetryReason)
 	fields = append(fields, providerRetryLogFields(err, delay)...)
-	slog.Warn("provider request failed, retrying", fields...)
+	slog.Warn("Provider request failed, retrying", fields...)
 	// Reset streamed content so the retried response doesn't
 	// concatenate with partial content from the failed attempt.
 	// On the final attempt (no more retries), any partial content
@@ -526,7 +526,7 @@ func (t *runTurn) modelProvider() fantasy.LanguageModel {
 	// stream attempt. It used to be the Info "ModelProvider called" line the
 	// audit flagged as noise (mistaken for the request count, carrying no
 	// session/run id or reason); it now goes to Debug. The line that *is*
-	// the request count is the "provider request started" the instrumented
+	// the request count is the "Provider request started" the instrumented
 	// model logs, one per real Stream attempt.
 	slog.Debug("ModelProvider called",
 		"session_id", t.call.SessionID,
@@ -577,7 +577,7 @@ func (t *runTurn) requestStartReason() string {
 func (t *runTurn) onToolCall(tc fantasy.ToolCallContent) error {
 	// Lifecycle logs deliberately contain correlation only: tool arguments may
 	// contain paths, source, credentials, or other user data.
-	slog.Info("tool lifecycle", "session_id", t.call.SessionID, "run_id", t.call.RunID,
+	slog.Info("Tool lifecycle", "session_id", t.call.SessionID, "run_id", t.call.RunID,
 		"turn_id", t.turnID, "tool_call_id", tc.ToolCallID, "tool_name", tc.ToolName,
 		"event", "tool_call", "tool_outcome", "started")
 	input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
@@ -603,7 +603,7 @@ func (t *runTurn) onToolResult(result fantasy.ToolResultContent) error {
 		outcome = "error"
 	}
 	// Do not log result content: it can include file data or command output.
-	slog.Info("tool lifecycle", "session_id", t.call.SessionID, "run_id", t.call.RunID,
+	slog.Info("Tool lifecycle", "session_id", t.call.SessionID, "run_id", t.call.RunID,
 		"turn_id", t.turnID, "tool_call_id", result.ToolCallID, "tool_name", result.ToolName,
 		"event", "tool_result", "tool_outcome", outcome)
 	toolResult := t.agent.convertToToolResult(result)

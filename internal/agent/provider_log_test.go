@@ -269,8 +269,8 @@ func consumeStream(stream fantasy.StreamResponse) {
 }
 
 // TestInstrumentedModel_Success drives a real Stream through the instrumented
-// model and proves the happy path: exactly one "provider request started" and
-// one "provider request finished" line, both at Info, sharing the full
+// model and proves the happy path: exactly one "Provider request started" and
+// one "Provider request finished" line, both at Info, sharing the full
 // correlation block, the finished line carrying outcome=success plus the
 // finish reason and usage the stream reported, and a latency.
 func TestInstrumentedModel_Success(t *testing.T) {
@@ -288,8 +288,8 @@ func TestInstrumentedModel_Success(t *testing.T) {
 	require.NoError(t, err)
 	consumeStream(stream)
 
-	started := allProviderLogLines(t, logs, "provider request started", "sess-ok")
-	finished := allProviderLogLines(t, logs, "provider request finished", "sess-ok")
+	started := allProviderLogLines(t, logs, "Provider request started", "sess-ok")
+	finished := allProviderLogLines(t, logs, "Provider request finished", "sess-ok")
 	require.Len(t, started, 1, "a single Stream call must log exactly one started line")
 	require.Len(t, finished, 1, "a single Stream call must log exactly one finished line")
 
@@ -331,8 +331,8 @@ func TestInstrumentedModel_StreamCreationError(t *testing.T) {
 	_, err := model.Stream(t.Context(), fantasy.Call{})
 	require.Error(t, err, "the creation error must propagate to the caller (fantasy retry)")
 
-	started := allProviderLogLines(t, logs, "provider request started", "sess-err")
-	finished := allProviderLogLines(t, logs, "provider request finished", "sess-err")
+	started := allProviderLogLines(t, logs, "Provider request started", "sess-err")
+	finished := allProviderLogLines(t, logs, "Provider request finished", "sess-err")
 	require.Len(t, started, 1)
 	require.Len(t, finished, 1)
 	require.Equal(t, outcomeError, finished[0]["outcome"])
@@ -374,7 +374,7 @@ func TestInstrumentedModel_StreamErrorPart(t *testing.T) {
 	}
 	require.True(t, sawError, "the error part must be teed through to the consumer unchanged")
 
-	finished := allProviderLogLines(t, logs, "provider request finished", "sess-mid")
+	finished := allProviderLogLines(t, logs, "Provider request finished", "sess-mid")
 	require.Len(t, finished, 1)
 	require.Equal(t, outcomeError, finished[0]["outcome"])
 	require.Equal(t, "http_4xx", finished[0]["error_category"])
@@ -414,7 +414,7 @@ func TestInstrumentedModel_StreamCanceledErrorPart(t *testing.T) {
 			require.NoError(t, err)
 			consumeStream(stream)
 
-			finished := allProviderLogLines(t, logs, "provider request finished", sessionID)
+			finished := allProviderLogLines(t, logs, "Provider request finished", sessionID)
 			require.Len(t, finished, 1)
 			require.Equal(t, outcomeCanceled, finished[0]["outcome"])
 			_, hasCategory := finished[0]["error_category"]
@@ -451,7 +451,7 @@ func TestInstrumentedModel_Cancel(t *testing.T) {
 		t.Fatal("timed out waiting for the canceled stream to drain")
 	}
 
-	finished := allProviderLogLines(t, logs, "provider request finished", "sess-cxl")
+	finished := allProviderLogLines(t, logs, "Provider request finished", "sess-cxl")
 	require.Len(t, finished, 1)
 	require.Equal(t, outcomeCanceled, finished[0]["outcome"])
 	_, hasCategory := finished[0]["error_category"]
@@ -482,7 +482,7 @@ func TestInstrumentedModel_StreamCreationCanceled(t *testing.T) {
 	require.Error(t, err, "the creation error must propagate to the caller")
 	require.ErrorIs(t, err, context.Canceled, "the returned error is the context error")
 
-	finished := allProviderLogLines(t, logs, "provider request finished", "sess-cxl2")
+	finished := allProviderLogLines(t, logs, "Provider request finished", "sess-cxl2")
 	require.Len(t, finished, 1)
 	require.Equal(t, outcomeCanceled, finished[0]["outcome"],
 		"a stream that failed to be created because the context is done is canceled, not an error")
@@ -505,7 +505,7 @@ func TestInstrumentedModel_StreamCreationWrappedCanceled(t *testing.T) {
 	_, err := model.Stream(t.Context(), fantasy.Call{})
 	require.ErrorIs(t, err, context.Canceled)
 
-	finished := allProviderLogLines(t, logs, "provider request finished", "sess-cxl3")
+	finished := allProviderLogLines(t, logs, "Provider request finished", "sess-cxl3")
 	require.Len(t, finished, 1)
 	require.Equal(t, outcomeCanceled, finished[0]["outcome"])
 	_, hasCategory := finished[0]["error_category"]
@@ -532,7 +532,7 @@ func TestInstrumentedModel_AbortedWithoutFinish(t *testing.T) {
 	require.NoError(t, err)
 	consumeStream(stream)
 
-	finished := allProviderLogLines(t, logs, "provider request finished", "sess-abort")
+	finished := allProviderLogLines(t, logs, "Provider request finished", "sess-abort")
 	require.Len(t, finished, 1)
 	require.Equal(t, outcomeAborted, finished[0]["outcome"],
 		"a stream that ended without a terminal finish part is aborted, not a success")
@@ -570,7 +570,7 @@ func TestInstrumentedModel_ConsumerStopsBeforeFinish(t *testing.T) {
 		break
 	}
 
-	finished := allProviderLogLines(t, logs, "provider request finished", "sess-stop")
+	finished := allProviderLogLines(t, logs, "Provider request finished", "sess-stop")
 	require.Len(t, finished, 1)
 	require.Equal(t, outcomeAborted, finished[0]["outcome"],
 		"stopping before the terminal finish is an aborted attempt, not a success")
@@ -654,8 +654,8 @@ func TestInstrumentedModel_ExactPairCount(t *testing.T) {
 		}
 	}
 
-	started := allProviderLogLines(t, logs, "provider request started", sessionID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sessionID)
+	started := allProviderLogLines(t, logs, "Provider request started", sessionID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sessionID)
 	require.Len(t, started, attempts, "one started line per Stream attempt")
 	require.Len(t, finished, attempts, "one finished line per Stream attempt, including failures")
 	require.Equal(t, len(started), len(finished), "started and finished must be a 1:1 count")
@@ -745,8 +745,8 @@ func TestProviderRequest_RetrySucceedsOnSecond(t *testing.T) {
 	require.NoError(t, err)
 	consumeStream(stream)
 
-	started := allProviderLogLines(t, logs, "provider request started", sessionID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sessionID)
+	started := allProviderLogLines(t, logs, "Provider request started", sessionID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sessionID)
 	require.Len(t, started, 2, "two attempts = two started lines")
 	require.Len(t, finished, 2, "two attempts = two finished lines, including the failed one")
 
@@ -762,7 +762,7 @@ func TestProviderRequest_RetrySucceedsOnSecond(t *testing.T) {
 
 	// The retry warning fires once, tied to the attempt it interrupts, and
 	// carries the filterable retry_reason.
-	warnings := allProviderLogLines(t, logs, "provider request failed, retrying", sessionID)
+	warnings := allProviderLogLines(t, logs, "Provider request failed, retrying", sessionID)
 	require.Len(t, warnings, 1)
 	require.Equal(t, "server_error", warnings[0]["retry_reason"])
 	require.EqualValues(t, 1, warnings[0]["attempt"], "the warning must name the attempt that failed")
@@ -795,8 +795,8 @@ func TestProviderRequest_RetryExhausted(t *testing.T) {
 		_ = stream
 	}
 
-	started := allProviderLogLines(t, logs, "provider request started", sessionID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sessionID)
+	started := allProviderLogLines(t, logs, "Provider request started", sessionID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sessionID)
 	require.Len(t, started, attempts)
 	require.Len(t, finished, attempts, "every failed attempt must still get a finished line (no orphaned started)")
 	require.Equal(t, len(started), len(finished))
@@ -847,8 +847,8 @@ func TestProviderRequest_AuthRefreshThenSuccess(t *testing.T) {
 	require.NoError(t, err)
 	consumeStream(stream)
 
-	started := allProviderLogLines(t, logs, "provider request started", sessionID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sessionID)
+	started := allProviderLogLines(t, logs, "Provider request started", sessionID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sessionID)
 	require.Len(t, started, 2, "two attempts = two started lines")
 	require.Len(t, finished, 2, "two attempts = two finished lines")
 
@@ -925,8 +925,8 @@ func TestProviderRequest_AuthRefreshAfterRetryProvesPrecedence(t *testing.T) {
 	require.NoError(t, err)
 	consumeStream(stream)
 
-	started := allProviderLogLines(t, logs, "provider request started", sessionID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sessionID)
+	started := allProviderLogLines(t, logs, "Provider request started", sessionID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sessionID)
 	require.Len(t, started, 3)
 	require.Len(t, finished, 3)
 	// The three reasons in order: baseline turn, transient retry, then
@@ -999,7 +999,7 @@ func TestProviderRequest_AutoSummarizeUsesCallRunID(t *testing.T) {
 	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, RunID: "call-run", Prompt: "prompt"})
 	require.NoError(t, err)
 
-	started := allProviderLogLines(t, logs, "provider request started", sess.ID)
+	started := allProviderLogLines(t, logs, "Provider request started", sess.ID)
 	require.Len(t, started, 2)
 	require.Equal(t, reasonTurn, started[0]["request_reason"])
 	require.Equal(t, "call-run", started[0]["run_id"])
@@ -1028,7 +1028,7 @@ func TestProviderRequest_QueuedAutoSummarizeUsesOwnRunID(t *testing.T) {
 	_, err = sa.Run(WithRunID(t.Context(), "parent-run"), SessionAgentCall{SessionID: sess.ID, RunID: "parent-run", Prompt: "parent"})
 	require.NoError(t, err)
 
-	started := allProviderLogLines(t, logs, "provider request started", sess.ID)
+	started := allProviderLogLines(t, logs, "Provider request started", sess.ID)
 	var summaryRunIDs []string
 	for _, line := range started {
 		if line["request_reason"] == reasonSummary {
@@ -1070,8 +1070,8 @@ func TestProviderRequest_SummarizeLabeled(t *testing.T) {
 	// correlation must therefore preserve the RunID supplied on the context.
 	require.NoError(t, sa.summarize(WithRunID(t.Context(), "standalone-run"), sess.ID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil))
 
-	started := allProviderLogLines(t, logs, "provider request started", sess.ID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sess.ID)
+	started := allProviderLogLines(t, logs, "Provider request started", sess.ID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sess.ID)
 	require.Len(t, started, 1, "a summarize makes exactly one provider request")
 	require.Len(t, finished, 1, "a summarize finishes exactly one provider request")
 
@@ -1132,7 +1132,7 @@ func TestProviderRequest_SummarizeCancel(t *testing.T) {
 		t.Fatal("timed out waiting for the canceled summarize to return")
 	}
 
-	finished := allProviderLogLines(t, logs, "provider request finished", sess.ID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sess.ID)
 	require.NotEmpty(t, finished, "the canceled summarize attempt must still log a finished line")
 	require.Equal(t, outcomeCanceled, finished[len(finished)-1]["outcome"])
 }
@@ -1223,8 +1223,8 @@ func TestProviderRequest_SummarizeRetryLabeled(t *testing.T) {
 
 	require.NoError(t, sa.summarize(t.Context(), sessID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil))
 
-	started := allProviderLogLines(t, logs, "provider request started", sessID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sessID)
+	started := allProviderLogLines(t, logs, "Provider request started", sessID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sessID)
 	require.Len(t, started, 2, "a failed-then-retried summarize makes two provider attempts")
 	require.Len(t, finished, 2, "both attempts get a finished line (no orphaned started)")
 
@@ -1274,8 +1274,8 @@ func TestProviderRequest_SummarizeUnauthorizedWithoutRefresh(t *testing.T) {
 	err := sa.summarize(t.Context(), sessID, fantasy.ProviderOptions{}, nil, sa.model.Get(), "", nil, nil)
 	require.Error(t, err)
 
-	started := allProviderLogLines(t, logs, "provider request started", sessID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sessID)
+	started := allProviderLogLines(t, logs, "Provider request started", sessID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sessID)
 	require.Equal(t, 1, model.calls, "a nil auth refresh must not restart a 401 summarize")
 	require.Len(t, started, 1)
 	require.Len(t, finished, 1)
@@ -1308,8 +1308,8 @@ func TestProviderRequest_SummarizeAuthRefreshLabeled(t *testing.T) {
 		func(ctx context.Context, err *fantasy.ProviderError) error { return nil },
 		sa.model.Get(), "", nil, nil))
 
-	started := allProviderLogLines(t, logs, "provider request started", sessID)
-	finished := allProviderLogLines(t, logs, "provider request finished", sessID)
+	started := allProviderLogLines(t, logs, "Provider request started", sessID)
+	finished := allProviderLogLines(t, logs, "Provider request finished", sessID)
 	require.Len(t, started, 2, "an auth-failed-then-refreshed summarize makes two provider attempts")
 	require.Len(t, finished, 2, "both attempts get a finished line (no orphaned started)")
 
@@ -1345,8 +1345,8 @@ func TestProviderRequestLogsCarryNoPrompt(t *testing.T) {
 	consumeStream(stream)
 
 	for _, line := range []map[string]any{
-		findProviderLogLine(t, logs, "provider request started", sessionID),
-		findProviderLogLine(t, logs, "provider request finished", sessionID),
+		findProviderLogLine(t, logs, "Provider request started", sessionID),
+		findProviderLogLine(t, logs, "Provider request finished", sessionID),
 	} {
 		require.NotNil(t, line)
 		require.NotContains(t, mustMarshal(t, line), prompt,
@@ -1375,7 +1375,7 @@ func TestModelProviderLogsAtDebugNotInfo(t *testing.T) {
 	require.NotNil(t, mp, "the ModelProvider callback must still be logged (now at Debug)")
 	require.Equal(t, slog.LevelDebug, slogLevel(t, mp), "ModelProvider called must be Debug, not Info")
 
-	started := findProviderLogLine(t, logs, "provider request started", sessionID)
+	started := findProviderLogLine(t, logs, "Provider request started", sessionID)
 	require.NotNil(t, started)
 	require.Equal(t, slog.LevelInfo, slogLevel(t, started), "the request-started line is the count and stays Info")
 }
@@ -1399,7 +1399,7 @@ func TestProviderRequestLogs_CorrelationMatchesModelProvider(t *testing.T) {
 	consumeStream(stream)
 
 	mp := findProviderLogLine(t, logs, "ModelProvider called", sessionID)
-	started := findProviderLogLine(t, logs, "provider request started", sessionID)
+	started := findProviderLogLine(t, logs, "Provider request started", sessionID)
 	require.NotNil(t, mp, "ModelProvider callback must carry the session id")
 	require.NotNil(t, started, "the request started line must carry the session id")
 	require.Equal(t, mp["turn_id"], started["turn_id"], "both must share the turn id")
@@ -1426,9 +1426,9 @@ func TestToolLifecycleLogs_ActualCallbacksEmitSafeCorrelation(t *testing.T) {
 		Result: fantasy.ToolResultOutputContentText{Text: secretOutput},
 	}))
 
-	call := findProviderLogLine(t, logs, "tool lifecycle", sessionID)
+	call := findProviderLogLine(t, logs, "Tool lifecycle", sessionID)
 	require.NotNil(t, call)
-	lines := allProviderLogLines(t, logs, "tool lifecycle", sessionID)
+	lines := allProviderLogLines(t, logs, "Tool lifecycle", sessionID)
 	require.Len(t, lines, 2)
 	for _, line := range lines {
 		require.Equal(t, "run-tool", line["run_id"])
