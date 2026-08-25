@@ -57,6 +57,16 @@ type Compactable interface {
 	SetCompact(compact bool)
 }
 
+// DelegationPanelAware is implemented by a delegation's tool item so the
+// model can tell it whether the session panel is currently drawing this
+// session's live delegations. It is deliberately separate from
+// [Compactable]: compact collapses a block whatever its state, while this
+// only silences the running status line of a block the panel is showing
+// at that moment. See delegationToolMessageItem.panelOwnsLiveDetail.
+type DelegationPanelAware interface {
+	SetPanelOwnsLiveDetail(owned bool)
+}
+
 // SpinningState contains the state passed to SpinningFunc for custom spinning logic.
 type SpinningState struct {
 	ToolCall message.ToolCall

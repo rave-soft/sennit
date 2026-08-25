@@ -1048,6 +1048,31 @@ func (m *Chat) SetTodosCompact(compact bool) {
 	}
 }
 
+// SetDelegationsPanelOwned tells every top-level delegation item whether
+// the session panel is currently showing this session's live delegations,
+// so a running one draws its stub alone instead of repeating the elapsed
+// time and step count the panel's agents block is already drawing. It is
+// SetTodosCompact's counterpart for delegations, and works the same way:
+// the panel owns the live view while there is live work, the transcript
+// owns the record once there is not.
+//
+// It is not SetCompact. Compact would also flatten a *finished*
+// delegation's block, which the panel does not show and which is the only
+// place its outcome is written down; this only reaches the pending stub.
+// Only top-level items are touched — a nested delegation is already
+// compact and belongs to a child session the panel is not reporting on.
+func (m *Chat) SetDelegationsPanelOwned(owned bool) {
+	for i := range m.list.Len() {
+		toolItem, ok := m.list.ItemAt(i).(chat.ToolMessageItem)
+		if !ok {
+			continue
+		}
+		if aware, ok := toolItem.(chat.DelegationPanelAware); ok {
+			aware.SetPanelOwnsLiveDetail(owned)
+		}
+	}
+}
+
 // IsSelectedShellItem returns true if the currently selected item is a
 // ShellItem (bang-mode result).
 func (m *Chat) IsSelectedShellItem() bool {

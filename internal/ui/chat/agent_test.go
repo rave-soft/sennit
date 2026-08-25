@@ -407,11 +407,14 @@ func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
 
 	out := ansi.Strip(item.Render(120))
 
-	// Distinct from a normal finished delegation: shows the task id and a
-	// background marker...
-	require.Contains(t, out, "t1")
-	require.Contains(t, out, "background")
-	// ...and does not show the ack text as if it were a finished result
+	// One line: the agent and what it was asked to do.
+	require.Contains(t, out, "scan the repo for TODOs")
+	require.Len(t, strings.Split(strings.TrimRight(out, "\n"), "\n"), 1)
+	// No badge and no task uuid — see renderBackgroundDispatch on why
+	// neither earned its line.
+	require.NotContains(t, out, "background")
+	require.NotContains(t, out, "t1")
+	// ...and the ack text is not shown as if it were a finished result
 	// preview.
 	require.NotContains(t, out, "It is running independently")
 	// ...nor a fabricated duration: r.agent.duration is near-zero here
@@ -426,6 +429,114 @@ func TestAgentToolRenderBackgroundDispatch(t *testing.T) {
 	// still streaming.
 	require.False(t, item.isSpinning())
 	require.True(t, item.Finished())
+}
+
+// TestAgentToolRenderPending_PanelOwnsLiveDetail covers the panel/chat
+// handoff for a running delegation, the same one todos already have: while
+// the session panel's agents section is drawing this delegation's block,
+// the transcript's pending render is the stub alone — the elapsed time and
+// step count are the panel's to show, and showing them in both places puts
+// the same sentence on screen twice. Clearing it hands the live detail back
+// to the transcript, which is where it belongs when no panel is carrying it.
+func TestAgentToolRenderPending_PanelOwnsLiveDetail(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.SennitDark()
+	parent := message.ToolCall{ID: "agent-parent", Name: "agent", Input: `{"prompt":"inspect codebase"}`, Finished: false}
+	item := NewAgentToolMessageItem(&sty, parent, nil, false, nil)
+	item.AddNestedTool(mkNestedToolCall(t, &sty, "tool-1", "bash", `{"command":"echo hi"}`))
+
+	item.SetPanelOwnsLiveDetail(true)
+	owned := ansi.Strip(item.Render(120))
+	require.Len(t, strings.Split(strings.TrimRight(owned, " \n"), "\n"), 1,
+		"the panel is drawing this delegation; the transcript shows the stub alone")
+	require.NotContains(t, owned, "step 1")
+
+	item.SetPanelOwnsLiveDetail(false)
+	unowned := ansi.Strip(item.Render(120))
+	require.Len(t, strings.Split(strings.TrimRight(unowned, " \n"), "\n"), 2,
+		"nothing else is showing it, so the transcript carries the live detail again")
+	require.Contains(t, unowned, "step 1")
+}
+
+// TestDelegationHeadline covers the header line a delegation shows beside
+// the agent's name. The case it exists for is a structured prompt, whose
+// literal first line ("ROLE: reviewer") names the agent the header has
+// just named and says nothing about the work.
+func TestDelegationHeadline(t *testing.T) {
+	t.Parallel()
+
+	const pipelinePrompt = "ROLE: reviewer\n" +
+		"TASK: keep LSP restarts isolated from stale runtime state\n" +
+		"ORIGINAL USER REQUEST:\n" +
+		"the LSP dies after a restart\n"
+
+	for _, tc := range []struct {
+		name   string
+		agent  string
+		prompt string
+		want   string
+	}{
+		{
+			name:   "structured prompt skips the label that repeats the agent",
+			agent:  "reviewer",
+			prompt: pipelinePrompt,
+			want:   "keep LSP restarts isolated from stale runtime state",
+		},
+		{
+			name:   "a label whose value is not the agent's name is still the answer",
+			agent:  "developer",
+			prompt: pipelinePrompt,
+			want:   "reviewer",
+		},
+		{
+			name:   "a label with no value is skipped too",
+			agent:  "reviewer",
+			prompt: "ROLE:\nTASK: split the C4 packages\n",
+			want:   "split the C4 packages",
+		},
+		{
+			name:   "prose with a colon is not a label",
+			agent:  "developer",
+			prompt: "Fix this: the parser drops newlines\nsecond line\n",
+			want:   "Fix this: the parser drops newlines",
+		},
+		{
+			name:   "a label in another script still counts",
+			agent:  "reviewer",
+			prompt: "РОЛЬ: reviewer\nЗАДАЧА: убрать вторую строчку\n",
+			want:   "убрать вторую строчку",
+		},
+		{
+			name:   "an ordinary prompt keeps its first line",
+			agent:  "task",
+			prompt: "scan the repo for TODOs\nand report them\n",
+			want:   "scan the repo for TODOs",
+		},
+		{
+			name:   "leading blank lines are not the headline",
+			agent:  "task",
+			prompt: "\n\n  scan the repo  \n",
+			want:   "scan the repo",
+		},
+		{
+			name:   "nothing but redundant labels falls back to the first line",
+			agent:  "reviewer",
+			prompt: "ROLE: reviewer\n",
+			want:   "ROLE: reviewer",
+		},
+		{
+			name:   "an empty prompt stays empty",
+			agent:  "task",
+			prompt: "",
+			want:   "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, delegationHeadline(tc.agent, tc.prompt))
+		})
+	}
 }
 
 // TestAgentToolToggleExpandedIsNoOp covers the removal of inline

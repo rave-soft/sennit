@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -76,6 +77,19 @@ type delegationToolMessageItem struct {
 	// never shows todos (see ToggleExpanded).
 	todos []session.Todo
 
+	// panelOwnsLiveDetail records that the session panel is currently
+	// showing this session's live delegations in its agents section, where
+	// each one already gets a block with its name, goal and running
+	// status. While that holds, a still-pending block here draws the stub
+	// alone and lets the panel carry the live detail, so the same elapsed
+	// time and step count are not written twice on one screen. This is the
+	// todos handoff applied to delegations — see Chat.SetDelegationsPanelOwned.
+	//
+	// It applies only while pending. A finished delegation is gone from
+	// the panel, and its block is then the only record of what happened,
+	// so nothing here ever suppresses a result.
+	panelOwnsLiveDetail bool
+
 	// duration is frozen the first time SetResult observes a non-nil
 	// result (see SetResult below) — i.e. only for a delegation that
 	// finishes while this item is live in the UI. An item reconstructed
@@ -113,6 +127,16 @@ func (a *delegationToolMessageItem) SetChildSessionTodos(todos []session.Todo) {
 		return
 	}
 	a.todos = todos
+	a.clearCache()
+	a.Bump()
+}
+
+// SetPanelOwnsLiveDetail implements [DelegationPanelAware].
+func (a *delegationToolMessageItem) SetPanelOwnsLiveDetail(owned bool) {
+	if a.panelOwnsLiveDetail == owned {
+		return
+	}
+	a.panelOwnsLiveDetail = owned
 	a.clearCache()
 	a.Bump()
 }
@@ -428,7 +452,8 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		// call — so what the task is doing is visible without opening
 		// the panel.
 		content := pendingDelegation(sty, r.agent.displayName, opts, width,
-			r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens)
+			r.agent.startTime, r.agent.nestedTools, r.agent.promptTokens, r.agent.completionTokens,
+			r.agent.panelOwnsLiveDetail)
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
@@ -448,7 +473,7 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if opts.Result != nil {
 		var bgMeta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &bgMeta); err == nil && bgMeta.TaskID != "" {
-			content := renderBackgroundDispatch(sty, width, r.agent.displayName, opts, prompt, bgMeta)
+			content := renderBackgroundDispatch(sty, width, r.agent.displayName, opts, prompt)
 			return clickableItemHover(sty, content, width, opts.Hovered)
 		}
 	}
@@ -559,7 +584,8 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		// See AgentToolRenderContext.RenderTool's matching change: pending
 		// stub plus a current-activity status line underneath.
 		content := pendingDelegation(sty, agenticFetchDisplayName, opts, width,
-			r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens)
+			r.fetch.startTime, r.fetch.nestedTools, r.fetch.promptTokens, r.fetch.completionTokens,
+			r.fetch.panelOwnsLiveDetail)
 		return clickableItemHover(sty, content, width, opts.Hovered)
 	}
 
@@ -571,7 +597,7 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 	if opts.Result != nil {
 		var meta tools.AgentBackgroundResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.TaskID != "" {
-			content := renderBackgroundDispatch(sty, width, agenticFetchDisplayName, opts, prompt, meta)
+			content := renderBackgroundDispatch(sty, width, agenticFetchDisplayName, opts, prompt)
 			return clickableItemHover(sty, content, width, opts.Hovered)
 		}
 	}
@@ -632,7 +658,7 @@ func renderCollapsedDelegation(
 	promptTokens, completionTokens int64,
 	model, effort string,
 ) string {
-	lines := []string{toolHeader(sty, opts.Status, name, width, opts, firstLine(headerParam))}
+	lines := []string{toolHeader(sty, opts.Status, name, width, opts, delegationHeadline(name, headerParam))}
 
 	if subtitle := renderAgentSubtitle(sty, width, model, effort); subtitle != "" {
 		lines = append(lines, subtitle)
@@ -655,34 +681,24 @@ func renderCollapsedDelegation(
 // tool call itself is finished (it returned an acknowledgment), but the
 // background task it started has barely begun — unlike a normal finished
 // delegation (renderCollapsedDelegation), there is no real duration to
-// report yet and the ack text is not a result worth previewing. The block
-// instead shows the delegation's name/goal plus a "background" marker and
-// the dispatched task's id, so it reads as "started elsewhere" rather than
-// "running" (no spinner — see AgentToolMessageItem's spinningFunc) or
-// "finished with an answer". The task id lets a user correlate this block
-// with its row in the tasks panel.
+// report yet and the ack text is not a result worth previewing. So it
+// renders as a single header line naming the agent and what it was asked
+// to do, with no spinner (see AgentToolMessageItem's spinningFunc) and
+// none of the finished shape's outcome or result preview.
+//
+// It used to carry a second line — a "background" badge and the task's
+// uuid. Neither survived the question of who reads it: "background" says
+// what the absence of a spinner already says, and a raw uuid is not how
+// anyone finds a task, the tasks panel being right there and listing them
+// by goal.
 func renderBackgroundDispatch(
 	sty *styles.Styles,
 	width int,
 	name string,
 	opts *ToolRenderOpts,
 	prompt string,
-	meta tools.AgentBackgroundResponseMetadata,
 ) string {
-	header := toolHeader(sty, opts.Status, name, width, opts, firstLine(prompt))
-	if opts.Compact {
-		return header
-	}
-
-	// JobToolName is the same "info" token bash.go's renderJobTool uses to
-	// mark a background shell job — reused here so both kinds of
-	// "started, running independently" work read consistently.
-	badge := sty.Tool.JobToolName.Render("background")
-	sep := sty.Tool.TodoStatusNote.Render(" · task ")
-	taskID := sty.Tool.TodoStatusNote.Render(meta.TaskID)
-	note := ansi.Truncate(badge+sep+taskID, width, "…")
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, note)
+	return toolHeader(sty, opts.Status, name, width, opts, delegationHeadline(name, prompt))
 }
 
 // renderDelegationOutcomeLine renders the collapsed block's second line,
@@ -748,9 +764,10 @@ func pendingDelegation(
 	startTime time.Time,
 	nestedTools []ToolMessageItem,
 	promptTokens, completionTokens int64,
+	panelOwnsLiveDetail bool,
 ) string {
 	head := pendingTool(sty, name, opts)
-	if opts.Compact {
+	if opts.Compact || panelOwnsLiveDetail {
 		return head
 	}
 	// The "● " icon prefix is 2 cells wide; indent the status line to sit
@@ -969,6 +986,82 @@ func toolKeyArgument(tc message.ToolCall) string {
 		}
 	}
 	return ""
+}
+
+// maxPromptLabelLen bounds how long the "LABEL" of a structured prompt's
+// "LABEL: value" line may be before delegationHeadline stops reading the
+// line as scaffolding. Long enough for the ones a pipeline actually
+// writes ("ACCEPTANCE CRITERIA"), short enough that a sentence with a
+// colon in it cannot pass for a label on length alone.
+const maxPromptLabelLen = 32
+
+// delegationHeadline picks the line of a delegation's prompt worth showing
+// in the header beside the agent's name.
+//
+// A structured prompt — the shape a pipeline skill hands its agents —
+// opens with scaffolding rather than with the work:
+//
+//	ROLE: reviewer
+//	TASK: keep LSP restarts isolated from stale runtime state
+//	ORIGINAL USER REQUEST:
+//	...
+//
+// Taking the first line verbatim rendered that as "reviewer  ROLE:
+// reviewer": a header that names the agent twice and the job not at all.
+// So leading label lines carrying nothing the header does not already show
+// — an empty value, or the agent's own name — are skipped, and the label
+// is dropped from the line it settles on, leaving "reviewer  keep LSP
+// restarts isolated from stale runtime state".
+//
+// Only a label in the all-caps shape a prompt uses for structure counts,
+// so ordinary prose that happens to contain a colon ("Fix this: the parser
+// drops newlines") is shown exactly as written, and a prompt with no
+// structure at all keeps its first line — which is all it ever had.
+func delegationHeadline(name, prompt string) string {
+	for _, line := range strings.Split(prompt, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		value, ok := promptLabelValue(line)
+		if !ok {
+			return line
+		}
+		if value == "" || strings.EqualFold(value, strings.TrimSpace(name)) {
+			continue
+		}
+		return value
+	}
+	return firstLine(prompt)
+}
+
+// promptLabelValue splits a structured prompt's "LABEL: value" line,
+// reporting ok only for a label written the way a prompt writes structure:
+// letters in upper case (in any script — a pipeline may label in its own
+// language), optionally spaced or hyphenated, at least two of them so a
+// drive letter or an initial cannot qualify.
+func promptLabelValue(line string) (value string, ok bool) {
+	colon := strings.IndexByte(line, ':')
+	if colon <= 0 || colon > maxPromptLabelLen {
+		return "", false
+	}
+	letters := 0
+	for _, r := range line[:colon] {
+		switch {
+		case unicode.IsLetter(r):
+			if !unicode.IsUpper(r) {
+				return "", false
+			}
+			letters++
+		case r == ' ' || r == '_' || r == '-':
+		default:
+			return "", false
+		}
+	}
+	if letters < 2 {
+		return "", false
+	}
+	return strings.TrimSpace(line[colon+1:]), true
 }
 
 // firstLine returns s up to (not including) its first newline.
